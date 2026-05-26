@@ -2,6 +2,10 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { isWallpaperMode, onWallpaperEvent } from './wallpaper'
 import { initASR, transcribe as asrTranscribe, getASRStatus } from './whisper'
+import { chat as aiChat, clearContext, setConfig } from './ai'
+
+const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY
+if (apiKey) setConfig(apiKey)
 
 let mainWindow: BrowserWindow | null = null
 
@@ -40,8 +44,12 @@ ipcMain.handle('asr:transcribe', async (_event, audio: Float32Array) => {
   }
 })
 
-ipcMain.handle('ai:chat', async (_event, _text: string) => {
-  return { reply: '' }
+ipcMain.handle('ai:chat', async (_event, text: string) => {
+  try {
+    return await aiChat(text)
+  } catch (err) {
+    return { error: 'INTERNAL' }
+  }
 })
 
 ipcMain.handle('tts:speak', async (_event, _text: string) => {})
