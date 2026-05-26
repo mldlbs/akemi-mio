@@ -3,6 +3,7 @@ import { join } from 'path'
 import { isWallpaperMode, onWallpaperEvent } from './wallpaper'
 import { initASR, transcribe as asrTranscribe, getASRStatus } from './whisper'
 import { chat as aiChat, clearContext, setConfig } from './ai'
+import { speak as ttsSpeak, stop as ttsStop } from './tts'
 
 const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY
 if (apiKey) setConfig(apiKey)
@@ -52,8 +53,12 @@ ipcMain.handle('ai:chat', async (_event, text: string) => {
   }
 })
 
-ipcMain.handle('tts:speak', async (_event, _text: string) => {})
-ipcMain.handle('tts:stop', async () => {})
+ipcMain.handle('tts:speak', async (_event, text: string) => {
+  await ttsSpeak(text)
+})
+ipcMain.handle('tts:stop', async () => {
+  ttsStop()
+})
 
 ipcMain.handle('state:get', async () => {
   return { asr: getASRStatus().loaded ? 'ready' : 'loading' }
