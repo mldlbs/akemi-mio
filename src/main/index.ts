@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { isWallpaperMode, onWallpaperEvent } from './wallpaper'
+import { initASR, transcribe as asrTranscribe, getASRStatus } from './whisper'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -29,8 +30,14 @@ function createWindow() {
   }
 }
 
-ipcMain.handle('asr:transcribe', async (_event, _audio: Float32Array) => {
-  return { text: '', duration: 0 }
+ipcMain.handle('asr:transcribe', async (_event, audio: Float32Array) => {
+  try {
+    return await asrTranscribe(audio)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (message === 'timeout') return { text: '', duration: -1 }
+    return { text: '', duration: -2, error: message }
+  }
 })
 
 ipcMain.handle('ai:chat', async (_event, _text: string) => {
@@ -41,7 +48,7 @@ ipcMain.handle('tts:speak', async (_event, _text: string) => {})
 ipcMain.handle('tts:stop', async () => {})
 
 ipcMain.handle('state:get', async () => {
-  return { asr: 'unloaded' }
+  return { asr: getASRStatus().loaded ? 'ready' : 'loading' }
 })
 
 app.whenReady().then(() => {
@@ -54,6 +61,10 @@ app.whenReady().then(() => {
       }
     })
   }
+
+  initASR('tiny').catch(() => {
+    mainWindow?.webContents.send('state:update', { error: 'ASR init failed' })
+  })
 
   createWindow()
 
