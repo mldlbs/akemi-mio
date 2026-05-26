@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 interface VoiceInputProps {
   onResult: (text: string) => void
@@ -49,6 +49,15 @@ export function VoiceInput({ onResult, disabled }: VoiceInputProps) {
       setRecording(false)
     }
   }, [])
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [handleKeyDown, handleKeyUp])
 
   return (
     <div className={`voice-input ${recording ? 'recording' : ''}`}>

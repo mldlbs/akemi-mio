@@ -37,7 +37,6 @@ export async function speak(text: string): Promise<void> {
       currentProcess = { kill: () => ffplay.kill() }
     })
   } catch (err) {
-    // Silently fail — speech is optional, text still displays
   } finally {
     try { unlinkSync(tempFile) } catch {}
   }
