@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 const electronAPI = {
-  transcribe: (audio: Float32Array): Promise<{ text: string; duration: number }> =>
+  transcribe: (audio: ArrayBuffer): Promise<{ text: string; duration: number }> =>
     ipcRenderer.invoke('asr:transcribe', audio),
 
   chat: (text: string): Promise<{ reply?: string; error?: string }> =>

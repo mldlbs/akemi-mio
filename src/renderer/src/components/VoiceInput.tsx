@@ -28,9 +28,8 @@ export function VoiceInput({ onResult, disabled }: VoiceInputProps) {
         stream.getTracks().forEach(t => t.stop())
         const blob = new Blob(chunks.current, { type: 'audio/webm' })
         const arrayBuffer = await blob.arrayBuffer()
-        const float32 = new Float32Array(arrayBuffer)
 
-        const result = await window.electronAPI.transcribe(float32)
+        const result = await window.electronAPI.transcribe(arrayBuffer)
         if (result.text) onResult(result.text)
       }
 

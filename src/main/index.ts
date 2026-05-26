@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { isWallpaperMode, onWallpaperEvent } from './wallpaper'
+import { decodeWebMToPCM } from './audio'
 import { initASR, transcribe as asrTranscribe, getASRStatus } from './whisper'
 import { chat as aiChat, clearContext, setConfig } from './ai'
 import { speak as ttsSpeak, stop as ttsStop } from './tts'
@@ -35,9 +36,11 @@ function createWindow() {
   }
 }
 
-ipcMain.handle('asr:transcribe', async (_event, audio: Float32Array) => {
+ipcMain.handle('asr:transcribe', async (_event, audioData: ArrayBuffer) => {
   try {
-    return await asrTranscribe(audio)
+    const pcm = await decodeWebMToPCM(audioData)
+    const result = await asrTranscribe(pcm)
+    return result
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     if (message === 'timeout') return { text: '', duration: -1 }
