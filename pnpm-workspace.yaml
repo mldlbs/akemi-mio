@@ -1,5 +1,0 @@
-allowBuilds:
-  electron: true
-  esbuild: set this to true or false
-  protobufjs: set this to true or false
-  sharp: true

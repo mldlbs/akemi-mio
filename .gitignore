@@ -4,6 +4,8 @@ dist
 dist-electron
 build/icon-preview.png
 *.exe
+pnpm-lock.yaml
+pnpm-workspace.yaml
 *.zip
 .DS_Store
 Thumbs.db
