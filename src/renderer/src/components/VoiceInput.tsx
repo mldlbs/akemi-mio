@@ -7,11 +7,11 @@ interface VoiceInputProps {
 }
 
 const SILENCE_MS = 1500
-const CHUNK_MS = 200
+const VAD_INTERVAL_MS = 200
 
 export function VoiceInput({ onResult, disabled, onConversationChange }: VoiceInputProps) {
   const [active, setActive] = useState(false)
-  const [state, setState] = useState('')
+  const [status, setStatus] = useState('')
   const streamRef = useRef<MediaStream | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
@@ -21,6 +21,7 @@ export function VoiceInput({ onResult, disabled, onConversationChange }: VoiceIn
   const isSpeakingRef = useRef(false)
   const activeRef = useRef(false)
   const processingRef = useRef(false)
+  const vadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const processChunk = useCallback(async () => {
     if (processingRef.current) return
@@ -34,6 +35,33 @@ export function VoiceInput({ onResult, disabled, onConversationChange }: VoiceIn
     }
     processingRef.current = false
   }, [onResult])
+
+  const stopConversation = useCallback(() => {
+    activeRef.current = false
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
+    if (vadTimerRef.current) {
+      clearInterval(vadTimerRef.current)
+      vadTimerRef.current = null
+    }
+    if (recorderRef.current?.state === 'recording') {
+      recorderRef.current.stop()
+    }
+    streamRef.current?.getTracks().forEach(t => t.stop())
+    streamRef.current = null
+    audioCtxRef.current?.close()
+    audioCtxRef.current = null
+    recorderRef.current = null
+    analyserRef.current = null
+    chunksRef.current = []
+    isSpeakingRef.current = false
+    processingRef.current = false
+    setActive(false)
+    setStatus('')
+    onConversationChange?.(false)
+  }, [onConversationChange])
 
   const startListening = useCallback(async () => {
     try {
@@ -55,12 +83,13 @@ export function VoiceInput({ onResult, disabled, onConversationChange }: VoiceIn
         if (e.data.size > 0) chunksRef.current.push(e.data)
       }
 
-      recorder.start(CHUNK_MS)
-      setState('监听中...')
+      recorder.start(200)
+      setStatus('监听中...')
 
       const buf = new Uint8Array(analyser.fftSize)
-      const checkVolume = () => {
+      vadTimerRef.current = setInterval(() => {
         if (!activeRef.current) return
+
         analyser.getByteTimeDomainData(buf)
         let sum = 0
         for (let i = 0; i < buf.length; i++) {
@@ -68,67 +97,39 @@ export function VoiceInput({ onResult, disabled, onConversationChange }: VoiceIn
           sum += v * v
         }
         const rms = Math.sqrt(sum / buf.length)
+        const speaking = rms > 8
 
-        if (rms > 15) {
-          isSpeakingRef.current = true
+        if (speaking) {
           if (silenceTimerRef.current) {
             clearTimeout(silenceTimerRef.current)
             silenceTimerRef.current = null
           }
-          setState('说话中...')
-        } else if (isSpeakingRef.current) {
-          if (!silenceTimerRef.current) {
-            silenceTimerRef.current = setTimeout(() => {
-              if (!activeRef.current) return
-              recorder.stop()
-              processChunk().then(() => {
-                if (activeRef.current) {
-                  chunksRef.current = []
-                  const r = new MediaRecorder(stream, { mimeType: 'audio/webm' })
-                  recorderRef.current = r
-                  r.ondataavailable = recorder.ondataavailable
-                  r.start(CHUNK_MS)
-                  setState('监听中...')
-                }
-              })
-            }, SILENCE_MS)
-          }
-          setState('等待结尾...')
+          setStatus('说话中...')
+        } else if (isSpeakingRef.current && !silenceTimerRef.current) {
+          silenceTimerRef.current = setTimeout(() => {
+            if (!activeRef.current) return
+            recorder.stop()
+            processChunk().then(() => {
+              if (activeRef.current) {
+                chunksRef.current = []
+                const r = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+                recorderRef.current = r
+                r.ondataavailable = recorder.ondataavailable
+                r.start(200)
+                setStatus('监听中...')
+              }
+            })
+          }, SILENCE_MS)
+          setStatus('等待结尾...')
         }
-        isSpeakingRef.current = rms > 15
 
-        if (activeRef.current) {
-          requestAnimationFrame(checkVolume)
-        }
-      }
-      requestAnimationFrame(checkVolume)
-    } catch {
+        isSpeakingRef.current = speaking
+      }, VAD_INTERVAL_MS)
+    } catch (err) {
+      console.error('VAD start failed:', err)
       stopConversation()
     }
-  }, [processChunk])
-
-  const stopConversation = useCallback(() => {
-    activeRef.current = false
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current)
-      silenceTimerRef.current = null
-    }
-    if (recorderRef.current?.state === 'recording') {
-      recorderRef.current.stop()
-    }
-    streamRef.current?.getTracks().forEach(t => t.stop())
-    streamRef.current = null
-    audioCtxRef.current?.close()
-    audioCtxRef.current = null
-    recorderRef.current = null
-    analyserRef.current = null
-    chunksRef.current = []
-    isSpeakingRef.current = false
-    processingRef.current = false
-    setActive(false)
-    setState('')
-    onConversationChange?.(false)
-  }, [onConversationChange])
+  }, [processChunk, stopConversation])
 
   const toggleConversation = useCallback(() => {
     if (active) {
@@ -150,7 +151,7 @@ export function VoiceInput({ onResult, disabled, onConversationChange }: VoiceIn
       >
         {active ? '⏹ 结束对话' : '🎤 开始对话'}
       </button>
-      {active && <span className="conversation-status">{state}</span>}
+      {active && <span className="conversation-status">{status}</span>}
       {!active && <span className="hint">点击开始，就像打电话一样</span>}
     </div>
   )
