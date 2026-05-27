@@ -4,7 +4,7 @@ import { isWallpaperMode, onWallpaperEvent } from './wallpaper'
 import { decodeWebMToPCM } from './audio'
 import { initASR, transcribe as asrTranscribe, getASRStatus } from './whisper'
 import { chat as aiChat, clearContext, setConfig } from './ai'
-import { speak as ttsSpeak, stop as ttsStop } from './tts'
+import { speak as ttsSpeak, stop as ttsStop, setMainWindow as ttsSetWindow } from './tts'
 
 const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY
 if (apiKey) {
@@ -33,6 +33,7 @@ function createWindow() {
   })
 
   mainWindow.setAlwaysOnTop(true, 'screen-saver')
+  ttsSetWindow(mainWindow)
 
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)

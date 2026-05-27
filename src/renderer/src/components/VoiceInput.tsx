@@ -4,12 +4,13 @@ interface VoiceInputProps {
   onResult: (text: string) => void
   disabled?: boolean
   onConversationChange?: (active: boolean) => void
+  ttsPlaying?: boolean
 }
 
 const SILENCE_MS = 1500
 const VAD_INTERVAL_MS = 200
 
-export function VoiceInput({ onResult, disabled, onConversationChange }: VoiceInputProps) {
+export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlaying }: VoiceInputProps) {
   const [active, setActive] = useState(false)
   const [status, setStatus] = useState('')
   const streamRef = useRef<MediaStream | null>(null)
@@ -22,6 +23,8 @@ export function VoiceInput({ onResult, disabled, onConversationChange }: VoiceIn
   const activeRef = useRef(false)
   const processingRef = useRef(false)
   const vadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const ttsPlayingRef = useRef(false)
+  ttsPlayingRef.current = !!ttsPlaying
 
   const processChunk = useCallback(async () => {
     if (processingRef.current) return
@@ -89,6 +92,7 @@ export function VoiceInput({ onResult, disabled, onConversationChange }: VoiceIn
       const buf = new Uint8Array(analyser.fftSize)
       vadTimerRef.current = setInterval(() => {
         if (!activeRef.current) return
+        if (ttsPlayingRef.current) { setStatus('等待回复...'); return }
 
         analyser.getByteTimeDomainData(buf)
         let sum = 0
@@ -107,7 +111,7 @@ export function VoiceInput({ onResult, disabled, onConversationChange }: VoiceIn
           setStatus('说话中...')
         } else if (isSpeakingRef.current && !silenceTimerRef.current) {
           silenceTimerRef.current = setTimeout(() => {
-            if (!activeRef.current) return
+            if (!activeRef.current || ttsPlayingRef.current) return
             recorder.stop()
             processChunk().then(() => {
               if (activeRef.current) {

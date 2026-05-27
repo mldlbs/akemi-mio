@@ -14,6 +14,7 @@ function App() {
   const [asrStatus, setAsrStatus] = useState('loading')
   const [error, setError] = useState<string | undefined>()
   const [conversationActive, setConversationActive] = useState(false)
+  const [ttsPlaying, setTtsPlaying] = useState(false)
   const [inputEnabled, setInputEnabled] = useState(false)
 
   useEffect(() => {
@@ -25,6 +26,7 @@ function App() {
     const cleanup = window.electronAPI.onStateUpdate((state) => {
       if (state.asr) setAsrStatus(state.asr as string)
       if (state.error) setError(state.error as string)
+      if (state.ttsPlaying !== undefined) setTtsPlaying(state.ttsPlaying as boolean)
     })
 
     return cleanup
@@ -51,15 +53,15 @@ function App() {
     })
 
     if (result.reply) {
-      window.electronAPI.speak(result.reply).catch(() => {})
+      window.electronAPI.speak(result.reply).catch((err: string) => console.error('TTS error:', err))
     }
   }, [])
 
   return (
     <div className="app">
       <ChatBubble messages={messages} />
-      <StatusBar asrStatus={asrStatus} conversationActive={conversationActive} error={error} />
-      <VoiceInput onResult={handleVoiceResult} onConversationChange={setConversationActive} disabled={!inputEnabled} />
+      <StatusBar asrStatus={asrStatus} conversationActive={conversationActive} ttsPlaying={ttsPlaying} error={error} />
+      <VoiceInput onResult={handleVoiceResult} onConversationChange={setConversationActive} ttsPlaying={ttsPlaying} disabled={!inputEnabled} />
     </div>
   )
 }
