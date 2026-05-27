@@ -65,7 +65,7 @@ body {
   gap: 6px;
   padding: 8px;
 }
-.mic-button {
+.conversation-button {
   width: 100%;
   padding: 10px 16px;
   border: none;
@@ -76,14 +76,14 @@ body {
   color: var(--text);
   transition: all 0.2s;
 }
-.mic-button:hover:not(:disabled) {
+.conversation-button:hover:not(:disabled) {
   background: rgba(96, 165, 250, 0.35);
 }
-.mic-button:disabled {
+.conversation-button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.voice-input.recording .mic-button {
+.conversation-button.active {
   background: rgba(248, 113, 113, 0.3);
   animation: pulse 1s infinite;
 }
@@ -91,7 +91,8 @@ body {
   font-size: 11px;
   opacity: 0.5;
 }
-.voice-input.recording .recording-hint {
-  color: #f87171;
-  opacity: 1;
+.voice-input .conversation-status {
+  font-size: 11px;
+  color: #60a5fa;
+  animation: pulse 1s infinite;
 }

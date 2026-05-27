@@ -13,7 +13,7 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [asrStatus, setAsrStatus] = useState('loading')
   const [error, setError] = useState<string | undefined>()
-  const [voiceState, setVoiceState] = useState<'idle' | 'recording' | 'transcribing'>('idle')
+  const [conversationActive, setConversationActive] = useState(false)
   const [inputEnabled, setInputEnabled] = useState(false)
 
   useEffect(() => {
@@ -58,8 +58,8 @@ function App() {
   return (
     <div className="app">
       <ChatBubble messages={messages} />
-      <StatusBar asrStatus={asrStatus} voiceState={voiceState} error={error} />
-      <VoiceInput onResult={handleVoiceResult} onStateChange={setVoiceState} disabled={!inputEnabled} />
+      <StatusBar asrStatus={asrStatus} conversationActive={conversationActive} error={error} />
+      <VoiceInput onResult={handleVoiceResult} onConversationChange={setConversationActive} disabled={!inputEnabled} />
     </div>
   )
 }
