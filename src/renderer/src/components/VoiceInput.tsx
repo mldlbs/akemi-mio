@@ -1,22 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 
 interface VoiceInputProps {
   onResult: (text: string) => void
+  onStateChange?: (state: 'idle' | 'recording' | 'transcribing') => void
   disabled?: boolean
 }
 
-export function VoiceInput({ onResult, disabled }: VoiceInputProps) {
-  const [recording, setRecording] = useState(false)
+export function VoiceInput({ onResult, onStateChange, disabled }: VoiceInputProps) {
+  const [state, setState] = useState<'idle' | 'recording' | 'transcribing'>('idle')
   const mediaRecorder = useRef<MediaRecorder | null>(null)
   const chunks = useRef<Blob[]>([])
+  const streamRef = useRef<MediaStream | null>(null)
 
-  const handleKeyDown = useCallback(async (e: KeyboardEvent) => {
-    if (e.code !== 'F2' || recording || disabled) return
-    e.preventDefault()
+  const updateState = (s: 'idle' | 'recording' | 'transcribing') => {
+    setState(s)
+    onStateChange?.(s)
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorder.current?.state === 'recording') {
+      mediaRecorder.current.stop()
+    }
+  }
+
+  const startRecording = async () => {
     chunks.current = []
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
       const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
       mediaRecorder.current = recorder
 
@@ -26,41 +37,47 @@ export function VoiceInput({ onResult, disabled }: VoiceInputProps) {
 
       recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop())
+        streamRef.current = null
+        updateState('transcribing')
+
         const blob = new Blob(chunks.current, { type: 'audio/webm' })
         const arrayBuffer = await blob.arrayBuffer()
-
         const result = await window.electronAPI.transcribe(arrayBuffer)
-        if (result.text) onResult(result.text)
+        if (result.text) {
+          onResult(result.text)
+        }
+        updateState('idle')
       }
 
       recorder.start()
-      setRecording(true)
+      updateState('recording')
     } catch {
-      setRecording(false)
+      updateState('idle')
     }
-  }, [recording, disabled, onResult])
+  }
 
-  const handleKeyUp = useCallback((e: KeyboardEvent) => {
-    if (e.code !== 'F2') return
-    e.preventDefault()
-    if (mediaRecorder.current?.state === 'recording') {
-      mediaRecorder.current.stop()
-      setRecording(false)
+  const toggle = () => {
+    if (state === 'recording') {
+      stopRecording()
+    } else if (state === 'idle') {
+      startRecording()
     }
-  }, [])
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('keyup', handleKeyUp)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('keyup', handleKeyUp)
-    }
-  }, [handleKeyDown, handleKeyUp])
+  }
 
   return (
-    <div className={`voice-input ${recording ? 'recording' : ''}`}>
-      <span className="hint">按住 F2 说话，松开发送</span>
+    <div className={`voice-input ${state}`}>
+      <button
+        className="mic-button"
+        onClick={toggle}
+        disabled={disabled || state === 'transcribing'}
+        title={state === 'recording' ? '点击停止录音' : '点击开始录音'}
+      >
+        {state === 'idle' && '🎤 点击说话'}
+        {state === 'recording' && '⏹ 停止录音'}
+        {state === 'transcribing' && '⏳ 识别中...'}
+      </button>
+      {state === 'idle' && !disabled && <span className="hint">点击麦克风开始语音输入</span>}
+      {state === 'recording' && <span className="hint recording-hint">正在录音，点击停止</span>}
     </div>
   )
 }

@@ -1,16 +1,17 @@
 interface StatusBarProps {
   asrStatus: string
-  recording: boolean
+  voiceState: 'idle' | 'recording' | 'transcribing'
   error?: string
 }
 
-export function StatusBar({ asrStatus, recording, error }: StatusBarProps) {
+export function StatusBar({ asrStatus, voiceState, error }: StatusBarProps) {
   return (
     <div className="status-bar">
       <span className={`status-asr ${asrStatus}`}>
-        {asrStatus === 'ready' ? '✓ 语音就绪' : '⋯ 加载中'}
+        {asrStatus === 'ready' ? '✓ ASR 就绪' : asrStatus === 'loading' ? '⏳ 加载中...' : '✗ ASR 异常'}
       </span>
-      {recording && <span className="status-recording">● 录音中</span>}
+      {voiceState === 'recording' && <span className="status-recording">● 录音中</span>}
+      {voiceState === 'transcribing' && <span>↻ 识别中</span>}
       {error && <span className="status-error">{error}</span>}
     </div>
   )

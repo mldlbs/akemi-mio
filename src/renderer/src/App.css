@@ -1,5 +1,5 @@
 :root {
-  --bg: rgba(0, 0, 0, 0.3);
+  --bg: rgba(15, 15, 30, 0.85);
   --user-bubble: rgba(59, 130, 246, 0.8);
   --ai-bubble: rgba(55, 65, 81, 0.8);
   --text: #e5e7eb;
@@ -22,6 +22,8 @@ body {
   height: 100vh;
   padding: 12px;
   gap: 8px;
+  background: var(--bg);
+  border-radius: 12px;
 }
 
 .chat-bubbles {
@@ -49,13 +51,47 @@ body {
   padding: 4px 8px;
   background: rgba(0,0,0,0.3);
   border-radius: 8px;
+  align-items: center;
 }
-
 .status-asr.ready { color: #4ade80; }
 .status-recording { color: #f87171; animation: pulse 1s infinite; }
 .status-error { color: #f87171; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 
-.voice-input { text-align: center; padding: 8px; }
-.voice-input .hint { font-size: 11px; opacity: 0.5; }
-.voice-input.recording .hint { color: #f87171; opacity: 1; }
+.voice-input {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+}
+.mic-button {
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  cursor: pointer;
+  background: rgba(96, 165, 250, 0.2);
+  color: var(--text);
+  transition: all 0.2s;
+}
+.mic-button:hover:not(:disabled) {
+  background: rgba(96, 165, 250, 0.35);
+}
+.mic-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.voice-input.recording .mic-button {
+  background: rgba(248, 113, 113, 0.3);
+  animation: pulse 1s infinite;
+}
+.voice-input .hint {
+  font-size: 11px;
+  opacity: 0.5;
+}
+.voice-input.recording .recording-hint {
+  color: #f87171;
+  opacity: 1;
+}

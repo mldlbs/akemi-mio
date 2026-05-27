@@ -2,6 +2,7 @@ node_modules
 out
 dist
 dist-electron
+build/icon-preview.png
 *.exe
 *.zip
 .DS_Store

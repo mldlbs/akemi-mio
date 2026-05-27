@@ -12,8 +12,8 @@ interface Message {
 function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [asrStatus, setAsrStatus] = useState('loading')
-  const [recording, setRecording] = useState(false)
   const [error, setError] = useState<string | undefined>()
+  const [voiceState, setVoiceState] = useState<'idle' | 'recording' | 'transcribing'>('idle')
   const [inputEnabled, setInputEnabled] = useState(false)
 
   useEffect(() => {
@@ -24,7 +24,6 @@ function App() {
 
     const cleanup = window.electronAPI.onStateUpdate((state) => {
       if (state.asr) setAsrStatus(state.asr as string)
-      if (state.recording !== undefined) setRecording(state.recording as boolean)
       if (state.error) setError(state.error as string)
     })
 
@@ -45,7 +44,7 @@ function App() {
       next[next.length - 1] = {
         role: 'assistant',
         content: result.error
-          ? '秋山澪暂时无法回应，请稍后再试'
+          ? errorMessage(result.error)
           : (result.reply || '')
       }
       return next
@@ -59,10 +58,21 @@ function App() {
   return (
     <div className="app">
       <ChatBubble messages={messages} />
-      <StatusBar asrStatus={asrStatus} recording={recording} error={error} />
-      <VoiceInput onResult={handleVoiceResult} disabled={!inputEnabled} />
+      <StatusBar asrStatus={asrStatus} voiceState={voiceState} error={error} />
+      <VoiceInput onResult={handleVoiceResult} onStateChange={setVoiceState} disabled={!inputEnabled} />
     </div>
   )
+}
+
+function errorMessage(code: string): string {
+  switch (code) {
+    case 'NO_KEY': return '请在终端设置 OPENROUTER_API_KEY 后再试'
+    case 'INVALID_KEY': return 'API Key 无效，请检查 OPENROUTER_API_KEY'
+    case 'RATE_LIMITED': return '请求太频繁，请稍后重试'
+    case 'TIMEOUT': return 'AI 响应超时，请稍后重试'
+    case 'NETWORK': return '网络连接失败，请检查网络'
+    default: return `秋山澪暂时无法回应 (${code})`
+  }
 }
 
 export default App
