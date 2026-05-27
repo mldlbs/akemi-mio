@@ -1,4 +1,9 @@
-import { pipeline } from '@xenova/transformers'
+import { pipeline, env } from '@xenova/transformers'
+import { app } from 'electron'
+import { join } from 'path'
+
+env.remoteHost = 'https://hf-mirror.com'
+env.cacheDir = join(app.getPath('userData'), 'whisper-cache')
 
 type Transcriber = (audio: Float32Array) => Promise<{ text: string }>
 

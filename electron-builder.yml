@@ -2,5 +2,10 @@ appId: com.akemi-mio.wallpaper
 productName: 秋山澪
 directories:
   output: dist-electron
+  buildResources: build
 win:
   target: portable
+  certificateSubjectName: null
+  sign: null
+  signAndEditExecutable: false
+  signDlls: false
