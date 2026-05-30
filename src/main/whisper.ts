@@ -1,7 +1,18 @@
 import { pipeline, env } from '@xenova/transformers'
-import { log, getRequestId } from './logger'
+import { log, createRequestId } from './logger'
 
-type Transcriber = (audio: Float32Array) => Promise<{ text: string }>
+interface HotwordHit {
+  hotword: string
+  count: number
+}
+
+interface TranscriptionResult {
+  text: string
+  raw?: string
+  hits?: HotwordHit[]
+}
+
+type Transcriber = (audio: Float32Array) => Promise<TranscriptionResult>
 
 let transcribeFn: Transcriber | null = null
 let loading = false
@@ -12,7 +23,7 @@ let firstInferenceDone = false
 
 const HOTWORDS = ['Agent', 'MCP', 'LangGraph', 'Claude', 'Cursor', 'OpenRouter', 'GitHub', 'API']
 
-function applyHotwords(text: string): { text: string; hits: Array<{ hotword: string; count: number }> } {
+function applyHotwords(text: string): { text: string; hits: HotwordHit[] } {
   let corrected = text
   const hits: Array<{ hotword: string; count: number }> = []
   for (const hw of HOTWORDS) {
@@ -65,6 +76,11 @@ async function _doInit(model: string, onProgress?: (pct: number, status: string)
     )
     const pipeTime = Date.now() - t0
     log('INFO', 'pipeline_create_complete', { model: `Xenova/whisper-${model}`, duration_ms: pipeTime })
+    log('INFO', 'pipeline_loaded', {
+      model: currentModel,
+      duration_ms: pipeTime,
+      execution_provider: 'CPU'
+    })
     const memAfter = process.memoryUsage().rss
     const modelSizes: Record<string, number> = { 'large-v3': 1500, 'medium': 800, 'small': 500, 'base': 300, 'tiny': 150 }
     log('INFO', 'asr_init_complete', {
@@ -100,14 +116,24 @@ async function _doInit(model: string, onProgress?: (pct: number, status: string)
   }
 }
 
-export async function transcribe(audioBuffer: Float32Array, timeoutMs = 10000): Promise<{
-  text: string; duration: number; raw?: string; hits?: Array<{ hotword: string; count: number }>
+export async function transcribe(audioBuffer: Float32Array, timeoutMs = 10000, requestId?: string): Promise<{
+  text: string
+  duration: number
+  request_id: string
+  raw?: string
+  hits?: HotwordHit[]
 }> {
   if (!transcribeFn) throw new Error('ASR not initialized')
 
   const t0 = Date.now()
   const audioLenNum = parseFloat((audioBuffer.length / 16000).toFixed(1))
-  const rid = getRequestId()
+  const rid = requestId || createRequestId()
+  log('INFO', 'transcription_start', {
+    request_id: rid,
+    audio_len_s: audioLenNum,
+    sample_count: audioBuffer.length,
+    timeout_ms: timeoutMs
+  })
 
   const timer = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error('timeout')), timeoutMs)
@@ -132,7 +158,7 @@ export async function transcribe(audioBuffer: Float32Array, timeoutMs = 10000): 
       firstInferenceDone = true
       log('PERF', 'first_inference', { audio_duration_s: audioLenNum, inference_ms: elapsed })
     }
-    return { text: result.text, duration: elapsed, raw: result.raw, hits: result.hits }
+    return { text: result.text, duration: elapsed, request_id: rid, raw: result.raw, hits: result.hits }
   } catch (err) {
     log('ERROR', 'transcription_failed', { request_id: rid, error: String(err) })
     throw err

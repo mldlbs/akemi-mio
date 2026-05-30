@@ -18,11 +18,12 @@ async function getAccessToken(apiKey: string, secretKey: string): Promise<string
 
 export async function baiduASR(pcmBuffer: Buffer, apiKey: string, secretKey: string, sampleRate = 16000): Promise<string> {
   const token = await getAccessToken(apiKey, secretKey)
+  const body = pcmBuffer.buffer.slice(pcmBuffer.byteOffset, pcmBuffer.byteOffset + pcmBuffer.byteLength) as ArrayBuffer
 
   const res = await fetch(`https://vop.baidu.com/server_api?cuid=akemi-mio&token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': `audio/pcm;rate=${sampleRate}` },
-    body: pcmBuffer,
+    body,
     signal: AbortSignal.timeout(10000)
   })
 

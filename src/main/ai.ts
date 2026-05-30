@@ -30,6 +30,7 @@ function estimateTokens(text: string): number {
 export async function chatStream(
   userText: string,
   onChunk: (text: string) => void,
+  requestId?: string,
   timeoutMs = 30000
 ): Promise<{ reply?: string; error?: string }> {
   if (!apiKey) {
@@ -38,7 +39,7 @@ export async function chatStream(
 
   const promptTokens = estimateTokens(SYSTEM_PROMPT) + estimateTokens(userText) +
     context.slice(1).reduce((s, m) => s + estimateTokens(m.content), 0)
-  log('INFO', 'user_prompt', { text: userText, tokens: promptTokens })
+  log('INFO', 'user_prompt', { request_id: requestId, text: userText, tokens: promptTokens })
 
   context.push({ role: 'user', content: userText })
   if (context.length - 1 > MAX_CONTEXT) {
@@ -52,7 +53,7 @@ export async function chatStream(
   const t0 = Date.now()
 
   try {
-    log('INFO', 'llm_request_start', { model: apiModel })
+    log('INFO', 'llm_request', { request_id: requestId, model: apiModel, prompt_tokens: promptTokens })
     const res = await fetch(API_URL, {
       method: 'POST',
       headers: {
@@ -68,15 +69,15 @@ export async function chatStream(
     })
 
     if (res.status === 429) {
-      log('WARN', 'rate_limited', { elapsed_ms: Date.now() - t0 })
+      log('WARN', 'rate_limited', { request_id: requestId, elapsed_ms: Date.now() - t0 })
       return { error: 'RATE_LIMITED' }
     }
     if (res.status === 401) {
-      log('ERROR', 'invalid_api_key')
+      log('ERROR', 'invalid_api_key', { request_id: requestId })
       return { error: 'INVALID_KEY' }
     }
     if (!res.ok) {
-      log('ERROR', 'llm_api_error', { status: res.status, elapsed_ms: Date.now() - t0 })
+      log('ERROR', 'llm_api_error', { request_id: requestId, status: res.status, elapsed_ms: Date.now() - t0 })
       return { error: `API_ERROR:${res.status}` }
     }
 
@@ -109,7 +110,7 @@ export async function chatStream(
           if (content) {
             if (!hasFirstChunk) {
               hasFirstChunk = true
-              log('PERF', 'time_to_first_token', { ms: Date.now() - firstChunkT })
+              log('PERF', 'time_to_first_token', { request_id: requestId, ms: Date.now() - firstChunkT })
             }
             full += content
             onChunk(content)
@@ -120,18 +121,18 @@ export async function chatStream(
 
     const elapsed = Date.now() - t0
     const outputTokens = estimateTokens(full)
-    log('INFO', 'llm_response', { text: full, duration_ms: elapsed, token_count: outputTokens })
-    log('PERF', 'llm_inference', { duration_ms: elapsed, prompt_tokens: promptTokens, output_tokens: outputTokens })
+    log('INFO', 'llm_response', { request_id: requestId, text: full, duration_ms: elapsed, token_count: outputTokens })
+    log('PERF', 'llm_inference', { request_id: requestId, duration_ms: elapsed, prompt_tokens: promptTokens, output_tokens: outputTokens })
 
     context.push({ role: 'assistant', content: full })
     return { reply: full }
   } catch (err) {
     const elapsed = Date.now() - t0
     if (err instanceof DOMException && err.name === 'AbortError') {
-      log('ERROR', 'llm_timeout', { elapsed_ms: elapsed })
+      log('ERROR', 'llm_timeout', { request_id: requestId, elapsed_ms: elapsed })
       return { error: 'TIMEOUT' }
     }
-    log('ERROR', 'llm_network_error', { elapsed_ms: elapsed, error: String(err) })
+    log('ERROR', 'llm_network_error', { request_id: requestId, elapsed_ms: elapsed, error: String(err) })
     return { error: 'NETWORK' }
   } finally {
     clearTimeout(timer)

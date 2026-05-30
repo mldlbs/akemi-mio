@@ -11,7 +11,7 @@ const RLOG = (level: string, event: string, meta?: Record<string, unknown>) => {
 }
 
 interface VoiceInputProps {
-  onResult: (text: string) => void
+  onResult: (text: string, requestId?: string) => void
   disabled?: boolean
   onConversationChange?: (active: boolean) => void
   ttsPlaying?: boolean
@@ -112,7 +112,7 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
     processingRef.current = false
 
     if (result.text) {
-      onResult(result.text)
+      onResult(result.text, result.request_id)
     } else if (result.error) {
       setStatus(`识别失败: ${result.error}`)
       setTimeout(() => { if (activeRef.current) setStatus('监听中...') }, 1500)

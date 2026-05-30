@@ -56,7 +56,7 @@ function App() {
     return () => unsubChunkRef.current?.()
   }, [])
 
-  const handleVoiceResult = useCallback(async (text: string) => {
+  const handleVoiceResult = useCallback(async (text: string, requestId?: string) => {
     if (!text) return
     setMessages(prev => [...prev, { role: 'user', content: text }])
     setError(undefined)
@@ -65,7 +65,7 @@ function App() {
     lastAssistantIdx.current = messages.length + 1
     setMessages(prev => [...prev, { role: 'assistant', content: '' }])
 
-    const result = await window.electronAPI.chat(text)
+    const result = await window.electronAPI.chat(text, requestId)
 
     const finalContent = result.error
       ? errorMessage(result.error)

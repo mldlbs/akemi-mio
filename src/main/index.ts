@@ -10,7 +10,7 @@ import { initASR, transcribe as asrTranscribe, getASRStatus, getModelInfo } from
 import { chatStream, clearContext, setConfig } from './ai'
 import { speak as ttsSpeak, stop as ttsStop, setMainWindow as ttsSetWindow, addTTSChunk, flushTTSBuffer } from './tts'
 import { env as transformersEnv } from '@xenova/transformers'
-import { log, getRequestId } from './logger'
+import { log, createRequestId } from './logger'
 
 log('INFO', 'startup', {
   project: 'akemi-mio',
@@ -102,14 +102,14 @@ function createWindow() {
   }
 }
 
-ipcMain.handle('ai:chat', async (_event, text: string) => {
+ipcMain.handle('ai:chat', async (_event, text: string, requestId?: string) => {
   const t0 = Date.now()
-  const rid = getRequestId()
+  const rid = requestId || createRequestId()
   try {
     const result = await chatStream(text, (chunk) => {
       mainWindow?.webContents.send('ai:chunk', chunk)
       addTTSChunk(chunk)
-    })
+    }, rid)
     log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: result.reply?.length || 0 })
     return result
   } catch (err) {
@@ -135,19 +135,21 @@ ipcMain.handle('state:get', async () => {
 let pendingRequests = 0
 
 ipcMain.handle('asr:transcribe', async (_event, audioBuffer: ArrayBuffer) => {
+  const rid = createRequestId()
   pendingRequests++
   if (pendingRequests > 1) {
-    log('WARN', 'queue_status', { pending_requests: pendingRequests, warning: 'concurrent ASR requests detected' })
+    log('WARN', 'queue_status', { request_id: rid, pending_requests: pendingRequests, warning: 'concurrent ASR requests detected' })
   }
 
   const status = getASRStatus()
   if (!status.loaded) {
     if (status.loading) { pendingRequests--; return { text: '', error: '模型加载中...' } }
     try {
+      log('INFO', 'asr_lazy_init_start', { request_id: rid })
       await initASR('medium')
     } catch (err) {
       pendingRequests--
-      log('ERROR', 'asr_lazy_init_failed', { error: String(err) })
+      log('ERROR', 'asr_lazy_init_failed', { request_id: rid, error: String(err) })
       return { text: '', error: `Whisper 加载失败: ${err}` }
     }
   }
@@ -156,13 +158,18 @@ ipcMain.handle('asr:transcribe', async (_event, audioBuffer: ArrayBuffer) => {
     const samples = new Int16Array(audioBuffer)
     const float32 = new Float32Array(samples.length)
     for (let i = 0; i < samples.length; i++) float32[i] = samples[i] / 32768
-    const result = await asrTranscribe(float32, 30000)
+    log('INFO', 'asr_audio_prepared', {
+      request_id: rid,
+      sample_count: samples.length,
+      audio_len_s: parseFloat((float32.length / 16000).toFixed(1))
+    })
+    const result = await asrTranscribe(float32, 30000, rid)
     pendingRequests--
-    return { text: result.text }
+    return { text: result.text, request_id: result.request_id }
   } catch (err) {
     pendingRequests--
     const msg = err instanceof Error ? err.message : String(err)
-    log('ERROR', 'asr_transcribe_error', { error: msg })
+    log('ERROR', 'asr_transcribe_error', { request_id: rid, error: msg })
     return { text: '', error: msg }
   }
 })
