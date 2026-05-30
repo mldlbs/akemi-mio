@@ -16,7 +16,7 @@ function findFfmpeg(): string {
   return 'ffmpeg'
 }
 
-export async function decodeWebMToPCM(webmBuffer: ArrayBuffer): Promise<Float32Array> {
+export async function decodeWebMToPCM(webmBuffer: ArrayBuffer): Promise<Buffer> {
   const ffmpeg = findFfmpeg()
   const inputPath = join(tmpdir(), `akemi-input-${Date.now()}.webm`)
   const outputPath = join(tmpdir(), `akemi-output-${Date.now()}.raw`)
@@ -37,16 +37,10 @@ export async function decodeWebMToPCM(webmBuffer: ArrayBuffer): Promise<Float32A
       })
     } catch (ffmpegErr) {
       console.warn('ffmpeg: decode failed, input size:', webmBuffer.byteLength)
-      return new Float32Array(0)
+      return Buffer.alloc(0)
     }
 
-    const raw = readFileSync(outputPath)
-    const samples = new Int16Array(raw.buffer, raw.byteOffset, raw.byteLength / 2)
-    const float32 = new Float32Array(samples.length)
-    for (let i = 0; i < samples.length; i++) {
-      float32[i] = samples[i] / 32768
-    }
-    return float32
+    return readFileSync(outputPath)
   } finally {
     try { unlinkSync(inputPath) } catch {}
     try { unlinkSync(outputPath) } catch {}

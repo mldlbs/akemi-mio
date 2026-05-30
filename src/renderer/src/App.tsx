@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { VoiceInput } from './components/VoiceInput'
 import { ChatBubble } from './components/ChatBubble'
 import { StatusBar } from './components/StatusBar'
@@ -9,22 +9,28 @@ interface Message {
   content: string
 }
 
+function cleanReply(text: string): string {
+  return text
+    .replace(/\*{1,2}(.*?)\*{1,2}/g, '')
+    .replace(/[（(][^）)]*[）)]/g, '')
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+    .replace(/[～~]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([])
-  const [asrStatus, setAsrStatus] = useState('loading')
   const [error, setError] = useState<string | undefined>()
   const [conversationActive, setConversationActive] = useState(false)
   const [ttsPlaying, setTtsPlaying] = useState(false)
-  const [inputEnabled, setInputEnabled] = useState(false)
+  const lastAssistantIdx = useRef(-1)
+  const streamingRef = useRef('')
+  const unsubChunkRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
-    window.electronAPI.getState().then((state) => {
-      setAsrStatus(state.asr)
-      if (state.asr === 'ready') setInputEnabled(true)
-    })
-
     const cleanup = window.electronAPI.onStateUpdate((state) => {
-      if (state.asr) setAsrStatus(state.asr as string)
       if (state.error) setError(state.error as string)
       if (state.ttsPlaying !== undefined) setTtsPlaying(state.ttsPlaying as boolean)
     })
@@ -32,36 +38,58 @@ function App() {
     return cleanup
   }, [])
 
+  useEffect(() => {
+    unsubChunkRef.current = window.electronAPI.onAIChunk((chunk) => {
+      streamingRef.current += chunk
+      setMessages(prev => {
+        const next = [...prev]
+        if (lastAssistantIdx.current >= 0 && lastAssistantIdx.current < next.length) {
+          next[lastAssistantIdx.current] = {
+            role: 'assistant',
+            content: streamingRef.current
+          }
+        }
+        return next
+      })
+    })
+
+    return () => unsubChunkRef.current?.()
+  }, [])
+
   const handleVoiceResult = useCallback(async (text: string) => {
     if (!text) return
     setMessages(prev => [...prev, { role: 'user', content: text }])
     setError(undefined)
 
-    setMessages(prev => [...prev, { role: 'assistant', content: '正在思考...' }])
+    streamingRef.current = ''
+    lastAssistantIdx.current = messages.length + 1
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }])
 
     const result = await window.electronAPI.chat(text)
 
+    const finalContent = result.error
+      ? errorMessage(result.error)
+      : cleanReply(result.reply || '')
+
+    streamingRef.current = finalContent
     setMessages(prev => {
       const next = [...prev]
-      next[next.length - 1] = {
-        role: 'assistant',
-        content: result.error
-          ? errorMessage(result.error)
-          : (result.reply || '')
+      if (lastAssistantIdx.current >= 0 && lastAssistantIdx.current < next.length) {
+        next[lastAssistantIdx.current] = { role: 'assistant', content: finalContent }
       }
       return next
     })
 
     if (result.reply) {
-      window.electronAPI.speak(result.reply).catch((err: string) => console.error('TTS error:', err))
+      // TTS handled during streaming in main process
     }
-  }, [])
+  }, [messages.length])
 
   return (
     <div className="app">
       <ChatBubble messages={messages} />
-      <StatusBar asrStatus={asrStatus} conversationActive={conversationActive} ttsPlaying={ttsPlaying} error={error} />
-      <VoiceInput onResult={handleVoiceResult} onConversationChange={setConversationActive} ttsPlaying={ttsPlaying} disabled={!inputEnabled} />
+      <StatusBar conversationActive={conversationActive} ttsPlaying={ttsPlaying} error={error} />
+      <VoiceInput onResult={handleVoiceResult} onConversationChange={setConversationActive} ttsPlaying={ttsPlaying} />
     </div>
   )
 }
