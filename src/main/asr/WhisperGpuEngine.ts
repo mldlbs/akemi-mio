@@ -1,0 +1,135 @@
+import whisper from '@kutalia/whisper-node-addon'
+import { join } from 'path'
+import { writeFileSync, unlinkSync, existsSync } from 'fs'
+import { tmpdir } from 'os'
+import { log } from '../logger/Logger'
+import { AsrResult, HotwordHit } from './types'
+import { Converter } from 'opencc-js'
+
+const MODELS_DIR = join(__dirname, '..', '..', 'models', 'ggml')
+
+// 简繁转换
+const t2s = Converter({ from: 'tw', to: 'cn' })
+
+// Whisper 同音字后处理修正（已知常见错误模式）
+const HOMOPHONE_FIXES: [RegExp, string][] = [
+  [/客服(?=就|已经|很|了|的)/g, '考试'],    // 客服→考试
+  [/铺子(?=确实|有|的|是)/g, '谱子'],        // 铺子→谱子
+  [/洛伦兹利/g, '洛伦兹力'],
+  [/安培利/g, '安培力'],
+  [/(\S)借\b/g, '$1劲'],                     // 借→劲 (这借→这劲)
+]
+
+// 生成 16kHz 单声道 WAV 文件头
+function encodeWAV(samples: Int16Array): Buffer {
+  const buf = Buffer.alloc(44 + samples.length * 2)
+  const w = (i: number, v: number) => { buf.writeUInt16LE(v, i) }
+  const dw = (i: number, v: number) => { buf.writeUInt32LE(v, i) }
+  buf.write('RIFF', 0)
+  dw(4, 36 + samples.length * 2)
+  buf.write('WAVE', 8)
+  buf.write('fmt ', 12)
+  dw(16, 16)           // chunk size
+  w(20, 1)             // PCM
+  w(22, 1)             // mono
+  dw(24, 16000)        // sample rate
+  dw(28, 16000 * 2)    // byte rate
+  w(32, 2)             // block align
+  w(34, 16)            // bits per sample
+  buf.write('data', 36)
+  dw(40, samples.length * 2)
+  for (let i = 0; i < samples.length; i++) buf.writeInt16LE(samples[i], 44 + i * 2)
+  return buf
+}
+
+export class WhisperGpuEngine {
+  private modelPath: string | null = null
+  private loaded = false
+
+  async initialize(model = 'small'): Promise<void> {
+    if (this.loaded) return
+    this.modelPath = join(MODELS_DIR, `ggml-${model}.bin`)
+    log('INFO', 'gpu_asr_init_start', { model: `ggml-${model}.bin`, path: this.modelPath })
+    const t0 = Date.now()
+    if (!existsSync(this.modelPath)) {
+      throw new Error(`Model not found: ${this.modelPath}`)
+    }
+    this.loaded = true
+    log('INFO', 'gpu_asr_init_complete', { model: `ggml-${model}`, duration_ms: Date.now() - t0, gpu: true })
+  }
+
+  async transcribe(pcmf32: Float32Array, timeoutMs = 15000): Promise<AsrResult> {
+    if (!this.modelPath || !this.loaded) throw new Error('GPU ASR not initialized')
+
+    const t0 = Date.now()
+    const audioLen = (pcmf32.length / 16000).toFixed(1)
+
+    // Float32 → Int16 → 临时 WAV 文件
+    const int16 = new Int16Array(pcmf32.length)
+    for (let i = 0; i < pcmf32.length; i++) {
+      int16[i] = Math.max(-32768, Math.min(32767, Math.round(pcmf32[i] * 32768)))
+    }
+    const wavBuf = encodeWAV(int16)
+    const tmpFile = join(tmpdir(), `akemi-mio-${Date.now()}.wav`)
+    writeFileSync(tmpFile, wavBuf)
+
+    log('INFO', 'gpu_asr_audio', { length_s: Number(audioLen), engine: 'whisper_gpu' })
+
+    const timer = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), timeoutMs)
+    )
+
+    try {
+      const result = await Promise.race([
+        whisper.transcribe({
+          model: this.modelPath,
+          fname_inp: tmpFile,
+          language: 'zh',
+          translate: false,
+          use_gpu: true,
+          flash_attn: false,
+          no_prints: true,
+          no_timestamps: true
+        }),
+        timer
+      ])
+
+      const elapsed = Date.now() - t0
+      const segments = (result as any)?.transcription || []
+      let text = segments.map((s: string[]) => s[2]).join(' ').trim()
+      // 繁体→简体
+      text = t2s(text)
+      // 同音字后处理纠正
+      let corrected = text
+      for (const [pattern, replacement] of HOMOPHONE_FIXES) {
+        corrected = corrected.replace(pattern, replacement)
+      }
+      if (corrected !== text) {
+        log('INFO', 'asr_corrected', { before: text, after: corrected })
+        text = corrected
+      }
+      log('INFO', 'transcription', {
+        text,
+        audio_len_s: Number(audioLen),
+        asr_inference_ms: elapsed,
+        engine: 'whisper_gpu',
+        gpu: true
+      })
+      return { text, duration: elapsed }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log('ERROR', 'gpu_asr_failed', { error: msg })
+      throw err
+    } finally {
+      try { unlinkSync(tmpFile) } catch {}
+    }
+  }
+
+  getStatus(): { loaded: boolean; loading: boolean; error: string | null } {
+    return { loaded: this.loaded, loading: false, error: null }
+  }
+
+  getModelInfo(): string {
+    return this.modelPath ? `ggml-small (GPU, Vulkan)` : 'not loaded'
+  }
+}

@@ -1,11 +1,18 @@
 appId: com.akemi-mio.wallpaper
-productName: 秋山澪
+productName: AkemiMio
 directories:
   output: dist-electron
   buildResources: build
+files:
+  - "**/*"
+  - "!models/**"
 win:
   target: portable
+  artifactName: "${productName}-${version}.${ext}"
   certificateSubjectName: null
   sign: null
   signAndEditExecutable: false
   signDlls: false
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

@@ -1,13 +1,8 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
+import { updateMicEnergy } from './audioShared'
 
 const RLOG = (level: string, event: string, meta?: Record<string, unknown>) => {
-  const entry: Record<string, unknown> = {
-    level,
-    timestamp: new Date().toISOString(),
-    event,
-    ...(meta || {})
-  }
-  console.log(JSON.stringify(entry))
+  console.log(JSON.stringify({ level, timestamp: new Date().toISOString(), event, ...(meta || {}) }))
 }
 
 interface VoiceInputProps {
@@ -15,132 +10,162 @@ interface VoiceInputProps {
   disabled?: boolean
   onConversationChange?: (active: boolean) => void
   ttsPlaying?: boolean
+  onWakeWord?: () => void
 }
 
-const SILENCE_MS = 1200
-const RMS_THRESHOLD = 0.06
+const SILENCE_MS = 4000
 const BUFFER_SIZE = 2048
 const ASR_SAMPLE_RATE = 16000
 const MIN_SPEAKING_FRAMES = 2
+const GRACE_FRAMES = 24
 const NOISE_FLOOR_FRAMES = 50
 const RMS_MULTIPLIER = 2.5
 const SPEECH_ZCR_MAX = 0.25
+const MAX_ASR_AUDIO_SECONDS = 25
+const INTERRUPTION_MIN_FRAMES = 18
+const INTERRUPTION_RMS_MULTIPLIER = 3.5
+const MIN_ASR_SAMPLES = 8000
+const WAKE_WORDS = ['澪', '秋山澪', 'mio', 'Mio', '开始对话']
+
+type Mode = 'idle' | 'wake' | 'listening' | 'processing' | 'playing_tts'
 
 function resample(audio: Float32Array, fromRate: number, toRate: number): Float32Array {
   if (fromRate === toRate) return audio
   const ratio = fromRate / toRate
-  const len = Math.ceil(audio.length / ratio)
-  const result = new Float32Array(len)
-  for (let i = 0; i < len; i++) {
+  const result = new Float32Array(Math.ceil(audio.length / ratio))
+  for (let i = 0; i < result.length; i++) {
     const pos = i * ratio
     const idx = Math.floor(pos)
     const frac = pos - idx
-    if (idx + 1 < audio.length) {
-      result[i] = audio[idx] * (1 - frac) + audio[idx + 1] * frac
-    } else {
-      result[i] = audio[idx] || 0
-    }
+    result[i] = idx + 1 < audio.length ? audio[idx] * (1 - frac) + audio[idx + 1] * frac : (audio[idx] || 0)
   }
   return result
 }
 
-export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlaying }: VoiceInputProps) {
+export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlaying, onWakeWord }: VoiceInputProps) {
   const [active, setActive] = useState(false)
   const [status, setStatus] = useState('')
+
+  // 单一状态机
+  const modeRef = useRef<Mode>('idle')
   const streamRef = useRef<MediaStream | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const processorRef = useRef<ScriptProcessorNode | null>(null)
   const samplesRef = useRef<Float32Array[]>([])
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isSpeakingRef = useRef(false)
-  const activeRef = useRef(false)
-  const processingRef = useRef(false)
-  const ttsPlayingRef = useRef(false)
-  const interruptionRef = useRef(false)
   const interruptSamplesRef = useRef<Float32Array[]>([])
 
-  ttsPlayingRef.current = !!ttsPlaying
+  // 切换到某个模式
+  const setMode = useCallback((m: Mode) => {
+    modeRef.current = m
+    RLOG('INFO', 'mode_change', { mode: m })
+  }, [])
 
-  const cleanupAll = useCallback(() => {
-    activeRef.current = false
-    RLOG('INFO', 'conversation_stopped')
+  const isMode = (m: Mode) => modeRef.current === m
+  const isWake = () => isMode('wake')
+  const isListening = () => isMode('listening') || isMode('wake')
+
+  const closeAudio = useCallback(() => {
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
-    processorRef.current?.disconnect()
-    audioCtxRef.current?.close()
-    streamRef.current?.getTracks().forEach(t => t.stop())
-    streamRef.current = null
-    audioCtxRef.current = null
+    if (processorRef.current) {
+      processorRef.current.onaudioprocess = null
+      processorRef.current.disconnect()
+    }
+    if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null }
+    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
     processorRef.current = null
-    samplesRef.current = []
-    interruptSamplesRef.current = []
-    isSpeakingRef.current = false
-    processingRef.current = false
-    setActive(false)
-    setStatus('')
-    onConversationChange?.(false)
-  }, [onConversationChange])
+  }, [])
 
   const processAudio = useCallback(async (samples: Float32Array[], sampleRate: number) => {
     if (!samples.length) return
-    processingRef.current = true
+    setMode('processing')
 
     let totalLen = 0
     for (const s of samples) totalLen += s.length
     const merged = new Float32Array(totalLen)
     let off = 0
-    for (const s of samples) {
-      merged.set(s, off)
-      off += s.length
-    }
+    for (const s of samples) { merged.set(s, off); off += s.length }
     samples.length = 0
 
-    const resampled = sampleRate !== ASR_SAMPLE_RATE ? resample(merged, sampleRate, ASR_SAMPLE_RATE) : merged
+    let resampled = sampleRate !== ASR_SAMPLE_RATE ? resample(merged, sampleRate, ASR_SAMPLE_RATE) : merged
+    const maxSamples = MAX_ASR_AUDIO_SECONDS * ASR_SAMPLE_RATE
+    if (resampled.length > maxSamples) resampled = resampled.slice(resampled.length - maxSamples)
+    if (resampled.length < MIN_ASR_SAMPLES) {
+      RLOG('WARN', 'asr_audio_too_short', { samples: resampled.length })
+      if (isListening()) setStatus('监听中...')
+      modeRef.current = isWake() ? 'wake' : 'listening'
+      return
+    }
+
     let peak = 0
-    for (let i = 0; i < resampled.length; i++) {
-      const v = Math.abs(resampled[i])
-      if (v > peak) peak = v
-    }
-    const gain = peak > 0.01 ? 0.5 / peak : 1
+    for (let i = 0; i < resampled.length; i++) { const v = Math.abs(resampled[i]); if (v > peak) peak = v }
+    const gain = peak > 0.001 ? Math.min(0.6 / peak, 20) : 1
     const pcm = new Int16Array(resampled.length)
-    for (let i = 0; i < resampled.length; i++) {
-      pcm[i] = Math.max(-32768, Math.min(32767, resampled[i] * gain * 32768))
-    }
+    for (let i = 0; i < resampled.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, resampled[i] * gain * 32768))
 
     const audioBuf = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength)
     setStatus('识别中...')
-    const result = await window.electronAPI.transcribe(audioBuf)
-    processingRef.current = false
 
-    if (result.text) {
+    let result: { text: string; request_id?: string; error?: string }
+    try {
+      result = await window.electronAPI.transcribe(audioBuf)
+    } catch (err) {
+      RLOG('ERROR', 'asr_transcribe_crash', { error: String(err) })
+      setStatus('识别异常')
+      setTimeout(() => { if (isListening()) setStatus('监听中...') }, 1500)
+      modeRef.current = isWake() ? 'wake' : 'listening'
+      return
+    }
+
+    if (result.text && result.text.trim()) {
+      // 唤醒模式：检测到唤醒词则启动对话
+      if (isWake()) {
+        const wakeHit = WAKE_WORDS.some(w => result.text.includes(w))
+        if (wakeHit) {
+          RLOG('INFO', 'wake_word_detected', { text: result.text })
+          setMode('listening')
+          setActive(true)
+          onConversationChange?.(true)
+          onWakeWord?.()
+          setStatus('监听中...')
+          samplesRef.current = []
+          return
+        }
+        // 非唤醒词忽略，回到唤醒
+        modeRef.current = 'wake'
+        return
+      }
+      // 对话模式：正常处理
       onResult(result.text, result.request_id)
+      modeRef.current = 'listening'
     } else if (result.error) {
       setStatus(`识别失败: ${result.error}`)
-      setTimeout(() => { if (activeRef.current) setStatus('监听中...') }, 1500)
+      setTimeout(() => { if (isListening()) setStatus('监听中...') }, 1500)
+      modeRef.current = isWake() ? 'wake' : 'listening'
     } else {
       setStatus('没听清，请再说一遍')
-      setTimeout(() => { if (activeRef.current) setStatus('监听中...') }, 800)
+      setTimeout(() => { if (isListening()) setStatus('监听中...') }, 800)
+      modeRef.current = isWake() ? 'wake' : 'listening'
     }
-  }, [onResult])
+  }, [onResult, onConversationChange, onWakeWord])
 
   const setupAudio = useCallback(async () => {
+    if (streamRef.current) return
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true } })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      })
       streamRef.current = stream
-
       const audioCtx = new AudioContext()
       audioCtxRef.current = audioCtx
-      const actualSampleRate = audioCtx.sampleRate
+      const sr = audioCtx.sampleRate
       const source = audioCtx.createMediaStreamSource(stream)
 
       const highpass = audioCtx.createBiquadFilter()
-      highpass.type = 'highpass'
-      highpass.frequency.value = 300
-      highpass.Q.value = 0.7
-
+      highpass.type = 'highpass'; highpass.frequency.value = 80; highpass.Q.value = 0.7
       const lowpass = audioCtx.createBiquadFilter()
-      lowpass.type = 'lowpass'
-      lowpass.frequency.value = 3000
-      lowpass.Q.value = 0.7
+      lowpass.type = 'lowpass'; lowpass.frequency.value = 7600; lowpass.Q.value = 0.7
 
       const processor = audioCtx.createScriptProcessor(BUFFER_SIZE, 1, 1)
       processorRef.current = processor
@@ -148,76 +173,83 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
       samplesRef.current = []
       isSpeakingRef.current = false
       let speechFrames = 0
+      let graceFrames = 0
       const noiseFloorHistory: number[] = []
-      let dynamicThreshold = RMS_THRESHOLD
+      let dynamicThreshold = 0.06
       let lastVadEvent = 0
+      let interruptionFrames = 0
       if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
-      setStatus('监听中...')
-    RLOG('INFO', 'audio_capture_start', { sampleRate: actualSampleRate })
-    RLOG('INFO', 'vad_started', { sampleRate: actualSampleRate })
-    RLOG('INFO', 'vad_config', { filter: '300-3000Hz', silenceMs: SILENCE_MS, minSpeechFrames: MIN_SPEAKING_FRAMES })
+
+      RLOG('INFO', 'audio_capture_start', { sampleRate: sr })
+      RLOG('INFO', 'vad_config', { silenceMs: SILENCE_MS })
 
       processor.onaudioprocess = (e) => {
-        if (!activeRef.current) return
+        const mode = modeRef.current
+        if (mode === 'idle') return
         const input = e.inputBuffer.getChannelData(0)
 
-        let sum = 0
-        let zcr = 0
+        // RMS + ZCR
+        let sum = 0, zcr = 0
         for (let i = 0; i < input.length; i++) {
           sum += input[i] * input[i]
-          if (i > 0 && ((input[i - 1] >= 0 && input[i] < 0) || (input[i - 1] < 0 && input[i] >= 0))) {
-            zcr++
-          }
+          if (i > 0 && ((input[i - 1] >= 0 && input[i] < 0) || (input[i - 1] < 0 && input[i] >= 0))) zcr++
         }
         const rms = Math.sqrt(sum / input.length)
         const zcrRate = zcr / input.length
+        updateMicEnergy(rms)
 
         noiseFloorHistory.push(rms)
         if (noiseFloorHistory.length > NOISE_FLOOR_FRAMES) noiseFloorHistory.shift()
         const sorted = [...noiseFloorHistory].sort((a, b) => a - b)
         const noiseFloor = sorted[Math.floor(sorted.length * 0.2)] || 0.001
-        dynamicThreshold = Math.max(RMS_THRESHOLD, noiseFloor * RMS_MULTIPLIER)
+        dynamicThreshold = Math.max(0.06, noiseFloor * RMS_MULTIPLIER)
 
         const aboveNoise = rms > dynamicThreshold && zcrRate < SPEECH_ZCR_MAX
+        const aboveInterruption = rms > dynamicThreshold * INTERRUPTION_RMS_MULTIPLIER && zcrRate < SPEECH_ZCR_MAX
 
-        const buf = interruptionRef.current ? interruptSamplesRef.current : samplesRef.current
-        buf.push(new Float32Array(input))
-
-        if (ttsPlayingRef.current) {
-          if (aboveNoise) {
+        // TTS 播放期间：检测打断
+        if (mode === 'playing_tts') {
+          if (aboveInterruption) { interruptionFrames++ } else { interruptionFrames = 0 }
+          if (interruptionFrames >= INTERRUPTION_MIN_FRAMES) {
+            RLOG('INFO', 'tts_interruption_detected', { rms, threshold: dynamicThreshold * INTERRUPTION_RMS_MULTIPLIER, frames: interruptionFrames })
             window.electronAPI.stopSpeaking()
-            interruptionRef.current = true
             interruptSamplesRef.current = [new Float32Array(input)]
+            interruptionFrames = 0
           }
           return
         }
 
-        if (aboveNoise) {
-          speechFrames = Math.min(speechFrames + 1, MIN_SPEAKING_FRAMES + 1)
-        } else {
-          speechFrames = 0
-        }
+        // 正常 VAD
+        interruptionFrames = 0
+        if (aboveNoise) { speechFrames = Math.min(speechFrames + 1, MIN_SPEAKING_FRAMES + 1) } else { speechFrames = 0 }
         const speaking = speechFrames >= MIN_SPEAKING_FRAMES
+        const buf = interruptSamplesRef.current.length > 0 ? interruptSamplesRef.current : samplesRef.current
+
+        if (aboveNoise || isSpeakingRef.current || speaking || graceFrames > 0) {
+          buf.push(new Float32Array(input))
+          if (aboveNoise) graceFrames = GRACE_FRAMES
+          else if (graceFrames > 0) graceFrames--
+        }
 
         if (aboveNoise && !isSpeakingRef.current && Date.now() - lastVadEvent > 5000) {
           lastVadEvent = Date.now()
-          RLOG('PERF', 'vad_speech_detected', { rms: Number(rms.toFixed(4)), zcr: Number(zcrRate.toFixed(3)), threshold: Number(dynamicThreshold.toFixed(4)) })
+          RLOG('PERF', 'vad_speech_detected', { rms, zcr: zcrRate, threshold: dynamicThreshold })
         }
         if (isSpeakingRef.current && !speaking && Date.now() - lastVadEvent > 1000) {
           lastVadEvent = Date.now()
-          RLOG('PERF', 'vad_speech_ended', { noiseFloor: Number(noiseFloor.toFixed(4)) })
+          RLOG('PERF', 'vad_speech_ended', { noiseFloor })
         }
 
         if (speaking) {
           if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
           setStatus('说话中...')
-        } else if (isSpeakingRef.current && !silenceTimerRef.current && !processingRef.current) {
-          const captured = interruptionRef.current ? interruptSamplesRef.current : samplesRef.current
+        } else if (isSpeakingRef.current && !silenceTimerRef.current && mode === 'listening') {
+          const captured = buf
           silenceTimerRef.current = setTimeout(() => {
-            if (!activeRef.current || processingRef.current) return
+            silenceTimerRef.current = null
+            if (modeRef.current !== 'listening' && modeRef.current !== 'wake') return
             setStatus('识别中...')
-            processAudio(captured.splice(0), actualSampleRate)
-            interruptionRef.current = false
+            processAudio(captured.splice(0), sr)
           }, SILENCE_MS)
           setStatus('等待结尾...')
         }
@@ -235,39 +267,73 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
     }
   }, [processAudio])
 
-  const toggleConversation = useCallback(() => {
-    if (active) {
-      cleanupAll()
-    } else {
-      activeRef.current = true
-      setActive(true)
-      onConversationChange?.(true)
-      setupAudio()
-    }
-  }, [active, setupAudio, cleanupAll, onConversationChange])
-
+  // TTS 状态变化：暂停/恢复 VAD
   useEffect(() => {
-    if (!ttsPlaying && activeRef.current && !processingRef.current && !interruptionRef.current) {
+    if (ttsPlaying && isListening()) {
+      setMode('playing_tts')
+      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
+      setStatus('回复中...')
+      return
+    }
+
+    if (!ttsPlaying && modeRef.current === 'playing_tts') {
+      RLOG('INFO', 'vad_restart_after_tts')
+      closeAudio()
       samplesRef.current = []
+      isSpeakingRef.current = false
+      interruptSamplesRef.current = []
+      // mode 切换为 listening（对话模式）或 wake（如果已结束对话）
+      if (modeRef.current === 'playing_tts') {
+        modeRef.current = isWake() ? 'wake' : 'listening'
+      }
       setTimeout(() => {
-        if (activeRef.current && !ttsPlayingRef.current) {
+        if (modeRef.current !== 'idle') {
+          setupAudio()
           setStatus('监听中...')
         }
-      }, 400)
+      }, 500)
     }
-  }, [ttsPlaying])
+  }, [ttsPlaying, closeAudio, setupAudio])
+
+  // 组件卸载时释放麦克风
+  useEffect(() => {
+    return () => {
+      closeAudio()
+      modeRef.current = 'idle'
+    }
+  }, [closeAudio])
+
+  const toggleConversation = useCallback(() => {
+    if (active) {
+      setMode('wake')
+      samplesRef.current = []
+      interruptSamplesRef.current = []
+      isSpeakingRef.current = false
+      setActive(false)
+      setStatus('')
+      onConversationChange?.(false)
+      RLOG('INFO', 'conversation_stopped')
+    } else {
+      setMode('listening')
+      setActive(true)
+      onConversationChange?.(true)
+      setStatus('监听中...')
+      if (!streamRef.current) setupAudio()
+    }
+  }, [active, setupAudio, onConversationChange])
 
   return (
-    <div className="voice-input">
+    <div className="voice-input" style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
       <button
-        className={`conversation-button ${active ? 'active' : ''}`}
+        className={`btn-voice ${active ? 'active' : ''}`}
         onClick={toggleConversation}
         disabled={disabled}
       >
-        {active ? '⏹ 结束对话' : '🎤 开始对话'}
+        <i className={`${active ? 'ri-stop-fill' : 'ri-mic-fill'}`} />
       </button>
-      {active && <span className="conversation-status">{status}</span>}
-      {!active && <span className="hint">点击开始，就像打电话一样</span>}
+      <button className="btn-icon btn-danger" onClick={() => window.electronAPI?.stopSpeaking?.()} disabled={!ttsPlaying}>
+        <i className="ri-stop-circle-line" />
+      </button>
     </div>
   )
 }

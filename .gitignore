@@ -25,3 +25,10 @@ logs.*
 *.sw?
 *.scc
 *.cache
+*.whl
+*.tar.gz
+*.wav
+.claude-flow/
+.swarm/
+logs_json_only.txt
+tools/

@@ -1,4 +1,4 @@
-type Level = 'INFO' | 'WARN' | 'ERROR' | 'PERF'
+type Level = 'INFO' | 'WARN' | 'ERROR' | 'PERF' | 'CHAT'
 
 let requestCounter = 0
 let currentRequestId = ''
