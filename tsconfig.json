@@ -11,7 +11,22 @@
     "isolatedModules": true
   },
   "references": [
-    { "path": "./tsconfig.node.json" },
-    { "path": "./tsconfig.web.json" }
+    {
+      "path": "./tsconfig.node.json"
+    },
+    {
+      "path": "./tsconfig.web.json"
+    }
+  ],
+  "exclude": [
+    "out/",
+    "dist-electron/",
+    "node_modules/",
+    "build/",
+    "coverage/",
+    "evolution_workspace/",
+    "mcp_workspace/",
+    "sandbox/",
+    "tmp/"
   ]
 }

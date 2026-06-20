@@ -1,0 +1,40 @@
+:root {
+  /* ─── 暖琥珀基底 — 有温度的颜色，不是黑色 ─── */
+  --bg-base: oklch(0.28 0.06 50);
+  --bg-glass: oklch(0.4 0.07 48 / 0.25);
+  --bg-glass-strong: oklch(0.46 0.08 48 / 0.3);
+  --bg-glass-hover: oklch(0.52 0.08 48 / 0.35);
+
+  /* ─── 暖白文字 ─── */
+  --text-primary: oklch(0.93 0.015 70);
+  --text-secondary: oklch(0.72 0.025 60);
+  --text-muted: oklch(0.55 0.03 50);
+  --text-glass: oklch(0.93 0.015 70 / 0.88);
+
+  /* ─── 暖色边框 ─── */
+  --border-glass: oklch(0.75 0.05 50 / 0.1);
+  --border-glass-hover: oklch(0.75 0.05 50 / 0.2);
+
+  /* ─── 朱红点缀 ─── */
+  --accent: oklch(0.58 0.2 28);
+  --accent-soft: oklch(0.64 0.14 32);
+  --accent-glow: oklch(0.58 0.2 28 / 0.1);
+
+  /* ─── 面板 ─── */
+  --panel-radius: 12px;
+  --panel-blur: 24px;
+
+  /* ─── 间距 ─── */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+
+  /* ─── 动画 ─── */
+  --ease-glass: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 200ms;
+  --duration-normal: 350ms;
+  --duration-slow: 600ms;
+}

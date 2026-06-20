@@ -32,3 +32,16 @@ logs.*
 .swarm/
 logs_json_only.txt
 tools/
+mcp_workspace/
+src/main/credentials/
+winCodeSign-*.7z
+evolution_workspace/
+.hermes/
+*.db
+coverage/
+err*.txt
+tsc*.txt
+test-*.txt
+test_write.txt
+test*.json
+writing-ui/

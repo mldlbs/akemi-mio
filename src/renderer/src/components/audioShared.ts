@@ -73,10 +73,18 @@ function doPlay(buf: ArrayBuffer) {
 }
 
 export function playTTS(filePath: string): void {
-  fetch(`file://${filePath.replace(/\\/g, '/')}`)
-    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer() })
-    .then(buf => doPlay(buf))
-    .catch(() => { /* fallback: wait for tts:play_audio_buffer IPC */ })
+  try {
+    fetch(`file://${filePath.replace(/\\/g, '/')}`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer() })
+      .then(buf => doPlay(buf))
+      .catch((err) => {
+        console.error('[TTS] playTTS fetch failed:', err)
+        ttsErrorCb?.(`TTS 文件加载失败: ${err instanceof Error ? err.message : String(err)}`)
+      })
+  } catch (err) {
+    console.error('[TTS] playTTS failed:', err)
+    ttsErrorCb?.(`TTS 播放异常: ${err instanceof Error ? err.message : String(err)}`)
+  }
 }
 
 export function playTTSBuffer(buf: ArrayBuffer): void {

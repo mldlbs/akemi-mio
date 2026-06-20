@@ -1,0 +1,1670 @@
+- generic [ref=e4]:
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9]:
+        - link [ref=e10] [cursor=pointer]:
+          - /url: https://www.epwk.com
+          - img [ref=e11]
+        - generic [ref=e12] [cursor=pointer]: 北京
+        - list [ref=e13]:
+          - listitem [ref=e14]:
+            - paragraph [ref=e15] [cursor=pointer]:
+              - link "首页" [ref=e16]:
+                - /url: https://www.epwk.com
+          - listitem [ref=e17]:
+            - paragraph [ref=e18] [cursor=pointer]:
+              - link "热门分类" [ref=e19]:
+                - /url: javascript:void();
+          - listitem [ref=e20]:
+            - link "精选服务商" [ref=e21] [cursor=pointer]:
+              - /url: https://talent.epwk.com/portal.html
+          - listitem [ref=e22]:
+            - link "任务大厅" [ref=e23] [cursor=pointer]:
+              - /url: https://task.epwk.com/portal.html
+          - listitem [ref=e24]:
+            - paragraph [ref=e25] [cursor=pointer]:
+              - link "V客优享" [ref=e26]:
+                - /url: https://www.epwk.com/vip/
+          - listitem [ref=e27]:
+            - paragraph [ref=e28] [cursor=pointer]:
+              - link "企业服务" [ref=e29]:
+                - /url: javascript:void();
+          - listitem [ref=e30]:
+            - link "工具赋能" [ref=e31] [cursor=pointer]:
+              - /url: http://tool.epwk.com
+          - listitem [ref=e32]:
+            - link "移动端" [ref=e33] [cursor=pointer]:
+              - /url: https://zt.epwk.com/zhushou1510/
+          - listitem [ref=e34]:
+            - paragraph [ref=e35] [cursor=pointer]:
+              - link "海外版" [ref=e36]:
+                - /url: https://intl.epwk.com/
+          - listitem [ref=e37]:
+            - paragraph [ref=e38] [cursor=pointer]:
+              - link "小威智能" [ref=e39]:
+                - /url: https://www.xwzn.cn/
+      - generic [ref=e40]:
+        - generic [ref=e41]:
+          - textbox "搜索" [ref=e43] [cursor=pointer]
+          - generic [ref=e44]:
+            - generic [ref=e45] [cursor=pointer]: 
+            - generic [ref=e46]:
+              - generic [ref=e47] [cursor=pointer]: 任务
+              - generic [ref=e48] [cursor=pointer]: 人才
+              - generic [ref=e49] [cursor=pointer]: 服务
+            - generic [ref=e50]:
+              - combobox [ref=e51]:
+                - textbox "软件开发" [ref=e53]
+              - generic [ref=e57]:
+                - heading "热门搜索" [level=4] [ref=e58]
+                - list
+                - heading "热门服务" [level=4] [ref=e59]
+                - list [ref=e60]:
+                  - listitem [ref=e61]:
+                    - link "V客优享" [ref=e62] [cursor=pointer]:
+                      - /url: http://www.epwk.com/vip/
+                  - listitem [ref=e63]:
+                    - link "诚信卫士" [ref=e64] [cursor=pointer]:
+                      - /url: https://zt.epwk.com/1910chengxin/
+                  - listitem [ref=e65]:
+                    - link "商标注册" [ref=e66] [cursor=pointer]:
+                      - /url: https://share.epwk.com/z2LVe
+                  - listitem [ref=e67]:
+                    - link "版权登记" [ref=e68] [cursor=pointer]:
+                      - /url: https://share.epwk.com/ABVlk
+                  - listitem [ref=e69]:
+                    - link "代理记账" [ref=e70] [cursor=pointer]:
+                      - /url: http://www.epcsw.com/jizhang/?utm_source=epwk
+        - generic [ref=e75]:
+          - generic [ref=e76]: 50+会员特权
+          - generic [ref=e77]: 10大优享服务
+          - generic [ref=e78]: 50+会员特权
+          - generic [ref=e79]: 10大优享服务
+        - link "登录/注册" [ref=e81] [cursor=pointer]:
+          - /url: https://www.epwk.com/login.html
+    - list [ref=e84]:
+      - listitem [ref=e85]:
+        - link "任务首页" [ref=e86] [cursor=pointer]:
+          - /url: https://task.epwk.com/portal.html
+      - listitem [ref=e87]:
+        - link "任务大厅" [ref=e88] [cursor=pointer]:
+          - /url: https://task.epwk.com
+      - listitem [ref=e89]:
+        - link "创意征集" [ref=e90] [cursor=pointer]:
+          - /url: https://www.epwk.com/creativity/list/
+      - listitem [ref=e91]:
+        - link "任务地图" [ref=e92] [cursor=pointer]:
+          - /url: https://www.epwk.com/task_map/
+      - listitem [ref=e93]:
+        - link "成功案例" [ref=e94] [cursor=pointer]:
+          - /url: https://www.epwk.com/guzhu/
+      - listitem [ref=e95]: "|"
+      - listitem [ref=e96]:
+        - link "人才大厅" [ref=e97] [cursor=pointer]:
+          - /url: https://talent.epwk.com
+      - listitem [ref=e98]:
+        - link "服务大厅" [ref=e99] [cursor=pointer]:
+          - /url: https://www.epwk.com/fuwu/
+      - listitem [ref=e100]:
+        - link "自助服务" [ref=e101] [cursor=pointer]:
+          - /url: https://ytby.epweike.com/
+  - generic [ref=e102]:
+    - generic [ref=e103]:
+      - img [ref=e106]
+      - list [ref=e111]:
+        - listitem [ref=e112]:
+          - link "任务首页" [ref=e113] [cursor=pointer]:
+            - /url: https://task.epwk.com/portal.html
+        - listitem [ref=e114]:
+          - link "任务大厅" [ref=e115] [cursor=pointer]:
+            - /url: https://task.epwk.com
+        - listitem [ref=e116]:
+          - link "创意征集" [ref=e117] [cursor=pointer]:
+            - /url: https://www.epwk.com/creativity/list/
+        - listitem [ref=e118]:
+          - link "任务地图" [ref=e119] [cursor=pointer]:
+            - /url: https://www.epwk.com/task_map/
+        - listitem [ref=e120]:
+          - link "成功案例" [ref=e121] [cursor=pointer]:
+            - /url: https://www.epwk.com/guzhu/
+        - listitem [ref=e122]: "|"
+        - listitem [ref=e123]:
+          - link "人才大厅" [ref=e124] [cursor=pointer]:
+            - /url: https://talent.epwk.com
+        - listitem [ref=e125]:
+          - link "服务大厅" [ref=e126] [cursor=pointer]:
+            - /url: https://www.epwk.com/fuwu/
+        - listitem [ref=e127]:
+          - link "自助服务" [ref=e128] [cursor=pointer]:
+            - /url: https://ytby.epweike.com/
+    - generic [ref=e130]:
+      - generic [ref=e131]:
+        - heading "设计" [level=3] [ref=e132]:
+          - link "设计" [ref=e133] [cursor=pointer]:
+            - /url: https://task.epwk.com/sj/
+            - text: 设计
+        - paragraph [ref=e136]:
+          - link "创意设计" [ref=e137] [cursor=pointer]:
+            - /url: https://task.epwk.com/logovi/
+          - link "工业设计" [ref=e138] [cursor=pointer]:
+            - /url: https://task.epwk.com/gysheji/
+          - link "电商设计" [ref=e139] [cursor=pointer]:
+            - /url: https://task.epwk.com/wdfw/
+          - link "动漫设计" [ref=e140] [cursor=pointer]:
+            - /url: https://task.epwk.com/dongman/
+      - generic [ref=e141]:
+        - heading "开发" [level=3] [ref=e142]:
+          - link "开发" [ref=e143] [cursor=pointer]:
+            - /url: https://task.epwk.com/develop/
+            - text: 开发
+        - paragraph [ref=e146]:
+          - link "软件开发" [ref=e147] [cursor=pointer]:
+            - /url: https://task.epwk.com/soft/
+          - link "网站开发" [ref=e148] [cursor=pointer]:
+            - /url: https://task.epwk.com/wzkaifa/
+          - link "工具软件" [ref=e149] [cursor=pointer]:
+            - /url: https://task.epwk.com/gjrj/
+          - link "AI应用" [ref=e150] [cursor=pointer]:
+            - /url: https://task.epwk.com/aiyy/
+      - generic [ref=e151]:
+        - heading "视频" [level=3] [ref=e152]:
+          - link "视频" [ref=e153] [cursor=pointer]:
+            - /url: https://task.epwk.com/shipin/
+            - text: 视频
+        - paragraph [ref=e156]:
+          - link "视频制作" [ref=e157] [cursor=pointer]:
+            - /url: https://task.epwk.com/yszz/
+          - link "短视频" [ref=e158] [cursor=pointer]:
+            - /url: https://task.epwk.com/duanshipin/
+          - link "网红营销" [ref=e159] [cursor=pointer]:
+            - /url: https://task.epwk.com/spyx/
+          - link "影视后期" [ref=e160] [cursor=pointer]:
+            - /url: https://task.epwk.com/videomake/
+      - generic [ref=e161]:
+        - heading "文案" [level=3] [ref=e162]:
+          - link "文案" [ref=e163] [cursor=pointer]:
+            - /url: https://task.epwk.com/copy/
+            - text: 文案
+        - paragraph [ref=e166]:
+          - link "广告文案" [ref=e167] [cursor=pointer]:
+            - /url: https://task.epwk.com/xiezuo/
+          - link "起名取名" [ref=e168] [cursor=pointer]:
+            - /url: https://task.epwk.com/qiming/
+          - link "内容创作" [ref=e169] [cursor=pointer]:
+            - /url: https://task.epwk.com/nrcz/
+          - link "社交媒体" [ref=e170] [cursor=pointer]:
+            - /url: https://task.epwk.com/sjmt/
+      - generic [ref=e171]:
+        - heading "营销" [level=3] [ref=e172]:
+          - link "营销" [ref=e173] [cursor=pointer]:
+            - /url: https://task.epwk.com/yinxiao/
+            - text: 营销
+        - paragraph [ref=e176]:
+          - link "网络推广" [ref=e177] [cursor=pointer]:
+            - /url: https://task.epwk.com/wangluotuiguang/
+          - link "营销策划" [ref=e178] [cursor=pointer]:
+            - /url: https://task.epwk.com/yingxiaocehua/
+          - link "社媒营销" [ref=e179] [cursor=pointer]:
+            - /url: https://task.epwk.com/webtui/
+          - link "电商代运营" [ref=e180] [cursor=pointer]:
+            - /url: https://task.epwk.com/dsdyy/
+      - generic [ref=e181]:
+        - heading "企服" [level=3] [ref=e182]:
+          - link "企服" [ref=e183] [cursor=pointer]:
+            - /url: https://task.epwk.com/shangwu/
+            - text: 企服
+        - paragraph [ref=e186]:
+          - link "商标业务" [ref=e187] [cursor=pointer]:
+            - /url: https://task.epwk.com/sbyw/
+          - link "公司财税" [ref=e188] [cursor=pointer]:
+            - /url: https://task.epwk.com/gscs/
+          - link "法律服务" [ref=e189] [cursor=pointer]:
+            - /url: https://task.epwk.com/law/
+          - link "广告会展" [ref=e190] [cursor=pointer]:
+            - /url: https://task.epwk.com/adshow/
+      - generic [ref=e191]:
+        - heading "其他" [level=3] [ref=e192]:
+          - link "其他" [ref=e193] [cursor=pointer]:
+            - /url: https://task.epwk.com/fixture/
+            - text: 其他
+        - paragraph [ref=e196]:
+          - link "家装设计" [ref=e197] [cursor=pointer]:
+            - /url: https://task.epwk.com/snsj/
+          - link "公装设计" [ref=e198] [cursor=pointer]:
+            - /url: https://task.epwk.com/kjsj/
+          - link "生活服务" [ref=e199] [cursor=pointer]:
+            - /url: https://task.epwk.com/sffw/
+          - link "翻译" [ref=e200] [cursor=pointer]:
+            - /url: https://task.epwk.com/translated/
+    - generic [ref=e203]:
+      - generic [ref=e204]:
+        - generic [ref=e206]:
+          - generic [ref=e207]:
+            - link [ref=e209] [cursor=pointer]:
+              - /url: https://www.epwk.com/index.php?do=adjump&ad_id=1322&position=80&target=https%253A%252F%252Fs.epwk.com%252Fthread-69176-1-1.html
+            - link [ref=e211] [cursor=pointer]:
+              - /url: https://www.epwk.com/index.php?do=adjump&ad_id=1063&position=80&target=https%253A%252F%252Fs.epwk.com%252Fthread-69184-1-1.html
+            - link [ref=e213] [cursor=pointer]:
+              - /url: https://www.epwk.com/index.php?do=adjump&ad_id=1584&position=80&target=https%253A%252F%252Fzt.epwk.com%252F26618KHJ%252F%253Fepi%253D789437%2526utm_source%253Drenwu%2526utm_term%253Dqhp
+            - link [ref=e215] [cursor=pointer]:
+              - /url: https://www.epwk.com/index.php?do=adjump&ad_id=888&position=80&target=https%253A%252F%252Fs.epwk.com%252Fthread-69180-1-1.html
+            - link [ref=e217] [cursor=pointer]:
+              - /url: https://www.epwk.com/index.php?do=adjump&ad_id=836&position=80&target=https%253A%252F%252Fs.epwk.com%252Fthread-69181-1-1.html
+            - link [ref=e219] [cursor=pointer]:
+              - /url: https://www.epwk.com/index.php?do=adjump&ad_id=1061&position=80&target=http%253A%252F%252Fwww.gmaward.com%252F%253Fepi%253Dqhprenwu
+            - link [ref=e221] [cursor=pointer]:
+              - /url: https://www.epwk.com/index.php?do=adjump&ad_id=1322&position=80&target=https%253A%252F%252Fs.epwk.com%252Fthread-69176-1-1.html
+            - link [ref=e223] [cursor=pointer]:
+              - /url: https://www.epwk.com/index.php?do=adjump&ad_id=1063&position=80&target=https%253A%252F%252Fs.epwk.com%252Fthread-69184-1-1.html
+          - generic [ref=e224]:
+            - button "Go to slide 1" [ref=e225] [cursor=pointer]
+            - button "Go to slide 2" [ref=e226] [cursor=pointer]
+            - button "Go to slide 3" [ref=e227] [cursor=pointer]
+            - button "Go to slide 4" [ref=e228] [cursor=pointer]
+            - button "Go to slide 5" [ref=e229] [cursor=pointer]
+            - button "Go to slide 6" [ref=e230] [cursor=pointer]
+          - button "Previous slide" [ref=e231] [cursor=pointer]
+          - button "Next slide" [ref=e232] [cursor=pointer]
+        - generic [ref=e233]:
+          - generic [ref=e234]:
+            - generic [ref=e235]:
+              - heading "您有需求，想找人完成？" [level=3] [ref=e236]
+              - paragraph [ref=e237]: 为您速配合适服务商
+              - link "免费发布需求" [ref=e238] [cursor=pointer]:
+                - /url: https://www.epwk.com/release.html
+            - generic [ref=e240]:
+              - generic [ref=e241]:
+                - heading "您是服务商，有技能？" [level=3] [ref=e242]
+                - paragraph [ref=e243]: 开通商铺，马上接单赚钱
+              - link "免费开通商铺" [ref=e244] [cursor=pointer]:
+                - /url: https://www.epwk.com/login.html
+          - link [ref=e247] [cursor=pointer]:
+            - /url: https://www.epwk.com/vip/
+      - generic [ref=e248]:
+        - generic [ref=e249]:
+          - heading "招标雇佣先找到威客再托管金额" [level=4] [ref=e251]:
+            - text: 招标雇佣先找到威客再托管金额
+            - link:
+              - /url: https://task.epwk.com/?m=4
+          - list [ref=e254]:
+            - listitem [ref=e255]:
+              - link "海上救援训练数字孪生项目 2万-5万元" [ref=e256] [cursor=pointer]:
+                - /url: https://task.epwk.com/1156195/
+                - generic [ref=e257]: 海上救援训练数字孪生项目
+                - generic [ref=e258]: 2万-5万元
+            - listitem [ref=e259]:
+              - link "传奇自动开区助手工具开发 2万-5万元" [ref=e260] [cursor=pointer]:
+                - /url: https://task.epwk.com/1156193/
+                - generic [ref=e261]: 传奇自动开区助手工具开发
+                - generic [ref=e262]: 2万-5万元
+            - listitem [ref=e263]:
+              - link "美业ai超级员工系统开发 5000-10000元" [ref=e264] [cursor=pointer]:
+                - /url: https://task.epwk.com/1156188/
+                - generic [ref=e265]: 美业ai超级员工系统开发
+                - generic [ref=e266]: 5000-10000元
+            - listitem [ref=e267]:
+              - link "开发AI智能客服 1万-2万元" [ref=e268] [cursor=pointer]:
+                - /url: https://task.epwk.com/1156183/
+                - generic [ref=e269]: 开发AI智能客服
+                - generic [ref=e270]: 1万-2万元
+            - listitem [ref=e271]:
+              - link "ai产品广告制作 ￥ 1000" [ref=e272] [cursor=pointer]:
+                - /url: https://task.epwk.com/1156161/
+                - generic [ref=e273]: ai产品广告制作
+                - generic [ref=e274]: ￥ 1000
+        - generic [ref=e275]:
+          - heading "悬赏计件先托管赏金再接受投稿" [level=4] [ref=e277]:
+            - text: 悬赏计件先托管赏金再接受投稿
+            - link:
+              - /url: https://task.epwk.com/?m=1
+          - list [ref=e280]:
+            - listitem [ref=e281]:
+              - link "新疆石磨全麦面粉（全谷物）的面粉包装设计 ￥ 2000" [ref=e282] [cursor=pointer]:
+                - /url: https://task.epwk.com/1155704/
+                - generic [ref=e283]: 新疆石磨全麦面粉（全谷物）的面粉包装设计
+                - generic [ref=e284]: ￥ 2000
+            - listitem [ref=e285]:
+              - link "贸易公司LOGO设计方案征集 ￥ 1300" [ref=e286] [cursor=pointer]:
+                - /url: https://task.epwk.com/1155557/
+                - generic [ref=e287]: 贸易公司LOGO设计方案征集
+                - generic [ref=e288]: ￥ 1300
+            - listitem [ref=e289]:
+              - link "关于纺织面料公司的vi设计 ￥ 5888" [ref=e290] [cursor=pointer]:
+                - /url: https://task.epwk.com/1155450/
+                - generic [ref=e291]: 关于纺织面料公司的vi设计
+                - generic [ref=e292]: ￥ 5888
+            - listitem [ref=e293]:
+              - link "悬赏征集：周氏东洋LOGO设计 | 医疗医美全产业链通用 ￥ 1250" [ref=e294] [cursor=pointer]:
+                - /url: https://task.epwk.com/1155056/
+                - generic [ref=e295]: 悬赏征集：周氏东洋LOGO设计 | 医疗医美全产业链通用
+                - generic [ref=e296]: ￥ 1250
+            - listitem [ref=e297]:
+              - link "中老年营养食品包装设计（乳钙产品） ￥ 3000" [ref=e298] [cursor=pointer]:
+                - /url: https://task.epwk.com/1154494/
+                - generic [ref=e299]: 中老年营养食品包装设计（乳钙产品）
+                - generic [ref=e300]: ￥ 3000
+    - generic [ref=e302]:
+      - list [ref=e304]:
+        - listitem [ref=e305] [cursor=pointer]:
+          - heading "诚信专享任务" [level=4] [ref=e306]
+        - listitem [ref=e307] [cursor=pointer]:
+          - heading "高价任务" [level=4] [ref=e308]
+        - listitem [ref=e309] [cursor=pointer]:
+          - heading "快结束任务" [level=4] [ref=e310]
+        - listitem [ref=e311] [cursor=pointer]:
+          - heading "特色任务" [level=4] [ref=e312]
+        - listitem [ref=e313] [cursor=pointer]:
+          - heading "创意征集" [level=4] [ref=e314]
+      - generic [ref=e316]:
+        - generic [ref=e317]:
+          - link "多商户商城二开｜诚寻长期稳定技术团队 ￥150000 多商户商城二开｜诚寻长期稳定技术团队 投标中 剩余 9天13小时" [ref=e319] [cursor=pointer]:
+            - /url: https://task.epwk.com/1154493/
+            - img "多商户商城二开｜诚寻长期稳定技术团队" [ref=e323]
+            - heading "￥150000" [level=3] [ref=e324]
+            - heading "多商户商城二开｜诚寻长期稳定技术团队" [level=4] [ref=e325]
+            - paragraph [ref=e327]:
+              - generic [ref=e328]: 投标中
+              - text: 剩余 9天13小时
+          - link "企业级GEO内容生产与发布管理 SaaS 系统开发 10万-20万元 企业级GEO内容生产与发布管理 SaaS 系统开发 投标中 剩余 17天17小时" [ref=e330] [cursor=pointer]:
+            - /url: https://task.epwk.com/1155198/
+            - img "企业级GEO内容生产与发布管理 SaaS 系统开发" [ref=e334]
+            - heading "10万-20万元" [level=3] [ref=e335]
+            - heading "企业级GEO内容生产与发布管理 SaaS 系统开发" [level=4] [ref=e336]
+            - paragraph [ref=e338]:
+              - generic [ref=e339]: 投标中
+              - text: 剩余 17天17小时
+          - link "幼儿百科视频100个 5万-10万元 幼儿百科视频100个 投标中 剩余 8天14小时" [ref=e341] [cursor=pointer]:
+            - /url: https://task.epwk.com/1155680/
+            - img "幼儿百科视频100个" [ref=e345]
+            - heading "5万-10万元" [level=3] [ref=e346]
+            - heading "幼儿百科视频100个" [level=4] [ref=e347]
+            - paragraph [ref=e349]:
+              - generic [ref=e350]: 投标中
+              - text: 剩余 8天14小时
+        - generic [ref=e351]:
+          - link "3000-5000元基于heliboard-v3.9开源代码开发中文输入法 投标中 剩余 5天20小时 0人投标" [ref=e352] [cursor=pointer]:
+            - /url: https://task.epwk.com/1156100/
+            - generic [ref=e353]:
+              - generic [ref=e354]:
+                - heading "3000-5000元基于heliboard-v3.9开源代码开发中文输入法" [level=3] [ref=e355]
+                - paragraph [ref=e357]:
+                  - generic [ref=e358]: 投标中
+                  - text: 剩余 5天20小时
+              - paragraph [ref=e360]: 0人投标
+          - link "5万-10万元一款加入传感器的拍手设计 投标中 剩余 2天8小时 0人投标" [ref=e361] [cursor=pointer]:
+            - /url: https://task.epwk.com/1154644/
+            - generic [ref=e362]:
+              - generic [ref=e363]:
+                - heading "5万-10万元一款加入传感器的拍手设计" [level=3] [ref=e364]
+                - paragraph [ref=e366]:
+                  - generic [ref=e367]: 投标中
+                  - text: 剩余 2天8小时
+              - paragraph [ref=e369]: 0人投标
+          - link "￥50000购买火影世界页游端源码 投标中 剩余 17天16小时 0人投标" [ref=e370] [cursor=pointer]:
+            - /url: https://task.epwk.com/1155416/
+            - generic [ref=e371]:
+              - generic [ref=e372]:
+                - heading "￥50000购买火影世界页游端源码" [level=3] [ref=e373]
+                - paragraph [ref=e375]:
+                  - generic [ref=e376]: 投标中
+                  - text: 剩余 17天16小时
+              - paragraph [ref=e378]: 0人投标
+    - generic [ref=e380]:
+      - heading "热门类目任务 / 五大门类海量任务精选 查看所有任务" [level=2] [ref=e382]:
+        - text: 热门类目任务 / 五大门类海量任务精选
+        - link "查看所有任务" [ref=e383] [cursor=pointer]:
+          - /url: https://task.epwk.com
+      - generic [ref=e385]:
+        - generic [ref=e386]:
+          - heading "设计" [level=4] [ref=e388]
+          - generic [ref=e390]:
+            - list [ref=e391]:
+              - listitem [ref=e392]:
+                - link "创意设计" [ref=e393] [cursor=pointer]:
+                  - /url: https://task.epwk.com/logovi/
+              - listitem [ref=e394]:
+                - link "工业设计" [ref=e395] [cursor=pointer]:
+                  - /url: https://task.epwk.com/gysheji/
+              - listitem [ref=e396]:
+                - link "视觉设计" [ref=e397] [cursor=pointer]:
+                  - /url: https://task.epwk.com/sjcdsj/
+              - listitem [ref=e398]:
+                - link "宣传品设计" [ref=e399] [cursor=pointer]:
+                  - /url: https://task.epwk.com/xcp/
+              - listitem [ref=e400]:
+                - link "电商设计" [ref=e401] [cursor=pointer]:
+                  - /url: https://task.epwk.com/wdfw/
+            - link "更多设计任务" [ref=e402] [cursor=pointer]:
+              - /url: https://task.epwk.com/sj/
+        - generic [ref=e403]:
+          - heading "进行中的设计任务" [level=4] [ref=e404]:
+            - text: 进行中的设计任务
+            - link [ref=e405] [cursor=pointer]:
+              - /url: https://task.epwk.com/sj/
+          - list [ref=e408]:
+            - listitem [ref=e409]:
+              - generic [ref=e410]:
+                - generic [ref=e411]: 1万-2万元
+                - link "蓝牙耳机产品设计" [ref=e412] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156148/
+              - generic [ref=e413]: 0人投标
+            - listitem [ref=e414]:
+              - generic [ref=e415]:
+                - generic [ref=e416]: 3000-5000元
+                - link "水位模拟软件LID设施效益评估" [ref=e417] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156097/
+              - generic [ref=e418]: 1人投标
+            - listitem [ref=e419]:
+              - generic [ref=e420]:
+                - generic [ref=e421]: ￥4500
+                - link "NKT6000智能训练器工业结构设计 建模+工程图" [ref=e422] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156009/
+              - generic [ref=e423]: 0人投标
+            - listitem [ref=e424]:
+              - generic [ref=e425]:
+                - generic [ref=e426]: ￥6000
+                - link "变压器3D模型制作" [ref=e427] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155989/
+              - generic [ref=e428]: 3人投标
+            - listitem [ref=e429]:
+              - generic [ref=e430]:
+                - generic [ref=e431]: 3000-5000元
+                - link "线上教育平台UI跟平面设计" [ref=e432] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155976/
+              - generic [ref=e433]: 1人投标
+            - listitem [ref=e434]:
+              - generic [ref=e435]:
+                - generic [ref=e436]: 1万-2万元
+                - link "人形机器人外壳设计" [ref=e437] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155928/
+              - generic [ref=e439]: 0人投标
+            - listitem [ref=e440]:
+              - generic [ref=e441]:
+                - generic [ref=e442]: 20万-30万元
+                - link "约850㎡浙菜餐饮宋式园林非标全案设计" [ref=e443] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155908/
+              - generic [ref=e444]: 0人投标
+            - listitem [ref=e445]:
+              - generic [ref=e446]:
+                - generic [ref=e447]: 1万-2万元
+                - link "工牌电子稿设计" [ref=e448] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155874/
+              - generic [ref=e449]: 7人投标
+            - listitem [ref=e450]:
+              - generic [ref=e451]:
+                - generic [ref=e452]: 1万-2万元
+                - link "苍莽大地人类学博物馆logo和VI设计" [ref=e453] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155826/
+              - generic [ref=e454]: 6人投标
+            - listitem [ref=e455]:
+              - generic [ref=e456]:
+                - generic [ref=e457]: 1万-2万元
+                - link "养虾户外自动投料机 整机结构 + 塑件外包设计" [ref=e458] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155718/
+              - generic [ref=e459]: 2人投标
+          - generic [ref=e460]:
+            - generic [ref=e461]:
+              - text: 推荐服务商
+              - generic [ref=e462] [cursor=pointer]: 换一批看看
+            - list [ref=e465]:
+              - listitem [ref=e466]:
+                - link "素造创意 素造创意 山东省-烟台市" [ref=e467] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/m7d7w92qy5q8/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "素造创意"
+                  - generic [ref=e468]:
+                    - heading "素造创意" [level=5] [ref=e469]
+                    - paragraph [ref=e470]: 山东省-烟台市
+              - listitem [ref=e471]:
+                - link "SHOW&TIME创意热店 SHOW&TIME创意热店 四川省-成都市" [ref=e472] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/zqdple4z9n1v/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "SHOW&TIME创意热店"
+                  - generic [ref=e473]:
+                    - heading "SHOW&TIME创意热店" [level=5] [ref=e474]
+                    - paragraph [ref=e475]: 四川省-成都市
+              - listitem [ref=e476]:
+                - link "东莞市艺匠品牌设计有限公司 东莞市艺匠品牌设计有限公司 广东省-东莞市" [ref=e477] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/zqdpl63gpn1v/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "东莞市艺匠品牌设计有限公司"
+                  - generic [ref=e478]:
+                    - heading "东莞市艺匠品牌设计有限公司" [level=5] [ref=e479]
+                    - paragraph [ref=e480]: 广东省-东莞市
+              - listitem [ref=e481]:
+                - link "开勒创意设计 开勒创意设计 山东省-滨州市" [ref=e482] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/j7n38jq7e5e1/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "开勒创意设计"
+                  - generic [ref=e483]:
+                    - heading "开勒创意设计" [level=5] [ref=e484]
+                    - paragraph [ref=e485]: 山东省-滨州市
+      - generic [ref=e487]:
+        - generic [ref=e488]:
+          - heading "开发" [level=4] [ref=e490]
+          - generic [ref=e492]:
+            - list [ref=e493]:
+              - listitem [ref=e494]:
+                - link "软件开发" [ref=e495] [cursor=pointer]:
+                  - /url: https://task.epwk.com/soft/
+              - listitem [ref=e496]:
+                - link "行业解决方案" [ref=e497] [cursor=pointer]:
+                  - /url: https://task.epwk.com/hyrjkf/
+              - listitem [ref=e498]:
+                - link "工具软件" [ref=e499] [cursor=pointer]:
+                  - /url: https://task.epwk.com/gjrj/
+              - listitem [ref=e500]:
+                - link "技术服务" [ref=e501] [cursor=pointer]:
+                  - /url: https://task.epwk.com/jsfw/
+              - listitem [ref=e502]:
+                - link "游戏" [ref=e503] [cursor=pointer]:
+                  - /url: https://task.epwk.com/games/
+            - link "更多开发任务" [ref=e504] [cursor=pointer]:
+              - /url: https://task.epwk.com/develop/
+        - generic [ref=e505]:
+          - heading "进行中的开发任务" [level=4] [ref=e506]:
+            - text: 进行中的开发任务
+            - link [ref=e507] [cursor=pointer]:
+              - /url: https://task.epwk.com/develop/
+          - list [ref=e510]:
+            - listitem [ref=e511]:
+              - generic [ref=e512]:
+                - generic [ref=e513]: 2万-5万元
+                - link "海上救援训练数字孪生项目" [ref=e514] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156195/
+              - generic [ref=e516]: 0人投标
+            - listitem [ref=e517]:
+              - generic [ref=e518]:
+                - generic [ref=e519]: 2万-5万元
+                - link "传奇自动开区助手工具开发" [ref=e520] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156193/
+              - generic [ref=e521]: 0人投标
+            - listitem [ref=e522]:
+              - generic [ref=e523]:
+                - generic [ref=e524]: 1万-2万元
+                - link "开发AI智能客服" [ref=e525] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156183/
+              - generic [ref=e526]: 1人投标
+            - listitem [ref=e527]:
+              - generic [ref=e528]:
+                - generic [ref=e529]: 50万-100万元
+                - link "炼厂循环水智能控制系统" [ref=e530] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156133/
+              - generic [ref=e531]: 0人投标
+            - listitem [ref=e532]:
+              - generic [ref=e533]:
+                - generic [ref=e534]: 1万-2万元
+                - link "针对中小学作文的成品带扫描仪批改，有成品的" [ref=e535] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156129/
+              - generic [ref=e536]: 4人投标
+            - listitem [ref=e537]:
+              - generic [ref=e538]:
+                - generic [ref=e539]: 1万-2万元
+                - link "电子吧唧·星乐章（ESP32S3版）产品开发" [ref=e540] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156067/
+              - generic [ref=e541]: 2人投标
+            - listitem [ref=e542]:
+              - generic [ref=e543]:
+                - generic [ref=e544]: 2万-5万元
+                - link "化工五位一体系统开发" [ref=e545] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156056/
+              - generic [ref=e546]: 9人投标
+            - listitem [ref=e547]:
+              - generic [ref=e548]:
+                - generic [ref=e549]: 1万-2万元
+                - link "海外B2B订货 PWA开发" [ref=e550] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156020/
+              - generic [ref=e551]: 4人投标
+            - listitem [ref=e552]:
+              - generic [ref=e553]:
+                - generic [ref=e554]: ￥10000
+                - link "文旅景区微信小程序开发（预约+票务+核销）" [ref=e555] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156016/
+              - generic [ref=e556]: 13人投标
+            - listitem [ref=e557]:
+              - generic [ref=e558]:
+                - generic [ref=e559]: 1万-2万元
+                - link "招标代理即时通讯系统开发" [ref=e560] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156002/
+              - generic [ref=e562]: 2人投标
+          - generic [ref=e563]:
+            - generic [ref=e564]:
+              - text: 推荐服务商
+              - generic [ref=e565] [cursor=pointer]: 换一批看看
+            - list [ref=e568]:
+              - listitem [ref=e569]:
+                - link "智控科技 智控科技 四川省-成都市" [ref=e570] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/omdwkr6xwdrp/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "智控科技"
+                  - generic [ref=e571]:
+                    - heading "智控科技" [level=5] [ref=e572]
+                    - paragraph [ref=e573]: 四川省-成都市
+              - listitem [ref=e574]:
+                - link "深圳市安滴泛科技有限公司 深圳市安滴泛科技有限公司 广东省-深圳市" [ref=e575] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/81n41gmjynp6/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "深圳市安滴泛科技有限公司"
+                  - generic [ref=e576]:
+                    - heading "深圳市安滴泛科技有限公司" [level=5] [ref=e577]
+                    - paragraph [ref=e578]: 广东省-深圳市
+              - listitem [ref=e579]:
+                - link "上海缘到软件科技有限公司 上海缘到软件科技有限公司 上海市-市辖区" [ref=e580] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/3gd2m4r3pner/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "上海缘到软件科技有限公司"
+                  - generic [ref=e581]:
+                    - heading "上海缘到软件科技有限公司" [level=5] [ref=e582]
+                    - paragraph [ref=e583]: 上海市-市辖区
+              - listitem [ref=e584]:
+                - link "湖南宏梦创客科技有限公司 湖南宏梦创客科技有限公司 湖南省-长沙市" [ref=e585] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/rp5z4yrwwdx3/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "湖南宏梦创客科技有限公司"
+                  - generic [ref=e586]:
+                    - heading "湖南宏梦创客科技有限公司" [level=5] [ref=e587]
+                    - paragraph [ref=e588]: 湖南省-长沙市
+      - generic [ref=e590]:
+        - generic [ref=e591]:
+          - heading "视频" [level=4] [ref=e593]
+          - generic [ref=e595]:
+            - list [ref=e596]:
+              - listitem [ref=e597]:
+                - link "视频制作" [ref=e598] [cursor=pointer]:
+                  - /url: https://task.epwk.com/yszz/
+              - listitem [ref=e599]:
+                - link "短视频" [ref=e600] [cursor=pointer]:
+                  - /url: https://task.epwk.com/duanshipin/
+              - listitem [ref=e601]:
+                - link "网红营销" [ref=e602] [cursor=pointer]:
+                  - /url: https://task.epwk.com/spyx/
+              - listitem [ref=e603]:
+                - link "动画制作" [ref=e604] [cursor=pointer]:
+                  - /url: https://task.epwk.com/duomeiti/
+              - listitem [ref=e605]:
+                - link "影视后期" [ref=e606] [cursor=pointer]:
+                  - /url: https://task.epwk.com/videomake/
+            - link "更多视频任务" [ref=e607] [cursor=pointer]:
+              - /url: https://task.epwk.com/shipin/
+        - generic [ref=e608]:
+          - heading "进行中的视频任务" [level=4] [ref=e609]:
+            - text: 进行中的视频任务
+            - link [ref=e610] [cursor=pointer]:
+              - /url: https://task.epwk.com/shipin/
+          - list [ref=e613]:
+            - listitem [ref=e614]:
+              - generic [ref=e615]:
+                - generic [ref=e616]: 3000-5000元
+                - link "layout+动画环节" [ref=e617] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156159/
+              - generic [ref=e618]: 0人投标
+            - listitem [ref=e619]:
+              - generic [ref=e620]:
+                - generic [ref=e621]: 5000-10000元
+                - link "AI视频抽卡师" [ref=e622] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156072/
+              - generic [ref=e623]: 0人投标
+            - listitem [ref=e624]:
+              - generic [ref=e625]:
+                - generic [ref=e626]: 5000-10000元
+                - link "工厂标准工序操作视频课件拍摄及制作" [ref=e627] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156034/
+              - generic [ref=e628]: 0人投标
+            - listitem [ref=e629]:
+              - generic [ref=e630]:
+                - generic [ref=e631]: 5万-10万元
+                - link "急需少儿编程完整课程体系授权" [ref=e632] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155963/
+              - generic [ref=e633]: 0人投标
+            - listitem [ref=e634]:
+              - generic [ref=e635]:
+                - generic [ref=e636]: ￥1500
+                - link "长期外包视频拍摄，贵阳本地威客" [ref=e637] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155745/
+              - generic [ref=e638]: 0人投标
+            - listitem [ref=e639]:
+              - generic [ref=e640]:
+                - generic [ref=e641]: 5万-10万元
+                - link "幼儿百科视频100个" [ref=e642] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155680/
+              - generic [ref=e644]: 2人投标
+            - listitem [ref=e645]:
+              - generic [ref=e646]:
+                - generic [ref=e647]: 5万-10万元
+                - link "少儿编程课程 AI 教学视频" [ref=e648] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155671/
+              - generic [ref=e649]: 1人投标
+            - listitem [ref=e650]:
+              - generic [ref=e651]:
+                - generic [ref=e652]: 3000-5000元
+                - link "vlog剪辑" [ref=e653] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155654/
+              - generic [ref=e654]: 1人投标
+            - listitem [ref=e655]:
+              - generic [ref=e656]:
+                - generic [ref=e657]: 5000-10000元
+                - link "需要大量AI企业宣传片介绍" [ref=e658] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155220/
+              - generic [ref=e659]: 1人投标
+            - listitem [ref=e660]:
+              - generic [ref=e661]:
+                - generic [ref=e662]: 5000-10000元
+                - link "大量常规宣传片制作" [ref=e663] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155081/
+              - generic [ref=e664]: 2人投标
+          - generic [ref=e665]:
+            - generic [ref=e666]:
+              - text: 推荐服务商
+              - generic [ref=e667] [cursor=pointer]: 换一批看看
+            - list [ref=e670]:
+              - listitem [ref=e671]:
+                - link "河北几维科技有限公司 河北几维科技有限公司 河北省-石家庄市" [ref=e672] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/81n41elllnp6/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "河北几维科技有限公司"
+                  - generic [ref=e673]:
+                    - heading "河北几维科技有限公司" [level=5] [ref=e674]
+                    - paragraph [ref=e675]: 河北省-石家庄市
+              - listitem [ref=e676]:
+                - link "海南低调桑梓科技有限公司 海南低调桑梓科技有限公司 海南省-省直辖县级行政单位" [ref=e677] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/m7d7wj6mr5q8/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "海南低调桑梓科技有限公司"
+                  - generic [ref=e678]:
+                    - heading "海南低调桑梓科技有限公司" [level=5] [ref=e679]
+                    - paragraph [ref=e680]: 海南省-省直辖县级行政单位
+              - listitem [ref=e681]:
+                - link "上海米熊网络科技 MISUN 上海米熊网络科技 MISUN 上海市-市辖区" [ref=e682] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/09drj4xz353w/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "上海米熊网络科技 MISUN"
+                  - generic [ref=e683]:
+                    - heading "上海米熊网络科技 MISUN" [level=5] [ref=e684]
+                    - paragraph [ref=e685]: 上海市-市辖区
+              - listitem [ref=e686]:
+                - link "广州源爱设计创意空间 广州源爱设计创意空间 广东省-广州市" [ref=e687] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/2j5xo4r305xm/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "广州源爱设计创意空间"
+                  - generic [ref=e688]:
+                    - heading "广州源爱设计创意空间" [level=5] [ref=e689]
+                    - paragraph [ref=e690]: 广东省-广州市
+      - generic [ref=e692]:
+        - generic [ref=e693]:
+          - heading "营销" [level=4] [ref=e695]
+          - generic [ref=e697]:
+            - list [ref=e698]:
+              - listitem [ref=e699]:
+                - link "网络推广" [ref=e700] [cursor=pointer]:
+                  - /url: https://task.epwk.com/wangluotuiguang/
+              - listitem [ref=e701]:
+                - link "营销策划" [ref=e702] [cursor=pointer]:
+                  - /url: https://task.epwk.com/yingxiaocehua/
+              - listitem [ref=e703]:
+                - link "社媒营销" [ref=e704] [cursor=pointer]:
+                  - /url: https://task.epwk.com/webtui/
+            - link "更多营销任务" [ref=e705] [cursor=pointer]:
+              - /url: https://task.epwk.com/yinxiao/
+        - generic [ref=e706]:
+          - heading "进行中的营销任务" [level=4] [ref=e707]:
+            - text: 进行中的营销任务
+            - link [ref=e708] [cursor=pointer]:
+              - /url: https://task.epwk.com/yinxiao/
+          - list [ref=e711]:
+            - listitem [ref=e712]:
+              - generic [ref=e713]:
+                - generic [ref=e714]: 3000-5000元
+                - link "找专业服务商做营销策划" [ref=e715] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155806/
+              - generic [ref=e716]: 1人投标
+            - listitem [ref=e717]:
+              - generic [ref=e718]:
+                - generic [ref=e719]: 2万-5万元
+                - link "国外五星级酒店外宣营销策划" [ref=e720] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1155339/
+              - generic [ref=e721]: 1人投标
+            - listitem [ref=e722]:
+              - generic [ref=e723]:
+                - generic [ref=e724]: 1万-2万元
+                - link "人群包自动扩展" [ref=e725] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1154482/
+              - generic [ref=e726]: 1人投标
+            - listitem [ref=e727]:
+              - generic [ref=e728]:
+                - generic [ref=e729]: ￥6000
+                - link "创意疲劳度预警" [ref=e730] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1154481/
+              - generic [ref=e731]: 1人投标
+            - listitem [ref=e732]:
+              - generic [ref=e733]:
+                - generic [ref=e734]: ￥3000
+                - link "无声的发布会" [ref=e735] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1154476/
+              - generic [ref=e736]: 1人投标
+            - listitem [ref=e737]:
+              - generic [ref=e738]:
+                - generic [ref=e739]: 3000-5000元
+                - link "旧物独白" [ref=e740] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1154475/
+              - generic [ref=e741]: 1人投标
+            - listitem [ref=e742]:
+              - generic [ref=e743]:
+                - generic [ref=e744]: ￥3000
+                - link "AI梦境联名" [ref=e745] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1154471/
+              - generic [ref=e746]: 1人投标
+            - listitem [ref=e747]:
+              - generic [ref=e748]:
+                - generic [ref=e749]: 3000-5000元
+                - link "历史博主复活计划" [ref=e750] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1154470/
+              - generic [ref=e751]: 1人投标
+            - listitem [ref=e752]:
+              - generic [ref=e753]:
+                - generic [ref=e754]: ￥1800
+                - link "母婴好物Facebook社群内容策划" [ref=e755] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1145439/
+              - generic [ref=e756]: 0人投标
+            - listitem [ref=e757]:
+              - generic [ref=e758]:
+                - generic [ref=e759]: ￥2500
+                - link "企业正面信息发布（国际主流媒体）" [ref=e760] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1126992/
+              - generic [ref=e761]: 4人投标
+          - generic [ref=e762]:
+            - generic [ref=e763]:
+              - text: 推荐服务商
+              - generic [ref=e764] [cursor=pointer]: 换一批看看
+            - list [ref=e767]:
+              - listitem [ref=e768]:
+                - link "甘肃中天易捷信息科技有限公司 甘肃中天易捷信息科技有限公司 甘肃省-兰州市" [ref=e769] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/09drj11k153w/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "甘肃中天易捷信息科技有限公司"
+                  - generic [ref=e770]:
+                    - heading "甘肃中天易捷信息科技有限公司" [level=5] [ref=e771]
+                    - paragraph [ref=e772]: 甘肃省-兰州市
+              - listitem [ref=e773]:
+                - link "禾庭品策 禾庭品策 广东省-中山市" [ref=e774] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/omdwkjqm1drp/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "禾庭品策"
+                  - generic [ref=e775]:
+                    - heading "禾庭品策" [level=5] [ref=e776]
+                    - paragraph [ref=e777]: 广东省-中山市
+              - listitem [ref=e778]:
+                - link "南京思卓克设计 南京思卓克设计 江苏省-南京市" [ref=e779] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/7lngq4p4rdmr/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "南京思卓克设计"
+                  - generic [ref=e780]:
+                    - heading "南京思卓克设计" [level=5] [ref=e781]
+                    - paragraph [ref=e782]: 江苏省-南京市
+              - listitem [ref=e783]:
+                - link "世玖科技 世玖科技 江苏省-苏州市" [ref=e784] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/09drj4g7153w/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "世玖科技"
+                  - generic [ref=e785]:
+                    - heading "世玖科技" [level=5] [ref=e786]
+                    - paragraph [ref=e787]: 江苏省-苏州市
+      - generic [ref=e789]:
+        - generic [ref=e790]:
+          - heading "文案" [level=4] [ref=e792]
+          - generic [ref=e794]:
+            - list [ref=e795]:
+              - listitem [ref=e796]:
+                - link "广告文案" [ref=e797] [cursor=pointer]:
+                  - /url: https://task.epwk.com/xiezuo/
+              - listitem [ref=e798]:
+                - link "起名取名" [ref=e799] [cursor=pointer]:
+                  - /url: https://task.epwk.com/qiming/
+            - link "更多文案任务" [ref=e800] [cursor=pointer]:
+              - /url: https://task.epwk.com/copy/
+        - generic [ref=e801]:
+          - heading "进行中的文案任务" [level=4] [ref=e802]:
+            - text: 进行中的文案任务
+            - link [ref=e803] [cursor=pointer]:
+              - /url: https://task.epwk.com/copy/
+          - list [ref=e806]:
+            - listitem [ref=e807]:
+              - generic [ref=e808]:
+                - generic [ref=e809]: ￥15000
+                - link "品牌分析报告" [ref=e810] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1154502/
+              - generic [ref=e811]: 0人投标
+            - listitem [ref=e812]:
+              - generic [ref=e813]:
+                - generic [ref=e814]: 1万-2万元
+                - link "照相馆的第七年" [ref=e815] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1151533/
+              - generic [ref=e816]: 1人投标
+            - listitem [ref=e817]:
+              - generic [ref=e818]:
+                - generic [ref=e819]: ￥5000
+                - link "末班地铁的乘客" [ref=e820] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1151531/
+              - generic [ref=e821]: 0人投标
+            - listitem [ref=e822]:
+              - generic [ref=e823]:
+                - generic [ref=e824]: 3000-5000元
+                - link "宴会酒店品牌宣传策划方案制作" [ref=e825] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1140153/
+              - generic [ref=e826]: 1人投标
+            - listitem [ref=e827]:
+              - generic [ref=e828]:
+                - generic [ref=e829]: 1000-3000元
+                - link "关于汽车行业分析报告撰写" [ref=e830] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1135649/
+              - generic [ref=e832]: 1人投标
+            - listitem [ref=e833]:
+              - generic [ref=e834]:
+                - generic [ref=e835]: ￥1100
+                - link "广告语和项目使命策划" [ref=e836] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1131737/
+              - generic [ref=e837]: 212人投标
+            - listitem [ref=e838]:
+              - generic [ref=e839]:
+                - generic [ref=e840]: ￥2000
+                - link "【重金悬赏】房地产项目创意设计征集" [ref=e841] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1111172/
+              - generic [ref=e842]: 233人投标
+            - listitem [ref=e843]:
+              - generic [ref=e844]:
+                - generic [ref=e845]: ￥1440
+                - link "儿童护眼灯、儿童学习桌取品牌名字" [ref=e846] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1092328/
+              - generic [ref=e847]: 405人投标
+            - listitem [ref=e848]:
+              - generic [ref=e849]:
+                - generic [ref=e850]: ￥4000
+                - link "大学生全能生活手册类 APP 征名！" [ref=e851] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1089151/
+              - generic [ref=e852]: 195人投标
+            - listitem [ref=e853]:
+              - generic [ref=e854]:
+                - generic [ref=e855]: ￥2000
+                - link "需要策划一个外贸品牌" [ref=e856] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1083234/
+              - generic [ref=e857]: 1人投标
+          - generic [ref=e858]:
+            - generic [ref=e859]:
+              - text: 推荐服务商
+              - generic [ref=e860] [cursor=pointer]: 换一批看看
+            - list [ref=e863]:
+              - listitem [ref=e864]:
+                - link "源科咨询 源科咨询 福建省-厦门市" [ref=e865] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/09drjy9ke53w/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "源科咨询"
+                  - generic [ref=e866]:
+                    - heading "源科咨询" [level=5] [ref=e867]
+                    - paragraph [ref=e868]: 福建省-厦门市
+              - listitem [ref=e869]:
+                - link "筑星工作室 筑星工作室 贵州省-贵阳市" [ref=e870] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/rp5z4v8p8dx3/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "筑星工作室"
+                  - generic [ref=e871]:
+                    - heading "筑星工作室" [level=5] [ref=e872]
+                    - paragraph [ref=e873]: 贵州省-贵阳市
+              - listitem [ref=e874]:
+                - link "趣玩锤子软件开发 趣玩锤子软件开发 湖南省-长沙市" [ref=e875] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/89dvg12wldl2/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "趣玩锤子软件开发"
+                  - generic [ref=e876]:
+                    - heading "趣玩锤子软件开发" [level=5] [ref=e877]
+                    - paragraph [ref=e878]: 湖南省-长沙市
+              - listitem [ref=e879]:
+                - link "四喜广告 四喜广告 湖北省-武汉市" [ref=e880] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/3gd2mv9lvner/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "四喜广告"
+                  - generic [ref=e881]:
+                    - heading "四喜广告" [level=5] [ref=e882]
+                    - paragraph [ref=e883]: 湖北省-武汉市
+      - generic [ref=e885]:
+        - generic [ref=e886]:
+          - heading "企业服务" [level=4] [ref=e888]
+          - generic [ref=e890]:
+            - list [ref=e891]:
+              - listitem [ref=e892]:
+                - link "商标业务" [ref=e893] [cursor=pointer]:
+                  - /url: https://task.epwk.com/sbyw/
+              - listitem [ref=e894]:
+                - link "公司财税" [ref=e895] [cursor=pointer]:
+                  - /url: https://task.epwk.com/gscs/
+              - listitem [ref=e896]:
+                - link "法律服务" [ref=e897] [cursor=pointer]:
+                  - /url: https://task.epwk.com/law/
+              - listitem [ref=e898]:
+                - link "广告会展" [ref=e899] [cursor=pointer]:
+                  - /url: https://task.epwk.com/adshow/
+              - listitem [ref=e900]:
+                - link "科技服务" [ref=e901] [cursor=pointer]:
+                  - /url: https://task.epwk.com/kejifuwu/
+            - link "更多企服任务" [ref=e902] [cursor=pointer]:
+              - /url: https://task.epwk.com/shangwu/
+        - generic [ref=e903]:
+          - heading "进行中的企业服务任务" [level=4] [ref=e904]:
+            - text: 进行中的企业服务任务
+            - link [ref=e905] [cursor=pointer]:
+              - /url: https://task.epwk.com/shangwu/
+          - list [ref=e908]:
+            - listitem [ref=e909]:
+              - generic [ref=e910]:
+                - generic [ref=e911]: 5000-10000元
+                - link "美业ai超级员工系统开发" [ref=e912] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156188/
+              - generic [ref=e913]: 1人投标
+            - listitem [ref=e914]:
+              - generic [ref=e915]:
+                - generic [ref=e916]: 3000-5000元
+                - link "旅游包车APP（安卓+iOS）开发 +24小时语音播报 + 应用市场上架" [ref=e917] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156153/
+              - generic [ref=e918]: 1人投标
+            - listitem [ref=e919]:
+              - generic [ref=e920]:
+                - generic [ref=e921]: 3000-5000元
+                - link "三维建模系统优化" [ref=e922] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156147/
+              - generic [ref=e923]: 0人投标
+            - listitem [ref=e924]:
+              - generic [ref=e925]:
+                - generic [ref=e926]: 5000-10000元
+                - link "针对高职大学院校的开发产品，要求有成品" [ref=e927] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156123/
+              - generic [ref=e928]: 6人投标
+            - listitem [ref=e929]:
+              - generic [ref=e930]:
+                - generic [ref=e931]: 3000-5000元
+                - link "网页设计 网站开发" [ref=e932] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156120/
+              - generic [ref=e933]: 2人投标
+            - listitem [ref=e934]:
+              - generic [ref=e935]:
+                - generic [ref=e936]: 3000-5000元
+                - link "基于heliboard-v3.9开源代码开发中文输入法" [ref=e937] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156100/
+              - generic [ref=e939]: 0人投标
+            - listitem [ref=e940]:
+              - generic [ref=e941]:
+                - generic [ref=e942]: ￥1500
+                - link "免介找房小程序开发尾款" [ref=e943] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156084/
+              - generic [ref=e944]: 0人投标
+            - listitem [ref=e945]:
+              - generic [ref=e946]:
+                - generic [ref=e947]: ￥10000
+                - link "蓝牙打印机app开发一期" [ref=e948] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156078/
+              - generic [ref=e949]: 1人投标
+            - listitem [ref=e950]:
+              - generic [ref=e951]:
+                - generic [ref=e952]: 5000-10000元
+                - link "农产品的现货自动交易的脚本" [ref=e953] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156077/
+              - generic [ref=e954]: 3人投标
+            - listitem [ref=e955]:
+              - generic [ref=e956]:
+                - generic [ref=e957]: 3000-5000元
+                - link "墓葬地图管理信息系统" [ref=e958] [cursor=pointer]:
+                  - /url: https://task.epwk.com/1156075/
+              - generic [ref=e959]: 1人投标
+          - generic [ref=e960]:
+            - generic [ref=e961]: 推荐服务商
+            - list [ref=e963]:
+              - listitem [ref=e964]:
+                - link "中芯智诚信息科技有限公司 中芯智诚信息科技有限公司 广东省-东莞市" [ref=e965] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/89dvg7e7gdl2/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "中芯智诚信息科技有限公司"
+                  - generic [ref=e966]:
+                    - heading "中芯智诚信息科技有限公司" [level=5] [ref=e967]
+                    - paragraph [ref=e968]: 广东省-东莞市
+              - listitem [ref=e969]:
+                - link "无锡羽墨科技有限公司 无锡羽墨科技有限公司 江苏省-无锡市" [ref=e970] [cursor=pointer]:
+                  - /url: https://shop.epwk.com/v0n1xwqw057y/
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img "无锡羽墨科技有限公司"
+                  - generic [ref=e971]:
+                    - heading "无锡羽墨科技有限公司" [level=5] [ref=e972]
+                    - paragraph [ref=e973]: 江苏省-无锡市
+    - generic [ref=e975]:
+      - generic [ref=e976]:
+        - heading "任务专题 / 高端大品牌任务聚集 更多" [level=2] [ref=e978]:
+          - text: 任务专题 / 高端大品牌任务聚集
+          - link "更多" [ref=e979] [cursor=pointer]:
+            - /url: https://www.epwk.com/zt/rwzt/
+        - generic [ref=e980]:
+          - list:
+            - listitem [ref=e981]:
+              - link "专注影视制作，助力品牌营销 专注影视制作，助力品牌营销" [ref=e982] [cursor=pointer]:
+                - /url: https://zt.epwk.com/2305shipin/?epi=789437&utm_source=qita&utm_term=qhp
+                - generic [ref=e983]:
+                  - img "专注影视制作，助力品牌营销" [ref=e987]
+                  - paragraph [ref=e988]: 专注影视制作，助力品牌营销
+            - listitem [ref=e989]:
+              - link "数字孪生，智领未来！数字人创意设计大赛来了 数字孪生，智领未来！数字人创意设计大赛来了" [ref=e990] [cursor=pointer]:
+                - /url: https://zt.epwk.com/shuziren/
+                - generic [ref=e991]:
+                  - img "数字孪生，智领未来！数字人创意设计大赛来了" [ref=e995]
+                  - paragraph [ref=e996]: 数字孪生，智领未来！数字人创意设计大赛来了
+            - listitem [ref=e997]:
+              - link "酷贝街原创形象表情大赛 酷贝街原创形象表情大赛" [ref=e998] [cursor=pointer]:
+                - /url: https://zt.kubeijie.com/2107dasai/
+                - generic [ref=e999]:
+                  - img "酷贝街原创形象表情大赛" [ref=e1003]
+                  - paragraph [ref=e1004]: 酷贝街原创形象表情大赛
+            - listitem [ref=e1005]:
+              - link "第三届中国（蓝光杯·漳州）钟表设计大赛 第三届中国（蓝光杯·漳州）钟表设计大赛" [ref=e1006] [cursor=pointer]:
+                - /url: http://zt.epwk.com/p_epwk_zbds_170718/
+                - generic [ref=e1007]:
+                  - img "第三届中国（蓝光杯·漳州）钟表设计大赛" [ref=e1011]
+                  - paragraph [ref=e1012]: 第三届中国（蓝光杯·漳州）钟表设计大赛
+            - listitem [ref=e1013]:
+              - link "第三届海峡两岸（漳州）工业设计大赛 第三届海峡两岸（漳州）工业设计大赛" [ref=e1014] [cursor=pointer]:
+                - /url: http://zt.epwk.com/1706gysj/
+                - generic [ref=e1015]:
+                  - img "第三届海峡两岸（漳州）工业设计大赛" [ref=e1019]
+                  - paragraph [ref=e1020]: 第三届海峡两岸（漳州）工业设计大赛
+            - listitem [ref=e1021]:
+              - link "棒棒金童奖婴童产品包装创意设计大赛 棒棒金童奖婴童产品包装创意设计大赛" [ref=e1022] [cursor=pointer]:
+                - /url: http://zt.epwk.com/1704jintong/
+                - generic [ref=e1023]:
+                  - img "棒棒金童奖婴童产品包装创意设计大赛" [ref=e1027]
+                  - paragraph [ref=e1028]: 棒棒金童奖婴童产品包装创意设计大赛
+      - generic [ref=e1029]:
+        - heading "任务地图" [level=2] [ref=e1031]
+        - link [ref=e1033] [cursor=pointer]:
+          - /url: https://www.epwk.com/task_map/
+    - generic [ref=e1035]:
+      - heading "对你有用 / 探究掌握最新动态" [level=2] [ref=e1037]
+      - generic [ref=e1038]:
+        - generic [ref=e1039]:
+          - heading "成功案例赏析 更多" [level=3] [ref=e1041]:
+            - text: 成功案例赏析
+            - link "更多" [ref=e1042] [cursor=pointer]:
+              - /url: https://www.epwk.com/anli/
+          - generic [ref=e1043]:
+            - generic [ref=e1044]:
+              - link "国际贸易公司VI设计":
+                - /url: https://www.epwk.com/special-view-case_info-art_id-258507.html
+                - generic [ref=e1045] [cursor=pointer]:
+                  - generic:
+                    - generic:
+                      - img "国际贸易公司VI设计"
+              - generic [ref=e1046]:
+                - link "国际贸易公司VI设计" [ref=e1047] [cursor=pointer]:
+                  - /url: https://www.epwk.com/special-view-case_info-art_id-258507.html
+                  - heading "国际贸易公司VI设计" [level=4] [ref=e1048]
+                - paragraph [ref=e1049]:
+                  - generic [ref=e1050]:
+                    - text: 赏金：
+                    - link "￥3666" [ref=e1051] [cursor=pointer]:
+                      - /url: https://task.epwk.com/792555/
+                - paragraph [ref=e1052]:
+                  - generic [ref=e1053]: 关注：10016 人
+                  - generic [ref=e1054]: 收藏：116人
+                - paragraph [ref=e1055]:
+                  - generic [ref=e1056]: 方案：38 个
+                  - generic [ref=e1057]:
+                    - text: 中标：
+                    - link "三边形意创品牌" [ref=e1058] [cursor=pointer]:
+                      - /url: https://shop.epwk.com/89dvgxyjkdl2/
+            - generic [ref=e1059]:
+              - link "生命关怀事业公司LOGO设计":
+                - /url: https://www.epwk.com/special-view-case_info-art_id-258300.html
+                - generic [ref=e1060] [cursor=pointer]:
+                  - generic:
+                    - generic:
+                      - img "生命关怀事业公司LOGO设计"
+              - generic [ref=e1061]:
+                - link "生命关怀事业公司LOGO设计" [ref=e1062] [cursor=pointer]:
+                  - /url: https://www.epwk.com/special-view-case_info-art_id-258300.html
+                  - heading "生命关怀事业公司LOGO设计" [level=4] [ref=e1063]
+                - paragraph [ref=e1064]:
+                  - generic [ref=e1065]:
+                    - text: 赏金：
+                    - link "￥1666" [ref=e1066] [cursor=pointer]:
+                      - /url: https://task.epwk.com/702302/
+                - paragraph [ref=e1067]:
+                  - generic [ref=e1068]: 关注：7996 人
+                  - generic [ref=e1069]: 收藏：141人
+                - paragraph [ref=e1070]:
+                  - generic [ref=e1071]: 方案：67 个
+                  - generic [ref=e1072]:
+                    - text: 中标：
+                    - link "cai18028788925" [ref=e1073] [cursor=pointer]:
+                      - /url: https://shop.epwk.com/78dlje7jp5lx/
+            - generic [ref=e1074]:
+              - link "舞蹈室Logo设计":
+                - /url: https://www.epwk.com/special-view-case_info-art_id-236970.html
+                - generic [ref=e1075] [cursor=pointer]:
+                  - generic:
+                    - generic:
+                      - img "舞蹈室Logo设计"
+              - generic [ref=e1076]:
+                - link "舞蹈室Logo设计" [ref=e1077] [cursor=pointer]:
+                  - /url: https://www.epwk.com/special-view-case_info-art_id-236970.html
+                  - heading "舞蹈室Logo设计" [level=4] [ref=e1078]
+                - paragraph [ref=e1079]:
+                  - generic [ref=e1080]:
+                    - text: 赏金：
+                    - link "￥460" [ref=e1081] [cursor=pointer]:
+                      - /url: https://task.epwk.com/638594/
+                - paragraph [ref=e1082]:
+                  - generic [ref=e1083]: 关注：13939 人
+                  - generic [ref=e1084]: 收藏：116人
+                - paragraph [ref=e1085]:
+                  - generic [ref=e1086]: 方案：43 个
+                  - generic [ref=e1087]:
+                    - text: 中标：
+                    - link "o59b6947e8cfe1" [ref=e1088] [cursor=pointer]:
+                      - /url: https://shop.epwk.com/2j5xoyyo95xm/
+            - generic [ref=e1089]:
+              - link "小龙虾餐厅logo设计征集":
+                - /url: https://www.epwk.com/special-view-case_info-art_id-229152.html
+                - generic [ref=e1090] [cursor=pointer]:
+                  - generic:
+                    - generic:
+                      - img "小龙虾餐厅logo设计征集"
+              - generic [ref=e1091]:
+                - link "小龙虾餐厅logo设计征集" [ref=e1092] [cursor=pointer]:
+                  - /url: https://www.epwk.com/special-view-case_info-art_id-229152.html
+                  - heading "小龙虾餐厅logo设计征集" [level=4] [ref=e1093]
+                - paragraph [ref=e1094]:
+                  - generic [ref=e1095]:
+                    - text: 赏金：
+                    - link "￥500" [ref=e1096] [cursor=pointer]:
+                      - /url: https://task.epwk.com/627079/
+                - paragraph [ref=e1097]:
+                  - generic [ref=e1098]: 关注：8713 人
+                  - generic [ref=e1099]: 收藏：105人
+                - paragraph [ref=e1100]:
+                  - generic [ref=e1101]: 方案：40 个
+                  - generic [ref=e1102]:
+                    - text: 中标：
+                    - link "卡漫淘工作室" [ref=e1103] [cursor=pointer]:
+                      - /url: https://shop.epwk.com/omdwkky2wdrp/
+            - generic [ref=e1104]:
+              - link "农业开发有限公司LOGO设计":
+                - /url: https://www.epwk.com/special-view-case_info-art_id-221465.html
+                - generic [ref=e1105] [cursor=pointer]:
+                  - generic:
+                    - generic:
+                      - img "农业开发有限公司LOGO设计"
+              - generic [ref=e1106]:
+                - link "农业开发有限公司LOGO设计" [ref=e1107] [cursor=pointer]:
+                  - /url: https://www.epwk.com/special-view-case_info-art_id-221465.html
+                  - heading "农业开发有限公司LOGO设计" [level=4] [ref=e1108]
+                - paragraph [ref=e1109]:
+                  - generic [ref=e1110]:
+                    - text: 赏金：
+                    - link "￥600" [ref=e1111] [cursor=pointer]:
+                      - /url: https://task.epwk.com/625899/
+                - paragraph [ref=e1112]:
+                  - generic [ref=e1113]: 关注：6583 人
+                  - generic [ref=e1114]: 收藏：45人
+                - paragraph [ref=e1115]:
+                  - generic [ref=e1116]: 方案：31 个
+                  - generic [ref=e1117]:
+                    - text: 中标：
+                    - link "视道品牌设计" [ref=e1118] [cursor=pointer]:
+                      - /url: https://shop.epwk.com/89dvgreyldl2/
+        - generic [ref=e1119]:
+          - generic [ref=e1120]:
+            - generic [ref=e1121]:
+              - heading "服务商访谈 雇主访谈 更多" [level=3] [ref=e1123]:
+                - generic [ref=e1124]: 服务商访谈
+                - generic [ref=e1125]: 雇主访谈
+                - link "更多" [ref=e1126] [cursor=pointer]:
+                  - /url: https://www.epwk.com/weike/
+              - generic [ref=e1127] [cursor=pointer]:
+                - link "从“美学执行”到“商业共创”：驼笛创意设计线上破局之路":
+                  - /url: https://www.epwk.com/weike/niu_323087.html
+                  - generic [ref=e1128]:
+                    - generic:
+                      - generic:
+                        - img "从“美学执行”到“商业共创”：驼笛创意设计线上破局之路"
+                - link "从“美学执行”到“商业共创”：驼笛创意设计线上破局之路 2018年，李晓枫创立了驼笛创意设计（上海）有限公司。那时候，他和团队面临所有设计创业者共同的困... [详细] 公司 | 上海市，市辖区，闵行区" [ref=e1130]:
+                  - /url: https://www.epwk.com/weike/niu_323087.html
+                  - heading "从“美学执行”到“商业共创”：驼笛创意设计线上破局之路" [level=4] [ref=e1131]
+                  - paragraph [ref=e1132]:
+                    - text: 2018年，李晓枫创立了驼笛创意设计（上海）有限公司。那时候，他和团队面临所有设计创业者共同的困...
+                    - generic [ref=e1133]: "[详细]"
+                  - paragraph [ref=e1134]: 公司 | 上海市，市辖区，闵行区
+            - list [ref=e1136]:
+              - listitem [ref=e1137] [cursor=pointer]:
+                - link "技术型外包团队如何“稳”中求单？火男网络八年实战复盘" [ref=e1138]:
+                  - /url: https://www.epwk.com/weike/niu_323023.html
+                  - text: 技术型外包团队如何“稳”中求单？火男网络八年实战复盘
+              - listitem [ref=e1140] [cursor=pointer]:
+                - link "技术型团队如何快速跑通线上接单？浩天环宇创始人的实战答案" [ref=e1141]:
+                  - /url: https://www.epwk.com/weike/niu_322963.html
+                  - text: 技术型团队如何快速跑通线上接单？浩天环宇创始人的实战答案
+              - listitem [ref=e1143] [cursor=pointer]:
+                - link "97年创业者毛航：入驻平台八年多，从零客源到成立自有品牌公司" [ref=e1144]:
+                  - /url: https://www.epwk.com/weike/niu_322812.html
+                  - text: 97年创业者毛航：入驻平台八年多，从零客源到成立自有品牌公司
+              - listitem [ref=e1146] [cursor=pointer]:
+                - link "00后创业者的数字化定制之路：从校园项目到全国服务商" [ref=e1147]:
+                  - /url: https://www.epwk.com/weike/niu_322718.html
+                  - text: 00后创业者的数字化定制之路：从校园项目到全国服务商
+          - generic [ref=e1149]:
+            - heading "一品问答 更多" [level=3] [ref=e1151]:
+              - text: 一品问答
+              - link "更多" [ref=e1152] [cursor=pointer]:
+                - /url: https://ask.epwk.com/
+            - list [ref=e1154]:
+              - listitem [ref=e1155]:
+                - generic [ref=e1156]: 问：
+                - link "商业手机网站推广，一般如何推广?" [ref=e1157] [cursor=pointer]:
+                  - /url: https://ask.epwk.com/71975.html
+                - generic [ref=e1158]: 待解决
+              - listitem [ref=e1159]:
+                - generic [ref=e1160]: 问：
+                - link "新建立的商业网站推广方式?急求!!急求!!!" [ref=e1161] [cursor=pointer]:
+                  - /url: https://ask.epwk.com/71974.html
+                - generic [ref=e1162]: 待解决
+              - listitem [ref=e1163]:
+                - generic [ref=e1164]: 问：
+                - link "一个商业网站推广的花费是多少？" [ref=e1165] [cursor=pointer]:
+                  - /url: https://ask.epwk.com/71973.html
+                - generic [ref=e1166]: 待解决
+              - listitem [ref=e1167]:
+                - generic [ref=e1168]: 问：
+                - link "跪求解答，专业的旅游app开发哪个品牌好，旅游app开发什么品牌好都来说说？" [ref=e1169] [cursor=pointer]:
+                  - /url: https://ask.epwk.com/71957.html
+                - generic [ref=e1170]: 已解决
+              - listitem [ref=e1171]:
+                - generic [ref=e1172]: 问：
+                - link "正规旅游app开发怎样收费？" [ref=e1173] [cursor=pointer]:
+                  - /url: https://ask.epwk.com/71956.html
+                - generic [ref=e1174]: 已解决
+              - listitem [ref=e1175]:
+                - generic [ref=e1176]: 问：
+                - link "我想了解 专业的旅游app开发哪家正规，旅游app开发该怎么选，都来说说？" [ref=e1177] [cursor=pointer]:
+                  - /url: https://ask.epwk.com/71955.html
+                - generic [ref=e1178]: 已解决
+              - listitem [ref=e1179]:
+                - generic [ref=e1180]: 问：
+                - link "旅游小程序该如何选择开发？" [ref=e1181] [cursor=pointer]:
+                  - /url: https://ask.epwk.com/71954.html
+                - generic [ref=e1182]: 已解决
+        - generic [ref=e1183]:
+          - generic [ref=e1184]:
+            - heading "服务商帮助 更多" [level=3] [ref=e1186]:
+              - text: 服务商帮助
+              - link "更多" [ref=e1187] [cursor=pointer]:
+                - /url: https://www.epwk.com/help/bang/
+            - list [ref=e1189]:
+              - listitem [ref=e1190]:
+                - link "综合区" [ref=e1191] [cursor=pointer]:
+                  - /url: https://www.epwk.com/help/bang/weikehgz.html
+                  - text: 综合区
+              - listitem [ref=e1193]:
+                - link "威客信用" [ref=e1194] [cursor=pointer]:
+                  - /url: https://www.epwk.com/help/bang/xinyongdengji.html
+                  - text: 威客信用
+              - listitem [ref=e1196]:
+                - link "招标、雇佣任务区" [ref=e1197] [cursor=pointer]:
+                  - /url: https://www.epwk.com/help/bang/zhaotask.html
+                  - text: 招标、雇佣任务区
+              - listitem [ref=e1199]:
+                - link "全额悬赏任务区" [ref=e1200] [cursor=pointer]:
+                  - /url: https://www.epwk.com/help/bang/qexs.html
+                  - text: 全额悬赏任务区
+              - listitem [ref=e1202]:
+                - link "计件任务区" [ref=e1203] [cursor=pointer]:
+                  - /url: https://www.epwk.com/help/bang/jijian.html
+                  - text: 计件任务区
+              - listitem [ref=e1205]:
+                - link "直接雇佣任务区" [ref=e1206] [cursor=pointer]:
+                  - /url: https://www.epwk.com/help/bang/zjgyq.html
+                  - text: 直接雇佣任务区
+              - listitem [ref=e1208]:
+                - link "威客能力品级" [ref=e1209] [cursor=pointer]:
+                  - /url: https://www.epwk.com/help/bang/level.html
+                  - text: 威客能力品级
+          - generic [ref=e1211]:
+            - heading "一品百科 更多" [level=3] [ref=e1213]:
+              - text: 一品百科
+              - link "更多" [ref=e1214] [cursor=pointer]:
+                - /url: https://www.epwk.com/baike/
+            - list [ref=e1216]:
+              - listitem [ref=e1217]:
+                - link "薛姓起名" [ref=e1218] [cursor=pointer]:
+                  - /url: https://www.epwk.com/baike/xxqm2/
+                  - text: 薛姓起名
+              - listitem [ref=e1220]:
+                - link "登入界面设计" [ref=e1221] [cursor=pointer]:
+                  - /url: https://www.epwk.com/baike/drjmsj/
+                  - text: 登入界面设计
+              - listitem [ref=e1223]:
+                - link "手绘海报" [ref=e1224] [cursor=pointer]:
+                  - /url: https://www.epwk.com/baike/shhb/
+                  - text: 手绘海报
+              - listitem [ref=e1226]:
+                - link "帮忙排队" [ref=e1227] [cursor=pointer]:
+                  - /url: https://www.epwk.com/baike/bmpd/
+                  - text: 帮忙排队
+              - listitem [ref=e1229]:
+                - link "公关活动策划" [ref=e1230] [cursor=pointer]:
+                  - /url: https://www.epwk.com/baike/gghdch2/
+                  - text: 公关活动策划
+              - listitem [ref=e1232]:
+                - link "明信片设计" [ref=e1233] [cursor=pointer]:
+                  - /url: https://www.epwk.com/baike/mxpsj/
+                  - text: 明信片设计
+              - listitem [ref=e1235]:
+                - link "满意度调查" [ref=e1236] [cursor=pointer]:
+                  - /url: https://www.epwk.com/baike/myddc/
+                  - text: 满意度调查
+  - generic [ref=e1238]:
+    - list [ref=e1241]:
+      - listitem [ref=e1242]:
+        - link "一品威客承担 国家科技支撑计划" [ref=e1243] [cursor=pointer]:
+          - /url: https://www.epwk.com/meiti/article-i-589-art_id-239448.html
+          - img [ref=e1245]
+          - generic [ref=e1246]:
+            - heading "一品威客承担" [level=4] [ref=e1247]
+            - paragraph [ref=e1248]: 国家科技支撑计划
+      - listitem [ref=e1249]:
+        - link "一品威客获评 电子商务示范企业" [ref=e1250] [cursor=pointer]:
+          - /url: https://www.epwk.com/meiti/article-i-589-art_id-205068.html
+          - img [ref=e1252]
+          - generic [ref=e1253]:
+            - heading "一品威客获评" [level=4] [ref=e1254]
+            - paragraph [ref=e1255]: 电子商务示范企业
+      - listitem [ref=e1256]:
+        - link "一品威客入选 发改委共享经济典型案例" [ref=e1257] [cursor=pointer]:
+          - /url: https://www.epwk.com/meiti/article-i-589-art_id-245154.html
+          - img [ref=e1259]
+          - generic [ref=e1260]:
+            - heading "一品威客入选" [level=4] [ref=e1261]
+            - paragraph [ref=e1262]: 发改委共享经济典型案例
+      - listitem [ref=e1263]:
+        - link "一品威客荣膺 国家科技与文化融合示范基地" [ref=e1264] [cursor=pointer]:
+          - /url: https://www.epjike.com/
+          - img [ref=e1266]
+          - generic [ref=e1267]:
+            - heading "一品威客荣膺" [level=4] [ref=e1268]
+            - paragraph [ref=e1269]: 国家科技与文化融合示范基地
+      - listitem [ref=e1270]:
+        - link "一品威客荣膺 国家级海峡两岸青年创业基地" [ref=e1271] [cursor=pointer]:
+          - /url: http://www.epjike.com
+          - img [ref=e1273]
+          - generic [ref=e1274]:
+            - heading "一品威客荣膺" [level=4] [ref=e1275]
+            - paragraph [ref=e1276]: 国家级海峡两岸青年创业基地
+    - generic [ref=e1277]:
+      - list [ref=e1279]:
+        - listitem [ref=e1280]:
+          - link "威客网" [ref=e1281] [cursor=pointer]:
+            - /url: ""
+            - img "威客网" [ref=e1282]
+        - listitem [ref=e1283]:
+          - heading "关于我们" [level=4] [ref=e1284]:
+            - link "关于我们" [ref=e1285] [cursor=pointer]:
+              - /url: https://www.epwk.com/about.html
+          - paragraph [ref=e1286]:
+            - link "公司简介" [ref=e1287] [cursor=pointer]:
+              - /url: https://www.epwk.com/about-view-about.html
+          - paragraph [ref=e1288]:
+            - link "平台公告" [ref=e1289] [cursor=pointer]:
+              - /url: https://www.epwk.com/gonggao/
+          - paragraph [ref=e1290]:
+            - link "媒体报道" [ref=e1291] [cursor=pointer]:
+              - /url: https://www.epwk.com/meiti/
+          - paragraph [ref=e1292]:
+            - link "联系方式" [ref=e1293] [cursor=pointer]:
+              - /url: https://www.epwk.com/about-view-contact.html
+        - listitem [ref=e1294]:
+          - heading "交易保障" [level=4] [ref=e1295]:
+            - link "交易保障" [ref=e1296] [cursor=pointer]:
+              - /url: https://www.epwk.com/integrity.html
+          - paragraph [ref=e1297]:
+            - link "担保交易" [ref=e1298] [cursor=pointer]:
+              - /url: https://zt.epwk.com/1910chengxin/
+          - paragraph [ref=e1299]:
+            - link "公司资质" [ref=e1300] [cursor=pointer]:
+              - /url: https://www.epwk.com/about-view-about-op-qualification.html
+          - paragraph [ref=e1301]:
+            - link "网站协议" [ref=e1302] [cursor=pointer]:
+              - /url: https://www.epwk.com/about-view-service.html
+          - paragraph [ref=e1303]:
+            - link "支付方式" [ref=e1304] [cursor=pointer]:
+              - /url: https://www.epwk.com/about-view-pay.html
+        - listitem [ref=e1305]:
+          - heading "案例中心" [level=4] [ref=e1306]:
+            - link "案例中心" [ref=e1307] [cursor=pointer]:
+              - /url: https://www.epwk.com/anli/portal.html
+          - paragraph [ref=e1308]:
+            - link "作品案例" [ref=e1309] [cursor=pointer]:
+              - /url: https://www.epwk.com/anli/
+          - paragraph [ref=e1310]:
+            - link "精彩专题" [ref=e1311] [cursor=pointer]:
+              - /url: https://www.epwk.com/zt/
+          - paragraph [ref=e1312]:
+            - link "成功雇主" [ref=e1313] [cursor=pointer]:
+              - /url: https://www.epwk.com/guzhu/
+          - paragraph [ref=e1314]:
+            - link "优秀威客" [ref=e1315] [cursor=pointer]:
+              - /url: https://www.epwk.com/weike/
+        - listitem [ref=e1316]:
+          - heading "帮助中心" [level=4] [ref=e1317]:
+            - link "帮助中心" [ref=e1318] [cursor=pointer]:
+              - /url: https://www.epwk.com/help/
+          - heading "400-128-6668" [level=3] [ref=e1319]
+          - paragraph [ref=e1320]: 全国官方客服咨询热线
+          - generic [ref=e1321]:
+            - link "企业QQ" [ref=e1322] [cursor=pointer]:
+              - /url: http://wpa.b.qq.com/cgi/wpa.php?ln=1&key=XzkzODA0NjE2MV80MTM2MzVfNDAwNjk5OTQ2N18yXw
+              - img [ref=e1323]
+              - text: 企业QQ
+            - link "智能客服" [ref=e1324] [cursor=pointer]:
+              - /url: https://www.epwk.com/help/bang/
+              - img [ref=e1325]
+              - text: 智能客服
+        - listitem [ref=e1326]:
+          - generic [ref=e1327]:
+            - img "一品威客网接单助手APP二维码" [ref=e1328]
+            - paragraph [ref=e1329]: 接单助手APP
+          - generic [ref=e1330]:
+            - img "一品威客APP二维码" [ref=e1331]
+            - paragraph [ref=e1332]: 一品威客
+          - generic [ref=e1333]:
+            - img "一品威客网微信公众号二维码" [ref=e1334]
+            - paragraph [ref=e1335]: 微信公众号
+      - list [ref=e1337]:
+        - listitem [ref=e1338]:
+          - paragraph [ref=e1339]: Copyright©2010-2026 epwk.com 厦门一品威客网络科技股份有限公司 版权所有
+          - paragraph [ref=e1340]:
+            - link "闽ICP备12001463号" [ref=e1341] [cursor=pointer]:
+              - /url: https://beian.miit.gov.cn/
+            - link "闽B2-20210789" [ref=e1342] [cursor=pointer]:
+              - /url: https://tsm.miit.gov.cn/dxxzsp/xkz/xkzgl/resource/qiyesearch.jsp?num=%25E9%2597%25BDB2-20210789&type=xuke
+            - link "闽公网安备 35021102000525号" [ref=e1343] [cursor=pointer]:
+              - /url: https://www.beian.gov.cn/portal/registerSystemInfo?recordcode=35021102000525
+        - listitem [ref=e1344]:
+          - link "安全联盟认证" [ref=e1345] [cursor=pointer]:
+            - /url: https://www.epwk.com/redirect.php?goto=f5e23bS8PxcGdjJeOCvXAIVZftV1qp8pPJiQ39jNrpaEZpymb%2BbNdyYv4Q9vqQD%2BJU65sw4i42XChxigGHxkMR5SsJnWgAdjAaadRjWTL7mWKnIxWGspX72RQO9QHaOHwRaHZt%2Bl
+            - img "安全联盟认证" [ref=e1346]
+          - link "经营性网站认证" [ref=e1347] [cursor=pointer]:
+            - /url: javascript:;
+            - img [ref=e1348]
+          - link "实名认证" [ref=e1349] [cursor=pointer]:
+            - /url: https://si.trustutn.org/info?sn=628230705040943324296&certType=1
+            - img "实名认证" [ref=e1350]
+    - generic:
+      - generic [ref=e1353]:
+        - generic [ref=e1356]:
+          - heading "免费官方金牌顾问" [level=4] [ref=e1357]
+          - paragraph [ref=e1358]: 10秒提交需求，快速匹配服务商
+        - generic [ref=e1359]:
+          - generic [ref=e1360]:
+            - generic [ref=e1361]: 我需要
+            - textbox "请输入服务名称" [ref=e1362]
+          - generic [ref=e1363]:
+            - textbox "您的联系电话" [ref=e1364]
+            - textbox "验证码" [ref=e1365]
+            - button "获取验证码" [ref=e1366] [cursor=pointer]
+          - button "发布需求" [ref=e1367] [cursor=pointer]
+        - generic [ref=e1368] [cursor=pointer]: ╳
+      - text: 
+  - text: 
+  - generic [ref=e1369]:
+    - generic [ref=e1370]:
+      - heading "客服" [level=4] [ref=e1373] [cursor=pointer]
+      - heading "反馈" [level=4] [ref=e1376] [cursor=pointer]
+      - heading "福利" [level=4] [ref=e1379] [cursor=pointer]
+    - link [ref=e1381] [cursor=pointer]:
+      - /url: https://www.epwk.com/vip/
+    - link [ref=e1383] [cursor=pointer]:
+      - /url: https://www.epwk.com/index.php?do=adjump&ad_id=1882&position=205&target=https%253A%252F%252Fchat.epwk.com%252F%253Fscene%253Dfabu

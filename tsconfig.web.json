@@ -9,10 +9,19 @@
     "skipLibCheck": true,
     "jsx": "react-jsx",
     "outDir": "./out",
-    "types": ["react"]
+    "types": [
+      "react"
+    ]
   },
   "include": [
     "src/renderer/src/**/*.ts",
     "src/renderer/src/**/*.tsx"
+  ],
+  "exclude": [
+    "out/",
+    "dist-electron/",
+    "node_modules/",
+    "build/",
+    "coverage/"
   ]
 }

@@ -1,15 +1,29 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, session } from 'electron'
 import { join } from 'path'
-import { existsSync, statSync, readFileSync } from 'fs'
 import { cpus, totalmem, freemem } from 'os'
-import { env as transformersEnv } from '@xenova/transformers'
 import { log } from '../logger/Logger'
 import { isWallpaperMode, onWallpaperEvent } from '../wallpaper/WallpaperService'
 import { StateManager } from './StateManager'
-import { AsrService } from '../asr/AsrService'
-import { WhisperEngine } from '../asr/WhisperEngine'
+import { detectGpu } from './GpuDetector'
+import { eventBus } from './EventBus'
+import { disableNCRendering } from './dwm'
 
 let mainWindow: BrowserWindow | null = null
+/** 全局清理函数集，在窗口销毁或应用退出时调用 */
+let globalDisposers: (() => void)[] = []
+
+export function addGlobalDisposer(fn: () => void): void {
+  globalDisposers.push(fn)
+}
+
+export function runGlobalDisposers(): void {
+  for (const fn of globalDisposers) {
+    try {
+      fn()
+    } catch {}
+  }
+  globalDisposers = []
+}
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow
@@ -23,25 +37,111 @@ export function createWindow(stateManager: StateManager): BrowserWindow {
   mainWindow = new BrowserWindow({
     width: 420,
     height: 640,
-    icon: join(app.getAppPath(), 'build', 'icon.png'),
+    icon: join(app.getAppPath(), 'icon.png'),
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
+    hasShadow: false,
     resizable: false,
-    alwaysOnTop: false,
+    alwaysOnTop: true,
     skipTaskbar: false,
+    fullscreenable: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      webSecurity: false,
-      allowFileAccess: true
+      webSecurity: true,
+      backgroundThrottling: false,
+    },
+  })
+
+  // ===== Content-Security-Policy =====
+  // 开发模式: 宽松（Vite HMR 需要 inline script + websocket）
+  // 生产模式: 严格，仅允许 self + remixicon CDN
+  const isDev = !!process.env.ELECTRON_RENDERER_URL
+  if (isDev) {
+    // dev: Vite HMR 需要 'unsafe-inline' 和 connect-src 包含 ws://
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; " +
+              "script-src 'self' 'unsafe-inline'; " +
+              "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/remixicon@4/ https://fonts.googleapis.com; " +
+              "font-src 'self' https://cdn.jsdelivr.net/npm/remixicon@4/ https://fonts.gstatic.com; " +
+              "img-src 'self' data: blob:; " +
+              "media-src 'self' blob:; " +
+              "connect-src 'self' ws: http://localhost:*; " +
+              "frame-ancestors 'none'",
+          ],
+        },
+      })
+    })
+  } else {
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; " +
+              "script-src 'self'; " +
+              "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/remixicon@4/; " +
+              "font-src 'self' https://cdn.jsdelivr.net/npm/remixicon@4/; " +
+              "img-src 'self' data: blob:; " +
+              "media-src 'self' blob:; " +
+              "connect-src 'self'; " +
+              "frame-ancestors 'none'",
+          ],
+        },
+      })
+    })
+  }
+
+  mainWindow.setTitle(' ')
+
+  // Windows DWM 透明窗口失焦白边修复 (#DWM-blur-fix)
+  // DwmSetWindowAttribute 禁用非客户区渲染，根本阻止 DWM 绘制白边
+  if (process.platform === 'win32') {
+    disableNCRendering(mainWindow)
+  }
+
+  mainWindow.on('enter-full-screen', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setFullScreen(false)
     }
   })
 
-  mainWindow.setTitle(' ')
   stateManager.setPushToRenderer((state) => {
     mainWindow?.webContents.send('state:update', state)
+  })
+
+  // 渲染进程崩溃/无响应处理 — 同时清理资源
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    log('ERROR', 'renderer_crashed', { reason: details.reason })
+    runGlobalDisposers()
+    app.relaunch()
+    app.exit(0)
+  })
+  mainWindow.on('unresponsive', () => {
+    log('WARN', 'renderer_unresponsive', {})
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isCrashed()) return
+      log('ERROR', 'renderer_force_reload', {})
+      runGlobalDisposers()
+      app.relaunch()
+      app.exit(0)
+    }, 10000)
+  })
+
+  // 窗口关闭时清理
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+
+  mainWindow.on('close', () => {
+    // 窗口关闭时释放所有订阅，但保留服务（可能会在后台运行）
+    log('INFO', 'window_close_dispose', { listeners: Object.keys(eventBus.getStats()) })
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -62,106 +162,38 @@ export function setupStartupLogging(): void {
     node: process.versions.node,
     chrome: process.versions.chrome,
     platform: process.platform,
-    arch: process.arch
+    arch: process.arch,
   })
 
   const cpuInfo = cpus()
   log('INFO', 'system_info', {
     cpu: cpuInfo[0]?.model?.trim() || 'unknown',
     cores: cpuInfo.length,
-    memory_gb: parseFloat((totalmem() / (1024 ** 3)).toFixed(1)),
-    free_memory_gb: parseFloat((freemem() / (1024 ** 3)).toFixed(1))
+    memory_gb: parseFloat((totalmem() / 1024 ** 3).toFixed(1)),
+    free_memory_gb: parseFloat((freemem() / 1024 ** 3).toFixed(1)),
   })
 
-  app.getGPUInfo('basic').then(info => {
-    const device = (info as any)?.gpuDevice?.active?.[0]
-    log('INFO', 'gpu_detect', {
-      gpu: device?.deviceName || 'unknown',
-      vendor: device?.vendorString || null,
-      featureLevel: (info as any)?.info?.featureLevel || null,
-      onnx_provider: 'cuda/dml/cpu (auto)'
-    })
-  }).catch(() => {
-    log('INFO', 'gpu_detect', { gpu: 'RTX 3060 (detected via WMI)', onnx_provider: 'cuda/dml/cpu (auto)' })
-  })
-}
-
-export function loadEnvFile(): void {
-  try {
-    const envPath = join(app.getAppPath(), '.env')
-    if (existsSync(envPath)) {
-      for (const line of readFileSync(envPath, 'utf-8').split('\n')) {
-        const eq = line.indexOf('=')
-        if (eq > 0) process.env[line.slice(0, eq).trim()] = line.slice(eq + 1).trim()
-      }
-    }
-  } catch { /* .env optional */ }
-}
-
-export function setupTransformers(): void {
-  transformersEnv.useCache = true
-  const modelsDir = join(app.getAppPath(), 'models')
-  transformersEnv.localModelPath = modelsDir
-  transformersEnv.allowRemoteModels = true
-
-  try {
-    const onnxBackend = require('@xenova/transformers/src/backends/onnx.js')
-    if (onnxBackend.executionProviders) {
-      onnxBackend.executionProviders.unshift('dml')
-      log('INFO', 'gpu_enable', { provider: 'dml', providers: onnxBackend.executionProviders })
-    }
-  } catch (err) {
-    log('WARN', 'gpu_config_failed', { error: String(err) })
-  }
-}
-
-export function initASRWithCache(
-  whisperEngine: WhisperEngine,
-  stateManager: StateManager,
-  asrService: AsrService
-): void {
-  if (asrService.useBaidu) {
-    stateManager.update({ asr: 'ready' })
-    return
-  }
-
-  const modelsDir = join(app.getAppPath(), 'models')
-  const modelCachePath = join(modelsDir, 'Xenova', 'whisper-small', 'onnx', 'encoder_model_quantized.onnx')
-  log('INFO', 'model_cache', { exists: existsSync(modelCachePath), path: modelCachePath })
-
-  const modelFiles: [string, number][] = [
-    ['encoder_model_quantized.onnx', 92324809],
-    ['decoder_model_merged_quantized.onnx', 156780950],
-  ]
-  for (const [file, expectedSize] of modelFiles) {
-    const p = join(modelsDir, 'Xenova', 'whisper-small', 'onnx', file)
-    if (existsSync(p)) {
-      const actualSize = statSync(p).size
-      if (Math.abs(actualSize - expectedSize) > 1024) {
-        log('WARN', 'model_file_size_mismatch', { file, expectedSize, actualSize })
-      }
-    }
-  }
-
-  whisperEngine.initialize('small').then(() => {
-    log('INFO', 'asr_ready')
-    stateManager.update({ asr: 'ready' })
-  }).catch((err) => {
-    log('ERROR', 'asr_init_failed', { error: String(err) })
-    stateManager.update({ error: 'Whisper 加载失败' })
-  })
+  detectGpu()
 }
 
 export function setupWallpaperListener(stateManager: StateManager): void {
   if (isWallpaperMode()) {
-    onWallpaperEvent((event) => {
-      if (event === 'pause') {
-        const win = getMainWindow()
-        win?.webContents.send('state:update', { recording: false })
-      } else if (event === 'resume') {
-        const win = getMainWindow()
-        win?.webContents.send('state:update', { asr: 'ready' })
-      }
-    })
+    try {
+      onWallpaperEvent((event) => {
+        try {
+          if (event === 'pause') {
+            const win = getMainWindow()
+            win?.webContents.send('state:update', { recording: false })
+          } else if (event === 'resume') {
+            const win = getMainWindow()
+            win?.webContents.send('state:update', { asr: 'ready' })
+          }
+        } catch (err) {
+          log('WARN', 'wallpaper_event_handler_error', { error: String(err), event })
+        }
+      })
+    } catch (err) {
+      log('WARN', 'wallpaper_setup_error', { error: String(err) })
+    }
   }
 }

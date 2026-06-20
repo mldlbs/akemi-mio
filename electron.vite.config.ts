@@ -9,10 +9,13 @@ export default defineConfig({
       outDir: 'out/main',
       rollupOptions: {
         input: {
-          index: resolve(__dirname, 'src/main/index.ts')
-        }
-      }
-    }
+          index: resolve(__dirname, 'src/main/index.ts'),
+          'workers/memory-indexer-worker': resolve(__dirname, 'src/main/core/workers/memory-indexer-worker.ts'),
+          'workers/verification-worker': resolve(__dirname, 'src/main/core/workers/verification-worker.ts'),
+          'workers/observer-worker': resolve(__dirname, 'src/main/core/workers/observer-worker.ts'),
+        },
+      },
+    },
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
@@ -20,10 +23,10 @@ export default defineConfig({
       outDir: 'out/preload',
       rollupOptions: {
         input: {
-          index: resolve(__dirname, 'src/preload/index.ts')
-        }
-      }
-    }
+          index: resolve(__dirname, 'src/preload/index.ts'),
+        },
+      },
+    },
   },
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
@@ -31,10 +34,10 @@ export default defineConfig({
       outDir: resolve(__dirname, 'out/renderer'),
       rollupOptions: {
         input: {
-          index: resolve(__dirname, 'src/renderer/index.html')
-        }
-      }
+          index: resolve(__dirname, 'src/renderer/index.html'),
+        },
+      },
     },
-    plugins: [react()]
-  }
+    plugins: [react()],
+  },
 })

@@ -1,0 +1,283 @@
+@startuml
+!theme plain
+title 秋山澪 (Akemi Mio) v2 — Agent OS 系统架构图
+
+' ====== 样式定义 ======
+skinparam backgroundColor #FEFEFE
+skinparam component {
+  BorderColor #2E4053
+  BackgroundColor #D6EAF8
+  FontSize 12
+  FontColor #1A1A2E
+}
+
+skinparam database {
+  BorderColor #1A5276
+  BackgroundColor #D4E6F1
+  FontSize 11
+}
+
+skinparam node {
+  BorderColor #7D3C98
+  BackgroundColor #E8DAEF
+  FontSize 11
+}
+
+skinparam rectangle {
+  BorderColor #117A65
+  BackgroundColor #D5F5E3
+}
+
+skinparam card {
+  BorderColor #B03A2E
+  BackgroundColor #FADBD8
+}
+
+skinparam note {
+  BorderColor #F39C12
+  BackgroundColor #FEF9E7
+}
+
+' ========================
+' 顶层定位
+' ========================
+rectangle "<color:white><size:20>秋山澪 Agent OS</size></color>\n\nConstitution-Governed\nCognitive Self-Improving\nAI Voice Assistant" as OS_TITLE #1A5276
+
+' ====================================
+' 第一层：输入层 (Input/Perception Layer)
+' ====================================
+package "感知层 (Perception Layer)" as PERCEPTION #F0F3F4 {
+  [麦克风 (Microphone)] as MIC
+  [键盘输入 (Keyboard)] as KEYBOARD
+  [IPC 通道] as IPC_CHANNEL
+
+  card "ASR 服务 (语音识别)" as ASR {
+    card "WhisperGPU (Vulkan)" as WHISPER
+    card "百度 ASR (Fallback)" as BAIDU_ASR
+  }
+
+  MIC --> WHISPER
+  KEYBOARD --> IPC_CHANNEL
+  WHISPER --> IPC_CHANNEL
+  BAIDU_ASR --> IPC_CHANNEL
+}
+
+' ====================================
+' 第二层：代理核心层 (Agent Core)
+' ====================================
+package "代理核心 (Agent Core)" as AGENT_CORE #D5F5E3 {
+  [AgentService] as AGENT_SVC
+  [ConversationContext] as CTX
+  [SubAgentPool] as SUB_POOL
+  [ReflectLoop] as REFLECT
+  [FailureAnalyzer] as FAILURE_ANAL
+  [SleepCycle] as SLEEP
+  [CircuitBreaker] as CIRCUIT
+  [ResourceBudget] as BUDGET
+
+  AGENT_SVC *-- CTX
+  AGENT_SVC *-- SUB_POOL
+  AGENT_SVC *-- REFLECT
+  AGENT_SVC *-- FAILURE_ANAL
+  AGENT_SVC *-- SLEEP
+  AGENT_SVC *-- CIRCUIT
+  AGENT_SVC *-- BUDGET
+}
+
+' ====================================
+' 第三层：服务层 (Services)
+' ====================================
+package "服务层 (Services)" as SERVICES #FADBD8 {
+  card "LLM 服务" as LLM {
+    [OpenRouter / DeepSeek Chat] as DEEPSEEK
+    [GoCode (Code Model)] as GOCODE
+  }
+
+  card "TTS 服务 (语音合成)" as TTS {
+    [PiperTTS Local] as PIPER
+  }
+
+  card "Memory 服务" as MEMORY {
+    [MemoryService] as MEM_SVC
+    [MemoryIndexer] as MEM_IDX
+    [EngineeringMemory] as ENG_MEM
+    [KnowledgeGraph] as KG
+  }
+
+  card "MCP 服务" as MCP_SERVICES {
+    [ServerManager] as MCP_MGR
+    [LocalProvider] as MCP_LOCAL
+    [StdioTransport] as MCP_STDIO
+    [多 MCP 服务器] as MCP_SERVERS
+  }
+
+  [EventBus] as EVT_BUS
+  [StateManager] as STATE_MGR
+  [LazyInitScheduler] as LAZY_SCHED
+}
+
+' ====================================
+' 第四层：自动化系统 (Self-* Systems)
+' ====================================
+package "自进化系统 (Self-*) 层" as SELF_SYS #E8DAEF {
+  card "Evolution (2h 循环)" as EVOLUTION {
+    [SelfEvolutionService] as EVO_SVC
+    [DrizzlePlanManager] as PLAN_MGR
+    [VerificationRunner] as VERIFY
+    [RegressionDetector] as REGRESS
+    [WorkflowEngine] as WF_ENGINE
+    [Workflow Skills] as WF_SKILLS
+  }
+
+  card "Insight (洞察)" as INSIGHT {
+    [InsightService] as INS_SVC
+    [InsightGenerator] as INS_GEN
+    [InsightScorer] as INS_SCORE
+    [PresenceService] as PRESENCE
+    [冲突/漂移/摩擦 检测器] as DETECTORS
+  }
+
+  card "Creativity (创造力)" as CREATIVITY {
+    [CreativityService] as CR_SVC
+    [ConceptMixer] as CONCEPT
+    [ExperimentPlanner] as EXP_PLAN
+    [DreamCycle] as DREAM
+  }
+
+  card "Inspiration (灵感)" as INSPIRE {
+    [GitHubInspiration] as GH_INSPIRE
+  }
+
+  card "Cognitive (认知系统)" as COGNITIVE {
+    [GoalEngine] as GOALS
+    [StrategyEngine] as STRATEGY
+    [TokenEconomy] as TOKEN
+    [EarningTaskRegistry] as EARN_TASKS
+    [ExecutionEngine] as EXEC_ENG
+  }
+}
+
+' ====================================
+' 守护层 (Constitution & Audit)
+' ====================================
+package "治理层 (Governance Layer)" as GOV #FEF9E7 {
+  [ConstitutionEngine] as CONST
+  [AuditTrail] as AUDIT
+  [ProtectedPaths] as PROTECT
+  [MetricsCollector] as METRICS
+}
+
+' ====================================
+' 持久化层
+' ====================================
+package "数据层 (Data Layer)" as DATA #D4E6F1 {
+  database "SQLite (Drizzle ORM)" as DB {
+    [plans] as T_PLANS
+    [insights] as T_INSIGHTS
+    [memories + vectors] as T_MEM
+    [creativity (ideas/hypotheses)] as T_CREATE
+    [goals / strategies] as T_GOALS
+    [credentials] as T_CRED
+  }
+  [文件系统 (Workspace)] as FS
+}
+
+' ====================================
+' 渲染层 (Renderer)
+' ====================================
+package "渲染层 (Electron Renderer)" as RENDER #FDEBD0 {
+  [React App (App.tsx)] as REACT
+  [VoiceInput] as VOICE_UI
+  [StatusBar] as STATUS_UI
+  [WaveRibbon / Waveform] as WAVE_UI
+  [TTS Audio Playback] as AUDIO_UI
+  [Three.js 动画粒子] as THREE
+}
+
+' ====================================
+' 外部依赖
+' ====================================
+node "外部依赖" as EXTERNAL #ABB2B9 {
+  [OpenRouter API] as OR_API
+  [DeepSeek API] as DS_API
+  [GoCode Server] as GO_API
+  [百度 ASR API] as BD_API
+  [Whisper ONNX (Vulkan)] as WHISPER_ONNX
+  [GitHub API] as GH_API
+  [赚钱平台 API\n(百度众测/腾讯搜活帮/\n猪八戒/阿里众包)] as EARN_API
+  [electron-updater] as UPDATER
+}
+
+' ============================================
+' 关键连接 (Connections)
+' ============================================
+' 感知 → Agent
+IPC_CHANNEL --> AGENT_SVC : 通过 Electron IPC
+ASR --> IPC_CHANNEL
+
+' Agent → 服务
+AGENT_SVC --> LLM : 请求 LLM 推理
+AGENT_SVC --> TTS : 触发语音合成
+AGENT_SVC --> MEM_SVC : 读写记忆
+AGENT_SVC --> MCP_MGR : 调用 MCP 工具
+EVT_BUS --> STATE_MGR : 更新 UI 状态
+
+' Agent → 自进化系统
+AGENT_SVC ---> EVO_SVC : evolution 注入 agent 引用
+AGENT_SVC ---> INS_SVC : insight 获取 context
+AGENT_SVC ---> CR_SVC : creativity 获取 sources
+
+' 自进化系统之间的交互
+EVO_SVC --> VERIFY : 验证进化结果
+EVO_SVC --> REGRESS : 回归检测
+EVO_SVC --> WF_ENGINE : 执行工作流
+WF_ENGINE --> WF_SKILLS : pipeline 技能链
+
+INS_SVC --> PRESENCE
+INS_SVC --> INS_GEN
+INS_SVC --> INS_SCORE
+
+CR_SVC --> CONCEPT
+CR_SVC --> EXP_PLAN
+CR_SVC --> DREAM
+
+COGNITIVE --> EVO_SVC : adjustByToken()
+
+' 治理层
+CONST ---> AGENT_SVC : 约束检查
+AUDIT ---> AGENT_SVC : 审计日志
+METRICS ---> AGENT_SVC : 采集指标
+
+' 持久化
+PLAN_MGR --> T_PLANS
+INS_SVC --> T_INSIGHTS
+MEM_SVC --> T_MEM
+CR_SVC --> T_CREATE
+COGNITIVE --> T_GOALS
+
+' 渲染
+REACT ---> AGENT_SVC : IPC
+STATE_MGR ---> REACT : 状态同步 (onStateUpdate)
+
+' 外部
+DEEPSEEK ---> DS_API
+LLM ---> OR_API
+GOCODE ---> GO_API
+WHISPER ---> WHISPER_ONNX
+BAIDU_ASR ---> BD_API
+GH_INSPIRE ---> GH_API
+EXEC_ENG ---> EARN_API
+
+' ====================================
+' 图例
+' ====================================
+legend right
+  <size:10><b>图例</b></size>
+  <size:10>=== 数据流 ===</size>
+  <size:10>--- 控制/注入 </size>
+  <size:10>[组件] 内部模块</size>
+  <size:10>{数据库} 持久化</size>
+  <size:10>{节点} 外部依赖</size>
+endlegend
+
+@enduml

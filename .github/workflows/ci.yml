@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, 'refactor/**', 'feature/**', 'fix/**']
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  quality:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Type check
+        run: npx tsc -p tsconfig.node.json --noEmit
+
+      - name: Lint
+        run: npx eslint src/ --ext .ts,.tsx
+
+      - name: Format check
+        run: npx prettier --check "src/**/*.{ts,tsx,json,css}"
+
+      - name: Unit tests + coverage
+        run: npx vitest run --coverage
+
+      - name: Build
+        run: npx electron-vite build

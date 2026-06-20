@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { log, setRequestId, getRequestId, createRequestId } from '../logger/Logger'
+import { log, setRequestId, getRequestId, createRequestId, sanitizeForLog } from '../logger/Logger'
 
 beforeEach(() => {
   vi.restoreAllMocks()
@@ -34,6 +34,20 @@ describe('logger', () => {
     setRequestId('')
     const id = getRequestId()
     expect(id).toMatch(/^req_\d+_\d+$/)
+  })
+
+  it('sanitizeForLog masks API keys', () => {
+    const result = sanitizeForLog('sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
+    expect(result).toMatch(/^sk-or/)
+    expect(result).toContain('***')
+    expect(result).toMatch(/xxxx$/)
+    expect(result.length).toBeLessThan(50)
+  })
+
+  it('sanitizeForLog passes through normal text', () => {
+    expect(sanitizeForLog('你好世界')).toBe('你好世界')
+    expect(sanitizeForLog('')).toBe('')
+    expect(sanitizeForLog('abc')).toBe('abc')
   })
 
   it('supports multiple log levels', () => {

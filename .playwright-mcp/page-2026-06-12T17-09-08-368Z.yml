@@ -1,0 +1,91 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e8] [cursor=pointer]: 幻纤gf
+        - generic [ref=e11] [cursor=pointer]: 未读消息
+      - link [ref=e14] [cursor=pointer]:
+        - /url: /
+        - img [ref=e15]
+    - list [ref=e17]:
+      - listitem [ref=e18]:
+        - link "首页" [ref=e19] [cursor=pointer]:
+          - /url: /crowdtest/community/index
+      - listitem [ref=e20]:
+        - link "任务" [ref=e21] [cursor=pointer]:
+          - /url: /mark/task/index
+      - listitem [ref=e22]:
+        - link "公会" [ref=e23] [cursor=pointer]:
+          - /url: /crowdtest/n/union/index
+      - listitem [ref=e24]:
+        - link "礼品" [ref=e25] [cursor=pointer]:
+          - /url: /crowdtest/n/giftSuit/index
+      - listitem [ref=e26]:
+        - link "成就" [ref=e27] [cursor=pointer]:
+          - /url: /crowdtest/home/ranklist
+      - listitem [ref=e28]:
+        - link "贴吧" [ref=e29] [cursor=pointer]:
+          - /url: https://tieba.baidu.com/f?kw=%B0%D9%B6%C8%BF%F1%B2%E2%D0%D0%B6%AF%D7%E9
+      - listitem [ref=e30]:
+        - link "考试测评" [ref=e31] [cursor=pointer]:
+          - /url: /crowdtest/exam/index#/mark/exam/list
+    - generic:
+      - list:
+        - listitem
+        - listitem
+        - listitem
+        - listitem
+        - listitem
+  - generic [ref=e33]:
+    - generic [ref=e34]:
+      - generic [ref=e35]: 欢迎来到百度众测
+      - generic [ref=e36]: 这里是百度众测唯一官网，所有以“百度众测”名义散布虚假招商加盟、兼职信息、众包任务的网站和APP均为假冒，
+      - generic [ref=e37]: 我们不会引导您下载各类APP或其他形式做任务，不会要求用户支付任何费用，请您切勿轻信，务必保护好个人隐私和财产安全！
+    - generic [ref=e38]:
+      - generic [ref=e39]: 不了解众测，不知道从何入手
+      - generic [ref=e40]: 在这里，你可以快速了解众测
+      - generic [ref=e41]: 还可以指导你做任务，能让你很快成为老手，并获得丰厚礼金
+    - list [ref=e43]:
+      - listitem [ref=e44]:
+        - link "众测学院 闯荡众测所需的必备知识，大神们的经验分享，明星公会明星用户的八卦趣闻....所有你不知道的以及想了解的，这里都有。" [ref=e45] [cursor=pointer]:
+          - /url: /crowdtest/communityAcademy/index?from=community_academy_tab
+          - generic [ref=e47]: 众测学院
+          - generic [ref=e48]: 闯荡众测所需的必备知识，大神们的经验分享，明星公会明星用户的八卦趣闻....所有你不知道的以及想了解的，这里都有。
+      - listitem [ref=e49]:
+        - link "众测训练营 训练营是了解众测的第一步，选择你喜欢的任务类型进行测试...是开启众测之旅的必要条件。" [ref=e50] [cursor=pointer]:
+          - /url: /crowdtest/communityTrain/base?from=community
+          - generic [ref=e52]: 众测训练营
+          - generic [ref=e53]: 训练营是了解众测的第一步，选择你喜欢的任务类型进行测试...是开启众测之旅的必要条件。
+      - listitem [ref=e54]:
+        - link "众测活动 这里有关于众测的最新动态，正在开展的趣味活动，相关活动的结果公布...加入进来，就有机会获得丰厚的奖励。" [ref=e55] [cursor=pointer]:
+          - /url: /crowdtest/communityActivity/index?from=community_activitiy_tab
+          - generic [ref=e57]: 众测活动
+          - generic [ref=e58]: 这里有关于众测的最新动态，正在开展的趣味活动，相关活动的结果公布...加入进来，就有机会获得丰厚的奖励。
+      - listitem [ref=e59]:
+        - link "众测明星墙 这里记录着每日坚持众测的大神，也有初出茅庐的新星。这里有竞争激励的大神榜，也有光彩夺目的明日之星。这是一个记载荣誉的地方。" [ref=e60] [cursor=pointer]:
+          - /url: /crowdtest/communityStar/index?from=community
+          - generic [ref=e62]: 众测明星墙
+          - generic [ref=e63]: 这里记录着每日坚持众测的大神，也有初出茅庐的新星。这里有竞争激励的大神榜，也有光彩夺目的明日之星。这是一个记载荣誉的地方。
+  - generic [ref=e64]:
+    - paragraph [ref=e65]:
+      - link "商务合作" [ref=e66] [cursor=pointer]:
+        - /url: mailto:crowdtest@baidu.com?subject=【商务合作】
+      - text: "|"
+      - link "关于众测" [ref=e67] [cursor=pointer]:
+        - /url: https://cloud.baidu.com/product/dcs.html
+      - text: "|"
+      - link "友情链接" [ref=e68] [cursor=pointer]:
+        - /url: /crowdtest/help/friendSite
+      - text: "|"
+      - link "用户协议" [ref=e69] [cursor=pointer]:
+        - /url: /crowdtest/communityAcademy/detail?id=77
+      - text: "|"
+      - link "隐私政策" [ref=e70] [cursor=pointer]:
+        - /url: /crowdtest/help/privacy
+    - paragraph [ref=e71]:
+      - text: ©2026 Baidu
+      - link "使用百度前必读" [ref=e72] [cursor=pointer]:
+        - /url: //www.baidu.com/duty/
+      - link "京ICP证030173号" [ref=e73] [cursor=pointer]:
+        - /url: http://www.miibeian.gov.cn
+      - img [ref=e74]

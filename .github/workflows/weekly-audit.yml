@@ -1,0 +1,93 @@
+name: Weekly Codebase Audit
+
+on:
+  schedule:
+    - cron: '0 20 * * 0'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Run tests
+        run: npx vitest run --reporter=json > test-results.json
+        continue-on-error: true
+
+      - name: Dead code scan
+        run: |
+          npm install -D ts-prune
+          npx ts-prune -p tsconfig.json > dead-code-report.txt 2>&1 || true
+        continue-on-error: true
+
+      - name: Long function detection
+        run: |
+          $threshold = 80
+          Get-ChildItem -Recurse -Filter *.ts | Where-Object { $_.FullName -notmatch '__tests__|node_modules|out' } | ForEach-Object {
+            $lines = Get-Content $_.FullName
+            $i = 0
+            while ($i -lt $lines.Count) {
+              if ($lines[$i] -match '^\s*(async\s+)?(function|private|public|export\s+(async\s+)?function)\s+\w+\s*\(|^\s*\w+\s*=\s*(async\s+)?\(|^\s*(private|public)?\s*\w+\s*\(.*\).*\{') {
+                $start = $i
+                $braceCount = 0
+                $found = $false
+                for ($j = $i; $j -lt $lines.Count -and $j -lt $i + 400; $j++) {
+                  $braceCount += ($lines[$j].ToCharArray() | Where-Object { $_ -eq '{' }).Count
+                  $braceCount -= ($lines[$j].ToCharArray() | Where-Object { $_ -eq '}' }).Count
+                  if ($braceCount -le 0 -and $j -gt $start) { $found = $true; break }
+                }
+                $length = $j - $start + 1
+                if ($length -ge $threshold) {
+                  $rel = Resolve-Path -Relative $_.FullName
+                  $name = $lines[$start] -replace '^\s*',''
+                  Write-Output "$rel`:$($start+1): $length lines $name"
+                }
+              }
+              $i++
+            }
+          } > long-functions.txt 2>&1 || $true
+        continue-on-error: true
+
+      - name: Check config drift
+        run: |
+          $envVars = Select-String -Path src/main/config/index.ts -Pattern 'process\.env\.(\w+)' | ForEach-Object { $_.Matches.Groups[1].Value }
+          $readmeEnv = Select-String -Path README.md -Pattern '`(\w+)`' | ForEach-Object { $_.Matches.Groups[1].Value }
+          $missing = @()
+          foreach ($v in $envVars) { if ($v -notin $readmeEnv -and $v -notmatch '^(HOTWORDS|WINDOW_WIDTH|WINDOW_HEIGHT)$') { $missing += $v } }
+          if ($missing.Count -gt 0) { Write-Output "Env vars not documented in README:"; $missing | ForEach-Object { Write-Output "- $_" } }
+        continue-on-error: true
+
+      - name: Create report
+        run: |
+@"
+## Weekly Audit Report — $(Get-Date -Format 'yyyy-MM-dd')
+
+### Test Results
+$(if (Test-Path test-results.json) { $r = Get-Content test-results.json | ConvertFrom-Json; "$($r.numPassedTests)/$($r.numTotalTests) passed" } else { "No test results" })
+
+### Dead Code
+$(if ((Get-Item dead-code-report.txt).Length -gt 0) { Get-Content dead-code-report.txt | Select-Object -First 30 | Out-String } else { "None found" })
+
+### Long Functions (>80 lines)
+$(if ((Get-Item long-functions.txt).Length -gt 0) { Get-Content long-functions.txt | Out-String } else { "None found" })
+"@ | Set-Content -Path audit-report.md
+
+      - name: Create Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('audit-report.md', 'utf8');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Weekly Codebase Audit — ${new Date().toISOString().slice(0,10)}`,
+              body: report,
+              labels: ['audit', 'automated']
+            });

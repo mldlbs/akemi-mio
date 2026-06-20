@@ -1,0 +1,222 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e8] [cursor=pointer]: 幻纤gf
+        - generic [ref=e11] [cursor=pointer]: 未读消息
+      - link [ref=e14] [cursor=pointer]:
+        - /url: /
+        - img [ref=e15]
+    - list [ref=e17]:
+      - listitem [ref=e18]:
+        - link "首页" [ref=e19] [cursor=pointer]:
+          - /url: /crowdtest/community/index
+      - listitem [ref=e20]:
+        - link "任务" [ref=e21] [cursor=pointer]:
+          - /url: /mark/task/index
+      - listitem [ref=e22]:
+        - link "公会" [ref=e23] [cursor=pointer]:
+          - /url: /crowdtest/n/union/index
+      - listitem [ref=e24]:
+        - link "礼品" [ref=e25] [cursor=pointer]:
+          - /url: /crowdtest/n/giftSuit/index
+      - listitem [ref=e26]:
+        - link "成就" [ref=e27] [cursor=pointer]:
+          - /url: /crowdtest/home/ranklist
+      - listitem [ref=e28]:
+        - link "贴吧" [ref=e29] [cursor=pointer]:
+          - /url: https://tieba.baidu.com/f?kw=%B0%D9%B6%C8%BF%F1%B2%E2%D0%D0%B6%AF%D7%E9
+      - listitem [ref=e30]:
+        - link "考试测评" [ref=e31] [cursor=pointer]:
+          - /url: /crowdtest/exam/index#/mark/exam/list
+    - generic:
+      - list:
+        - listitem
+        - listitem
+        - listitem
+        - listitem
+        - listitem
+    - list [ref=e35]:
+      - listitem [ref=e36]:
+        - link "快速判断" [ref=e37] [cursor=pointer]:
+          - /url: /mark/task/index
+      - listitem [ref=e38]:
+        - link "问卷调查" [ref=e39] [cursor=pointer]:
+          - /url: /crowdtest/activityUnit/paperSurvey/type/2
+      - listitem [ref=e40]:
+        - link "产品测试" [ref=e41] [cursor=pointer]:
+          - /url: /crowdtest/activityUnit/productFaultFind/type/0/from/1
+      - listitem [ref=e42]:
+        - link "采集任务" [ref=e43] [cursor=pointer]:
+          - /url: /crowdtest/activityUnit/specialActivity/type/11
+  - generic [ref=e45]:
+    - generic [ref=e46]:
+      - link [ref=e49] [cursor=pointer]:
+        - /url: http://test.baidu.com/crowdtest/n/survey/index/proid/2512819?ori=gotoActivityMarket&title
+        - img [ref=e51]
+      - generic [ref=e56] [cursor=pointer]: 订阅问卷
+      - generic [ref=e58]:
+        - generic [ref=e59]:
+          - text: 服务任务
+          - img [ref=e62] [cursor=pointer]
+        - list [ref=e65]:
+          - listitem [ref=e66]:
+            - link "在线任务 - 图片 20-05701001- HUAWEI GBT ... 50礼券 平均耗时:0.0分钟" [ref=e68] [cursor=pointer]:
+              - /url: /crowdtest/n/survey/index/proid/11902309
+              - img "在线任务 - 图片" [ref=e70]
+              - generic [ref=e71]:
+                - text: 20-05701001- HUAWEI GBT ...
+                - paragraph [ref=e72]:
+                  - generic [ref=e73]: 50礼券
+                  - generic [ref=e74]: 平均耗时:0.0分钟
+          - listitem [ref=e75]:
+            - link "在线任务 - 图片 20-05701001- HUAWEI GBT ... 50礼券 平均耗时:0.0分钟" [ref=e77] [cursor=pointer]:
+              - /url: /crowdtest/n/survey/index/proid/12010943
+              - img "在线任务 - 图片" [ref=e79]
+              - generic [ref=e80]:
+                - text: 20-05701001- HUAWEI GBT ...
+                - paragraph [ref=e81]:
+                  - generic [ref=e82]: 50礼券
+                  - generic [ref=e83]: 平均耗时:0.0分钟
+          - listitem [ref=e84]:
+            - link "在线任务 - 图片 20-05701001- HUAWEI GBT ... 50礼券 平均耗时:0.0分钟" [ref=e86] [cursor=pointer]:
+              - /url: /crowdtest/n/survey/index/proid/12172482
+              - img "在线任务 - 图片" [ref=e88]
+              - generic [ref=e89]:
+                - text: 20-05701001- HUAWEI GBT ...
+                - paragraph [ref=e90]:
+                  - generic [ref=e91]: 50礼券
+                  - generic [ref=e92]: 平均耗时:0.0分钟
+          - listitem [ref=e93]:
+            - link "在线任务 - 图片 20-05701001- HUAWEI GBT ... 50礼券 平均耗时:0.0分钟" [ref=e95] [cursor=pointer]:
+              - /url: /crowdtest/n/survey/index/proid/12210474
+              - img "在线任务 - 图片" [ref=e97]
+              - generic [ref=e98]:
+                - text: 20-05701001- HUAWEI GBT ...
+                - paragraph [ref=e99]:
+                  - generic [ref=e100]: 50礼券
+                  - generic [ref=e101]: 平均耗时:0.0分钟
+          - listitem [ref=e102]:
+            - link "在线任务 - 图片 S202604000218-i 50礼券 平均耗时:0.0分钟" [ref=e104] [cursor=pointer]:
+              - /url: /crowdtest/n/survey/index/proid/12248241
+              - img "在线任务 - 图片" [ref=e106]
+              - generic [ref=e107]:
+                - text: S202604000218-i
+                - paragraph [ref=e108]:
+                  - generic [ref=e109]: 50礼券
+                  - generic [ref=e110]: 平均耗时:0.0分钟
+          - listitem [ref=e111]:
+            - link "在线任务 - 图片 20-05701001- HUAWEI GBT ... 50礼券 平均耗时:0.0分钟" [ref=e113] [cursor=pointer]:
+              - /url: /crowdtest/n/survey/index/proid/12276326
+              - img "在线任务 - 图片" [ref=e115]
+              - generic [ref=e116]:
+                - text: 20-05701001- HUAWEI GBT ...
+                - paragraph [ref=e117]:
+                  - generic [ref=e118]: 50礼券
+                  - generic [ref=e119]: 平均耗时:0.0分钟
+          - listitem [ref=e120]:
+            - link "在线任务 - 图片 S202604000515-i 50礼券 平均耗时:0.0分钟" [ref=e122] [cursor=pointer]:
+              - /url: /crowdtest/n/survey/index/proid/12290524
+              - img "在线任务 - 图片" [ref=e124]
+              - generic [ref=e125]:
+                - text: S202604000515-i
+                - paragraph [ref=e126]:
+                  - generic [ref=e127]: 50礼券
+                  - generic [ref=e128]: 平均耗时:0.0分钟
+          - listitem [ref=e129]:
+            - link "在线任务 - 图片 202605000120-i 50礼券 平均耗时:0.0分钟" [ref=e131] [cursor=pointer]:
+              - /url: /crowdtest/n/survey/index/proid/12303298
+              - img "在线任务 - 图片" [ref=e133]
+              - generic [ref=e134]:
+                - text: 202605000120-i
+                - paragraph [ref=e135]:
+                  - generic [ref=e136]: 50礼券
+                  - generic [ref=e137]: 平均耗时:0.0分钟
+          - listitem [ref=e138]:
+            - link "在线任务 - 图片 20-05701001- HUAWEI GBT ... 50礼券 平均耗时:0.0分钟" [ref=e140] [cursor=pointer]:
+              - /url: /crowdtest/n/survey/index/proid/12319317
+              - img "在线任务 - 图片" [ref=e142]
+              - generic [ref=e143]:
+                - text: 20-05701001- HUAWEI GBT ...
+                - paragraph [ref=e144]:
+                  - generic [ref=e145]: 50礼券
+                  - generic [ref=e146]: 平均耗时:0.0分钟
+          - listitem [ref=e147]:
+            - link "在线任务 - 图片 S202605000266-i 50礼券 平均耗时:0.0分钟" [ref=e149] [cursor=pointer]:
+              - /url: /crowdtest/n/survey/index/proid/12333229
+              - img "在线任务 - 图片" [ref=e151]
+              - generic [ref=e152]:
+                - text: S202605000266-i
+                - paragraph [ref=e153]:
+                  - generic [ref=e154]: 50礼券
+                  - generic [ref=e155]: 平均耗时:0.0分钟
+      - generic [ref=e156]:
+        - generic [ref=e157]:
+          - text: 常规任务
+          - textbox "搜索项目名称" [ref=e159]:
+            - /placeholder: " 搜索项目名称"
+        - list [ref=e162]:
+          - listitem [ref=e163]:
+            - link "在线任务 - 图片 市场调查-副本 8礼券 平均耗时:1.4分钟" [ref=e165] [cursor=pointer]:
+              - /url: /crowdtest/n/survey/index/proid/186851
+              - img "在线任务 - 图片" [ref=e167]
+              - generic [ref=e168]:
+                - text: 市场调查-副本
+                - paragraph [ref=e169]:
+                  - generic [ref=e170]: 8礼券
+                  - generic [ref=e171]: 平均耗时:1.4分钟
+    - generic [ref=e172]:
+      - generic [ref=e173]:
+        - generic [ref=e174]:
+          - link "幻纤gf" [ref=e176] [cursor=pointer]:
+            - /url: /crowdtest/home/myInfo
+            - img "幻纤gf" [ref=e177]
+          - generic [ref=e178]:
+            - link "幻纤gf" [ref=e179] [cursor=pointer]:
+              - /url: /crowdtest/home/myInfo
+            - link "LV.0" [ref=e181] [cursor=pointer]:
+              - /url: /crowd/growth/level
+            - generic [ref=e182]:
+              - generic [ref=e183]: 来众测4370天
+              - generic [ref=e184]: 共赚到0礼券
+        - generic [ref=e186]:
+          - list
+        - list [ref=e188]:
+          - listitem [ref=e189] [cursor=pointer]:
+            - link "0" [ref=e190]:
+              - /url: /crowdtest/home/myGiftScore
+            - generic [ref=e191]: 礼券
+          - listitem [ref=e192] [cursor=pointer]:
+            - link "0" [ref=e193]:
+              - /url: /crowdtest/home/myProject
+            - generic [ref=e194]: 任务
+          - listitem [ref=e195] [cursor=pointer]:
+            - link "0" [ref=e196]:
+              - /url: /crowdtest/home/myRecord
+            - generic [ref=e197]: 礼品
+      - generic [ref=e198]:
+        - generic [ref=e199]: 扫描关注订阅号
+        - img [ref=e202]
+  - generic [ref=e203]:
+    - paragraph [ref=e204]:
+      - link "商务合作" [ref=e205] [cursor=pointer]:
+        - /url: mailto:crowdtest@baidu.com?subject=【商务合作】
+      - text: "|"
+      - link "关于众测" [ref=e206] [cursor=pointer]:
+        - /url: https://cloud.baidu.com/product/dcs.html
+      - text: "|"
+      - link "友情链接" [ref=e207] [cursor=pointer]:
+        - /url: /crowdtest/help/friendSite
+      - text: "|"
+      - link "用户协议" [ref=e208] [cursor=pointer]:
+        - /url: /crowdtest/communityAcademy/detail?id=77
+      - text: "|"
+      - link "隐私政策" [ref=e209] [cursor=pointer]:
+        - /url: /crowdtest/help/privacy
+    - paragraph [ref=e210]:
+      - text: ©2026 Baidu
+      - link "使用百度前必读" [ref=e211] [cursor=pointer]:
+        - /url: //www.baidu.com/duty/
+      - link "京ICP证030173号" [ref=e212] [cursor=pointer]:
+        - /url: http://www.miibeian.gov.cn
+      - img [ref=e213]

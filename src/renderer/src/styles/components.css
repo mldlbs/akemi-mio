@@ -1,0 +1,404 @@
+/* ═══════════════════════════════════════
+   Akemi Mio — Dawn Glass Components
+   极简 monochrome · 布局/交互重构
+   ═══════════════════════════════════════ */
+
+/* ─── 主应用容器 ─── */
+.app {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 20px; width: 100%; height: 100%;
+  padding: 24px 32px 32px;
+  position: relative; z-index: 1;
+  overflow: hidden; background: transparent;
+}
+
+/* ─── 可视化区 ─── */
+.viz-area {
+  width: 200px; height: 200px;
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  -webkit-app-region: drag;
+  flex-shrink: 0;
+}
+.viz-glow {
+  position: absolute; width: 120%; height: 120%;
+  top: -10%; left: -10%;
+  border-radius: 50%;
+  background: radial-gradient(circle, oklch(0.6 0.18 30 / 0.08) 0%, oklch(0.6 0.18 30 / 0.02) 40%, transparent 70%);
+  filter: blur(30px);
+}
+.viz-ring {
+  position: absolute; border-radius: 50%;
+  width: 75%; height: 75%;
+  border: 1px solid var(--border-glass);
+  animation: spin-ring 45s linear infinite;
+}
+@keyframes spin-ring {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.wave-ribbon {
+  position: absolute; inset: 0;
+  border-radius: 50%; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 12%, #000 88%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0%, #000 12%, #000 88%, transparent 100%);
+}
+.wave-ribbon canvas {
+  display: block; pointer-events: none; background: transparent;
+}
+
+/* ─── 状态栏 ─── */
+.status-bar {
+  display: flex; align-items: center;
+  gap: var(--space-md);
+  flex-shrink: 0;
+}
+.status-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--text-muted);
+  transition: background var(--duration-normal) var(--ease-glass),
+              box-shadow var(--duration-normal) var(--ease-glass);
+}
+.status-dot.active {
+  background: var(--accent);
+  box-shadow: 0 0 14px oklch(0.6 0.18 30 / 0.35);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 14px oklch(0.6 0.18 30 / 0.35); }
+  50% { box-shadow: 0 0 24px oklch(0.6 0.18 30 / 0.5); }
+}
+.status-label {
+  font-size: 14px; font-weight: 400;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+.status-sub {
+  font-size: 12px; font-weight: 300;
+  color: var(--text-secondary);
+}
+.status-error {
+  font-size: 12px; font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* ─── 转录卡片 ─── */
+.transcript-card {
+  width: 380px; flex-shrink: 0;
+  background: var(--bg-glass);
+  backdrop-filter: blur(var(--panel-blur)) saturate(1.15);
+  -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(1.15);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--panel-radius);
+  padding: var(--space-sm) var(--space-md);
+  display: flex; flex-direction: column; gap: var(--space-xs);
+  overflow: hidden;
+  animation: card-in 0.35s var(--ease-glass) both;
+}
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.marquee-wrap {
+  overflow: hidden; width: 100%;
+}
+.marquee-inner {
+  display: inline-block; white-space: nowrap;
+  font-size: 14px; font-weight: 400;
+  color: var(--text-glass);
+  text-shadow: 0 0 12px oklch(0 0 0 / 0.4), 0 0 2px oklch(0 0 0 / 0.5);
+}
+.marquee-inner.scrolling {
+  animation: marquee 8s linear infinite;
+  padding-right: 60px;
+}
+@keyframes marquee {
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+.reply-text {
+  font-size: 14px; font-weight: 300;
+  color: var(--text-secondary); line-height: 1.6;
+  white-space: nowrap; overflow-x: auto;
+  text-shadow: 0 0 12px oklch(0 0 0 / 0.4), 0 0 2px oklch(0 0 0 / 0.5);
+  scrollbar-width: none;
+}
+.reply-text::-webkit-scrollbar { display: none; }
+
+/* ─── 控制区 ─── */
+.control-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.voice-input {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
+/* ─── 通用图标按钮 ─── */
+.btn-icon {
+  width: 40px; height: 40px; min-width: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px) saturate(1.15);
+  -webkit-backdrop-filter: blur(12px) saturate(1.15);
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--duration-normal) var(--ease-glass);
+}
+.btn-icon:hover:not(:disabled) {
+  border-color: var(--border-glass-hover);
+  background: var(--bg-glass-hover);
+  color: var(--text-primary);
+  transform: scale(1.05);
+}
+.btn-icon:active:not(:disabled) {
+  transform: scale(0.95);
+}
+.btn-icon:disabled { opacity: 0.35; cursor: default; }
+
+.btn-danger {
+  border-color: oklch(0.6 0 0 / 0.25);
+  background: oklch(0.6 0 0 / 0.08);
+  color: oklch(0.72 0 0 / 0.85);
+}
+.btn-danger:hover:not(:disabled) {
+  border-color: oklch(0.6 0 0 / 0.4);
+  background: oklch(0.6 0 0 / 0.15);
+}
+
+/* ─── 语音主按钮 ─── */
+.btn-voice {
+  width: 64px; height: 64px; min-width: 64px;
+  border-radius: 50%; border: none;
+  background: linear-gradient(180deg, oklch(0.32 0.015 30 / 0.85) 0%, oklch(0.2 0.015 30 / 0.9) 100%);
+  backdrop-filter: blur(var(--panel-blur));
+  -webkit-backdrop-filter: blur(var(--panel-blur));
+  color: var(--text-glass);
+  font-size: 26px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+  overflow: visible;
+  transition: all var(--duration-normal) var(--ease-glass);
+  box-shadow: 0 0 30px oklch(0.6 0.18 30 / 0.06), 0 4px 20px oklch(0 0 0 / 0.15);
+  animation: breathe-glow 3s ease-in-out infinite;
+}
+@keyframes breathe-glow {
+  0%, 100% { box-shadow: 0 0 30px oklch(0.6 0.18 30 / 0.06), 0 4px 20px oklch(0 0 0 / 0.15); }
+  50% { box-shadow: 0 0 40px oklch(0.6 0.18 30 / 0.12), 0 4px 20px oklch(0 0 0 / 0.15); }
+}
+.btn-voice:hover {
+  box-shadow: 0 0 50px oklch(0.6 0.18 30 / 0.15), 0 6px 25px oklch(0 0 0 / 0.2);
+  transform: scale(1.05);
+}
+.btn-voice.active {
+  background: linear-gradient(180deg, oklch(0.55 0.18 30 / 0.85) 0%, oklch(0.4 0.18 30 / 0.9) 100%);
+  box-shadow: 0 0 45px var(--accent-glow), 0 4px 20px oklch(0 0 0 / 0.15);
+  animation: breathe-glow-active 2s ease-in-out infinite;
+}
+@keyframes breathe-glow-active {
+  0%, 100% { box-shadow: 0 0 35px oklch(0.6 0.18 30 / 0.3), 0 4px 20px oklch(0 0 0 / 0.15); }
+  50% { box-shadow: 0 0 55px oklch(0.6 0.18 30 / 0.45), 0 4px 20px oklch(0 0 0 / 0.15); }
+}
+
+/* ─── 语音按钮涟漪 ─── */
+.btn-voice::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid var(--border-glass);
+  opacity: 0;
+  pointer-events: none;
+}
+.btn-voice:active::after {
+  animation: ripple-out 0.5s var(--ease-glass);
+}
+@keyframes ripple-out {
+  0% { inset: -4px; opacity: 0.5; border-width: 1px; }
+  100% { inset: -16px; opacity: 0; border-width: 0.5px; }
+}
+
+/* ─── 文字输入（在转录卡片内展开） ─── */
+.text-input-wrap {
+  max-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  opacity: 0;
+  transition: max-height 0.3s var(--ease-glass),
+              opacity 0.2s var(--ease-glass),
+              visibility 0s 0.3s;
+}
+.text-input-wrap.visible {
+  max-height: 60px;
+  visibility: visible;
+  opacity: 1;
+  transition: max-height 0.3s var(--ease-glass),
+              opacity 0.2s var(--ease-glass),
+              visibility 0s 0s;
+}
+.text-input-row {
+  display: flex; align-items: center; gap: var(--space-sm);
+  padding: var(--space-sm) 0;
+}
+.text-input {
+  flex: 1; height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: var(--bg-glass-strong);
+  color: var(--text-primary);
+  font-size: 13px; font-family: inherit;
+  padding: 0 12px;
+  outline: none;
+  transition: background var(--duration-normal) var(--ease-glass);
+}
+.text-input::placeholder {
+  color: var(--text-muted);
+}
+.text-input:focus {
+  background: oklch(0.28 0.01 30 / 0.7);
+}
+.btn-send {
+  width: 34px; height: 34px; min-width: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-glass);
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+.btn-send:hover:not(:disabled) {
+  border-color: var(--border-glass-hover);
+  background: var(--bg-glass-hover);
+  color: var(--text-primary);
+}
+.btn-send:disabled {
+  opacity: 0.3; cursor: default;
+}
+
+/* ─── 更新横幅 ─── */
+.update-banner {
+  width: 380px; flex-shrink: 0;
+  display: flex; align-items: center; gap: var(--space-sm);
+  padding: var(--space-sm) 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  color: var(--text-glass);
+  font-size: 13px;
+  animation: banner-in 0.35s var(--ease-glass) both;
+}
+@keyframes banner-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.update-btn {
+  margin-left: auto;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-glass-hover);
+  background: var(--bg-glass-strong);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+.update-btn:hover {
+  background: var(--bg-glass-hover);
+  border-color: oklch(1 0 0 / 0.3);
+}
+.update-dismiss {
+  margin-left: auto;
+  width: 20px; height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.update-dismiss:hover {
+  color: var(--text-secondary);
+}
+
+/* ─── 对话历史面板 ─── */
+.history-section {
+  width: 380px; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: var(--space-xs);
+}
+.btn-history-toggle {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px; font-family: inherit;
+  cursor: pointer;
+  align-self: flex-end;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+.btn-history-toggle:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-glass);
+  background: var(--bg-glass);
+}
+.history-panel {
+  max-height: 280px; overflow-y: auto;
+  background: var(--bg-glass);
+  backdrop-filter: blur(var(--panel-blur)) saturate(1.15);
+  -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(1.15);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--panel-radius);
+  padding: var(--space-sm);
+  animation: card-in 0.35s var(--ease-glass) both;
+}
+.chat-bubbles {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.bubble {
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px; line-height: 1.5;
+  word-break: break-word;
+}
+.bubble.user {
+  align-self: flex-end;
+  background: var(--bg-glass-strong);
+  color: var(--text-primary);
+}
+.bubble.assistant {
+  align-self: flex-start;
+  color: var(--text-secondary);
+}
+.bubble-label {
+  font-size: 11px; font-weight: 500;
+  margin-bottom: 2px;
+  color: var(--text-muted);
+}
+.bubble-label .source-tag {
+  margin-left: 6px;
+  font-size: 10px;
+  opacity: 0.6;
+}
+.bubble-content {
+  font-size: 13px; line-height: 1.5;
+  white-space: pre-wrap;
+}
+

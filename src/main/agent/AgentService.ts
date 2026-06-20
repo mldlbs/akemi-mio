@@ -3,10 +3,33 @@ import { log, createRequestId } from '../logger/Logger'
 import { LlmService } from '../llm/LlmService'
 import { AsrService } from '../asr/AsrService'
 import { TtsService } from '../tts/TtsService'
-import { ConversationContext } from './context'
+import { ConversationContext, Message } from './context'
 import { MemoryService } from '../memory/MemoryService'
 import { ChatResult } from '../llm/types'
 import { IntentResult, IntentHandler } from './intent/types'
+import { ServerManager } from '../mcp/ServerManager'
+import { eventBus, EventBus } from '../core/EventBus'
+import type { PlanManagerLike } from '../evolution/types'
+import { extractJsonFromLLMReply } from '../utils/llm'
+import { planManager as defaultPlanManager } from '../evolution'
+import { SubAgentPool } from './SubAgentPool'
+import { ReflectLoop } from './ReflectLoop'
+import { FailureAnalyzer } from './FailureAnalyzer'
+import { Guardrail } from './Guardrail'
+import { GoalGuardrail } from '../governance/GoalGuardrail'
+import { CircuitBreaker } from '../core/CircuitBreaker'
+import { ResourceBudget } from '../core/ResourceBudget'
+import { type TokenAccount } from '../cognitive/TokenEconomy'
+import { SleepCycle } from './SleepCycle'
+import { SkillManager } from '../skill'
+import { RunContext } from './runstate'
+import { ToolScheduler } from './ToolScheduler'
+import { SessionRecoveryManager } from './SessionRecoveryManager'
+import { classify as classifyError } from './ErrorClassifier'
+import { TaskExecutor } from './TaskExecutor'
+import { ChatExecutor } from './ChatExecutor'
+import { ProceduralMemory } from './ProceduralMemory'
+import { setProceduralMemory } from '../tool/deps'
 
 export class AgentService {
   private llmService: LlmService
@@ -16,13 +39,122 @@ export class AgentService {
   private context: ConversationContext
   private mainWindow: BrowserWindow | null = null
   private intentHandlers: Map<string, IntentHandler> = new Map()
+  private eventBus: EventBus
+  private mcpManager: ServerManager
+  private planManager: PlanManagerLike
+  private inSelfTask = false
+  /** 本次会话中由 LLM 创建的活跃计划 ID，force_continue 仅作用于它们 */
+  private sessionPlanIds: Set<string> = new Set()
+  /** 运行状态机上下文 */
+  private runContext: RunContext | null = null
+  /** 并发工具调度器 */
+  private toolScheduler: ToolScheduler
+  /** Guardrail — 工具循环安全护栏 */
+  private guardrail: Guardrail
+  /** 当前激活的工作流提示模块 */
+  private activeWorkflowModule: string | null = null
+  /** 自任务超时中止控制器 — 用于取消 timed-out 的进化分析任务 */
+  private selfTaskAbortController: AbortController | null = null
+  /** 自任务开始时间戳，用于检测挂起超时任务 */
+  private selfTaskStartTime: number = 0
+  private subAgentPool: SubAgentPool
+  readonly reflectLoop = new ReflectLoop()
+  readonly proceduralMemory = new ProceduralMemory()
+  readonly failureAnalyzer = new FailureAnalyzer()
+  readonly sleepCycle = new SleepCycle()
+  readonly resourceBudget = new ResourceBudget()
+  /** Token 经济账户 — 长期 Token 余额管理 */
+  tokenAccount: TokenAccount | null = null
+  /** 技能管理器 — 管理外部技能的安装与注入 */
+  private skillManager: SkillManager | null = null
+  /** 目标守卫 — 工具调用前拦截，防宪法违规 & 目标漂移 */
+  readonly goalGuardrail: GoalGuardrail
+  /** 熔断器 — 防止 LLM/工具调用级联失败 */
+  readonly circuitBreaker = new CircuitBreaker(5, 30000)
+  /** 会话恢复管理器 */
+  private recoveryManager: SessionRecoveryManager | null = null
+  /** 错误分类器 */
+  private errorClassifier = { classify: classifyError }
+  /** 上次创建检查点的 toolLoop step */
+  private lastCheckpointStep = -1
+  /** 上次创建检查点的时间戳 */
+  private lastCheckpointTime = 0
+  /** 连续可重试错误计数 */
+  private consecutiveRetryableErrors = 0
+  /** 暂停状态 */
+  private _paused = false
 
-  constructor(llmService: LlmService, asrService: AsrService, ttsService: TtsService) {
+  /** 身份上下文缓存（由 CognitiveService.identity 提供） */
+  private identityContext = ''
+
+  // ── v2 架构 ──
+  /** ChatExecutor — Chat 运行时（独立 context + toolLoop） */
+  private chatExecutor: ChatExecutor | null = null
+  /** TaskExecutor — Evolution 循环执行引擎 */
+  private taskExecutor: TaskExecutor | null = null
+
+  constructor(
+    llmService: LlmService,
+    asrService: AsrService,
+    ttsService: TtsService,
+    bus?: EventBus,
+    mcpManager?: ServerManager,
+    planManager?: PlanManagerLike,
+  ) {
     this.llmService = llmService
     this.asrService = asrService
     this.ttsService = ttsService
     this.context = new ConversationContext()
+    this.eventBus = bus || eventBus
+    this.mcpManager = mcpManager || new ServerManager()
+    this.planManager = planManager || defaultPlanManager
+    this.toolScheduler = new ToolScheduler(this.mcpManager || new ServerManager())
+    this.guardrail = new Guardrail({
+      memoryService: null,
+      skillManager: null,
+      planManager: this.planManager,
+    })
+    this.goalGuardrail = new GoalGuardrail(null, null, { softCheckInterval: 1 })
+    this.subAgentPool = new SubAgentPool(
+      this.mcpManager,
+      this.eventBus,
+      this.llmService['chatApiKey'] || undefined,
+      this.llmService['codeApiKey'] || undefined,
+    )
     this.registerDefaultHandlers()
+    // 监听计划创建，追踪本次会话的活跃计划
+    this.eventBus.on('agent.plan.created', (p: { planId: string; title: string }) => {
+      this.sessionPlanIds.add(p.planId)
+      log('INFO', 'agent_service_plan_tracked', { plan_id: p.planId, title: p.title })
+    })
+
+    // ── v2 架构初始化 ──
+    // ChatExecutor: 独立 context + toolLoop
+    this.chatExecutor = new ChatExecutor(
+      this.llmService,
+      this.ttsService,
+      this.mainWindow,
+      this.toolScheduler,
+      this.guardrail,
+      this.goalGuardrail,
+      this.planManager,
+      this.resourceBudget,
+      this.memoryService,
+      this.skillManager,
+      this.recoveryManager,
+      this.tokenAccount,
+      this.subAgentPool,
+      this.reflectLoop,
+    )
+
+    // 注册流程记忆到工具依赖
+    setProceduralMemory(this.proceduralMemory)
+
+    this.taskExecutor = new TaskExecutor(this.llmService, this.toolScheduler, this.guardrail, this.planManager, this.resourceBudget)
+  }
+
+  getMcpManager(): ServerManager {
+    return this.mcpManager
   }
 
   registerIntentHandler(handler: IntentHandler): void {
@@ -33,22 +165,22 @@ export class AgentService {
     this.registerIntentHandler({
       intent: 'open_pump',
       description: '开启泵站',
-      execute: (slots) => `已开启${slots.pump_id || '指定泵站'}`
+      execute: (slots) => `已开启${slots.pump_id || '指定泵站'}`,
     })
     this.registerIntentHandler({
       intent: 'close_pump',
       description: '关闭泵站',
-      execute: (slots) => `已关闭${slots.pump_id || '指定泵站'}`
+      execute: (slots) => `已关闭${slots.pump_id || '指定泵站'}`,
     })
     this.registerIntentHandler({
       intent: 'query_status',
       description: '查询状态',
-      execute: (slots) => `${slots.target || '系统'}运行正常，各项指标在正常范围内。`
+      execute: (slots) => `${slots.target || '系统'}运行正常，各项指标在正常范围内。`,
     })
     this.registerIntentHandler({
       intent: 'report_alarm',
       description: '报告报警',
-      execute: (slots) => `收到${slots.alarm_type || '报警'}${slots.location ? '，位置：' + slots.location : ''}，已通知值班人员处理。`
+      execute: (slots) => `收到${slots.alarm_type || '报警'}${slots.location ? '，位置：' + slots.location : ''}，已通知值班人员处理。`,
     })
   }
 
@@ -62,22 +194,74 @@ export class AgentService {
       parsed.slots = parsed.slots || {}
       return parsed
     } catch {
+      // 如果直接解析失败，尝试从 markdown 代码围栏中提取 JSON
+      const extracted = extractJsonFromLLMReply(result.reply)
+      if (extracted) {
+        try {
+          const parsed = JSON.parse(extracted) as IntentResult
+          if (parsed.intent && typeof parsed.intent === 'string') {
+            parsed.slots = parsed.slots || {}
+            log('INFO', 'intent_parsed_from_fences', { intent: parsed.intent })
+            return parsed
+          }
+        } catch {
+          /* fall through */
+        }
+      }
       log('WARN', 'intent_parse_failed', { raw: result.reply })
       return null
     }
   }
 
+  /** 同步 ChatExecutor 中的 DI 依赖（延时注入后调用） */
+  private updateRuntimeDeps(): void {
+    this.chatExecutor?.updateDeps({
+      memoryService: this.memoryService,
+      skillManager: this.skillManager,
+      recoveryManager: this.recoveryManager,
+      tokenAccount: this.tokenAccount,
+      identityContext: this.identityContext || undefined,
+      failureAnalyzer: this.failureAnalyzer,
+    })
+  }
+
   setMemoryService(memoryService: MemoryService): void {
     this.memoryService = memoryService
-    const memCtx = memoryService.getFormattedContext()
-    if (memCtx) {
-      this.context = new ConversationContext(memCtx)
-      log('INFO', 'memory_injected', { memory: memCtx })
+    this.guardrail.updateDeps({ memoryService })
+    this.refreshMemoryInContext()
+    this.updateRuntimeDeps()
+  }
+
+  /** 刷新 ConversationContext 中的静态记忆片段，确保 remember_fact 写入后立即可见 */
+  private refreshMemoryInContext(): void {
+    if (!this.memoryService) return
+    const memCtx = this.memoryService.getFormattedContext()
+    const reflectCtx = this.reflectLoop.getFormattedContext()
+    const procCtx = this.proceduralMemory.getFormattedContext()
+    const skillModules = this.skillManager?.getEnabledPromptModules() || []
+    const extraModules = skillModules.length > 0 ? skillModules : undefined
+    const wfModule = this.activeWorkflowModule
+    const allExtraModules = wfModule ? [wfModule, ...(extraModules || [])] : extraModules
+    const allContextParts = [memCtx, procCtx, reflectCtx, this.failureAnalyzer.getFormattedContext()].filter(Boolean)
+    const combinedContext = allContextParts.join('\n\n')
+    if (combinedContext || allExtraModules) {
+      this.context = new ConversationContext(combinedContext || undefined, 2000, allExtraModules, undefined, reflectCtx)
     }
+  }
+
+  setSkillManager(sm: SkillManager): void {
+    this.skillManager = sm
+    this.guardrail.updateDeps({ skillManager: sm })
+    this.updateRuntimeDeps()
+  }
+
+  getSkillManager(): SkillManager | null {
+    return this.skillManager
   }
 
   setMainWindow(win: BrowserWindow | null): void {
     this.mainWindow = win
+    this.chatExecutor?.setMainWindow(win)
   }
 
   getContext(): ConversationContext {
@@ -114,33 +298,251 @@ export class AgentService {
     return { reply }
   }
 
-  async processTextInput(text: string, requestId?: string): Promise<ChatResult> {
+  async processTextInput(
+    text: string,
+    requestId?: string,
+    source: 'electron' | 'telegram' = 'electron',
+    extra?: { telegramChatId?: number; telegramUserId?: number; telegramFrom?: string; telegramMessageId?: number },
+  ): Promise<ChatResult> {
+    // 熔断检查
+    const blocked = this.circuitBreaker.allow('llm')
+    if (blocked) {
+      log('WARN', 'agent_circuit_broken', { reason: blocked })
+      return { error: 'CIRCUIT_OPEN' }
+    }
+
+    // 会话恢复
+    if (this.recoveryManager?.hasInterruptedSession()) {
+      this.tryRestoreSession()
+    }
+
+    this.resourceBudget.startRequest()
+
     const rid = requestId || createRequestId()
     const t0 = Date.now()
-    try {
-      this.memoryService?.recordInteraction()
 
-      const result = await this.llmService.chatStream(text, this.context, (chunk) => {
-        this.mainWindow?.webContents.send('ai:chunk', chunk)
-        this.ttsService.addChunk(chunk)
-      }, rid)
-      this.ttsService.flushBuffer()
-      // LLM 失败时自动重试一次
-      if (result.error && !result.reply) {
-        log('WARN', 'llm_retry', { request_id: rid, error: result.error })
-        const retry = await this.llmService.chatStream(text, this.context, (chunk) => {
-          this.mainWindow?.webContents.send('ai:chunk', chunk)
-          this.ttsService.addChunk(chunk)
-        }, rid)
-        this.ttsService.flushBuffer()
-        log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: retry.reply?.length || 0, retried: true })
-        return retry
+    this.memoryService?.recordInteraction()
+    this.memoryService?.setLastUserText(text)
+
+    // 中断正在运行的 Evolution
+    if (this.inSelfTask) {
+      log('INFO', 'input_preempting_self_task', { requestId: rid })
+      this.abortSelfTask()
+      let waitMs = 0
+      while (this.inSelfTask && waitMs < 3000) {
+        await new Promise((r) => setTimeout(r, 10))
+        waitMs += 10
       }
-      log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: result.reply?.length || 0 })
-      return result
+      if (this.inSelfTask) {
+        log('WARN', 'self_task_preempt_timeout', { requestId: rid })
+        this.inSelfTask = false
+      }
+    }
+
+    try {
+      // v2: 委托 ChatExecutor 执行
+      const reply = await this.chatExecutor!.run(text, rid, source, extra)
+      if (!reply || reply.error) return reply || { error: 'NO_REPLY' }
+      log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: reply.reply?.length || 0 })
+      return reply
     } catch (err) {
+      this.eventBus.emit('agent.error', { error: String(err), requestId: rid })
       log('ERROR', 'chat_handler_error', { request_id: rid, error: String(err) })
+      await this.saveRecoverySnapshot('error', String(err)).catch(() => {})
       return { error: 'INTERNAL' }
+    }
+  }
+
+  async stopConversation(): Promise<void> {
+    // 取消正在运行的 toolLoop
+    this.chatExecutor?.stop()
+    this.runContext?.interrupt('user_stop')
+    this.runContext = null
+    // 停止 TTS 播放
+    this.ttsService.stop()
+    log('INFO', 'conversation_stopped_by_user')
+  }
+
+  isBusy(): boolean {
+    return this.inSelfTask || this.chatExecutor?.isBusy() === true
+  }
+
+  /** 暂停 Chat 处理（暂停 ASR/TTS/LLM 调用，保留上下文） */
+  pause(): void {
+    if (this._paused) return
+    this._paused = true
+    this.chatExecutor?.stop()
+    this.ttsService.stop()
+    log('INFO', 'agent_paused')
+    this.eventBus.emit('agent.pause' as any, {})
+  }
+
+  /** 恢复 Chat 处理 */
+  resume(): void {
+    if (!this._paused) return
+    this._paused = false
+    log('INFO', 'agent_resumed')
+    this.eventBus.emit('agent.resume' as any, {})
+  }
+
+  /** 是否处于暂停状态 */
+  isPaused(): boolean {
+    return this._paused
+  }
+
+  /** 设置/清除强制续行抑制。在 tryRun 前设为 true，防止 toolLoop 注入"停止读取"等干扰提示 */
+  setSuppressForceContinue(val: boolean): void {
+    if (this.runContext) {
+      this.runContext.suppressForceContinue = val
+    }
+  }
+
+  /** 取消正在运行的自任务（由 SelfEvolutionService 在超时时调用） */
+  abortSelfTask(): void {
+    // Pause/Resume 模式：请求 TaskExecutor 保存状态而非硬中断
+    this.taskExecutor?.pause()
+    this.selfTaskAbortController?.abort()
+    if (this.runContext) {
+      this.runContext.interrupt('self_task_abort')
+    }
+    log('INFO', 'agent_self_task_aborted')
+  }
+
+  /** 获取自任务运行时长（毫秒），无自任务时返回 0 */
+  getSelfTaskAge(): number {
+    if (!this.inSelfTask || this.selfTaskStartTime === 0) return 0
+    return Date.now() - this.selfTaskStartTime
+  }
+
+  /** 获取子 agent 状态 */
+  getSubAgentStatus(): { running: { id: string; goal: string; elapsed: number }[] } {
+    return { running: this.subAgentPool.listRunning() }
+  }
+
+  /** 设置会话恢复管理器 */
+  setRecoveryManager(rm: SessionRecoveryManager): void {
+    this.recoveryManager = rm
+    this.updateRuntimeDeps()
+  }
+
+  /** 保存恢复快照（检查点） */
+  async saveRecoverySnapshot(trigger: 'milestone' | 'error' | 'interrupt' | 'shutdown', error?: string): Promise<void> {
+    if (!this.recoveryManager) return
+    try {
+      const activePlan = this.planManager?.getActivePlan?.()
+      const pendingDescriptions = activePlan ? activePlan.steps.filter((s: any) => s.status !== 'done').map((s: any) => s.description) : []
+      await this.recoveryManager.createCheckpoint({
+        trigger,
+        runContext: this.runContext,
+        context: this.context,
+        runId: this.runContext?.runId ?? `recovery_${Date.now()}`,
+        planState: {
+          activePlanId: activePlan?.id ?? null,
+          activePlanTitle: activePlan?.title ?? null,
+          sessionPlanIds: Array.from(this.sessionPlanIds),
+          pendingStepDescriptions: pendingDescriptions,
+        },
+        resourceBudget: this.resourceBudget,
+        circuitBreaker: this.circuitBreaker,
+        error,
+      })
+    } catch (err: any) {
+      log('WARN', 'save_recovery_snapshot_failed', { error: String(err) })
+    }
+  }
+
+  /** 尝试恢复中断的会话。返回 true 表示已恢复 */
+  private tryRestoreSession(): boolean {
+    if (!this.recoveryManager) return false
+    if (!this.recoveryManager.hasInterruptedSession()) return false
+
+    // 恢复循环检测：连续 3 次恢复且 60 秒内 → 安全模式
+    if (this.recoveryManager.isRecoveryLoop()) {
+      log('WARN', 'session_recovery_loop_detected', {})
+      this.recoveryManager.clearSession()
+      this.recoveryManager.resetRecoveryFailCount()
+      return false
+    }
+
+    const checkpoint = this.recoveryManager.restoreLatestCheckpoint()
+    if (!checkpoint) return false
+
+    log('INFO', 'session_auto_restore', { runId: checkpoint.meta.runId, trigger: checkpoint.meta.trigger })
+
+    this.eventBus.emit('recovery.recovery.started' as any, {
+      oldRunId: checkpoint.meta.runId,
+      error: checkpoint.meta.trigger === 'error' ? 'previous session error' : 'interrupted',
+    })
+
+    // 重建 context
+    const memCtx = this.memoryService?.getFormattedContext() || ''
+    const reflectCtx = this.reflectLoop.getFormattedContext()
+    const skillModules = this.skillManager?.getEnabledPromptModules() || []
+    const extraM = skillModules.length > 0 ? skillModules : undefined
+    this.context = new ConversationContext(memCtx, 2000, extraM, undefined, reflectCtx)
+
+    // 注入短期记忆对
+    for (const pair of checkpoint.shortTermMemory) {
+      this.context.addUser(pair.user)
+      this.context.addAssistant(pair.assistant)
+    }
+
+    // 恢复会话计划 ID
+    this.sessionPlanIds = new Set(checkpoint.planState.sessionPlanIds)
+
+    // 构建恢复提示
+    let recoveryMsg = '【系统恢复】系统在之前的会话中被中断。以下是恢复信息：'
+    if (checkpoint.conversationSummary) {
+      recoveryMsg += `\n${checkpoint.conversationSummary}`
+    }
+    if (checkpoint.planState.activePlanId) {
+      recoveryMsg += `\n\n之前的活跃计划: ${checkpoint.planState.activePlanTitle} (${checkpoint.planState.activePlanId})`
+      recoveryMsg += '\n请继续完成该计划，不要重新开始。'
+    } else {
+      recoveryMsg += '\n请从断点继续工作。'
+    }
+    this.context.addUser(recoveryMsg)
+
+    // 记录恢复尝试
+    this.recoveryManager.recordRecoveryAttempt()
+
+    this.eventBus.emit('recovery.session.restored' as any, {
+      runId: checkpoint.meta.runId,
+      hasUnfinishedPlan: !!checkpoint.planState.activePlanId,
+    })
+
+    this.recoveryManager.clearSession()
+    this.recoveryManager.resetRecoveryFailCount()
+
+    return true
+  }
+
+  async runSelfTask(task: string, systemPrompt?: string): Promise<{ success: boolean; summary: string }> {
+    if (this.inSelfTask) return { success: false, summary: '自进化已经在运行' }
+    this.inSelfTask = true
+    this.selfTaskAbortController = new AbortController()
+    this.selfTaskStartTime = Date.now()
+    this.resourceBudget.resetToolLoopTurns()
+    this.resourceBudget.resetEvolution()
+    const savedContext = this.context
+    const savedSessionPlanIds = this.sessionPlanIds
+    this.sessionPlanIds = new Set()
+    this.context = new ConversationContext(undefined, 2000, undefined, systemPrompt)
+    try {
+      this.context.addUser(task)
+      // v2: 使用 TaskExecutor 替代 toolLoop
+      const messages: Message[] = this.context.getMessages()
+      const ctx = new RunContext(`self_${Date.now()}`)
+      this.runContext = ctx
+      const reply = await this.taskExecutor!.run(messages, ctx, this.selfTaskAbortController?.signal)
+      return { success: !!reply, summary: reply || '' }
+    } finally {
+      this.inSelfTask = false
+      this.selfTaskAbortController = null
+      this.selfTaskStartTime = 0
+      this.sessionPlanIds = savedSessionPlanIds
+      this.context = savedContext
+      this.runContext = null
     }
   }
 }

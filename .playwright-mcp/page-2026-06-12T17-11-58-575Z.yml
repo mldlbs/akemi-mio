@@ -1,0 +1,319 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]:
+          - generic [ref=e8] [cursor=pointer]: 幻纤gf
+          - generic [ref=e11] [cursor=pointer]: 未读消息
+        - link [ref=e14] [cursor=pointer]:
+          - /url: /
+          - img [ref=e15]
+      - list [ref=e17]:
+        - listitem [ref=e18]:
+          - link "首页" [ref=e19] [cursor=pointer]:
+            - /url: /crowdtest/community/index
+        - listitem [ref=e20]:
+          - link "任务" [ref=e21] [cursor=pointer]:
+            - /url: /mark/task/index
+        - listitem [ref=e22]:
+          - link "公会" [ref=e23] [cursor=pointer]:
+            - /url: /crowdtest/n/union/index
+        - listitem [ref=e24]:
+          - link "礼品" [ref=e25] [cursor=pointer]:
+            - /url: /crowdtest/n/giftSuit/index
+        - listitem [ref=e26]:
+          - link "成就" [ref=e27] [cursor=pointer]:
+            - /url: /crowdtest/home/ranklist
+        - listitem [ref=e28]:
+          - link "贴吧" [ref=e29] [cursor=pointer]:
+            - /url: https://tieba.baidu.com/f?kw=%B0%D9%B6%C8%BF%F1%B2%E2%D0%D0%B6%AF%D7%E9
+        - listitem [ref=e30]:
+          - link "考试测评" [ref=e31] [cursor=pointer]:
+            - /url: /crowdtest/exam/index#/mark/exam/list
+      - generic:
+        - list:
+          - listitem
+          - listitem
+          - listitem
+          - listitem
+          - listitem
+    - generic [ref=e32]:
+      - list [ref=e33]:
+        - listitem [ref=e34]:
+          - link "任务" [ref=e35] [cursor=pointer]:
+            - /url: /crowdtest/activity/gotoActivityMarket
+          - text: /
+        - listitem [ref=e36]:
+          - link "问卷调查" [ref=e37] [cursor=pointer]:
+            - /url: /crowdtest/activityUnit/paperSurvey/type/2
+          - text: /
+        - listitem [ref=e38]: 市场调查-副本
+      - generic [ref=e45]:
+        - generic [ref=e46]: 市场调查-副本
+        - generic [ref=e47]: 问卷中包含陷阱题，使用小号答题或乱填乱写可能被取消答题资格
+        - generic [ref=e49]:
+          - generic [ref=e50]:
+            - generic [ref=e52]: 1. 您的性别
+            - generic [ref=e54]:
+              - generic [ref=e55]: 男
+              - generic [ref=e57]: 女
+          - generic [ref=e59]:
+            - generic [ref=e61]: 2. 您的职业
+            - combobox [ref=e64]:
+              - option [selected]
+              - option "在校学生"
+              - option "政府/机关干部/公务员"
+              - option "企业管理者（包括基层及中高层管理者）"
+              - option "普通职员（办公室/写字楼工作人员）"
+              - option "专业人员（如医生/律师/文体/记者/老师等）"
+              - option "普通工人（如工厂工人/体力劳动者等）"
+              - option "商业服务业职工（如销售人员/商店职员/服务员等）"
+              - option "个体经营者/承包商"
+              - option "自由职业者"
+              - option "农林牧渔劳动者"
+              - option "退休"
+              - option "暂无职业"
+              - option "其他"
+          - generic [ref=e65]:
+            - generic [ref=e67]: 3. 个人月收入
+            - generic [ref=e69]:
+              - generic [ref=e70]: 在校学生，没有收入
+              - generic [ref=e72]: 2000元及以下
+              - generic [ref=e74]: 2001-3000元
+              - generic [ref=e76]: 3001-5000元
+              - generic [ref=e78]: 5001-8000元
+              - generic [ref=e80]: 8001-12000元
+              - generic [ref=e82]: 12001-20000元
+              - generic [ref=e84]: 20000元以上
+              - generic [ref=e86]: 不方便透露
+          - generic [ref=e88]:
+            - generic [ref=e90]: 4. 你期待今年圣诞节吗？
+            - generic [ref=e92]:
+              - generic [ref=e93]: 很期待
+              - generic [ref=e95]: 期待
+              - generic [ref=e97]: 一般
+              - generic [ref=e99]: 不期待
+              - generic [ref=e101]: 很不期待
+              - generic [ref=e103]: 没听说过圣诞节
+          - generic [ref=e105]:
+            - generic [ref=e107]: 5. 关于圣诞节的描述，你最认同的一点是？
+            - generic [ref=e109]:
+              - generic [ref=e110]: 和朋友狂欢happy的节日
+              - generic [ref=e112]: 绝对要去购物扫货，因为折扣都非常优惠
+              - generic [ref=e114]: 必须来个温馨家庭大聚餐
+              - generic [ref=e116]: 最适合跟恋人一起享受浪漫时光
+              - generic [ref=e118]: 就让我一个人做安静的美男纸或女纸吧
+              - generic [ref=e120]: 没兴趣，这个节日与我无关
+          - generic [ref=e122]:
+            - generic [ref=e124]: 6. 您是否有在圣诞节送礼物给别人的经历？
+            - generic [ref=e126]:
+              - generic [ref=e127]: 有
+              - generic [ref=e129]: 无
+              - generic [ref=e131]: 没有，但打算送
+          - generic [ref=e133]:
+            - generic [ref=e135]: 7. 您想送礼物给谁或最想收到谁送的礼物？
+            - generic [ref=e137]:
+              - generic [ref=e138]: 恋人
+              - generic [ref=e140]: 老师
+              - generic [ref=e142]: 父母
+              - generic [ref=e144]: 朋友
+              - generic [ref=e146]:
+                - text: 其他
+                - textbox [ref=e148]
+          - generic [ref=e149]:
+            - generic [ref=e151]: 8. 您购买或赠送圣诞礼物的目的？
+            - generic [ref=e153]:
+              - generic [ref=e154]: 收藏观赏性
+              - generic [ref=e156]: 有实用性
+              - generic [ref=e158]: 馈赠朋友
+              - generic [ref=e160]: 感受节日
+              - generic [ref=e162]: 气氛
+              - generic [ref=e164]:
+                - text: 其他
+                - textbox [ref=e166]
+          - generic [ref=e167]:
+            - generic [ref=e169]: 9. 你看中礼物的价格还是价值？
+            - generic [ref=e171]:
+              - generic [ref=e172]: 价格
+              - generic [ref=e174]: 价值
+              - generic [ref=e176]: 都看重
+          - generic [ref=e178]:
+            - generic [ref=e180]: 10. 您会选择哪种类型的礼物？
+            - generic [ref=e182]:
+              - generic [ref=e183]: 衣服
+              - generic [ref=e185]: 箱包鞋履
+              - generic [ref=e187]: 化妆护肤
+              - generic [ref=e189]: 珠宝首饰
+              - generic [ref=e191]: 数码产品
+              - generic [ref=e193]: 个性小玩物
+          - generic [ref=e195]:
+            - generic [ref=e197]: 11. 如果购买礼物您愿花多少钱？
+            - generic [ref=e199]:
+              - generic [ref=e200]: 100元以内
+              - generic [ref=e202]: 100-200元
+              - generic [ref=e204]: 201-500元
+              - generic [ref=e206]: 501-1000元
+              - generic [ref=e208]: 1001-2000元
+              - generic [ref=e210]: 2001-5000元
+              - generic [ref=e212]: 5000元以上
+          - generic [ref=e214]:
+            - generic [ref=e216]: 12. 选择礼物时您最看重哪个方面？
+            - generic [ref=e218]:
+              - generic [ref=e219]: 品牌知名度
+              - generic [ref=e221]: 价格，性价比高
+              - generic [ref=e223]: 质量/性能最好
+              - generic [ref=e225]: 美观
+              - generic [ref=e227]: 广告宣传吸引人
+              - generic [ref=e229]: 售后服务
+              - generic [ref=e231]: 实用，TA刚好需要
+              - generic [ref=e233]: 是限量版本或有特殊含义
+              - generic [ref=e235]: 有促销活动
+              - generic [ref=e237]: 销售人员的推荐
+          - generic [ref=e239]:
+            - generic [ref=e241]: 13. 您一般是在哪里购买礼物？
+            - generic [ref=e243]:
+              - generic [ref=e244]: 网购
+              - generic [ref=e246]: 商场超市
+              - generic [ref=e248]: 精品小店
+              - generic [ref=e250]:
+                - text: 其他
+                - textbox [ref=e252]
+          - generic [ref=e253]:
+            - generic [ref=e255]: 14. 您送礼物的方式中最多是？
+            - generic [ref=e257]:
+              - generic [ref=e258]: 快递直邮
+              - generic [ref=e260]: 亲自送
+              - generic [ref=e262]: 熟人转交
+              - generic [ref=e264]: 经创意策划的方式
+          - generic [ref=e266]:
+            - generic [ref=e268]: 15. 您网购过圣诞礼物吗？
+            - generic [ref=e270]:
+              - generic [ref=e271]: 一直都在网上买
+              - generic [ref=e273]: 偶尔会在网上买
+              - generic [ref=e275]: 从来没有
+          - generic [ref=e277]:
+            - generic [ref=e279]: 16. 您对网购来的礼物的满意度
+            - generic [ref=e281]:
+              - generic [ref=e282]: 非常满意
+              - generic [ref=e284]: 满意
+              - generic [ref=e286]: 一般
+              - generic [ref=e288]: 不满意
+              - generic [ref=e290]: 非常不满意
+          - generic [ref=e292]:
+            - generic [ref=e294]: 以下什么样的答题行为是正确的
+            - generic [ref=e296]:
+              - generic [ref=e297]: 填空题胡乱填写
+              - generic [ref=e299]: 整份问卷的相同选项超过80%
+              - generic [ref=e301]: 所有多选题都选择全部选项
+              - generic [ref=e303]: 认真阅读题目并回答
+          - generic [ref=e305]:
+            - generic [ref=e307]: 17. 您对网购的礼物最不满意或最担心的是？
+            - generic [ref=e309]:
+              - generic [ref=e310]: 配送是龟速，慢
+              - generic [ref=e312]: 产品质量与实物相关太大
+              - generic [ref=e314]: 包装太差，无法当礼物送人
+              - generic [ref=e316]: 送货和收货时间不确定，惊喜变成了担忧
+              - generic [ref=e318]: 不能代写贺卡，礼物少了点情趣
+              - generic [ref=e320]: 代写祝福的字太丑，感觉整个人都不好了
+          - generic [ref=e322]:
+            - generic [ref=e324]: 18. 如果您对圣诞节还有什么想法，请写下来告诉我们吧！
+            - textbox [ref=e327]
+          - generic [ref=e330] [cursor=pointer]: 57s
+    - generic [ref=e331]:
+      - paragraph [ref=e332]:
+        - link "商务合作" [ref=e333] [cursor=pointer]:
+          - /url: mailto:crowdtest@baidu.com?subject=【商务合作】
+        - text: "|"
+        - link "关于众测" [ref=e334] [cursor=pointer]:
+          - /url: https://cloud.baidu.com/product/dcs.html
+        - text: "|"
+        - link "友情链接" [ref=e335] [cursor=pointer]:
+          - /url: /crowdtest/help/friendSite
+        - text: "|"
+        - link "用户协议" [ref=e336] [cursor=pointer]:
+          - /url: /crowdtest/communityAcademy/detail?id=77
+        - text: "|"
+        - link "隐私政策" [ref=e337] [cursor=pointer]:
+          - /url: /crowdtest/help/privacy
+      - paragraph [ref=e338]:
+        - text: ©2026 Baidu
+        - link "使用百度前必读" [ref=e339] [cursor=pointer]:
+          - /url: //www.baidu.com/duty/
+        - link "京ICP证030173号" [ref=e340] [cursor=pointer]:
+          - /url: http://www.miibeian.gov.cn
+        - img [ref=e341]
+  - iframe [ref=e343]:
+    - generic [ref=f1e2]:
+      - generic [ref=f1e3]:
+        - link [ref=f1e4] [cursor=pointer]:
+          - /url: "###"
+        - link [ref=f1e5] [cursor=pointer]:
+          - /url: "###"
+        - textbox [ref=f1e7] [cursor=pointer]: 六月
+        - textbox [ref=f1e9] [cursor=pointer]: "2026"
+        - link [ref=f1e10] [cursor=pointer]:
+          - /url: "###"
+        - link [ref=f1e11] [cursor=pointer]:
+          - /url: "###"
+      - table [ref=f1e13]:
+        - rowgroup [ref=f1e14]:
+          - row "日 一 二 三 四 五 六" [ref=f1e15]:
+            - cell "日" [ref=f1e16]
+            - cell "一" [ref=f1e17]
+            - cell "二" [ref=f1e18]
+            - cell "三" [ref=f1e19]
+            - cell "四" [ref=f1e20]
+            - cell "五" [ref=f1e21]
+            - cell "六" [ref=f1e22]
+          - row "31 1 2 3 4 5 6" [ref=f1e23]:
+            - cell "31" [ref=f1e24] [cursor=pointer]
+            - cell "1" [ref=f1e25] [cursor=pointer]
+            - cell "2" [ref=f1e26] [cursor=pointer]
+            - cell "3" [ref=f1e27] [cursor=pointer]
+            - cell "4" [ref=f1e28] [cursor=pointer]
+            - cell "5" [ref=f1e29] [cursor=pointer]
+            - cell "6" [ref=f1e30] [cursor=pointer]
+          - row "7 8 9 10 11 12 13" [ref=f1e31]:
+            - cell "7" [ref=f1e32] [cursor=pointer]
+            - cell "8" [ref=f1e33] [cursor=pointer]
+            - cell "9" [ref=f1e34] [cursor=pointer]
+            - cell "10" [ref=f1e35] [cursor=pointer]
+            - cell "11" [ref=f1e36] [cursor=pointer]
+            - cell "12" [ref=f1e37] [cursor=pointer]
+            - cell "13" [ref=f1e38]
+          - row "14 15 16 17 18 19 20" [ref=f1e39]:
+            - cell "14" [ref=f1e40] [cursor=pointer]
+            - cell "15" [ref=f1e41] [cursor=pointer]
+            - cell "16" [ref=f1e42] [cursor=pointer]
+            - cell "17" [ref=f1e43] [cursor=pointer]
+            - cell "18" [ref=f1e44] [cursor=pointer]
+            - cell "19" [ref=f1e45] [cursor=pointer]
+            - cell "20" [ref=f1e46] [cursor=pointer]
+          - row "21 22 23 24 25 26 27" [ref=f1e47]:
+            - cell "21" [ref=f1e48] [cursor=pointer]
+            - cell "22" [ref=f1e49] [cursor=pointer]
+            - cell "23" [ref=f1e50] [cursor=pointer]
+            - cell "24" [ref=f1e51] [cursor=pointer]
+            - cell "25" [ref=f1e52] [cursor=pointer]
+            - cell "26" [ref=f1e53] [cursor=pointer]
+            - cell "27" [ref=f1e54] [cursor=pointer]
+          - row "28 29 30 1 2 3 4" [ref=f1e55]:
+            - cell "28" [ref=f1e56] [cursor=pointer]
+            - cell "29" [ref=f1e57] [cursor=pointer]
+            - cell "30" [ref=f1e58] [cursor=pointer]
+            - cell "1" [ref=f1e59] [cursor=pointer]
+            - cell "2" [ref=f1e60] [cursor=pointer]
+            - cell "3" [ref=f1e61] [cursor=pointer]
+            - cell "4" [ref=f1e62] [cursor=pointer]
+          - row "5 6 7 8 9 10 11" [ref=f1e63]:
+            - cell "5" [ref=f1e64] [cursor=pointer]
+            - cell "6" [ref=f1e65] [cursor=pointer]
+            - cell "7" [ref=f1e66] [cursor=pointer]
+            - cell "8" [ref=f1e67] [cursor=pointer]
+            - cell "9" [ref=f1e68] [cursor=pointer]
+            - cell "10" [ref=f1e69] [cursor=pointer]
+            - cell "11" [ref=f1e70] [cursor=pointer]
+      - generic [ref=f1e72]:
+        - button "清空" [ref=f1e73]
+        - button "今天" [ref=f1e74]
+        - button "确定" [ref=f1e75]
