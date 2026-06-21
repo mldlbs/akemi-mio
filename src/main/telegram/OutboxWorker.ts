@@ -37,9 +37,13 @@ export class OutboxWorker {
         sent++
       } catch (err: any) {
         const errMsg = err.message ?? String(err)
-        markOutboxFailed(msg.id!, errMsg)
+        const wasDropped = markOutboxFailed(msg.id!, errMsg)
+        if (wasDropped && msg.msgType === 'edit') {
+          log('WARN', 'outbox_edit_dropped_fallback_to_send', { id: msg.id, error: errMsg })
+        } else {
+          log('WARN', 'outbox_deliver_failed', { id: msg.id, msgType: msg.msgType, error: errMsg })
+        }
         failed++
-        log('WARN', 'outbox_deliver_failed', { id: msg.id, msgType: msg.msgType, error: errMsg })
       }
     }
 
@@ -82,9 +86,11 @@ export class OutboxWorker {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15000),
     })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`)
+    // ★ 修复：同时检查 HTTP 状态码和响应体 ok 字段
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data?.ok === false) {
+      const errMsg = data?.error || `HTTP ${res.status}`
+      throw new Error(errMsg)
     }
   }
 }

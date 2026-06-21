@@ -10,22 +10,25 @@ export class McpClient {
   readonly transportType: 'stdio' | 'http' | 'sse'
   readonly url: string
   readonly requestTimeoutMs: number
-  private transport: Transport
+  readonly headers: Record<string, string>
+  readonly transport: Transport
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>()
   private tools: MCPToolSchema[] = []
   private initialized = false
   private serverInfo: { name: string; version: string } = { name: '', version: '' }
+  private notificationHandler: ((method: string, params?: any) => void) | null = null
 
   constructor(config: MCPServerConfig) {
     this.name = config.name
     this.rawCommand = config.rawCommand || ''
     this.cwd = config.cwd || ''
     this.requestTimeoutMs = config.requestTimeoutMs ?? 30000
+    this.headers = config.headers || {}
 
     if (config.transport === 'http' || config.transport === 'sse' || config.url) {
       this.transportType = config.transport === 'sse' ? 'sse' : config.url?.endsWith('/sse') ? 'sse' : 'http'
       this.url = config.url || config.command || ''
-      this.transport = new HttpTransport(this.url, this.requestTimeoutMs)
+      this.transport = new HttpTransport(this.url, this.requestTimeoutMs, this.headers)
     } else {
       this.transportType = 'stdio'
       this.url = ''
@@ -35,6 +38,11 @@ export class McpClient {
   }
 
   private handleResponse(data: MCPResponse): void {
+    // JSON-RPC notification (no id field) — server-initiated message
+    if (data.id == null && data.method) {
+      this.notificationHandler?.(data.method as string, (data as any).params)
+      return
+    }
     const pending = this.pending.get(data.id)
     if (!pending) return
     this.pending.delete(data.id)
@@ -43,6 +51,11 @@ export class McpClient {
     } else {
       pending.resolve(data.result)
     }
+  }
+
+  /** 注册通知处理回调（处理 MCP Notification / 服务端主动推送的消息） */
+  onNotification(handler: (method: string, params?: any) => void): void {
+    this.notificationHandler = handler
   }
 
   private async request(method: string, params?: any): Promise<any> {

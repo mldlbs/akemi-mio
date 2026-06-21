@@ -209,6 +209,7 @@ function isDeterministicError(message: string): boolean {
 
     // 命令执行失败：run_command 返回的确定性错误（命令本身出错，重试没用）
     '命令执行失败',
+    'nginx: command not found',
   ]
   return deterministricPatterns.some((p) => message.includes(p))
 }

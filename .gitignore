@@ -30,6 +30,7 @@ logs.*
 *.wav
 .claude-flow/
 .swarm/
+.playwright-mcp/
 logs_json_only.txt
 tools/
 mcp_workspace/

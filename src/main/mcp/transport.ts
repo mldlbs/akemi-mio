@@ -96,16 +96,18 @@ export class StdioTransport implements Transport {
 export class HttpTransport implements Transport {
   private url: string
   private requestTimeoutMs: number
+  private headers: Record<string, string>
   private handler: ((data: MCPResponse) => void) | null = null
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null
   private abortController = new AbortController()
   private closed = false
   private connected = false
 
-  constructor(url: string, requestTimeoutMs = 30000) {
+  constructor(url: string, requestTimeoutMs = 30000, headers: Record<string, string> = {}) {
     // 标准化 URL，移除尾部 /
     this.url = url.replace(/\/+$/, '')
     this.requestTimeoutMs = requestTimeoutMs
+    this.headers = headers
   }
 
   async send(message: string): Promise<void> {
@@ -136,6 +138,7 @@ export class HttpTransport implements Transport {
           'Content-Type': 'application/json',
           Accept: 'application/json, text/event-stream',
           'Content-Length': Buffer.byteLength(message, 'utf-8'),
+          ...this.headers,
         },
         signal: this.abortController.signal,
         timeout: this.requestTimeoutMs,
@@ -197,6 +200,7 @@ export class HttpTransport implements Transport {
         headers: {
           Accept: 'text/event-stream',
           'Cache-Control': 'no-cache',
+          ...this.headers,
         },
         signal: this.abortController.signal,
       }

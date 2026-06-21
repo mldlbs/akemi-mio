@@ -128,6 +128,7 @@ const MATCH_RULES: MatchRule[] = [
       /missing required/i,
       /invalid parameter/i,
       /invalid message/i,
+      /API_ERROR:4/i,
     ],
     exclude: [/context_length/i, /token limit/i],
   },
@@ -199,7 +200,7 @@ export function classify(error: string): ClassificationResult {
   }
 
   // 裸 400 没有匹配到具体规则 → INVALID_REQUEST
-  if (/^400$|^400\b|400 error/i.test(error) && !/context|length|token|too large/i.test(error)) {
+  if (/^400$|^400\b|400 error|API_ERROR:400/i.test(error) && !/context|length|token|too large/i.test(error)) {
     const strategy = STRATEGIES.INVALID_REQUEST
     return {
       category: 'INVALID_REQUEST',

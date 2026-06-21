@@ -68,21 +68,37 @@ export function markOutboxSent(id: number): void {
   markDirty()
 }
 
-/** 标记失败：retryCount < 3 翻回 pending；>= 3 删除 */
-export function markOutboxFailed(id: number, error: string): void {
+/** 标记失败：retryCount < 3 翻回 pending；>= 3 删除，返回 true 表示已放弃 */
+export function markOutboxFailed(id: number, error: string): boolean {
   const db = getRawDb()
-  const current = db.exec(`SELECT retry_count FROM telegram_outbox WHERE id = ?`, [id])
-  const retryCount = current?.[0]?.values?.[0]?.[0] ?? 0
+  const current = db.exec(`SELECT retry_count, msg_type, chat_id, message FROM telegram_outbox WHERE id = ?`, [id])
+  const row = current?.[0]?.values?.[0]
+  if (!row) return false
+  const retryCount = row[0] ?? 0
   if (retryCount >= 3) {
+    const msgType = row[1]
+    const chatId = row[2]
+    const lastMessage = row[3]
     db.run(`DELETE FROM telegram_outbox WHERE id = ?`, [id])
+    // ★ 修复：edit 重试 3 次失败后降级为 send 新消息
+    if (msgType === 'edit' && chatId && lastMessage) {
+      db.run(
+        `INSERT INTO telegram_outbox (chat_id, msg_type, category, message, hash, status, retry_count, created_at)
+         VALUES (?, 'send', 'dialogue', ?, ?, 'pending', 0, ?)`,
+        [chatId, lastMessage, simpleHash(`${chatId}:send:${lastMessage}:fallback`), Date.now()],
+      )
+    }
+    markDirty()
+    return true
   } else {
     db.run(`UPDATE telegram_outbox SET status = 'pending', retry_count = retry_count + 1, last_error = ?, updated_at = ? WHERE id = ?`, [
       error,
       Date.now(),
       id,
     ])
+    markDirty()
+    return false
   }
-  markDirty()
 }
 
 /** 幂等检查：相同 hash 的 pending/sent 消息是否已存在 */

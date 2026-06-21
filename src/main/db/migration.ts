@@ -398,6 +398,20 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 18,
+    sql: `
+      CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        source TEXT,
+        trace_id TEXT,
+        timestamp INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_events_channel_ts ON events(channel, timestamp);
+    `,
+  },
 ]
 
 export function runMigrations(sqlite: SqlJsDatabase): void {

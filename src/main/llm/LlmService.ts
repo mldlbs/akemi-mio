@@ -1,5 +1,5 @@
 import { log } from '../logger/Logger'
-import { ConversationContext, estimateTokens, getBasePromptTokens, Message } from '../agent/context'
+import { ConversationContext, estimateTokens, getBasePromptTokens, Message, trimOrphanedToolCallsFrom } from '../agent/context'
 import { ChatResult, ChunkCallback } from './types'
 import { INTENT_CLASSIFY_PROMPT } from '../agent/intent/types'
 import { ServerManager } from '../mcp/ServerManager'
@@ -291,6 +291,8 @@ export class LlmService {
     const RETRYABLE = new Set(['RATE_LIMITED', 'NETWORK'])
     const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503]) // 400 不重试：invalid_request_error 是结构性错误
     for (let attempt = 1; attempt <= 3; attempt++) {
+      // ★ 底层兜底：每次发请求前自动清理孤儿 tool_calls
+      trimOrphanedToolCallsFrom(messages)
       // 外部中止信号已触发，立即放弃当前请求
       if (externalSignal?.aborted) return { error: 'ABORTED' }
 
@@ -383,6 +385,8 @@ export class LlmService {
     signal: AbortSignal,
     onChunk: ChunkCallback,
   ): Promise<{ reply?: string; toolCalls?: ToolCallInfo[]; error?: string }> {
+    // 发流式请求前清理孤儿 tool_calls（兜底，与 chatWithTools 入口处互补）
+    trimOrphanedToolCallsFrom(messages)
     // 流式请求中同时携带 tools 声明，让 LLM 仍可选工具调用
     const res = await fetch(LLM_CODE_API_URL, {
       method: 'POST',

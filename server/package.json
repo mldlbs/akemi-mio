@@ -1,14 +1,16 @@
 {
   "name": "telegram-bot",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "Akemi Mio Telegram Bot (server-side)",
+  "description": "Akemi Mio Telegram Bot (server-side, grammy SDK)",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "node --watch index.js"
   },
   "dependencies": {
     "express": "^4.21.0",
-    "grammy": "^1.34.0"
+    "grammy": "^1.34.0",
+    "undici": "^7.0.0"
   }
 }

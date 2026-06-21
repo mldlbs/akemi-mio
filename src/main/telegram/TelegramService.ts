@@ -94,12 +94,19 @@ export class TelegramService {
     }
   >()
   private pushChatId: number | null = null
-  private pushMessageId: number | null = null
-  private pushToolLines: ToolLine[] = []
-  private pushDisposers: (() => void)[] = []
-  private pushTypingTimer: ReturnType<typeof setInterval> | null = null
-  private pushEditor = new DebouncedEditor()
-  private pushLastUserText = ''
+  // ★ 修复：Map<requestId, session> 通过 EventBus requestId 精确匹配输入/回复
+  private pushSessions = new Map<
+    string,
+    {
+      messageId: number
+      userText: string
+      toolLines: ToolLine[]
+      editor: DebouncedEditor
+      typingTimer: ReturnType<typeof setInterval> | null
+      disposers: (() => void)[]
+      createdAt: number
+    }
+  >()
 
   constructor(agentService: AgentService) {
     this.agentService = agentService
@@ -111,7 +118,6 @@ export class TelegramService {
 
     // 所有 DebouncedEditor 共享 baseUrl
     DebouncedEditor.prototype.setBaseUrl(this.baseUrl)
-    this.pushEditor.setBaseUrl(this.baseUrl)
 
     try {
       const res = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(5000) })
@@ -122,8 +128,6 @@ export class TelegramService {
       log('WARN', 'telegram_server_unreachable', { url: this.baseUrl, error: String(err) })
       return
     }
-
-    this.pushEditor.setBaseUrl(this.baseUrl)
 
     const rawChatId = credentialsManager.get('telegram_chat_id') || process.env.TELEGRAM_CHAT_ID
     if (rawChatId) {
@@ -139,8 +143,10 @@ export class TelegramService {
 
     this.isRunning = true
     this.pollTimer = setInterval(() => this.poll(), 1000)
-    log('INFO', 'telegram_polling_started', { url: this.baseUrl })
+    log('INFO', 'telegram_polling_started', { url: this.baseUrl, pushChatId: this.pushChatId })
   }
+
+  private staleCleanupCounter = 0
 
   private async poll(): Promise<void> {
     if (!this.isRunning) return
@@ -154,6 +160,13 @@ export class TelegramService {
       }
     } catch {
       /* 超时或网络错误，静默忽略 */
+    }
+
+    // 每 30 次 poll 清理一次孤儿 push session（防泄漏）
+    this.staleCleanupCounter++
+    if (this.staleCleanupCounter >= 30) {
+      this.staleCleanupCounter = 0
+      this.cleanupStalePushSessions()
     }
 
     if (this.retryQueue.length > 0) {
@@ -187,6 +200,7 @@ export class TelegramService {
     const initialText = `👤 你: ${userText}\n\n🤖 秋山澪 AI 处理中...\n  ⏳ 正在分析请求`
     const progressMsgId = await this.sendMessageSync(chatId, initialText)
     if (progressMsgId === null) {
+      // sendMessageSync 失败（网络/服务器不可达），退化到直接处理 + outbox 回复
       try {
         const result = await this.agentService.processTextInput(msg.text, undefined, 'telegram', {
           telegramChatId: msg.chatId,
@@ -196,11 +210,17 @@ export class TelegramService {
         })
         if (result.reply) {
           this.enqueueReply(msg.chatId, result.reply)
-        } else if (result.error && result.error !== 'BUSY') {
+        } else if (result.error === 'BUSY') {
+          this.enqueueReply(msg.chatId, `👤 ${userText}\n\n⏳ 秋山澪正在处理其他请求，你的消息已加入队列，处理完成后会自动回复`)
+          insertOutbox({ chatId: String(chatId), msgType: 'reply', category: 'dialogue', message: userText })
+        } else if (result.error) {
           this.enqueueReply(msg.chatId, `❌ 错误: ${result.error}`)
+        } else {
+          this.enqueueReply(msg.chatId, '❌ 处理失败，未获得有效回复')
         }
       } catch (err) {
         log('ERROR', 'telegram_process_error', { error: String(err) })
+        this.enqueueReply(msg.chatId, '❌ 系统内部错误，请稍后重试')
       }
       return
     }
@@ -251,16 +271,28 @@ export class TelegramService {
         const finalText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n🤖 秋山澪: ${result.reply}`
         editor.cancel()
         this.enqueueEdit(chatId, progressMsgId, finalText)
+        log('INFO', 'telegram_reply_enqueued', { chatId, msgId: progressMsgId, replyLen: result.reply.length })
       } else if (result.error) {
         if (result.error === 'BUSY') {
+          const busyText = `👤 你: ${userText}\n\n⏳ 秋山澪正在处理其他请求，你的消息已加入队列，处理完会自动回复`
+          editor.cancel()
+          this.enqueueEdit(chatId, progressMsgId, busyText)
           insertOutbox({ chatId: String(chatId), msgType: 'reply', category: 'dialogue', message: userText })
           if (this.retryQueue.length < 100) {
             this.retryQueue.push(msg)
           }
           log('INFO', 'telegram_busy_requeue', { text: msg.text?.slice(0, 50), queueSize: this.retryQueue.length })
         } else {
-          this.enqueueReply(chatId, `❌ 错误: ${result.error}`)
+          const errorText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n❌ ${result.error}`
+          editor.cancel()
+          this.enqueueEdit(chatId, progressMsgId, errorText)
         }
+      } else {
+        // ★ 兜底：reply 和 error 都为空时不再静默失败
+        log('WARN', 'telegram_empty_reply_no_error', { chatId, text: userText.slice(0, 100) })
+        editor.cancel()
+        const fallbackText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n🤖 秋山澪: 嗯，我在呢。想聊什么？`
+        this.enqueueEdit(chatId, progressMsgId, fallbackText)
       }
     } catch (err) {
       log('ERROR', 'telegram_process_error', { error: String(err) })
@@ -279,11 +311,13 @@ export class TelegramService {
     // === 💬 对话 ===
     eventBus.on('agent.input.received', (p: any) => {
       if (p.source !== 'electron') return
-      this.handlePushInput(chatId, p.text)
+      // ★ 修复：透传 requestId 用于响应精确匹配
+      this.handlePushInput(chatId, p.text, p.requestId)
     })
     eventBus.on('agent.response.generated', (p: any) => {
       if (p.source !== 'electron') return
-      this.handlePushResponse(chatId, p.text)
+      // ★ 修复：通过 requestId 精确匹配到对应的 push session
+      this.handlePushResponse(chatId, p.text, p.requestId)
     })
 
     // === 🧬 进化 ===
@@ -437,53 +471,72 @@ export class TelegramService {
     })
   }
 
-  private async handlePushInput(chatId: number, text: string): Promise<void> {
-    this.cleanupPush()
+  private async handlePushInput(chatId: number, text: string, requestId: string): Promise<void> {
     const initialText = `👤 你: ${text}\n\n🤖 秋山澪 AI 处理中...\n  ⏳ 正在处理`
     const msgId = await this.sendMessageSync(chatId, initialText)
     if (msgId === null) return
 
-    this.pushMessageId = msgId
-    this.pushToolLines = []
-    this.pushLastUserText = text
+    const editor = new DebouncedEditor()
+    const toolLines: ToolLine[] = []
+
+    // 如果已存在相同 requestId 的 session（极端情况），先清理
+    if (this.pushSessions.has(requestId)) {
+      this.cleanupPushSession(requestId)
+    }
 
     const d1 = eventBus.on('agent.tool.invoked', (p: any) => {
-      if (this.pushMessageId === null) return
-      this.pushToolLines.push({ name: p.tool, status: 'running' })
-      this.refreshPushMessage(chatId, msgId, text)
+      const session = this.pushSessions.get(requestId)
+      if (!session) return
+      session.toolLines.push({ name: p.tool, status: 'running' })
+      this.refreshPushMessage(chatId, msgId, text, session.toolLines, editor)
     })
     const d2 = eventBus.on('agent.tool.completed', (p: any) => {
-      const line = this.pushToolLines.find((l) => l.name === p.tool && l.status === 'running')
+      const session = this.pushSessions.get(requestId)
+      if (!session) return
+      const line = session.toolLines.find((l) => l.name === p.tool && l.status === 'running')
       if (line) {
         line.status = 'done'
         line.latencyMs = (p as any).latencyMs || 0
       }
-      this.refreshPushMessage(chatId, msgId, text)
+      this.refreshPushMessage(chatId, msgId, text, session.toolLines, editor)
     })
     const d3 = eventBus.on('agent.tool.failed', (p: any) => {
-      const line = this.pushToolLines.find((l) => l.name === p.tool && l.status === 'running')
+      const session = this.pushSessions.get(requestId)
+      if (!session) return
+      const line = session.toolLines.find((l) => l.name === p.tool && l.status === 'running')
       if (line) line.status = 'failed'
-      this.refreshPushMessage(chatId, msgId, text)
+      this.refreshPushMessage(chatId, msgId, text, session.toolLines, editor)
     })
-    this.pushDisposers = [d1, d2, d3]
-    this.pushTypingTimer = setInterval(() => this.enqueueAction(chatId, 'typing'), 4000)
+
+    const typingTimer = setInterval(() => this.enqueueAction(chatId, 'typing'), 4000)
+
+    this.pushSessions.set(requestId, {
+      messageId: msgId,
+      userText: text,
+      toolLines,
+      editor,
+      typingTimer,
+      disposers: [d1, d2, d3],
+      createdAt: Date.now(),
+    })
   }
 
-  private async handlePushResponse(chatId: number, reply: string): Promise<void> {
-    if (this.pushMessageId !== null && this.pushLastUserText) {
-      const finalText = `👤 你: ${this.pushLastUserText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n🤖 秋山澪: ${reply}`
-      this.pushEditor.flushNow()
-      this.enqueueEdit(chatId, this.pushMessageId, finalText)
+  private async handlePushResponse(chatId: number, reply: string, requestId: string): Promise<void> {
+    const session = this.pushSessions.get(requestId)
+    if (session) {
+      const finalText = `👤 你: ${session.userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n🤖 秋山澪: ${reply}`
+      session.editor.flushNow()
+      this.enqueueEdit(chatId, session.messageId, finalText)
+      this.cleanupPushSession(requestId)
     } else {
       this.enqueueReply(chatId, reply)
     }
-    this.cleanupPush()
   }
 
-  private refreshPushMessage(chatId: number, msgId: number, userText: string): void {
+  private refreshPushMessage(chatId: number, msgId: number, userText: string, toolLines: ToolLine[], editor: DebouncedEditor): void {
     const lines: string[] = [`👤 你: ${userText}\n`]
     let hasRunning = false
-    for (const tl of this.pushToolLines) {
+    for (const tl of toolLines) {
       if (tl.status === 'running') {
         lines.push(`  ⏳ ${simplifyToolName(tl.name)}`)
         hasRunning = true
@@ -494,21 +547,27 @@ export class TelegramService {
         lines.push(`  ❌ ${simplifyToolName(tl.name)}`)
       }
     }
-    if (!hasRunning && this.pushToolLines.length > 0) lines.push('\n✍️ 正在生成回复...')
-    this.pushEditor.schedule(chatId, msgId, lines.join('\n'))
+    if (!hasRunning && toolLines.length > 0) lines.push('\n✍️ 正在生成回复...')
+    editor.schedule(chatId, msgId, lines.join('\n'))
   }
 
-  private cleanupPush(): void {
-    for (const d of this.pushDisposers) d()
-    this.pushDisposers = []
-    if (this.pushTypingTimer) {
-      clearInterval(this.pushTypingTimer)
-      this.pushTypingTimer = null
+  private cleanupPushSession(requestId: string): void {
+    const session = this.pushSessions.get(requestId)
+    if (!session) return
+    for (const d of session.disposers) d()
+    if (session.typingTimer) clearInterval(session.typingTimer)
+    session.editor.flushNow()
+    this.pushSessions.delete(requestId)
+  }
+
+  /** 清理 10 分钟前的孤儿 push session（防泄漏） */
+  private cleanupStalePushSessions(): void {
+    const now = Date.now()
+    for (const [requestId, session] of this.pushSessions) {
+      if (now - session.createdAt > 600_000) {
+        this.cleanupPushSession(requestId)
+      }
     }
-    this.pushEditor.cancel()
-    this.pushMessageId = null
-    this.pushToolLines = []
-    this.pushLastUserText = ''
   }
 
   // ── Outbox 写入 ──
@@ -518,7 +577,8 @@ export class TelegramService {
   }
 
   private enqueueEdit(chatId: number, targetMessageId: number, text: string): void {
-    insertOutbox({ chatId: String(chatId), msgType: 'edit', message: text, targetMessageId })
+    const inserted = insertOutbox({ chatId: String(chatId), msgType: 'edit', message: text, targetMessageId })
+    log('DEBUG', 'telegram_enqueue_edit', { chatId, targetMessageId, inserted, textLen: text.length })
   }
 
   private enqueueAction(chatId: number, action: string): void {
@@ -561,7 +621,10 @@ export class TelegramService {
   }
 
   stop(): void {
-    this.cleanupPush()
+    // 清理所有 push sessions
+    for (const requestId of this.pushSessions.keys()) {
+      this.cleanupPushSession(requestId)
+    }
     for (const chatId of this.activeSessions.keys()) {
       this.cleanupSession(chatId)
     }
@@ -578,7 +641,8 @@ export class TelegramService {
     if (!session) return
     if (session.typingTimer) clearInterval(session.typingTimer)
     for (const d of session.disposers) d()
-    session.editor.cancel()
+    // ★ 修复：flush 保留最终进度编辑，不 cancel 丢弃
+    session.editor.flushNow()
     this.activeSessions.delete(chatId)
   }
 }

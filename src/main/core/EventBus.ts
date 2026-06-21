@@ -1,4 +1,6 @@
 import { EventEmitter } from 'events'
+import type { Priority, OnOptions, EventMeta, StoredListener, EventStoreEngine } from './EventBusTypes'
+import { PRIORITY_ORDER } from './EventBusTypes'
 
 export type EventName =
   | 'task.lifecycle'
@@ -165,8 +167,11 @@ export class EventBus {
   private emitter = new EventEmitter()
   private static instance: EventBus
   private static readonly MAX_LISTENERS = 50
+  /** priority-ordered listeners per event */
+  private priorityListeners = new Map<string, Map<Priority, StoredListener<any>[]>>()
   /** 记录每个事件的订阅来源（label → disposer），用于诊断 */
   private subscriptionLabels = new Map<string, Set<string>>()
+  private store: EventStoreEngine | null = null
 
   static getInstance(): EventBus {
     if (!EventBus.instance) {
@@ -176,32 +181,53 @@ export class EventBus {
     return EventBus.instance
   }
 
-  on<E extends EventName>(event: E, listener: Listener<E>, label?: string): () => void {
-    const count = this.emitter.listenerCount(event)
-    if (count >= EventBus.MAX_LISTENERS) {
-      console.warn(`[EventBus] Listener leak warning: "${event}" has ${count} listeners (max ${EventBus.MAX_LISTENERS})`)
+  /** Enable event persistence. Call once at boot before any subscribers. */
+  enablePersistence(store: EventStoreEngine): void {
+    this.store = store
+  }
+
+  on<E extends EventName>(event: E, listener: Listener<E>, labelOrOpts?: string | OnOptions): () => void {
+    const opts: OnOptions = typeof labelOrOpts === 'string' ? { label: labelOrOpts } : (labelOrOpts ?? {})
+    const priority: Priority = opts.priority ?? 'normal'
+
+    // Track label for diagnostics
+    if (opts.label) {
+      if (!this.subscriptionLabels.has(event)) this.subscriptionLabels.set(event, new Set())
+      this.subscriptionLabels.get(event)!.add(opts.label)
     }
+
+    // Register with base emitter (ensures listenerCount works)
     this.emitter.on(event, listener)
+
+    // Store in priority bucket
+    if (!this.priorityListeners.has(event)) this.priorityListeners.set(event, new Map())
+    const buckets = this.priorityListeners.get(event)!
+    if (!buckets.has(priority)) buckets.set(priority, [])
+    buckets.get(priority)!.push({ listener, label: opts.label, filter: opts.filter })
+
     const disposer = () => {
       this.emitter.off(event, listener)
-    }
-    if (label) {
-      if (!this.subscriptionLabels.has(event)) {
-        this.subscriptionLabels.set(event, new Set())
+      const b = this.priorityListeners.get(event)?.get(priority)
+      if (b) {
+        const idx = b.findIndex((s) => s.listener === listener)
+        if (idx >= 0) b.splice(idx, 1)
       }
-      this.subscriptionLabels.get(event)!.add(label)
     }
     return disposer
   }
 
-  /** 注册订阅并自动加入 tracker */
-  track<E extends EventName>(event: E, listener: Listener<E>, tracker: SubscriptionTracker, label?: string): void {
-    const disposer = this.on(event, listener, label)
+  /** Register subscription with auto-cleanup via tracker */
+  track<E extends EventName>(event: E, listener: Listener<E>, tracker: SubscriptionTracker, labelOrOpts?: string | OnOptions): void {
+    const disposer = this.on(event, listener, labelOrOpts)
     tracker.add(disposer)
   }
 
   off<E extends EventName>(event: E, listener: Listener<E>): void {
     this.emitter.off(event, listener)
+    for (const buckets of this.priorityListeners.get(event)?.values() ?? []) {
+      const idx = buckets.findIndex((s) => s.listener === listener)
+      if (idx >= 0) buckets.splice(idx, 1)
+    }
   }
 
   once<E extends EventName>(event: E, listener: Listener<E>): () => void {
@@ -211,7 +237,38 @@ export class EventBus {
     }
   }
 
-  emit<E extends EventName>(event: E, payload: EventPayload[E]): void {
+  emit<E extends EventName>(event: E, payload: EventPayload[E], meta?: EventMeta): void {
+    // Persist if store configured
+    if (this.store) {
+      this.store
+        .append({
+          channel: event,
+          payload: JSON.stringify(payload),
+          source: meta?.source ?? null,
+          traceId: meta?.traceId ?? null,
+          timestamp: Date.now(),
+        })
+        .catch(() => {})
+    }
+
+    // Fire in priority order with optional filter
+    const buckets = this.priorityListeners.get(event)
+    if (buckets && buckets.size > 0) {
+      for (const p of PRIORITY_ORDER) {
+        const listeners = buckets.get(p)
+        if (!listeners) continue
+        for (const stored of listeners) {
+          if (stored.filter?.sources && meta?.source && !stored.filter.sources.includes(meta.source)) continue
+          try {
+            stored.listener(payload)
+          } catch (err) {
+            console.error(`[EventBus] ${event} handler error (${stored.label || 'unlabeled'}):`, err)
+          }
+        }
+      }
+    }
+
+    // Fallback: fire via base emitter for non-priority subscribers
     try {
       this.emitter.emit(event, payload)
     } catch (err) {
@@ -234,13 +291,15 @@ export class EventBus {
   }
 
   /** 诊断：当前所有活跃订阅概况 */
-  getStats(): Record<string, { count: number; labels: string[] }> {
-    const stats: Record<string, { count: number; labels: string[] }> = {}
-    const events = this.emitter.eventNames() as string[]
+  getStats(): Record<string, { count: number; labels: string[]; priorityBuckets: Record<string, number> }> {
+    const stats: Record<string, { count: number; labels: string[]; priorityBuckets: Record<string, number> }> = {}
+    const events = new Set([...this.emitter.eventNames().map(String), ...this.priorityListeners.keys()])
     for (const event of events) {
       const count = this.emitter.listenerCount(event)
       const labels = Array.from(this.subscriptionLabels.get(event) || [])
-      stats[event] = { count, labels }
+      const buckets: Record<string, number> = {}
+      for (const [p, listeners] of this.priorityListeners.get(event) ?? []) buckets[p] = listeners.length
+      stats[event] = { count, labels, priorityBuckets: buckets }
     }
     return stats
   }

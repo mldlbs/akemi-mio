@@ -10,7 +10,7 @@ import { BrowserWindow } from 'electron'
 import { log, createRequestId } from '../logger/Logger'
 import type { LlmService } from '../llm/LlmService'
 import type { TtsService } from '../tts/TtsService'
-import { ConversationContext, Message, buildSystemPrompt } from './context'
+import { ConversationContext, Message, buildSystemPrompt, trimOrphanedToolCallsFrom } from './context'
 import type { MemoryService } from '../memory/MemoryService'
 import { ChatResult } from '../llm/types'
 import { eventBus } from '../core/EventBus'
@@ -53,6 +53,7 @@ export class ChatExecutor {
   private sessionPlanIds: Set<string> = new Set()
   private errorClassifier: { classify: (error: string) => any }
   private consecutiveRetryableErrors = 0
+  private consecutiveInvalidRequest = 0
   private lastCheckpointStep = -1
   private lastCheckpointTime = 0
   private activeWorkflowModule: string | null = null
@@ -245,7 +246,9 @@ export class ChatExecutor {
             this.mainWindow?.webContents.send('ai:chunk', t)
           }
         }
-        this.context.trimOrphanedToolCalls()
+        // trim messages (the actual working array), not this.context which may
+        // be a fresh copy after refreshMemory() at line 239
+        trimOrphanedToolCallsFrom(messages)
         // 消耗 chat budget：每次 LLM 调用前检查
         const chatBudgetCheck = this.resourceBudget.checkLlmCall('chat')
         if (chatBudgetCheck) {
@@ -374,7 +377,12 @@ export class ChatExecutor {
       return 'continue'
     }
     if (c.category === 'INVALID_REQUEST') {
-      this.context.trimOrphanedToolCalls()
+      this.consecutiveInvalidRequest++
+      if (this.consecutiveInvalidRequest >= 3) {
+        log('ERROR', 'chat_invalid_request_exhausted', { step, count: this.consecutiveInvalidRequest })
+        return 'return'
+      }
+      trimOrphanedToolCallsFrom(m)
       m.push({ role: 'user', content: '【系统提示】请求格式有误，请重试。' })
       return 'continue'
     }

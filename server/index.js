@@ -1,4 +1,5 @@
 const express = require('express')
+const { Bot, GrammyError } = require('grammy')
 
 const PORT = process.env.PORT || 3003
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
@@ -8,157 +9,230 @@ const AUTHORIZED_USERS = new Set(
   (process.env.TELEGRAM_AUTHORIZED_USERS || '').split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
 )
 
+// ── HTTP proxy support ──
+if (process.env.HTTP_PROXY) {
+  try {
+    const { setGlobalDispatcher, ProxyAgent } = require('undici')
+    setGlobalDispatcher(new ProxyAgent(process.env.HTTP_PROXY))
+    console.log('[TG_BOT] using HTTP proxy:', process.env.HTTP_PROXY)
+  } catch (e) {
+    console.warn('[TG_BOT] failed to set HTTP proxy:', e.message)
+  }
+}
+
+const MAX_QUEUE = 1000
 const messageQueue = []
 const app = express()
 app.use(express.json())
 
-const CURL = '/usr/bin/curl -s --connect-timeout 8 -m 12 -x http://127.0.0.1:7890'
+// ── Grammy Bot ──
+const bot = new Bot(BOT_TOKEN, {
+  client: { timeout: parseInt(process.env.TG_API_TIMEOUT || '15000') },
+})
 
-function tgReq(method, params, cb, attempt) {
-  attempt = attempt || 1
-  var qs = ''
-  if (params) {
-    var parts = []
-    for (var k in params) parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k])))
-    qs = '?' + parts.join('&')
-  }
-  var cmd = CURL + ' "' + 'https://api.telegram.org/bot' + BOT_TOKEN + '/' + method + qs + '"'
-  require('child_process').exec(cmd, { timeout: 20000, encoding: 'utf-8' }, function(err, stdout) {
-    if (err) {
-      if (attempt < 3 && method === 'sendMessage') {
-        setTimeout(function() { tgReq(method, params, cb, attempt + 1) }, 2000)
-        return
+// 429 retry: 最多重试 3 次，按 Telegram 的 retry_after 等待
+async function safeApiCall(fn, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn()
+    } catch (err) {
+      if (err instanceof GrammyError && err.error_code === 429) {
+        const retryAfter = err.parameters?.retry_after ?? (i + 1) * 2
+        if (i < retries - 1) {
+          console.warn(`[RATE_LIMIT] retry ${i + 1}/${retries} after ${retryAfter}s`)
+          await new Promise(r => setTimeout(r, retryAfter * 1000))
+          continue
+        }
       }
-      if (cb) cb(err)
-      return
+      throw err
     }
-    try { var d = JSON.parse(stdout); if (cb) cb(null, d) } catch (e) { if (cb) cb(e) }
-  })
+  }
 }
 
-app.get('/health', (_req, res) => res.json({ ok: true, uptime: process.uptime(), queueLength: messageQueue.length }))
+// ── Bot commands registration ──
+safeApiCall(() =>
+  bot.api.setMyCommands([
+    { command: 'start', description: '开始对话' },
+    { command: 'help', description: '帮助信息' },
+    { command: 'status', description: '系统状态' },
+    { command: 'clear', description: '清除对话上下文' },
+  ])
+).catch(() => {})
+
+// ── Long polling ──
+let pollingOffset = 0
+let pollingActive = false
+
+async function pollLoop() {
+  if (pollingActive) return
+  pollingActive = true
+  try {
+    const updates = await bot.api.getUpdates({
+      offset: pollingOffset,
+      timeout: 30,
+      allowed_updates: ['message'],
+    })
+    for (const update of updates) {
+      pollingOffset = update.update_id + 1
+      const msg = update.message
+      if (!msg || !msg.text) continue
+      if (msg.from && msg.from.is_bot) continue
+
+      const chatId = msg.chat.id
+      const text = msg.text
+      const from = msg.from ? (msg.from.username || msg.from.first_name || 'unknown') : 'unknown'
+
+      // Authorization
+      if (AUTHORIZED_USERS.size > 0 && msg.from && !AUTHORIZED_USERS.has(msg.from.id)) {
+        safeApiCall(() => bot.api.sendMessage(chatId, '⛔ 未授权用户')).catch(() => {})
+        continue
+      }
+
+      // Commands
+      if (text === '/start') {
+        safeApiCall(() => bot.api.sendMessage(chatId, '你好！我是秋山澪 AI 助手。直接发送消息即可与我对话。')).catch(() => {})
+        continue
+      }
+      if (text === '/help') {
+        safeApiCall(() =>
+          bot.api.sendMessage(chatId, '🤖 *秋山澪 AI 助手*\n直接发送文字消息与我对话。\n/help - 显示此帮助\n/status - 系统状态\n/clear - 清除对话上下文', { parse_mode: 'Markdown' })
+        ).catch(() => {})
+        continue
+      }
+      if (text === '/status') {
+        safeApiCall(() => bot.api.sendMessage(chatId, `✅ 系统运行中\n队列: ${messageQueue.length}/${MAX_QUEUE}`)).catch(() => {})
+        continue
+      }
+      if (text === '/clear') {
+        if (messageQueue.length < MAX_QUEUE) {
+          messageQueue.push({ type: 'command', command: 'clear', chatId, userId: msg.from ? msg.from.id : undefined, timestamp: Date.now() })
+        }
+        safeApiCall(() => bot.api.sendMessage(chatId, '⏳ 清除请求已提交...')).catch(() => {})
+        continue
+      }
+
+      // Normal message — 队列满时丢弃最早的消息
+      if (messageQueue.length >= MAX_QUEUE) {
+        const dropped = messageQueue.shift()
+        console.warn('[QUEUE_DROP] dropped message from', dropped?.from || 'unknown')
+      }
+      messageQueue.push({
+        type: 'message',
+        messageId: msg.message_id,
+        chatId,
+        text,
+        from,
+        userId: msg.from ? msg.from.id : undefined,
+        timestamp: Date.now(),
+      })
+      console.log('[MSG] ' + from + ': ' + text.slice(0, 100))
+    }
+  } catch (err) {
+    const errMsg = String(err).slice(0, 200)
+    if (!errMsg.includes('timeout') && !errMsg.includes('TIMEOUT') && !errMsg.includes('socket hang up')) {
+      console.error('[POLL_ERR]', errMsg)
+    }
+  } finally {
+    pollingActive = false
+    setTimeout(pollLoop, 1000)
+  }
+}
+
+// ── HTTP API (consumed by desktop app) ──
+
+app.get('/health', (_req, res) => {
+  res.json({
+    ok: true,
+    uptime: process.uptime(),
+    queueLength: messageQueue.length,
+    maxQueue: MAX_QUEUE,
+    pollingActive,
+    botConnected: true,
+  })
+})
 
 app.get('/poll', (_req, res) => {
-  const batch = messageQueue.splice(0, messageQueue.length)
-  res.json({ messages: batch })
+  const batch = messageQueue.splice(0, Math.min(messageQueue.length, 50))
+  res.json({ messages: batch, queueRemaining: messageQueue.length })
 })
 
-app.post('/reply', function(req, res) {
-  var chatId = req.body.chatId
-  var text = req.body.text
+app.post('/reply', async (req, res) => {
+  const { chatId, text } = req.body
   if (!chatId || !text) return res.status(400).json({ error: 'chatId and text required' })
-  tgReq('sendMessage', { chat_id: chatId, text: text }, function(err) {
-    if (err) { console.error('[REPLY_ERR]', err.message); res.status(500).json({ error: err.message }) }
-    else res.json({ ok: true })
-  })
+  try {
+    await safeApiCall(() => bot.api.sendMessage(chatId, text))
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('[REPLY_ERR]', err.message)
+    res.status(500).json({ error: err.message })
+  }
 })
 
-// 发送一条独立消息，返回 messageId
-app.post('/send', function(req, res) {
-  var chatId = req.body.chatId
-  var text = req.body.text
-<<<<<<< Updated upstream
+app.post('/send', async (req, res) => {
+  const { chatId, text, parseMode } = req.body
   if (!chatId || !text) return res.status(400).json({ error: 'chatId and text required' })
-  var params = { chat_id: chatId, text: text }
-  if (req.body.parseMode) params.parse_mode = req.body.parseMode
-=======
-  var parseMode = req.body.parseMode
-  if (!chatId || !text) return res.status(400).json({ error: 'chatId and text required' })
-  var params = { chat_id: chatId, text: text }
-  if (parseMode) params.parse_mode = parseMode
->>>>>>> Stashed changes
-  tgReq('sendMessage', params, function(err, data) {
-    if (err) { console.error('[SEND_ERR]', err.message); res.status(500).json({ error: err.message }) }
-    else res.json({ ok: true, messageId: data.result && data.result.message_id })
-  })
+  try {
+    const result = await safeApiCall(() => bot.api.sendMessage(chatId, text, parseMode ? { parse_mode: parseMode } : {}))
+    res.json({ ok: true, messageId: result.message_id })
+  } catch (err) {
+    console.error('[SEND_ERR]', err.message)
+    res.status(500).json({ error: err.message })
+  }
 })
 
-// 编辑已有消息
-app.post('/edit', function(req, res) {
-  var chatId = req.body.chatId
-  var messageId = req.body.messageId
-  var text = req.body.text
-<<<<<<< Updated upstream
+app.post('/edit', async (req, res) => {
+  const { chatId, messageId, text, parseMode } = req.body
   if (!chatId || !messageId || text === undefined) return res.status(400).json({ error: 'chatId, messageId and text required' })
-  var params = { chat_id: chatId, message_id: messageId, text: text }
-  if (req.body.parseMode) params.parse_mode = req.body.parseMode
-=======
-  var parseMode = req.body.parseMode
-  if (!chatId || !messageId || text === undefined) return res.status(400).json({ error: 'chatId, messageId and text required' })
-  var params = { chat_id: chatId, message_id: messageId, text: text }
-  if (parseMode) params.parse_mode = parseMode
->>>>>>> Stashed changes
-  tgReq('editMessageText', params, function(err) {
-    if (err) console.error('[EDIT_ERR]', err.message)
-    res.json({ ok: !err, error: err ? err.message : undefined })
-  })
+  try {
+    await safeApiCall(() => bot.api.editMessageText(chatId, messageId, text, parseMode ? { parse_mode: parseMode } : {}))
+    res.json({ ok: true })
+  } catch (err) {
+    if (err.message && err.message.includes('message is not modified')) {
+      res.json({ ok: true, notModified: true })
+    } else {
+      console.error('[EDIT_ERR]', err.message)
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  }
 })
 
-// 发送 chat action（typing 等）
-app.post('/action', function(req, res) {
-  var chatId = req.body.chatId
-  var action = req.body.action || 'typing'
+app.post('/action', async (req, res) => {
+  const { chatId, action } = req.body
   if (!chatId) return res.status(400).json({ error: 'chatId required' })
-  tgReq('sendChatAction', { chat_id: chatId, action: action }, function(err) {
-    if (err) console.error('[ACTION_ERR]', err.message)
-    res.json({ ok: !err })
-  })
+  try {
+    await safeApiCall(() => bot.api.sendChatAction(chatId, action || 'typing'))
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('[ACTION_ERR]', err.message)
+    res.status(500).json({ ok: false })
+  }
 })
 
-app.listen(PORT, '0.0.0.0', function() {
+// ── Start ──
+
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('[TG_BOT] listening on 0.0.0.0:' + PORT)
   console.log('[TG_BOT] authorized users: ' + (AUTHORIZED_USERS.size || 'anyone'))
+  pollLoop()
+})
 
-  var offset = 0
-  function poll() {
-    tgReq('getUpdates', { offset: offset }, function(err, data) {
-      if (!err && data.ok && data.result && data.result.length) {
-        for (var i = 0; i < data.result.length; i++) {
-          var update = data.result[i]
-          offset = update.update_id + 1
-          var msg = update.message
-          if (!msg || !msg.text) continue
-<<<<<<< Updated upstream
-          // 跳过 bot 自己发出的消息，防止回复被回传给 LLM
-=======
-          // 过滤 bot 自己的消息，防止 reply 被当成用户消息回传给 LLM
->>>>>>> Stashed changes
-          if (msg.from && msg.from.is_bot) continue
-          var chatId = msg.chat.id
-          var text = msg.text
-          var from = msg.from ? (msg.from.username || msg.from.first_name || 'unknown') : 'unknown'
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('[TG_BOT] SIGTERM received, shutting down...')
+  server.close(() => {
+    console.log('[TG_BOT] server closed')
+    process.exit(0)
+  })
+  setTimeout(() => {
+    console.error('[TG_BOT] forced exit after timeout')
+    process.exit(1)
+  }, 5000)
+})
 
-          if (AUTHORIZED_USERS.size > 0 && msg.from && !AUTHORIZED_USERS.has(msg.from.id)) {
-            tgReq('sendMessage', { chat_id: chatId, text: '⛔ 未授权用户' })
-            continue
-          }
-          if (text === '/start') {
-            tgReq('sendMessage', { chat_id: chatId, text: '你好！我是秋山澪 AI 助手。直接发送消息即可与我对话。' })
-            continue
-          }
-          if (text === '/help') {
-            tgReq('sendMessage', { chat_id: chatId, text: '🤖 *秋山澪 AI 助手*\n直接发送文字消息与我对话。\n/help - 显示此帮助\n/status - 系统状态\n/clear - 清除对话上下文', parse_mode: 'Markdown' })
-            continue
-          }
-          if (text === '/status') {
-            tgReq('sendMessage', { chat_id: chatId, text: '✅ 系统运行中' })
-            continue
-          }
-          if (text === '/clear') {
-            messageQueue.push({ type: 'command', command: 'clear', chatId: chatId, userId: msg.from ? msg.from.id : undefined })
-            tgReq('sendMessage', { chat_id: chatId, text: '⏳ 清除请求已提交...' })
-            continue
-          }
-
-          messageQueue.push({ type: 'message', messageId: msg.message_id, chatId: chatId, text: text, from: from, userId: msg.from ? msg.from.id : undefined, timestamp: Date.now() })
-          console.log('[MSG] ' + from + ': ' + text.slice(0, 100))
-        }
-      } else if (err) {
-        var em = (err.message || err).slice(0, 200)
-        if (em.indexOf('timeout') === -1) console.error('[POLL_ERR]', em)
-      }
-      setTimeout(poll, 2000)
-    })
-  }
-  poll()
+process.on('SIGINT', () => {
+  console.log('[TG_BOT] SIGINT received, shutting down...')
+  server.close(() => {
+    console.log('[TG_BOT] server closed')
+    process.exit(0)
+  })
 })

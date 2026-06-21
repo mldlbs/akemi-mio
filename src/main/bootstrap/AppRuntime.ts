@@ -50,6 +50,7 @@ import { SyscallBus, HealthChecker } from '../core/lifecycle/index'
 import type { IModule, SubsystemState } from '../core/lifecycle/types'
 import { TelegramService } from '../telegram/TelegramService'
 import { OutboxWorker } from '../telegram/OutboxWorker'
+import { UumitService } from '../uumit/index'
 import { TaskRunner } from '../core/tasks/unified/TaskRunner'
 import { MetricsCollector } from '../observability/MetricsCollector'
 import { SystemStabilityScore } from '../observability/SystemStabilityScore'
@@ -57,6 +58,7 @@ import { ResourceBudget } from '../core/ResourceBudget'
 import { BudgetRebalancer } from '../core/BudgetRebalancer'
 import { LazyServiceGroup } from './LazyServiceGroup'
 import { SessionRecoveryManager } from '../agent/SessionRecoveryManager'
+import { EventStore } from '../core/event-sourcing/EventStore'
 
 /**
  * AppRuntime — 应用启动生命周期编排器。
@@ -98,6 +100,22 @@ export class AppRuntime {
     // === Stage 1: 核心基础设施 ===
     const stateManager = new StateManager()
     const mcpManager = new ServerManager()
+
+    // 注册 Playwright MCP 服务器，赋予 AI 浏览器自动化能力
+    try {
+      const pwMcpPath = require.resolve('@playwright/mcp')
+      mcpManager
+        .addServer({
+          name: 'playwright',
+          transport: 'stdio',
+          command: 'node',
+          args: [pwMcpPath, '--headless'],
+        })
+        .catch((err) => log('WARN', 'playwright_mcp_start_failed', { error: String(err) }))
+    } catch {
+      log('WARN', 'playwright_mcp_not_found')
+    }
+
     const llmService = new LlmService(mcpManager)
     const gpuEngine = new WhisperGpuEngine()
     const baiduEngine = new BaiduEngine()
@@ -360,6 +378,27 @@ export class AppRuntime {
     }
     systemBus.freeze()
     log('INFO', 'systembus_ready', { stats: systemBus.getStats() })
+
+    // SystemBus v2: EventBus bridge
+    systemBus.bridgeFrom(eventBus, [
+      {
+        event: 'evolution.cycle.completed',
+        command: 'evolution.adjust-priority',
+        mapPayload: (p) => ({ success: p.success, durationMs: p.durationMs }),
+      },
+      { event: 'budget.exhausted', query: 'resource-status' },
+    ])
+    log('INFO', 'systembus_bridge_ready')
+
+    // EventBus v2: 启用事件持久化
+    const store = new EventStore()
+    store
+      .init()
+      .then(() => {
+        eventBus.enablePersistence(store)
+        log('INFO', 'event_persistence_enabled')
+      })
+      .catch(() => {})
 
     setUpdateWindow(win)
     initUpdater()
@@ -663,6 +702,19 @@ export class AppRuntime {
       delayMs: 3000,
       fn: async () => {
         setupWallpaperListener(stateManager)
+      },
+    })
+
+    // UUMit 平台对接（延迟启动，等核心服务就绪）
+    this.lazyInit!.add({
+      name: 'uumit',
+      priority: 'normal',
+      delayMs: 5000,
+      fn: async () => {
+        const uumit = new UumitService(agentService)
+        await uumit.initialize()
+        await uumit.start()
+        log('INFO', 'uumit_service_started')
       },
     })
 

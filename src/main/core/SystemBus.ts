@@ -11,6 +11,16 @@
  * - Trace ID 传播（防无限递归 + 可观测性）
  */
 import { log, createRequestId } from '../logger/Logger'
+import type { EventBus, EventName } from './EventBus'
+
+// ───── 桥接配置 ─────
+
+export interface BridgeRule {
+  event: EventName
+  command?: CommandChannel
+  query?: QueryChannel
+  mapPayload?: (payload: any) => any
+}
 
 // ───── 类型 ─────
 
@@ -75,6 +85,41 @@ export class SystemBus {
   private queryHandlers = new Map<QueryChannel, Map<string, { handler: QueryHandler; reg: HandlerRegistration }>>()
   private commandHandlers = new Map<CommandChannel, Map<string, { handler: CommandHandler; reg: HandlerRegistration }>>()
   private frozen = false
+  private bridgeDisposers: (() => void)[] = []
+
+  // ───── 桥接 ─────
+
+  /**
+   * bridgeFrom — 当 EventBus 事件触发时，自动转发到 SystemBus command/query。
+   * 实现"事件→命令"闭环。
+   * 每个桥接规则返回一个 disposer，调用 stopBridge() 可统一解除。
+   */
+  bridgeFrom(eventBus: EventBus, rules: BridgeRule[]): void {
+    for (const rule of rules) {
+      const disposer = eventBus.on(rule.event, (payload: any) => {
+        const mapped = rule.mapPayload ? rule.mapPayload(payload) : payload
+
+        if (rule.command) {
+          this.execute(rule.command, mapped).catch((err: any) =>
+            log('WARN', 'bridge_command_failed', { event: rule.event, command: rule.command, error: String(err) }),
+          )
+        }
+
+        if (rule.query) {
+          this.query(rule.query, mapped).catch((err: any) =>
+            log('WARN', 'bridge_query_failed', { event: rule.event, query: rule.query, error: String(err) }),
+          )
+        }
+      })
+      this.bridgeDisposers.push(disposer)
+      log('DEBUG', 'systembus_bridge_registered', { event: rule.event, command: rule.command, query: rule.query })
+    }
+  }
+
+  stopBridge(): void {
+    for (const d of this.bridgeDisposers) d()
+    this.bridgeDisposers = []
+  }
 
   // ───── 注册 ─────
 

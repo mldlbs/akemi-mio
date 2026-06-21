@@ -374,30 +374,35 @@ export class ConversationContext {
    * 2. 部分孤儿：assistant 有 N 个 tool_calls，但只收到 M < N 条对应的 tool 消息
    */
   trimOrphanedToolCalls(): void {
-    for (let i = this._context.length - 1; i > 0; i--) {
-      const m = this._context[i]
-      if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
-        const toolMessages = this._context.slice(i + 1).filter((t) => t.role === 'tool')
-        if (toolMessages.length === 0) {
-          log('INFO', 'trim_orphaned_tool_calls_full', { index: i, tools: m.tool_calls.map((t) => t.function?.name) })
-          this._context.splice(i, 1)
-          continue
-        }
-        const toolCallIds = new Set(m.tool_calls.map((tc) => tc.id).filter(Boolean))
-        const respondedIds = new Set(toolMessages.map((t) => t.tool_call_id).filter(Boolean))
-        const orphanedIds = [...toolCallIds].filter((id) => !respondedIds.has(id))
-        if (orphanedIds.length > 0) {
-          log('INFO', 'trim_orphaned_tool_calls_partial', { index: i, orphaned_ids: orphanedIds })
-          m.tool_calls = m.tool_calls.filter((tc) => !orphanedIds.includes(tc.id))
-          if (m.tool_calls.length === 0) {
-            this._context.splice(i, 1)
-          }
-        }
-      }
-    }
+    trimOrphanedToolCallsFrom(this._context)
   }
 
   getMessages(): Message[] {
     return this._context
+  }
+}
+
+/** 从任意消息数组中移除孤立的 assistant(tool_calls) 消息 */
+export function trimOrphanedToolCallsFrom(messages: Message[]): void {
+  for (let i = messages.length - 1; i > 0; i--) {
+    const m = messages[i]
+    if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+      const toolMessages = messages.slice(i + 1).filter((t) => t.role === 'tool')
+      if (toolMessages.length === 0) {
+        log('INFO', 'trim_orphaned_tool_calls_full', { index: i, tools: m.tool_calls.map((t) => t.function?.name) })
+        messages.splice(i, 1)
+        continue
+      }
+      const toolCallIds = new Set(m.tool_calls.map((tc) => tc.id).filter(Boolean))
+      const respondedIds = new Set(toolMessages.map((t) => t.tool_call_id).filter(Boolean))
+      const orphanedIds = [...toolCallIds].filter((id) => !respondedIds.has(id))
+      if (orphanedIds.length > 0) {
+        log('INFO', 'trim_orphaned_tool_calls_partial', { index: i, orphaned_ids: orphanedIds })
+        m.tool_calls = m.tool_calls.filter((tc) => !orphanedIds.includes(tc.id))
+        if (m.tool_calls.length === 0) {
+          messages.splice(i, 1)
+        }
+      }
+    }
   }
 }

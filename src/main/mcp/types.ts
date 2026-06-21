@@ -59,4 +59,6 @@ export interface MCPServerConfig {
   rawCommand?: string
   /** 请求超时（毫秒），默认 30000 */
   requestTimeoutMs?: number
+  /** 自定义 HTTP 请求头，用于 SSE/HTTP 传输模式（如 X-API-Key 认证） */
+  headers?: Record<string, string>
 }
