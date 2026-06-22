@@ -229,9 +229,50 @@ export class LlmService {
     try {
       const body = await res.text()
       log('ERROR', 'llm_api_error_body', { request_id: requestId, status, elapsed_ms: elapsedMs, body: body.slice(0, 1000) })
+      // 400 时 dump 消息链诊断
+      if (status === 400) {
+        this._dumpToolChain(this.lastSentMessages || [], requestId)
+      }
     } catch {
       log('ERROR', 'llm_api_error', { request_id: requestId, status, elapsed_ms: elapsedMs })
     }
+  }
+
+  /** 发送前暂存 messages 快照，供错误诊断用 */
+  private lastSentMessages: Message[] | null = null
+
+  private _dumpToolChain(m: Message[], requestId?: string): void {
+    let assCalls = 0,
+      toolMsgs = 0,
+      userMsgs = 0,
+      orphanedCalls = 0
+    const last20: string[] = []
+    for (let i = 0; i < m.length; i++) {
+      const msg = m[i]
+      if (msg.role === 'assistant' && msg.tool_calls?.length) {
+        assCalls++
+        // 判断是否有后续 tool 消息
+        const nextTool = m.slice(i + 1).some((t) => t.role === 'tool')
+        if (!nextTool) orphanedCalls++
+      }
+      if (msg.role === 'tool') toolMsgs++
+      if (msg.role === 'user') userMsgs++
+      if (i >= m.length - 20) {
+        const preview = (msg.content || '').slice(0, 60).replace(/\n/g, ' ')
+        const tc = msg.tool_calls?.length ? ` tc:[${msg.tool_calls.map((t) => t.function?.name).join(',')}]` : ''
+        last20.push(`  [${i}] ${msg.role}${tc} ${preview}`)
+      }
+    }
+    log('ERROR', 'llm_tool_chain_diag', {
+      request_id: requestId,
+      total_msgs: m.length,
+      assistant_with_tool_calls: assCalls,
+      tool_messages: toolMsgs,
+      user_messages: userMsgs,
+      orphaned_tool_call_blocks: orphanedCalls,
+    })
+    // dump last 20 messages
+    log('ERROR', 'llm_last_20_msgs', { request_id: requestId, msgs: last20.join('\n') })
   }
 
   private async _readSSEStream(res: Response, onChunk: ChunkCallback, requestId?: string, t0?: number): Promise<string> {
@@ -293,6 +334,8 @@ export class LlmService {
     for (let attempt = 1; attempt <= 3; attempt++) {
       // ★ 底层兜底：每次发请求前自动清理孤儿 tool_calls
       trimOrphanedToolCallsFrom(messages)
+      // 保存快照供 400 诊断
+      this.lastSentMessages = messages
       // 外部中止信号已触发，立即放弃当前请求
       if (externalSignal?.aborted) return { error: 'ABORTED' }
 
@@ -497,11 +540,17 @@ export class LlmService {
       }
 
       if (validToolCalls.length > 0) {
-        messages.push({
-          role: 'assistant',
-          content: full || '',
-          tool_calls: validToolCalls.map((tc) => ({ ...tc, result: undefined })),
-        })
+        // 过滤空 id — 空 id 的 tool_calls 会导致 DeepSeek 400 ("insufficient tool messages")
+        const sendableToolCalls = validToolCalls.filter((tc) => tc.id && tc.id.trim()).map((tc) => ({ ...tc, result: undefined }))
+        if (sendableToolCalls.length > 0) {
+          messages.push({
+            role: 'assistant',
+            content: full || '',
+            tool_calls: sendableToolCalls,
+          })
+        } else {
+          messages.push({ role: 'assistant', content: full || '（工具调用参数解析失败）' })
+        }
       } else {
         messages.push({ role: 'assistant', content: full || '（工具调用参数解析失败）' })
       }
@@ -556,8 +605,13 @@ export class LlmService {
       }
 
       // 有合法 tool_calls 时才推 assistant(tool_calls)
-      if (validToolCalls.length > 0) {
-        messages.push({ role: 'assistant', content: textContent, tool_calls: validToolCalls.map((tc) => ({ ...tc, result: undefined })) })
+      // 过滤空 id — 空 id 的 tool_calls 会导致 DeepSeek 400 ("insufficient tool messages")
+      const sendableToolCalls = validToolCalls.filter((tc) => tc.id && tc.id.trim()).map((tc) => ({ ...tc, result: undefined }))
+      if (sendableToolCalls.length > 0) {
+        messages.push({ role: 'assistant', content: textContent, tool_calls: sendableToolCalls })
+      } else if (validToolCalls.length > 0) {
+        // 全部因空 id 被过滤，回退为纯文本
+        log('WARN', 'tool_calls_empty_id_filtered', { request_id: requestId, count: validToolCalls.length })
       } else {
         // 全部无效时回退为纯文本回复
         messages.push({ role: 'assistant', content: textContent || '（工具调用参数解析失败）' })

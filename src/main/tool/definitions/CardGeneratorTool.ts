@@ -3,11 +3,11 @@ import { WORKSPACE } from '../../config'
 import { readFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 
-/** 候选字体路径（按优先级） */
+/** 候选字体路径（按优先级：小体积优先） */
 const FONT_PATHS = [
+  'C:/Windows/Fonts/simhei.ttf',
   'C:/Windows/Fonts/NotoSansSC-VF.ttf',
   'C:/Windows/Fonts/msyh.ttc',
-  'C:/Windows/Fonts/simhei.ttf',
   'C:/Windows/Fonts/simsun.ttc',
 ]
 

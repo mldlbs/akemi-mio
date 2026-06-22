@@ -141,7 +141,7 @@ export class ChatExecutor {
   private refreshMemory(): void {
     if (!this.memoryService) return
     const memCtx = this.memoryService.getFormattedContext()
-    this.obsLogger?.logMemory(this.lastUserText, memCtx.split('\n\n').filter((s) => s.trim().length > 0).length)
+    this.obsLogger?.logMemory(this.lastUserText, memCtx)
     const reflectCtx = this.reflectLoop.getFormattedContext()
     const skillModules = this.skillManager?.getEnabledPromptModules() || []
     const extraModules = skillModules.length > 0 ? skillModules : undefined
@@ -175,6 +175,9 @@ export class ChatExecutor {
     this.memoryService?.recordInteraction()
     this.memoryService?.setLastUserText(text)
     this.lastUserText = text
+    // 重置跨请求计数器
+    this.consecutiveRetryableErrors = 0
+    this.consecutiveInvalidRequest = 0
     this.obsLogger = new ObservabilityLogger(rid)
     this.obsLogger.logInput(text, source)
     // 先刷新 memory（可能重建 context），再加用户消息，确保消息不丢失
@@ -197,6 +200,7 @@ export class ChatExecutor {
 
     try {
       const messages: Message[] = this.workingMemory.getMessages()
+      trimOrphanedToolCallsFrom(messages)
       const ctx = new RunContext(rid)
       this.runContext = ctx
       const reply = await this.toolLoop(messages, ctx, rid, source)
@@ -254,6 +258,14 @@ export class ChatExecutor {
   private async toolLoop(messages: Message[], ctx: RunContext, requestId: string, source: string): Promise<string> {
     ctx.transition(RunState.RUNNING)
     const MAX_TURNS = 300
+    /** 诊断：记录 LLM 返回 tool_calls 但未执行的路径 */
+    const orphanSources: Record<string, number> = {}
+    const tryRecordOrphan = (reason: string, msgsBefore: number) => {
+      if (messages.length > msgsBefore) {
+        orphanSources[reason] = (orphanSources[reason] || 0) + 1
+        log('WARN', 'tool_orphan_born', { step: ctx.step, reason, requestId })
+      }
+    }
     try {
       for (let i = 0; i < MAX_TURNS; i++) {
         ctx.step = i
@@ -290,6 +302,7 @@ export class ChatExecutor {
         this.obsLogger?.logLlmTrace('before', `step=${i} msgs=${messages.length}`)
         this.obsLogger?.logPrompt(messages)
         const tBeforeLlm = Date.now()
+        const msgsBeforeCall = messages.length // 锚定：LLM 可能在 messages 中推入 assistant(tool_calls)
         const result = await this.llmService.chatWithTools(messages, requestId, 120000, onToken)
         const llmMs = Date.now() - tBeforeLlm
         this.obsLogger?.logLlmTrace(
@@ -315,6 +328,7 @@ export class ChatExecutor {
           ctx.consecutiveTimeouts = 0
           this.consecutiveRetryableErrors = 0
           if (ctx.interruptFlag && !ctx.guardrailStop) {
+            tryRecordOrphan('interrupt_flag', msgsBeforeCall)
             this.obsLogger?.logExit('interrupt_flag')
             return ''
           }
@@ -327,6 +341,7 @@ export class ChatExecutor {
           if (this.thinkStageCount < 3) {
             const thinkResult = runThink(result.toolCalls, result.reply, messages, ctx)
             if (thinkResult.injected) {
+              tryRecordOrphan('think_injected', msgsBeforeCall)
               this.thinkStageCount++
               continue
             }
@@ -334,6 +349,7 @@ export class ChatExecutor {
           // ── GoalGuardrail 拦截：在 spend 之前，在 executeAll 之前 ──
           const guardDecision = await this.goalGuardrail.checkBatch(result.toolCalls, messages, ctx)
           if (guardDecision.status === 'denied') {
+            tryRecordOrphan('guardrail_denied', msgsBeforeCall)
             this.obsLogger?.logExit('guardrail_denied', `retry=${guardDecision.canRetry}`)
             if (!guardDecision.canRetry) return '' // 硬拒绝 → 终止本轮
             continue // 软拒绝 → 不 spend/不执行，LLM 重试
@@ -438,7 +454,8 @@ export class ChatExecutor {
         return 'return'
       }
       trimOrphanedToolCallsFrom(m)
-      this.workingMemory.scratchpad.add('error_hint', '请求格式有误，请重试。')
+      // 只清理孤儿 tool_calls，不改动消息链 — m === workingMemory.context.context，修改它会破坏跨请求消息
+      this.workingMemory.scratchpad.add('error_hint', '请求格式有误，已清理孤儿 tool_calls，请重试。')
       return 'continue'
     }
     if (c.category === 'TOOL_SCHEMA_ERROR') {

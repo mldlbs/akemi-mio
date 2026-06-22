@@ -25,11 +25,19 @@ export class ObservabilityLogger {
     this.entries.push({ tag: 'INPUT', body: text || '(empty)' })
   }
 
-  logMemory(query: string, hitCount: number): void {
+  logMemory(query: string, memCtx: string): void {
     if (!isEnabled()) return
+    // 解析各段是否命中
+    const hasPermanent = memCtx.includes('【重要的记忆】')
+    const hasScored = memCtx.includes('你记得以下')
+    const hasVector = memCtx.includes('相关的历史记忆')
+    const hasSummary = memCtx.includes('对话总结')
+    const hasInteractions = memCtx.includes('你们之前聊过')
+    const hasKg = memCtx.includes('知识图谱')
+    const breakdown = `permanent:${hasPermanent}|scored:${hasScored}|vector:${hasVector}|summary:${hasSummary}|interactions:${hasInteractions}|kg:${hasKg}`
     this.entries.push({
       tag: 'MEMORY',
-      body: `query: "${query || '(empty)'}"\nhit_count: ${hitCount}`,
+      body: `query: "${query || '(empty)'}"\n${breakdown}`,
     })
   }
 

@@ -119,16 +119,7 @@ export class TelegramService {
     // 所有 DebouncedEditor 共享 baseUrl
     DebouncedEditor.prototype.setBaseUrl(this.baseUrl)
 
-    try {
-      const res = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(5000) })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const info = await res.json()
-      log('INFO', 'telegram_server_connected', { url: this.baseUrl, queueLength: info.queueLength })
-    } catch (err) {
-      log('WARN', 'telegram_server_unreachable', { url: this.baseUrl, error: String(err) })
-      return
-    }
-
+    // push chatId 不论 health 是否可达都读取（push 路径走本地发送）
     const rawChatId = credentialsManager.get('telegram_chat_id') || process.env.TELEGRAM_CHAT_ID
     if (rawChatId) {
       this.pushChatId = parseInt(rawChatId, 10)
@@ -141,6 +132,41 @@ export class TelegramService {
       }
     }
 
+    try {
+      const res = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(5000) })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const info = await res.json()
+      log('INFO', 'telegram_server_connected', { url: this.baseUrl, queueLength: info.queueLength })
+      this.startPolling()
+    } catch (err) {
+      log('WARN', 'telegram_server_unreachable', { url: this.baseUrl, error: String(err) })
+      // health 失败时后台重试，不阻塞初始化
+      this.scheduleReconnect()
+    }
+  }
+
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectAttempts = 0
+
+  private scheduleReconnect(): void {
+    const delay = Math.min(30000 + this.reconnectAttempts * 10000, 120000)
+    log('INFO', 'telegram_reconnect_scheduled', { delay, attempt: this.reconnectAttempts + 1 })
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null
+      try {
+        const res = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(5000) })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        this.reconnectAttempts = 0
+        log('INFO', 'telegram_reconnected', { url: this.baseUrl })
+        this.startPolling()
+      } catch {
+        this.reconnectAttempts++
+        this.scheduleReconnect()
+      }
+    }, delay)
+  }
+
+  private startPolling(): void {
     this.isRunning = true
     this.pollTimer = setInterval(() => this.poll(), 1000)
     log('INFO', 'telegram_polling_started', { url: this.baseUrl, pushChatId: this.pushChatId })
@@ -632,6 +658,10 @@ export class TelegramService {
     if (this.pollTimer) {
       clearInterval(this.pollTimer)
       this.pollTimer = null
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
     }
     log('INFO', 'telegram_polling_stopped')
   }

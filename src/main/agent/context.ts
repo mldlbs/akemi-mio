@@ -403,13 +403,22 @@ export function trimOrphanedToolCallsFrom(messages: Message[]): void {
         messages.splice(i, 1)
         continue
       }
-      const toolCallIds = new Set(m.tool_calls.map((tc) => tc.id).filter(Boolean))
-      const respondedIds = new Set(toolMessages.map((t) => t.tool_call_id).filter(Boolean))
+      // 保留空字符串 id，避免 DeepSeek 400 ("insufficient tool messages")
+      const toolCallIds = new Set(m.tool_calls.map((tc) => tc.id).filter((id) => id !== undefined && id !== null))
+      const respondedIds = new Set(toolMessages.map((t) => t.tool_call_id).filter((id) => id !== undefined && id !== null))
       const orphanedIds = [...toolCallIds].filter((id) => !respondedIds.has(id))
       if (orphanedIds.length > 0) {
         log('INFO', 'trim_orphaned_tool_calls_partial', { index: i, orphaned_ids: orphanedIds })
         m.tool_calls = m.tool_calls.filter((tc) => !orphanedIds.includes(tc.id))
         if (m.tool_calls.length === 0) {
+          messages.splice(i, 1)
+        }
+      }
+      // 若有 tool_call 的 id 为空字符串且无对应 tool 消息，整个 assistant 块应被清理
+      if (m.tool_calls && m.tool_calls.some((tc) => !tc.id)) {
+        const totalToolMsgs = messages.slice(i + 1).filter((t) => t.role === 'tool')
+        if (totalToolMsgs.length === 0) {
+          log('INFO', 'trim_orphaned_tool_calls_empty_id', { index: i, tools: m.tool_calls.map((t) => t.function?.name) })
           messages.splice(i, 1)
         }
       }
