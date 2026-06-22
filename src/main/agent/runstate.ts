@@ -63,6 +63,8 @@ export class RunContext {
   forceContinueStagnation = 0
   /** 抑制强制续行（tryRun 分析模式用） */
   suppressForceContinue = false
+  /** Guardrail 请求终止：放行最后一轮 LLM 回复后退出 */
+  guardrailStop = false
   softReplyInjected = false
   /** 前几轮已经口头汇报过的内容摘要 */
   spokenReplies: string[] = []

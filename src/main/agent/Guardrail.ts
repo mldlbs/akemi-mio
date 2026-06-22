@@ -60,6 +60,9 @@ export class Guardrail {
    * 副作用：注入系统消息到 messages，更新 ctx 计数器。
    */
   apply(toolResults: ToolResult[], toolCalls: ToolCallInfo[], messages: Message[], ctx: RunContext): GuardrailResult {
+    // Guardrail 已请求终止：跳过所有检查，放行最后一轮 LLM 回复
+    if (ctx.guardrailStop) return { workflowActivation: null, injected: false }
+
     let injected = false
 
     // 1. 工作流激活检测
@@ -151,7 +154,7 @@ export class Guardrail {
           content:
             '【系统强制】已连续多次只读卡死，当前状态无法继续推进。立即停止所有读取操作，基于已获取的信息给出当前最佳回答或总结。不要继续尝试读取新文件。',
         })
-        ctx.interrupt('guardrail_readonly_stuck_exceeded')
+        ctx.guardrailStop = true
       } else if (ctx.readonlyStuckCount >= 3) {
         messages.push({
           role: 'user',
@@ -219,13 +222,14 @@ export class Guardrail {
    * 累计 >= 3 次注入诊断消息；>= 5 次直接中断 toolLoop
    */
   private checkConsecutiveToolErrors(toolResults: ToolResult[], messages: Message[], ctx: RunContext): boolean {
+    if (ctx.guardrailStop) return false
     const anyError = toolResults.some((r) => !r.success)
     if (anyError) {
       ctx.consecutiveToolErrors++
     } else {
       ctx.consecutiveToolErrors = 0
     }
-    if (!ctx.suppressForceContinue) {
+    if (!ctx.suppressForceContinue && !ctx.guardrailStop) {
       if (ctx.consecutiveToolErrors >= 5) {
         ctx.consecutiveToolErrors = 0
         log('WARN', 'guardrail_diagnostic_trigger', { consecutive_errors: 5 })
@@ -233,7 +237,7 @@ export class Guardrail {
           role: 'user',
           content: '【系统强制】连续 5 次工具调用全部失败，当前路径不可行。请基于已获取的信息输出当前结论或总结，不要继续重试。',
         })
-        ctx.interrupt('guardrail_consecutive_errors_exceeded')
+        ctx.guardrailStop = true
         return true
       }
       if (ctx.consecutiveToolErrors >= 3) {

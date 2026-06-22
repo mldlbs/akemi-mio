@@ -78,6 +78,20 @@ export class ObservabilityLogger {
     })
   }
 
+  /** 记录提前退出的原因（return '' 路径标记） */
+  logExit(reason: string, detail?: string): void {
+    if (!isEnabled()) return
+    const tag = `EXIT:${reason}`
+    this.entries.push({ tag, body: detail || '' })
+    log('WARN', 'chat_exit', { requestId: this.requestId, reason, detail })
+  }
+
+  /** 记录 LLM 调用断点 */
+  logLlmTrace(phase: 'before' | 'after' | 'result', payload: string): void {
+    if (!isEnabled()) return
+    log('INFO', 'llm_trace', { requestId: this.requestId, phase, payload })
+  }
+
   flush(): void {
     if (!isEnabled() || !this.entries.length) return
     const block = this.entries.map((e) => `${e.tag}:\n${e.body}`).join('\n\n')

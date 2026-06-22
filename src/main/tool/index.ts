@@ -13,6 +13,7 @@ import { analyzeTaskTool, listWorkflowsTool } from './definitions/WorkflowTools'
 import { listSkillsTool, enableSkillTool, disableSkillTool } from './definitions/SkillTools'
 import { writingSystemTool } from './definitions/WritingTool'
 import { generateImageTool } from './definitions/ImageGenerationTool'
+import { cardGeneratorTool } from './definitions/CardGeneratorTool'
 import { rememberProcedureTool, listProceduresTool } from './definitions/ProceduralMemoryTool'
 
 export function getAllTools(): Tool[] {
@@ -40,6 +41,7 @@ export function getAllTools(): Tool[] {
     disableSkillTool as Tool,
     writingSystemTool as Tool,
     generateImageTool as Tool,
+    cardGeneratorTool as Tool,
     rememberProcedureTool as Tool,
     listProceduresTool as Tool,
   ]

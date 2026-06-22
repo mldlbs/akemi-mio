@@ -203,6 +203,7 @@ export class ChatExecutor {
       if (!reply) {
         this.obsLogger?.logOutput('NO_REPLY', Date.now() - t0)
         this.obsLogger?.flush()
+        log('WARN', 'chat_no_reply', { request_id: rid, source, duration_ms: Date.now() - t0 })
         return { error: 'NO_REPLY' }
       }
       this.workingMemory.addAssistant(reply)
@@ -256,8 +257,9 @@ export class ChatExecutor {
     try {
       for (let i = 0; i < MAX_TURNS; i++) {
         ctx.step = i
-        if (ctx.interruptFlag) {
+        if (ctx.interruptFlag && !ctx.guardrailStop) {
           log('INFO', 'chat_toolLoop_interrupted', { step: i })
+          this.obsLogger?.logExit('interrupted')
           return ''
         }
         if (i > 0 && i % 5 === 0 && this.memoryService) {
@@ -280,21 +282,42 @@ export class ChatExecutor {
         const chatBudgetCheck = this.resourceBudget.checkLlmCall('chat')
         if (chatBudgetCheck) {
           log('WARN', 'chat_budget_exhausted', { step: i, check: chatBudgetCheck })
+          this.obsLogger?.logExit('budget_exhausted', JSON.stringify(chatBudgetCheck))
           this.workingMemory.scratchpad.add('system_hint', '对话预算已耗尽，请总结当前进展并结束。')
           return ''
         }
         this.resourceBudget.consumeLlmCall('chat')
+        this.obsLogger?.logLlmTrace('before', `step=${i} msgs=${messages.length}`)
         this.obsLogger?.logPrompt(messages)
+        const tBeforeLlm = Date.now()
         const result = await this.llmService.chatWithTools(messages, requestId, 120000, onToken)
+        const llmMs = Date.now() - tBeforeLlm
+        this.obsLogger?.logLlmTrace(
+          'result',
+          `ms=${llmMs} reply_len=${(result.reply || '').length} tools=${result.toolCalls?.length || 0} error=${result.error || 'null'}`,
+        )
 
         const err = this.handleLlmError(result.error, i, messages, ctx)
-        if (err === 'return') return ''
+        if (err === 'return') {
+          this.obsLogger?.logExit('llm_error', result.error)
+          return ''
+        }
         if (err === 'continue') continue
+
+        // Guardrail 请求终止：放行本轮 LLM 回复，然后退出
+        if (ctx.guardrailStop) {
+          const finalReply = result.reply || '操作已完成。'
+          this.obsLogger?.logExit('guardrail_stop', `reply_len=${finalReply.length}`)
+          return finalReply
+        }
 
         if (result.toolCalls && result.toolCalls.length > 0) {
           ctx.consecutiveTimeouts = 0
           this.consecutiveRetryableErrors = 0
-          if (ctx.interruptFlag) return ''
+          if (ctx.interruptFlag && !ctx.guardrailStop) {
+            this.obsLogger?.logExit('interrupt_flag')
+            return ''
+          }
           // ── [OBSERVE] 查询流程记忆和失败模式 ──
           runObserve(result.toolCalls, messages, ctx, {
             proceduralMemory: this.proceduralMemory,
@@ -311,6 +334,7 @@ export class ChatExecutor {
           // ── GoalGuardrail 拦截：在 spend 之前，在 executeAll 之前 ──
           const guardDecision = await this.goalGuardrail.checkBatch(result.toolCalls, messages, ctx)
           if (guardDecision.status === 'denied') {
+            this.obsLogger?.logExit('guardrail_denied', `retry=${guardDecision.canRetry}`)
             if (!guardDecision.canRetry) return '' // 硬拒绝 → 终止本轮
             continue // 软拒绝 → 不 spend/不执行，LLM 重试
           }
@@ -377,10 +401,13 @@ export class ChatExecutor {
           continue
         }
         ctx.transition(RunState.COMPLETED)
-        return result.reply || ''
+        const finalReply = result.reply || ''
+        if (!finalReply) this.obsLogger?.logExit('empty_llm_reply', `step=${i}`)
+        return finalReply
       }
     } finally {
     }
+    this.obsLogger?.logExit('max_turns_exceeded')
     return '操作次数过多，请重新尝试'
   }
 
