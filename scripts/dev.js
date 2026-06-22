@@ -14,6 +14,10 @@ const child = spawn(process.execPath, [electronVite, 'dev'], {
   cwd: root,
   stdio: 'inherit',
   windowsHide: true,
+  env: {
+    ...process.env,
+    AKEMI_MIO_OBSERVABILITY: process.env.AKEMI_MIO_OBSERVABILITY || '',
+  },
 })
 
 child.on('exit', (code, signal) => {

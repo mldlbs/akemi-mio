@@ -22,6 +22,7 @@ import { GoalGuardrail } from '../governance/GoalGuardrail'
 import { ToolScheduler, type ToolResult } from './ToolScheduler'
 import type { TokenAccount } from '../cognitive/TokenEconomy'
 import { SkillManager } from '../skill'
+import { WorkingMemory } from './WorkingMemory'
 import { createMessageId, insertMessage, type StoredMessage } from '../db/messages'
 import { RunState, RunContext } from './runstate'
 import { SessionRecoveryManager } from './SessionRecoveryManager'
@@ -33,12 +34,13 @@ import type { FailureAnalyzer } from './FailureAnalyzer'
 import { runObserve } from './ObserveStage'
 import { runThink } from './ThinkStage'
 import { runReflect } from './ReflectStage'
+import { ObservabilityLogger } from '../observability/ObservabilityLogger'
 
 export class ChatExecutor {
   private llmService: LlmService
   private ttsService: TtsService
   private mainWindow: BrowserWindow | null
-  private context: ConversationContext
+  private workingMemory: WorkingMemory
   private toolScheduler: ToolScheduler
   private guardrail: Guardrail
   private planManager: PlanManagerLike
@@ -62,6 +64,8 @@ export class ChatExecutor {
   private proceduralMemory: ProceduralMemory | null = null
   private failureAnalyzer: FailureAnalyzer | null = null
   private thinkStageCount = 0
+  private obsLogger: ObservabilityLogger | null = null
+  private lastUserText = ''
 
   constructor(
     llmService: LlmService,
@@ -82,7 +86,7 @@ export class ChatExecutor {
     this.llmService = llmService
     this.ttsService = ttsService
     this.mainWindow = mainWindow
-    this.context = new ConversationContext()
+    this.workingMemory = new WorkingMemory('chat')
     this.toolScheduler = toolScheduler
     this.guardrail = guardrail
     this.planManager = planManager
@@ -122,7 +126,7 @@ export class ChatExecutor {
   }
 
   getContext(): ConversationContext {
-    return this.context
+    return this.workingMemory.context
   }
   getSessionPlanIds(): Set<string> {
     return this.sessionPlanIds
@@ -137,13 +141,14 @@ export class ChatExecutor {
   private refreshMemory(): void {
     if (!this.memoryService) return
     const memCtx = this.memoryService.getFormattedContext()
+    this.obsLogger?.logMemory(this.lastUserText, memCtx.split('\n\n').filter((s) => s.trim().length > 0).length)
     const reflectCtx = this.reflectLoop.getFormattedContext()
     const skillModules = this.skillManager?.getEnabledPromptModules() || []
     const extraModules = skillModules.length > 0 ? skillModules : undefined
     const wfModule = this.activeWorkflowModule
     const allExtraModules = wfModule ? [wfModule, ...(extraModules || [])] : extraModules
     if (memCtx || reflectCtx || allExtraModules || this.identityContext) {
-      this.context = new ConversationContext(memCtx, 2000, allExtraModules, undefined, reflectCtx, this.identityContext || undefined)
+      this.workingMemory.refreshMemory(memCtx, reflectCtx, allExtraModules, this.identityContext || undefined)
     }
   }
 
@@ -169,9 +174,12 @@ export class ChatExecutor {
     const t0 = Date.now()
     this.memoryService?.recordInteraction()
     this.memoryService?.setLastUserText(text)
+    this.lastUserText = text
+    this.obsLogger = new ObservabilityLogger(rid)
+    this.obsLogger.logInput(text, source)
     // 先刷新 memory（可能重建 context），再加用户消息，确保消息不丢失
     this.refreshMemory()
-    this.context.addUser(text)
+    this.workingMemory.addUser(text)
     eventBus.emit('agent.input.received', { text, requestId: rid, source })
     const userMsg: StoredMessage = {
       id: createMessageId(),
@@ -188,12 +196,18 @@ export class ChatExecutor {
     this.mainWindow?.webContents.send('message:new', userMsg)
 
     try {
-      const messages: Message[] = this.context.getMessages()
+      const messages: Message[] = this.workingMemory.getMessages()
       const ctx = new RunContext(rid)
       this.runContext = ctx
       const reply = await this.toolLoop(messages, ctx, rid, source)
-      if (!reply) return { error: 'NO_REPLY' }
-      this.context.addAssistant(reply)
+      if (!reply) {
+        this.obsLogger?.logOutput('NO_REPLY', Date.now() - t0)
+        this.obsLogger?.flush()
+        return { error: 'NO_REPLY' }
+      }
+      this.workingMemory.addAssistant(reply)
+      this.obsLogger?.logOutput(reply, Date.now() - t0)
+      this.obsLogger?.flush()
       eventBus.emit('agent.response.generated', { text: reply, requestId: rid, source })
       log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: reply.length })
       this.ttsService.flushBuffer()
@@ -209,6 +223,17 @@ export class ChatExecutor {
         this.mainWindow?.webContents.send('message:new', assistMsg)
       }
       this.reflectLoop.trigger({ requestId: rid, userMessage: text, replyLength: reply.length, durationMs: Date.now() - t0 })
+      // P0→P1 沉淀（MetaController.onInteractionEnd）
+      if (reply && this.memoryService) {
+        this.memoryService.metaController.onInteractionEnd({
+          userMessage: text,
+          assistantReply: reply,
+          tokenUsed: this.resourceBudget.getLlmUsage?.() || 0,
+          tokenBudget: this.resourceBudget.getChatBudget?.() || 200000,
+          planActive: this.sessionPlanIds.size > 0,
+          agentId: 'chat',
+        })
+      }
       return { reply }
     } catch (err) {
       eventBus.emit('agent.error', { error: String(err), requestId: rid })
@@ -237,7 +262,7 @@ export class ChatExecutor {
         }
         if (i > 0 && i % 5 === 0 && this.memoryService) {
           this.refreshMemory()
-          const f = this.context.getMessages()
+          const f = this.workingMemory.getMessages()
           if (f[0]?.role === 'system') messages[0] = f[0]
         }
         const onToken = (t: string) => {
@@ -246,17 +271,20 @@ export class ChatExecutor {
             this.mainWindow?.webContents.send('ai:chunk', t)
           }
         }
-        // trim messages (the actual working array), not this.context which may
+        // trim messages (the actual working array), not workingMemory.context which may
         // be a fresh copy after refreshMemory() at line 239
         trimOrphanedToolCallsFrom(messages)
+        // 将 scratchpad 中新条目注入对话
+        this.workingMemory.injectScratchpad(messages)
         // 消耗 chat budget：每次 LLM 调用前检查
         const chatBudgetCheck = this.resourceBudget.checkLlmCall('chat')
         if (chatBudgetCheck) {
           log('WARN', 'chat_budget_exhausted', { step: i, check: chatBudgetCheck })
-          this.context.addUser('【系统提示】对话预算已耗尽，请总结当前进展并结束。')
+          this.workingMemory.scratchpad.add('system_hint', '对话预算已耗尽，请总结当前进展并结束。')
           return ''
         }
         this.resourceBudget.consumeLlmCall('chat')
+        this.obsLogger?.logPrompt(messages)
         const result = await this.llmService.chatWithTools(messages, requestId, 120000, onToken)
 
         const err = this.handleLlmError(result.error, i, messages, ctx)
@@ -298,6 +326,7 @@ export class ChatExecutor {
           eventBus.emit('agent.progress' as any, { requestId, step: i + 1, toolNames: result.toolCalls.map((t) => t.name) })
           result.toolCalls.forEach((tc) => eventBus.emit('agent.tool.invoked', { tool: tc.name, args: tc.arguments }))
           const toolResults = await this.toolScheduler.executeAll(result.toolCalls, ctx.abortController.signal)
+          this.obsLogger?.logToolBatch(toolResults)
           // 信用恢复：每个成功的工具调用降低一次拒绝计数
           for (const tr of toolResults) {
             if (tr.success) {
@@ -316,20 +345,19 @@ export class ChatExecutor {
           }
           // ── [REFLECT] 同步执行反馈（同一轮可见） ──
           runReflect(toolResults, result.toolCalls, messages, ctx)
-          this.context.trimToTokenBudget(600_000)
+          this.workingMemory.trimToTokenBudget(600_000)
           if (!ctx.softReplyInjected && i >= 10) {
             ctx.softReplyInjected = true
-            messages.push({ role: 'user', content: '【系统提示】你已执行了多步操作。请立即停止工具调用，向用户汇报当前进展。' })
+            this.workingMemory.scratchpad.add('system_hint', '你已执行了多步操作。请立即停止工具调用，向用户汇报当前进展。')
           }
           const gr = this.guardrail.apply(toolResults, result.toolCalls, messages, ctx)
           if (gr.workflowActivation) {
             this.activeWorkflowModule = gr.workflowActivation.moduleContent
             const memCtx = this.memoryService?.getFormattedContext() || '',
               sm = this.skillManager?.getEnabledPromptModules() || []
-            this.context = new ConversationContext(memCtx, 2000, [gr.workflowActivation.moduleContent, ...sm])
+            this.workingMemory.refreshMemory(memCtx, undefined, [gr.workflowActivation.moduleContent, ...sm], undefined, true)
             messages.length = 0
-            messages.push(...this.context.getMessages())
-            messages.push({ role: 'system', content: buildSystemPrompt(memCtx, [gr.workflowActivation.moduleContent]) })
+            messages.push(...this.workingMemory.getMessages())
           }
           this.checkMilestone(i, toolResults, ctx, requestId, !!gr.workflowActivation)
           ctx.transition(RunState.RUNNING)
@@ -337,7 +365,7 @@ export class ChatExecutor {
         }
         if (result.toolCalls?.length === 0) {
           log('WARN', 'chat_empty_tool_calls', { step: i })
-          messages.push({ role: 'user', content: '【系统提示】工具调用参数解析失败。请重新生成。' })
+          this.workingMemory.scratchpad.add('system_hint', '工具调用参数解析失败。请重新生成。')
           continue
         }
         const pa = await this.handlePlanForceContinue(result.reply || '', messages, ctx)
@@ -361,7 +389,7 @@ export class ChatExecutor {
     if (e === 'TIMEOUT') {
       ctx.consecutiveTimeouts++
       if (ctx.consecutiveTimeouts >= 3) return 'return'
-      m.push({ role: 'user', content: '【系统提示】超时，请缩短输出量从断点继续。' })
+      this.workingMemory.scratchpad.add('error_hint', '超时，请缩短输出量从断点继续。')
       return 'continue'
     }
     const c = this.errorClassifier.classify(e)
@@ -371,9 +399,9 @@ export class ChatExecutor {
       return this.consecutiveRetryableErrors >= 3 ? 'return' : 'continue'
     }
     if (c.category === 'CONTEXT_OVERFLOW') {
-      this.context.saveToShortTermMemory(5)
-      this.context.trimToTokenBudget(300_000)
-      m.push({ role: 'user', content: '【系统提示】上下文过长已被压缩。' })
+      this.workingMemory.context.saveToShortTermMemory(5)
+      this.workingMemory.trimToTokenBudget(300_000)
+      this.workingMemory.scratchpad.add('error_hint', '上下文过长已被压缩。')
       return 'continue'
     }
     if (c.category === 'INVALID_REQUEST') {
@@ -383,11 +411,11 @@ export class ChatExecutor {
         return 'return'
       }
       trimOrphanedToolCallsFrom(m)
-      m.push({ role: 'user', content: '【系统提示】请求格式有误，请重试。' })
+      this.workingMemory.scratchpad.add('error_hint', '请求格式有误，请重试。')
       return 'continue'
     }
     if (c.category === 'TOOL_SCHEMA_ERROR') {
-      m.push({ role: 'user', content: '【系统提示】工具参数格式有误，请检查后重试。' })
+      this.workingMemory.scratchpad.add('error_hint', '工具参数格式有误，请检查后重试。')
       return 'continue'
     }
     return 'return'
@@ -405,7 +433,7 @@ export class ChatExecutor {
       this.sessionPlanIds.delete(a.id)
       ctx.forceContinueCount = 0
       ctx.forceContinueStagnation = 0
-      m.push({ role: 'user', content: `【系统】计划「${a.title}」已被放弃。` })
+      this.workingMemory.scratchpad.add('system_hint', `计划「${a.title}」已被放弃。`)
       return 'continue'
     }
     const pd = p.map((s) => s.description).join('|')
@@ -416,7 +444,7 @@ export class ChatExecutor {
       this.sessionPlanIds.delete(a.id)
       ctx.forceContinueCount = 0
       ctx.forceContinueStagnation = 0
-      m.push({ role: 'user', content: `【系统】计划「${a.title}」已被放弃（停滞）。` })
+      this.workingMemory.scratchpad.add('system_hint', `计划「${a.title}」已被放弃（停滞）。`)
       return 'continue'
     }
     m.push({ role: 'assistant', content: r })
@@ -448,7 +476,7 @@ export class ChatExecutor {
       .createCheckpoint({
         trigger: ms.trigger,
         runContext: ctx,
-        context: this.context,
+        context: this.workingMemory.context,
         runId: rid,
         planState: {
           activePlanId: ap?.id ?? null,

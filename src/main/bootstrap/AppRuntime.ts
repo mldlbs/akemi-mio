@@ -221,9 +221,11 @@ export class AppRuntime {
     if (memoryService.engineering) {
       agentService.reflectLoop.setDeps(llmService, memoryService.engineering)
       agentService.reflectLoop.setResourceBudget(this.resourceBudget!)
+      agentService.reflectLoop.setDecisionStore(memoryService['decisionStore'])
       agentService.failureAnalyzer.setEngineering(memoryService.engineering)
       agentService.failureAnalyzer.start()
       agentService.sleepCycle.setDeps(memoryService, agentService.failureAnalyzer)
+      agentService.sleepCycle.setMetaController(memoryService.metaController)
       log('INFO', 'agent_cognitive_enhancements_ready', { reflect: true, failureAnalyzer: true, sleepCycle: true })
     }
 

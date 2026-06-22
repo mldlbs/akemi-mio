@@ -196,17 +196,13 @@ export class EventBus {
       this.subscriptionLabels.get(event)!.add(opts.label)
     }
 
-    // Register with base emitter (ensures listenerCount works)
-    this.emitter.on(event, listener)
-
-    // Store in priority bucket
+    // Store in priority bucket (not in base emitter — avoid double-fire on emit)
     if (!this.priorityListeners.has(event)) this.priorityListeners.set(event, new Map())
     const buckets = this.priorityListeners.get(event)!
     if (!buckets.has(priority)) buckets.set(priority, [])
     buckets.get(priority)!.push({ listener, label: opts.label, filter: opts.filter })
 
     const disposer = () => {
-      this.emitter.off(event, listener)
       const b = this.priorityListeners.get(event)?.get(priority)
       if (b) {
         const idx = b.findIndex((s) => s.listener === listener)
@@ -223,7 +219,6 @@ export class EventBus {
   }
 
   off<E extends EventName>(event: E, listener: Listener<E>): void {
-    this.emitter.off(event, listener)
     for (const buckets of this.priorityListeners.get(event)?.values() ?? []) {
       const idx = buckets.findIndex((s) => s.listener === listener)
       if (idx >= 0) buckets.splice(idx, 1)
@@ -268,7 +263,7 @@ export class EventBus {
       }
     }
 
-    // Fallback: fire via base emitter for non-priority subscribers
+    // Fallback: fire via base emitter for listeners registered outside priority buckets (once())
     try {
       this.emitter.emit(event, payload)
     } catch (err) {
@@ -280,14 +275,18 @@ export class EventBus {
     if (event) {
       this.emitter.removeAllListeners(event)
       this.subscriptionLabels.delete(event)
+      this.priorityListeners.delete(event)
     } else {
       this.emitter.removeAllListeners()
       this.subscriptionLabels.clear()
+      this.priorityListeners.clear()
     }
   }
 
   listenerCount(event: EventName): number {
-    return this.emitter.listenerCount(event)
+    // priority buckets + base emitter, deduplicated
+    const priorityCount = Array.from(this.priorityListeners.get(event)?.values() ?? []).reduce((sum, list) => sum + list.length, 0)
+    return Math.max(priorityCount, this.emitter.listenerCount(event))
   }
 
   /** 诊断：当前所有活跃订阅概况 */
@@ -295,7 +294,8 @@ export class EventBus {
     const stats: Record<string, { count: number; labels: string[]; priorityBuckets: Record<string, number> }> = {}
     const events = new Set([...this.emitter.eventNames().map(String), ...this.priorityListeners.keys()])
     for (const event of events) {
-      const count = this.emitter.listenerCount(event)
+      const priorityCount = Array.from(this.priorityListeners.get(event)?.values() ?? []).reduce((sum, list) => sum + list.length, 0)
+      const count = Math.max(priorityCount, this.emitter.listenerCount(event))
       const labels = Array.from(this.subscriptionLabels.get(event) || [])
       const buckets: Record<string, number> = {}
       for (const [p, listeners] of this.priorityListeners.get(event) ?? []) buckets[p] = listeners.length

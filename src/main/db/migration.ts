@@ -412,6 +412,26 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_events_channel_ts ON events(channel, timestamp);
     `,
   },
+  {
+    version: 19,
+    sql: `
+      CREATE TABLE IF NOT EXISTS decisions (
+        id TEXT PRIMARY KEY,
+        timestamp INTEGER NOT NULL,
+        agent_id TEXT NOT NULL,
+        category TEXT NOT NULL CHECK(category IN ('tool_select','strategy','plan_route','goal_adjust','recovery')),
+        context TEXT NOT NULL,
+        choice TEXT NOT NULL,
+        alternatives TEXT NOT NULL DEFAULT '[]',
+        outcome TEXT NOT NULL DEFAULT 'pending' CHECK(outcome IN ('pending','success','failure')),
+        confidence REAL NOT NULL DEFAULT 0.5,
+        related_plan_id TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_decisions_category ON decisions(category);
+      CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp);
+    `,
+  },
 ]
 
 export function runMigrations(sqlite: SqlJsDatabase): void {

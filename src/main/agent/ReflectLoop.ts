@@ -1,6 +1,7 @@
 import { log } from '../logger/Logger'
 import { LlmService } from '../llm/LlmService'
 import { EngineeringMemory } from '../memory/EngineeringMemory'
+import type { DecisionStore } from '../memory/DecisionStore'
 import type { ResourceBudget } from '../core/ResourceBudget'
 
 export interface ReflectionResult {
@@ -31,6 +32,7 @@ const REFLECTION_PROMPT = `你刚刚完成了一次与用户的交互。请快�
 export class ReflectLoop {
   private llmService: LlmService | null = null
   private engineering: EngineeringMemory | null = null
+  private decisionStore: DecisionStore | null = null
   private resourceBudget: ResourceBudget | null = null
   private recentReflections: Array<{ summary: string; timestamp: number }> = []
   private consecutiveReflectionFailures = 0
@@ -38,6 +40,10 @@ export class ReflectLoop {
   setDeps(llmService: LlmService, engineering: EngineeringMemory): void {
     this.llmService = llmService
     this.engineering = engineering
+  }
+
+  setDecisionStore(store: DecisionStore): void {
+    this.decisionStore = store
   }
 
   setResourceBudget(budget: ResourceBudget): void {
@@ -136,6 +142,16 @@ export class ReflectLoop {
       confidence: reflection.confidence,
       relatedFiles: [],
       tags: [...reflection.patterns.map((p) => p.slice(0, 20)), ...reflection.improvements.map((i) => i.slice(0, 20))],
+    })
+
+    // 同时写入 DecisionStore（如已注入）
+    this.decisionStore?.record({
+      agentId: 'reflect_loop',
+      category: 'strategy',
+      context: context.userMessage.slice(0, 200),
+      choice: reflection.improvements[0] || '继续当前模式',
+      alternatives: reflection.patterns,
+      confidence: reflection.confidence,
     })
 
     this.recentReflections.push({ summary: reflection.summary, timestamp: Date.now() })

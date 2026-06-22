@@ -1,25 +1,32 @@
+/**
+ * SleepCycle — 低负载维护循环
+ *
+ * 职责：
+ * - 低负载时触发后台任务（记忆固化、模式挖掘）
+ * - 委托 MetaController.backgroundOptimization() 做 P1→P2 提纯
+ * - 保留 FailureAnalyzer 模式持久化（与 MetaController 互补）
+ *
+ * v2 改动：consolidation/memory merge 委托给 MetaController，
+ * SleepCycle 保持轻量调度入口角色。
+ */
+
 import { log } from '../logger/Logger'
 import { MemoryService } from '../memory/MemoryService'
+import type { MetaController } from '../memory/MetaController'
 import { FailureAnalyzer } from './FailureAnalyzer'
 
-/**
- * SleepCycle — 低负载时执行记忆固化、模式挖掘、垃圾回收。
- *
- * 安排在用户离线或系统空闲时运行。当前实现：
- * - 使用 Scheduler 以固定低频间隔执行
- * - 仅当 agent 不繁忙时运行
- *
- * Phase 3 方向：
- * - 可引入"梦境"阶段（类似 CreativityService 的 dream mode）
- * - 跨 session 的模式挖掘
- */
 export class SleepCycle {
   private memoryService: MemoryService | null = null
   private failureAnalyzer: FailureAnalyzer | null = null
+  private metaController: MetaController | null = null
 
   setDeps(memory: MemoryService, failureAnalyzer: FailureAnalyzer): void {
     this.memoryService = memory
     this.failureAnalyzer = failureAnalyzer
+  }
+
+  setMetaController(mc: MetaController): void {
+    this.metaController = mc
   }
 
   async run(isBusy: () => boolean): Promise<void> {
@@ -31,7 +38,9 @@ export class SleepCycle {
     log('INFO', 'sleep_cycle_start')
     const t0 = Date.now()
 
-    const results = await Promise.allSettled([this.consolidateMemory(), this.mineFailurePatterns()])
+    const metaTask = this.metaController?.backgroundOptimization() || Promise.resolve()
+
+    const results = await Promise.allSettled([metaTask, this.consolidateMemory(), this.mineFailurePatterns()])
 
     const ok = results.filter((r) => r.status === 'fulfilled').length
     log('INFO', 'sleep_cycle_done', { elapsed: Date.now() - t0, ok, total: results.length })
@@ -77,7 +86,6 @@ export class SleepCycle {
       this.memoryService['tryPromote']?.(e)
     }
 
-    // 持久化：将内存中的去重/清理/晋升写回 DB
     this.memoryService.flush()
 
     log('INFO', 'memory_consolidated', {

@@ -3,6 +3,8 @@ import { SummaryMemory } from './SummaryMemory'
 import { VectorMemory } from './VectorMemory'
 import { KnowledgeGraph } from './KnowledgeGraph'
 import { EngineeringMemory } from './EngineeringMemory'
+import { DecisionStore } from './DecisionStore'
+import { MetaController } from './MetaController'
 import { UnifiedMemoryQuery } from './UnifiedMemoryQuery'
 import type { MemoryEntry } from './types'
 import { getRawDb, markDirty } from '../db/connection'
@@ -39,6 +41,8 @@ export class MemoryService {
   readonly vector: VectorMemory
   readonly knowledgeGraph: KnowledgeGraph
   readonly engineering: EngineeringMemory
+  readonly decisionStore: DecisionStore
+  readonly metaController: MetaController
   readonly unifiedQuery: UnifiedMemoryQuery
 
   constructor() {
@@ -46,6 +50,13 @@ export class MemoryService {
     this.vector = new VectorMemory()
     this.knowledgeGraph = new KnowledgeGraph()
     this.engineering = new EngineeringMemory()
+    this.decisionStore = new DecisionStore()
+    this.metaController = new MetaController()
+    this.metaController.setDeps({
+      summary: this.summary,
+      decisions: this.decisionStore,
+      memory: this,
+    })
     this.unifiedQuery = new UnifiedMemoryQuery()
     this.unifiedQuery.register('memory', this)
     this.unifiedQuery.register('vector', this.vector)

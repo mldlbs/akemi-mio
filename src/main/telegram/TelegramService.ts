@@ -22,7 +22,7 @@ interface ToolLine {
 }
 
 /** 延迟编辑调度：将频繁的 progress 更新 debounce 后直接 HTTP 编辑（不走 outbox，保证实时性） */
-class DebouncedEditor {
+export class DebouncedEditor {
   private baseUrl = ''
   private timer: ReturnType<typeof setTimeout> | null = null
   private pendingChatId = 0

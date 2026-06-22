@@ -359,6 +359,16 @@ export class ConversationContext {
     }
   }
 
+  /**
+   * 只重建 system prompt（index 0），保留对话历史。
+   * 由 WorkingMemory.refreshMemory() 调用，取代 new ConversationContext() 销毁历史。
+   */
+  rebuildSystemPrompt(memoryContext?: string, extraModules?: string[], reflectionContext?: string, identityContext?: string): void {
+    const oldMessages = this._context.slice(1)
+    this.systemPrompt = buildSystemPrompt(memoryContext, extraModules, reflectionContext, identityContext)
+    this._context = [{ role: 'system', content: this.systemPrompt }, ...oldMessages]
+  }
+
   clear(keepShortTerm = true): void {
     this._context = [{ role: 'system', content: this.systemPrompt }]
     if (!keepShortTerm) {

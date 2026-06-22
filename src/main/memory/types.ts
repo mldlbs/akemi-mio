@@ -22,6 +22,12 @@ export interface SummaryEntry {
   summary: string
   turnStart: number
   turnEnd: number
+  /** 本次对话的主题词 */
+  topics: string[]
+  /** 本次对话做出的决策 */
+  decisions: string[]
+  /** 涉及的实体 */
+  keyEntities: string[]
   createdAt: number
 }
 
