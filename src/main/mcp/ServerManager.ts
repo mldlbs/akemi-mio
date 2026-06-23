@@ -69,6 +69,15 @@ export class ServerManager {
   private capabilityEngine: CapabilityEngine | null = null
   /** 每个 MCP 服务器的独立熔断器 */
   private circuitBreakers = new Map<string, { failures: number; state: 'closed' | 'open'; openedAt: number }>()
+  /** 重启预算：每小时最多 RESTART_BUDGET_MAX 次重启，超限后自动禁用 */
+  private restartBudgets = new Map<string, { attempts: number[]; disabled: boolean }>()
+  private readonly RESTART_BUDGET_WINDOW = 3600_000 // 1 小时
+  private readonly RESTART_BUDGET_MAX = 10 // 每小时最多 10 次
+  /** Capability Registry: 记录每个服务器的期望和实际工具集，检测漂移 */
+  private capabilityRegistry = new Map<
+    string,
+    { expectedTools: number; expectedToolNames: string[]; actualTools: number; actualToolNames: string[]; healthScore: number }
+  >()
 
   constructor() {
     this.local = new LocalProvider()
@@ -188,6 +197,7 @@ export class ServerManager {
         this.toolMap.set(t.name, { serverName: config.name })
       }
       log('INFO', 'mcp_connected', { name: config.name, tools: client.getToolDefinitions().length })
+      this.registerCapabilities(config.name, client)
     } catch (err: any) {
       log('ERROR', 'mcp_connect_failed', { name: config.name, error: err.message })
       this.servers.delete(config.name)
@@ -437,6 +447,22 @@ export class ServerManager {
             const alive = await client.ping()
             if (alive) {
               this.recordServerSuccess(name)
+              // 健康时校验工具集是否漂移
+              const toolNames = client.getToolDefinitions().map((t) => t.name)
+              const entry = this.capabilityRegistry.get(name)
+              if (entry && toolNames.length < entry.expectedTools) {
+                const missing = entry.expectedToolNames.filter((t) => !toolNames.includes(t))
+                entry.actualTools = toolNames.length
+                entry.actualToolNames = toolNames
+                entry.healthScore = Math.max(0, 100 - missing.length * 15)
+                log('WARN', 'capability_registry.drift_detected', {
+                  name,
+                  expectedTools: entry.expectedTools,
+                  actualTools: toolNames.length,
+                  missingTools: missing,
+                  healthScore: entry.healthScore,
+                })
+              }
               continue
             }
             this.recordServerFailure(name)
@@ -485,8 +511,94 @@ export class ServerManager {
     }
   }
 
+  /** Capability Registry v0: 注册/更新服务器工具集，检测漂移 */
+  private registerCapabilities(name: string, client: McpClient): void {
+    const toolNames = client.getToolDefinitions().map((t) => t.name)
+    const toolCount = toolNames.length
+    const existing = this.capabilityRegistry.get(name)
+    if (!existing) {
+      // 首次连接：记录 expected 基线
+      this.capabilityRegistry.set(name, {
+        expectedTools: toolCount,
+        expectedToolNames: toolNames,
+        actualTools: toolCount,
+        actualToolNames: toolNames,
+        healthScore: 100,
+      })
+      log('INFO', 'capability_registry.registered', { name, tools: toolCount })
+      return
+    }
+    // 后续连接：对比实际 vs 预期，检测漂移
+    const missing = existing.expectedToolNames.filter((t) => !toolNames.includes(t))
+    if (missing.length > 0) {
+      existing.actualTools = toolCount
+      existing.actualToolNames = toolNames
+      existing.healthScore = Math.max(0, 100 - missing.length * 15)
+      log('WARN', 'capability_registry.drift_detected', {
+        name,
+        expectedTools: existing.expectedTools,
+        actualTools: toolCount,
+        missingTools: missing,
+        healthScore: existing.healthScore,
+      })
+    } else {
+      existing.actualTools = toolCount
+      existing.actualToolNames = toolNames
+      existing.healthScore = 100
+    }
+  }
+
+  /** 获取所有服务器的能力健康汇总 */
+  getCapabilitySummary(): { totalCapabilityHealth: number; servers: Array<{ name: string; healthScore: number; driftDetected: boolean }> } {
+    const servers: Array<{ name: string; healthScore: number; driftDetected: boolean }> = []
+    let totalScore = 0
+    let count = 0
+    for (const [name, entry] of this.capabilityRegistry) {
+      const missing = entry.expectedToolNames.filter((t) => !entry.actualToolNames.includes(t))
+      servers.push({ name, healthScore: entry.healthScore, driftDetected: missing.length > 0 })
+      totalScore += entry.healthScore
+      count++
+    }
+    return {
+      totalCapabilityHealth: count > 0 ? Math.round(totalScore / count) : 100,
+      servers,
+    }
+  }
+
+  /** 查询服务器的能力健康状态 */
+  getCapabilityHealth(name: string): { healthScore: number; expectedTools: number; actualTools: number; missingTools: string[] } | null {
+    const entry = this.capabilityRegistry.get(name)
+    if (!entry) return null
+    const missing = entry.expectedToolNames.filter((t) => !entry.actualToolNames.includes(t))
+    return { healthScore: entry.healthScore, expectedTools: entry.expectedTools, actualTools: entry.actualTools, missingTools: missing }
+  }
+
+  /** 检查并记录重启预算。预算超限返回 false，不再自动重启 */
+  private checkRestartBudget(name: string): boolean {
+    let budget = this.restartBudgets.get(name)
+    if (!budget) {
+      budget = { attempts: [], disabled: false }
+      this.restartBudgets.set(name, budget)
+    }
+    if (budget.disabled) return false
+    const now = Date.now()
+    // 清理过期记录
+    budget.attempts = budget.attempts.filter((t) => now - t < this.RESTART_BUDGET_WINDOW)
+    if (budget.attempts.length >= this.RESTART_BUDGET_MAX) {
+      budget.disabled = true
+      log('ERROR', 'mcp_restart_budget_exhausted', { name, maxPerHour: this.RESTART_BUDGET_MAX })
+      return false
+    }
+    budget.attempts.push(now)
+    return true
+  }
+
   /** 带指数退避的重启 */
   private async restartServerWithBackoff(name: string): Promise<void> {
+    if (!this.checkRestartBudget(name)) {
+      log('WARN', 'mcp_restart_budget_exceeded', { name })
+      return
+    }
     const now = Date.now()
     let state = this.retryStates.get(name)
     if (!state) {

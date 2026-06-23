@@ -9,6 +9,16 @@ export type BackgroundTaskType =
   | 'telegram.outbox'
   | 'stability.tick'
 
+/** 任务优先级等级 */
+export enum TaskTier {
+  /** 用户可见，必须成功 */
+  CRITICAL = 'critical',
+  /** 系统健康相关，有限重试 */
+  IMPORTANT = 'important',
+  /** 锦上添花，失败即跳过 */
+  BEST_EFFORT = 'best_effort',
+}
+
 /** 后台任务状态 */
 export type BackgroundTaskStatus = 'idle' | 'running' | 'failed' | 'cooldown'
 

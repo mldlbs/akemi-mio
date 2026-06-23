@@ -62,6 +62,7 @@ export type EventName =
   | 'guardrail.readonly_stuck'
   | 'guardrail.tool_error'
   | 'guardrail.context_corrupted'
+  | 'runtime.health.updated'
 
 export interface EventPayload {
   'task.lifecycle': { taskId: string; type: string; status: string; durationMs?: number; error?: string }
@@ -139,6 +140,16 @@ export interface EventPayload {
   'guardrail.readonly_stuck': { count: number; consecutiveRounds: number }
   'guardrail.tool_error': { tool: string; error: string; consecutiveErrors: number }
   'guardrail.context_corrupted': { error: string; details?: string }
+  'runtime.health.updated': {
+    compositeScore: number
+    compositeLevel: string
+    sessionScore: number
+    capabilityScore: number
+    taskScore: number
+    modelScore: number
+    recommendedActions: string[]
+    timestamp: number
+  }
 }
 
 type Listener<E extends EventName> = (payload: EventPayload[E]) => void

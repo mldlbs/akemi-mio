@@ -63,6 +63,7 @@ import { BudgetRebalancer } from '../core/BudgetRebalancer'
 import { LazyServiceGroup } from './LazyServiceGroup'
 import { SessionRecoveryManager } from '../agent/SessionRecoveryManager'
 import { EventStore } from '../core/event-sourcing/EventStore'
+import { RuntimeHealthManager } from '../health/RuntimeHealthManager'
 
 /**
  * AppRuntime — 应用启动生命周期编排器。
@@ -90,6 +91,7 @@ export class AppRuntime {
   private capabilityEngine?: CapabilityEngine
   private sessionGovernor?: SessionGovernor
   private checkpointV2?: CheckpointV2
+  private runtimeHealthManager?: RuntimeHealthManager
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
     this.crashGuard = crashGuard ?? { flushMemory: null }
@@ -324,6 +326,13 @@ export class AppRuntime {
     this.healthChecker.register(this.workerPool!)
     this.healthChecker.register(this.sessionGovernor!)
     this.healthChecker.register(this.processManager!)
+    // Phase 5D: RuntimeHealthManager init with available providers (TaskRunner not yet ready)
+    this.runtimeHealthManager = new RuntimeHealthManager()
+    this.runtimeHealthManager.setSessionHealthProvider(this.sessionGovernor!.scorer)
+    this.runtimeHealthManager.setCapabilityHealthProvider(mcpManager)
+    await this.runtimeHealthManager.init()
+    this.healthChecker.register(this.runtimeHealthManager)
+    await this.runtimeHealthManager.start()
     // Phase 4: ProcessManager 启动（此时开始健康检查）
     await this.processManager!.start()
     log('INFO', 'process_manager_ready')
@@ -469,6 +478,9 @@ export class AppRuntime {
     const outboxWorker = new OutboxWorker(outboxUrl)
     this.taskRunner.register('telegram.outbox', () => outboxWorker.tick(), 2000, { cooldownMs: 10000 })
 
+    // Phase 5D: 注入 Task 健康提供者（此时所有 task 已注册）
+    this.runtimeHealthManager?.setTaskHealthProvider(this.taskRunner)
+
     // 启动！
     this.lazyInit.start()
     this.taskRunner.start()
@@ -495,6 +507,9 @@ export class AppRuntime {
   }
 
   private async shutdown(): Promise<void> {
+    // Phase 5D: 停止运行时健康管理器
+    await this.runtimeHealthManager?.stop().catch(() => {})
+
     // Phase 4: Agent OS 生命周期 — 反向停止
     await this.sessionGovernor?.stop().catch(() => {})
     await this.healthChecker?.stop().catch(() => {})

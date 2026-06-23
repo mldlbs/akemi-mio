@@ -11,6 +11,7 @@ import { log, createRequestId } from '../logger/Logger'
 import type { LlmService } from '../llm/LlmService'
 import type { TtsService } from '../tts/TtsService'
 import { ConversationContext, Message, buildSystemPrompt, trimOrphanedToolCallsFrom } from './context'
+import { validateToolCallChain, rollbackToLastKnownGood } from './ContextIntegrityChecker'
 import type { MemoryService } from '../memory/MemoryService'
 import { ChatResult } from '../llm/types'
 import { eventBus } from '../core/EventBus'
@@ -449,14 +450,35 @@ export class ChatExecutor {
     }
     if (c.category === 'INVALID_REQUEST') {
       this.consecutiveInvalidRequest++
-      if (this.consecutiveInvalidRequest >= 3) {
-        log('ERROR', 'chat_invalid_request_exhausted', { step, count: this.consecutiveInvalidRequest })
-        return 'return'
+      if (this.consecutiveInvalidRequest >= 2) {
+        log('ERROR', 'chat_invalid_request_rollback', { step, count: this.consecutiveInvalidRequest })
+        const stm = this.workingMemory.context.getShortTermMemoryPairs()
+        const lastUser = [...m].reverse().find((msg) => msg.role === 'user')
+        rollbackToLastKnownGood(m, stm, lastUser?.content)
+        this.workingMemory.scratchpad.add('error_hint', '会话状态异常，已回滚到最近的健康检查点，请重试。')
+        return 'continue'
       }
       trimOrphanedToolCallsFrom(m)
-      // 只清理孤儿 tool_calls，不改动消息链 — m === workingMemory.context.context，修改它会破坏跨请求消息
       this.workingMemory.scratchpad.add('error_hint', '请求格式有误，已清理孤儿 tool_calls，请重试。')
       return 'continue'
+    }
+    if (c.category === 'CORRUPTED_STATE') {
+      // CORRUPTED_STATE 在错误分类器中已具有更高优先级匹配
+      // 首次出现就直接回滚，不需要等到第二次
+      log('ERROR', 'chat_corrupted_state_rollback', { step, category: c.category })
+      const stm = this.workingMemory.context.getShortTermMemoryPairs()
+      const lastUser = [...m].reverse().find((msg) => msg.role === 'user')
+      rollbackToLastKnownGood(m, stm, lastUser?.content)
+      this.workingMemory.scratchpad.add('error_hint', '会话状态异常，已回滚到最近的健康检查点。')
+      return 'continue'
+    }
+    if (c.category === 'CAPABILITY_LOSS') {
+      this.workingMemory.scratchpad.add('error_hint', '该工具当前不可用，已跳过。')
+      return 'continue'
+    }
+    if (c.category === 'CONFIGURATION_ERROR') {
+      log('WARN', 'chat_configuration_error', { step, error: e.slice(0, 200) })
+      return 'return'
     }
     if (c.category === 'TOOL_SCHEMA_ERROR') {
       this.workingMemory.scratchpad.add('error_hint', '工具参数格式有误，请检查后重试。')

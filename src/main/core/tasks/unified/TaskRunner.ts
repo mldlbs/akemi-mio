@@ -1,4 +1,4 @@
-import type { BackgroundTaskType, TaskExecutionResult, TaskExecutor } from './TaskTypes'
+import type { BackgroundTaskType, TaskExecutionResult, TaskExecutor, TaskTier } from './TaskTypes'
 import { TaskStore } from './TaskStore'
 import { log } from '../../../logger/Logger'
 import { eventBus } from '../../../core/EventBus'
@@ -13,6 +13,20 @@ export interface RegisteredTask {
   maxFailures: number
   /** 指数退避基础延时 */
   retryBaseMs: number
+  /** 任务优先级等级，影响 maxFailures 的默认值 */
+  tier: TaskTier
+}
+
+/** 根据 Tier 确定默认 maxFailures */
+function defaultMaxFailuresByTier(tier: TaskTier): number {
+  switch (tier) {
+    case 'critical':
+      return 10
+    case 'important':
+      return 5
+    case 'best_effort':
+      return 3
+  }
 }
 
 /**
@@ -38,15 +52,18 @@ export class TaskRunner {
       cooldownMs?: number
       maxFailures?: number
       retryBaseMs?: number
+      tier?: TaskTier
     },
   ): void {
+    const tier = options?.tier ?? 'best_effort'
     this.tasks.set(type, {
       type,
       executor,
       intervalMs,
       cooldownMs: options?.cooldownMs ?? intervalMs,
-      maxFailures: options?.maxFailures ?? 3,
+      maxFailures: options?.maxFailures ?? defaultMaxFailuresByTier(tier),
       retryBaseMs: options?.retryBaseMs ?? 1000,
+      tier,
     })
     // 如果 runner 已启动，注册后立即启动定时器
     if (this.started) {
@@ -103,6 +120,24 @@ export class TaskRunner {
     return this.tasks.has(type)
   }
 
+  /** 获取所有任务的健康摘要 */
+  getTaskHealthSummary(): Array<{ type: string; status: string; consecutiveFailures: number; tier: string; disabled: boolean }> {
+    const summary: Array<{ type: string; status: string; consecutiveFailures: number; tier: string; disabled: boolean }> = []
+    for (const [type] of this.tasks) {
+      const state = this.store.get(type)
+      const task = this.tasks.get(type)
+      const disabled = task?.tier === 'best_effort' && state.consecutiveFailures >= task.maxFailures
+      summary.push({
+        type,
+        status: state.status,
+        consecutiveFailures: state.consecutiveFailures,
+        tier: task?.tier ?? 'best_effort',
+        disabled,
+      })
+    }
+    return summary
+  }
+
   private async tick(type: BackgroundTaskType): Promise<void> {
     const task = this.tasks.get(type)
     if (!task) return
@@ -138,6 +173,18 @@ export class TaskRunner {
     } else {
       const failures = state.consecutiveFailures + 1
       if (failures >= task.maxFailures) {
+        // BEST_EFFORT 任务达到上限后停止定时器（不再重试），其余进入 cooldown
+        if (task.tier === 'best_effort') {
+          this.stopType(type)
+          log('WARN', 'task_runner_disabled', { type, failures, tier: task.tier })
+          eventBus.emit(`${type}.completed` as any, {
+            success: false,
+            summary: `disabled after ${failures} consecutive failures`,
+            timestamp: Date.now(),
+          })
+          this.abortControllers.delete(type)
+          return
+        }
         this.store.update(type, {
           status: 'cooldown',
           consecutiveFailures: failures,

@@ -285,6 +285,11 @@ export class TelegramService {
 
     this.activeSessions.set(chatId, { messageId: progressMsgId, toolLines, typingTimer, disposers, editor })
 
+    // ⏱ 超时预警：处理超过 20 秒未返回时告知用户
+    const timeoutNoticeTimer = setTimeout(() => {
+      this.enqueueEdit(chatId, progressMsgId, `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n⚠️ 正在恢复中，请稍候……`)
+    }, 20000)
+
     try {
       const result = await this.agentService.processTextInput(msg.text, undefined, 'telegram', {
         telegramChatId: msg.chatId,
@@ -292,6 +297,7 @@ export class TelegramService {
         telegramFrom: msg.from,
         telegramMessageId: msg.messageId,
       })
+      clearTimeout(timeoutNoticeTimer)
 
       if (result.reply) {
         const finalText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n🤖 秋山澪: ${result.reply}`
@@ -321,8 +327,11 @@ export class TelegramService {
         this.enqueueEdit(chatId, progressMsgId, fallbackText)
       }
     } catch (err) {
+      clearTimeout(timeoutNoticeTimer)
       log('ERROR', 'telegram_process_error', { error: String(err) })
-      this.retryQueue.push(msg)
+      const errorText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n❌ 抱歉，处理失败，请重新发送。`
+      editor.cancel()
+      this.enqueueEdit(chatId, progressMsgId, errorText)
     } finally {
       this.cleanupSession(chatId)
     }

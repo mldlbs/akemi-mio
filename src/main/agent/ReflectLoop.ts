@@ -120,6 +120,10 @@ export class ReflectLoop {
 
     if (result.error || !result.data) {
       log('WARN', 'reflect_llm_failed', { requestId: context.requestId, error: result.error })
+      this.consecutiveReflectionFailures++
+      if (this.consecutiveReflectionFailures >= 10) {
+        log('ERROR', 'reflect_loop_disabled', { consecutiveFailures: this.consecutiveReflectionFailures })
+      }
       return
     }
 

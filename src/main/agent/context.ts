@@ -391,6 +391,10 @@ export class ConversationContext {
     this._context.push({ role: 'system' as any, content })
   }
 
+  getShortTermMemoryPairs(): Array<{ user: string; assistant: string }> {
+    return this.shortTermMemory
+  }
+
   /**
    * 移除孤立的 assistant(tool_calls) 消息，确保每对 assistant(tool_calls) → tool 完整。
    * 支持两种孤儿检测：

@@ -1,5 +1,6 @@
 import { log } from '../logger/Logger'
 import { ConversationContext, estimateTokens, getBasePromptTokens, Message, trimOrphanedToolCallsFrom } from '../agent/context'
+import { validateToolCallChain } from '../agent/ContextIntegrityChecker'
 import { ChatResult, ChunkCallback } from './types'
 import { INTENT_CLASSIFY_PROMPT } from '../agent/intent/types'
 import { ServerManager } from '../mcp/ServerManager'
@@ -334,6 +335,15 @@ export class LlmService {
     for (let attempt = 1; attempt <= 3; attempt++) {
       // ★ 底层兜底：每次发请求前自动清理孤儿 tool_calls
       trimOrphanedToolCallsFrom(messages)
+      // ★ 预检：清理后结构仍不完整则直接拒绝，避免浪费 API 调用
+      const integrityCheck = validateToolCallChain(messages)
+      if (!integrityCheck.valid) {
+        log('ERROR', 'tool_call_chain_invalid', {
+          request_id: requestId,
+          issues: integrityCheck.issues.map((i) => i.description),
+        })
+        return { error: 'INVALID_REQUEST' }
+      }
       // 保存快照供 400 诊断
       this.lastSentMessages = messages
       // 外部中止信号已触发，立即放弃当前请求
