@@ -12,7 +12,11 @@ function makeValidHtml(): string {
 
 describe('SandboxValidator 压力测试', () => {
   let testDir: string
-  afterEach(() => { try { rmSync(testDir, { recursive: true }) } catch { } })
+  afterEach(() => {
+    try {
+      rmSync(testDir, { recursive: true })
+    } catch {}
+  })
 
   it('100 个 sandbox HTML 并发验证', () => {
     testDir = join(tmpdir(), `sandbox-stress-${Date.now()}`)
@@ -32,7 +36,11 @@ describe('SandboxValidator 压力测试', () => {
     mkdirSync(testDir, { recursive: true })
     const d = join(testDir, 'large')
     mkdirSync(d, { recursive: true })
-    writeFileSync(join(d, 'large.html'), makeValidHtml() + '\n' + Array.from({ length: 10000 }, (_, i) => `<div>${i}</div>`).join('\n'), 'utf-8')
+    writeFileSync(
+      join(d, 'large.html'),
+      makeValidHtml() + '\n' + Array.from({ length: 10000 }, (_, i) => `<div>${i}</div>`).join('\n'),
+      'utf-8',
+    )
     const r = validateAllSandboxes(testDir)
     expect(r.total).toBe(1)
   })

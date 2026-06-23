@@ -53,7 +53,12 @@ describe('pickBestPlan', () => {
 describe('buildPlanInjection', () => {
   it('包含计划信息', () => {
     const plan = makePlan()
-    const inj = buildPlanInjection(plan, 1, 2, plan.steps.filter((s) => s.status === 'pending'))
+    const inj = buildPlanInjection(
+      plan,
+      1,
+      2,
+      plan.steps.filter((s) => s.status === 'pending'),
+    )
     expect(inj).toContain('测试计划')
     expect(inj).toContain('1/2')
     expect(inj).toContain('步骤二')

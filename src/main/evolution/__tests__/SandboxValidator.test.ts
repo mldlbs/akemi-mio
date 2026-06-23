@@ -23,7 +23,11 @@ describe('SandboxValidator', () => {
   })
 
   afterEach(() => {
-    try { rmSync(testDir, { recursive: true }) } catch { /* ignore */ }
+    try {
+      rmSync(testDir, { recursive: true })
+    } catch {
+      /* ignore */
+    }
   })
 
   it('有效 HTML 通过验证', () => {

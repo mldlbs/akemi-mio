@@ -101,6 +101,7 @@ export class PromptEvolutionManager {
     slot.latestVersion = newVersion
     slot.currentVersion = newVersion
 
+    this.persistenceDirty = true
     this.save()
     log('INFO', 'prompt_evolved', { mode, newVersion, reason, antiPatternCount: antiPatterns.length })
     return pv
@@ -235,6 +236,7 @@ export class PromptEvolutionManager {
     slot.latestVersion = newVersion
     slot.currentVersion = newVersion
 
+    this.persistenceDirty = true
     this.save()
     log('INFO', 'prompt_overlays_summarized', { mode, version: newVersion, rulesCount: rules.size })
     return pv

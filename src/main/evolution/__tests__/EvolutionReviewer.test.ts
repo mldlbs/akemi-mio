@@ -16,7 +16,15 @@ describe('EvolutionReviewer', () => {
     resetEvents()
     responseValidator = {
       startListening: vi.fn(),
-      stopAndValidate: vi.fn().mockReturnValue({ passed: true, violations: [], warnings: [], stats: { total: 0, readOnly: 0, write: 0, errors: 0 }, validationSummary: '' }),
+      stopAndValidate: vi
+        .fn()
+        .mockReturnValue({
+          passed: true,
+          violations: [],
+          warnings: [],
+          stats: { total: 0, readOnly: 0, write: 0, errors: 0 },
+          validationSummary: '',
+        }),
       reset: vi.fn(),
       getSnapshot: vi.fn().mockReturnValue([]),
       cleanup: vi.fn(),
@@ -46,7 +54,15 @@ describe('EvolutionReviewer', () => {
   })
 
   it('stopAndValidate 失败设置 summary', () => {
-    responseValidator.stopAndValidate = vi.fn().mockReturnValue({ passed: false, violations: [{ type: 'forbidden_tool', severity: 'error', message: '违规' }], warnings: [], stats: { total: 1, readOnly: 0, write: 1, errors: 0 }, validationSummary: '违规' })
+    responseValidator.stopAndValidate = vi
+      .fn()
+      .mockReturnValue({
+        passed: false,
+        violations: [{ type: 'forbidden_tool', severity: 'error', message: '违规' }],
+        warnings: [],
+        stats: { total: 1, readOnly: 0, write: 1, errors: 0 },
+        validationSummary: '违规',
+      })
     reviewer.startListen()
     expect(reviewer.stopAndValidate('analyze').passed).toBe(false)
   })

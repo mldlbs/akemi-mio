@@ -9,8 +9,19 @@ describe('EvolutionExecutor', () => {
   let planManager: any
 
   beforeEach(() => {
-    agentService = { runSelfTask: vi.fn().mockResolvedValue({ success: true, summary: 'OK' }), isBusy: vi.fn(() => false), abortSelfTask: vi.fn() }
-    planManager = { getActivePlan: vi.fn().mockReturnValue(null), listPlans: vi.fn().mockReturnValue([]), getFormattedContext: vi.fn(() => ''), updateStep: vi.fn(), completePlan: vi.fn(), abandonPlan: vi.fn() }
+    agentService = {
+      runSelfTask: vi.fn().mockResolvedValue({ success: true, summary: 'OK' }),
+      isBusy: vi.fn(() => false),
+      abortSelfTask: vi.fn(),
+    }
+    planManager = {
+      getActivePlan: vi.fn().mockReturnValue(null),
+      listPlans: vi.fn().mockReturnValue([]),
+      getFormattedContext: vi.fn(() => ''),
+      updateStep: vi.fn(),
+      completePlan: vi.fn(),
+      abandonPlan: vi.fn(),
+    }
     executor = new EvolutionExecutor(agentService, planManager)
   })
 
@@ -29,7 +40,9 @@ describe('EvolutionExecutor', () => {
   })
 
   it('hasPendingStep 有 pending 步骤返回 true', () => {
-    planManager.getActivePlan = vi.fn().mockReturnValue({ id: 'p1', steps: [{ id: 's1', description: 's1', status: 'pending' }], status: 'active' })
+    planManager.getActivePlan = vi
+      .fn()
+      .mockReturnValue({ id: 'p1', steps: [{ id: 's1', description: 's1', status: 'pending' }], status: 'active' })
     expect(executor.hasPendingStep()).toBe(true)
   })
 
@@ -38,7 +51,14 @@ describe('EvolutionExecutor', () => {
   })
 
   it('getPlanProgress 返回进度', () => {
-    planManager.getActivePlan = vi.fn().mockReturnValue({ id: 'p1', steps: [{ id: 's1', description: 's1', status: 'done' }, { id: 's2', description: 's2', status: 'pending' }], status: 'active' })
+    planManager.getActivePlan = vi.fn().mockReturnValue({
+      id: 'p1',
+      steps: [
+        { id: 's1', description: 's1', status: 'done' },
+        { id: 's2', description: 's2', status: 'pending' },
+      ],
+      status: 'active',
+    })
     expect(executor.getPlanProgress()).toEqual({ completed: 1, total: 2 })
   })
 
@@ -56,8 +76,20 @@ describe('EvolutionExecutor', () => {
   })
 
   it('executeNextStep 完成所有步骤', async () => {
-    planManager.getActivePlan = vi.fn().mockReturnValue({ id: 'p1', title: '测试', description: 'd', steps: [{ id: 's1', description: '完成', status: 'done' }], status: 'active' })
-    planManager.listPlans = vi.fn().mockReturnValue([{ id: 'p1', title: '测试', description: 'd', steps: [{ id: 's1', description: '完成', status: 'done' }], status: 'active' }])
+    planManager.getActivePlan = vi
+      .fn()
+      .mockReturnValue({
+        id: 'p1',
+        title: '测试',
+        description: 'd',
+        steps: [{ id: 's1', description: '完成', status: 'done' }],
+        status: 'active',
+      })
+    planManager.listPlans = vi
+      .fn()
+      .mockReturnValue([
+        { id: 'p1', title: '测试', description: 'd', steps: [{ id: 's1', description: '完成', status: 'done' }], status: 'active' },
+      ])
     const r = await executor.executeNextStep({ planId: 'p1', stepIndex: 0, stepDescription: '', planCtx: '', cognitiveCtx: '' })
     expect(r.planCompleted).toBe(true)
   })

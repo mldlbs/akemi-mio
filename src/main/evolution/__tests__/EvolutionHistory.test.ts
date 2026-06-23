@@ -22,7 +22,11 @@ describe('EvolutionHistoryManager', () => {
   })
 
   afterEach(() => {
-    try { rmSync(historyPath.replace(/\/[^/]+$/, ''), { recursive: true }) } catch { /* ignore */ }
+    try {
+      rmSync(historyPath.replace(/\/[^/]+$/, ''), { recursive: true })
+    } catch {
+      /* ignore */
+    }
   })
 
   it('load 返回空历史', () => {
@@ -63,14 +67,38 @@ describe('EvolutionHistoryManager', () => {
   })
 
   it('loadRecentFailures 只返回失败', () => {
-    manager.recordCycle({ timestamp: Date.now(), perspective: '分析', summary: 'OK', planCreated: false, stepsCompleted: 0, stepsTotal: 0, success: true })
-    manager.recordCycle({ timestamp: Date.now(), perspective: '执行', summary: '超时失败', planCreated: false, stepsCompleted: 0, stepsTotal: 0, success: false })
+    manager.recordCycle({
+      timestamp: Date.now(),
+      perspective: '分析',
+      summary: 'OK',
+      planCreated: false,
+      stepsCompleted: 0,
+      stepsTotal: 0,
+      success: true,
+    })
+    manager.recordCycle({
+      timestamp: Date.now(),
+      perspective: '执行',
+      summary: '超时失败',
+      planCreated: false,
+      stepsCompleted: 0,
+      stepsTotal: 0,
+      success: false,
+    })
     expect(manager.loadRecentFailures()).toHaveLength(1)
   })
 
   it('max 20 entries enforced', () => {
     for (let i = 0; i < 25; i++) {
-      manager.recordCycle({ timestamp: Date.now(), perspective: '循环', summary: `条目 ${i}`, planCreated: false, stepsCompleted: 0, stepsTotal: 0, success: true })
+      manager.recordCycle({
+        timestamp: Date.now(),
+        perspective: '循环',
+        summary: `条目 ${i}`,
+        planCreated: false,
+        stepsCompleted: 0,
+        stepsTotal: 0,
+        success: true,
+      })
     }
     expect(manager.load().cycles.length).toBeLessThanOrEqual(20)
   })

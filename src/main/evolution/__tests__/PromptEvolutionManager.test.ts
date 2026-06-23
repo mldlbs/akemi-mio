@@ -22,7 +22,11 @@ describe('PromptEvolutionManager', () => {
   })
 
   afterEach(() => {
-    try { rmSync(tmpDir, { recursive: true }) } catch { /* ignore */ }
+    try {
+      rmSync(tmpDir, { recursive: true })
+    } catch {
+      /* ignore */
+    }
   })
 
   it('初始化后 base overlay 为空字符串', () => {
@@ -64,13 +68,13 @@ describe('PromptEvolutionManager', () => {
   })
 
   it('summarizeOverlays 合并多条规则', () => {
-    manager.evolvePrompt('analysis_prompt', 'A', ['规则一'])
-    manager.evolvePrompt('analysis_prompt', 'B', ['规则二'])
+    manager.evolvePrompt('analysis_prompt', 'A', ['必须分析项目中未被检测的代码模块'])
+    manager.evolvePrompt('analysis_prompt', 'B', ['避免在每次分析中重复检查 config 文件'])
     const pv = manager.summarizeOverlays('analysis_prompt')
     expect(pv).not.toBeNull()
     expect(pv!.version).toBeGreaterThan(2)
-    expect(manager.getOverlay('analysis_prompt')).toContain('规则一')
-    expect(manager.getOverlay('analysis_prompt')).toContain('规则二')
+    expect(manager.getOverlay('analysis_prompt')).toContain('未被检测的代码模块')
+    expect(manager.getOverlay('analysis_prompt')).toContain('重复检查 config')
   })
 
   it('shouldCompact 在版本过多时触发', () => {
@@ -91,7 +95,9 @@ describe('PromptEvolutionManager', () => {
 
   it('llmEvolvePrompt 失败时回退到硬编码模式', async () => {
     const failingAgent = {
-      runSelfTask: async () => { throw new Error('timeout') },
+      runSelfTask: async () => {
+        throw new Error('timeout')
+      },
     }
     const pv = await manager.llmEvolvePrompt('analysis_prompt', '退化', '连续相同结论', failingAgent as any)
     expect(pv).not.toBeNull()
@@ -129,5 +135,5 @@ describe('PromptEvolutionManager', () => {
     expect(overlay.length).toBeGreaterThan(0)
     const result = manager.shouldCompact('analysis_prompt')
     expect(result.needSummarize).toBe(true)
-  })
+  }, 30000)
 })

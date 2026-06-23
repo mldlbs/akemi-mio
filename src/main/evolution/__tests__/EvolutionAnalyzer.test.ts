@@ -21,12 +21,22 @@ describe('EvolutionAnalyzer', () => {
   beforeEach(() => {
     paths = makeTestPaths()
     planManager = { getActivePlan: vi.fn(() => null), listPlans: vi.fn(() => []), getFormattedContext: vi.fn(() => '') }
-    agentService = { runSelfTask: vi.fn().mockResolvedValue({ success: true, summary: '分析完成' }), isBusy: vi.fn(() => false), abortSelfTask: vi.fn() }
-    analyzer = new EvolutionAnalyzer(agentService, planManager, { historyPath: paths.historyPath, analysisTimeoutMs: 60000, degenerationThreshold: 3 })
+    agentService = {
+      runSelfTask: vi.fn().mockResolvedValue({ success: true, summary: '分析完成' }),
+      isBusy: vi.fn(() => false),
+      abortSelfTask: vi.fn(),
+    }
+    analyzer = new EvolutionAnalyzer(agentService, planManager, {
+      historyPath: paths.historyPath,
+      analysisTimeoutMs: 60000,
+      degenerationThreshold: 3,
+    })
   })
 
   afterEach(() => {
-    try { rmSync(paths.livingPlanDir, { recursive: true }) } catch { }
+    try {
+      rmSync(paths.livingPlanDir, { recursive: true })
+    } catch {}
   })
 
   it('init state 转换', async () => {
@@ -40,8 +50,15 @@ describe('EvolutionAnalyzer', () => {
   })
 
   it('detectPlanMode 有活跃计划返回 continue_plan', () => {
-    planManager.getActivePlan = vi.fn(() => ({ id: 'p1', title: '测试', steps: [{ id: 's1', description: 's', status: 'pending' }], status: 'active' }))
-    planManager.listPlans = vi.fn(() => [{ id: 'p1', title: '测试', steps: [{ id: 's1', description: 's', status: 'pending' }], status: 'active' }])
+    planManager.getActivePlan = vi.fn(() => ({
+      id: 'p1',
+      title: '测试',
+      steps: [{ id: 's1', description: 's', status: 'pending' }],
+      status: 'active',
+    }))
+    planManager.listPlans = vi.fn(() => [
+      { id: 'p1', title: '测试', steps: [{ id: 's1', description: 's', status: 'pending' }], status: 'active' },
+    ])
     expect(analyzer.detectPlanMode().mode).toBe('continue_plan')
   })
 
@@ -67,7 +84,12 @@ describe('EvolutionAnalyzer', () => {
   })
 
   it('shouldAnalyze 有活跃计划时返回 false', () => {
-    planManager.getActivePlan = vi.fn(() => ({ id: 'p1', title: 't', steps: [{ id: 's', description: 's', status: 'pending' }], status: 'active' }))
+    planManager.getActivePlan = vi.fn(() => ({
+      id: 'p1',
+      title: 't',
+      steps: [{ id: 's', description: 's', status: 'pending' }],
+      status: 'active',
+    }))
     expect(analyzer.shouldAnalyze().shouldRun).toBe(false)
   })
 
@@ -76,7 +98,16 @@ describe('EvolutionAnalyzer', () => {
   })
 
   it('analyze 调用 agentService', async () => {
-    const input = { mode: 'first_run' as any, planContext: '', historySummary: '', safetyMode: 'auto', livingPlanCtx: '', cognitiveCtx: '', strategyCtx: '', promptMode: 'full' as any }
+    const input = {
+      mode: 'first_run' as any,
+      planContext: '',
+      historySummary: '',
+      safetyMode: 'auto',
+      livingPlanCtx: '',
+      cognitiveCtx: '',
+      strategyCtx: '',
+      promptMode: 'full' as any,
+    }
     const result = await analyzer.analyze(input)
     expect(agentService.runSelfTask).toHaveBeenCalled()
     expect(result.success).toBe(true)
@@ -84,7 +115,16 @@ describe('EvolutionAnalyzer', () => {
 
   it('analyze 异常时返回 hadTimeout', async () => {
     agentService.runSelfTask = vi.fn().mockRejectedValue(new Error('API error'))
-    const input = { mode: 'first_run' as any, planContext: '', historySummary: '', safetyMode: 'auto', livingPlanCtx: '', cognitiveCtx: '', strategyCtx: '', promptMode: 'full' as any }
+    const input = {
+      mode: 'first_run' as any,
+      planContext: '',
+      historySummary: '',
+      safetyMode: 'auto',
+      livingPlanCtx: '',
+      cognitiveCtx: '',
+      strategyCtx: '',
+      promptMode: 'full' as any,
+    }
     const result = await analyzer.analyze(input)
     expect(result.success).toBe(false)
     expect(result.hadTimeout).toBe(true)

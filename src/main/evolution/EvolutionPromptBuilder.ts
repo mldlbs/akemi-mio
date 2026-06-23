@@ -12,6 +12,7 @@ export const ANALYSIS_PROMPT = (
   historySummary: string,
   safetyMode: string,
   validationSummary?: string,
+  promptOverlay?: string,
 ) => {
   const modeInstructions: Record<AnalysisMode, string> = {
     first_run: [
