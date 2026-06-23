@@ -45,6 +45,8 @@ import { AuditTrail } from '../plugin/AuditTrail'
 import { MemoryIndexer } from '../memory/MemoryIndexer'
 import { Kernel } from '../core/Kernel'
 import { WorkerPool } from '../core/WorkerPool'
+import { SessionGovernor } from '../governance'
+import { CheckpointV2 } from '../governance'
 import { systemBus } from '../core/SystemBus'
 import { SyscallBus, HealthChecker } from '../core/lifecycle/index'
 import type { IModule, SubsystemState } from '../core/lifecycle/types'
@@ -83,6 +85,8 @@ export class AppRuntime {
   private syscallBus?: SyscallBus
   private healthChecker?: HealthChecker
   private capabilityEngine?: CapabilityEngine
+  private sessionGovernor?: SessionGovernor
+  private checkpointV2?: CheckpointV2
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
     this.crashGuard = crashGuard ?? { flushMemory: null }
@@ -189,6 +193,15 @@ export class AppRuntime {
     // Phase 4: WorkerPool — 后台工作线程池（ISubsystem，独立生命周期）
     await this.workerPool!.init()
 
+    // Phase 4: SessionGovernor — 会话级健康治理
+    this.sessionGovernor = new SessionGovernor()
+    this.sessionGovernor.setStateManager(stateManager)
+    await this.sessionGovernor.init()
+
+    // Phase 4: CheckpointV2 — 带健康验证的检查点
+    this.checkpointV2 = new CheckpointV2(join(WORKSPACE.evolution, 'recovery'), recoveryManager)
+    this.checkpointV2.setHealthScorer(this.sessionGovernor.scorer)
+
     // 注册 SyscallBus 为内核模块
     const kernelModule: IModule = {
       name: 'syscall',
@@ -209,6 +222,8 @@ export class AppRuntime {
     }
     await kernel.registerModule(kernelModule)
     await kernel.start()
+    // Phase 4: 启动会话治理
+    await this.sessionGovernor!.start()
     // Phase 4: 冻结内核模块注册表 + 能力沙箱默认值
     kernel.freezeModuleRegistry()
     freezeDefaults()
@@ -273,6 +288,7 @@ export class AppRuntime {
     this.workerPool!.register('verification', 'verification-worker')
     this.workerPool!.register('observer', 'observer-worker')
     this.healthChecker.register(this.workerPool!)
+    this.healthChecker.register(this.sessionGovernor!)
     log('INFO', 'workerpool_ready', { workers: ['memory-indexer', 'verification', 'observer'] })
     log('INFO', 'health_checker_started')
 
@@ -442,6 +458,7 @@ export class AppRuntime {
 
   private async shutdown(): Promise<void> {
     // Phase 4: Agent OS 生命周期 — 反向停止
+    await this.sessionGovernor?.stop().catch(() => {})
     await this.healthChecker?.stop().catch(() => {})
     await this.workerPool?.stop().catch(() => {})
     const kernel = Kernel.getInstance()
