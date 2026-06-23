@@ -11,6 +11,7 @@ function getProjectRoot(): string {
 }
 
 function getUserDataDir(): string {
+  if (process.env.USER_DATA_DIR) return process.env.USER_DATA_DIR
   try {
     return app.getPath('userData')
   } catch {

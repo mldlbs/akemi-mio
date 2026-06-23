@@ -42,15 +42,18 @@ function resolveKernelPrefixes(): string[] {
 }
 
 /** Runtime Kernel 不可变目录前缀（自动推导，兼容 dev/prod） */
-export const KERNEL_PREFIXES = resolveKernelPrefixes()
+export function getKernelPrefixes(): string[] {
+  return resolveKernelPrefixes()
+}
 
 /**
  * 判断路径是否属于 Runtime Kernel（基于前缀匹配，路径分隔符归一化）。
  * 用于在 ConstitutionEngine 加载前的快速判断。
  */
-export function isKernelPath(absolutePath: string): boolean {
+export function isKernelPath(absolutePath: string, prefixes?: string[]): boolean {
   const normalized = absolutePath.replace(/\\/g, '/')
-  return KERNEL_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+  const resolved = prefixes ?? resolveKernelPrefixes()
+  return resolved.some((prefix) => normalized.startsWith(prefix))
 }
 
 export function normalizePath(p: string): string {

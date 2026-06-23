@@ -5,6 +5,13 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/main/**/__tests__/**/*.test.ts'],
+    fileParallelism: false,
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
     coverage: {
       provider: 'v8',
       include: ['src/main/**/*.ts'],

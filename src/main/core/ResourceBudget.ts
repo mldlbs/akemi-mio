@@ -83,6 +83,25 @@ interface TaskBudget {
   cpuBudget: number
 }
 
+// ==================== 进程级预算 ====================
+
+export interface ProcessBudgetConfig {
+  maxMemoryMb: number
+  maxCpuMs: number
+  maxRestarts: number
+}
+
+export interface ProcessUtilization {
+  memoryMb: number
+  cpuMs: number
+  restarts: number
+}
+
+interface ProcessBudget {
+  config: ProcessBudgetConfig
+  utilization: ProcessUtilization
+}
+
 /**
  * ResourceBudget — Agent OS 资源预算管理器。
  *
@@ -98,6 +117,7 @@ export class ResourceBudget {
   private config: BudgetConfig
   private state: BudgetState
   private taskBudgets = new Map<string, TaskBudget>()
+  private processBudgets = new Map<string, ProcessBudget>()
   private originalConfig: BudgetConfig
   private readonly budgetFilePath: string
 
@@ -366,6 +386,57 @@ export class ResourceBudget {
       return `Task ${taskId}: CPU 配额已超 (${tb.cpuMsUsed}/${tb.cpuBudget}ms)`
     }
     return null
+  }
+
+  // ==================== 进程级预算 ====================
+
+  /** 为子进程分配预算 */
+  allocateProcessBudget(processName: string, config: ProcessBudgetConfig): void {
+    this.processBudgets.set(processName, {
+      config,
+      utilization: { memoryMb: 0, cpuMs: 0, restarts: 0 },
+    })
+  }
+
+  /** 消耗子进程内存（返回是否超限） */
+  consumeProcessMemory(processName: string, mb: number): boolean {
+    const pb = this.processBudgets.get(processName)
+    if (!pb) return true // 未跟踪进程不计入预算
+
+    pb.utilization.memoryMb = Math.max(pb.utilization.memoryMb, mb)
+    if (mb >= pb.config.maxMemoryMb) {
+      this.emitProcessExhausted(processName, 'memory', mb, pb.config.maxMemoryMb)
+      return false
+    }
+    return true
+  }
+
+  /** 记录子进程重启 */
+  recordProcessRestart(processName: string): boolean {
+    const pb = this.processBudgets.get(processName)
+    if (!pb) return true
+
+    pb.utilization.restarts++
+    if (pb.utilization.restarts > pb.config.maxRestarts) {
+      this.emitProcessExhausted(processName, 'restarts', pb.utilization.restarts, pb.config.maxRestarts)
+      return false
+    }
+    return true
+  }
+
+  /** 获取子进程利用率 */
+  getProcessUtilization(processName: string): ProcessUtilization | null {
+    return this.processBudgets.get(processName)?.utilization ?? null
+  }
+
+  /** 释放子进程预算 */
+  releaseProcessBudget(processName: string): void {
+    this.processBudgets.delete(processName)
+  }
+
+  private emitProcessExhausted(processName: string, resource: string, used: number, limit: number): void {
+    log('WARN', 'budget_process_exhausted', { process: processName, resource, used, limit })
+    eventBus.emit('budget.exhausted', { resource: `process.${processName}.${resource}`, utilization: used / limit })
   }
 
   // ==================== 稳定性自适应调节 ====================

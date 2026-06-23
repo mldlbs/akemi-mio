@@ -36,6 +36,7 @@ export class MemoryService {
   private entries: MemoryEntry[] = []
   private messageCount: number = 0
   private lastUserText: string = ''
+  private removedIds = new Set<string>()
 
   readonly summary: SummaryMemory
   readonly vector: VectorMemory
@@ -317,7 +318,10 @@ export class MemoryService {
     const toRemove = scored.slice(max)
     for (const s of toRemove) {
       const idx = this.entries.findIndex((e) => e.id === s.entry.id)
-      if (idx >= 0) this.entries.splice(idx, 1)
+      if (idx >= 0) {
+        this.removedIds.add(s.entry.id)
+        this.entries.splice(idx, 1)
+      }
     }
     if (toRemove.length > 0) {
       log('INFO', 'memory_pruned', { tier, removed: toRemove.length })
@@ -357,28 +361,21 @@ export class MemoryService {
   }
 
   private flushAllToDb(): void {
+    if (this.removedIds.size === 0) return
     try {
       const db = getRawDb()
       db.run('BEGIN')
-      for (const e of this.entries) {
-        db.run(
-          'INSERT OR REPLACE INTO memories (id, type, content, confidence, tier, reinforce_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [e.id, e.type, e.content, e.confidence, e.tier, e.reinforceCount, e.createdAt, e.updatedAt],
-        )
-      }
-      // 清除不在内存中的过期行（已被 prune 移除的）
-      const inMemoryIds = this.entries.map((e) => e.id)
-      if (inMemoryIds.length > 0) {
-        const placeholders = inMemoryIds.map(() => '?').join(',')
-        db.run(`DELETE FROM memories WHERE id NOT IN (${placeholders})`, inMemoryIds)
+      for (const id of this.removedIds) {
+        db.run('DELETE FROM memories WHERE id = ?', [id])
       }
       db.run('COMMIT')
       markDirty()
+      this.removedIds.clear()
     } catch (err) {
       try {
         getRawDb().run('ROLLBACK')
       } catch {}
-      log('ERROR', 'memory_save_failed', { error: String(err) })
+      log('ERROR', 'memory_flush_removed_failed', { error: String(err) })
     }
   }
 }

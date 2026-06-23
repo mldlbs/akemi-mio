@@ -19,8 +19,8 @@ const READONLY_TOOLS = new Set([
 describe('getAllTools', () => {
   const tools = getAllTools()
 
-  it('返回 25 个工具', () => {
-    expect(tools).toHaveLength(25)
+  it('返回 26 个工具', () => {
+    expect(tools).toHaveLength(26)
   })
 
   it('每个工具有 name/description/inputJSONSchema/handler', () => {

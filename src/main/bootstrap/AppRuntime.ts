@@ -45,6 +45,8 @@ import { AuditTrail } from '../plugin/AuditTrail'
 import { MemoryIndexer } from '../memory/MemoryIndexer'
 import { Kernel } from '../core/Kernel'
 import { WorkerPool } from '../core/WorkerPool'
+import { ProcessManager } from '../core/ProcessManager'
+import { AgentModule, MemoryModule, EvolutionModule, McpModule } from '../core/kernel-modules'
 import { SessionGovernor } from '../governance'
 import { CheckpointV2 } from '../governance'
 import { systemBus } from '../core/SystemBus'
@@ -74,6 +76,7 @@ export class AppRuntime {
   private memoryService?: MemoryService
   private memoryIndexer?: MemoryIndexer
   private workerPool?: WorkerPool
+  private processManager?: ProcessManager
   private pluginLoader?: PluginLoader
   private agentServiceRef?: AgentService
   private crashGuard: { flushMemory: (() => void) | null }
@@ -138,6 +141,7 @@ export class AppRuntime {
     this.syscallBus = new SyscallBus()
     this.healthChecker = new HealthChecker(30_000)
     this.workerPool = new WorkerPool()
+    this.processManager = new ProcessManager()
 
     // Phase 1-3: 基础设施实例化
     this.resourceBudget = new ResourceBudget()
@@ -190,6 +194,17 @@ export class AppRuntime {
     const kernel = Kernel.getInstance()
     await kernel.init()
 
+    // Phase 4: 注册内核模块（Agent, Memory, MCP, Evolution 等）
+    const agentModule = new AgentModule(agentService)
+    const memoryModule = new MemoryModule(memoryService)
+    const mcpModule = new McpModule(mcpManager)
+    await kernel.registerModule(agentModule)
+    await kernel.registerModule(memoryModule)
+    await kernel.registerModule(mcpModule)
+
+    // Phase 4: ProcessManager — 子进程生命周期管理
+    await this.processManager!.init()
+
     // Phase 4: WorkerPool — 后台工作线程池（ISubsystem，独立生命周期）
     await this.workerPool!.init()
 
@@ -201,6 +216,25 @@ export class AppRuntime {
     // Phase 4: CheckpointV2 — 带健康验证的检查点
     this.checkpointV2 = new CheckpointV2(join(WORKSPACE.evolution, 'recovery'), recoveryManager)
     this.checkpointV2.setHealthScorer(this.sessionGovernor.scorer)
+
+    // Phase 4: 连接 SessionGovernor 恢复回调到 AgentService
+    this.sessionGovernor.setRecoveryCallbacks({
+      onContextCompress: () => {
+        try {
+          agentService.getContext().trimOrphanedToolCalls?.()
+        } catch {}
+      },
+      onInjectCorrection: (msg) => {
+        try {
+          agentService.getContext().addSystemMessage?.(msg)
+        } catch {}
+      },
+      onClearContext: () => {
+        try {
+          agentService.clearContext()
+        } catch {}
+      },
+    })
 
     // 注册 SyscallBus 为内核模块
     const kernelModule: IModule = {
@@ -289,6 +323,10 @@ export class AppRuntime {
     this.workerPool!.register('observer', 'observer-worker')
     this.healthChecker.register(this.workerPool!)
     this.healthChecker.register(this.sessionGovernor!)
+    this.healthChecker.register(this.processManager!)
+    // Phase 4: ProcessManager 启动（此时开始健康检查）
+    await this.processManager!.start()
+    log('INFO', 'process_manager_ready')
     log('INFO', 'workerpool_ready', { workers: ['memory-indexer', 'verification', 'observer'] })
     log('INFO', 'health_checker_started')
 
@@ -460,6 +498,7 @@ export class AppRuntime {
     // Phase 4: Agent OS 生命周期 — 反向停止
     await this.sessionGovernor?.stop().catch(() => {})
     await this.healthChecker?.stop().catch(() => {})
+    await this.processManager?.stop().catch(() => {})
     await this.workerPool?.stop().catch(() => {})
     const kernel = Kernel.getInstance()
     await kernel.stop().catch(() => {})
@@ -577,6 +616,10 @@ export class AppRuntime {
         evolution.setProposalValidator(this.proposalValidator)
         // 设置 sandbox 产物验证根目录
         setSandboxRoot(join(WORKSPACE.evolution, 'sandbox'))
+        // 注册 Evolution 内核模块
+        const evolutionModule = new EvolutionModule(evolution)
+        const kernel = Kernel.getInstance()
+        await kernel.registerModule(evolutionModule)
         evolution.scheduleEvolution(2)
         log('INFO', 'evolution_service_started', { interval_hours: 2 })
       },

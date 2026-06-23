@@ -6,6 +6,7 @@ export interface UIState {
   recording?: boolean
   error?: string
   model?: string
+  sessionHealth?: string
 }
 
 /**
@@ -97,7 +98,9 @@ export class StateManager {
 
   subscribe(callback: Listener): () => void {
     this.listeners.add(callback)
-    return () => { this.listeners.delete(callback) }
+    return () => {
+      this.listeners.delete(callback)
+    }
   }
 
   setPushToRenderer(fn: (state: Partial<UIState>) => void): void {

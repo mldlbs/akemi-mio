@@ -128,24 +128,8 @@ export class VectorMemory {
   }
 
   private flushToDb(): void {
-    try {
-      const db = getRawDb()
-      db.run('BEGIN')
-      db.run('DELETE FROM memory_vectors')
-      for (const e of this.entries) {
-        db.run(
-          'INSERT INTO memory_vectors (id, content, embedding, confidence, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [e.id, e.content, JSON.stringify(e.embedding), e.confidence, e.source, e.createdAt, e.updatedAt],
-        )
-      }
-      db.run('COMMIT')
-      markDirty()
-      log('INFO', 'vector_flushed', { count: this.entries.length })
-    } catch (err) {
-      try {
-        getRawDb().run('ROLLBACK')
-      } catch {}
-      log('ERROR', 'vector_flush_failed', { error: String(err) })
-    }
+    // 写穿透：saveToDb/updateInDb 已在个体写入时即时持久化
+    // flush 无需重复写入，仅保留用于重置 dirty 标记
+    log('INFO', 'vector_flush_skipped_wt', { count: this.entries.length })
   }
 }

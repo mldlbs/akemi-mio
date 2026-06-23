@@ -59,6 +59,9 @@ export type EventName =
   | 'agent.observe'
   | 'agent.think'
   | 'agent.reflect'
+  | 'guardrail.readonly_stuck'
+  | 'guardrail.tool_error'
+  | 'guardrail.context_corrupted'
 
 export interface EventPayload {
   'task.lifecycle': { taskId: string; type: string; status: string; durationMs?: number; error?: string }
@@ -133,6 +136,9 @@ export interface EventPayload {
   'agent.observe': { requestId: string; step: number; proceduresFound: number; patternsFound: number; durationMs: number }
   'agent.think': { requestId: string; step: number; toolCallCount: number; strategyPrompted: boolean }
   'agent.reflect': { requestId: string; step: number; toolResults: number; successCount: number; summary: string; durationMs: number }
+  'guardrail.readonly_stuck': { count: number; consecutiveRounds: number }
+  'guardrail.tool_error': { tool: string; error: string; consecutiveErrors: number }
+  'guardrail.context_corrupted': { error: string; details?: string }
 }
 
 type Listener<E extends EventName> = (payload: EventPayload[E]) => void

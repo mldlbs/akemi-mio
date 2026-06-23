@@ -121,7 +121,9 @@ export function closeDatabase(): void {
   }
   if (sqlite) {
     flushDatabase()
-    sqlite.close()
+    try {
+      sqlite.close()
+    } catch {}
     sqlite = null
     db = null
   }

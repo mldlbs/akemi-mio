@@ -153,48 +153,8 @@ export class SummaryMemory {
   }
 
   private flushToDb(): void {
-    try {
-      const db = getRawDb()
-      const info = db.exec('PRAGMA table_info(memory_summaries)')
-      const columns = info?.[0]?.values?.map((v: any) => v[1]) || []
-      const hasTopics = columns.includes('topics')
-
-      db.run('BEGIN')
-      db.run('DELETE FROM memory_summaries')
-      for (const e of this.entries) {
-        if (hasTopics) {
-          db.run(
-            `INSERT INTO memory_summaries (id, summary, turn_start, turn_end, topics, decisions, key_entities, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              e.id,
-              e.summary,
-              e.turnStart,
-              e.turnEnd,
-              JSON.stringify(e.topics),
-              JSON.stringify(e.decisions),
-              JSON.stringify(e.keyEntities),
-              e.createdAt,
-            ],
-          )
-        } else {
-          db.run('INSERT INTO memory_summaries (id, summary, turn_start, turn_end, created_at) VALUES (?, ?, ?, ?, ?)', [
-            e.id,
-            e.summary,
-            e.turnStart,
-            e.turnEnd,
-            e.createdAt,
-          ])
-        }
-      }
-      db.run('COMMIT')
-      markDirty()
-      log('INFO', 'summary_flushed', { count: this.entries.length })
-    } catch (err) {
-      try {
-        getRawDb().run('ROLLBACK')
-      } catch {}
-      log('ERROR', 'summary_flush_failed', { error: String(err) })
-    }
+    // 写穿透：saveToDb 已在个体写入时即时持久化
+    // flush 无需重复写入，仅保留用于重置 dirty 标记
+    log('INFO', 'summary_flush_skipped_wt', { count: this.entries.length })
   }
 }

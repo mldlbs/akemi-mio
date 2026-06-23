@@ -25,6 +25,8 @@ export type { Proposal, ProposalValidation } from './ProposalValidator'
 export { ANALYSIS_PROMPT, PLAN_EXECUTE_PROMPT, detectPlanMode, pickBestPlan, buildPlanInjection } from './EvolutionPromptBuilder'
 export type { AnalysisMode } from './EvolutionPromptBuilder'
 export { SelfEvolutionService, EvolutionSchedulerState as ServiceSchedulerState } from './SelfEvolutionService'
+export { MetaLearner } from './MetaLearner'
+export { EvaluatorCalibrator } from './EvaluatorCalibrator'
 export type { EvolutionSafetyMode } from './types'
 export type { PlanManagerLike } from './types'
 

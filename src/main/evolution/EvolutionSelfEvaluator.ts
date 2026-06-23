@@ -6,6 +6,7 @@
  */
 
 import { log } from '../logger/Logger'
+import type { EngineeringMemory } from '../memory/EngineeringMemory'
 
 export interface SelfEvaluationResult {
   score: number
@@ -19,14 +20,46 @@ export interface SelfEvaluationResult {
     substantiveLength: number
   }
   feedback: string[]
+  outcome?: boolean
 }
 
 export class EvolutionSelfEvaluator {
   private recentEvaluations: SelfEvaluationResult[] = []
   private maxHistory: number
+  private engineering: EngineeringMemory | null = null
 
   constructor(historyMaxEntries = 10) {
     this.maxHistory = historyMaxEntries
+  }
+
+  injectEngineering(eng: EngineeringMemory): void {
+    this.engineering = eng
+  }
+
+  /** 事后记录该次演化的实际结果（plan 是否成功执行） */
+  recordOutcome(score: number, succeeded: boolean): void {
+    // 在 recentEvaluations 中找到最近一次匹配分数的评估，标记 outcome
+    for (let i = this.recentEvaluations.length - 1; i >= 0; i--) {
+      if (this.recentEvaluations[i].score === score && this.recentEvaluations[i].outcome === undefined) {
+        this.recentEvaluations[i].outcome = succeeded
+        break
+      }
+    }
+  }
+
+  /** 评估器校准：对比评分与实际成功率 */
+  getCalibration(): { bias: number; sampleSize: number; isReliable: boolean } {
+    const completed = this.recentEvaluations.filter((r) => r.outcome !== undefined)
+    if (completed.length < 3) return { bias: 0, sampleSize: completed.length, isReliable: false }
+
+    let totalDiff = 0
+    for (const r of completed) {
+      const predicted = r.score / 100 // 评分映射到 0-1
+      const actual = r.outcome ? 1 : 0
+      totalDiff += actual - predicted
+    }
+    const bias = totalDiff / completed.length // 正数 = 太悲观，负数 = 太乐观
+    return { bias, sampleSize: completed.length, isReliable: completed.length >= 5 }
   }
 
   evaluate(params: {
@@ -68,6 +101,27 @@ export class EvolutionSelfEvaluator {
     this.recentEvaluations.push(result)
     if (this.recentEvaluations.length > this.maxHistory) {
       this.recentEvaluations = this.recentEvaluations.slice(-this.maxHistory)
+    }
+
+    // 持久化到 EngineeringMemory
+    if (this.engineering) {
+      try {
+        this.engineering.store({
+          type: 'evaluation',
+          content: [
+            `【自评估】${result.score}/100 (${params.strategyName})`,
+            `计划质量: ${result.dimensions.planQuality}`,
+            `分析多样性: ${result.dimensions.analysisDiversity}`,
+            `策略合规: ${result.dimensions.strategyCompliance}`,
+            `摘要长度: ${result.dimensions.substantiveLength}`,
+            ...result.feedback.map((f) => `反馈: ${f}`),
+          ].join('\n'),
+          source: 'self_evaluator',
+          confidence: result.score / 100,
+          relatedFiles: [],
+          tags: ['self_evaluation', params.strategyName, ...(result.feedback.length > 0 ? ['has_feedback'] : [])],
+        })
+      } catch {}
     }
 
     log('INFO', 'self_evaluation_complete', {

@@ -36,6 +36,8 @@ import type { ISubsystem, HealthCheckResult, SubsystemState } from '../core/life
 import type { AnalysisInput } from './pipeline/types'
 import { PromptEvolutionManager, type PromptSlot } from './PromptEvolutionManager'
 import { EvolutionSelfEvaluator } from './EvolutionSelfEvaluator'
+import { MetaLearner } from './MetaLearner'
+import { EvaluatorCalibrator } from './EvaluatorCalibrator'
 
 // =============================================================================
 // 调度状态机状态枚举
@@ -110,6 +112,8 @@ export class SelfEvolutionService implements ISubsystem {
   // ==================== Phase 3: Meta Evolution ====================
   readonly promptEvolutionManager: PromptEvolutionManager
   readonly selfEvaluator: EvolutionSelfEvaluator
+  readonly metaLearner: MetaLearner
+  readonly evaluatorCalibrator: EvaluatorCalibrator
   private consecutiveCleanCycles = 0
 
   // ==================== 状态持久化 ====================
@@ -165,6 +169,8 @@ export class SelfEvolutionService implements ISubsystem {
     // Phase 3: Meta Evolution
     this.promptEvolutionManager = new PromptEvolutionManager()
     this.selfEvaluator = new EvolutionSelfEvaluator()
+    this.metaLearner = new MetaLearner()
+    this.evaluatorCalibrator = new EvaluatorCalibrator()
 
     this.loadState()
 
@@ -577,6 +583,9 @@ export class SelfEvolutionService implements ISubsystem {
         const result = await this.analyzer.analyze(input)
         this.analyzer.recordFingerprint(result.summary)
 
+        // Phase 3: 自评估结果（在多个 if 块中共享）
+        let selfEval: any = null
+
         if (result.success) {
           this.tryRunFailures = 0
           this.lastSuccessTime = Date.now()
@@ -598,7 +607,7 @@ export class SelfEvolutionService implements ISubsystem {
           if (result.success) {
             try {
               const activePlan = this.planManager?.getActivePlan()
-              const selfEval = this.selfEvaluator.evaluate({
+              selfEval = this.selfEvaluator.evaluate({
                 strategyName: strategy.name,
                 promptMode: strategy.promptMode,
                 analysisSummary: result.summary,
@@ -614,21 +623,49 @@ export class SelfEvolutionService implements ISubsystem {
                 dimensions: selfEval.dimensions,
                 feedback: selfEval.feedback,
               })
+              // 持久化 self-evaluator 到 EngineeringMemory
+              if (this.agentService['memoryService']?.engineering) {
+                this.selfEvaluator.injectEngineering(this.agentService['memoryService'].engineering)
+              }
               // 微调策略分
               this.strategizer.getLearner().applySelfEvaluation(strategy.name, selfEval.score)
-              // Phase 3: 自评估 → 策略变异闭环
+              // Phase 3: 自评估 → 元学习引导定向策略变异闭环
               const trend = this.selfEvaluator.getTrend()
+              const recommendation = this.selfEvaluator.getStrategyRecommendation()
               if (trend === 'stagnant' || trend === 'downward') {
                 try {
-                  const targetStrategy = strategy.name
-                  const mutation = this.strategizer.getLearner().getMutator().mutate(this.strategizer.getLearner().getCycleHistory())
-                  if (mutation) {
-                    log('INFO', 'strategy_mutated_from_selfeval', {
-                      parent: mutation.parent,
-                      child: mutation.child,
-                      operation: mutation.operation,
-                      trend,
+                  // 元学习检查是否应抑制变异
+                  if (this.metaLearner.shouldSuppressMutation()) {
+                    log('INFO', 'strategy_mutation_suppressed_by_metalearner')
+                  } else {
+                    // MetaLearner 推荐变异参数（比随机选择更智能）
+                    const metaRec = this.metaLearner.recommendMutationParam({
+                      strategyName: strategy.name,
+                      currentScore: selfEval.score,
                     })
+                    const targetDim = recommendation.targetDimension || undefined
+                    const mutation = this.strategizer
+                      .getLearner()
+                      .getMutator()
+                      .mutate(this.strategizer.getLearner().getCycleHistory(), targetDim)
+                    if (mutation) {
+                      // Track in MetaLearner
+                      this.metaLearner.recordMutation({
+                        parentStrategy: mutation.parent,
+                        childStrategy: mutation.child,
+                        paramName: metaRec.paramName || mutation.reason,
+                        oldValue: 'parent',
+                        newValue: mutation.child,
+                        operation: mutation.operation,
+                      })
+                      log('INFO', 'strategy_mutated_from_selfeval', {
+                        parent: mutation.parent,
+                        child: mutation.child,
+                        operation: mutation.operation,
+                        trend,
+                        metaInsight: metaRec.insight,
+                      })
+                    }
                   }
                 } catch {
                   log('WARN', 'strategy_mutation_skipped')
@@ -676,6 +713,38 @@ export class SelfEvolutionService implements ISubsystem {
           }
           if (tuningResult.length > 0) {
             log('INFO', 'strategy_params_tuned', { adjustments: tuningResult })
+          }
+          // Phase 3: 记录 outcome（演化结果）
+          if (selfEval) {
+            this.selfEvaluator.recordOutcome(selfEval.score, result.planCreated)
+            // Phase 3: 评估器自校准（每轮记录，每 5 轮实际校准一次）
+            this.evaluatorCalibrator.recordSample(selfEval.dimensions, selfEval.score, result.planCreated)
+          }
+          if (this.evaluatorCalibrator.getCalibrationStats().sampleCount % 5 === 0) {
+            const calResult = this.evaluatorCalibrator.calibrate()
+            if (calResult.sampleSize >= 5) {
+              log('INFO', 'evaluator_weights_adjusted', { delta: calResult.delta })
+            }
+          }
+          // Phase 3: 元学习周期增长
+          this.metaLearner.incrementCycle()
+          if (this.metaLearner.getCycleCount() % 5 === 0) {
+            const metaSummary = this.metaLearner.getMetaSummary()
+            if (metaSummary) {
+              log('INFO', 'meta_learning_summary', { insight: metaSummary.insight })
+            }
+          }
+          // Phase 3: prompt 总结/清理
+          for (const slot of ['analysis_prompt', 'system_prompt'] as const) {
+            try {
+              const compact = this.promptEvolutionManager.shouldCompact(slot)
+              if (compact.needSummarize) {
+                this.promptEvolutionManager.summarizeOverlays(slot)
+              }
+              if (compact.needPrune) {
+                this.promptEvolutionManager.pruneStaleRules(slot)
+              }
+            } catch {}
           }
         }
 

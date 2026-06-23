@@ -434,14 +434,13 @@ export class StrategyMutator {
     this.scores = scores
   }
 
-  /** 尝试一次变异操作 */
-  mutate(cycleHistory: Array<{ strategy: string; eval: CycleEvaluation }>): MutationResult | null {
+  /** 尝试一次变异操作。targetDimension 可指定目标改进维度 */
+  mutate(cycleHistory: Array<{ strategy: string; eval: CycleEvaluation }>, targetDimension?: string): MutationResult | null {
     const viable = this.getViableStrategies()
     if (viable.length === 0) return this.trySeed()
 
-    // Prefer mutation over crossover (simpler, less disruptive)
     if (viable.length >= 1 && Math.random() < 0.7) {
-      return this.performMutation(viable)
+      return this.performMutation(viable, targetDimension)
     }
     if (viable.length >= 2) {
       return this.performCrossover(viable)
@@ -475,10 +474,10 @@ export class StrategyMutator {
     )
   }
 
-  private performMutation(viable: StrategyConfig[]): MutationResult {
+  private performMutation(viable: StrategyConfig[], targetDimension?: string): MutationResult {
     const parent = viable[Math.floor(Math.random() * viable.length)]
     const newName = `${parent.name}_mut_${Date.now().toString(36)}`
-    const param = this.pickMutateParam()
+    const param = targetDimension ? this.pickTargetParam(targetDimension) : this.pickMutateParam()
 
     const child: StrategyConfig = {
       ...parent,
@@ -523,6 +522,22 @@ export class StrategyMutator {
   private pickMutateParam(): string {
     const params = ['timeoutMs', 'trimMode', 'promptMode', 'degenerationThreshold', 'maxHistoryEntries']
     return params[Math.floor(Math.random() * params.length)]
+  }
+
+  /** 目标维度 → 相关参数映射，70% 概率命中目标 */
+  private pickTargetParam(targetDimension: string): string {
+    const dimensionParamMap: Record<string, string[]> = {
+      planQuality: ['promptMode', 'timeoutMs'],
+      analysisDiversity: ['degenerationThreshold', 'maxHistoryEntries'],
+      strategyCompliance: ['safetyMode', 'trimMode'],
+      substantiveLength: ['timeoutMs', 'promptMode'],
+    }
+    const candidates = dimensionParamMap[targetDimension]
+    if (!candidates || candidates.length === 0) return this.pickMutateParam()
+    if (Math.random() < 0.7) {
+      return candidates[Math.floor(Math.random() * candidates.length)]
+    }
+    return this.pickMutateParam()
   }
 
   private performCrossover(viable: StrategyConfig[]): MutationResult {

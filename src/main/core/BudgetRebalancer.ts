@@ -51,6 +51,13 @@ export class BudgetRebalancer {
 
   private handleExhausted(resource: string): void {
     const now = Date.now()
+
+    // Process budget exhaustion: log only (no cross-pool rebalancing)
+    if (resource.startsWith('process.')) {
+      log('WARN', 'budget_rebalance_process', { resource })
+      return
+    }
+
     if (now - this.lastRebalance < this.DEBOUNCE_MS) return
     this.lastRebalance = now
 

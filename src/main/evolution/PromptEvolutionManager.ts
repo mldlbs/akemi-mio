@@ -196,6 +196,96 @@ export class PromptEvolutionManager {
     this.save()
   }
 
+  /** 将版本链中所有 overlays 总结为简洁规则，创建新版本 */
+  summarizeOverlays(mode: PromptSlot): PromptVersion | null {
+    const slot = this.registry.prompts[mode]
+    if (!slot || slot.latestVersion <= 1) return null
+
+    const rules = new Set<string>()
+    for (let v = slot.baseVersion; v <= slot.latestVersion; v++) {
+      const pv = this.versions.get(`${mode}_v${v}`)
+      if (!pv || !pv.promptOverlay) continue
+      for (const line of pv.promptOverlay.split('\n')) {
+        const trimmed = line
+          .replace(/^-\s*/, '')
+          .replace(/^\d+[\.\)]\s*/, '')
+          .trim()
+        if (trimmed.length > 10 && trimmed.length < 200 && !trimmed.startsWith('【')) {
+          rules.add(trimmed)
+        }
+      }
+    }
+
+    if (rules.size === 0) return null
+
+    const merged = Array.from(rules).join('\n')
+
+    const newVersion = slot.latestVersion + 1
+    const pv: PromptVersion = {
+      name: mode,
+      version: newVersion,
+      promptOverlay: `【总结 v${newVersion}】\n${merged}`,
+      applicableMode: mode,
+      createdAt: Date.now(),
+      parentVersion: slot.latestVersion,
+      evolutionReason: `summarize: ${rules.size} rules from ${slot.latestVersion} versions`,
+    }
+
+    this.versions.set(`${mode}_v${newVersion}`, pv)
+    slot.latestVersion = newVersion
+    slot.currentVersion = newVersion
+
+    this.save()
+    log('INFO', 'prompt_overlays_summarized', { mode, version: newVersion, rulesCount: rules.size })
+    return pv
+  }
+
+  /** 移除低分版本的 overlay 规则，返回清理数 */
+  pruneStaleRules(mode: PromptSlot): number {
+    const slot = this.registry.prompts[mode]
+    if (!slot) return 0
+
+    const current = this.versions.get(`${mode}_v${slot.currentVersion}`)
+    if (!current || !current.promptOverlay) return 0
+
+    let removedCount = 0
+    for (let v = slot.baseVersion; v <= slot.latestVersion; v++) {
+      const pv = this.versions.get(`${mode}_v${v}`)
+      if (!pv || v === slot.currentVersion) continue
+      const avg = pv.performanceStats?.avgScore
+      if (avg !== undefined && avg < 40) {
+        const reasonWords = pv.evolutionReason.split(/[\s,，]+/).filter((w: string) => w.length > 2)
+        for (const word of reasonWords) {
+          const re = new RegExp(`[\\s\\S]*?${word}[\\s\\S]*?(\\n|$)`, 'gi')
+          const before = current.promptOverlay.length
+          current.promptOverlay = current.promptOverlay.replace(re, '')
+          if (current.promptOverlay.length < before) removedCount++
+        }
+      }
+    }
+
+    if (removedCount > 0) {
+      this.persistenceDirty = true
+      this.save()
+      log('INFO', 'prompt_stale_rules_pruned', { mode, removedCount })
+    }
+    return removedCount
+  }
+
+  /** 判断是否需要总结或清理 */
+  shouldCompact(mode: PromptSlot): { needSummarize: boolean; needPrune: boolean } {
+    const slot = this.registry.prompts[mode]
+    if (!slot) return { needSummarize: false, needPrune: false }
+
+    const current = this.versions.get(`${mode}_v${slot.currentVersion}`)
+    const overlayLen = current?.promptOverlay?.length || 0
+
+    return {
+      needSummarize: overlayLen > 1200 || slot.latestVersion >= 5,
+      needPrune: slot.latestVersion > 3,
+    }
+  }
+
   /** 状态摘要（日志用） */
   getRegistrySummary(): string {
     const parts: string[] = ['【Prompt 版本状态】']

@@ -20,6 +20,7 @@ function App() {
   const [inputOpen, setInputOpen] = useState(false)
   const [historyMessages, setHistoryMessages] = useState<MessageItem[]>([])
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [sessionHealth, setSessionHealth] = useState('100:HEALTHY:RUNNING')
 
   const fadeTimer = useTimerControl()
   const revealTimer = useTimerControl()
@@ -96,6 +97,7 @@ function App() {
   useIPCEvent(window.electronAPI.onStateUpdate, (s) => {
     if (s.error) setError(s.error as string)
     if (s.ttsPlaying !== undefined) setTtsPlaying(s.ttsPlaying as boolean)
+    if (s.sessionHealth) setSessionHealth(s.sessionHealth as string)
   })
 
   useIPCEvent(window.electronAPI.onAIChunk, (chunk) => {
@@ -172,7 +174,7 @@ function App() {
         </div>
 
         {/* 状态指示器 */}
-        <StatusBar conversationActive={active} ttsPlaying={ttsPlaying} error={error} />
+        <StatusBar conversationActive={active} ttsPlaying={ttsPlaying} error={error} sessionHealth={sessionHealth} />
 
         {/* 转录显示 — 鼠标移入展开输入框 */}
         <div

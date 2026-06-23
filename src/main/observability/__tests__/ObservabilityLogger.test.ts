@@ -42,13 +42,13 @@ describe('ObservabilityLogger', () => {
     expect(out).toContain('你好')
   })
 
-  it('should log memory with hit count', () => {
+  it('should log memory context breakdown', () => {
     const log = new ObservabilityLogger('req-002')
-    log.logMemory('查询内容', 5)
+    log.logMemory('查询内容', '【重要的记忆】 content')
     log.flush()
     const out = getObsOutput(log)
     expect(out).toContain('MEMORY:')
-    expect(out).toContain('hit_count: 5')
+    expect(out).toContain('permanent:true')
   })
 
   it('should log tool batch', () => {
@@ -91,7 +91,7 @@ describe('ObservabilityLogger', () => {
   it('should produce the full 5-block layout', () => {
     const log = new ObservabilityLogger('req-full')
     log.logInput('test', 'electron')
-    log.logMemory('test', 2)
+    log.logMemory('test', '【重要的记忆】xyz 相关的历史记忆 abc')
     log.logPrompt([{ role: 'system', content: 'sys' }])
     log.logToolBatch([{ id: '1', name: 'tool_a', success: true, content: 'ok', latencyMs: 100 }])
     log.logOutput('reply', 999)

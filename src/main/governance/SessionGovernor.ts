@@ -19,6 +19,19 @@ import { RECOVERY_ACTIONS } from './SessionGovernorTypes'
  * 注册为 Kernel IModule（通过 AppRuntime）。
  */
 
+export interface RecoveryCallbacks {
+  /** Level 1: 压缩上下文，清理 orphan tool_call */
+  onContextCompress?: () => void
+  /** Level 2: 注入纠偏消息到会话上下文 */
+  onInjectCorrection?: (message: string) => void
+  /** Level 3: 切换模型 */
+  onModelSwitch?: (model: string) => void
+  /** Level 4: 限制工具为只读 */
+  onToolDowngrade?: (restricted: boolean) => void
+  /** Level 5: 清空上下文窗口 */
+  onClearContext?: () => void
+}
+
 export class SessionGovernor implements ISubsystem {
   readonly name = 'SessionGovernor'
   state: SubsystemState = 'created'
@@ -31,6 +44,7 @@ export class SessionGovernor implements ISubsystem {
   private tickTimer: ReturnType<typeof setInterval> | null = null
   private recoveryInProgress = false
   private readonly tickIntervalMs = 30_000
+  private callbacks: RecoveryCallbacks = {}
 
   constructor() {
     this.scorer = new SessionHealthScorer()
@@ -39,6 +53,10 @@ export class SessionGovernor implements ISubsystem {
 
   setStateManager(sm: StateManager): void {
     this.stateManager = sm
+  }
+
+  setRecoveryCallbacks(cbs: RecoveryCallbacks): void {
+    this.callbacks = cbs
   }
 
   // ── ISubsystem ──
@@ -177,6 +195,37 @@ export class SessionGovernor implements ISubsystem {
       },
       'recovery_completed',
     )
+
+    // ── Guardrail 闭环事件 ──
+
+    track(
+      'guardrail.readonly_stuck',
+      () => {
+        this.scorer.recordGuardrailTrip()
+        this.scorer.recordToolResult(false)
+        this.evaluateAndAct()
+      },
+      'guardrail_readonly',
+    )
+
+    track(
+      'guardrail.tool_error',
+      () => {
+        this.scorer.recordGuardrailTrip()
+        this.scorer.recordToolResult(false)
+        this.evaluateAndAct()
+      },
+      'guardrail_tool_error',
+    )
+
+    track(
+      'guardrail.context_corrupted',
+      () => {
+        this.scorer.recordToolResult(false)
+        this.evaluateAndAct()
+      },
+      'guardrail_context_corrupted',
+    )
   }
 
   // ── 核心评估循环 ──
@@ -268,17 +317,51 @@ export class SessionGovernor implements ISubsystem {
   }
 
   private async executeAction(level: RecoveryActionLevel): Promise<boolean> {
+    const cb = this.callbacks
+
     switch (level) {
       case 1:
         eventBus.emit('recovery.context.compress' as any, { beforeTokens: 0, afterTokens: 0 })
+        cb.onContextCompress?.()
+        log('INFO', 'sg_action:context_compress')
         return true
+
+      case 2:
+        cb.onInjectCorrection?.('[SessionGovernor] 检测到会话异常，已自动触发纠偏，请简化操作重试。')
+        log('INFO', 'sg_action:inject_correction')
+        return true
+
+      case 3:
+        cb.onModelSwitch?.('deepseek-chat')
+        log('INFO', 'sg_action:model_switch', { to: 'deepseek-chat' })
+        return true
+
+      case 4:
+        cb.onToolDowngrade?.(true)
+        log('INFO', 'sg_action:tool_downgrade', { restricted: true })
+        return true
+
       case 5:
-        log('INFO', 'sg_action:clear_context_pending')
+        cb.onClearContext?.()
+        log('INFO', 'sg_action:clear_context')
         return true
+
       case 6:
         this.scorer.resetFailures()
         this.stateMachine.reset()
+        log('INFO', 'sg_action:rebuild_session')
         return true
+
+      case 7:
+        this.stateMachine.transitionTo('SAFE_MODE', 'SessionGovernor initiated safe mode', this.scorer.getScore())
+        this.pushUIState()
+        log('INFO', 'sg_action:safe_mode')
+        return true
+
+      case 8:
+        log('INFO', 'sg_action:hibernation')
+        return true
+
       default:
         log('INFO', 'sg_action:not_implemented', { level, name: RECOVERY_ACTIONS[level].name })
         return true
@@ -299,9 +382,11 @@ export class SessionGovernor implements ISubsystem {
     if (!this.stateManager) return
     const score = this.scorer.getScore()
     const level = this.scorer.getLevel()
+    const state = this.stateMachine.state
 
     this.stateManager.batch({
-      error: score < 50 ? `会话健康度 ${score}/100 (${level})，状态: ${this.stateMachine.state}` : undefined,
+      error: score < 50 ? `会话健康度 ${score}/100 (${level})，状态: ${state}` : undefined,
+      sessionHealth: `${score}:${level}:${state}`,
     })
   }
 

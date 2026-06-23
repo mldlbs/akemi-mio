@@ -1,4 +1,5 @@
 import { log } from '../logger/Logger'
+import { eventBus } from '../core/EventBus'
 import type { ToolResult } from './ToolScheduler'
 import type { ToolCallInfo } from '../llm/LlmService'
 import type { Message } from './context'
@@ -147,6 +148,7 @@ export class Guardrail {
       ctx.consecutiveReadOnlyRounds = 0
       ctx.readonlyStuckCount++
       log('WARN', 'guardrail_readonly_stuck', { rounds, total: ctx.readonlyStuckCount })
+      eventBus.emit('guardrail.readonly_stuck', { count: ctx.readonlyStuckCount, consecutiveRounds: rounds })
 
       if (ctx.readonlyStuckCount >= 4) {
         messages.push({
@@ -233,6 +235,7 @@ export class Guardrail {
       if (ctx.consecutiveToolErrors >= 5) {
         ctx.consecutiveToolErrors = 0
         log('WARN', 'guardrail_diagnostic_trigger', { consecutive_errors: 5 })
+        eventBus.emit('guardrail.tool_error', { tool: '', error: '5 consecutive tool errors', consecutiveErrors: 5 })
         messages.push({
           role: 'user',
           content: '【系统强制】连续 5 次工具调用全部失败，当前路径不可行。请基于已获取的信息输出当前结论或总结，不要继续重试。',

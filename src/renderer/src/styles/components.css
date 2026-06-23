@@ -83,6 +83,14 @@
   font-size: 12px; font-weight: 500;
   color: var(--text-primary);
 }
+.status-health {
+  font-size: 11px; font-weight: 400;
+  letter-spacing: 0.03em;
+  margin-left: auto;
+}
+.status-health.health-ok { color: var(--accent); }
+.status-health.health-warn { color: oklch(0.7 0.15 70); }
+.status-health.health-bad { color: oklch(0.6 0.18 30); }
 
 /* ─── 转录卡片 ─── */
 .transcript-card {

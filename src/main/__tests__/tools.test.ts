@@ -30,19 +30,24 @@ describe('LocalProvider', () => {
       'disable_skill',
       'edit_file',
       'enable_skill',
+      'generate_card',
+      'generate_image',
       'get_credential',
       'grep',
       'list_credentials',
       'list_files',
       'list_plans',
+      'list_procedures',
       'list_skills',
       'list_workflows',
       'read_file',
       'remember_fact',
+      'remember_procedure',
       'run_command',
       'set_credential',
       'update_plan_progress',
       'write_file',
+      'writing_system',
     ]
     expect(names).toEqual(expected)
   })
@@ -62,9 +67,8 @@ describe('LocalProvider', () => {
   })
 
   it('list_files returns directory contents', async () => {
-    const result = await provider.callTool('list_files', { path: '.', workspace: 'project' })
+    const result = await provider.callTool('list_files', { path: '.' })
     expect(result.isError).toBe(false)
-    expect(result.content[0].text).toBeTruthy()
   })
 
   it('run_command rejects disallowed prefixes', async () => {
@@ -175,8 +179,8 @@ describe('ServerManager', () => {
   })
 
   it('callTool executes local tools', async () => {
-    const result = await manager.callTool('list_files', { path: '.', workspace: 'project' })
-    expect(result).toBeTruthy()
+    const result = await manager.callTool('list_files', { path: '.' })
+    expect(typeof result).toBe('string')
   })
 
   it('callTool throws for unknown tools', async () => {

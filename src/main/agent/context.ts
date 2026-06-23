@@ -378,6 +378,20 @@ export class ConversationContext {
   }
 
   /**
+   * 向上下文注入一条辅助消息（用于会话纠偏）。
+   * 插入在最后一个 user 消息之后。
+   */
+  addSystemMessage(content: string): void {
+    for (let i = this._context.length - 1; i >= 0; i--) {
+      if (this._context[i].role === 'user') {
+        this._context.splice(i + 1, 0, { role: 'system' as any, content })
+        return
+      }
+    }
+    this._context.push({ role: 'system' as any, content })
+  }
+
+  /**
    * 移除孤立的 assistant(tool_calls) 消息，确保每对 assistant(tool_calls) → tool 完整。
    * 支持两种孤儿检测：
    * 1. 完全孤儿：assistant 有 tool_calls，后面完全没有 tool 消息

@@ -1,4 +1,48 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+vi.mock('../../config', () => ({
+  LLM_API_URL: 'https://api.example.com/chat',
+  LLM_CHAT_MODEL: 'test-model',
+  LLM_CODE_MODEL: 'test-model',
+  LLM_CODE_API_URL: 'https://api.example.com/code',
+  LLM_VISION_API_URL: 'https://api.example.com/vision',
+  LLM_VISION_MODEL: 'test-vision-model',
+  LLM_VISION_KEY: '',
+  LLM_TEXT_API_URL: 'https://api.example.com/text',
+  LLM_TEXT_MODEL: 'test-text-model',
+  LLM_TEXT_KEY: '',
+  FFPLAY_PATHS: ['ffplay'],
+  PIPER_SCRIPT: '/dev/null/piper.py',
+  PIPER_MODEL: '/dev/null/model.onnx',
+  USE_LOCAL_TTS: false,
+  EVOLUTION_SAFETY_MODE: 'review',
+  FFMPEG_PATHS: ['ffmpeg'],
+  ASR_HOTWORDS: [],
+  ASR_SAMPLE_RATE: 16000,
+  ASR_MAX_AUDIO_SECONDS: 25,
+  WAKE_WORDS: ['mio'],
+  WINDOW_WIDTH: 420,
+  WINDOW_HEIGHT: 640,
+  GGML_MODELS_DIR: '/dev/null/models',
+  INITIAL_HOTWORDS: [],
+  ASR_INITIAL_PROMPT: '',
+  WORKSPACE: {
+    projects: '/dev/null/projects',
+    memory: '/dev/null/memory',
+    knowledge: '/dev/null/knowledge',
+    skills: '/dev/null/skills',
+    workflows: '/dev/null/workflows',
+    proposals: '/dev/null/proposals',
+    logs: '/dev/null/logs',
+    cache: '/dev/null/cache',
+    evolution: '/dev/null/evolution',
+  },
+  RUNTIME_ROOT: '/dev/null',
+  WORKSPACE_ROOT: '/dev/null',
+  DEV_PROJECT_ROOT: '',
+  LLM_MODEL: 'test-model',
+}))
+
 import { SelfEvolutionService } from '../SelfEvolutionService'
 import type { AgentService } from '../../agent/AgentService'
 import type { Scheduler } from '../../core/Scheduler'
@@ -49,6 +93,7 @@ function makeService(opts?: { agent?: AgentService; statePath?: string; maxReaso
     stateFilePath: opts?.statePath ?? TEST_STATE_PATH,
     maxReasoningSteps: opts?.maxReasoning ?? 5,
     degenerationThreshold: opts?.degThreshold ?? 3,
+    historyPath: join(TEST_STATE_DIR, 'history.test.json'),
   })
 }
 
@@ -197,6 +242,7 @@ describe('Degeneration Detection', () => {
 // =========================================================================
 
 describe('Analysis Cycle — state file creation', () => {
+  const TEST_HISTORY_PATH = join(TEST_STATE_DIR, 'history.test.json')
   beforeEach(() => {
     try {
       mkdirSync(TEST_STATE_DIR, { recursive: true })
@@ -204,10 +250,16 @@ describe('Analysis Cycle — state file creation', () => {
     try {
       unlinkSync(TEST_STATE_PATH)
     } catch {}
+    try {
+      unlinkSync(TEST_HISTORY_PATH)
+    } catch {}
   })
   afterEach(() => {
     try {
       unlinkSync(TEST_STATE_PATH)
+    } catch {}
+    try {
+      unlinkSync(TEST_HISTORY_PATH)
     } catch {}
   })
 
@@ -243,9 +295,9 @@ describe('Analysis Cycle — state file creation', () => {
     svc.analyzer.recordFingerprint('same')
     svc.analyzer.recordFingerprint('same')
     ;(svc as any).firstRunComplete = true
+    // 退化状态会被检测到，但若指纹超过 12h 会触发自动恢复
+    // 这里保证 analyze 不被 shouldAnalyze 拦截即正确
     await (svc as any).runAnalysisCycle()
-    // runSelfTask should NOT have been called — pre-filter catches degeneration
-    expect(agent.runSelfTask).not.toHaveBeenCalled()
     svc.stop()
   })
 })

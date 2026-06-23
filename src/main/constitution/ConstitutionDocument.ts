@@ -1,11 +1,11 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { log } from '../logger/Logger'
-import { KERNEL_PREFIXES } from './types'
+import { getKernelPrefixes } from './types'
 
 /** 基于运行时 KERNEL_PREFIXES 生成默认不可变路径规则 */
 function getDefaultImmutablePaths(): { pattern: string; mutable: boolean; reason: string; layer: 'kernel' }[] {
-  return KERNEL_PREFIXES.map((prefix) => {
+  return getKernelPrefixes().map((prefix) => {
     const normalized = prefix.replace(/\\/g, '/').replace(/\/$/, '')
     const name = normalized.split('/').pop() || 'kernel'
     return {
