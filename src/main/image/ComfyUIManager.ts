@@ -341,7 +341,7 @@ export class ComfyUIManager {
       '9': { class_type: 'SaveImage', inputs: { images: ['8', 0], filename_prefix: 'akemi_mio' }, _meta: { title: 'SaveImage' } },
       '10': {
         class_type: 'CheckpointLoaderSimple',
-        inputs: { ckpt_name: 'flux-schnell/flux1-schnell-fp8.safetensors' },
+        inputs: { ckpt_name: 'flux-schnell/flux1-schnell-fp8-e4m3fn.safetensors' },
         _meta: { title: 'Load FLUX Model' },
       },
       '11': {
