@@ -1,7 +1,7 @@
 export interface CreativitySource {
   name: string
   content: string
-  type: 'knowledge' | 'behavior' | 'insight' | 'failure' | 'random'
+  type: 'knowledge' | 'behavior' | 'insight' | 'failure' | 'random' | 'provocation'
   weight: number
 }
 
@@ -60,6 +60,9 @@ export interface IdeaStoreLike {
   getRecentCombos: (limit?: number) => ConceptCombo[]
   getRecentDreamCycles: (limit?: number) => DreamCycleLog[]
   updateHypothesisStatus: (id: string, status: Hypothesis['status']) => boolean
+  addExploredPair: (nameA: string, nameB: string) => void
+  getExploredPairs: () => string[]
+  resetExploredPairs: () => void
   count: () => { combos: number; hypotheses: number; experiments: number; dreamCycles: number }
   templateAdoptionStats: () => Record<string, { total: number; active: number; rejected: number; adopted: number }>
   adoptionReport: (limit?: number) => string
@@ -71,8 +74,9 @@ export interface CreativityStoreData {
   hypotheses: Hypothesis[]
   experiments: ExperimentPlan[]
   dreamCycles: DreamCycleLog[]
+  exploredPairs: string[]
 }
 
-export const CREATIVITY_STORE_VERSION = 1
+export const CREATIVITY_STORE_VERSION = 2
 export const DREAM_CYCLE_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6h
 export const NORMAL_CYCLE_INTERVAL_MS = 60 * 60 * 1000 // 1h

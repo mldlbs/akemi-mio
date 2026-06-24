@@ -127,7 +127,7 @@ export class MetaCycle {
     const result = await this.llmService.chatJson(prompt, {
       system: '你是一个自我评估引擎。输出 JSON only，严格遵循要求的格式。',
       temperature: 0.3,
-      timeoutMs: 30000,
+      timeoutMs: 90000,
       requestId: `meta_review_${Date.now()}`,
     })
 

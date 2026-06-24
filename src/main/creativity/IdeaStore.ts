@@ -16,11 +16,14 @@ export class IdeaStore {
   private load(): CreativityStoreData {
     try {
       if (!existsSync(this.filePath)) {
-        return { version: CREATIVITY_STORE_VERSION, combos: [], hypotheses: [], experiments: [], dreamCycles: [] }
+        return { version: CREATIVITY_STORE_VERSION, combos: [], hypotheses: [], experiments: [], dreamCycles: [], exploredPairs: [] }
       }
-      return JSON.parse(readFileSync(this.filePath, 'utf-8'))
+      const parsed = JSON.parse(readFileSync(this.filePath, 'utf-8'))
+      // 兼容旧版本（缺少 exploredPairs 字段）
+      if (!parsed.exploredPairs) parsed.exploredPairs = []
+      return parsed
     } catch {
-      return { version: CREATIVITY_STORE_VERSION, combos: [], hypotheses: [], experiments: [], dreamCycles: [] }
+      return { version: CREATIVITY_STORE_VERSION, combos: [], hypotheses: [], experiments: [], dreamCycles: [], exploredPairs: [] }
     }
   }
 

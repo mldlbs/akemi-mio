@@ -3,6 +3,9 @@ import { resolve } from 'path'
 import { log } from '../logger/Logger'
 import { eventBus, EventBus } from '../core/EventBus'
 import { IdeaGenerator } from './IdeaGenerator'
+import { WorldTrendProvider } from './WorldTrendProvider'
+import { SourceBuilder } from './SourceBuilder'
+import { evaluateNovelty } from './NoveltyScorer'
 import type { CreativitySource, CreativeIdea, DreamCycleLog, IdeaStoreLike } from './types'
 import { DREAM_CYCLE_INTERVAL_MS, NORMAL_CYCLE_INTERVAL_MS } from './types'
 import type { TaskRunner } from '../core/tasks/unified/TaskRunner'
@@ -29,6 +32,12 @@ export class CreativityService {
   private reportDir: string
   private taskRunner?: TaskRunner
   private taskRunnerKeys: string[] = []
+  private sourceBuilder: SourceBuilder
+  private worldTrendProvider: WorldTrendProvider | null
+
+  /** 最近一次进化系统执行结果（Phase 3 反馈） */
+  private evolutionOutcome: { success: boolean; summary: string; planTitle?: string } | null = null
+  private evolutionDisposer: (() => void) | null = null
 
   /** 用户正在对话中 — 跳过创造性周期避免抢占 LLM */
   private conversationActive = false
@@ -53,6 +62,7 @@ export class CreativityService {
     bus?: EventBus,
     reportDir = '',
     taskRunner?: TaskRunner,
+    observerDir?: string,
   ) {
     this.store = store
     this.generator = new IdeaGenerator(chatJson, temperature, seed)
@@ -63,6 +73,8 @@ export class CreativityService {
     this.getSources = deps.getSources
     this.getInsights = deps.getInsights
     this.getFailedHypotheses = deps.getFailedHypotheses
+    this.sourceBuilder = new SourceBuilder(seed)
+    this.worldTrendProvider = observerDir ? new WorldTrendProvider(observerDir) : null
 
     // 对话期间不触发创造力周期，避免抢占 LLM 资源
     this.eventBus.on('agent.input.received', () => {
@@ -78,6 +90,15 @@ export class CreativityService {
       },
       5 * 60 * 1000,
     )
+
+    // Phase 3: 订阅进化系统执行结果反馈
+    this.evolutionDisposer = this.eventBus.on('evolution.plan.outcome' as any, (p: any) => {
+      this.evolutionOutcome = {
+        success: p.success,
+        summary: p.summary || '',
+        planTitle: p.planTitle,
+      }
+    })
   }
 
   start(): void {
@@ -141,7 +162,33 @@ export class CreativityService {
    */
   private async cycle(): Promise<void> {
     if (this.conversationActive) return
-    const sources = this.getSources()
+    let sources = this.getSources()
+
+    // 注入 Observer 世界趋势和洞察
+    if (this.worldTrendProvider) {
+      const trends = this.worldTrendProvider.getTrends()
+      const insights = this.worldTrendProvider.getInsights()
+      if (trends.length > 0 || insights.length > 0) {
+        const observerSources = this.sourceBuilder.build({ observer: { trends, insights } }, [], trends)
+        const worldSources = observerSources.filter((s) => s.type === 'provocation' || s.type === 'insight')
+        sources = [...sources, ...worldSources]
+      }
+    }
+
+    // Phase 3: 注入进化系统反馈作为来源
+    if (this.evolutionOutcome) {
+      const outcome = this.evolutionOutcome
+      sources.push({
+        name: outcome.success ? '进化:可行方案' : '进化:失败尝试',
+        content: outcome.success
+          ? `进化系统最近执行了计划"${outcome.planTitle || '(分析)'}"并成功完成: ${outcome.summary.slice(0, 200)}`
+          : `进化系统最近的分析/执行未成功: ${outcome.summary.slice(0, 200)}`,
+        type: outcome.success ? 'knowledge' : 'failure',
+        weight: outcome.success ? 0.8 : 0.6,
+      })
+      this.evolutionOutcome = null // 消费后清除
+    }
+
     if (sources.length < 2) return
 
     log('INFO', 'creativity_cycle_start', { source_count: sources.length })
@@ -155,19 +202,63 @@ export class CreativityService {
       return
     }
 
-    // 去重：与最近 20 条已知假设对比，跳过相似度过高的
-    const recent = this.store.getHypotheses({ limit: 20 })
-    const deduped = ideas.filter((i) => !recent.some((r) => similarity(i.hypothesis.title, r.title) > 0.65))
+    // Phase 5: 代码层新颖度评估 — 替代纯标题去重
+    const recent = this.store.getHypotheses({ limit: 30 })
+    const rejected = this.store.getHypotheses({ status: 'rejected', limit: 50 })
+    const passed: CreativeIdea[] = []
+    const rejectedIdeas: CreativeIdea[] = []
+    for (const idea of ideas) {
+      const verdict = evaluateNovelty(
+        { title: idea.hypothesis.title, idea: idea.hypothesis.idea, novelty: idea.hypothesis.novelty },
+        recent.map((h) => ({ title: h.title, idea: h.idea, novelty: h.novelty })),
+        rejected.map((h) => ({ title: h.title, idea: h.idea })),
+      )
+      if (verdict.shouldReject) {
+        rejectedIdeas.push(idea)
+        log('INFO', 'creativity_novelty_rejected', {
+          title: idea.hypothesis.title,
+          reason: verdict.rejectReason,
+        })
+        continue
+      }
+      idea.hypothesis.novelty = verdict.adjustedNovelty
+      passed.push(idea)
+    }
 
-    if (deduped.length === 0) {
-      log('INFO', 'creativity_cycle_all_duplicates')
-      this.eventBus.emit('creativity.cycle.completed', { count: ideas.length, hasValue: false })
+    if (passed.length === 0) {
+      log('INFO', 'creativity_cycle_all_rejected', { noveltyRejected: rejectedIdeas.length })
+      this.eventBus.emit('creativity.cycle.completed', { count: rejectedIdeas.length, hasValue: false })
       return
     }
+    const deduped = passed
 
     this.persist(deduped)
     this.reportCycle(deduped)
     this.report(deduped)
+
+    // Phase 2: 高综合分假设 → 通知进化系统
+    const topIdea = deduped.reduce(
+      (best, i) => {
+        const score = i.hypothesis.novelty + i.hypothesis.feasibility + i.hypothesis.impact
+        return score > (best.score || 0) ? { idea: i, score } : best
+      },
+      { idea: null as any, score: 0 },
+    )
+    if (topIdea.idea && topIdea.score > 220) {
+      const h = topIdea.idea.hypothesis
+      this.eventBus.emit('creativity.hypothesis.selected', {
+        id: h.id,
+        title: h.title,
+        idea: h.idea,
+        novelty: h.novelty,
+        feasibility: h.feasibility,
+        impact: h.impact,
+        sourceLabels: h.sourceLabels,
+        expectedBenefit: h.expectedBenefit,
+        risk: h.risk,
+      })
+    }
+
     this.eventBus.emit('creativity.cycle.completed', { count: deduped.length, hasValue: true })
   }
 
@@ -396,22 +487,4 @@ ${this.store.adoptionReport(5)}
   getStore(): IdeaStoreLike {
     return this.store
   }
-}
-
-/**
- * 简单字符串相似度（基于公共子串）
- */
-function similarity(a: string, b: string): number {
-  const short = a.length <= b.length ? a : b
-  const long = a.length <= b.length ? b : a
-  if (long.length === 0) return 0
-  let maxLen = 0
-  for (let i = 0; i < short.length; i++) {
-    for (let j = i + 1; j <= short.length; j++) {
-      if (long.includes(short.slice(i, j))) {
-        maxLen = Math.max(maxLen, j - i)
-      }
-    }
-  }
-  return maxLen / long.length
 }

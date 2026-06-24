@@ -13,6 +13,14 @@ import { getRawDb } from '../db/connection'
 export type DecisionCategory = 'tool_select' | 'strategy' | 'plan_route' | 'goal_adjust' | 'recovery'
 export type DecisionOutcome = 'pending' | 'success' | 'failure'
 
+export interface FailurePatternGroup {
+  pattern: string
+  count: number
+  commonContext: string
+  sampleChoices: string[]
+  lastSeen: number
+}
+
 export interface DecisionRecord {
   id: string
   timestamp: number
@@ -159,5 +167,102 @@ export class DecisionStore {
     } catch {
       /* ignore */
     }
+  }
+
+  // ══════════════════════════════════════════
+  //  决策分析
+  // ══════════════════════════════════════════
+
+  /** 查询近期失败决策，按 category 分组提取公共模式 */
+  getFailurePatterns(options?: { since?: number; minCount?: number }): FailurePatternGroup[] {
+    const since = options?.since ?? Date.now() - 7 * 24 * 3600_000
+    const minCount = options?.minCount ?? 2
+
+    const failures = this.query({ outcome: 'failure', since })
+    if (failures.length === 0) return []
+
+    const byCategory = new Map<string, DecisionRecord[]>()
+    for (const f of failures) {
+      const list = byCategory.get(f.category) || []
+      list.push(f)
+      byCategory.set(f.category, list)
+    }
+
+    const groups: FailurePatternGroup[] = []
+    for (const [category, records] of byCategory) {
+      if (records.length < minCount) continue
+      const contextWords = records.map((r) => r.context.slice(0, 100))
+      const common = this.findCommonContext(contextWords)
+      const sampleChoices = [...new Set(records.map((r) => r.choice).filter(Boolean))].slice(0, 5)
+      const lastSeen = Math.max(...records.map((r) => r.timestamp))
+      groups.push({
+        pattern: `${category} failures in ${common || 'general'}`,
+        count: records.length,
+        commonContext: common,
+        sampleChoices,
+        lastSeen,
+      })
+    }
+
+    groups.sort((a, b) => b.count - a.count)
+    return groups
+  }
+
+  /** 聚合最近 N 天决策摘要 */
+  getCrossSessionSummary(days: number = 7): string {
+    const since = Date.now() - days * 24 * 3600_000
+    const records = this.query({ since })
+    if (records.length === 0) return ''
+
+    const byCategory = new Map<string, { total: number; success: number; failure: number }>()
+    for (const r of records) {
+      if (!byCategory.has(r.category)) byCategory.set(r.category, { total: 0, success: 0, failure: 0 })
+      const s = byCategory.get(r.category)!
+      s.total++
+      if (r.outcome === 'success') s.success++
+      else if (r.outcome === 'failure') s.failure++
+    }
+
+    const parts: string[] = [`【跨会话决策总览 (${days}天)】`]
+    for (const [cat, stats] of byCategory) {
+      parts.push(`- ${cat}: ${stats.total} 次 (成功 ${stats.success}, 失败 ${stats.failure})`)
+    }
+
+    const failures = records.filter((r) => r.outcome === 'failure')
+    if (failures.length > 0) {
+      const catCount = new Map<string, number>()
+      for (const f of failures) catCount.set(f.category, (catCount.get(f.category) || 0) + 1)
+      const worst = [...catCount.entries()].sort((a, b) => b[1] - a[1])[0]
+      parts.push(`最频繁失败模式: ${worst[0]} (${worst[1]} 次)`)
+    }
+
+    return parts.join('\n')
+  }
+
+  private findCommonContext(contexts: string[]): string {
+    if (contexts.length === 0) return ''
+    if (contexts.length === 1) return contexts[0].slice(0, 40)
+
+    const words = contexts.map((c) =>
+      c
+        .split(/[\s,，。]+/)
+        .filter((w) => w.length > 2)
+        .slice(0, 10),
+    )
+
+    const freq = new Map<string, number>()
+    for (const wlist of words) {
+      for (const w of [...new Set(wlist)]) {
+        freq.set(w, (freq.get(w) || 0) + 1)
+      }
+    }
+
+    const common = [...freq.entries()]
+      .filter(([, count]) => count >= Math.max(2, Math.floor(contexts.length / 2)))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([w]) => w)
+
+    return common.join(', ')
   }
 }

@@ -117,7 +117,7 @@ const PROMPT_TOOLS = `可用工具列表：
 - list_mcp_servers — 查看已注册的 MCP 服务器
 - remove_mcp_server — 移除 MCP 服务器
 - remember_fact — 记住重要信息（用户偏好、关键决定、项目需求），对话中主动使用
-- generate_image — 使用 CogView-3-Flash（智谱AI）根据提示词生成图片。需要先配置 ZHIPU_API_KEY
+- generate_image — 使用 FLUX.1-schnell（本地 ComfyUI GPU）或 CogView-3-Flash（智谱AI）根据提示词生成图片
 
 端口和进程管理：
 - netstat -ano | findstr :端口号 — 检查端口占用
@@ -412,12 +412,37 @@ export class ConversationContext {
 
 /** 从任意消息数组中移除孤立的 assistant(tool_calls) 消息 */
 export function trimOrphanedToolCallsFrom(messages: Message[]): void {
+  // 反向遍历，先清理孤立的 tool 消息（前面无对应 assistant(tool_calls)）
+  for (let i = messages.length - 1; i > 0; i--) {
+    const m = messages[i]
+    if (m.role === 'tool') {
+      let foundAssistant = false
+      for (let j = i - 1; j >= 0; j--) {
+        if (messages[j].role === 'assistant' && messages[j].tool_calls?.length) {
+          foundAssistant = true
+          break
+        }
+        if (messages[j].role === 'user' || messages[j].role === 'assistant') break
+      }
+      if (!foundAssistant) {
+        log('INFO', 'trim_orphaned_tool_message', { index: i, tool_call_id: m.tool_call_id })
+        messages.splice(i, 1)
+      }
+    }
+  }
+
+  // 反向遍历处理 assistant(tool_calls) 块
   for (let i = messages.length - 1; i > 0; i--) {
     const m = messages[i]
     if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
       const toolMessages = messages.slice(i + 1).filter((t) => t.role === 'tool')
       if (toolMessages.length === 0) {
-        log('INFO', 'trim_orphaned_tool_calls_full', { index: i, tools: m.tool_calls.map((t) => t.function?.name) })
+        // 无任何 tool 响应 → 检查是否有 user 消息插入在中间（interleaved）
+        const hasInterleavedUser = messages.slice(i + 1).some((t) => t.role === 'user')
+        log('INFO', hasInterleavedUser ? 'trim_orphaned_tool_calls_interleaved_user' : 'trim_orphaned_tool_calls_full', {
+          index: i,
+          tools: m.tool_calls.map((t) => t.function?.name),
+        })
         messages.splice(i, 1)
         continue
       }

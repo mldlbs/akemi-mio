@@ -2,10 +2,18 @@ import { buildTool, formatToolResult, formatToolError } from '../types'
 import { LLM_IMAGE_KEY, LLM_IMAGE_MODEL, LLM_IMAGE_API_URL, WORKSPACE } from '../../config'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
+import type { ComfyUIManager } from '../../image/ComfyUIManager'
+
+// 可选依赖：ComfyUI 本地生图（由 AppRuntime 注入）
+let _comfyUI: ComfyUIManager | null = null
+
+export function setComfyUIManager(mgr: ComfyUIManager | null): void {
+  _comfyUI = mgr
+}
 
 export const generateImageTool = buildTool({
   name: 'generate_image',
-  description: '使用 CogView-3-Flash（智谱AI）根据提示词生成图片。返回图片的本地路径和在线URL',
+  description: '使用 FLUX.1-schnell（本地 ComfyUI）或 CogView-3-Flash（智谱AI）根据提示词生成图片。返回图片的本地路径和在线URL',
   inputJSONSchema: {
     type: 'object',
     properties: {
@@ -19,87 +27,115 @@ export const generateImageTool = buildTool({
       },
       imageCount: {
         type: 'number',
-        description: '生成图片数量，可选 1-4，默认 1',
+        description: '生成图片数量，可选 1-4，默认 1。仅在 CogView fallback 时有效',
+      },
+      useComfyUI: {
+        type: 'boolean',
+        description: '强制使用 ComfyUI 本地生图（默认：ComfyUI 可用则用）',
       },
     },
     required: ['prompt'],
   },
-  handler: async (args: { prompt: string; size?: string; imageCount?: number }) => {
-    const apiKey = LLM_IMAGE_KEY
-    if (!apiKey) {
-      return formatToolError('未配置 LLM_IMAGE_KEY。请在 .env 中设置 LLM_IMAGE_KEY=your_zhipu_api_key')
-    }
-
+  handler: async (args: { prompt: string; size?: string; imageCount?: number; useComfyUI?: boolean }) => {
     const prompt = String(args.prompt).trim()
     if (!prompt) return formatToolError('prompt 不能为空')
 
-    const size = args.size || '1024x1024'
-    const n = Math.min(Math.max(args.imageCount || 1, 1), 4)
-
-    try {
-      const res = await fetch(LLM_IMAGE_API_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: LLM_IMAGE_MODEL,
-          prompt,
-          size,
-          n,
-        }),
-        signal: AbortSignal.timeout(120000),
-      })
-
-      if (!res.ok) {
-        const body = await res.text().catch(() => '')
-        return formatToolError(`CogView API 错误 (${res.status}): ${body.slice(0, 500)}`)
-      }
-
-      const data = (await res.json()) as {
-        data?: Array<{ url: string; revised_prompt?: string }>
-        created?: number
-      }
-
-      if (!data.data || data.data.length === 0) {
-        return formatToolError('CogView API 返回了空结果')
-      }
-
-      // 保存到 workspace images 目录
-      const imagesDir = join(WORKSPACE.cache, 'images')
-      if (!existsSync(imagesDir)) {
-        mkdirSync(imagesDir, { recursive: true })
-      }
-
-      const results: string[] = []
-      for (let i = 0; i < data.data.length; i++) {
-        const img = data.data[i]
-        const ts = data.created || Date.now()
-        const filename = `cogview_${ts}_${i}.png`
-        const filePath = join(imagesDir, filename)
-
-        // 下载图片
-        const imgRes = await fetch(img.url)
-        if (!imgRes.ok) {
-          results.push(`图片 ${i + 1}: 下载失败 (${imgRes.status})，URL: ${img.url}`)
-          continue
-        }
-        const imgBuffer = Buffer.from(await imgRes.arrayBuffer())
-        writeFileSync(filePath, imgBuffer)
-
-        const line = [`图片 ${i + 1}:`, `文件: ${filePath}`, `URL: ${img.url}`]
-        if (img.revised_prompt) line.push(`优化提示词: ${img.revised_prompt}`)
-        results.push(line.join('\n'))
-      }
-
-      return formatToolResult(results.join('\n\n---\n\n'))
-    } catch (err: any) {
-      if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-        return formatToolError('CogView API 请求超时（120秒）')
-      }
-      return formatToolError(`图片生成失败: ${err.message}`)
+    // ComfyUI 可用 → 优先本地生图
+    if (_comfyUI?.isReady) {
+      return generateWithComfyUI(prompt, args.size)
     }
+
+    // CogView fallback
+    return generateWithCogView(prompt, args)
   },
   isReadOnly: false,
 })
+
+// ─── ComfyUI 本地生图 ───
+
+async function generateWithComfyUI(prompt: string, size?: string): Promise<string> {
+  const [width, height] = parseSize(size) ?? [1024, 1024]
+
+  try {
+    const result = await _comfyUI!.generate({ prompt, width, height })
+    return formatToolResult(
+      [
+        `✨ 本地生图完成（FLUX.1-schnell）`,
+        `文件: ${result.imagePath}`,
+        `种子: ${result.seed}`,
+        `耗时: ${(result.elapsedMs / 1000).toFixed(1)}s`,
+      ].join('\n'),
+    )
+  } catch (err: any) {
+    return formatToolError(`ComfyUI 生成失败：${err.message}`)
+  }
+}
+
+// ─── CogView 在线 API（fallback） ───
+
+async function generateWithCogView(prompt: string, args: any): Promise<string> {
+  const apiKey = LLM_IMAGE_KEY
+  if (!apiKey) {
+    return formatToolError('未配置 LLM_IMAGE_KEY，且 ComfyUI 未就绪。请在 .env 中设置 LLM_IMAGE_KEY 或安装 ComfyUI')
+  }
+
+  const size = args.size || '1024x1024'
+  const n = Math.min(Math.max(args.imageCount || 1, 1), 4)
+
+  try {
+    const res = await fetch(LLM_IMAGE_API_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ model: LLM_IMAGE_MODEL, prompt, size, n }),
+      signal: AbortSignal.timeout(120000),
+    })
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      return formatToolError(`CogView API 错误 (${res.status}): ${body.slice(0, 500)}`)
+    }
+
+    const data = (await res.json()) as { data?: Array<{ url: string; revised_prompt?: string }>; created?: number }
+    if (!data.data || data.data.length === 0) return formatToolError('CogView API 返回了空结果')
+
+    const imagesDir = join(WORKSPACE.cache, 'images')
+    if (!existsSync(imagesDir)) mkdirSync(imagesDir, { recursive: true })
+
+    const results: string[] = []
+    for (let i = 0; i < data.data.length; i++) {
+      const img = data.data[i]
+      const ts = data.created || Date.now()
+      const filePath = join(imagesDir, `cogview_${ts}_${i}.png`)
+
+      const imgRes = await fetch(img.url)
+      if (!imgRes.ok) {
+        results.push(`图片 ${i + 1}: 下载失败，URL: ${img.url}`)
+        continue
+      }
+      writeFileSync(filePath, Buffer.from(await imgRes.arrayBuffer()))
+
+      const line = [`图片 ${i + 1}:`, `文件: ${filePath}`, `URL: ${img.url}`]
+      if (img.revised_prompt) line.push(`优化提示词: ${img.revised_prompt}`)
+      results.push(line.join('\n'))
+    }
+
+    return formatToolResult(results.join('\n\n---\n\n'))
+  } catch (err: any) {
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      return formatToolError('CogView API 请求超时（120秒）')
+    }
+    return formatToolError(`图片生成失败: ${err.message}`)
+  }
+}
+
+// ─── 工具 ───
+
+function parseSize(size?: string): [number, number] | null {
+  if (!size) return null
+  const m = size.match(/^(\d+)x(\d+)$/)
+  if (!m) return null
+  return [parseInt(m[1]), parseInt(m[2])]
+}

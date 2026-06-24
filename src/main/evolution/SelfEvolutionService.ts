@@ -123,6 +123,18 @@ export class SelfEvolutionService implements ISubsystem {
   // ==================== 事件订阅清理 ====================
   private eventSubscriptions: (() => void)[] = []
 
+  // ==================== 创造力建议缓存 ====================
+  /** 最近一次来自创造力系统的优质假设，注入到下一次分析 prompt 中 */
+  private creativityHypothesis: {
+    title: string
+    idea: string
+    novelty: number
+    feasibility: number
+    impact: number
+    expectedBenefit: string
+    risk: string
+  } | null = null
+
   constructor(
     agentService: AgentService,
     sched?: Scheduler,
@@ -195,6 +207,22 @@ export class SelfEvolutionService implements ISubsystem {
       this.eventBus.on('budget.exhausted', (p: any) => this.onTriggerEvent('budget.exhausted', p) as any),
       this.eventBus.on('evolution.cycle.completed', (p: any) => {
         if (!p.success) this.onTriggerEvent('evolution.cycle.completed', p)
+      }) as any,
+      // Phase 2: 接收创造力系统的高分假设
+      this.eventBus.on('creativity.hypothesis.selected', (p: any) => {
+        this.creativityHypothesis = {
+          title: p.title,
+          idea: p.idea,
+          novelty: p.novelty,
+          feasibility: p.feasibility,
+          impact: p.impact,
+          expectedBenefit: p.expectedBenefit,
+          risk: p.risk,
+        }
+        log('INFO', 'evolution_received_creativity_hypothesis', {
+          title: p.title,
+          score: p.novelty + p.feasibility + p.impact,
+        })
       }) as any,
     )
   }
@@ -562,6 +590,18 @@ export class SelfEvolutionService implements ISubsystem {
         livingPlanCtx: this.analyzer.buildLivingPlanContext(),
         cognitiveCtx: this.cognitiveService?.getFormattedContext() || '',
         strategyCtx: this.strategizer.getFormattedContext(),
+        creativityCtx: this.creativityHypothesis
+          ? [
+              '【创造力系统建议】',
+              `标题: ${this.creativityHypothesis.title}`,
+              `描述: ${this.creativityHypothesis.idea}`,
+              `评分: 新颖=${this.creativityHypothesis.novelty} 可行=${this.creativityHypothesis.feasibility} 影响=${this.creativityHypothesis.impact}`,
+              `预期收益: ${this.creativityHypothesis.expectedBenefit}`,
+              `风险: ${this.creativityHypothesis.risk}`,
+              '以上是创造力系统产出的改进建议。请评估是否值得纳入本次分析/计划，',
+              '如果是则作为计划的一部分执行，如果不是则说明理由。',
+            ].join('\n')
+          : undefined,
         promptMode: strategy.promptMode,
       }
 
@@ -753,6 +793,17 @@ export class SelfEvolutionService implements ISubsystem {
           success: result.success,
           summary: result.summary,
           timestamp: Date.now(),
+          durationMs: Date.now() - this.lastRun,
+        })
+        // Phase 3: 通知创造力系统本次分析结果
+        this.eventBus.emit('evolution.plan.outcome' as any, {
+          success: result.success,
+          summary: result.summary.slice(0, 500),
+          planTitle: result.planSummary?.title,
+          stepsCompleted: (result as any).stepsCompleted ?? 0,
+          stepsTotal: (result as any).stepsTotal ?? 0,
+          hadTimeout: result.hadTimeout,
+          hadRetry: result.hadRetry,
           durationMs: Date.now() - this.lastRun,
         })
       } catch (err: any) {

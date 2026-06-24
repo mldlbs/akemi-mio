@@ -16,6 +16,7 @@ import { RSSCollector } from './collectors/RSSCollector'
 import { BilibiliCollector } from './collectors/BilibiliCollector'
 import { DouyinCollector } from './collectors/DouyinCollector'
 import { GitHubTrendingCollector } from './collectors/GitHubTrendingCollector'
+import { HackerNewsCollector } from './collectors/HackerNewsCollector'
 import type { Collector, FeedbackSignal, EvolutionParams, OutputEnvelope, WritingMode } from './types'
 
 const PIPELINE_INTERVAL_MS = 4 * 60 * 60 * 1000
@@ -67,7 +68,13 @@ export class ObserverService {
     this.worldModel = new WorldModelStore(this.llm, this.store)
     this.selfEvo = new SelfEvolutionEngine(this.store)
     this.output = new OutputLayer(this.store)
-    this.collectors = [new RSSCollector(), new BilibiliCollector(), new DouyinCollector(), new GitHubTrendingCollector()]
+    this.collectors = [
+      new RSSCollector(),
+      new BilibiliCollector(),
+      new DouyinCollector(),
+      new GitHubTrendingCollector(),
+      new HackerNewsCollector(),
+    ]
   }
 
   // ════════════════════════════════════════════════════════════

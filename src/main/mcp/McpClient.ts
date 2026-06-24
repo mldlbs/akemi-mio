@@ -96,6 +96,14 @@ export class McpClient {
     if (!result.capabilities) {
       ;(result as any).capabilities = {}
     }
+    // SSE 传输需要建立长期连接以接收服务端推送通知
+    if (this.transportType === 'sse') {
+      try {
+        await this.transport.connectSSE()
+      } catch (err) {
+        console.error(`[MCP] SSE connect failed for ${this.name}:`, err)
+      }
+    }
     this.initialized = true
     console.log(`[MCP] Initialized: ${this.serverInfo.name} v${this.serverInfo.version}`)
   }

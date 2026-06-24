@@ -6,11 +6,14 @@ import type { WorkerPool } from '../core/WorkerPool'
 
 // 正则模式：匹配常见的工程知识模式
 const PATTERNS: Array<{ type: EngineeringEntry['type']; regex: RegExp }> = [
-  { type: 'architecture_pattern', regex: /(?:架构|体系|分层|模块|服务)[：:]\s*(.+?)[。\n]/ },
-  { type: 'design_decision', regex: /(?:决定|选择|采用|改为|弃用)[：:]\s*(.+?)[。\n]/ },
-  { type: 'failure_pattern', regex: /(?:错误|失败|异常|崩溃|超时|挂起|卡死)[：:]\s*(.+?)[。\n]/ },
-  { type: 'test_pattern', regex: /(?:测试|测试用例|集成测试|单元测试)[：:]\s*(.+?)[。\n]/ },
-  { type: 'coding_convention', regex: /(?:约定|规范|命名|风格|格式)[：:]\s*(.+?)[。\n]/ },
+  { type: 'architecture_pattern', regex: /(?:架构|体系|分层|模块|服务|architecture|system|layer|module|service)[：:]\s*(.+?)[。\n.!?]/ },
+  { type: 'design_decision', regex: /(?:决定|选择|采用|改为|弃用|decided|chose|switched|adopted|migrated)[：:]\s*(.+?)[。\n.!?]/ },
+  {
+    type: 'failure_pattern',
+    regex: /(?:错误|失败|异常|崩溃|超时|挂起|卡死|error|failed|exception|crash|timeout|hang)[：:]\s*(.+?)[。\n.!?]/,
+  },
+  { type: 'test_pattern', regex: /(?:测试|测试用例|集成测试|单元测试|test|spec|integration|unit test)[：:]\s*(.+?)[。\n.!?]/ },
+  { type: 'coding_convention', regex: /(?:约定|规范|命名|风格|格式|convention|standard|naming|style|pattern)[：:]\s*(.+?)[。\n.!?]/ },
 ]
 
 export class MemoryIndexer {

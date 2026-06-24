@@ -30,6 +30,7 @@ export interface AnalysisInput {
   livingPlanCtx: string
   cognitiveCtx: string
   strategyCtx: string
+  creativityCtx?: string
   promptMode: 'full' | 'balanced' | 'minimal'
 }
 

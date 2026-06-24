@@ -1,0 +1,20 @@
+name: Weekly Stress Test
+on:
+  schedule:
+    - cron: '0 22 * * 0'
+  workflow_dispatch:
+
+jobs:
+  stress:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - run: npm ci
+      - name: Run stress tests
+        run: npm run test:stress
+        timeout-minutes: 15
+        continue-on-error: true

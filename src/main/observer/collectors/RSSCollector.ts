@@ -43,6 +43,10 @@ export class RSSCollector implements Collector {
       // RSSHub 代理（澎湃 / 财新）
       'https://rsshub.app/thepaper/featured',
       'https://rsshub.app/caixin/latest',
+      // 技术资讯
+      'https://feeds.feedburner.com/InfoqChinese',
+      'https://www.jiqizhixin.com/rss',
+      'https://36kr.com/feed',
     ]
   }
 

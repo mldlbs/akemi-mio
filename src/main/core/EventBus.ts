@@ -53,6 +53,7 @@ export type EventName =
   | 'evolution.snapshot.created'
   | 'evolution.rollback.completed'
   | 'evolution.proposal.validated'
+  | 'evolution.plan.outcome'
   | 'task.graph.cycle_detected'
   | 'goal.guardrail.rejection'
   | 'goal.guardrail.tripped'
@@ -105,6 +106,17 @@ export interface EventPayload {
     count: number
     ideas: { id: string; title: string; novelty: number; feasibility: number; impact: number }[]
   }
+  'creativity.hypothesis.selected': {
+    id: string
+    title: string
+    idea: string
+    novelty: number
+    feasibility: number
+    impact: number
+    sourceLabels: string[]
+    expectedBenefit: string
+    risk: string
+  }
   'insight.analysis.started': {}
   'insight.detector.completed': { detector: string; findings: number }
   'insight.candidate.generated': { count: number }
@@ -131,6 +143,16 @@ export interface EventPayload {
   'evolution.snapshot.created': { tag: string; branch: string; timestamp: number }
   'evolution.rollback.completed': { level: string; ref: string; success: boolean; error?: string }
   'evolution.proposal.validated': { proposalId: string; passed: boolean; regressionRisk: string }
+  'evolution.plan.outcome': {
+    success: boolean
+    summary: string
+    planTitle?: string
+    stepsCompleted: number
+    stepsTotal: number
+    hadTimeout: boolean
+    hadRetry: boolean
+    durationMs: number
+  }
   'task.graph.cycle_detected': { cycle: string[] }
   'goal.guardrail.rejection': { reason: string; toolName: string; step: number }
   'goal.guardrail.tripped': { count: number; threshold: number }

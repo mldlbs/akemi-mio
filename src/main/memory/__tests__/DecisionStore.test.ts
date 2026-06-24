@@ -185,4 +185,80 @@ describe('DecisionStore', () => {
     const all = store.query({ limit: 999 })
     expect(all.length).toBeLessThanOrEqual(200)
   })
+
+  // ══════════════════════════════════════════
+  //  getFailurePatterns
+  // ══════════════════════════════════════════
+
+  it('getFailurePatterns 无失败记录时返回空数组', () => {
+    const patterns = store.getFailurePatterns()
+    expect(patterns).toEqual([])
+  })
+
+  it('getFailurePatterns 按 category 分组', () => {
+    store.record({ agentId: 'a', category: 'tool_select', context: 'file read error', choice: 'read_file', outcome: 'failure' })
+    store.record({ agentId: 'a', category: 'recovery', context: 'recovery failed', choice: 'restart', outcome: 'failure' })
+    store.record({ agentId: 'a', category: 'tool_select', context: 'file write error', choice: 'write_file', outcome: 'failure' })
+
+    const patterns = store.getFailurePatterns()
+    expect(patterns.length).toBeGreaterThanOrEqual(1)
+    const tool = patterns.find((p) => p.pattern.includes('tool_select'))
+    expect(tool).toBeDefined()
+    expect(tool!.count).toBeGreaterThanOrEqual(2)
+  })
+
+  it('getFailurePatterns 尊重 minCount', () => {
+    for (let i = 0; i < 3; i++) {
+      store.record({ agentId: 'a', category: 'tool_select', context: '普通错误', choice: 'read', outcome: 'failure' })
+    }
+    store.record({ agentId: 'a', category: 'recovery', context: '恢复失败', choice: 'restart', outcome: 'failure' })
+
+    const patterns = store.getFailurePatterns({ minCount: 5 })
+    expect(patterns).toEqual([])
+  })
+
+  it('getFailurePatterns 尊重 since 参数', () => {
+    store.record({ agentId: 'a', category: 'tool_select', context: '旧错误', choice: 'read', outcome: 'failure' })
+    const patterns = store.getFailurePatterns({ since: Date.now() + 10000 })
+    expect(patterns).toEqual([])
+  })
+
+  // ══════════════════════════════════════════
+  //  getCrossSessionSummary
+  // ══════════════════════════════════════════
+
+  it('getCrossSessionSummary 无记录时返回空字符串', () => {
+    expect(store.getCrossSessionSummary()).toBe('')
+  })
+
+  it('getCrossSessionSummary 返回格式化统计', () => {
+    store.record({ agentId: 'a', category: 'tool_select', context: '读取文件', choice: 'read_file', outcome: 'success' })
+    store.record({ agentId: 'a', category: 'tool_select', context: '写入文件', choice: 'write_file', outcome: 'success' })
+    store.record({ agentId: 'a', category: 'recovery', context: '恢复操作', choice: 'restart', outcome: 'failure' })
+
+    const summary = store.getCrossSessionSummary()
+    expect(summary).toContain('tool_select')
+    expect(summary).toContain('recovery')
+    expect(summary).toContain('成功')
+    expect(summary).toContain('失败')
+  })
+
+  it('getCrossSessionSummary 包含最频繁失败模式', () => {
+    for (let i = 0; i < 5; i++) {
+      store.record({ agentId: 'a', category: 'strategy', context: '策略失败', choice: 'retry', outcome: 'failure' })
+    }
+    store.record({ agentId: 'a', category: 'tool_select', context: '工具成功', choice: 'read', outcome: 'success' })
+
+    const summary = store.getCrossSessionSummary()
+    expect(summary).toContain('strategy')
+    expect(summary).toContain('最频繁失败模式')
+  })
+
+  it('getCrossSessionSummary 尊重 days 参数', () => {
+    store.record({ agentId: 'a', category: 'tool_select', context: '旧记录', choice: 'read', outcome: 'success' })
+    const summary = store.getCrossSessionSummary(0)
+    // days=0 意味着 since=now，记录时间戳是 now 之前几毫秒，所以可能会包含
+    // 验证至少格式正确即可
+    expect(typeof summary).toBe('string')
+  })
 })

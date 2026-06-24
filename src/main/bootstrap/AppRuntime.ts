@@ -58,6 +58,8 @@ import { UumitService } from '../uumit/index'
 import { TaskRunner } from '../core/tasks/unified/TaskRunner'
 import { MetricsCollector } from '../observability/MetricsCollector'
 import { SystemStabilityScore } from '../observability/SystemStabilityScore'
+import { ComfyUIManager } from '../image/ComfyUIManager'
+import { setComfyUIManager as setImageToolComfyUI } from '../tool/definitions/ImageGenerationTool'
 import { ResourceBudget } from '../core/ResourceBudget'
 import { BudgetRebalancer } from '../core/BudgetRebalancer'
 import { LazyServiceGroup } from './LazyServiceGroup'
@@ -92,6 +94,7 @@ export class AppRuntime {
   private sessionGovernor?: SessionGovernor
   private checkpointV2?: CheckpointV2
   private runtimeHealthManager?: RuntimeHealthManager
+  private comfyUI?: ComfyUIManager
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
     this.crashGuard = crashGuard ?? { flushMemory: null }
@@ -397,6 +400,16 @@ export class AppRuntime {
       tokenBalance: cognitiveService.tokenAccount.getBalance(),
     })
 
+    // Wire LLMKnowledgeExtractor into KnowledgeGraph
+    const { LLMKnowledgeExtractor } = await import('../memory/extractors/LLMKnowledgeExtractor')
+    const llmExtractor = new LLMKnowledgeExtractor()
+    if (llmService) {
+      llmExtractor.setLlm({
+        chatJson: (prompt: string, opts?: any) => llmService.chatJson(prompt, opts),
+      })
+    }
+    memoryService.knowledgeGraph.setLLMExtractor(llmExtractor)
+
     // Phase 5: SystemBus 注册 & 冻结
     systemBus.registerQuery<number>(
       'utility-score',
@@ -527,6 +540,7 @@ export class AppRuntime {
       }
     }
     this.taskRunner?.stop()
+    await this.comfyUI?.stop().catch(() => {})
     this.memoryService?.shutdown()
     this.memoryIndexer?.stop()
     evolutionService?.stop()
@@ -712,6 +726,7 @@ export class AppRuntime {
           0.3,
           join(WORKSPACE.evolution, 'creativity', 'reports'),
           this.taskRunner,
+          join(WORKSPACE.evolution, 'observer'),
         )
         creativity.start()
         log('INFO', 'creativity_service_started')
@@ -792,6 +807,21 @@ export class AppRuntime {
         await uumit.initialize()
         await uumit.start()
         log('INFO', 'uumit_service_started')
+      },
+    })
+
+    // ComfyUI 本地生图引擎
+    this.lazyInit!.add({
+      name: 'comfyui',
+      priority: 'background',
+      delayMs: 8000,
+      fn: async () => {
+        this.comfyUI = new ComfyUIManager()
+        setImageToolComfyUI(this.comfyUI)
+        await this.comfyUI.start()
+        if (this.comfyUI.isReady) {
+          log('INFO', 'comfyui_service_ready', { port: 8188 })
+        }
       },
     })
 

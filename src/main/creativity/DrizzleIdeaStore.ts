@@ -196,6 +196,26 @@ export class DrizzleIdeaStore {
     return report
   }
 
+  addExploredPair(nameA: string, nameB: string): void {
+    const db = getRawDb()
+    const key = [nameA, nameB].sort().join('|')
+    db.run('INSERT OR IGNORE INTO explored_pairs (pair_key, created_at) VALUES (?, ?)', [key, Date.now()])
+    markDirty()
+  }
+
+  getExploredPairs(): string[] {
+    const db = getRawDb()
+    const result = db.exec('SELECT pair_key FROM explored_pairs ORDER BY created_at DESC')
+    if (!result || result.length === 0 || result[0].values.length === 0) return []
+    return result[0].values.map((v: any) => String(v[0]))
+  }
+
+  resetExploredPairs(): void {
+    const db = getRawDb()
+    db.run('DELETE FROM explored_pairs')
+    markDirty()
+  }
+
   private insertHypothesis(db: any, h: Hypothesis): void {
     db.run(
       'INSERT OR IGNORE INTO hypotheses (id, title, idea, expected_benefit, risk, source_labels, novelty, feasibility, impact, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',

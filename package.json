@@ -12,6 +12,8 @@
     "publish:win": "npm run build && electron-builder --win nsis --publish always",
     "download:model": "node scripts/download-model.cjs",
     "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:stress": "vitest run src/main/**/__tests__/*.stress.test.ts src/main/**/__tests__/*.benchmark.test.ts src/main/**/__tests__/*endurance* src/main/**/__tests__/*baseline*",
     "lint": "eslint src/ --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx,json,css}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,json,css}\"",

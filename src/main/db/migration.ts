@@ -432,6 +432,32 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp);
     `,
   },
+  {
+    version: 20,
+    sql: `
+      CREATE TABLE IF NOT EXISTS agent_events (
+        id TEXT PRIMARY KEY,
+        timestamp INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        agent_id TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'system',
+        detail TEXT NOT NULL DEFAULT '',
+        duration_ms INTEGER,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type);
+    `,
+  },
+  {
+    version: 21,
+    sql: `
+      CREATE TABLE IF NOT EXISTS explored_pairs (
+        pair_key TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL
+      );
+    `,
+  },
 ]
 
 export function runMigrations(sqlite: SqlJsDatabase): void {

@@ -20,11 +20,22 @@ export function initCreativity(
   temperature = 0.3,
   reportDir = '',
   taskRunner?: TaskRunner | null,
+  observerDir?: string,
 ): CreativityService {
   if (!creativityService) {
     const store = new DrizzleIdeaStore()
     ideaStore = store
-    creativityService = new CreativityService(store, deps, chatJson, temperature, undefined, undefined, reportDir, taskRunner ?? undefined)
+    creativityService = new CreativityService(
+      store,
+      deps,
+      chatJson,
+      temperature,
+      undefined,
+      undefined,
+      reportDir,
+      taskRunner ?? undefined,
+      observerDir,
+    )
   }
   return creativityService
 }

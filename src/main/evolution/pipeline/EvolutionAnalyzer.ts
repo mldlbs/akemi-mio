@@ -99,7 +99,8 @@ export class EvolutionAnalyzer implements ISubsystem {
       '\n' +
       input.cognitiveCtx +
       '\n' +
-      input.strategyCtx
+      input.strategyCtx +
+      (input.creativityCtx ? '\n' + input.creativityCtx : '')
 
     try {
       const result = await this.agentService.runSelfTask(prompt, buildEvolutionSystemPrompt(undefined, this.promptOverlay))
@@ -232,6 +233,18 @@ export class EvolutionAnalyzer implements ISubsystem {
   }
 
   /**
+   * 检测活跃计划是否已卡住（超过 1 小时无更新）。
+   * 卡住的计划允许 evolution 分析穿透，以便 LLM 发现并处理。
+   */
+  private isActivePlanStale(): boolean {
+    const plan = this.planManager?.getActivePlan()
+    if (!plan) return true
+    const staleThreshold = Date.now() - 3600_000 // 1 小时
+    const lastUpdated = plan.updatedAt || plan.createdAt
+    return lastUpdated < staleThreshold
+  }
+
+  /**
    * 廉价预过滤：在调用 LLM 分析前检查是否有必要运行。
    * Level 1 规则（无 LLM 调用）：退化检测、计划进展、近期空闲周期。
    */
@@ -241,12 +254,20 @@ export class EvolutionAnalyzer implements ISubsystem {
       return { shouldRun: false, reason: 'degenerate_fingerprint' }
     }
 
-    // 2. 计划活跃存在：任何活跃计划都阻止新分析
-    //    只有计划完全不存在时才允许分析（避免刚建完又建）
+    // 2. 计划活跃存在：未卡住的活跃计划阻止新分析
+    //    卡住的计划允许分析穿透，以便 LLM 发现并处理
     const activePlan = this.planManager?.getActivePlan()
     if (activePlan) {
-      const progress = this.getActivePlanProgress()
-      return { shouldRun: false, reason: `active_plan_exists_${progress.completed}/${progress.total}` }
+      if (!this.isActivePlanStale()) {
+        const progress = this.getActivePlanProgress()
+        return { shouldRun: false, reason: `active_plan_exists_${progress.completed}/${progress.total}` }
+      }
+      // 计划卡住超过 1 小时，允许分析穿透
+      log('INFO', 'evolution_active_plan_stale', {
+        planTitle: activePlan.title,
+        planId: activePlan.id,
+        updatedAt: new Date(activePlan.updatedAt || activePlan.createdAt).toISOString(),
+      })
     }
 
     // 3. 近期空闲周期：最近 3 次分析都成功但未创建计划
