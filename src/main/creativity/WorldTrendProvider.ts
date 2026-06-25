@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
+import { resolveRandom, type RandomGenerator } from '../utils/random'
 
 /**
  * WorldTrendProvider — 从 Observer 工作线程的世界模型中读取趋势和洞察
@@ -12,12 +13,20 @@ import { join } from 'path'
  */
 export class WorldTrendProvider {
   private observerDir: string
+  private consumedNames: Set<string> = new Set()
+  private rng: RandomGenerator
 
-  constructor(observerDir: string) {
+  constructor(observerDir: string, seed?: number) {
     this.observerDir = observerDir
+    this.rng = resolveRandom(seed)
   }
 
-  /** 获取近期世界趋势列表（最多 5 条） */
+  /** 重置已消费记录，让所有趋势重新可被选取 */
+  resetConsumed(): void {
+    this.consumedNames.clear()
+  }
+
+  /** 获取近期世界趋势列表（轮换选取，每次不同） */
   getTrends(): string[] {
     const trendsFile = join(this.observerDir, 'world_model', 'trends.json')
     if (!existsSync(trendsFile)) return []
@@ -27,14 +36,31 @@ export class WorldTrendProvider {
       const trends = JSON.parse(raw)
       if (!Array.isArray(trends)) return []
 
-      return trends
-        .filter((t: any) => t.name && t.momentum != null)
-        .sort((a: any, b: any) => (b.momentum || 0) - (a.momentum || 0))
-        .slice(0, 5)
-        .map((t: any) => `[${t.direction === 'rising' ? '↑' : '↓'}] ${t.name} (强度:${(t.momentum * 100).toFixed(0)})`)
+      const valid = trends.filter((t: any) => t.name && t.momentum != null).sort((a: any, b: any) => (b.momentum || 0) - (a.momentum || 0))
+
+      // 取 top-15，跳过已消费的，从剩余中随机选 3-5 条
+      const candidates = valid.slice(0, 50).filter((t: any) => !this.consumedNames.has(t.name))
+      if (candidates.length === 0) {
+        this.consumedNames.clear()
+        const refill = valid.slice(0, 50)
+        return this.pickRandom(refill)
+      }
+
+      const picked = this.pickRandom(candidates)
+      for (const t of picked) this.consumedNames.add(t.name)
+      return picked
     } catch {
       return []
     }
+  }
+
+  /** 从趋势数组中随机取 3-5 条 */
+  private pickRandom(trends: any[]): string[] {
+    const count = Math.min(trends.length, 3 + Math.floor(this.rng() * 3))
+    const shuffled = [...trends].sort(() => this.rng() - 0.5)
+    return shuffled
+      .slice(0, count)
+      .map((t: any) => `[${t.direction === 'rising' ? '↑' : '↓'}] ${t.name} (强度:${(t.momentum * 100).toFixed(0)})`)
   }
 
   /** 获取近期洞察摘要（最多 3 条） */

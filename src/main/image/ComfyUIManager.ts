@@ -109,7 +109,7 @@ export class ComfyUIManager {
     try {
       log('INFO', 'comfyui_starting', { root: this.config.root, port: this.config.port })
 
-      this.process = spawn('python', ['main.py', '--port', String(this.config.port), '--highvram'], {
+      this.process = spawn('python', ['main.py', '--port', String(this.config.port), '--listen', '0.0.0.0', '--highvram'], {
         cwd: this.config.root,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env },
@@ -315,7 +315,7 @@ export class ComfyUIManager {
 
   private buildDefaultWorkflow(prompt: string, seed: number, width: number, height: number): Record<string, any> {
     return {
-      '3': { class_type: 'CLIPTextEncode', inputs: { text: prompt, clip: ['11', 1] }, _meta: { title: 'Positive' } },
+      '3': { class_type: 'CLIPTextEncode', inputs: { text: prompt, clip: ['11', 0] }, _meta: { title: 'Positive' } },
       '4': {
         class_type: 'KSampler',
         inputs: {
@@ -334,18 +334,18 @@ export class ComfyUIManager {
       },
       '7': {
         class_type: 'CLIPTextEncode',
-        inputs: { text: 'blurry, low quality, distorted', clip: ['11', 1] },
+        inputs: { text: 'blurry, low quality, distorted', clip: ['11', 0] },
         _meta: { title: 'Negative' },
       },
       '8': { class_type: 'VAEDecode', inputs: { samples: ['4', 0], vae: ['13', 0] }, _meta: { title: 'VAEDecode' } },
       '9': { class_type: 'SaveImage', inputs: { images: ['8', 0], filename_prefix: 'akemi_mio' }, _meta: { title: 'SaveImage' } },
       '10': {
         class_type: 'UnetLoaderGGUF',
-        inputs: { ckpt_name: 'flux-schnell/flux1-schnell-Q4_K_S.gguf' },
+        inputs: { unet_name: 'flux-schnell\\flux1-schnell-Q4_K_S.gguf' },
         _meta: { title: 'Load FLUX GGUF' },
       },
       '11': {
-        class_type: 'DualCLIPLoader',
+        class_type: 'DualCLIPLoaderGGUF',
         inputs: { clip_name1: 'clip_l.safetensors', clip_name2: 't5-v1_1-xxl-encoder-Q6_K.gguf', type: 'flux' },
       },
       '12': { class_type: 'EmptyLatentImage', inputs: { width, height, batch_size: 1 }, _meta: { title: 'Empty Latent' } },

@@ -724,6 +724,85 @@ export class LlmService {
     }
   }
 
+  /**
+   * chatJsonWithCode — 使用 code 模型的轻量级 LLM 调用，返回解析后的 JSON。
+   * 与 chatJson() 签名/返回一致，但路由到 LLM_CODE_API_URL + this.codeModel。
+   * 用于需要更强模型能力的场景（创造力生成、复杂分析等）。
+   */
+  async chatJsonWithCode(
+    userText: string,
+    options?: {
+      system?: string
+      temperature?: number
+      timeoutMs?: number
+      requestId?: string
+    },
+  ): Promise<{ data?: any; error?: string }> {
+    const key = this.codeApiKey || this.chatApiKey
+    if (!key) return { error: 'NO_KEY' }
+
+    const system = options?.system || ''
+    const temperature = options?.temperature ?? 0.3
+    const timeoutMs = options?.timeoutMs ?? 60000
+    const requestId = options?.requestId
+
+    const { controller, timer } = createTimeoutSignal(timeoutMs)
+    const t0 = Date.now()
+
+    try {
+      const res = await fetch(LLM_CODE_API_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.codeModel,
+          messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: userText }],
+          stream: false,
+          temperature,
+        }),
+        signal: controller.signal,
+      })
+
+      if (!res.ok) return { error: `API_ERROR:${res.status}` }
+
+      const data = (await res.json()) as { choices?: Array<{ message: { content: string } }> }
+      const reply = data.choices?.[0]?.message?.content?.trim() || ''
+      const elapsed = Date.now() - t0
+
+      log('INFO', 'chat_json_code_done', { request_id: requestId, reply_len: reply.length, duration_ms: elapsed })
+
+      try {
+        const parsed = JSON.parse(reply)
+        return { data: parsed }
+      } catch {
+        const extracted = extractJsonFromLLMReply(reply)
+        if (extracted) {
+          try {
+            const parsed = JSON.parse(extracted)
+            log('INFO', 'chat_json_code_extracted_from_fences', { request_id: requestId })
+            return { data: parsed }
+          } catch {
+            // fall through
+          }
+        }
+        log('WARN', 'chat_json_code_parse_failed', { request_id: requestId, reply: reply.slice(0, 200) })
+        return { data: reply }
+      }
+    } catch (err) {
+      const elapsed = Date.now() - t0
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        log('ERROR', 'chat_json_code_timeout', { request_id: requestId, elapsed_ms: elapsed })
+        return { error: 'TIMEOUT' }
+      }
+      log('ERROR', 'chat_json_code_network_error', { request_id: requestId, elapsed_ms: elapsed, error: String(err) })
+      return { error: 'NETWORK' }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
   // ── 文本处理（摘要、提取、重写、分析等纯文本任务）──
 
   /**

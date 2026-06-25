@@ -66,6 +66,9 @@ export class HypothesisGenerator {
         impact: Math.max(10, Math.min(100, r.impact)),
         status: 'draft' as const,
         createdAt: Date.now(),
+        implementationDifficulty: r.implementationDifficulty,
+        estimatedDevTime: r.estimatedDevTime,
+        perspectives: r.perspectives,
       }))
     }
 
@@ -86,6 +89,9 @@ export class HypothesisGenerator {
           impact: Math.max(10, Math.min(100, r.impact)),
           status: 'draft' as const,
           createdAt: Date.now(),
+          implementationDifficulty: r.implementationDifficulty,
+          estimatedDevTime: r.estimatedDevTime,
+          perspectives: r.perspectives,
         }))
       }
     }
@@ -125,6 +131,9 @@ export class HypothesisGenerator {
       novelty: number
       feasibility: number
       impact: number
+      implementationDifficulty?: number
+      estimatedDevTime?: string
+      perspectives?: { self: string; user: string; maintainer: string }
     }>
   > {
     // 限制输入量，避免超 token

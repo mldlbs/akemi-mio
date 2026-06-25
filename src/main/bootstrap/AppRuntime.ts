@@ -728,6 +728,7 @@ export class AppRuntime {
           join(WORKSPACE.evolution, 'creativity', 'reports'),
           this.taskRunner,
           join(WORKSPACE.evolution, 'observer'),
+          llmService.chatJsonWithCode.bind(llmService),
         )
         creativity.start()
         log('INFO', 'creativity_service_started')

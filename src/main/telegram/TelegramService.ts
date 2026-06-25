@@ -434,9 +434,23 @@ export class TelegramService {
     eventBus.on('creativity.ideas.generated', (p: any) => {
       const lines = [`💡 创意想法 x${p.count}`]
       for (const idea of (p.ideas || []).slice(0, 3)) {
-        lines.push(`  • ${idea.title} (新颖:${idea.novelty}% 可行:${idea.feasibility}% 影响:${idea.impact}%)`)
+        const src = Array.isArray(idea.sourceLabels) ? idea.sourceLabels.join(' × ') : ''
+        lines.push(``)
+        lines.push(`📌 ${idea.title}`)
+        lines.push(`  来源: ${src}`)
+        lines.push(`  评分: 新颖 ${idea.novelty}% · 可行 ${idea.feasibility}% · 影响 ${idea.impact}%`)
+        if (idea.idea) {
+          const snippet = idea.idea.length > 120 ? idea.idea.slice(0, 120) + '…' : idea.idea
+          lines.push(`  ${snippet}`)
+        }
+        if (idea.expectedBenefit) {
+          lines.push(`  ✅ ${idea.expectedBenefit}`)
+        }
+        if (idea.risk) {
+          lines.push(`  ⚠️ ${idea.risk}`)
+        }
       }
-      if (p.ideas?.length > 3) lines.push(`  ... 还有 ${p.ideas.length - 3} 条`)
+      if (p.ideas?.length > 3) lines.push(`\n  ... 还有 ${p.ideas.length - 3} 条`)
       this.enqueueReply(chatId, lines.join('\n'), 'creativity')
     })
 

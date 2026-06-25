@@ -24,6 +24,16 @@ export interface Hypothesis {
   impact: number
   status: 'draft' | 'active' | 'experimenting' | 'validated' | 'rejected'
   createdAt: number
+  /** 实现难度 1-5（LLM 生成） */
+  implementationDifficulty?: number
+  /** 预计开发时间（LLM 生成，如 "1-2天"） */
+  estimatedDevTime?: string
+  /** 多视角评估（LLM 生成） */
+  perspectives?: {
+    self: string
+    user: string
+    maintainer: string
+  }
 }
 
 export interface ExperimentPlan {

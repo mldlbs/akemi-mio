@@ -1,4 +1,6 @@
 import { readFileSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
 import { Client } from 'ssh2'
 import { getCredentialsManager } from '../deps'
 
@@ -14,19 +16,26 @@ const EXEC_TIMEOUT = 60_000
 function getDefaultSSHConfig(): SSHConfig {
   const cm = getCredentialsManager()
   return {
-    host: cm?.get('centos_host') || 'localhost',
-    port: parseInt(cm?.get('centos_port') || '22', 10),
+    host: cm?.get('centos_host') || '192.168.31.123',
+    port: parseInt(cm?.get('centos_port') || '8091', 10),
     username: cm?.get('centos_user') || 'root',
   }
 }
 
 function getSSHAuth(): { password?: string; privateKey?: string | Buffer } {
   const cm = getCredentialsManager()
-  const key = cm?.get('centos_ssh_key')
-  if (key) {
-    return { privateKey: key.includes('\n') ? key : readFileSync(key, 'utf-8') }
-  }
   const pwd = cm?.get('centos_password')
+  // 优先尝试密钥认证
+  const keyPath = (() => {
+    const customKey = cm?.get('centos_ssh_key')
+    if (customKey) return customKey.startsWith('~') ? join(homedir(), customKey.slice(1)) : customKey
+    return join(homedir(), '.ssh', 'id_rsa_mio')
+  })()
+  try {
+    const privateKey = readFileSync(keyPath, 'utf-8')
+    // 密钥存在时也附带密码，用于密钥被拒后自动回退
+    return pwd ? { privateKey, password: pwd } : { privateKey }
+  } catch {}
   if (pwd) return { password: pwd }
   return {}
 }

@@ -21,6 +21,10 @@ export function initCreativity(
   reportDir = '',
   taskRunner?: TaskRunner | null,
   observerDir?: string,
+  chatJsonWithCode?: (
+    userText: string,
+    options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string },
+  ) => Promise<{ data?: any; error?: string }>,
 ): CreativityService {
   if (!creativityService) {
     const store = new DrizzleIdeaStore()
@@ -29,6 +33,7 @@ export function initCreativity(
       store,
       deps,
       chatJson,
+      chatJsonWithCode,
       temperature,
       undefined,
       undefined,

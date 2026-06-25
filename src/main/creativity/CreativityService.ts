@@ -57,6 +57,10 @@ export class CreativityService {
       userText: string,
       options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string },
     ) => Promise<{ data?: any; error?: string }>,
+    chatJsonWithCode?: (
+      userText: string,
+      options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string },
+    ) => Promise<{ data?: any; error?: string }>,
     temperature = 0.3,
     seed?: number,
     bus?: EventBus,
@@ -65,7 +69,9 @@ export class CreativityService {
     observerDir?: string,
   ) {
     this.store = store
-    this.generator = new IdeaGenerator(chatJson, temperature, seed)
+    // 优先使用 code 模型（更强），回退到 text 模型
+    const hypothesisJson = chatJsonWithCode || chatJson
+    this.generator = new IdeaGenerator(hypothesisJson, temperature, seed)
     this.eventBus = bus || eventBus
     this.reportDir = reportDir
     this.taskRunner = taskRunner
@@ -74,7 +80,7 @@ export class CreativityService {
     this.getInsights = deps.getInsights
     this.getFailedHypotheses = deps.getFailedHypotheses
     this.sourceBuilder = new SourceBuilder(seed)
-    this.worldTrendProvider = observerDir ? new WorldTrendProvider(observerDir) : null
+    this.worldTrendProvider = observerDir ? new WorldTrendProvider(observerDir, seed) : null
 
     // 对话期间不触发创造力周期，避免抢占 LLM 资源
     this.eventBus.on('agent.input.received', () => {

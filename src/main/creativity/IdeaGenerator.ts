@@ -112,7 +112,9 @@ export class IdeaGenerator {
     // 梦境模式：高温度 + dreamMode=true
     const hypotheses = await this.hypothesisGen.generate(combos, activeSources, true)
 
-    const novel = hypotheses.filter((h) => h.novelty >= 65)
+    const feasible = this.feasibilityGate(hypotheses)
+
+    const novel = feasible.filter((h) => h.novelty >= 65)
 
     return novel.slice(0, maxIdeas).map((h) => ({
       hypothesis: h,
@@ -127,6 +129,23 @@ export class IdeaGenerator {
   /** 设置已探索过的配对，用于 ConceptMixer 降权 */
   setExploredPairs(pairs: string[]): void {
     this.exploredPairs = pairs
+  }
+
+  /**
+   * 可行性/质量门禁 — 过滤明显不靠谱的想法
+   * - 可行性评分 >= 30 才保留
+   * - 想法描述至少 20 个字符（排除模板填空）
+   * - novelty > 80 但 feasibility < 40 的"可疑高新颖性"需要额外检查描述长度
+   */
+  private feasibilityGate(hypotheses: Hypothesis[]): Hypothesis[] {
+    return hypotheses.filter((h) => {
+      if (h.feasibility < 30) return false
+      if (!h.idea || h.idea.length < 20) return false
+      if (h.novelty > 80 && h.feasibility < 40) {
+        if (!h.idea || h.idea.length < 60) return false
+      }
+      return true
+    })
   }
 
   /**
