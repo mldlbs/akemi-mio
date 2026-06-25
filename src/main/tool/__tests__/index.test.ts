@@ -14,13 +14,16 @@ const READONLY_TOOLS = new Set([
   'list_workflows',
   'analyze_codebase',
   'analyze_task',
+  'centos_read_file',
+  'centos_grep',
+  'centos_search_files',
 ])
 
 describe('getAllTools', () => {
   const tools = getAllTools()
 
-  it('返回 26 个工具', () => {
-    expect(tools).toHaveLength(26)
+  it('返回 31 个工具', () => {
+    expect(tools).toHaveLength(31)
   })
 
   it('每个工具有 name/description/inputJSONSchema/handler', () => {

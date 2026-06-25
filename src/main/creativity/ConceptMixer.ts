@@ -15,12 +15,14 @@ export class ConceptMixer {
   }
   /**
    * 将所有来源两两配对并打分，返回前 N 个最有潜力的组合
+   * @param exploredPairs 已探索过的 pair key 列表（"A|B" 格式，已排序），用于降权
    */
-  mix(sources: CreativitySource[], maxCombos = 10): { combo: ConceptCombo; score: number }[] {
+  mix(sources: CreativitySource[], maxCombos = 10, exploredPairs: string[] = []): { combo: ConceptCombo; score: number }[] {
     if (sources.length < 2) return []
 
     const combos = this.generatePairs(sources)
-    const scored = combos.map(([a, b]) => this.scorePair(a, b, sources))
+    const exploredSet = new Set(exploredPairs)
+    const scored = combos.map(([a, b]) => this.scorePair(a, b, sources, exploredSet))
     const sorted = scored.sort((a, b) => b.score - a.score)
     return sorted.slice(0, maxCombos)
   }
@@ -35,16 +37,25 @@ export class ConceptMixer {
     return pairs
   }
 
-  private scorePair(a: CreativitySource, b: CreativitySource, allSources: CreativitySource[]): { combo: ConceptCombo; score: number } {
+  private scorePair(
+    a: CreativitySource,
+    b: CreativitySource,
+    allSources: CreativitySource[],
+    exploredSet: Set<string> = new Set(),
+  ): { combo: ConceptCombo; score: number } {
     // 同类型组合分数降低（重复视角），不同类型组合分数提高
     const typeBonus = a.type === b.type ? 10 : 40
     const weightProduct = a.weight * b.weight * 0.3
-    const noveltyBonus = this.calculateNoveltyBonus(a.name, b.name, allSources)
+    const noveltyBonus = this.calculateNoveltyBonus(a, b, allSources)
 
     // 随机扰动：让组合有不可预测性
     const perturbation = this.rng() * 20
 
-    const score = Math.round(typeBonus + weightProduct + noveltyBonus + perturbation)
+    // 已探索过的配对降权 15 分，刺激探索新方向
+    const pairKey = [a.name, b.name].sort().join('|')
+    const explorationPenalty = exploredSet.has(pairKey) ? 15 : 0
+
+    const score = Math.round(typeBonus + weightProduct + noveltyBonus + perturbation - explorationPenalty)
 
     const description = this.describeCombo(a.name, b.name, a.type, b.type)
 
@@ -52,15 +63,29 @@ export class ConceptMixer {
       id: `combo_${Date.now()}_${this.rng().toString(36).slice(2, 6)}`,
       sources: [a.name, b.name],
       description,
-      createdAt: Date.now()
+      createdAt: Date.now(),
     }
 
     return { combo, score }
   }
 
-  private calculateNoveltyBonus(nameA: string, nameB: string, allSources: CreativitySource[]): number {
-    // 跨类型组合本身就比同类型新颖
-    return 10
+  private calculateNoveltyBonus(a: CreativitySource, b: CreativitySource, allSources: CreativitySource[]): number {
+    // 基础：不同 type 本身就比同 type 新颖
+    let bonus = a.type === b.type ? 5 : 20
+
+    // 稀有类型奖励：failure/random/provocation 等不常见类型出现时加分
+    const rareTypes = ['failure', 'random', 'provocation', 'insight']
+    if (rareTypes.includes(a.type)) bonus += 10
+    if (rareTypes.includes(b.type)) bonus += 10
+
+    // 权重差异越大越新颖（一个高权核心能力 + 一个低权边缘能力）
+    bonus += Math.round(Math.abs(a.weight - b.weight) * 20)
+
+    // 在所有来源中的"孤立度"：如果某个来源很少被配对（之前被过滤掉了），这次出现值得奖励
+    const sameTypeCount = allSources.filter((s) => s.type === a.type || s.type === b.type).length
+    if (sameTypeCount <= 2) bonus += 15
+
+    return bonus
   }
 
   private describeCombo(nameA: string, nameB: string, typeA: string, typeB: string): string {
@@ -88,12 +113,12 @@ export class ConceptMixer {
    * 随机抽取一组来源（温度越高，越可能选中低权重来源）
    */
   pickRandomSources(sources: CreativitySource[], temperature: number, minCount = 3): CreativitySource[] {
-    const weighted = sources.map(s => ({
+    const weighted = sources.map((s) => ({
       source: s,
-      weight: s.weight * (0.5 + this.rng() * temperature)
+      weight: s.weight * (0.5 + this.rng() * temperature),
     }))
     const sorted = weighted.sort((a, b) => b.weight - a.weight)
     const count = Math.min(sorted.length, Math.max(minCount, Math.floor(sorted.length * (0.3 + this.rng() * 0.5))))
-    return sorted.slice(0, count).map(w => w.source)
+    return sorted.slice(0, count).map((w) => w.source)
   }
 }

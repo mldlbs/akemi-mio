@@ -22,8 +22,14 @@ export class IdeaGenerator {
   // 创造力温度：越高越随机，越低越保守
   private temperature = 0.3
 
+  /** 已探索过的配对 key 列表，传给 ConceptMixer 以降权 */
+  private exploredPairs: string[] = []
+
   constructor(
-    chatJson: (userText: string, options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string }) => Promise<{ data?: any; error?: string }>,
+    chatJson: (
+      userText: string,
+      options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string },
+    ) => Promise<{ data?: any; error?: string }>,
     temperature = 0.3,
     seed?: number,
   ) {
@@ -43,8 +49,8 @@ export class IdeaGenerator {
     // 1. 随机扰动：温度越高，来源选择越随机
     const activeSources = this.applyTemperature(sources)
 
-    // 2. 概念重组：配对 + 打分
-    const scoredCombos = this.mixer.mix(activeSources, maxIdeas * 3)
+    // 2. 概念重组：配对 + 打分，已探索过的配对降权
+    const scoredCombos = this.mixer.mix(activeSources, maxIdeas * 3, this.exploredPairs)
     const combos = scoredCombos.map((c) => c.combo)
 
     if (combos.length === 0) return []
@@ -52,8 +58,8 @@ export class IdeaGenerator {
     // 3. 用 LLM 生成假设
     const hypotheses = await this.hypothesisGen.generate(combos, activeSources)
 
-    // 4. 过滤低新颖性
-    const novel = hypotheses.filter((h) => h.novelty >= 50)
+    // 4. 过滤低新颖性 — 提线：硬编码模板的下限过滤
+    const novel = hypotheses.filter((h) => h.novelty >= 55)
 
     // 5. 为每个假设生成实验方案
     const ideas = novel.slice(0, maxIdeas).map((h) => ({
@@ -116,6 +122,11 @@ export class IdeaGenerator {
 
   setTemperature(t: number): void {
     this.temperature = Math.max(0, Math.min(1, t))
+  }
+
+  /** 设置已探索过的配对，用于 ConceptMixer 降权 */
+  setExploredPairs(pairs: string[]): void {
+    this.exploredPairs = pairs
   }
 
   /**

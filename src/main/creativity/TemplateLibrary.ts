@@ -555,7 +555,7 @@ function fill(template: string, a: CreativitySource, b: CreativitySource): strin
     .replace(/\{bType\}/g, b.type)
 }
 
-/** 确保分数在 50-100 之间 */
+/** 确保分数在 60-100 之间 */
 function clamp50(v: number): number {
-  return Math.max(50, Math.min(100, v))
+  return Math.max(60, Math.min(100, v))
 }

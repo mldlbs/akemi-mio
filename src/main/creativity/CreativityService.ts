@@ -194,6 +194,9 @@ export class CreativityService {
     log('INFO', 'creativity_cycle_start', { source_count: sources.length })
     this.eventBus.emit('creativity.cycle.started', {})
 
+    // 推送已探索配对给 Mixer 用于降权
+    this.generator.setExploredPairs(this.store.getExploredPairs())
+
     const ideas = await this.generator.generateIdeas(sources)
 
     if (ideas.length === 0) {
@@ -235,6 +238,14 @@ export class CreativityService {
     this.persist(deduped)
     this.reportCycle(deduped)
     this.report(deduped)
+
+    // 记录本轮配对为已探索，避免重复
+    for (const idea of deduped) {
+      const labels = idea.hypothesis.sourceLabels
+      if (labels.length >= 2) {
+        this.store.addExploredPair(labels[0], labels[1])
+      }
+    }
 
     // Phase 2: 高综合分假设 → 通知进化系统
     const topIdea = deduped.reduce(

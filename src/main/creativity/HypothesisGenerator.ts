@@ -139,8 +139,8 @@ export class HypothesisGenerator {
     try {
       const result = await this.chatJson(prompt, {
         system: CREATIVITY_SYSTEM_PROMPT,
-        temperature: dreamMode ? 0.8 : 0.6,
-        timeoutMs: 30000,
+        temperature: dreamMode ? 1.0 : 0.8,
+        timeoutMs: 60000,
       })
 
       if (result.error) {

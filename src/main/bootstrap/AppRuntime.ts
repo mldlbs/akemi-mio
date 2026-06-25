@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { readFileSync } from 'fs'
 import { log, initLogFile, getLogFilePath, sanitizeForLog } from '../logger/Logger'
 import { StateManager } from '../core/StateManager'
@@ -115,13 +115,14 @@ export class AppRuntime {
 
     // 注册 Playwright MCP 服务器，赋予 AI 浏览器自动化能力
     try {
-      const pwMcpPath = require.resolve('@playwright/mcp')
+      const pwMcpDir = dirname(require.resolve('@playwright/mcp/package.json'))
+      const cliPath = join(pwMcpDir, 'cli.js')
       mcpManager
         .addServer({
           name: 'playwright',
           transport: 'stdio',
           command: 'node',
-          args: [pwMcpPath, '--headless'],
+          args: [cliPath, '--headless'],
         })
         .catch((err) => log('WARN', 'playwright_mcp_start_failed', { error: String(err) }))
     } catch {
@@ -886,16 +887,37 @@ export class AppRuntime {
   }
 
   private buildCreativitySources(memoryService: MemoryService, pm: any): any[] {
+    const memInfo = memoryService?.getInfo?.()
+    const recentTopics = memInfo?.recentTopics || []
+    const interactionCount = memoryService?.getInteractionCount?.() || 0
+
     const sources: any[] = [
-      { name: 'Memory', content: '对话记忆系统', type: 'knowledge', weight: 0.9 },
-      { name: 'MCP', content: '工具调用框架', type: 'knowledge', weight: 0.8 },
-      { name: 'ASR', content: '语音识别', type: 'knowledge', weight: 0.7 },
-      { name: 'TTS', content: '语音合成', type: 'knowledge', weight: 0.7 },
-      { name: 'Agent', content: 'Agent 服务', type: 'knowledge', weight: 0.9 },
-      { name: 'Evolution', content: '自进化系统', type: 'knowledge', weight: 0.8 },
-      { name: 'Wallpaper', content: '桌面壁纸集成', type: 'knowledge', weight: 0.5 },
-      { name: 'PiperTTS', content: '本地 TTS', type: 'knowledge', weight: 0.5 },
-      { name: 'UserBehavior', content: `最近交互 ${memoryService?.getInteractionCount() || 0} 次`, type: 'behavior', weight: 0.7 },
+      {
+        name: 'Memory',
+        content: memInfo
+          ? `对话记忆：${memInfo.entryCount || 0} 条记录，最近话题 ${recentTopics.slice(0, 3).join('、') || '无'}`
+          : '对话记忆系统',
+        type: 'knowledge',
+        weight: 0.9,
+      },
+      { name: 'MCP', content: '工具调用框架：多工具集成、动态附件、实时响应', type: 'knowledge', weight: 0.8 },
+      { name: 'ASR', content: '语音识别：中英文语音输入、实时转写、领域词表', type: 'knowledge', weight: 0.7 },
+      { name: 'TTS', content: '语音合成：多音色选择、情感语调可控、低延迟', type: 'knowledge', weight: 0.7 },
+      { name: 'Agent', content: 'Agent 服务：多轮对话、工具调用、任务编排', type: 'knowledge', weight: 0.9 },
+      {
+        name: 'Evolution',
+        content: '自进化系统：代码分析与修改、计划执行、2 小时周期',
+        type: 'knowledge',
+        weight: 0.8,
+      },
+      { name: 'Wallpaper', content: '桌面壁纸：半透明 Overlay、系统托盘、鼠标穿透', type: 'knowledge', weight: 0.5 },
+      { name: 'PiperTTS', content: '本地 TTS：离线合成、低延迟、多模型切换', type: 'knowledge', weight: 0.5 },
+      {
+        name: 'UserBehavior',
+        content: `最近交互 ${interactionCount} 次${recentTopics.length > 0 ? `，活跃话题: ${recentTopics.slice(0, 3).join('、')}` : ''}`,
+        type: 'behavior',
+        weight: 0.7,
+      },
     ]
     try {
       const plans = pm.listPlans()

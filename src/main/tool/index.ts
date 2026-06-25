@@ -15,6 +15,7 @@ import { writingSystemTool } from './definitions/WritingTool'
 import { generateImageTool } from './definitions/ImageGenerationTool'
 import { cardGeneratorTool } from './definitions/CardGeneratorTool'
 import { rememberProcedureTool, listProceduresTool } from './definitions/ProceduralMemoryTool'
+import { centosExecTool, centosReadFileTool, centosWriteFileTool, centosGrepTool, centosSearchFilesTool } from './definitions/SshTools'
 
 export function getAllTools(): Tool[] {
   return [
@@ -44,6 +45,11 @@ export function getAllTools(): Tool[] {
     cardGeneratorTool as Tool,
     rememberProcedureTool as Tool,
     listProceduresTool as Tool,
+    centosExecTool as Tool,
+    centosReadFileTool as Tool,
+    centosWriteFileTool as Tool,
+    centosGrepTool as Tool,
+    centosSearchFilesTool as Tool,
   ]
 }
 
