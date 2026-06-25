@@ -357,6 +357,10 @@ export class CreativityService {
       ideas: top.map((i) => ({
         id: i.hypothesis.id,
         title: i.hypothesis.title,
+        idea: i.hypothesis.idea,
+        expectedBenefit: i.hypothesis.expectedBenefit,
+        risk: i.hypothesis.risk,
+        sourceLabels: i.hypothesis.sourceLabels,
         novelty: i.hypothesis.novelty,
         feasibility: i.hypothesis.feasibility,
         impact: i.hypothesis.impact,

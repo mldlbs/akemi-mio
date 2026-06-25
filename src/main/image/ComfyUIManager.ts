@@ -315,7 +315,7 @@ export class ComfyUIManager {
 
   private buildDefaultWorkflow(prompt: string, seed: number, width: number, height: number): Record<string, any> {
     return {
-      '3': { class_type: 'CLIPTextEncode', inputs: { text: prompt, clip: ['11', 0] }, _meta: { title: 'Positive' } },
+      '3': { class_type: 'CLIPTextEncode', inputs: { text: prompt, clip: ['11', 1] }, _meta: { title: 'Positive' } },
       '4': {
         class_type: 'KSampler',
         inputs: {
@@ -334,22 +334,22 @@ export class ComfyUIManager {
       },
       '7': {
         class_type: 'CLIPTextEncode',
-        inputs: { text: 'blurry, low quality, distorted', clip: ['11', 0] },
+        inputs: { text: 'blurry, low quality, distorted', clip: ['11', 1] },
         _meta: { title: 'Negative' },
       },
-      '8': { class_type: 'VAEDecode', inputs: { samples: ['4', 0], vae: ['10', 2] }, _meta: { title: 'VAEDecode' } },
+      '8': { class_type: 'VAEDecode', inputs: { samples: ['4', 0], vae: ['13', 0] }, _meta: { title: 'VAEDecode' } },
       '9': { class_type: 'SaveImage', inputs: { images: ['8', 0], filename_prefix: 'akemi_mio' }, _meta: { title: 'SaveImage' } },
       '10': {
-        class_type: 'CheckpointLoaderSimple',
-        inputs: { ckpt_name: 'flux-schnell/flux1-schnell-fp8-e4m3fn.safetensors' },
-        _meta: { title: 'Load FLUX Model' },
+        class_type: 'UnetLoaderGGUF',
+        inputs: { ckpt_name: 'flux-schnell/flux1-schnell-Q4_K_S.gguf' },
+        _meta: { title: 'Load FLUX GGUF' },
       },
       '11': {
-        class_type: 'CLIPLoader',
-        inputs: { ckpt_name: 'flux-schnell/t5-v1_1-xxl-encoder-only-Q6_K.gguf', type: 'sd3' },
-        _meta: { title: 'CLIP Loader' },
+        class_type: 'DualCLIPLoader',
+        inputs: { clip_name1: 'clip_l.safetensors', clip_name2: 't5-v1_1-xxl-encoder-Q6_K.gguf', type: 'flux' },
       },
       '12': { class_type: 'EmptyLatentImage', inputs: { width, height, batch_size: 1 }, _meta: { title: 'Empty Latent' } },
+      '13': { class_type: 'VAELoader', inputs: { vae_name: 'ae.safetensors' }, _meta: { title: 'Load VAE' } },
     }
   }
 }

@@ -5,13 +5,13 @@ from tqdm import tqdm
 
 MODELS = [
     {
-        "name": "FLUX.1-schnell fp8",
-        "url": "https://hf-mirror.com/Kijai/flux-fp8/resolve/main/flux1-schnell-fp8-e4m3fn.safetensors",
-        "path": r"C:\Users\gf191\AppData\Roaming\akemi-mio\cache\comfyui\models\checkpoints\flux-schnell\flux1-schnell-fp8-e4m3fn.safetensors",
+        "name": "FLUX.1-schnell Q4_K_S (6.5GB)",
+        "url": "https://hf-mirror.com/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q4_K_S.gguf",
+        "path": r"C:\Users\gf191\AppData\Roaming\akemi-mio\cache\comfyui\models\checkpoints\flux-schnell\flux1-schnell-Q4_K_S.gguf",
     },
     {
-        "name": "T5-v1_1-xxl encoder",
-        "url": "https://hf-mirror.com/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-only-Q6_K.gguf",
+        "name": "T5-v1_1-xxl encoder Q6_K (3.7GB)",
+        "url": "https://hf-mirror.com/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q6_K.gguf",
         "path": r"C:\Users\gf191\AppData\Roaming\akemi-mio\cache\comfyui\models\clip\t5-v1_1-xxl-encoder-Q6_K.gguf",
     },
 ]

@@ -104,7 +104,17 @@ export interface EventPayload {
   'creativity.dream.completed': { count: number; topNovelty: number }
   'creativity.ideas.generated': {
     count: number
-    ideas: { id: string; title: string; novelty: number; feasibility: number; impact: number }[]
+    ideas: {
+      id: string
+      title: string
+      idea: string
+      expectedBenefit: string
+      risk: string
+      sourceLabels: string[]
+      novelty: number
+      feasibility: number
+      impact: number
+    }[]
   }
   'creativity.hypothesis.selected': {
     id: string
