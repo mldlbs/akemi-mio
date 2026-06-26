@@ -6,7 +6,7 @@ import { IdeaGenerator } from './IdeaGenerator'
 import { WorldTrendProvider } from './WorldTrendProvider'
 import { SourceBuilder } from './SourceBuilder'
 import { evaluateNovelty } from './NoveltyScorer'
-import type { CreativitySource, CreativeIdea, DreamCycleLog, IdeaStoreLike } from './types'
+import type { CreativitySource, CreativeIdea, DreamCycleLog, IdeaStoreLike, Strategy } from './types'
 import { DREAM_CYCLE_INTERVAL_MS, NORMAL_CYCLE_INTERVAL_MS } from './types'
 import type { TaskRunner } from '../core/tasks/unified/TaskRunner'
 
@@ -38,6 +38,10 @@ export class CreativityService {
   /** 最近一次进化系统执行结果（Phase 3 反馈） */
   private evolutionOutcome: { success: boolean; summary: string; planTitle?: string } | null = null
   private evolutionDisposer: (() => void) | null = null
+
+  /** 轮换的策略序列：每次 cycle 按顺序切换 */
+  private strategyCycle: Strategy[] = ['explore', 'signal', 'stable']
+  private strategyIndex = 0
 
   /** 用户正在对话中 — 跳过创造性周期避免抢占 LLM */
   private conversationActive = false
@@ -200,10 +204,15 @@ export class CreativityService {
     log('INFO', 'creativity_cycle_start', { source_count: sources.length })
     this.eventBus.emit('creativity.cycle.started', {})
 
+    // 轮换策略：每次 cycle 切换一种生成模式
+    const strategy = this.strategyCycle[this.strategyIndex % this.strategyCycle.length]
+    this.strategyIndex++
+    log('INFO', 'creativity_strategy_selected', { strategy, strategyIndex: this.strategyIndex })
+
     // 推送已探索配对给 Mixer 用于降权
     this.generator.setExploredPairs(this.store.getExploredPairs())
 
-    const ideas = await this.generator.generateIdeas(sources)
+    const ideas = await this.generator.generateIdeas(sources, undefined, strategy)
 
     if (ideas.length === 0) {
       log('INFO', 'creativity_cycle_empty')

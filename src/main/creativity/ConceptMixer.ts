@@ -1,4 +1,4 @@
-import type { CreativitySource, ConceptCombo } from './types'
+import type { CreativitySource, ConceptCombo, Strategy } from './types'
 import { resolveRandom, type RandomGenerator } from '../utils/random'
 
 /**
@@ -6,6 +6,10 @@ import { resolveRandom, type RandomGenerator } from '../utils/random'
  *
  * 人类创造力 ≈ 已有概念的重新组合
  * 输入来源越多、越多样，组合越新颖
+ *
+ * v2 改动：mix() 接受 strategy 参数，在配对前约束组合空间。
+ * strategy 决定了允许哪些 type 配对，而不只是事后评分。
+ * 参见策略定义：Strategy = 'stable' | 'explore' | 'signal'
  */
 export class ConceptMixer {
   private rng: RandomGenerator
@@ -13,27 +17,81 @@ export class ConceptMixer {
   constructor(seed?: number) {
     this.rng = resolveRandom(seed)
   }
+
   /**
    * 将所有来源两两配对并打分，返回前 N 个最有潜力的组合
    * @param exploredPairs 已探索过的 pair key 列表（"A|B" 格式，已排序），用于降权
+   * @param strategy 策略约束：stable/explore/signal，默认为 'explore'
+   *   策略决定哪些 type 配对被允许、评分权重如何调整。
    */
-  mix(sources: CreativitySource[], maxCombos = 10, exploredPairs: string[] = []): { combo: ConceptCombo; score: number }[] {
+  mix(
+    sources: CreativitySource[],
+    maxCombos = 10,
+    exploredPairs: string[] = [],
+    strategy: Strategy = 'explore',
+  ): { combo: ConceptCombo; score: number }[] {
     if (sources.length < 2) return []
 
-    const combos = this.generatePairs(sources)
     const exploredSet = new Set(exploredPairs)
-    const scored = combos.map(([a, b]) => this.scorePair(a, b, sources, exploredSet))
+
+    // 先按策略约束过滤允许的配对
+    const allowed = this.generatePairs(sources, strategy)
+
+    const scored = allowed.map(([a, b]) => this.scorePair(a, b, sources, exploredSet, strategy))
     const sorted = scored.sort((a, b) => b.score - a.score)
     return sorted.slice(0, maxCombos)
   }
 
-  private generatePairs(sources: CreativitySource[]): [CreativitySource, CreativitySource][] {
+  /**
+   * 按策略约束生成配对 — 核心改动：
+   * - stable:   只同类型配对（去掉 novelty bonus 主导的跨类型噪声）
+   * - explore:  跨类型优先，保留现有的多样性行为
+   * - signal:   强制包含 provocation/insight/trend，限制纯知识配对
+   */
+  private generatePairs(sources: CreativitySource[], strategy: Strategy): [CreativitySource, CreativitySource][] {
     const pairs: [CreativitySource, CreativitySource][] = []
-    for (let i = 0; i < sources.length; i++) {
-      for (let j = i + 1; j < sources.length; j++) {
-        pairs.push([sources[i], sources[j]])
+
+    if (strategy === 'stable') {
+      // 只同类型配对，去掉外源随机扰动
+      for (let i = 0; i < sources.length; i++) {
+        for (let j = i + 1; j < sources.length; j++) {
+          if (sources[i].type === sources[j].type) {
+            pairs.push([sources[i], sources[j]])
+          }
+        }
+      }
+    } else if (strategy === 'signal') {
+      // 至少一个来源必须是 provocation/insight/failure
+      const signalTypes = new Set(['provocation', 'insight', 'failure'])
+      for (let i = 0; i < sources.length; i++) {
+        for (let j = i + 1; j < sources.length; j++) {
+          if (signalTypes.has(sources[i].type) || signalTypes.has(sources[j].type)) {
+            pairs.push([sources[i], sources[j]])
+          }
+        }
+      }
+    } else {
+      // explore: 跨类型优先（原行为），但也允许同类型
+      for (let i = 0; i < sources.length; i++) {
+        for (let j = i + 1; j < sources.length; j++) {
+          if (sources[i].type !== sources[j].type) {
+            pairs.push([sources[i], sources[j]])
+          }
+        }
+      }
+      // 补充少量同类型（不超过总配对 20%）
+      const sameTypeCount = Math.max(0, Math.floor(sources.length * 0.2))
+      let added = 0
+      for (let i = 0; i < sources.length && added < sameTypeCount; i++) {
+        for (let j = i + 1; j < sources.length && added < sameTypeCount; j++) {
+          if (sources[i].type === sources[j].type) {
+            pairs.push([sources[i], sources[j]])
+            added++
+          }
+        }
       }
     }
+
     return pairs
   }
 
@@ -42,16 +100,28 @@ export class ConceptMixer {
     b: CreativitySource,
     allSources: CreativitySource[],
     exploredSet: Set<string> = new Set(),
+    strategy: Strategy = 'explore',
   ): { combo: ConceptCombo; score: number } {
-    // 同类型组合分数降低（重复视角），不同类型组合分数提高
-    const typeBonus = a.type === b.type ? 10 : 40
+    // 按策略调整基础评分权重
+    let typeBonus: number
+    switch (strategy) {
+      case 'stable':
+        typeBonus = 30 // 同类型也有足够权重
+        break
+      case 'signal':
+        typeBonus = 35 // 信号来源 + 知识源的配对
+        break
+      default:
+        typeBonus = a.type === b.type ? 10 : 40
+    }
+
     const weightProduct = a.weight * b.weight * 0.3
-    const noveltyBonus = this.calculateNoveltyBonus(a, b, allSources)
+    const noveltyBonus = this.calculateNoveltyBonus(a, b, allSources, strategy)
 
-    // 随机扰动：让组合有不可预测性
-    const perturbation = this.rng() * 20
+    // 策略感知的随机扰动
+    const perturbation = strategy === 'stable' ? this.rng() * 10 : this.rng() * 20
 
-    // 已探索过的配对降权 15 分，刺激探索新方向
+    // 已探索过的配对降权
     const pairKey = [a.name, b.name].sort().join('|')
     const explorationPenalty = exploredSet.has(pairKey) ? 15 : 0
 
@@ -69,22 +139,32 @@ export class ConceptMixer {
     return { combo, score }
   }
 
-  private calculateNoveltyBonus(a: CreativitySource, b: CreativitySource, allSources: CreativitySource[]): number {
-    // 基础：不同 type 本身就比同 type 新颖
-    let bonus = a.type === b.type ? 5 : 20
+  private calculateNoveltyBonus(
+    a: CreativitySource,
+    b: CreativitySource,
+    allSources: CreativitySource[],
+    strategy: Strategy = 'explore',
+  ): number {
+    // stable: novelty bonus 大幅压降，消除 novelty bias
+    if (strategy === 'stable') {
+      return a.type === b.type ? 3 : 8
+    }
 
-    // 稀有类型奖励：failure/random/provocation 等不常见类型出现时加分
+    // signal: 偏向 signal 来源
+    if (strategy === 'signal') {
+      const signalTypes = new Set(['provocation', 'insight', 'failure'])
+      const hasSignal = signalTypes.has(a.type) || signalTypes.has(b.type)
+      return hasSignal ? 25 : 5
+    }
+
+    // explore: 原行为不变
+    let bonus = a.type === b.type ? 5 : 20
     const rareTypes = ['failure', 'random', 'provocation', 'insight']
     if (rareTypes.includes(a.type)) bonus += 10
     if (rareTypes.includes(b.type)) bonus += 10
-
-    // 权重差异越大越新颖（一个高权核心能力 + 一个低权边缘能力）
     bonus += Math.round(Math.abs(a.weight - b.weight) * 20)
-
-    // 在所有来源中的"孤立度"：如果某个来源很少被配对（之前被过滤掉了），这次出现值得奖励
     const sameTypeCount = allSources.filter((s) => s.type === a.type || s.type === b.type).length
     if (sameTypeCount <= 2) bonus += 15
-
     return bonus
   }
 

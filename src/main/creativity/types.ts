@@ -1,3 +1,11 @@
+/**
+ * 生成策略 — 在 ConceptMixer 之前选择，约束配对空间
+ * - stable:   同类型组合，禁止 novelty bonus 主导，输出收敛
+ * - explore:  跨类型组合，提高 diversity weight，允许结构差异
+ * - signal:   强制注入 trend/ provocation/insight 来源，限制 randomness
+ */
+export type Strategy = 'stable' | 'explore' | 'signal'
+
 export interface CreativitySource {
   name: string
   content: string

@@ -67,7 +67,39 @@ const EVOLUTION_TOOLS = `可用工具列表：
 你可以在三个工作区操作：
 - mcp_workspace（默认）— MCP 服务器开发沙箱
 - evolution_workspace — 进化分析、创意、实验代码（传 workspace="evolution"）
-- project_root — 项目源码目录（传 workspace="project"）`
+- project_root — 项目源码目录（传 workspace="project"）
+
+### 社交媒体运营
+evolution_workspace/social/ 目录下有完整的社交运营系统（7 平台，纯 CLI，零外部依赖）：
+- config.yaml — 安全模式（safe/assisted/autopilot）与平台开关
+- strategy.yaml — 各平台内容方向和发布策略
+- accounts.json — 账号配置（可用 write_file 管理）
+- content_calendar.yaml — 排程记录（AI 读写）
+- analytics.yaml — 运营数据（AI 写入）
+- adapters/*.mjs — 7 平台适配器（x, telegram, weibo, zhihu, douyin, xiaohongshu, wechat_mp）
+- cli.mjs — CLI： run_command workspace="evolution" node social/cli.mjs <命令>
+
+CLI 可用命令:
+  post <platform> <text>         发帖（输出 JSON）
+  delete <platform> <postId>     删帖
+  stats <platform>               查统计
+  mode <safe|assisted|autopilot> 安全模式
+  policy                         查看策略
+  cred set/list                  凭据管理
+  adapters                       列出适配器
+  accounts                       列出账号
+
+运营约束：
+- 凭据存于 .creds.json（适配器自动读取），LLM 不可直接读
+- 风控词被拦截时改写内容重试
+- 无 cookie 的平台（douyin/xiaohongshu/weibo）需人工发布
+
+自动运营流程（每次分析循环执行）：
+1. read_file social/strategy.yaml 了解策略
+2. read_file social/content_calendar.yaml 检查到期排程
+3. 有到期任务则 post 发送
+4. write_file 更新 content_calendar.yaml 标记已发布
+5. write_file 更新 analytics.yaml 记录运营数据`
 
 export function buildEvolutionSystemPrompt(memoryContext?: string, promptOverlay?: string): string {
   let prompt = [EVOLUTION_IDENTITY, EVOLUTION_CORE, EVOLUTION_TOOLS].join('\n\n---\n\n')

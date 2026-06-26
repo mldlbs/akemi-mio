@@ -1,4 +1,4 @@
-import type { CreativitySource, ConceptCombo, Hypothesis, CreativeIdea } from './types'
+import type { CreativitySource, ConceptCombo, Hypothesis, CreativeIdea, Strategy } from './types'
 import { ConceptMixer } from './ConceptMixer'
 import { HypothesisGenerator } from './HypothesisGenerator'
 import { ExperimentPlanner } from './ExperimentPlanner'
@@ -42,15 +42,16 @@ export class IdeaGenerator {
 
   /**
    * 完整一轮"灵感涌现"流程
+   * @param strategy 生成策略，约束 ConceptMixer 配对空间
    */
-  async generateIdeas(sources: CreativitySource[], maxIdeas = 5): Promise<CreativeIdea[]> {
+  async generateIdeas(sources: CreativitySource[], maxIdeas = 5, strategy: Strategy = 'explore'): Promise<CreativeIdea[]> {
     if (sources.length < 2) return []
 
     // 1. 随机扰动：温度越高，来源选择越随机
     const activeSources = this.applyTemperature(sources)
 
-    // 2. 概念重组：配对 + 打分，已探索过的配对降权
-    const scoredCombos = this.mixer.mix(activeSources, maxIdeas * 3, this.exploredPairs)
+    // 2. 概念重组：按策略约束配对 + 打分
+    const scoredCombos = this.mixer.mix(activeSources, maxIdeas * 3, this.exploredPairs, strategy)
     const combos = scoredCombos.map((c) => c.combo)
 
     if (combos.length === 0) return []
@@ -78,6 +79,7 @@ export class IdeaGenerator {
     historicalCombos: ConceptCombo[],
     failedHypotheses: Hypothesis[],
     maxIdeas = 3,
+    strategy: Strategy = 'explore',
   ): Promise<CreativeIdea[]> {
     // 梦境模式：提高温度，纳入失败历史，强制跨类型组合
     const dreamTemperature = 0.8
@@ -104,7 +106,7 @@ export class IdeaGenerator {
 
     // 用高温度混合
     const activeSources = this.mixer.pickRandomSources(allSources, dreamTemperature, 4)
-    const scoredCombos = this.mixer.mix(activeSources, maxIdeas * 5)
+    const scoredCombos = this.mixer.mix(activeSources, maxIdeas * 5, [], strategy)
     const combos = scoredCombos.map((c) => c.combo)
 
     if (combos.length === 0) return []
