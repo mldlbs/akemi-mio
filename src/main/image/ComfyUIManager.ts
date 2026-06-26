@@ -341,7 +341,7 @@ export class ComfyUIManager {
       '9': { class_type: 'SaveImage', inputs: { images: ['8', 0], filename_prefix: 'akemi_mio' }, _meta: { title: 'SaveImage' } },
       '10': {
         class_type: 'UnetLoaderGGUF',
-        inputs: { unet_name: 'flux-schnell\\flux1-schnell-Q4_K_S.gguf' },
+        inputs: { unet_name: 'flux-schnell\\' + 'flux1-schnell-Q4_K_S.gguf' },
         _meta: { title: 'Load FLUX GGUF' },
       },
       '11': {

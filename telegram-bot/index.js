@@ -150,7 +150,7 @@ function buildWorkflow(prompt, seed) {
     '7': { class_type: 'CLIPTextEncode', inputs: { text: 'blurry, low quality, distorted', clip: ['11', 0] } },
     '8': { class_type: 'VAEDecode', inputs: { samples: ['4', 0], vae: ['13', 0] } },
     '9': { class_type: 'SaveImage', inputs: { images: ['8', 0], filename_prefix: 'bot' } },
-    '10': { class_type: 'UnetLoaderGGUF', inputs: { unet_name: 'flux-schnell\\flux1-schnell-Q4_K_S.gguf' } },
+    '10': { class_type: 'UnetLoaderGGUF', inputs: { unet_name: 'flux-schnell\\' + 'flux1-schnell-Q4_K_S.gguf' } },
     '11': { class_type: 'DualCLIPLoaderGGUF', inputs: { clip_name1: 'clip_l.safetensors', clip_name2: 't5-v1_1-xxl-encoder-Q6_K.gguf', type: 'flux' } },
     '12': { class_type: 'EmptyLatentImage', inputs: { width: 1024, height: 1024, batch_size: 1 } },
     '13': { class_type: 'VAELoader', inputs: { vae_name: 'ae.safetensors' } },
@@ -167,7 +167,7 @@ function buildImg2imgWorkflow(imageName, prompt, denoise, seed) {
     '7': { class_type: 'CLIPTextEncode', inputs: { text: 'blurry, low quality, distorted', clip: ['11', 0] } },
     '8': { class_type: 'VAEDecode', inputs: { samples: ['4', 0], vae: ['13', 0] } },
     '9': { class_type: 'SaveImage', inputs: { images: ['8', 0], filename_prefix: 'bot' } },
-    '10': { class_type: 'UnetLoaderGGUF', inputs: { unet_name: 'flux-schnell\\flux1-schnell-Q4_K_S.gguf' } },
+    '10': { class_type: 'UnetLoaderGGUF', inputs: { unet_name: 'flux-schnell\\' + 'flux1-schnell-Q4_K_S.gguf' } },
     '11': { class_type: 'DualCLIPLoaderGGUF', inputs: { clip_name1: 'clip_l.safetensors', clip_name2: 't5-v1_1-xxl-encoder-Q6_K.gguf', type: 'flux' } },
     '13': { class_type: 'VAELoader', inputs: { vae_name: 'ae.safetensors' } },
   }
