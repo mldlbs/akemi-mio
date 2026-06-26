@@ -69,7 +69,7 @@ export class DrizzlePlanManager {
   /** 当前活跃计划上限 */
   static readonly MAX_ACTIVE_PLANS = 3
 
-  createPlan(title: string, description: string, stepDescriptions: string[]): DevPlan {
+  createPlan(title: string, description: string, stepDescriptions: string[], priority?: number): DevPlan {
     const existing = this.getActivePlanByTitle(title)
     if (existing) {
       log('INFO', 'plan_duplicate_skipped', { plan_id: existing.id, title })
@@ -86,17 +86,18 @@ export class DrizzlePlanManager {
 
     const db = tryDb()
     if (!db) {
-      const plan = this.createInMemoryPlan(title, description, stepDescriptions, Date.now())
+      const plan = this.createInMemoryPlan(title, description, stepDescriptions, Date.now(), priority)
       return plan
     }
     const planId = `plan_${Date.now()}_${++idCounter}`
     const now = Date.now()
 
-    db.run('INSERT INTO plans (id, title, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)', [
+    db.run('INSERT INTO plans (id, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [
       planId,
       title,
       description,
       'active',
+      priority ?? 0,
       now,
       now,
     ])
@@ -121,6 +122,7 @@ export class DrizzlePlanManager {
       description,
       steps: stepRows,
       status: 'active',
+      priority: priority ?? 0,
       createdAt: now,
       updatedAt: now,
     }
@@ -357,7 +359,7 @@ export class DrizzlePlanManager {
     return removed
   }
 
-  private createInMemoryPlan(title: string, description: string, stepDescriptions: string[], now: number): DevPlan {
+  private createInMemoryPlan(title: string, description: string, stepDescriptions: string[], now: number, priority?: number): DevPlan {
     const planId = `plan_${now}_${++idCounter}`
     const steps = stepDescriptions.map((desc, i) => ({
       id: `step_${i}_${now}`,
@@ -370,6 +372,7 @@ export class DrizzlePlanManager {
       description,
       steps,
       status: 'active',
+      priority: priority ?? 0,
       createdAt: now,
       updatedAt: now,
     }

@@ -94,6 +94,11 @@ CLI 可用命令:
 - 风控词被拦截时改写内容重试
 - 无 cookie 的平台（douyin/xiaohongshu/weibo）需人工发布
 
+创建计划时用 priority 参数标注优先级：
+- priority=2（紧急）：社交排程到期
+- priority=1（高）：功能缺陷/安全修复
+- priority=0（普通）：重构/优化/新功能
+
 自动运营流程（每次分析循环执行）：
 1. read_file social/strategy.yaml 了解策略
 2. read_file social/content_calendar.yaml 检查到期排程

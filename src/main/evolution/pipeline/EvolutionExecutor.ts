@@ -113,8 +113,10 @@ export class EvolutionExecutor implements ISubsystem {
 
     return this.executionLock.run(async () => {
       const allPlans = pm.listPlans()
-      const activePlans = allPlans.filter((p: DevPlan) => p.status === 'active')
-      const plan = activePlans.length > 1 ? pickBestPlan(activePlans) : pm.getActivePlan() || null
+      const activePlans = allPlans
+        .filter((p: DevPlan) => p.status === 'active')
+        .sort((a: DevPlan, b: DevPlan) => (b.priority || 0) - (a.priority || 0))
+      const plan = activePlans.length > 0 ? activePlans[0] : null
       if (!plan) return { success: false, stepIndex: input.stepIndex, error: 'no active plan', planCompleted: false }
 
       // 查找 pending 或 failed 步骤

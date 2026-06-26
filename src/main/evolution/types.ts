@@ -14,13 +14,15 @@ export interface DevPlan {
   createdAt: number
   updatedAt: number
   reflection?: string
+  /** 优先级（0=普通，1=高，2=紧急），用于执行排序 */
+  priority?: number
 }
 
 export interface PlanManagerLike {
   getActivePlan: () => DevPlan | undefined
   getPlan: (id: string) => DevPlan | undefined
   listPlans: () => DevPlan[]
-  createPlan: (title: string, description: string, stepDescriptions: string[]) => DevPlan
+  createPlan: (title: string, description: string, stepDescriptions: string[], priority?: number) => DevPlan
   updateStep: (planId: string, stepIndex: number, status: PlanStep['status'], result?: string) => boolean
   completePlan: (planId: string, reflection?: string) => boolean
   abandonPlan: (planId: string, reason?: string) => boolean

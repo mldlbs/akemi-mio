@@ -45,7 +45,7 @@ export class PlanManager {
   /** 当前活跃计划上限 */
   static readonly MAX_ACTIVE_PLANS = 3
 
-  createPlan(title: string, description: string, stepDescriptions: string[]): DevPlan {
+  createPlan(title: string, description: string, stepDescriptions: string[], priority?: number): DevPlan {
     const existing = this.data.plans.find((p) => p.title === title && p.status === 'active')
     if (existing) {
       log('INFO', 'plan_duplicate_skipped', { plan_id: existing.id, title })
@@ -70,6 +70,7 @@ export class PlanManager {
         status: 'pending',
       })),
       status: 'active',
+      priority: priority ?? 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }

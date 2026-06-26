@@ -29,7 +29,7 @@ if (!TOKEN) {
 }
 
 const COMFYUI_URL = process.env.COMFYUI_URL || 'http://127.0.0.1:8188'
-const PROXY_URL = process.env.PROXY_URL || 'http://127.0.0.1:7890'
+const PROXY_URL = process.env.PROXY_URL || 'http://127.0.0.1:6653'
 
 // ComfyUI input 目录（用于上传中转图片）
 const COMFYUI_INPUT_DIR = process.env.COMFYUI_INPUT_DIR ||

@@ -845,6 +845,12 @@ export class SelfEvolutionService implements ISubsystem {
     })
 
     this.transitionState(EvolutionSchedulerState.IDLE, '分析循环结束')
+
+    // 分析完成后自动触发执行：如果分析创建了计划且有 pending 步骤，立即执行（不等下次心跳）
+    if (this.planManager?.getActivePlan() && this.executor.hasPendingStep() && this.safetyMode !== 'review') {
+      log('INFO', 'evolution_auto_trigger_execution', { plan_title: this.planManager.getActivePlan()?.title })
+      await this.runExecutionCycle()
+    }
   }
 
   // ==================== 执行循环 ====================

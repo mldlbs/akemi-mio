@@ -458,6 +458,12 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 22,
+    sql: `
+      ALTER TABLE plans ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ]
 
 export function runMigrations(sqlite: SqlJsDatabase): void {
