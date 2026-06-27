@@ -24,7 +24,7 @@ import { ToolScheduler, type ToolResult } from './ToolScheduler'
 import type { TokenAccount } from '../cognitive/TokenEconomy'
 import { SkillManager } from '../skill'
 import { WorkingMemory } from './WorkingMemory'
-import { createMessageId, createSessionId, insertMessage, getLastSessionId, getLastMessageTime, type StoredMessage } from '../db/messages'
+import { createMessageId, createSessionId, insertMessage, getLastSessionId, getLastMessageTime, getMessagesBySession, type StoredMessage } from '../db/messages'
 import { RunState, RunContext } from './runstate'
 import { SessionRecoveryManager } from './SessionRecoveryManager'
 import { classify as classifyError } from './ErrorClassifier'
@@ -75,6 +75,8 @@ export class ChatExecutor {
   private driftControl = new PersonaDriftControlSystem()
   /** 上轮 drift 评估产生的待注入消息信号 */
   private pendingDriftSignal: string | null = null
+  /** 当前加载的 session，用于切换 session 时重建上下文 */
+  private currentSessionId: string | null = null
 
   constructor(
     llmService: LlmService,
@@ -210,6 +212,7 @@ export class ChatExecutor {
     requestId?: string,
     source: 'electron' | 'telegram' = 'electron',
     extra?: { telegramChatId?: number; telegramUserId?: number; telegramFrom?: string; telegramMessageId?: number },
+    sessionId?: string,
   ): Promise<ChatResult> {
     const rid = requestId || createRequestId()
     const t0 = Date.now()
@@ -228,17 +231,33 @@ export class ChatExecutor {
     this.consecutiveInvalidRequest = 0
     this.obsLogger = new ObservabilityLogger(rid)
     this.obsLogger.logInput(text, source)
+    // session 切换时加载对应历史到 workingMemory
+    if (sessionId && sessionId !== this.currentSessionId) {
+      this.currentSessionId = sessionId
+      this.workingMemory = new WorkingMemory('chat')
+      this.refreshMemory()
+      const history = getMessagesBySession(sessionId)
+      for (const m of history) {
+        if (m.role === 'user') {
+          this.workingMemory.context.addUser(m.content)
+        } else if (m.role === 'assistant') {
+          this.workingMemory.context.addAssistant(m.content)
+        }
+      }
+    } else if (!sessionId) {
+      this.currentSessionId = null
+    }
     // 先刷新 memory（可能重建 context），再加用户消息，确保消息不丢失
     this.refreshMemory()
     this.workingMemory.addUser(text)
     eventBus.emit('agent.input.received', { text, requestId: rid, source })
-    const sessionId = this.resolveSessionId()
+    const effectiveSessionId = sessionId || this.resolveSessionId()
     const userMsg: StoredMessage = {
       id: createMessageId(),
       source,
       role: 'user',
       content: text,
-      sessionId,
+      sessionId: effectiveSessionId,
       telegramChatId: extra?.telegramChatId ?? null,
       telegramUserId: extra?.telegramUserId ?? null,
       telegramFrom: extra?.telegramFrom ?? null,

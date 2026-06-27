@@ -6,7 +6,7 @@ const electronAPI = {
   transcribe: (audio: ArrayBuffer): Promise<{ text: string; request_id?: string; error?: string }> =>
     ipcRenderer.invoke('asr:transcribe', audio),
 
-  chat: (text: string, requestId?: string): Promise<{ reply?: string; error?: string }> => ipcRenderer.invoke('ai:chat', text, requestId),
+  chat: (text: string, requestId?: string, sessionId?: string): Promise<{ reply?: string; error?: string }> => ipcRenderer.invoke('ai:chat', text, requestId, sessionId),
 
   speak: (text: string): Promise<void> => ipcRenderer.invoke('tts:speak', text),
 
@@ -58,16 +58,22 @@ const electronAPI = {
     }
   },
 
-  getMessageHistory: (limit?: number): Promise<{ id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number }[]> =>
+  getMessageHistory: (
+    limit?: number,
+  ): Promise<{ id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number }[]> =>
     ipcRenderer.invoke('messages:getHistory', limit),
 
   getSessions: (): Promise<{ id: string; label: string; messageCount: number; lastActivityAt: number; createdAt: number }[]> =>
     ipcRenderer.invoke('messages:getSessions'),
 
-  getMessagesBySession: (sessionId: string): Promise<{ id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number }[]> =>
+  getMessagesBySession: (
+    sessionId: string,
+  ): Promise<{ id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number }[]> =>
     ipcRenderer.invoke('messages:getBySession', sessionId),
 
-  onMessageNew: (callback: (msg: { id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number }) => void) => {
+  onMessageNew: (
+    callback: (msg: { id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number }) => void,
+  ) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
       msg: { id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number },

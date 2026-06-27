@@ -305,6 +305,7 @@ export class AgentService {
     requestId?: string,
     source: 'electron' | 'telegram' = 'electron',
     extra?: { telegramChatId?: number; telegramUserId?: number; telegramFrom?: string; telegramMessageId?: number },
+    sessionId?: string,
   ): Promise<ChatResult> {
     // 熔断检查
     const blocked = this.circuitBreaker.allow('llm')
@@ -342,8 +343,8 @@ export class AgentService {
     }
 
     try {
-      // v2: 委托 ChatExecutor 执行
-      const reply = await this.chatExecutor!.run(text, rid, source, extra)
+      // v2: 委托 ChatExecutor 执行，传入 sessionId 用于加载历史
+      const reply = await this.chatExecutor!.run(text, rid, source, extra, sessionId)
       if (!reply || reply.error) return reply || { error: 'NO_REPLY' }
       log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: reply.reply?.length || 0 })
       return reply

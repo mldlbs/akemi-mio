@@ -74,10 +74,10 @@ export function registerHandlers(
     BrowserWindow.fromWebContents(event.sender)?.close()
   })
 
-  ipcMain.handle('ai:chat', async (_event, text: string, requestId?: string) => {
+  ipcMain.handle('ai:chat', async (_event, text: string, requestId?: string, sessionId?: string) => {
     try {
       if (agentService.isPaused()) return { reply: '', error: 'PAUSED' }
-      return await agentService.processTextInput(text, requestId)
+      return await agentService.processTextInput(text, requestId, 'electron', undefined, sessionId)
     } catch (err) {
       log('ERROR', 'ai_chat_failed', { error: String(err), requestId })
       throw err

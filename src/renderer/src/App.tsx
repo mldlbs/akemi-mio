@@ -126,15 +126,21 @@ function App() {
   })
 
   useIPCEvent(window.electronAPI.onMessageNew, (msg) => {
-    // 仅当消息属于当前 session 时追加
-    if (msg.sessionId === activeSessionId) {
+    // 新消息到来时始终追加到当前会话，并自动切换到最新 session
+    if (msg.sessionId && msg.sessionId !== activeSessionId) {
+      setActiveSessionId(msg.sessionId)
+      setHistoryMessages([msg])
+    } else if (msg.sessionId === activeSessionId) {
       setHistoryMessages((prev) => [...prev, msg])
     }
     setPendingText('')
     setDisplayText('')
     revealTimer.clear()
     // 刷新会话列表
-    window.electronAPI.getSessions().then(setSessions).catch(() => {})
+    window.electronAPI
+      .getSessions()
+      .then(setSessions)
+      .catch(() => {})
   })
 
   useIPCEvent(window.electronAPI.onPersonaUpdated, (data) => {
@@ -150,7 +156,7 @@ function App() {
     setToolStatus(null)
     revealTimer.clear()
     try {
-      await window.electronAPI.chat(t)
+      await window.electronAPI.chat(t, undefined, activeSessionId || undefined)
     } catch (err) {
       setError(String(err))
     }
@@ -159,7 +165,7 @@ function App() {
       setDisplayText('')
       setTranscribed('')
     }, 10000)
-  }, [])
+  }, [activeSessionId])
 
   const handleSelectChat = useCallback((sessionId: string) => {
     setActiveSessionId(sessionId)
