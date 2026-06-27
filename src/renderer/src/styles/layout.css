@@ -12,6 +12,7 @@
   background: var(--bg-base);
   position: relative;
   overflow: hidden;
+  border: 1px solid var(--border-glass-hover);
 }
 
 /* ─── TopBar ─── */
