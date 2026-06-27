@@ -233,12 +233,14 @@ export class AgentService {
   }
 
   /** 刷新 ConversationContext 中的静态记忆片段，确保 remember_fact 写入后立即可见 */
-  private refreshMemoryInContext(): void {
+  private refreshMemoryInContext(lastUserText?: string): void {
     if (!this.memoryService) return
     const memCtx = this.memoryService.getFormattedContext()
     const reflectCtx = this.reflectLoop.getFormattedContext()
     const procCtx = this.proceduralMemory.getFormattedContext()
-    const skillModules = this.skillManager?.getEnabledPromptModules() || []
+    const skillModules = lastUserText
+      ? this.skillManager?.getMatchedPromptModules(lastUserText) || []
+      : this.skillManager?.getEnabledPromptModules() || []
     const extraModules = skillModules.length > 0 ? skillModules : undefined
     const wfModule = this.activeWorkflowModule
     const allExtraModules = wfModule ? [wfModule, ...(extraModules || [])] : extraModules

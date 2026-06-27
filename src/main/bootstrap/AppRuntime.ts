@@ -64,6 +64,7 @@ import { ResourceBudget } from '../core/ResourceBudget'
 import { BudgetRebalancer } from '../core/BudgetRebalancer'
 import { LazyServiceGroup } from './LazyServiceGroup'
 import { SessionRecoveryManager } from '../agent/SessionRecoveryManager'
+import { UIBridge } from '../agent/UIBridge'
 import { EventStore } from '../core/event-sourcing/EventStore'
 import { RuntimeHealthManager } from '../health/RuntimeHealthManager'
 
@@ -159,6 +160,10 @@ export class AppRuntime {
     const ttsService = new TtsService((state) => stateManager.update(state))
     const agentService = new AgentService(llmService, asrService, ttsService, eventBus, mcpManager)
     this.agentServiceRef = agentService
+    // 将 SubAgentPool 引用注入到 SkillAgentTools 全局
+    const { setSubAgentPool } = await import('../tool/definitions/SkillAgentTools')
+    setSubAgentPool(agentService['subAgentPool'])
+
     const recoveryManager = new SessionRecoveryManager(join(WORKSPACE.evolution, 'recovery'))
     agentService.setRecoveryManager(recoveryManager)
     const telegramService = new TelegramService(agentService)
@@ -182,6 +187,10 @@ export class AppRuntime {
         win.webContents.send('tts:play_audio', filePath)
       }
     })
+
+    // UIBridge: 将 EventBus 事件桥接到 Renderer 窗口
+    const uiBridge = new UIBridge()
+    uiBridge.bind(win)
 
     // === Stage 3: 核心服务（内存、插件、技能） ===
     const memoryService = new MemoryService()
@@ -491,6 +500,26 @@ export class AppRuntime {
       credentialsManager.get('telegram_server_url') || process.env.TELEGRAM_SERVER_URL || 'https://skills.crlkcloud.cyou/telegram'
     const outboxWorker = new OutboxWorker(outboxUrl)
     this.taskRunner.register('telegram.outbox', () => outboxWorker.tick(), 2000, { cooldownMs: 10000 })
+
+    // 社交平台自动发布（每分钟检查 content_calendar.yaml）
+    const socialDir = join(WORKSPACE.evolution, 'social')
+    this.taskRunner.register(
+      'social.tick',
+      async () => {
+        try {
+          const { execSync } = require('child_process')
+          const result = execSync(`node "${join(socialDir, 'cli.mjs')}" tick`, { encoding: 'utf-8', timeout: 30000, cwd: socialDir })
+          const data = JSON.parse(result.trim())
+          if (data.posted > 0 || data.errors > 0) {
+            log('INFO', 'social_tick', { posted: data.posted, skipped: data.skipped, errors: data.errors })
+          }
+        } catch (err) {
+          log('WARN', 'social_tick_error', { error: String(err) })
+        }
+      },
+      60000,
+      { cooldownMs: 30000 },
+    )
 
     // Phase 5D: 注入 Task 健康提供者（此时所有 task 已注册）
     this.runtimeHealthManager?.setTaskHealthProvider(this.taskRunner)

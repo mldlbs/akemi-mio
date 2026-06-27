@@ -6,24 +6,11 @@ import { toolRegistry } from '../plugin/registry'
 import { Plugin } from '../plugin/types'
 import { eventBus } from '../core/EventBus'
 import { log } from '../logger/Logger'
+import { SkillMatcher } from './SkillMatcher'
+import { skillAgentRegistry } from './SkillAgentRegistry'
+import type { SkillManifest, InstalledSkill } from './SkillTypes'
 
-export interface SkillManifest {
-  name: string
-  version: string
-  description: string
-  author?: string
-  triggers?: string[]
-  tools?: string[]
-  requires?: string[]
-  enabled?: boolean
-}
-
-export interface InstalledSkill {
-  manifest: SkillManifest
-  enabled: boolean
-  promptModule: string | null
-  toolsLoaded: boolean
-}
+export type { SkillManifest, InstalledSkill }
 
 const SKILLS_DIR = join(app.getPath('userData'), 'skills')
 
@@ -31,6 +18,7 @@ export class SkillManager {
   private promptCache = new Map<string, string>()
   private loadedTools = new Set<string>()
   private skills = new Map<string, SkillManifest>()
+  private matcher = new SkillMatcher()
 
   async initialize(): Promise<void> {
     if (!existsSync(SKILLS_DIR)) {
@@ -57,6 +45,7 @@ export class SkillManager {
     return list
   }
 
+  /** 返回所有已启用技能的 prompt（全量注入） */
   getEnabledPromptModules(): string[] {
     const modules: string[] = []
     for (const [name, manifest] of this.skills) {
@@ -65,6 +54,39 @@ export class SkillManager {
       if (cached) modules.push(cached)
     }
     return modules
+  }
+
+  /**
+   * 根据用户输入返回匹配的已启用技能 prompt（按需注入）
+   * 仅返回 knowledge 类型 + 匹配到的技能 prompt
+   */
+  getMatchedPromptModules(userInput: string): string[] {
+    if (!userInput || this.skills.size === 0) return []
+
+    const allEnabled = Array.from(this.skills.values()).filter((m) => m.enabled !== false)
+    const matched = this.matcher.match(userInput, allEnabled)
+
+    if (matched.length === 0) return []
+
+    const modules: string[] = []
+    const seen = new Set<string>()
+    for (const m of matched) {
+      if (seen.has(m.manifest.name)) continue
+      seen.add(m.manifest.name)
+      // knowledge 类型：注入 prompt
+      if (m.manifest.type !== 'executor') {
+        const cached = this.promptCache.get(m.manifest.name)
+        if (cached) modules.push(cached)
+      }
+    }
+    return modules
+  }
+
+  /** 用输入匹配所有已启用技能，返回匹配到的 manifest 列表 */
+  matchSkills(input: string): SkillManifest[] {
+    if (!input || this.skills.size === 0) return []
+    const allEnabled = Array.from(this.skills.values()).filter((m) => m.enabled !== false)
+    return this.matcher.match(input, allEnabled).map((m) => m.manifest)
   }
 
   async enableSkill(name: string): Promise<string> {
@@ -94,6 +116,7 @@ export class SkillManager {
     if (this.loadedTools.has(name)) {
       toolRegistry.unregisterAll(`@skill/${name}`)
       this.loadedTools.delete(name)
+      skillAgentRegistry.unregister(name)
     }
 
     eventBus.emit('skill.disabled', { name })
@@ -111,7 +134,7 @@ export class SkillManager {
       if (existsSync(manifestPath)) {
         try {
           manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'))
-          if (!manifest.name) manifest.name = entry.name
+          if (!manifest!.name) manifest!.name = entry.name
         } catch (err) {
           log('WARN', 'skill_manifest_parse_failed', { dir: entry.name, error: String(err) })
         }
@@ -163,6 +186,7 @@ export class SkillManager {
       return
     }
     const pluginName = `@skill/${name}`
+    const toolNames: string[] = []
     for (const schema of plugin.tools) {
       toolRegistry.register({
         name: schema.name,
@@ -172,8 +196,17 @@ export class SkillManager {
         handler: (args) => plugin.handle(schema.name, args),
         pluginName,
       })
+      toolNames.push(schema.name)
     }
     this.loadedTools.add(name)
+
+    // 有 tools.plugin.js → 自动归类为 executor 并注册到技能 Agent 表
+    const manifest = this.skills.get(name)
+    if (manifest) {
+      manifest.type = 'executor'
+      skillAgentRegistry.register(manifest, toolNames, SKILLS_DIR)
+    }
+
     log('INFO', 'skill_tools_loaded', { skill: name, tools: plugin.tools.length })
   }
 }

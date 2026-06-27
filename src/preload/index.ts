@@ -86,6 +86,141 @@ const electronAPI = {
       ipcRenderer.removeListener('update:status', handler)
     }
   },
+
+  // ── Coding Agent UI ──
+
+  // 工具调用事件
+  onToolInvoked: (callback: (data: { tool: string; args: Record<string, any> }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:tool_invoked', handler)
+    return () => ipcRenderer.removeListener('agent:tool_invoked', handler)
+  },
+
+  onToolCompleted: (callback: (data: { tool: string; result: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:tool_completed', handler)
+    return () => ipcRenderer.removeListener('agent:tool_completed', handler)
+  },
+
+  onToolFailed: (callback: (data: { tool: string; error: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:tool_failed', handler)
+    return () => ipcRenderer.removeListener('agent:tool_failed', handler)
+  },
+
+  // 计划事件
+  onPlanCreated: (callback: (data: { planId: string; title: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:plan_created', handler)
+    return () => ipcRenderer.removeListener('agent:plan_created', handler)
+  },
+
+  onPlanStep: (callback: (data: { planId: string; stepIndex: number; status: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:plan_step', handler)
+    return () => ipcRenderer.removeListener('agent:plan_step', handler)
+  },
+
+  onPlanCompleted: (callback: (data: { planId: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:plan_completed', handler)
+    return () => ipcRenderer.removeListener('agent:plan_completed', handler)
+  },
+
+  // OTPAR 阶段事件
+  onAgentObserve: (
+    callback: (data: { requestId: string; step: number; proceduresFound: number; patternsFound: number; durationMs: number }) => void,
+  ) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:observe', handler)
+    return () => ipcRenderer.removeListener('agent:observe', handler)
+  },
+
+  onAgentThink: (callback: (data: { requestId: string; step: number; toolCallCount: number; strategyPrompted: boolean }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:think', handler)
+    return () => ipcRenderer.removeListener('agent:think', handler)
+  },
+
+  onAgentReflect: (
+    callback: (data: {
+      requestId: string
+      step: number
+      toolResults: number
+      successCount: number
+      summary: string
+      durationMs: number
+    }) => void,
+  ) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:reflect', handler)
+    return () => ipcRenderer.removeListener('agent:reflect', handler)
+  },
+
+  // 输入输出
+  onInputReceived: (callback: (data: { text: string; requestId: string; source: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:input_received', handler)
+    return () => ipcRenderer.removeListener('agent:input_received', handler)
+  },
+
+  onResponseGenerated: (callback: (data: { text: string; requestId: string; source: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:response_generated', handler)
+    return () => ipcRenderer.removeListener('agent:response_generated', handler)
+  },
+
+  // Guardrail & 错误
+  onGuardrail: (callback: (data: { type: string } & Record<string, any>) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:guardrail', handler)
+    return () => ipcRenderer.removeListener('agent:guardrail', handler)
+  },
+
+  onBudgetExhausted: (callback: (data: { resource: string; utilization: number }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:budgetExhausted', handler)
+    return () => ipcRenderer.removeListener('agent:budgetExhausted', handler)
+  },
+
+  onBudgetRestored: (callback: (data: { resource: string; utilization: number }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:budgetRestored', handler)
+    return () => ipcRenderer.removeListener('agent:budgetRestored', handler)
+  },
+
+  onAgentError: (callback: (data: { error: string; requestId: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('agent:error', handler)
+    return () => ipcRenderer.removeListener('agent:error', handler)
+  },
+
+  // Invoke handlers
+  getActivePlan: (): Promise<{
+    id: string
+    title: string
+    description: string
+    steps: { id: string; description: string; status: string; result?: string }[]
+    status: string
+    createdAt: number
+    updatedAt: number
+  } | null> => ipcRenderer.invoke('agent:getActivePlan'),
+
+  listPlans: (): Promise<
+    {
+      id: string
+      title: string
+      description: string
+      steps: { id: string; description: string; status: string; result?: string }[]
+      status: string
+      createdAt: number
+      updatedAt: number
+    }[]
+  > => ipcRenderer.invoke('agent:listPlans'),
+
+  openAgentWindow: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('agent:openWindow'),
+
+  closeAgentWindow: (): Promise<{ success: boolean }> => ipcRenderer.invoke('agent:closeWindow'),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)

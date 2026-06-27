@@ -3,7 +3,8 @@ import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
 export const telegramOutbox = sqliteTable('telegram_outbox', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   chatId: text('chat_id').notNull(),
-  msgType: text('msg_type', { enum: ['send', 'edit', 'reply', 'action'] }).notNull(),
+  bot: text('bot').default('chat'),
+  msgType: text('msg_type', { enum: ['send', 'edit', 'reply', 'action', 'photo', 'media_group'] }).notNull(),
   category: text('category', {
     enum: ['dialogue', 'evolution', 'insight', 'creativity', 'plan', 'budget', 'recovery', 'stability', 'system'],
   })

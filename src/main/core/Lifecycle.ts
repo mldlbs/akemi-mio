@@ -154,6 +154,59 @@ export function createWindow(stateManager: StateManager): BrowserWindow {
   return mainWindow
 }
 
+/** 独立窗口：Agent 面板 */
+let agentWindow: BrowserWindow | null = null
+
+export function getAgentWindow(): BrowserWindow | null {
+  return agentWindow
+}
+
+export function createAgentWindow(): BrowserWindow {
+  if (agentWindow && !agentWindow.isDestroyed()) {
+    agentWindow.focus()
+    return agentWindow
+  }
+
+  agentWindow = new BrowserWindow({
+    width: 480,
+    height: 580,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: true,
+    skipTaskbar: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      backgroundThrottling: false,
+    },
+  })
+
+  agentWindow.setTitle('Agent — Akemi Mio')
+
+  if (process.env.ELECTRON_RENDERER_URL) {
+    agentWindow.loadURL(process.env.ELECTRON_RENDERER_URL.replace('index.html', 'agent.html'))
+    agentWindow.webContents.openDevTools()
+  } else {
+    agentWindow.loadFile(join(__dirname, '../renderer/agent.html'))
+  }
+
+  agentWindow.on('closed', () => {
+    agentWindow = null
+  })
+
+  return agentWindow
+}
+
+export function closeAgentWindow(): void {
+  if (agentWindow && !agentWindow.isDestroyed()) {
+    agentWindow.close()
+  }
+}
+
 export function setupStartupLogging(): void {
   log('INFO', 'startup', {
     project: 'akemi-mio',

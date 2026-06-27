@@ -93,6 +93,7 @@ CLI 可用命令:
 - 凭据存于 .creds.json（适配器自动读取），LLM 不可直接读
 - 风控词被拦截时改写内容重试
 - 无 cookie 的平台（douyin/xiaohongshu/weibo）需人工发布
+- 定时内容由 TaskRunner（social.tick, 60s 间隔）自动检查并发布到期内容，LLM 只需更新排程
 
 创建计划时用 priority 参数标注优先级：
 - priority=2（紧急）：社交排程到期
@@ -101,10 +102,9 @@ CLI 可用命令:
 
 自动运营流程（每次分析循环执行）：
 1. read_file social/strategy.yaml 了解策略
-2. read_file social/content_calendar.yaml 检查到期排程
-3. 有到期任务则 post 发送
-4. write_file 更新 content_calendar.yaml 标记已发布
-5. write_file 更新 analytics.yaml 记录运营数据`
+2. read_file social/content_calendar.yaml 检查排程
+3. 排程内容由 TaskRunner（social.tick）自动发布，LLM 只需在 content_calendar.yaml 中添加新排程
+4. write_file 更新 analytics.yaml 记录运营数据`
 
 export function buildEvolutionSystemPrompt(memoryContext?: string, promptOverlay?: string): string {
   let prompt = [EVOLUTION_IDENTITY, EVOLUTION_CORE, EVOLUTION_TOOLS].join('\n\n---\n\n')

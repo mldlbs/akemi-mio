@@ -53,27 +53,50 @@ export class OutboxWorker {
   private async deliver(msg: {
     id?: number
     chatId: string
+    bot?: string
     msgType: string
     message: string
     targetMessageId?: number | null
   }): Promise<void> {
+    const bot = msg.bot || 'chat'
     switch (msg.msgType) {
       case 'reply':
-        await this.fetch('/reply', { chatId: Number(msg.chatId), text: msg.message })
+        await this.fetch('/reply', { chatId: Number(msg.chatId), text: msg.message, bot })
         break
       case 'edit':
         await this.fetch('/edit', {
           chatId: Number(msg.chatId),
           messageId: msg.targetMessageId,
           text: msg.message,
+          bot,
         })
         break
       case 'send':
-        await this.fetch('/send', { chatId: Number(msg.chatId), text: msg.message })
+        await this.fetch('/send', { chatId: Number(msg.chatId), text: msg.message, bot })
         break
       case 'action':
-        await this.fetch('/action', { chatId: Number(msg.chatId), action: msg.message })
+        await this.fetch('/action', { chatId: Number(msg.chatId), action: msg.message, bot })
         break
+      case 'photo': {
+        const parsed = tryParseJson(msg.message)
+        await this.fetch('/photo', {
+          chatId: Number(msg.chatId),
+          photo: parsed?.photo || msg.message,
+          caption: parsed?.caption,
+          bot: msg.bot || 'gen',
+        })
+        break
+      }
+      case 'media_group': {
+        const parsed = tryParseJson(msg.message)
+        await this.fetch('/media_group', {
+          chatId: Number(msg.chatId),
+          media: parsed?.media || parsed || msg.message,
+          caption: parsed?.caption,
+          bot: msg.bot || 'gen',
+        })
+        break
+      }
       default:
         throw new Error(`unknown msgType: ${msg.msgType}`)
     }
@@ -92,5 +115,14 @@ export class OutboxWorker {
       const errMsg = data?.error || `HTTP ${res.status}`
       throw new Error(errMsg)
     }
+  }
+}
+
+/** 尝试解析 JSON 字符串，失败返回 null */
+function tryParseJson(s: string): Record<string, any> | null {
+  try {
+    return JSON.parse(s)
+  } catch {
+    return null
   }
 }

@@ -23,6 +23,8 @@ export interface ComfyUIGenerateOptions {
   width?: number
   height?: number
   seed?: number
+  /** LoadImage 节点的图片文件名（放于 ComfyUI input/ 目录） */
+  refImage?: string
 }
 
 export interface ComfyUIGenerateResult {
@@ -53,7 +55,11 @@ const DEFAULT_CONFIG: ComfyUIConfig = {
   autoRestart: true,
 }
 
-const WORKFLOW_JSON_PATH = 'workflows/flux_schnell_api.json'
+const WORKFLOW_JSON_PATH = 'workflows/flux_pulid_api.json'
+
+const WORKFLOW_REF_IMAGE_NODE = '1' // LoadImage node ID
+const WORKFLOW_POSITIVE_NODE = '8' // CLIPTextEncode (positive)
+const WORKFLOW_NEGATIVE_NODE = '9' // CLIPTextEncode (negative)
 
 // ─── ComfyUIManager ───
 
@@ -196,7 +202,14 @@ export class ComfyUIManager {
     const width = opts.width ?? 1024
     const height = opts.height ?? 1024
 
-    const workflow = this.loadWorkflow(opts.prompt, seed, width, height)
+    const workflow = this.loadWorkflow({
+      prompt,
+      negativePrompt: opts.negativePrompt,
+      seed,
+      width,
+      height,
+      refImage: opts.refImage,
+    })
 
     try {
       const queueRes = await fetch(`http://127.0.0.1:${this.config.port}/prompt`, {
@@ -283,32 +296,56 @@ export class ComfyUIManager {
     throw new Error(`ComfyUI 生成超时 (${this.config.generateTimeoutMs / 1000}s)`)
   }
 
-  private loadWorkflow(prompt: string, seed: number, width: number, height: number): Record<string, any> {
+  private loadWorkflow(opts: {
+    prompt: string
+    negativePrompt?: string
+    seed: number
+    width: number
+    height: number
+    refImage?: string
+  }): Record<string, any> {
+    const { prompt, negativePrompt, seed, width, height, refImage } = opts
     const wfPath = join(this.config.root, WORKFLOW_JSON_PATH)
 
     if (existsSync(wfPath)) {
       const workflow = JSON.parse(readFileSync(wfPath, 'utf-8'))
-      this.overrideWorkflowPrompt(workflow, prompt, seed)
+      this.overrideWorkflowPrompt(workflow, { prompt, negativePrompt, seed, refImage })
+      // 如果 JSON workflow 没有 refImage 节点，用回硬编码
+      if (refImage && workflow[WORKFLOW_REF_IMAGE_NODE]) {
+        workflow[WORKFLOW_REF_IMAGE_NODE].inputs.image = refImage
+      }
       return workflow
     }
 
     return this.buildDefaultWorkflow(prompt, seed, width, height)
   }
 
-  private overrideWorkflowPrompt(workflow: Record<string, any>, prompt: string, seed: number): void {
+  private overrideWorkflowPrompt(
+    workflow: Record<string, any>,
+    opts: { prompt: string; negativePrompt?: string; seed: number; refImage?: string },
+  ): void {
+    const { prompt, negativePrompt, seed } = opts
     for (const nodeId of Object.keys(workflow)) {
       const node = workflow[nodeId]
       if (!node?.inputs) continue
       const cls = node.class_type
 
       if (cls === 'CLIPTextEncode' && typeof node.inputs.text === 'string') {
-        node.inputs.text = prompt
+        if (nodeId === WORKFLOW_NEGATIVE_NODE && negativePrompt) {
+          node.inputs.text = negativePrompt
+        } else if (nodeId === WORKFLOW_POSITIVE_NODE) {
+          node.inputs.text = prompt
+        }
       }
       if (cls === 'KSampler' || cls === 'KSamplerAdvanced' || cls === 'SamplerCustom') {
         if (typeof node.inputs.seed === 'number') node.inputs.seed = seed
       }
       if (cls === 'RandomNoise') {
         if (typeof node.inputs.noise_seed === 'number') node.inputs.noise_seed = seed
+      }
+      // 覆盖 refImage
+      if (cls === 'LoadImage' && nodeId === WORKFLOW_REF_IMAGE_NODE && opts.refImage) {
+        node.inputs.image = opts.refImage
       }
     }
   }

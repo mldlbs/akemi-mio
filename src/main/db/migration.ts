@@ -464,6 +464,33 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE plans ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 23,
+    sql: `
+      DROP TABLE IF EXISTS telegram_outbox_new;
+      CREATE TABLE telegram_outbox_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id TEXT NOT NULL,
+        bot TEXT NOT NULL DEFAULT 'chat',
+        msg_type TEXT NOT NULL CHECK(msg_type IN ('send', 'edit', 'reply', 'action', 'photo', 'media_group')),
+        category TEXT NOT NULL DEFAULT 'dialogue',
+        message TEXT NOT NULL,
+        target_message_id INTEGER,
+        hash TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'sent', 'failed')),
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER
+      );
+      INSERT INTO telegram_outbox_new SELECT id, chat_id, 'chat', msg_type, IFNULL(category,'dialogue'), message, target_message_id, hash, status, retry_count, last_error, created_at, updated_at FROM telegram_outbox;
+      DROP TABLE telegram_outbox;
+      ALTER TABLE telegram_outbox_new RENAME TO telegram_outbox;
+      CREATE INDEX IF NOT EXISTS idx_outbox_status ON telegram_outbox(status);
+      CREATE INDEX IF NOT EXISTS idx_outbox_hash ON telegram_outbox(hash);
+      CREATE INDEX IF NOT EXISTS idx_outbox_category ON telegram_outbox(category);
+    `,
+  },
 ]
 
 export function runMigrations(sqlite: SqlJsDatabase): void {

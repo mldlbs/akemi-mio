@@ -64,6 +64,8 @@ export type EventName =
   | 'guardrail.tool_error'
   | 'guardrail.context_corrupted'
   | 'runtime.health.updated'
+  | 'skill.enabled'
+  | 'skill.disabled'
 
 export interface EventPayload {
   'task.lifecycle': { taskId: string; type: string; status: string; durationMs?: number; error?: string }

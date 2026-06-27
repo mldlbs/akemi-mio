@@ -16,6 +16,7 @@ import { generateImageTool } from './definitions/ImageGenerationTool'
 import { cardGeneratorTool } from './definitions/CardGeneratorTool'
 import { rememberProcedureTool, listProceduresTool } from './definitions/ProceduralMemoryTool'
 import { centosExecTool, centosReadFileTool, centosWriteFileTool, centosGrepTool, centosSearchFilesTool } from './definitions/SshTools'
+import { spawnSkillAgentTool } from './definitions/SkillAgentTools'
 
 export function getAllTools(): Tool[] {
   return [
@@ -40,6 +41,7 @@ export function getAllTools(): Tool[] {
     listSkillsTool as Tool,
     enableSkillTool as Tool,
     disableSkillTool as Tool,
+    spawnSkillAgentTool as Tool,
     writingSystemTool as Tool,
     generateImageTool as Tool,
     cardGeneratorTool as Tool,

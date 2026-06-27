@@ -1,4 +1,4 @@
-import type { Hypothesis, ConceptCombo, CreativitySource } from './types'
+import type { Hypothesis, ConceptCombo, CreativitySource, ExternalSignal } from './types'
 import { CREATIVITY_SYSTEM_PROMPT, buildCreativityPrompt } from './CreativityPrompt'
 import { TemplateLibrary } from './TemplateLibrary'
 import { LocalModelService } from './LocalModelService'
@@ -48,11 +48,13 @@ export class HypothesisGenerator {
     sources: CreativitySource[],
     /** 梦境模式使用更高温度 */
     dreamMode = false,
+    /** 外部信号 — 不参与配对，作为审视视角注入 LLM */
+    externalSignals: ExternalSignal[] = [],
   ): Promise<Hypothesis[]> {
     if (combos.length === 0) return []
 
     // 第一级：远程 LLM 驱动生成
-    const llmResults = await this.tryLLM(sources, combos, dreamMode)
+    const llmResults = await this.tryLLM(sources, combos, dreamMode, externalSignals)
     if (llmResults.length > 0) {
       return llmResults.map((r) => ({
         id: `hyp_${Date.now()}_${++this.idCounter}_${this.rng().toString(36).slice(2, 4)}`,
@@ -121,6 +123,7 @@ export class HypothesisGenerator {
     sources: CreativitySource[],
     combos: ConceptCombo[],
     dreamMode: boolean,
+    externalSignals: ExternalSignal[] = [],
   ): Promise<
     Array<{
       title: string
@@ -143,7 +146,7 @@ export class HypothesisGenerator {
       description: c.description,
     }))
 
-    const prompt = buildCreativityPrompt(sources, comboInfo)
+    const prompt = buildCreativityPrompt(sources, comboInfo, externalSignals)
 
     try {
       const result = await this.chatJson(prompt, {

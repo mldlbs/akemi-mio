@@ -1,4 +1,4 @@
-import type { CreativitySource, ConceptCombo } from './types'
+import type { CreativitySource, ConceptCombo, ExternalSignal } from './types'
 
 /**
  * Creativity System Prompt — 给 LLM 的创造力提示词
@@ -95,8 +95,13 @@ export const CREATIVITY_SYSTEM_PROMPT = buildSystemPrompt()
 /**
  * 构建 Creativity 用户提示词
  * 将来源内容和配对信息格式化为 LLM 输入
+ * @param externalSignals 外部信号（Observer 趋势/洞察），不参与配对，作为"外部审视"段注入
  */
-export function buildCreativityPrompt(sources: CreativitySource[], combos: { sources: string[]; description: string }[]): string {
+export function buildCreativityPrompt(
+  sources: CreativitySource[],
+  combos: { sources: string[]; description: string }[],
+  externalSignals: ExternalSignal[] = [],
+): string {
   const sections: string[] = []
 
   // 来源列表
@@ -112,5 +117,30 @@ export function buildCreativityPrompt(sources: CreativitySource[], combos: { sou
     .join('\n')
   sections.push(`【推荐配对组合】\n请为以下每个配对产生一个创意方案：\n${comboLines}`)
 
+  // 外部信号段 — 不参与配对，作为约束/挑战注入
+  if (externalSignals.length > 0) {
+    sections.push(buildExternalSignalBlock(externalSignals))
+  }
+
   return sections.join('\n\n')
+}
+
+/**
+ * 构建外部信号段 — 不参与 pairing，作为"外部挑战"注入 LLM
+ *
+ * 与概念来源的关键区别：
+ * - 外部信号不能被"配对"，只能被"回应"
+ * - 提示 LLM 用外部信号审视/挑战已有的来源组合，而不是组合它们
+ */
+function buildExternalSignalBlock(signals: ExternalSignal[]): string {
+  const lines = signals.map((s) => `  [${s.type}@${s.source}] ${s.raw}`).join('\n')
+  return `【外部信号 — 作为审视视角，不可配对】
+
+以下信号来自 Observer 的真实世界趋势和洞察。它们不应被直接与概念来源组合配对。
+请以这些外部信号为"审视视角"，重新评估你的配对方案：
+- 有哪些组合的前提假设被这些外部信号挑战了？
+- 有哪些组合在外部信号的视角下会失败？
+- 有哪些组合因为外部信号的出现而变得有价值？
+
+${lines}`
 }

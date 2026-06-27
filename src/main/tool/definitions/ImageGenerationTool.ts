@@ -21,6 +21,10 @@ export const generateImageTool = buildTool({
         type: 'string',
         description: '图片描述提示词（支持中文），如"一只可爱的橘猫坐在钢琴上，夕阳背景，唯美风格"',
       },
+      negativePrompt: {
+        type: 'string',
+        description: '反向提示词（仅 ComfyUI），描述不想看到的内容',
+      },
       size: {
         type: 'string',
         description: '图片尺寸，可选 1024x1024（默认）、1024x1792、1792x1024',
@@ -33,16 +37,27 @@ export const generateImageTool = buildTool({
         type: 'boolean',
         description: '强制使用 ComfyUI 本地生图（默认：ComfyUI 可用则用）',
       },
+      refImage: {
+        type: 'string',
+        description: 'ComfyUI input/ 目录下的参考图文件名，用于 PuLID 换场景保持角色身份一致',
+      },
     },
     required: ['prompt'],
   },
-  handler: async (args: { prompt: string; size?: string; imageCount?: number; useComfyUI?: boolean }) => {
+  handler: async (args: {
+    prompt: string
+    negativePrompt?: string
+    size?: string
+    imageCount?: number
+    useComfyUI?: boolean
+    refImage?: string
+  }) => {
     const prompt = String(args.prompt).trim()
     if (!prompt) return formatToolError('prompt 不能为空')
 
     // ComfyUI 可用 → 优先本地生图
     if (_comfyUI?.isReady) {
-      return generateWithComfyUI(prompt, args.size)
+      return generateWithComfyUI(prompt, args.size, args.negativePrompt, args.refImage)
     }
 
     // CogView fallback
@@ -53,14 +68,14 @@ export const generateImageTool = buildTool({
 
 // ─── ComfyUI 本地生图 ───
 
-async function generateWithComfyUI(prompt: string, size?: string): Promise<string> {
+async function generateWithComfyUI(prompt: string, size?: string, negativePrompt?: string, refImage?: string): Promise<string> {
   const [width, height] = parseSize(size) ?? [1024, 1024]
 
   try {
-    const result = await _comfyUI!.generate({ prompt, width, height })
+    const result = await _comfyUI!.generate({ prompt, negativePrompt, width, height, refImage })
     return formatToolResult(
       [
-        `✨ 本地生图完成（FLUX.1-schnell）`,
+        `✨ 本地生图完成（FLUX.1-schnell + PuLID）`,
         `文件: ${result.imagePath}`,
         `种子: ${result.seed}`,
         `耗时: ${(result.elapsedMs / 1000).toFixed(1)}s`,

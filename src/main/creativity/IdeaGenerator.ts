@@ -44,7 +44,12 @@ export class IdeaGenerator {
    * 完整一轮"灵感涌现"流程
    * @param strategy 生成策略，约束 ConceptMixer 配对空间
    */
-  async generateIdeas(sources: CreativitySource[], maxIdeas = 5, strategy: Strategy = 'explore'): Promise<CreativeIdea[]> {
+  async generateIdeas(
+    sources: CreativitySource[],
+    maxIdeas = 5,
+    strategy: Strategy = 'explore',
+    externalSignals: ExternalSignal[] = [],
+  ): Promise<CreativeIdea[]> {
     if (sources.length < 2) return []
 
     // 1. 随机扰动：温度越高，来源选择越随机
@@ -56,11 +61,13 @@ export class IdeaGenerator {
 
     if (combos.length === 0) return []
 
-    // 3. 用 LLM 生成假设
-    const hypotheses = await this.hypothesisGen.generate(combos, activeSources)
+    // 3. 用 LLM 生成假设（外部信号作为审视视角注入，不参与配对）
+    const hypotheses = await this.hypothesisGen.generate(combos, activeSources, false, externalSignals)
 
-    // 4. 过滤低新颖性 — 提线：硬编码模板的下限过滤
-    const novel = hypotheses.filter((h) => h.novelty >= 55)
+    // 4. 策略感知的新颖性门禁 — stable 模式同类型配对新颖度天然偏低，
+    //    降低阈值避免误杀；signal 模式需要更高的新颖度才有价值
+    const noveltyThreshold = strategy === 'stable' ? 40 : strategy === 'signal' ? 60 : 55
+    const novel = hypotheses.filter((h) => h.novelty >= noveltyThreshold)
 
     // 5. 为每个假设生成实验方案
     const ideas = novel.slice(0, maxIdeas).map((h) => ({

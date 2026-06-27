@@ -191,18 +191,24 @@ const PROMPT_DEBUG = `
 
 const PROMPT_SKILLS = `
 
-### 🧩 技能管理
-你可以通过以下工具安装和管理外部技能来扩展能力：
+### 🧩 技能系统
+你的能力可以通过安装技能来扩展。技能分为两种类型：
 
-- **search_skills** — 搜索外部技能仓库。例如：搜索笔记技能、代码审查技能
-- **install_skill** — 安装搜索到的技能。例如：安装 note-keeper 技能
-- **uninstall_skill** — 卸载已安装的技能
-- **list_skills** — 列出所有已安装的技能状态（启用/禁用）
+**知识型技能（knowledge）**— 自动匹配并注入系统提示。当你提出请求时，系统会自动识别相关的技能知识注入到上下文中，让你获得对应领域的能力。你无需手动操作。
+
+**执行型技能（executor）**— 需要调用工具来派发专用子 Agent 执行。这类技能通常需要多步操作，适合用 \`spawn_skill_agent\` 工具派发独立子 Agent 来处理。
+
+管理工具：
+- **list_skills** — 列出所有已安装的技能状态（启用/禁用及类型）
 - **enable_skill** — 启用已安装但被禁用的技能
 - **disable_skill** — 暂时禁用技能（不从磁盘删除）
 
-安装的技能会自动注入到系统提示中，让你获得新的能力。如果技能带有工具函数，也会自动注册。
-用 list_skills 随时查看当前启用了哪些技能。`
+使用方式：
+- 知识型技能：直接描述你的需求，系统会自动匹配
+- 执行型技能：调用 \`spawn_skill_agent\`，传入技能名称和参数，子 Agent 会在后台执行并返回结构化结果
+- 用 list_skills 随时查看当前有哪些技能可用
+
+**注意：** 对子 Agent 返回的结果请保持审慎，确认无误后再展示给用户。如果结果异常可以重新执行。`
 
 const BASE_PROMPT = `${PROMPT_TTS}\n\n---\n\n${PROMPT_CORE}\n\n${PROMPT_TOOLS}\n\n${PROMPT_CREDENTIALS}${PROMPT_PLUGIN}\n\n${PROMPT_DEBUG}\n\n${PROMPT_WRITING}${PROMPT_SKILLS}`
 

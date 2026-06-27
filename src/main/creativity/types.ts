@@ -98,3 +98,21 @@ export interface CreativityStoreData {
 export const CREATIVITY_STORE_VERSION = 2
 export const DREAM_CYCLE_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6h
 export const NORMAL_CYCLE_INTERVAL_MS = 60 * 60 * 1000 // 1h
+
+/**
+ * 外部信号 — 不进入配对空间
+ *
+ * Observer 的外部数据在此层保持其"不可配对"的原始语义，
+ * 直接注入 LLM 作为约束/挑战，而非组合概念。
+ *
+ * 与 CreativitySource 的关键区别：
+ * - 不能进入 ConceptMixer
+ * - 不参与 combinatorial pairing
+ * - 不参与 scoring/ranking
+ * - 只作为 prompt 中的"外部审视"段
+ */
+export interface ExternalSignal {
+  source: string
+  raw: string
+  type: 'trend' | 'event' | 'anomaly' | 'insight'
+}

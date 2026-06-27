@@ -122,6 +122,37 @@ describe('TemplateLibrary', () => {
     })
   })
 
+  describe('nameFit 二次路由', () => {
+    it('有 nameFit 加成的配对路由到不同的模板', () => {
+      const lib = new TemplateLibrary(42)
+      // ASR × MCP：有 nameFit 加成 (+8)，应偏向 merged 模板
+      const combo1 = makeCombo({ sources: ['ASR', 'MCP'] })
+      const sources1 = [makeSource('ASR', 'knowledge'), makeSource('MCP', 'knowledge')]
+      const h1 = lib.generate(combo1, sources1)!
+
+      // Memory × TTS：无 nameFit 加成，应落到其他模板
+      const combo2 = makeCombo({ sources: ['Memory', 'TTS'] })
+      const sources2 = [makeSource('Memory', 'knowledge'), makeSource('TTS', 'knowledge')]
+      const h2 = lib.generate(combo2, sources2)!
+
+      // 有 nameFit 时标题格式应不同于无加成的配对
+      expect(h1.title).not.toBe(h2.title)
+    })
+
+    it('无 nameFit 加成的配对不影响基础路由', () => {
+      const lib = new TemplateLibrary(42)
+      // Agent × Evolution：有 pattern_migration 的 nameFit (+8)
+      const combo1 = makeCombo({ sources: ['Agent', 'Evolution'] })
+      const sources1 = [makeSource('Agent', 'knowledge'), makeSource('Evolution', 'knowledge')]
+      const h1 = lib.generate(combo1, sources1)!
+
+      // 仍应产出有效假设
+      expect(h1.title).toBeTruthy()
+      expect(h1.idea).toBeTruthy()
+      expect(h1.novelty).toBeGreaterThanOrEqual(50)
+    })
+  })
+
   describe('边缘情况', () => {
     it('同名不同类型仍可生成', () => {
       const lib = new TemplateLibrary(42)

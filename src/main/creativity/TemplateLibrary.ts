@@ -42,6 +42,12 @@ interface TemplateDef {
   riskTemplate: string
   /** 类型配对 → 适配度 (0-10) */
   typeFit: Record<string, number>
+  /**
+   * 源名称偏好 — 按 source name 做二次路由
+   * key 格式: "sourceA|sourceB"（已排序），value 为加成权重
+   * 例如 "ASR|Agent": 15 表示 ASR×Agent 配对时此模板额外 +15 分
+   */
+  nameFit?: Record<string, number>
   noveltyBonus: number
   feasibilityBonus: number
   impactBonus: number
@@ -58,6 +64,8 @@ const TEMPLATES: TemplateDef[] = [
     benefitTemplate: '消除信息孤岛，产生 1+1>2 的涌现效果',
     riskTemplate: '耦合度过高导致两个模块难以独立演进',
     typeFit: { knowledge_knowledge: 10, insight_insight: 9, behavior_behavior: 7 },
+    // 不同知识源走向不同策略：ASR×MCP 适合深度融合，Memory×Agent 也是
+    nameFit: { 'ASR|MCP': 8, 'Agent|Memory': 8, 'MCP|Agent': 8 },
     noveltyBonus: 18,
     feasibilityBonus: 5,
     impactBonus: 20,
@@ -112,6 +120,13 @@ const TEMPLATES: TemplateDef[] = [
     benefitTemplate: '避免重复造轮子，架构决策经过验证',
     riskTemplate: '模式迁移可能引入 {a} 的隐式约束',
     typeFit: { knowledge_behavior: 8, knowledge_knowledge: 9, insight_behavior: 7 },
+    /**
+     * pattern_migration 是结构化迁移，只适合工程系统间的配对
+     * ASR→MCP、Agent→Evolution 有意义
+     * Memory→Agent、TTS→Wallpaper 等则不适用 — 没有 nameFit 加成，
+     * 自然落到其他模板
+     */
+    nameFit: { 'ASR|MCP': 8, 'Agent|Evolution': 8 },
     noveltyBonus: 11,
     feasibilityBonus: 8,
     impactBonus: 12,
@@ -484,7 +499,8 @@ export class TemplateLibrary {
     if (!sourceA || !sourceB) return null
 
     const typeKey = this.typeKey(sourceA.type, sourceB.type)
-    const candidates = this.selectForType(typeKey)
+    const nameKey = this.nameKey(sourceA.name, sourceB.name)
+    const candidates = this.selectForType(typeKey, nameKey)
     if (candidates.length === 0) return null
 
     // 用来源名称做 hash，保证同源同模板（确定性）
@@ -510,13 +526,18 @@ export class TemplateLibrary {
 
   /**
    * 返回适用于某个类型组合的所有模板列表
+   * @param nameKey 对 source name 排序后的组合键，用于 nameFit 二次路由
    */
-  private selectForType(typeKey: string): TemplateDef[] {
+  private selectForType(typeKey: string, nameKey = ''): TemplateDef[] {
     const [a, b] = typeKey.split('_')
     const reverseKey = `${b}_${a}`
 
     const scored = TEMPLATES.map((tpl) => {
-      const score = tpl.typeFit[typeKey] ?? tpl.typeFit[reverseKey] ?? 0
+      let score = tpl.typeFit[typeKey] ?? tpl.typeFit[reverseKey] ?? 0
+      // nameFit 加成：使模板在不同 name 组合间产生差异
+      if (tpl.nameFit && nameKey) {
+        score += tpl.nameFit[nameKey] ?? 0
+      }
       return { tpl, score }
     })
 
@@ -528,6 +549,11 @@ export class TemplateLibrary {
 
   private typeKey(a: string, b: string): string {
     return [a, b].sort().join('_')
+  }
+
+  /** 对 source name 排序生成 nameFit 查询键 */
+  private nameKey(a: string, b: string): string {
+    return [a, b].sort().join('|')
   }
 
   private stableHash(a: string, b: string): number {

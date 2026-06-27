@@ -3,6 +3,9 @@ import { log } from '../logger/Logger'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import { eventBus } from '../core/EventBus'
 import { insertOutbox, type OutboxCategory } from '../db/outbox'
+import { WORKSPACE } from '../config'
+import { writeFileSync, existsSync, mkdirSync } from 'fs'
+import { join } from 'path'
 
 interface TelegramMessage {
   type: 'message' | 'command'
@@ -12,6 +15,7 @@ interface TelegramMessage {
   command?: string
   from: string
   userId?: number
+  bot?: string
   timestamp: number
 }
 
@@ -21,6 +25,24 @@ interface ToolLine {
   latencyMs?: number
 }
 
+// ── 路由表：消息分类 → 使用的 bot ──
+// 4 个 bot：chat(对话) / push(推送) / gen(生图) / write(写作)
+
+const ROUTING: Record<string, string> = {
+  dialogue: 'chat',
+  evolution: 'push',
+  insight: 'push',
+  creativity: 'push',
+  plan: 'push',
+  budget: 'push',
+  recovery: 'push',
+  stability: 'push',
+  system: 'push',
+  image_gen: 'gen',
+  image_result: 'gen',
+  writing: 'write',
+}
+
 /** 延迟编辑调度：将频繁的 progress 更新 debounce 后直接 HTTP 编辑（不走 outbox，保证实时性） */
 export class DebouncedEditor {
   private baseUrl = ''
@@ -28,16 +50,18 @@ export class DebouncedEditor {
   private pendingChatId = 0
   private pendingText = ''
   private pendingTargetMsgId = 0
+  private pendingBot = 'chat'
 
   /** 在 TelegramService 初始化后设置真实的 baseUrl */
   setBaseUrl(url: string): void {
     this.baseUrl = url
   }
 
-  schedule(chatId: number, targetMessageId: number, text: string): void {
+  schedule(chatId: number, targetMessageId: number, text: string, bot: string = 'chat'): void {
     this.pendingChatId = chatId
     this.pendingText = text
     this.pendingTargetMsgId = targetMessageId
+    this.pendingBot = bot
     if (!this.timer) {
       this.timer = setTimeout(() => this.flush(), 400)
     }
@@ -53,6 +77,7 @@ export class DebouncedEditor {
           chatId: this.pendingChatId,
           messageId: this.pendingTargetMsgId,
           text: this.pendingText,
+          bot: this.pendingBot,
         }),
         signal: AbortSignal.timeout(5000),
       })
@@ -84,9 +109,10 @@ export class TelegramService {
   private isRunning = false
   private retryQueue: TelegramMessage[] = []
   private activeSessions = new Map<
-    number,
+    string,
     {
       messageId: number
+      bot: string
       toolLines: ToolLine[]
       typingTimer: ReturnType<typeof setInterval> | null
       disposers: (() => void)[]
@@ -219,12 +245,20 @@ export class TelegramService {
 
     const chatId = msg.chatId
     const userText = msg.text
-    const existing = this.activeSessions.get(chatId)
-    if (existing) this.cleanupSession(chatId)
+    const botName = msg.bot || 'chat'
+
+    // gen bot → 直连 CogView 生图，不走 Agent
+    if (botName === 'gen') {
+      this.handleGenBotMessage(chatId, userText)
+      return
+    }
+
+    const existing = this.activeSessions.get(sessionKey(chatId, botName))
+    if (existing) this.cleanupSession(chatId, botName)
 
     // sendMessage 仍需同步获取 messageId，不走 outbox
     const initialText = `👤 你: ${userText}\n\n🤖 秋山澪 AI 处理中...\n  ⏳ 正在分析请求`
-    const progressMsgId = await this.sendMessageSync(chatId, initialText)
+    const progressMsgId = await this.sendMessageSync(chatId, initialText, botName)
     if (progressMsgId === null) {
       // sendMessageSync 失败（网络/服务器不可达），退化到直接处理 + outbox 回复
       try {
@@ -235,18 +269,23 @@ export class TelegramService {
           telegramMessageId: msg.messageId,
         })
         if (result.reply) {
-          this.enqueueReply(msg.chatId, result.reply)
+          this.enqueueReply(msg.chatId, result.reply, 'dialogue', botName)
         } else if (result.error === 'BUSY') {
-          this.enqueueReply(msg.chatId, `👤 ${userText}\n\n⏳ 秋山澪正在处理其他请求，你的消息已加入队列，处理完成后会自动回复`)
+          this.enqueueReply(
+            msg.chatId,
+            `👤 ${userText}\n\n⏳ 秋山澪正在处理其他请求，你的消息已加入队列，处理完成后会自动回复`,
+            'dialogue',
+            botName,
+          )
           insertOutbox({ chatId: String(chatId), msgType: 'reply', category: 'dialogue', message: userText })
         } else if (result.error) {
-          this.enqueueReply(msg.chatId, `❌ 错误: ${result.error}`)
+          this.enqueueReply(msg.chatId, `❌ 错误: ${result.error}`, 'dialogue', botName)
         } else {
-          this.enqueueReply(msg.chatId, '❌ 处理失败，未获得有效回复')
+          this.enqueueReply(msg.chatId, '❌ 处理失败，未获得有效回复', 'dialogue', botName)
         }
       } catch (err) {
         log('ERROR', 'telegram_process_error', { error: String(err) })
-        this.enqueueReply(msg.chatId, '❌ 系统内部错误，请稍后重试')
+        this.enqueueReply(msg.chatId, '❌ 系统内部错误，请稍后重试', 'dialogue', botName)
       }
       return
     }
@@ -269,6 +308,7 @@ export class TelegramService {
           line.latencyMs = (p as any).latencyMs || 0
         }
         this.refreshProgressMessage(chatId, progressMsgId, userText, toolLines, editor)
+        this.handleToolPhoto(chatId, p.tool, p.result)
       }),
     )
     disposers.push(
@@ -280,14 +320,21 @@ export class TelegramService {
     )
 
     const typingTimer = setInterval(() => {
-      this.enqueueAction(chatId, 'typing')
+      this.enqueueAction(chatId, 'typing', botName)
     }, 4000)
 
-    this.activeSessions.set(chatId, { messageId: progressMsgId, toolLines, typingTimer, disposers, editor })
+    this.activeSessions.set(sessionKey(chatId, botName), {
+      messageId: progressMsgId,
+      bot: botName,
+      toolLines,
+      typingTimer,
+      disposers,
+      editor,
+    })
 
     // ⏱ 超时预警：处理超过 20 秒未返回时告知用户
     const timeoutNoticeTimer = setTimeout(() => {
-      this.enqueueEdit(chatId, progressMsgId, `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n⚠️ 正在恢复中，请稍候……`)
+      this.enqueueEdit(chatId, progressMsgId, `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n⚠️ 正在恢复中，请稍候……`, botName)
     }, 20000)
 
     try {
@@ -302,13 +349,13 @@ export class TelegramService {
       if (result.reply) {
         const finalText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n🤖 秋山澪: ${result.reply}`
         editor.cancel()
-        this.enqueueEdit(chatId, progressMsgId, finalText)
+        this.enqueueEdit(chatId, progressMsgId, finalText, botName)
         log('INFO', 'telegram_reply_enqueued', { chatId, msgId: progressMsgId, replyLen: result.reply.length })
       } else if (result.error) {
         if (result.error === 'BUSY') {
           const busyText = `👤 你: ${userText}\n\n⏳ 秋山澪正在处理其他请求，你的消息已加入队列，处理完会自动回复`
           editor.cancel()
-          this.enqueueEdit(chatId, progressMsgId, busyText)
+          this.enqueueEdit(chatId, progressMsgId, busyText, botName)
           insertOutbox({ chatId: String(chatId), msgType: 'reply', category: 'dialogue', message: userText })
           if (this.retryQueue.length < 100) {
             this.retryQueue.push(msg)
@@ -317,23 +364,22 @@ export class TelegramService {
         } else {
           const errorText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n❌ ${result.error}`
           editor.cancel()
-          this.enqueueEdit(chatId, progressMsgId, errorText)
+          this.enqueueEdit(chatId, progressMsgId, errorText, botName)
         }
       } else {
-        // ★ 兜底：reply 和 error 都为空时不再静默失败
         log('WARN', 'telegram_empty_reply_no_error', { chatId, text: userText.slice(0, 100) })
         editor.cancel()
         const fallbackText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n🤖 秋山澪: 嗯，我在呢。想聊什么？`
-        this.enqueueEdit(chatId, progressMsgId, fallbackText)
+        this.enqueueEdit(chatId, progressMsgId, fallbackText, botName)
       }
     } catch (err) {
       clearTimeout(timeoutNoticeTimer)
       log('ERROR', 'telegram_process_error', { error: String(err) })
       const errorText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n❌ 抱歉，处理失败，请重新发送。`
       editor.cancel()
-      this.enqueueEdit(chatId, progressMsgId, errorText)
+      this.enqueueEdit(chatId, progressMsgId, errorText, botName)
     } finally {
-      this.cleanupSession(chatId)
+      this.cleanupSession(chatId, botName)
     }
   }
 
@@ -440,8 +486,7 @@ export class TelegramService {
         lines.push(`  来源: ${src}`)
         lines.push(`  评分: 新颖 ${idea.novelty}% · 可行 ${idea.feasibility}% · 影响 ${idea.impact}%`)
         if (idea.idea) {
-          const snippet = idea.idea.length > 120 ? idea.idea.slice(0, 120) + '…' : idea.idea
-          lines.push(`  ${snippet}`)
+          lines.push(`  ${idea.idea}`)
         }
         if (idea.expectedBenefit) {
           lines.push(`  ✅ ${idea.expectedBenefit}`)
@@ -522,7 +567,7 @@ export class TelegramService {
 
   private async handlePushInput(chatId: number, text: string, requestId: string): Promise<void> {
     const initialText = `👤 你: ${text}\n\n🤖 秋山澪 AI 处理中...\n  ⏳ 正在处理`
-    const msgId = await this.sendMessageSync(chatId, initialText)
+    const msgId = await this.sendMessageSync(chatId, initialText, 'chat')
     if (msgId === null) return
 
     const editor = new DebouncedEditor()
@@ -548,6 +593,7 @@ export class TelegramService {
         line.latencyMs = (p as any).latencyMs || 0
       }
       this.refreshPushMessage(chatId, msgId, text, session.toolLines, editor)
+      this.handleToolPhoto(chatId, p.tool, p.result)
     })
     const d3 = eventBus.on('agent.tool.failed', (p: any) => {
       const session = this.pushSessions.get(requestId)
@@ -597,7 +643,7 @@ export class TelegramService {
       }
     }
     if (!hasRunning && toolLines.length > 0) lines.push('\n✍️ 正在生成回复...')
-    editor.schedule(chatId, msgId, lines.join('\n'))
+    editor.schedule(chatId, msgId, lines.join('\n'), 'chat')
   }
 
   private cleanupPushSession(requestId: string): void {
@@ -621,26 +667,32 @@ export class TelegramService {
 
   // ── Outbox 写入 ──
 
-  private enqueueReply(chatId: number, text: string, category?: OutboxCategory): void {
-    insertOutbox({ chatId: String(chatId), msgType: 'reply', category, message: text })
+  private enqueueReply(chatId: number, text: string, category?: OutboxCategory, bot?: string): void {
+    insertOutbox({
+      chatId: String(chatId),
+      bot: (bot || (category && ROUTING[category]) || 'chat') as any,
+      msgType: 'reply',
+      category,
+      message: text,
+    })
   }
 
-  private enqueueEdit(chatId: number, targetMessageId: number, text: string): void {
-    const inserted = insertOutbox({ chatId: String(chatId), msgType: 'edit', message: text, targetMessageId })
+  private enqueueEdit(chatId: number, targetMessageId: number, text: string, bot: string = 'chat'): void {
+    const inserted = insertOutbox({ chatId: String(chatId), bot: bot as any, msgType: 'edit', message: text, targetMessageId })
     log('DEBUG', 'telegram_enqueue_edit', { chatId, targetMessageId, inserted, textLen: text.length })
   }
 
-  private enqueueAction(chatId: number, action: string): void {
-    insertOutbox({ chatId: String(chatId), msgType: 'action', message: action })
+  private enqueueAction(chatId: number, action: string, bot: string = 'chat'): void {
+    insertOutbox({ chatId: String(chatId), bot: bot as any, msgType: 'action', message: action })
   }
 
   /** sendMessage 需要同步拿到 messageId，因此直接 HTTP 调用 */
-  private async sendMessageSync(chatId: number, text: string): Promise<number | null> {
+  private async sendMessageSync(chatId: number, text: string, bot: string = 'chat'): Promise<number | null> {
     try {
       const res = await fetch(`${this.baseUrl}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId, text }),
+        body: JSON.stringify({ chatId, text, bot }),
         signal: AbortSignal.timeout(10000),
       })
       if (!res.ok) return null
@@ -669,13 +721,166 @@ export class TelegramService {
     editor.schedule(chatId, msgId, lines.join('\n'))
   }
 
+  // ── gen bot：直连 ComfyUI 生图，不经过 Agent 对话 ──
+
+  private async handleGenBotMessage(chatId: number, prompt: string): Promise<void> {
+    const COMFYUI_URL = process.env.COMFYUI_URL || 'http://127.0.0.1:8188'
+
+    try {
+      const r = await fetch(`${COMFYUI_URL}/system_stats`, { signal: AbortSignal.timeout(5000) })
+      if (!r.ok) throw new Error('not ok')
+    } catch {
+      this.sendGenReply(chatId, '❌ ComfyUI 未运行')
+      return
+    }
+
+    const statusMsgId = await this.sendMessageSync(chatId, '⏳ ComfyUI 生成中...', 'gen')
+    if (statusMsgId === null) return
+
+    try {
+      const seed = Math.floor(Math.random() * 2 ** 32)
+      const workflow = {
+        '3': { class_type: 'CLIPTextEncode', inputs: { text: prompt, clip: ['11', 0] } },
+        '4': {
+          class_type: 'KSampler',
+          inputs: {
+            seed,
+            steps: 4,
+            cfg: 1,
+            sampler_name: 'euler',
+            scheduler: 'simple',
+            denoise: 1,
+            model: ['10', 0],
+            positive: ['3', 0],
+            negative: ['7', 0],
+            latent_image: ['12', 0],
+          },
+        },
+        '7': { class_type: 'CLIPTextEncode', inputs: { text: 'blurry, low quality, distorted', clip: ['11', 0] } },
+        '8': { class_type: 'VAEDecode', inputs: { samples: ['4', 0], vae: ['13', 0] } },
+        '9': { class_type: 'SaveImage', inputs: { images: ['8', 0], filename_prefix: 'gen_bot' } },
+        '10': { class_type: 'UnetLoaderGGUF', inputs: { unet_name: 'flux-schnell\\flux1-schnell-Q4_K_S.gguf' } },
+        '11': {
+          class_type: 'DualCLIPLoaderGGUF',
+          inputs: { clip_name1: 'clip_l.safetensors', clip_name2: 't5-v1_1-xxl-encoder-Q6_K.gguf', type: 'flux' },
+        },
+        '12': { class_type: 'EmptyLatentImage', inputs: { width: 1024, height: 1024, batch_size: 1 } },
+        '13': { class_type: 'VAELoader', inputs: { vae_name: 'ae.safetensors' } },
+      }
+      const wfRes = await fetch(`${COMFYUI_URL}/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: workflow }),
+        signal: AbortSignal.timeout(30000),
+      })
+      if (!wfRes.ok) {
+        this.sendGenReply(chatId, `❌ ComfyUI 提交失败 (${wfRes.status})`)
+        const b = await wfRes.text().catch(() => '')
+        log('WARN', 'telegram_gen_comfyui_submit_fail', { status: wfRes.status, body: b.slice(0, 200) })
+        return
+      }
+      const { prompt_id } = (await wfRes.json()) as { prompt_id: string }
+      log('INFO', 'telegram_gen_comfyui_submitted', { prompt_id })
+
+      // 轮询结果
+      const t0 = Date.now()
+      let imageBuffer: Buffer | null = null
+      while (Date.now() - t0 < 300000) {
+        await new Promise((r) => setTimeout(r, 1500))
+        try {
+          const histRes = await fetch(`${COMFYUI_URL}/history/${prompt_id}`, { signal: AbortSignal.timeout(5000) })
+          if (!histRes.ok) continue
+          const history = (await histRes.json()) as Record<string, any>
+          const entry = history[prompt_id]
+          if (!entry?.outputs) continue
+          for (const nodeId of Object.keys(entry.outputs)) {
+            for (const img of entry.outputs[nodeId].images || []) {
+              if (img.type !== 'output') continue
+              const viewUrl = `${COMFYUI_URL}/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder || '')}&type=output`
+              const imgRes = await fetch(viewUrl)
+              if (imgRes.ok) {
+                imageBuffer = Buffer.from(await imgRes.arrayBuffer())
+                break
+              }
+            }
+            if (imageBuffer) break
+          }
+          if (imageBuffer) break
+        } catch {
+          /* retry */
+        }
+      }
+
+      if (!imageBuffer) {
+        this.sendGenReply(chatId, '⏰ ComfyUI 生成超时')
+        return
+      }
+
+      // 发图到 Telegram
+      fetch(`${this.baseUrl}/photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, photo: imageBuffer.toString('base64'), caption: `🎨 ${prompt}`, bot: 'gen' }),
+        signal: AbortSignal.timeout(60000),
+      }).catch((err) => log('WARN', 'telegram_gen_send_photo_error', { error: String(err) }))
+
+      log('INFO', 'telegram_gen_completed', { chatId, prompt: prompt.slice(0, 50) })
+    } catch (err) {
+      log('ERROR', 'telegram_gen_error', { error: String(err) })
+      this.sendGenReply(chatId, `❌ 生图失败: ${String(err).slice(0, 100)}`)
+    }
+  }
+
+  private sendGenReply(chatId: number, text: string): void {
+    insertOutbox({ chatId: String(chatId), bot: 'gen', msgType: 'reply', category: 'dialogue', message: text })
+  }
+
+  // ── 图片处理：生图工具完成 → 发送图片到 Telegram ──
+
+  private handleToolPhoto(chatId: number, tool: string, result: string): void {
+    if (tool !== 'generate_image') return
+    if (!result) return
+
+    // 从结果中提取图片文件路径（行: "文件: /some/path.png"）
+    const filePaths: string[] = []
+    for (const line of result.split('\n')) {
+      const m = line.match(/^文件:\s*(.+\.\w+)$/)
+      if (m) filePaths.push(m[1].trim())
+    }
+    if (filePaths.length === 0) {
+      log('WARN', 'telegram_handle_tool_photo_no_file', { result: result.slice(0, 200) })
+      return
+    }
+
+    for (const filePath of filePaths) {
+      try {
+        const photoBuffer = require('fs').readFileSync(filePath)
+        const base64 = photoBuffer.toString('base64')
+        // 直接发送到代理服务器（不走 outbox，避免 SQLite 存巨量 base64）
+        fetch(`${this.baseUrl}/photo`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chatId, photo: base64, bot: 'gen' }),
+          signal: AbortSignal.timeout(60000),
+        })
+          .then((r) => {
+            if (r.ok) log('INFO', 'telegram_photo_sent', { chatId, filePath })
+            else r.text().then((t) => log('WARN', 'telegram_photo_send_failed', { status: r.status, error: t.slice(0, 200) }))
+          })
+          .catch((err) => log('WARN', 'telegram_photo_send_error', { error: String(err) }))
+      } catch (err) {
+        log('WARN', 'telegram_handle_tool_photo_failed', { filePath, error: String(err) })
+      }
+    }
+  }
+
   stop(): void {
     // 清理所有 push sessions
     for (const requestId of this.pushSessions.keys()) {
       this.cleanupPushSession(requestId)
     }
-    for (const chatId of this.activeSessions.keys()) {
-      this.cleanupSession(chatId)
+    for (const key of this.activeSessions.keys()) {
+      this.cleanupSessionByKey(key)
     }
     this.isRunning = false
     if (this.pollTimer) {
@@ -689,15 +894,22 @@ export class TelegramService {
     log('INFO', 'telegram_polling_stopped')
   }
 
-  private cleanupSession(chatId: number): void {
-    const session = this.activeSessions.get(chatId)
+  private cleanupSession(chatId: number, bot: string): void {
+    this.cleanupSessionByKey(sessionKey(chatId, bot))
+  }
+
+  private cleanupSessionByKey(key: string): void {
+    const session = this.activeSessions.get(key)
     if (!session) return
     if (session.typingTimer) clearInterval(session.typingTimer)
     for (const d of session.disposers) d()
-    // ★ 修复：flush 保留最终进度编辑，不 cancel 丢弃
     session.editor.flushNow()
-    this.activeSessions.delete(chatId)
+    this.activeSessions.delete(key)
   }
+}
+
+function sessionKey(chatId: number, bot: string): string {
+  return `${chatId}:${bot}`
 }
 
 function simplifyToolName(name: string): string {

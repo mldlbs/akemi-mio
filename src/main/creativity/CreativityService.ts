@@ -6,7 +6,7 @@ import { IdeaGenerator } from './IdeaGenerator'
 import { WorldTrendProvider } from './WorldTrendProvider'
 import { SourceBuilder } from './SourceBuilder'
 import { evaluateNovelty } from './NoveltyScorer'
-import type { CreativitySource, CreativeIdea, DreamCycleLog, IdeaStoreLike, Strategy } from './types'
+import type { CreativitySource, CreativeIdea, DreamCycleLog, IdeaStoreLike, Strategy, ExternalSignal } from './types'
 import { DREAM_CYCLE_INTERVAL_MS, NORMAL_CYCLE_INTERVAL_MS } from './types'
 import type { TaskRunner } from '../core/tasks/unified/TaskRunner'
 
@@ -173,15 +173,17 @@ export class CreativityService {
   private async cycle(): Promise<void> {
     if (this.conversationActive) return
     let sources = this.getSources()
+    let externalSignals: ExternalSignal[] = []
 
-    // 注入 Observer 世界趋势和洞察
+    // Observer 世界趋势 — 不进入配对空间，作为外部信号注入 LLM
     if (this.worldTrendProvider) {
       const trends = this.worldTrendProvider.getTrends()
       const insights = this.worldTrendProvider.getInsights()
-      if (trends.length > 0 || insights.length > 0) {
-        const observerSources = this.sourceBuilder.build({ observer: { trends, insights } }, [], trends)
-        const worldSources = observerSources.filter((s) => s.type === 'provocation' || s.type === 'insight')
-        sources = [...sources, ...worldSources]
+      for (const t of trends) {
+        externalSignals.push({ source: 'Observer', raw: t, type: 'trend' })
+      }
+      for (const i of insights) {
+        externalSignals.push({ source: 'Observer', raw: i, type: 'insight' })
       }
     }
 
@@ -201,7 +203,10 @@ export class CreativityService {
 
     if (sources.length < 2) return
 
-    log('INFO', 'creativity_cycle_start', { source_count: sources.length })
+    log('INFO', 'creativity_cycle_start', {
+      source_count: sources.length,
+      external_signal_count: externalSignals.length,
+    })
     this.eventBus.emit('creativity.cycle.started', {})
 
     // 轮换策略：每次 cycle 切换一种生成模式
@@ -212,7 +217,7 @@ export class CreativityService {
     // 推送已探索配对给 Mixer 用于降权
     this.generator.setExploredPairs(this.store.getExploredPairs())
 
-    const ideas = await this.generator.generateIdeas(sources, undefined, strategy)
+    const ideas = await this.generator.generateIdeas(sources, undefined, strategy, externalSignals)
 
     if (ideas.length === 0) {
       log('INFO', 'creativity_cycle_empty')

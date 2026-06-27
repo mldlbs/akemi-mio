@@ -144,7 +144,10 @@ export class ChatExecutor {
     const memCtx = this.memoryService.getFormattedContext()
     this.obsLogger?.logMemory(this.lastUserText, memCtx)
     const reflectCtx = this.reflectLoop.getFormattedContext()
-    const skillModules = this.skillManager?.getEnabledPromptModules() || []
+    // 按需注入：根据用户输入匹配技能
+    const skillModules = this.lastUserText
+      ? this.skillManager?.getMatchedPromptModules(this.lastUserText) || []
+      : this.skillManager?.getEnabledPromptModules() || []
     const extraModules = skillModules.length > 0 ? skillModules : undefined
     const wfModule = this.activeWorkflowModule
     const allExtraModules = wfModule ? [wfModule, ...(extraModules || [])] : extraModules
@@ -414,7 +417,20 @@ export class ChatExecutor {
         const done = this.subAgentPool.collectCompleted()
         if (done.length > 0) {
           messages.push({ role: 'assistant', content: result.reply || '' })
-          messages.push({ role: 'user', content: `【后台任务汇报】${done.map((t: any) => `[${t.status}]${t.goal}`).join('\n')}` })
+          const reportLines = done.map((t: any) => {
+            const isSkill = t.id?.startsWith('sk_')
+            if (isSkill && t.summary) {
+              try {
+                const parsed = JSON.parse(t.summary)
+                const dataStr = parsed.error ? `错误: ${parsed.error}` : `结果: ${JSON.stringify(parsed.data)}`
+                return `[${t.status}]${t.goal}\n${dataStr}`
+              } catch {
+                /* fallback to plain text */
+              }
+            }
+            return `[${t.status}]${t.goal}`
+          })
+          messages.push({ role: 'user', content: `【后台任务汇报】\n${reportLines.join('\n\n')}` })
           continue
         }
         ctx.transition(RunState.COMPLETED)

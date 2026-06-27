@@ -3,6 +3,8 @@ import { ServerManager } from '../mcp/ServerManager'
 import { ConversationContext, Message } from './context'
 import { EventBus, eventBus } from '../core/EventBus'
 import { log, createRequestId } from '../logger/Logger'
+import { ScopedAgent } from './scoped/ScopedAgent'
+import type { SkillAgentDef } from '../skill/SkillAgentRegistry'
 
 // ── 类型定义 ──
 
@@ -41,12 +43,7 @@ class SubAgentInstance {
   private abortController = new AbortController()
   private mcpManager: ServerManager
 
-  constructor(
-    task: SubAgentTask,
-    mcpManager: ServerManager,
-    chatKey: string,
-    codeKey: string,
-  ) {
+  constructor(task: SubAgentTask, mcpManager: ServerManager, chatKey: string, codeKey: string) {
     this.id = task.id
     this.goal = task.goal
     this.mcpManager = mcpManager
@@ -99,11 +96,7 @@ class SubAgentInstance {
         throw new DOMException('Aborted', 'AbortError')
       }
 
-      const result = await this.llm.chatWithTools(
-        messages,
-        `sub_${this.id}_${i}`,
-        30000,
-      )
+      const result = await this.llm.chatWithTools(messages, `sub_${this.id}_${i}`, 30000)
 
       if (result.error === 'TIMEOUT') {
         log('WARN', 'subagent_timeout', { id: this.id, step: i })
@@ -125,10 +118,7 @@ class SubAgentInstance {
     return '操作次数过多，已自动停止'
   }
 
-  private async processToolCalls(
-    toolCalls: ToolCallInfo[],
-    messages: Message[],
-  ): Promise<void> {
+  private async processToolCalls(toolCalls: ToolCallInfo[], messages: Message[]): Promise<void> {
     for (const call of toolCalls) {
       if (this.abortController.signal.aborted) {
         throw new DOMException('Aborted', 'AbortError')
@@ -154,11 +144,12 @@ class SubAgentInstance {
 
 // ── 子 Agent 池 ──
 
-const SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000  // 5 分钟
-const WATCHDOG_INTERVAL_MS = 30_000         // 每 30 秒检查一次
+const SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000 // 5 分钟
+const WATCHDOG_INTERVAL_MS = 30_000 // 每 30 秒检查一次
 
 export class SubAgentPool {
   private agents = new Map<string, SubAgentInstance>()
+  private scopedAgents = new Map<string, ScopedAgent>()
   /** 已完成但尚未被主 agent 消费的结果 */
   private completedQueue: SubAgentResult[] = []
   private mcpManager: ServerManager
@@ -193,25 +184,60 @@ export class SubAgentPool {
   }
 
   /** 派发多个并行任务 */
-  spawnBatch(
-    tasks: { goal: string }[],
-    parentGoal?: string,
-  ): string[] {
-    return tasks.map(t => this.spawn(t.goal, parentGoal))
+  spawnBatch(tasks: { goal: string }[], parentGoal?: string): string[] {
+    return tasks.map((t) => this.spawn(t.goal, parentGoal))
+  }
+
+  /**
+   * 派发一个技能子 Agent（受控执行）
+   * 返回 agentId，执行完成后结果会进入 completedQueue
+   */
+  spawnSkillAgent(skillName: string, agentDef: SkillAgentDef, params: Record<string, any>): string {
+    const id = `sk_${++this.counter}_${Date.now().toString(36)}`
+    const agent = new ScopedAgent(id, skillName, agentDef, params, this.mcpManager, this.chatKey, this.codeKey)
+    this.scopedAgents.set(id, agent)
+
+    this.ensureWatchdog()
+
+    agent.run().then(() => {
+      this.scopedAgents.delete(id)
+      this.completedQueue.push(agent.toResult())
+      this.eventBus.emit('subagent.completed' as any, {
+        id,
+        goal: `技能「${skillName}」执行`,
+        status: agent.status,
+      })
+    })
+
+    log('INFO', 'scoped_agent_spawned', { id, skill: skillName })
+    return id
   }
 
   /** 打断一个子任务 */
   interrupt(id: string): boolean {
     const inst = this.agents.get(id)
-    if (!inst) return false
-    inst.interrupt()
-    return true
+    if (inst) {
+      inst.interrupt()
+      return true
+    }
+    const scoped = this.scopedAgents.get(id)
+    if (scoped) {
+      scoped.interrupt()
+      return true
+    }
+    return false
   }
 
   /** 打断全部运行中的子任务 */
   interruptAll(): number {
     let count = 0
-    for (const [id, inst] of this.agents) {
+    for (const [, inst] of this.agents) {
+      if (inst.status === 'running') {
+        inst.interrupt()
+        count++
+      }
+    }
+    for (const [, inst] of this.scopedAgents) {
       if (inst.status === 'running') {
         inst.interrupt()
         count++
@@ -229,13 +255,14 @@ export class SubAgentPool {
 
   /** 当前运行中的任务列表 */
   listRunning(): { id: string; goal: string; elapsed: number }[] {
-    return Array.from(this.agents.values())
-      .filter(a => a.status === 'running')
-      .map(a => ({
-        id: a.id,
-        goal: a.goal.slice(0, 60),
-        elapsed: Date.now() - a.startedAt,
-      }))
+    const running: { id: string; goal: string; elapsed: number }[] = []
+    for (const [, inst] of this.agents) {
+      if (inst.status === 'running') running.push({ id: inst.id, goal: inst.goal.slice(0, 60), elapsed: Date.now() - inst.startedAt })
+    }
+    for (const [, inst] of this.scopedAgents) {
+      if (inst.status === 'running') running.push({ id: inst.id, goal: `技能【${inst.skillName}】`, elapsed: Date.now() - inst.startedAt })
+    }
+    return running
   }
 
   private onAgentDone(instance: SubAgentInstance): void {
@@ -267,6 +294,14 @@ export class SubAgentPool {
           this.onAgentDone(inst)
         }
       }
+      for (const [id, inst] of this.scopedAgents) {
+        if (inst.status === 'running' && now - inst.startedAt > SUBAGENT_TIMEOUT_MS) {
+          log('WARN', 'scoped_agent_timeout_kill', { id, skill: inst.skillName, elapsed: now - inst.startedAt })
+          inst.interrupt()
+          this.completedQueue.push(inst.toResult())
+          this.scopedAgents.delete(id)
+        }
+      }
     }, WATCHDOG_INTERVAL_MS)
     this.watchdogTimer.unref?.()
   }
@@ -279,6 +314,7 @@ export class SubAgentPool {
     }
     this.interruptAll()
     this.agents.clear()
+    this.scopedAgents.clear()
     this.completedQueue = []
   }
 }

@@ -238,6 +238,17 @@ function App() {
         <div className="control-area">
           <VoiceInput onResult={handleResult} onConversationChange={setActive} ttsPlaying={ttsPlaying} />
         </div>
+
+        {/* 打开独立 Agent 窗口 */}
+        <button
+          className="cap-toggle-btn"
+          onClick={() => {
+            window.electronAPI.openAgentWindow()
+          }}
+          title="打开 Agent 面板"
+        >
+          <i className="ri-robot-2-line" />
+        </button>
       </div>
     </div>
   )

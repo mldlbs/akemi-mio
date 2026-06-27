@@ -10,6 +10,8 @@ import { monitorEventLoopDelay } from 'perf_hooks'
 import { checkForUpdates, downloadUpdate, quitAndInstall } from '../updater/UpdaterService'
 import { MetricsCollector } from '../observability/MetricsCollector'
 import { getRecentMessages } from '../db/messages'
+import { planManager as planManagerImport } from '../evolution'
+import { createAgentWindow, closeAgentWindow } from '../core/Lifecycle'
 import { join } from 'path'
 import { existsSync } from 'fs'
 
@@ -271,5 +273,43 @@ export function registerHandlers(
   ipcMain.handle('update:install', async () => {
     quitAndInstall()
     return { success: true }
+  })
+
+  // ── Coding Agent UI ──
+
+  ipcMain.handle('agent:getActivePlan', async () => {
+    try {
+      const plan = planManagerImport.getActivePlan()
+      return plan ?? null
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle('agent:listPlans', async () => {
+    try {
+      return planManagerImport.listPlans()
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('agent:openWindow', async () => {
+    try {
+      createAgentWindow()
+      return { success: true }
+    } catch (err) {
+      log('ERROR', 'agent_open_window_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('agent:closeWindow', async () => {
+    try {
+      closeAgentWindow()
+      return { success: true }
+    } catch {
+      return { success: false }
+    }
   })
 }

@@ -5,7 +5,8 @@ export type OutboxCategory = 'dialogue' | 'evolution' | 'insight' | 'creativity'
 export interface OutboxRow {
   id?: number
   chatId: string
-  msgType: 'send' | 'edit' | 'reply' | 'action'
+  bot?: 'chat' | 'push' | 'gen' | 'write'
+  msgType: 'send' | 'edit' | 'reply' | 'action' | 'photo' | 'media_group'
   category?: OutboxCategory
   message: string
   targetMessageId?: number
@@ -27,9 +28,9 @@ export function insertOutbox(row: OutboxRow): number {
   if (outboxExists(hash)) return 0
 
   db.run(
-    `INSERT INTO telegram_outbox (chat_id, msg_type, category, message, target_message_id, hash, status, retry_count, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?)`,
-    [row.chatId, row.msgType, row.category || 'dialogue', row.message, row.targetMessageId ?? null, hash, now],
+    `INSERT INTO telegram_outbox (chat_id, bot, msg_type, category, message, target_message_id, hash, status, retry_count, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)`,
+    [row.chatId, row.bot || 'chat', row.msgType, row.category || 'dialogue', row.message, row.targetMessageId ?? null, hash, now],
   )
   markDirty()
   return (db.exec('SELECT last_insert_rowid()') as any)[0]?.values?.[0]?.[0] ?? 0
@@ -39,7 +40,7 @@ export function insertOutbox(row: OutboxRow): number {
 export function getPendingOutbox(limit = 10): OutboxRow[] {
   const db = getRawDb()
   const rows = db.exec(
-    `SELECT id, chat_id, msg_type, message, target_message_id, hash, status, retry_count, last_error, created_at, updated_at
+    `SELECT id, chat_id, bot, msg_type, message, target_message_id, hash, status, retry_count, last_error, created_at, updated_at
      FROM telegram_outbox
      WHERE status = 'pending'
      ORDER BY id ASC
@@ -50,15 +51,16 @@ export function getPendingOutbox(limit = 10): OutboxRow[] {
   return rows[0].values.map((r: any[]) => ({
     id: r[0],
     chatId: r[1],
-    msgType: r[2],
-    message: r[3],
-    targetMessageId: r[4],
-    hash: r[5],
-    status: r[6],
-    retryCount: r[7],
-    lastError: r[8],
-    createdAt: r[9],
-    updatedAt: r[10],
+    bot: r[2] || 'chat',
+    msgType: r[3],
+    message: r[4],
+    targetMessageId: r[5],
+    hash: r[6],
+    status: r[7],
+    retryCount: r[8],
+    lastError: r[9],
+    createdAt: r[10],
+    updatedAt: r[11],
   }))
 }
 
