@@ -266,7 +266,7 @@
   padding: var(--space-sm) var(--space-md);
   resize: none;
   outline: none;
-  transition: border-color var(--duration-fast) var(--ease-glass);
+  transition: border-color var(--duration-fast) var(--ease-glass), box-shadow var(--duration-fast) var(--ease-glass);
   line-height: 1.5;
   overflow-y: auto;
 }
@@ -284,7 +284,8 @@
 }
 
 .inputbar-field:focus {
-  border-color: var(--border-glass-hover);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-glow);
 }
 
 .inputbar-send {
@@ -307,6 +308,11 @@
 .inputbar-send:hover:not(:disabled) {
   background: var(--accent-soft);
   transform: scale(1.05);
+}
+
+.inputbar-send:disabled {
+  opacity: 0.2;
+  cursor: default;
 }
 
 .inputbar-send:disabled {
@@ -424,6 +430,7 @@
   color: var(--text-muted);
   margin-top: 2px;
   padding: 0 var(--space-sm);
+  opacity: 0.7;
 }
 
 /* ─── Tool / Preview slot placeholders ─── */
