@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { VoiceInput } from './components/VoiceInput'
 import { StatusBar } from './components/StatusBar'
 import { TopBar } from './components/TopBar'
@@ -8,10 +8,19 @@ import { InputBar } from './components/InputBar'
 import { ChatSlot } from './components/ChatSlot'
 import { ToolSlot } from './components/ToolSlot'
 import { PreviewSlot } from './components/PreviewSlot'
-import { playTTS, playTTSBuffer } from './components/audioShared'
+import { playTTS, playTTSBuffer, onTTSStart, onTTSError } from './components/audioShared'
 import { useIPCEvent } from './hooks/useIPCEvent'
+import { useTimerControl } from './hooks/useTimer'
 import { useSlots } from './slots/SlotContext'
 import type { MessageItem } from './components/ChatBubble'
+
+/** 临时拼接的 AI 回复流 */
+interface PendingMessage {
+  id: string
+  content: string
+}
+
+export type { MessageItem }
 
 function App() {
   const [active, setActive] = useState(false)
@@ -19,8 +28,43 @@ function App() {
   const [error, setError] = useState<string | undefined>()
   const [historyMessages, setHistoryMessages] = useState<MessageItem[]>([])
   const [sessionHealth, setSessionHealth] = useState('100:HEALTHY:RUNNING')
+  const [pendingText, setPendingText] = useState('')
+  const [displayText, setDisplayText] = useState('')
 
-  const { uiState, setActiveSlot } = useSlots()
+  const fadeTimer = useTimerControl()
+  const revealTimer = useTimerControl()
+  const textRef = useRef('')
+  const { uiState, setActiveSlot, setActiveChatId } = useSlots()
+
+  useEffect(() => {
+    textRef.current = pendingText
+  }, [pendingText])
+
+  useEffect(() => {
+    const onStart = (duration: number) => {
+      const t = textRef.current
+      if (!t) return
+      revealTimer.clear()
+      setDisplayText('')
+      const totalMs = duration * 1000
+      const intervalMs = Math.max(20, totalMs / t.length)
+      let i = 0
+      revealTimer.setInterval(() => {
+        i++
+        setDisplayText(t.slice(0, i))
+        if (i >= t.length) revealTimer.clear()
+      }, intervalMs)
+    }
+    const onError = (err: string) => {
+      setError(err)
+    }
+    onTTSStart(onStart)
+    onTTSError(onError)
+    return () => {
+      revealTimer.clear()
+      fadeTimer.clear()
+    }
+  }, [])
 
   // 加载对话历史
   useEffect(() => {
@@ -36,6 +80,11 @@ function App() {
     if (s.error) setError(s.error as string)
     if (s.ttsPlaying !== undefined) setTtsPlaying(s.ttsPlaying as boolean)
     if (s.sessionHealth) setSessionHealth(s.sessionHealth as string)
+  })
+
+  useIPCEvent(window.electronAPI.onAIChunk, (chunk) => {
+    setPendingText((prev) => prev + chunk)
+    fadeTimer.clear()
   })
 
   useIPCEvent(window.electronAPI.onTTSAudio, (filePath) => {
@@ -56,25 +105,46 @@ function App() {
 
   useIPCEvent(window.electronAPI.onMessageNew, (msg) => {
     setHistoryMessages((prev) => [...prev, msg])
+    // 清除 pending 状态，因为正式消息已到达
+    setPendingText('')
+    setDisplayText('')
+    revealTimer.clear()
   })
 
   const handleResult = useCallback(async (t: string) => {
     if (!t) return
     setError(undefined)
+    setPendingText('')
+    setDisplayText('')
+    revealTimer.clear()
     try {
       await window.electronAPI.chat(t)
     } catch (err) {
       setError(String(err))
     }
+    fadeTimer.set(() => {
+      setPendingText('')
+      setDisplayText('')
+    }, 10000)
   }, [])
 
   return (
     <div className="app-shell">
       <TopBar />
       <div className="app-body">
-        <Sidebar />
+        <Sidebar
+          historyMessages={historyMessages}
+          activeChatId={uiState.activeChatId}
+          onSelectChat={setActiveChatId}
+        />
         <MainArea>
-          {uiState.activeSlot === 'chat' && <ChatSlot messages={historyMessages} />}
+          {uiState.activeSlot === 'chat' && (
+            <ChatSlot
+              messages={historyMessages}
+              pendingText={pendingText}
+              displayText={displayText}
+            />
+          )}
           {uiState.activeSlot === 'tool' && <ToolSlot />}
           {uiState.activeSlot === 'preview' && <PreviewSlot />}
         </MainArea>

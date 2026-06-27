@@ -4,6 +4,7 @@ import type { UiState, ActiveSlot } from './types'
 interface SlotContextValue {
   uiState: UiState
   setActiveSlot: (slot: ActiveSlot) => void
+  setActiveChatId: (id: string) => void
   toggleSidebar: () => void
   setCommandMode: (mode: boolean) => void
 }
@@ -22,6 +23,10 @@ export function SlotProvider({ children }: { children: ReactNode }) {
     setUiState((s) => ({ ...s, activeSlot: slot, commandMode: false }))
   }, [])
 
+  const setActiveChatId = useCallback((id: string) => {
+    setUiState((s) => ({ ...s, activeChatId: id }))
+  }, [])
+
   const toggleSidebar = useCallback(() => {
     setUiState((s) => ({ ...s, sidebarOpen: !s.sidebarOpen }))
   }, [])
@@ -30,11 +35,7 @@ export function SlotProvider({ children }: { children: ReactNode }) {
     setUiState((s) => ({ ...s, commandMode: mode }))
   }, [])
 
-  return (
-    <SlotContext.Provider value={{ uiState, setActiveSlot, toggleSidebar, setCommandMode }}>
-      {children}
-    </SlotContext.Provider>
-  )
+  return <SlotContext.Provider value={{ uiState, setActiveSlot, setActiveChatId, toggleSidebar, setCommandMode }}>{children}</SlotContext.Provider>
 }
 
 export function useSlots(): SlotContextValue {

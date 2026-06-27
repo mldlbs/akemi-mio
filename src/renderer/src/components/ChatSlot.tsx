@@ -3,16 +3,20 @@ import type { MessageItem } from './ChatBubble'
 
 interface ChatSlotProps {
   messages: MessageItem[]
+  pendingText?: string
+  displayText?: string
 }
 
-export function ChatSlot({ messages }: ChatSlotProps) {
+export function ChatSlot({ messages, pendingText, displayText }: ChatSlotProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, displayText])
 
-  if (messages.length === 0) {
+  const hasPending = !!pendingText
+
+  if (messages.length === 0 && !hasPending) {
     return (
       <div className="chat-slot">
         <div className="chat-empty">
@@ -34,6 +38,13 @@ export function ChatSlot({ messages }: ChatSlotProps) {
           <div className="msg-time">{new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</div>
         </div>
       ))}
+      {/* 流式响应中的 pending 消息 */}
+      {hasPending && (
+        <div className="msg msg-row assistant">
+          <div className="msg-label">秋山澪</div>
+          <div className="msg-bubble">{displayText || pendingText}</div>
+        </div>
+      )}
       <div ref={bottomRef} />
     </div>
   )
