@@ -34,12 +34,9 @@ export function Sidebar({ historyMessages, activeChatId, onSelectChat }: Sidebar
 
   return (
     <aside className="sidebar">
-      {groups.length === 0 && (
-        <div className="sidebar-header" style={{ borderBottom: 'none' }}>Recent</div>
-      )}
       <div className="sidebar-content">
         {groups.length === 0 ? (
-          <div style={{ padding: 'var(--space-lg)', color: 'var(--text-muted)', fontSize: 'var(--fs-small)', textAlign: 'center' }}>
+          <div style={{ padding: 'var(--space-xl) var(--space-lg)', color: 'var(--text-muted)', fontSize: 'var(--fs-small)', textAlign: 'center' }}>
             暂无会话
           </div>
         ) : (
