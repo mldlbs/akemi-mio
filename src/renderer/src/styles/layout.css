@@ -20,12 +20,12 @@
   min-height: var(--topbar-height);
   display: flex;
   align-items: center;
-  padding: 0 var(--space-lg);
+  padding: 0 var(--space-sm) 0 var(--space-md);
   background: var(--bg-topbar);
   border-bottom: 1px solid var(--border-glass);
   -webkit-app-region: drag;
   z-index: 20;
-  gap: var(--space-md);
+  gap: var(--space-xs);
 }
 
 .topbar-logo {
@@ -34,21 +34,40 @@
   color: var(--text-primary);
   letter-spacing: 0.04em;
   -webkit-app-region: no-drag;
+  margin-right: var(--space-lg);
 }
 
-.topbar-title {
-  font-size: var(--fs-small);
+.topbar-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  -webkit-app-region: no-drag;
+}
+
+.topbar-btn {
+  width: 32px; height: 32px; min-width: 32px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-muted);
-  margin-left: auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+  -webkit-app-region: no-drag;
+}
+
+.topbar-btn:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-glass);
+  background: var(--bg-glass);
 }
 
 .topbar-actions {
   display: flex;
   align-items: center;
   gap: var(--space-xs);
+  margin-left: auto;
   -webkit-app-region: no-drag;
 }
 

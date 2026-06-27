@@ -1,11 +1,13 @@
-import { useState, useCallback, useRef, type KeyboardEvent } from 'react'
+import { useState, useCallback, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { useSlots } from '../slots/SlotContext'
 
 interface InputBarProps {
   onSend: (text: string) => void
+  /** Renders before the textarea */
+  voiceSlot?: ReactNode
 }
 
-export function InputBar({ onSend }: InputBarProps) {
+export function InputBar({ onSend, voiceSlot }: InputBarProps) {
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { setCommandMode } = useSlots()
@@ -43,9 +45,7 @@ export function InputBar({ onSend }: InputBarProps) {
   return (
     <div className="inputbar">
       <div className="inputbar-row">
-        <button className="inputbar-attach" title="附加">
-          <i className="ri-attachment-2" />
-        </button>
+        {voiceSlot}
         <textarea
           ref={textareaRef}
           className="inputbar-field"

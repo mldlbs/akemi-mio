@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { VoiceInput } from './components/VoiceInput'
-import { StatusBar } from './components/StatusBar'
 import { TopBar } from './components/TopBar'
 import { Sidebar } from './components/Sidebar'
 import { MainArea } from './components/MainArea'
@@ -129,30 +128,43 @@ function App() {
 
   return (
     <div className="app-shell">
-      <TopBar />
+      <TopBar
+        conversationActive={active}
+        ttsPlaying={ttsPlaying}
+        error={error}
+        sessionHealth={sessionHealth}
+        agentSlot={
+          <button
+            className="cap-toggle-btn"
+            onClick={() => window.electronAPI.openAgentWindow()}
+            title="Agent 面板"
+          >
+            <i className="ri-robot-2-line" />
+          </button>
+        }
+      />
       <div className="app-body">
         <Sidebar historyMessages={historyMessages} activeChatId={uiState.activeChatId} onSelectChat={setActiveChatId} />
         <MainArea>
-          {uiState.activeSlot === 'chat' && <ChatSlot messages={historyMessages} pendingText={pendingText} displayText={displayText} transcribed={transcribed} toolStatus={toolStatus} />}
+          {uiState.activeSlot === 'chat' && (
+            <ChatSlot
+              messages={historyMessages}
+              pendingText={pendingText}
+              displayText={displayText}
+              transcribed={transcribed}
+              toolStatus={toolStatus}
+            />
+          )}
           {uiState.activeSlot === 'tool' && <ToolSlot />}
           {uiState.activeSlot === 'preview' && <PreviewSlot />}
         </MainArea>
       </div>
-      <InputBar onSend={handleResult} />
-
-      <div style={{ position: 'fixed', bottom: 80, right: 24, zIndex: 50, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-        <StatusBar conversationActive={active} ttsPlaying={ttsPlaying} error={error} sessionHealth={sessionHealth} />
-        <VoiceInput onResult={handleResult} onConversationChange={setActive} ttsPlaying={ttsPlaying} />
-      </div>
-
-      <button
-        className="cap-toggle-btn"
-        onClick={() => window.electronAPI.openAgentWindow()}
-        title="打开 Agent 面板"
-        style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 50 }}
-      >
-        <i className="ri-robot-2-line" />
-      </button>
+      <InputBar
+        onSend={handleResult}
+        voiceSlot={
+          <VoiceInput onResult={handleResult} onConversationChange={setActive} ttsPlaying={ttsPlaying} />
+        }
+      />
     </div>
   )
 }

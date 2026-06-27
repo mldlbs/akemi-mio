@@ -1,23 +1,41 @@
+import type { ReactNode } from 'react'
 import { useSlots } from '../slots/SlotContext'
+import { StatusBar } from './StatusBar'
 
-export function TopBar() {
+interface TopBarProps {
+  conversationActive: boolean
+  ttsPlaying?: boolean
+  error?: string
+  sessionHealth?: string
+  /** Agent window toggle button — renders into actions area if provided */
+  agentSlot?: ReactNode
+}
+
+export function TopBar({ conversationActive, ttsPlaying, error, sessionHealth, agentSlot }: TopBarProps) {
   const { uiState, toggleSidebar } = useSlots()
 
   return (
     <header className="topbar">
       <button
-        className="sidebar-item"
+        className="topbar-btn"
         onClick={toggleSidebar}
-        style={{ width: 32, minWidth: 32, justifyContent: 'center', padding: 0 }}
         title={uiState.sidebarOpen ? '收起侧栏' : '展开侧栏'}
       >
         <i className={`ri-menu-${uiState.sidebarOpen ? 'fold' : 'unfold'}-line`} />
       </button>
       <span className="topbar-logo">秋山澪</span>
+
+      <div className="topbar-center">
+        <StatusBar
+          conversationActive={conversationActive}
+          ttsPlaying={ttsPlaying}
+          error={error}
+          sessionHealth={sessionHealth}
+        />
+      </div>
+
       <div className="topbar-actions">
-        <button className="sidebar-item" style={{ width: 32, minWidth: 32, justifyContent: 'center', padding: 0 }} title="设置">
-          <i className="ri-settings-3-line" />
-        </button>
+        {agentSlot}
       </div>
     </header>
   )
