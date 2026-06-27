@@ -317,7 +317,7 @@
 /* ─── Chat slot messages ─── */
 .chat-slot {
   flex: 1;
-  padding: var(--space-md) var(--space-lg) var(--space-xl);
+  padding: var(--space-xl) var(--space-lg) var(--space-xl);
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
@@ -389,6 +389,22 @@
   line-height: 1.6;
   word-break: break-word;
   white-space: pre-wrap;
+}
+
+/* 流式回复时的闪烁光标 */
+.msg-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink-cursor 0.8s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 .msg-row.user .msg-bubble {

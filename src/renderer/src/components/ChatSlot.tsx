@@ -33,7 +33,6 @@ export function ChatSlot({ messages, pendingText, displayText, transcribed, tool
 
   return (
     <div className="chat-slot">
-      {/* 当前语音输入 / 转录 */}
       {transcribed && (
         <div className="msg msg-row user">
           <div className="msg-label">你</div>
@@ -51,11 +50,13 @@ export function ChatSlot({ messages, pendingText, displayText, transcribed, tool
         </div>
       ))}
 
-      {/* 流式响应中的 pending 消息 */}
       {hasPending && (
         <div className="msg msg-row assistant">
           <div className="msg-label">秋山澪</div>
-          <div className="msg-bubble">{displayText || pendingText}</div>
+          <div className="msg-bubble">
+            {displayText || pendingText}
+            <span className="msg-cursor" />
+          </div>
         </div>
       )}
       <div ref={bottomRef} />
