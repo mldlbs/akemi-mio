@@ -24,7 +24,7 @@ import { ToolScheduler, type ToolResult } from './ToolScheduler'
 import type { TokenAccount } from '../cognitive/TokenEconomy'
 import { SkillManager } from '../skill'
 import { WorkingMemory } from './WorkingMemory'
-import { createMessageId, insertMessage, type StoredMessage } from '../db/messages'
+import { createMessageId, createSessionId, insertMessage, getLastSessionId, getLastMessageTime, type StoredMessage } from '../db/messages'
 import { RunState, RunContext } from './runstate'
 import { SessionRecoveryManager } from './SessionRecoveryManager'
 import { classify as classifyError } from './ErrorClassifier'
@@ -152,6 +152,11 @@ export class ChatExecutor {
     if (result.transitionSignal) {
       this.workingMemory.scratchpad.add('system_hint', result.transitionSignal)
     }
+    if (result.changed) {
+      this.mainWindow?.webContents.send('persona:updated', {
+        level: this.personaManager.getCurrentLevel(),
+      })
+    }
   }
 
   private refreshMemory(): void {
@@ -175,6 +180,17 @@ export class ChatExecutor {
     if (memCtx || reflectCtx || allExtraModules || this.identityContext) {
       this.workingMemory.refreshMemory(memCtx, reflectCtx, allExtraModules, this.identityContext || undefined)
     }
+  }
+
+  /** 自动分配或续用 session_id：30 分钟无活动则新建 session */
+  private resolveSessionId(): string {
+    const lastTime = getLastMessageTime()
+    const lastSid = getLastSessionId()
+    const THIRTY_MIN = 30 * 60 * 1000
+    if (lastSid && lastTime && Date.now() - lastTime < THIRTY_MIN) {
+      return lastSid
+    }
+    return createSessionId()
   }
 
   private persistAssistantMessage(reply: string, source: string): void {
@@ -216,11 +232,13 @@ export class ChatExecutor {
     this.refreshMemory()
     this.workingMemory.addUser(text)
     eventBus.emit('agent.input.received', { text, requestId: rid, source })
+    const sessionId = this.resolveSessionId()
     const userMsg: StoredMessage = {
       id: createMessageId(),
       source,
       role: 'user',
       content: text,
+      sessionId,
       telegramChatId: extra?.telegramChatId ?? null,
       telegramUserId: extra?.telegramUserId ?? null,
       telegramFrom: extra?.telegramFrom ?? null,
@@ -254,6 +272,7 @@ export class ChatExecutor {
           source,
           role: 'assistant',
           content: reply,
+          sessionId,
           createdAt: Date.now(),
         }
         insertMessage(assistMsg)

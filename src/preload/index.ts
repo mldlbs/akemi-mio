@@ -58,13 +58,19 @@ const electronAPI = {
     }
   },
 
-  getMessageHistory: (limit?: number): Promise<{ id: string; source: string; role: string; content: string; createdAt: number }[]> =>
+  getMessageHistory: (limit?: number): Promise<{ id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number }[]> =>
     ipcRenderer.invoke('messages:getHistory', limit),
 
-  onMessageNew: (callback: (msg: { id: string; source: string; role: string; content: string; createdAt: number }) => void) => {
+  getSessions: (): Promise<{ id: string; label: string; messageCount: number; lastActivityAt: number; createdAt: number }[]> =>
+    ipcRenderer.invoke('messages:getSessions'),
+
+  getMessagesBySession: (sessionId: string): Promise<{ id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number }[]> =>
+    ipcRenderer.invoke('messages:getBySession', sessionId),
+
+  onMessageNew: (callback: (msg: { id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number }) => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      msg: { id: string; source: string; role: string; content: string; createdAt: number },
+      msg: { id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number },
     ) => callback(msg)
     ipcRenderer.on('message:new', handler)
     return () => {
@@ -221,6 +227,13 @@ const electronAPI = {
   openAgentWindow: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('agent:openWindow'),
 
   closeAgentWindow: (): Promise<{ success: boolean }> => ipcRenderer.invoke('agent:closeWindow'),
+
+  // 人格切换事件
+  onPersonaUpdated: (callback: (data: { level: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { level: string }) => callback(data)
+    ipcRenderer.on('persona:updated', handler)
+    return () => ipcRenderer.removeListener('persona:updated', handler)
+  },
 }
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)

@@ -5,6 +5,7 @@ export interface MessageItem {
   source: 'electron' | 'telegram'
   role: 'user' | 'assistant'
   content: string
+  sessionId?: string
   createdAt: number
 }
 

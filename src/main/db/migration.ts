@@ -491,6 +491,13 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_outbox_category ON telegram_outbox(category);
     `,
   },
+  {
+    version: 24,
+    sql: `
+      ALTER TABLE messages ADD COLUMN session_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
+    `,
+  },
 ]
 
 export function runMigrations(sqlite: SqlJsDatabase): void {

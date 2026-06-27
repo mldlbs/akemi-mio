@@ -15,6 +15,14 @@ import type { MessageItem } from './components/ChatBubble'
 
 export type { MessageItem }
 
+interface SessionItem {
+  id: string
+  label: string
+  messageCount: number
+  lastActivityAt: number
+  createdAt: number
+}
+
 function App() {
   const [active, setActive] = useState(false)
   const [ttsPlaying, setTtsPlaying] = useState(false)
@@ -25,11 +33,14 @@ function App() {
   const [displayText, setDisplayText] = useState('')
   const [transcribed, setTranscribed] = useState('')
   const [toolStatus, setToolStatus] = useState<{ type: string; tool: string; message: string } | null>(null)
+  const [personaLevel, setPersonaLevel] = useState<string>('core')
+  const [sessions, setSessions] = useState<SessionItem[]>([])
+  const [activeSessionId, setActiveSessionId] = useState<string>('')
 
   const fadeTimer = useTimerControl()
   const revealTimer = useTimerControl()
   const textRef = useRef('')
-  const { uiState, setActiveSlot, setActiveChatId } = useSlots()
+  const { uiState, setActiveSlot } = useSlots()
 
   useEffect(() => {
     textRef.current = pendingText
@@ -61,14 +72,29 @@ function App() {
     }
   }, [])
 
+  // 加载会话列表
   useEffect(() => {
     window.electronAPI
-      .getMessageHistory(200)
+      .getSessions()
+      .then((s) => {
+        setSessions(s)
+        if (s.length > 0 && !activeSessionId) {
+          setActiveSessionId(s[0].id)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  // 按活跃 session 加载消息
+  useEffect(() => {
+    if (!activeSessionId) return
+    window.electronAPI
+      .getMessagesBySession(activeSessionId)
       .then((msgs) => {
         setHistoryMessages(msgs)
       })
       .catch(() => {})
-  }, [])
+  }, [activeSessionId])
 
   useIPCEvent(window.electronAPI.onStateUpdate, (s) => {
     if (s.error) setError(s.error as string)
@@ -100,10 +126,19 @@ function App() {
   })
 
   useIPCEvent(window.electronAPI.onMessageNew, (msg) => {
-    setHistoryMessages((prev) => [...prev, msg])
+    // 仅当消息属于当前 session 时追加
+    if (msg.sessionId === activeSessionId) {
+      setHistoryMessages((prev) => [...prev, msg])
+    }
     setPendingText('')
     setDisplayText('')
     revealTimer.clear()
+    // 刷新会话列表
+    window.electronAPI.getSessions().then(setSessions).catch(() => {})
+  })
+
+  useIPCEvent(window.electronAPI.onPersonaUpdated, (data) => {
+    setPersonaLevel(data.level)
   })
 
   const handleResult = useCallback(async (t: string) => {
@@ -126,6 +161,10 @@ function App() {
     }, 10000)
   }, [])
 
+  const handleSelectChat = useCallback((sessionId: string) => {
+    setActiveSessionId(sessionId)
+  }, [])
+
   return (
     <div className="app-shell">
       <TopBar
@@ -133,18 +172,15 @@ function App() {
         ttsPlaying={ttsPlaying}
         error={error}
         sessionHealth={sessionHealth}
+        personaLevel={personaLevel}
         agentSlot={
-          <button
-            className="cap-toggle-btn"
-            onClick={() => window.electronAPI.openAgentWindow()}
-            title="Agent 面板"
-          >
+          <button className="cap-toggle-btn" onClick={() => window.electronAPI.openAgentWindow()} title="Agent 面板">
             <i className="ri-robot-2-line" />
           </button>
         }
       />
       <div className="app-body">
-        <Sidebar historyMessages={historyMessages} activeChatId={uiState.activeChatId} onSelectChat={setActiveChatId} />
+        <Sidebar sessions={sessions} activeSessionId={activeSessionId} onSelectChat={handleSelectChat} />
         <MainArea>
           {uiState.activeSlot === 'chat' && (
             <ChatSlot
@@ -161,9 +197,7 @@ function App() {
       </div>
       <InputBar
         onSend={handleResult}
-        voiceSlot={
-          <VoiceInput onResult={handleResult} onConversationChange={setActive} ttsPlaying={ttsPlaying} />
-        }
+        voiceSlot={<VoiceInput onResult={handleResult} onConversationChange={setActive} ttsPlaying={ttsPlaying} />}
       />
     </div>
   )

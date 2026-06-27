@@ -250,6 +250,24 @@ export function registerHandlers(
     }
   })
 
+  ipcMain.handle('messages:getSessions', async () => {
+    try {
+      return await getSessions()
+    } catch (err) {
+      log('ERROR', 'get_sessions_failed', { error: String(err) })
+      return []
+    }
+  })
+
+  ipcMain.handle('messages:getBySession', async (_event, sessionId: string) => {
+    try {
+      return await getMessagesBySession(sessionId)
+    } catch (err) {
+      log('ERROR', 'get_by_session_failed', { error: String(err), sessionId })
+      return []
+    }
+  })
+
   // === Auto-update handlers ===
   ipcMain.handle('update:check', async () => {
     try {

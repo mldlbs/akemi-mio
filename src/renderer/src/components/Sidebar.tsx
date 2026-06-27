@@ -1,57 +1,58 @@
 import { useMemo } from 'react'
-import type { MessageItem } from './ChatBubble'
+
+interface SessionItem {
+  id: string
+  label: string
+  messageCount: number
+  lastActivityAt: number
+  createdAt: number
+}
 
 interface SidebarProps {
-  historyMessages: MessageItem[]
-  activeChatId: string
+  sessions: SessionItem[]
+  activeSessionId: string
   onSelectChat: (id: string) => void
 }
 
-/** 按用户消息分组为会话列表 */
-function buildSessionGroups(messages: MessageItem[]) {
-  const dateGroupMap = new Map<string, { label: string; firstMsgId: string; time: string }[]>()
-
-  for (const m of messages) {
-    if (m.role !== 'user') continue
-    const d = new Date(m.createdAt)
+/** 按 lastActivityAt 分组为日期段 */
+function groupSessions(sessions: SessionItem[]) {
+  const dateGroupMap = new Map<string, SessionItem[]>()
+  for (const s of sessions) {
+    const d = new Date(s.lastActivityAt)
     const dateStr = d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-    const timeStr = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-
     if (!dateGroupMap.has(dateStr)) {
       dateGroupMap.set(dateStr, [])
     }
-    const list = dateGroupMap.get(dateStr)!
-    if (list.length === 0 || list[list.length - 1].firstMsgId !== m.id) {
-      list.push({ label: m.content.slice(0, 30), firstMsgId: m.id, time: timeStr })
-    }
+    dateGroupMap.get(dateStr)!.push(s)
   }
-
-  return Array.from(dateGroupMap.entries()).map(([date, sessions]) => ({ date, sessions }))
+  return Array.from(dateGroupMap.entries())
 }
 
-export function Sidebar({ historyMessages, activeChatId, onSelectChat }: SidebarProps) {
-  const groups = useMemo(() => buildSessionGroups(historyMessages), [historyMessages])
+export function Sidebar({ sessions, activeSessionId, onSelectChat }: SidebarProps) {
+  const groups = useMemo(() => groupSessions(sessions), [sessions])
 
   return (
     <aside className="sidebar">
       <div className="sidebar-content">
-        {groups.length === 0 ? (
+        {sessions.length === 0 ? (
           <div style={{ padding: 'var(--space-xl) var(--space-lg)', color: 'var(--text-muted)', fontSize: 'var(--fs-small)', textAlign: 'center' }}>
             暂无会话
           </div>
         ) : (
-          groups.map((g) => (
-            <div key={g.date}>
-              <div className="sidebar-header">{g.date}</div>
-              {g.sessions.map((s) => (
+          groups.map(([date, items]) => (
+            <div key={date}>
+              <div className="sidebar-header">{date}</div>
+              {items.map((s) => (
                 <button
-                  key={s.firstMsgId}
-                  className={`sidebar-item${s.firstMsgId === activeChatId ? ' active' : ''}`}
-                  onClick={() => onSelectChat(s.firstMsgId)}
+                  key={s.id}
+                  className={`sidebar-item${s.id === activeSessionId ? ' active' : ''}`}
+                  onClick={() => onSelectChat(s.id)}
                 >
                   <i className="ri-chat-1-line" style={{ fontSize: 14, opacity: 0.6 }} />
                   <span>{s.label}</span>
-                  <span className="sidebar-item-time">{s.time}</span>
+                  <span className="sidebar-item-time">
+                    {new Date(s.lastActivityAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 </button>
               ))}
             </div>

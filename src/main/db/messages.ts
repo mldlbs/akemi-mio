@@ -6,6 +6,7 @@ export interface StoredMessage {
   source: 'electron' | 'telegram'
   role: 'user' | 'assistant'
   content: string
+  sessionId?: string
   telegramChatId?: number | null
   telegramUserId?: number | null
   telegramFrom?: string | null
@@ -13,21 +14,34 @@ export interface StoredMessage {
   createdAt: number
 }
 
+export interface SessionItem {
+  id: string
+  label: string
+  messageCount: number
+  lastActivityAt: number
+  createdAt: number
+}
+
 export function createMessageId(): string {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function createSessionId(): string {
+  return `session_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
 }
 
 export function insertMessage(msg: StoredMessage): void {
   try {
     const db = getRawDb()
     db.run(
-      `INSERT INTO messages (id, source, role, content, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (id, source, role, content, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         msg.id,
         msg.source,
         msg.role,
         msg.content,
+        msg.sessionId ?? null,
         msg.telegramChatId ?? null,
         msg.telegramUserId ?? null,
         msg.telegramFrom ?? null,
@@ -46,6 +60,7 @@ interface StoredMessageRow {
   source: string
   role: string
   content: string
+  session_id: string | null
   telegram_chat_id: number | null
   telegram_user_id: number | null
   telegram_from: string | null
@@ -57,7 +72,7 @@ export function getRecentMessages(limit = 100): StoredMessage[] {
   try {
     const db = getRawDb()
     const rows = db.exec(
-      `SELECT id, source, role, content, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at
+      `SELECT id, source, role, content, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at
        FROM messages ORDER BY created_at ASC LIMIT ?`,
       [limit],
     )
@@ -74,12 +89,93 @@ export function getRecentMessages(limit = 100): StoredMessage[] {
   }
 }
 
+export function getSessions(): SessionItem[] {
+  try {
+    const db = getRawDb()
+    const rows = db.exec(
+      `SELECT session_id,
+              (SELECT content FROM messages AS sub WHERE sub.session_id = m.session_id AND sub.role = 'user' ORDER BY sub.created_at ASC LIMIT 1) AS label,
+              COUNT(*) AS message_count,
+              MAX(created_at) AS last_activity_at,
+              MIN(created_at) AS created_at
+       FROM messages m
+       WHERE session_id IS NOT NULL
+       GROUP BY session_id
+       ORDER BY last_activity_at DESC`,
+    )
+    if (!rows.length || !rows[0].values.length) return []
+    const cols = rows[0].columns
+    return rows[0].values.map((row: any[]) => {
+      const obj: Record<string, any> = {}
+      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i]
+      return {
+        id: obj.session_id as string,
+        label: (obj.label as string)?.slice(0, 40) || '新对话',
+        messageCount: obj.message_count as number,
+        lastActivityAt: obj.last_activity_at as number,
+        createdAt: obj.created_at as number,
+      }
+    })
+  } catch (err) {
+    log('ERROR', 'db_get_sessions_failed', { error: String(err) })
+    return []
+  }
+}
+
+export function getMessagesBySession(sessionId: string): StoredMessage[] {
+  try {
+    const db = getRawDb()
+    const rows = db.exec(
+      `SELECT id, source, role, content, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at
+       FROM messages WHERE session_id = ? ORDER BY created_at ASC`,
+      [sessionId],
+    )
+    if (!rows.length || !rows[0].values.length) return []
+    const cols = rows[0].columns
+    return rows[0].values.map((row: any[]) => {
+      const obj: Record<string, any> = {}
+      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i]
+      return rowToMessage(obj as StoredMessageRow)
+    })
+  } catch (err) {
+    log('ERROR', 'db_get_messages_by_session_failed', { error: String(err), sessionId })
+    return []
+  }
+}
+
+/** 获取最后一条消息的 session_id（用于自动分组） */
+export function getLastSessionId(): string | null {
+  try {
+    const db = getRawDb()
+    const rows = db.exec(`SELECT session_id FROM messages ORDER BY created_at DESC LIMIT 1`)
+    if (!rows.length || !rows[0].values.length) return null
+    return (rows[0].values[0] as any[])[0] as string | null
+  } catch {
+    return null
+  }
+}
+
+/** 获取最后一条消息的时间戳 */
+export function getLastMessageTime(): number | null {
+  try {
+    const db = getRawDb()
+    const rows = db.exec(`SELECT created_at FROM messages ORDER BY created_at DESC LIMIT 1`)
+    if (!rows.length || !rows[0].values.length) return null
+    return (rows[0].values[0] as any[])[0] as number
+  } catch {
+    return null
+  }
+}
+
+export { createSessionId }
+
 function rowToMessage(row: StoredMessageRow): StoredMessage {
   return {
     id: row.id,
     source: row.source as 'electron' | 'telegram',
     role: row.role as 'user' | 'assistant',
     content: row.content,
+    sessionId: row.session_id ?? undefined,
     telegramChatId: row.telegram_chat_id,
     telegramUserId: row.telegram_user_id,
     telegramFrom: row.telegram_from,
