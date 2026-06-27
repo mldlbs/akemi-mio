@@ -36,6 +36,8 @@ import { runObserve } from './ObserveStage'
 import { runThink } from './ThinkStage'
 import { runReflect } from './ReflectStage'
 import { ObservabilityLogger } from '../observability/ObservabilityLogger'
+import { PersonaStateManager } from './PersonaStateManager'
+import { PersonaDriftControlSystem, DRIFT_CORRECTION_PROMPT } from './PersonaDriftControlSystem'
 
 export class ChatExecutor {
   private llmService: LlmService
@@ -67,6 +69,12 @@ export class ChatExecutor {
   private thinkStageCount = 0
   private obsLogger: ObservabilityLogger | null = null
   private lastUserText = ''
+  /** 人格仲裁管理器 */
+  private personaManager = new PersonaStateManager()
+  /** 人格漂移控制系统 */
+  private driftControl = new PersonaDriftControlSystem()
+  /** 上轮 drift 评估产生的待注入消息信号 */
+  private pendingDriftSignal: string | null = null
 
   constructor(
     llmService: LlmService,
@@ -139,6 +147,13 @@ export class ChatExecutor {
     return this.runContext?.running ?? false
   }
 
+  private resolvePersonaFor(text: string): void {
+    const result = this.personaManager.update(text)
+    if (result.transitionSignal) {
+      this.workingMemory.scratchpad.add('system_hint', result.transitionSignal)
+    }
+  }
+
   private refreshMemory(): void {
     if (!this.memoryService) return
     const memCtx = this.memoryService.getFormattedContext()
@@ -148,9 +163,15 @@ export class ChatExecutor {
     const skillModules = this.lastUserText
       ? this.skillManager?.getMatchedPromptModules(this.lastUserText) || []
       : this.skillManager?.getEnabledPromptModules() || []
-    const extraModules = skillModules.length > 0 ? skillModules : undefined
+    const extraModules: string[] = [...skillModules]
+    // Persona 注入 — 委托 PersonaStateManager
+    extraModules.unshift(...this.personaManager.getExtraModules())
+    // Drift 修正 — 连续漂移时注入 system prompt 级别修正
+    if (this.driftControl.needsCorrectionPrompt()) {
+      extraModules.unshift(DRIFT_CORRECTION_PROMPT)
+    }
     const wfModule = this.activeWorkflowModule
-    const allExtraModules = wfModule ? [wfModule, ...(extraModules || [])] : extraModules
+    const allExtraModules = wfModule ? [wfModule, ...extraModules] : extraModules.length > 0 ? extraModules : undefined
     if (memCtx || reflectCtx || allExtraModules || this.identityContext) {
       this.workingMemory.refreshMemory(memCtx, reflectCtx, allExtraModules, this.identityContext || undefined)
     }
@@ -179,6 +200,13 @@ export class ChatExecutor {
     this.memoryService?.recordInteraction()
     this.memoryService?.setLastUserText(text)
     this.lastUserText = text
+    // Persona 仲裁：检测意图 → 路由人格
+    this.resolvePersonaFor(text)
+    // 注入上轮待处理的 drift 修正信号
+    if (this.pendingDriftSignal) {
+      this.workingMemory.scratchpad.add('system_hint', this.pendingDriftSignal)
+      this.pendingDriftSignal = null
+    }
     // 重置跨请求计数器
     this.consecutiveRetryableErrors = 0
     this.consecutiveInvalidRequest = 0
@@ -232,6 +260,12 @@ export class ChatExecutor {
         this.mainWindow?.webContents.send('message:new', assistMsg)
       }
       this.reflectLoop.trigger({ requestId: rid, userMessage: text, replyLength: reply.length, durationMs: Date.now() - t0 })
+      // Persona Drift Control：输出后评估
+      if (reply) {
+        const { messageSignal } = this.driftControl.evaluateOutput(reply, this.personaManager.getCurrentLevel())
+        // 修正信号在下一轮注入（本轮已结束）
+        this.pendingDriftSignal = messageSignal
+      }
       // P0→P1 沉淀（MetaController.onInteractionEnd）
       if (reply && this.memoryService) {
         this.memoryService.metaController.onInteractionEnd({

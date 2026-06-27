@@ -17,6 +17,8 @@ import { cardGeneratorTool } from './definitions/CardGeneratorTool'
 import { rememberProcedureTool, listProceduresTool } from './definitions/ProceduralMemoryTool'
 import { centosExecTool, centosReadFileTool, centosWriteFileTool, centosGrepTool, centosSearchFilesTool } from './definitions/SshTools'
 import { spawnSkillAgentTool } from './definitions/SkillAgentTools'
+import { socialPipelineTool } from './definitions/SocialPipelineTool'
+import { queryTrendsTool } from './definitions/TrendQueryTool'
 
 export function getAllTools(): Tool[] {
   return [
@@ -52,6 +54,8 @@ export function getAllTools(): Tool[] {
     centosWriteFileTool as Tool,
     centosGrepTool as Tool,
     centosSearchFilesTool as Tool,
+    socialPipelineTool as Tool,
+    queryTrendsTool as Tool,
   ]
 }
 
