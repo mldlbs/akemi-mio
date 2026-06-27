@@ -420,7 +420,7 @@
 }
 
 .msg-row.assistant .msg-bubble {
-  background: oklch(0.35 0.04 48 / 0.45);
+  background: oklch(0.82 0.02 75 / 0.5);
   color: var(--text-glass);
   border-bottom-left-radius: 4px;
 }
