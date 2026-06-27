@@ -1,6 +1,10 @@
 :root {
-  /* ─── 暖琥珀基底 — 有温度的颜色，不是黑色 ─── */
-  --bg-base: oklch(0.28 0.06 50);
+  /* ─── 暖琥珀基底 ─── */
+  --bg-base: oklch(0.22 0.04 50);
+  --bg-surface: oklch(0.25 0.04 48 / 0.5);
+  --bg-topbar: oklch(0.26 0.05 48 / 0.85);
+  --bg-main: oklch(0.22 0.04 50);
+  --bg-input: oklch(0.3 0.05 48 / 0.6);
   --bg-glass: oklch(0.4 0.07 48 / 0.25);
   --bg-glass-strong: oklch(0.46 0.08 48 / 0.3);
   --bg-glass-hover: oklch(0.52 0.08 48 / 0.35);
@@ -20,6 +24,27 @@
   --accent-soft: oklch(0.64 0.14 32);
   --accent-glow: oklch(0.58 0.2 28 / 0.1);
 
+  /* ─── 冷蓝 Slot 指示 ─── */
+  --accent-slot: oklch(0.55 0.12 240);
+  --accent-slot-glow: oklch(0.55 0.12 240 / 0.1);
+
+  /* ─── 版式比例 ─── */
+  --fs-display: 24px;
+  --fs-heading: 16px;
+  --fs-body: 14px;
+  --fs-small: 12px;
+  --fs-caption: 11px;
+
+  /* ─── 布局尺寸 ─── */
+  --topbar-height: 56px;
+  --sidebar-width: 260px;
+  --chat-max-width: 720px;
+
+  /* ─── 圆角 ─── */
+  --radius-bubble: 12px;
+  --radius-card: 8px;
+  --radius-panel: 12px;
+
   /* ─── 面板 ─── */
   --panel-radius: 12px;
   --panel-blur: 24px;
@@ -30,6 +55,7 @@
   --space-md: 12px;
   --space-lg: 16px;
   --space-xl: 24px;
+  --space-xxl: 32px;
 
   /* ─── 动画 ─── */
   --ease-glass: cubic-bezier(0.16, 1, 0.3, 1);
