@@ -153,6 +153,14 @@
   width: 100%;
   text-align: left;
   font-family: inherit;
+  overflow: hidden;
+}
+
+.sidebar-item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .sidebar-item:hover {
@@ -309,10 +317,10 @@
 /* ─── Chat slot messages ─── */
 .chat-slot {
   flex: 1;
-  padding: var(--space-lg) var(--space-xl);
+  padding: var(--space-md) var(--space-lg) var(--space-xl);
   display: flex;
   flex-direction: column;
-  gap: var(--space-sm);
+  gap: var(--space-md);
   max-width: var(--chat-max-width);
   width: 100%;
   margin: 0 auto;
@@ -338,7 +346,8 @@
 }
 
 .msg {
-  animation: msg-in 0.25s var(--ease-glass) both;
+  animation: msg-in 0.2s var(--ease-glass) both;
+  animation-iteration-count: 1;
 }
 
 @keyframes msg-in {
@@ -390,7 +399,7 @@
 
 .msg-row.assistant .msg-bubble {
   background: var(--bg-glass);
-  color: var(--text-secondary);
+  color: var(--text-glass);
   border-bottom-left-radius: 4px;
 }
 
