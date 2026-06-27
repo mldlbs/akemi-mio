@@ -5,9 +5,11 @@ interface ChatSlotProps {
   messages: MessageItem[]
   pendingText?: string
   displayText?: string
+  transcribed?: string
+  toolStatus: { type: string; tool: string; message: string } | null
 }
 
-export function ChatSlot({ messages, pendingText, displayText }: ChatSlotProps) {
+export function ChatSlot({ messages, pendingText, displayText, transcribed, toolStatus }: ChatSlotProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -16,7 +18,7 @@ export function ChatSlot({ messages, pendingText, displayText }: ChatSlotProps) 
 
   const hasPending = !!pendingText
 
-  if (messages.length === 0 && !hasPending) {
+  if (messages.length === 0 && !hasPending && !transcribed) {
     return (
       <div className="chat-slot">
         <div className="chat-empty">
@@ -31,13 +33,24 @@ export function ChatSlot({ messages, pendingText, displayText }: ChatSlotProps) 
 
   return (
     <div className="chat-slot">
+      {/* 当前语音输入 / 转录 */}
+      {transcribed && (
+        <div className="msg msg-row user">
+          <div className="msg-label">你</div>
+          <div className="msg-bubble">{toolStatus ? `🔧 ${toolStatus.message}` : transcribed}</div>
+        </div>
+      )}
+
       {messages.map((m) => (
         <div key={m.id} className={`msg msg-row ${m.role}`}>
           <div className="msg-label">{m.role === 'user' ? '你' : '秋山澪'}</div>
           <div className="msg-bubble">{m.content}</div>
-          <div className="msg-time">{new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</div>
+          <div className="msg-time">
+            {new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+          </div>
         </div>
       ))}
+
       {/* 流式响应中的 pending 消息 */}
       {hasPending && (
         <div className="msg msg-row assistant">

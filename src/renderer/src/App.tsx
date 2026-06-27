@@ -14,12 +14,6 @@ import { useTimerControl } from './hooks/useTimer'
 import { useSlots } from './slots/SlotContext'
 import type { MessageItem } from './components/ChatBubble'
 
-/** 临时拼接的 AI 回复流 */
-interface PendingMessage {
-  id: string
-  content: string
-}
-
 export type { MessageItem }
 
 function App() {
@@ -30,6 +24,8 @@ function App() {
   const [sessionHealth, setSessionHealth] = useState('100:HEALTHY:RUNNING')
   const [pendingText, setPendingText] = useState('')
   const [displayText, setDisplayText] = useState('')
+  const [transcribed, setTranscribed] = useState('')
+  const [toolStatus, setToolStatus] = useState<{ type: string; tool: string; message: string } | null>(null)
 
   const fadeTimer = useTimerControl()
   const revealTimer = useTimerControl()
@@ -66,7 +62,6 @@ function App() {
     }
   }, [])
 
-  // 加载对话历史
   useEffect(() => {
     window.electronAPI
       .getMessageHistory(200)
@@ -97,15 +92,16 @@ function App() {
 
   useIPCEvent(window.electronAPI.onToolStatus, (status) => {
     if (status.type === 'start') {
+      setToolStatus(status)
       setActiveSlot('tool')
     } else {
+      setToolStatus(null)
       setActiveSlot('chat')
     }
   })
 
   useIPCEvent(window.electronAPI.onMessageNew, (msg) => {
     setHistoryMessages((prev) => [...prev, msg])
-    // 清除 pending 状态，因为正式消息已到达
     setPendingText('')
     setDisplayText('')
     revealTimer.clear()
@@ -113,9 +109,11 @@ function App() {
 
   const handleResult = useCallback(async (t: string) => {
     if (!t) return
+    setTranscribed(t)
     setError(undefined)
     setPendingText('')
     setDisplayText('')
+    setToolStatus(null)
     revealTimer.clear()
     try {
       await window.electronAPI.chat(t)
@@ -125,6 +123,7 @@ function App() {
     fadeTimer.set(() => {
       setPendingText('')
       setDisplayText('')
+      setTranscribed('')
     }, 10000)
   }, [])
 
@@ -132,19 +131,9 @@ function App() {
     <div className="app-shell">
       <TopBar />
       <div className="app-body">
-        <Sidebar
-          historyMessages={historyMessages}
-          activeChatId={uiState.activeChatId}
-          onSelectChat={setActiveChatId}
-        />
+        <Sidebar historyMessages={historyMessages} activeChatId={uiState.activeChatId} onSelectChat={setActiveChatId} />
         <MainArea>
-          {uiState.activeSlot === 'chat' && (
-            <ChatSlot
-              messages={historyMessages}
-              pendingText={pendingText}
-              displayText={displayText}
-            />
-          )}
+          {uiState.activeSlot === 'chat' && <ChatSlot messages={historyMessages} pendingText={pendingText} displayText={displayText} transcribed={transcribed} toolStatus={toolStatus} />}
           {uiState.activeSlot === 'tool' && <ToolSlot />}
           {uiState.activeSlot === 'preview' && <PreviewSlot />}
         </MainArea>
