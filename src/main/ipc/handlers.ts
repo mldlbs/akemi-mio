@@ -185,6 +185,11 @@ export function registerHandlers(
     return true
   })
 
+  ipcMain.handle('credentials:delete', async (_event, name: string) => {
+    credentialsManager.delete(name)
+    return true
+  })
+
   ipcMain.handle('config:getWakeWords', async () => {
     return WAKE_WORDS
   })

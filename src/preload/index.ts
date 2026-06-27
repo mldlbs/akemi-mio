@@ -6,7 +6,8 @@ const electronAPI = {
   transcribe: (audio: ArrayBuffer): Promise<{ text: string; request_id?: string; error?: string }> =>
     ipcRenderer.invoke('asr:transcribe', audio),
 
-  chat: (text: string, requestId?: string, sessionId?: string): Promise<{ reply?: string; error?: string }> => ipcRenderer.invoke('ai:chat', text, requestId, sessionId),
+  chat: (text: string, requestId?: string, sessionId?: string): Promise<{ reply?: string; error?: string }> =>
+    ipcRenderer.invoke('ai:chat', text, requestId, sessionId),
 
   speak: (text: string): Promise<void> => ipcRenderer.invoke('tts:speak', text),
 
@@ -57,6 +58,12 @@ const electronAPI = {
       ipcRenderer.removeListener('tool:status', handler)
     }
   },
+
+  getCredential: (key: string): Promise<string | null> => ipcRenderer.invoke('credentials:get', key),
+
+  setCredential: (key: string, value: string): Promise<true> => ipcRenderer.invoke('credentials:set', key, value),
+
+  deleteCredential: (key: string): Promise<true> => ipcRenderer.invoke('credentials:delete', key),
 
   getMessageHistory: (
     limit?: number,

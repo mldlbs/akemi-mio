@@ -7,6 +7,7 @@ import { InputBar } from './components/InputBar'
 import { ChatSlot } from './components/ChatSlot'
 import { ToolSlot } from './components/ToolSlot'
 import { PreviewSlot } from './components/PreviewSlot'
+import { SettingsModal } from './components/SettingsModal'
 import { playTTS, playTTSBuffer, onTTSStart, onTTSError } from './components/audioShared'
 import { useIPCEvent } from './hooks/useIPCEvent'
 import { useTimerControl } from './hooks/useTimer'
@@ -36,6 +37,7 @@ function App() {
   const [personaLevel, setPersonaLevel] = useState<string>('core')
   const [sessions, setSessions] = useState<SessionItem[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string>('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const fadeTimer = useTimerControl()
   const revealTimer = useTimerControl()
@@ -147,25 +149,28 @@ function App() {
     setPersonaLevel(data.level)
   })
 
-  const handleResult = useCallback(async (t: string) => {
-    if (!t) return
-    setTranscribed(t)
-    setError(undefined)
-    setPendingText('')
-    setDisplayText('')
-    setToolStatus(null)
-    revealTimer.clear()
-    try {
-      await window.electronAPI.chat(t, undefined, activeSessionId || undefined)
-    } catch (err) {
-      setError(String(err))
-    }
-    fadeTimer.set(() => {
+  const handleResult = useCallback(
+    async (t: string) => {
+      if (!t) return
+      setTranscribed(t)
+      setError(undefined)
       setPendingText('')
       setDisplayText('')
-      setTranscribed('')
-    }, 10000)
-  }, [activeSessionId])
+      setToolStatus(null)
+      revealTimer.clear()
+      try {
+        await window.electronAPI.chat(t, undefined, activeSessionId || undefined)
+      } catch (err) {
+        setError(String(err))
+      }
+      fadeTimer.set(() => {
+        setPendingText('')
+        setDisplayText('')
+        setTranscribed('')
+      }, 10000)
+    },
+    [activeSessionId],
+  )
 
   const handleSelectChat = useCallback((sessionId: string) => {
     setActiveSessionId(sessionId)
@@ -179,6 +184,7 @@ function App() {
         error={error}
         sessionHealth={sessionHealth}
         personaLevel={personaLevel}
+        onOpenSettings={() => setSettingsOpen(true)}
         agentSlot={
           <button className="cap-toggle-btn" onClick={() => window.electronAPI.openAgentWindow()} title="Agent 面板">
             <i className="ri-robot-2-line" />
@@ -205,6 +211,7 @@ function App() {
         onSend={handleResult}
         voiceSlot={<VoiceInput onResult={handleResult} onConversationChange={setActive} ttsPlaying={ttsPlaying} />}
       />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }
