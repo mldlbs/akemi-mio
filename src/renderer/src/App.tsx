@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { VoiceInput } from './components/VoiceInput'
 import { StatusBar } from './components/StatusBar'
 import { TopBar } from './components/TopBar'
