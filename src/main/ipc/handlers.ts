@@ -9,7 +9,7 @@ import { WAKE_WORDS, LLM_API_URL, LLM_CODE_API_URL, LLM_TEXT_API_URL, LLM_VISION
 import { monitorEventLoopDelay } from 'perf_hooks'
 import { checkForUpdates, downloadUpdate, quitAndInstall } from '../updater/UpdaterService'
 import { MetricsCollector } from '../observability/MetricsCollector'
-import { getRecentMessages } from '../db/messages'
+import { getRecentMessages, getSessions, getMessagesBySession } from '../db/messages'
 import { planManager as planManagerImport } from '../evolution'
 import { createAgentWindow, closeAgentWindow } from '../core/Lifecycle'
 import { join } from 'path'
@@ -70,14 +70,26 @@ export function registerHandlers(
   evolutionRef?: ServiceRef<SelfEvolutionService>,
   metricsCollector?: MetricsCollector,
 ): void {
-  ipcMain.on('window:close', (event) => {
-    BrowserWindow.fromWebContents(event.sender)?.close()
+  ipcMain.handle('window:close', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false }
+    try {
+      // 关闭前保存所有状态
+      agentService.pause()
+      await agentService.stopConversation().catch(() => {})
+      eventBus?.emit('agent.session.flush', {})
+      agentService.saveRecoverySnapshot?.('window_close')
+    } catch (err) {
+      log('WARN', 'window_close_save_failed', { error: String(err) })
+    }
+    win.close()
+    return { success: true }
   })
 
-  ipcMain.handle('ai:chat', async (_event, text: string, requestId?: string, sessionId?: string) => {
+  ipcMain.handle('ai:chat', async (_event, text: string, requestId?: string, sessionId?: string, noTts?: boolean) => {
     try {
       if (agentService.isPaused()) return { reply: '', error: 'PAUSED' }
-      return await agentService.processTextInput(text, requestId, 'electron', undefined, sessionId)
+      return await agentService.processTextInput(text, requestId, 'electron', undefined, sessionId, noTts)
     } catch (err) {
       log('ERROR', 'ai_chat_failed', { error: String(err), requestId })
       throw err

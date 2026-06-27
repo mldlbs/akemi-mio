@@ -1,22 +1,32 @@
 import { useState, useCallback, useRef, type KeyboardEvent, type ReactNode } from 'react'
-import { useSlots } from '../slots/SlotContext'
+import type { AgentState } from '../hooks/useAIOutput'
 
 interface InputBarProps {
   onSend: (text: string) => void
   /** Renders before the textarea */
   voiceSlot?: ReactNode
+  agentState?: AgentState
 }
 
-export function InputBar({ onSend, voiceSlot }: InputBarProps) {
+export function InputBar({ onSend, voiceSlot, agentState }: InputBarProps) {
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const { setCommandMode } = useSlots()
 
   const autoResize = useCallback(() => {
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+  }, [])
+
+  const isBusy = agentState === 'thinking' || agentState === 'tool_executing' || agentState === 'replying'
+
+  const handleStop = useCallback(async () => {
+    try {
+      await window.electronAPI.stopConversation()
+    } catch {
+      /* ignore */
+    }
   }, [])
 
   const handleSend = useCallback(() => {
@@ -35,11 +45,8 @@ export function InputBar({ onSend, voiceSlot }: InputBarProps) {
         e.preventDefault()
         handleSend()
       }
-      if (e.key === '/' && value === '') {
-        setCommandMode(true)
-      }
     },
-    [handleSend, value, setCommandMode],
+    [handleSend],
   )
 
   return (
@@ -55,12 +62,18 @@ export function InputBar({ onSend, voiceSlot }: InputBarProps) {
             autoResize()
           }}
           onKeyDown={handleKeyDown}
-          placeholder="输入消息…  / 触发命令"
+          placeholder="输入消息…"
           rows={1}
         />
-        <button className="inputbar-send" disabled={!value.trim()} onClick={handleSend} title="发送">
-          <i className="ri-send-plane-2-fill" />
-        </button>
+        {isBusy ? (
+          <button className="inputbar-stop" onClick={handleStop} title="停止回复">
+            <i className="ri-stop-fill" />
+          </button>
+        ) : (
+          <button className="inputbar-send" disabled={!value.trim()} onClick={handleSend} title="发送">
+            <i className="ri-send-plane-2-fill" />
+          </button>
+        )}
       </div>
     </div>
   )

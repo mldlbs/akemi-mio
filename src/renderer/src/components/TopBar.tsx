@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { useSlots } from '../slots/SlotContext'
 import { StatusBar } from './StatusBar'
+import type { AgentState } from '../hooks/useAIOutput'
 
 interface TopBarProps {
   conversationActive: boolean
@@ -11,9 +12,19 @@ interface TopBarProps {
   /** Agent window toggle button — renders into actions area if provided */
   agentSlot?: ReactNode
   onOpenSettings?: () => void
+  agentState?: AgentState
 }
 
-export function TopBar({ conversationActive, ttsPlaying, error, sessionHealth, personaLevel, agentSlot, onOpenSettings }: TopBarProps) {
+export function TopBar({
+  conversationActive,
+  ttsPlaying,
+  error,
+  sessionHealth,
+  personaLevel,
+  agentSlot,
+  onOpenSettings,
+  agentState,
+}: TopBarProps) {
   const { uiState, toggleSidebar } = useSlots()
 
   return (
@@ -30,6 +41,7 @@ export function TopBar({ conversationActive, ttsPlaying, error, sessionHealth, p
           error={error}
           sessionHealth={sessionHealth}
           personaLevel={personaLevel}
+          agentState={agentState}
         />
       </div>
 
@@ -38,6 +50,9 @@ export function TopBar({ conversationActive, ttsPlaying, error, sessionHealth, p
           <i className="ri-settings-3-line" />
         </button>
         {agentSlot}
+        <button className="topbar-close" onClick={() => window.electronAPI.closeWindow()} title="关闭">
+          <i className="ri-close-line" />
+        </button>
       </div>
     </header>
   )

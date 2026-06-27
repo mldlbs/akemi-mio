@@ -22,6 +22,7 @@ import type { FailureAnalyzer } from './FailureAnalyzer'
 import { runObserve } from './ObserveStage'
 import { runThink } from './ThinkStage'
 import { runReflect } from './ReflectStage'
+import { ExecutionGovernor } from './ExecutionGovernor'
 
 const MAX_TURNS = 30
 
@@ -46,6 +47,7 @@ export class TaskExecutor {
   private proceduralMemory: ProceduralMemory | null = null
   private failureAnalyzer: FailureAnalyzer | null = null
   private thinkStageCount = 0
+  private executionGovernor = new ExecutionGovernor()
 
   constructor(
     llmService: LlmService,
@@ -167,6 +169,20 @@ export class TaskExecutor {
           runReflect(toolResults, result.toolCalls, messages, ctx)
 
           const gr = this.guardrail.apply(toolResults, result.toolCalls, messages, ctx)
+          // ── [DECIDE] ExecutionGovernor 强制决策门 ──
+          const gd = this.executionGovernor.evaluate(toolResults, result.toolCalls, ctx)
+          if (gd.action === 'stop') {
+            log('WARN', 'task_governor_stop', { step: i, reason: gd.reason })
+            if (gd.message) messages.push({ role: 'user', content: gd.message })
+            ctx.transition(RunState.COMPLETED)
+            return gd.reason
+          }
+          if (gd.action === 'shift') {
+            log('WARN', 'task_governor_shift', { step: i, reason: gd.reason })
+            if (gd.message) messages.push({ role: 'user', content: gd.message })
+            ctx.transition(RunState.RUNNING)
+            continue
+          }
           if (gr.workflowActivation) {
             log('INFO', 'task_executor_workflow_activation', { hasModule: !!gr.workflowActivation.moduleContent })
           }

@@ -43,6 +43,7 @@ import type { FailureAnalyzer } from './FailureAnalyzer'
 import { runObserve } from './ObserveStage'
 import { runThink } from './ThinkStage'
 import { runReflect } from './ReflectStage'
+import { ExecutionGovernor } from './ExecutionGovernor'
 import { ObservabilityLogger } from '../observability/ObservabilityLogger'
 import { PersonaStateManager } from './PersonaStateManager'
 import { PersonaDriftControlSystem, DRIFT_CORRECTION_PROMPT } from './PersonaDriftControlSystem'
@@ -85,6 +86,8 @@ export class ChatExecutor {
   private pendingDriftSignal: string | null = null
   /** 当前加载的 session，用于切换 session 时重建上下文 */
   private currentSessionId: string | null = null
+  /** 执行决策门 — 每轮 tool batch 后强制决策 */
+  private executionGovernor = new ExecutionGovernor()
 
   constructor(
     llmService: LlmService,
@@ -215,13 +218,17 @@ export class ChatExecutor {
     this.mainWindow?.webContents.send('message:new', msg)
   }
 
+  private noTts = false
+
   async run(
     text: string,
     requestId?: string,
     source: 'electron' | 'telegram' = 'electron',
     extra?: { telegramChatId?: number; telegramUserId?: number; telegramFrom?: string; telegramMessageId?: number },
     sessionId?: string,
+    noTts?: boolean,
   ): Promise<ChatResult> {
+    this.noTts = noTts ?? false
     const rid = requestId || createRequestId()
     const t0 = Date.now()
     this.memoryService?.recordInteraction()
@@ -254,6 +261,7 @@ export class ChatExecutor {
       }
     } else if (!sessionId) {
       this.currentSessionId = null
+      this.workingMemory = new WorkingMemory('chat')
     }
     // 先刷新 memory（可能重建 context），再加用户消息，确保消息不丢失
     this.refreshMemory()
@@ -292,14 +300,14 @@ export class ChatExecutor {
       this.obsLogger?.flush()
       eventBus.emit('agent.response.generated', { text: reply, requestId: rid, source })
       log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: reply.length })
-      this.ttsService.flushBuffer()
+      if (!this.noTts) this.ttsService.flushBuffer()
       if (reply) {
         const assistMsg: StoredMessage = {
           id: createMessageId(),
           source,
           role: 'assistant',
           content: reply,
-          sessionId,
+          sessionId: effectiveSessionId,
           createdAt: Date.now(),
         }
         insertMessage(assistMsg)
@@ -337,6 +345,7 @@ export class ChatExecutor {
     this.runContext?.interrupt('user_stop')
     this.runContext = null
     this.ttsService.stop()
+    this.executionGovernor.reset()
   }
 
   private async toolLoop(messages: Message[], ctx: RunContext, requestId: string, source: string): Promise<string> {
@@ -365,7 +374,7 @@ export class ChatExecutor {
         }
         const onToken = (t: string) => {
           if (!ctx.interruptFlag) {
-            this.ttsService.addChunk(t)
+            if (!this.noTts) this.ttsService.addChunk(t)
             this.mainWindow?.webContents.send('ai:chunk', t)
           }
         }
@@ -475,6 +484,19 @@ export class ChatExecutor {
             this.workingMemory.scratchpad.add('system_hint', '你已执行了多步操作。请立即停止工具调用，向用户汇报当前进展。')
           }
           const gr = this.guardrail.apply(toolResults, result.toolCalls, messages, ctx)
+          // ── [DECIDE] ExecutionGovernor 强制决策门 ──
+          const gd = this.executionGovernor.evaluate(toolResults, result.toolCalls, ctx)
+          if (gd.action === 'stop') {
+            log('WARN', 'chat_governor_stop', { step: i, reason: gd.reason })
+            if (gd.message) messages.push({ role: 'user', content: gd.message })
+            this.obsLogger?.logExit('governor_stop', gd.reason)
+            return gd.reason
+          }
+          if (gd.action === 'shift') {
+            log('WARN', 'chat_governor_shift', { step: i, reason: gd.reason })
+            if (gd.message) messages.push({ role: 'user', content: gd.message })
+            continue
+          }
           if (gr.workflowActivation) {
             this.activeWorkflowModule = gr.workflowActivation.moduleContent
             const memCtx = this.memoryService?.getFormattedContext() || '',

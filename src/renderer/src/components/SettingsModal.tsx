@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from 'react'
+import { useState, useEffect, useCallback, type FormEvent } from 'react'
 
 interface SettingsModalProps {
   open: boolean
@@ -52,8 +52,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   if (!open) return null
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    },
+    [onClose],
+  )
+
   return (
-    <div className="settings-overlay" onClick={onClose}>
+    <div className="settings-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <span className="settings-title">设置</span>
@@ -96,9 +103,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
           </div>
 
-          {message && (
-            <div className={`settings-message settings-${message.type}`}>{message.text}</div>
-          )}
+          {message && <div className={`settings-message settings-${message.type}`}>{message.text}</div>}
 
           <div className="settings-actions">
             <button type="submit" className="settings-save" disabled={saving}>

@@ -1,11 +1,11 @@
 export function PreviewSlot() {
   return (
     <div className="preview-slot">
-      <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 'var(--space-xxl) 0' }}>
-        <div style={{ fontSize: 28, opacity: 0.2, marginBottom: 'var(--space-md)' }}>
+      <div className="preview-empty">
+        <div className="preview-empty-icon">
           <i className="ri-eye-line" />
         </div>
-        <div className="chat-empty-text">结果预览</div>
+        <div className="chat-empty-text">AI 生成的图片、图表等内容会显示在此</div>
       </div>
     </div>
   )

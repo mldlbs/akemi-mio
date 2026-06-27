@@ -1,11 +1,4 @@
-interface ToolEvent {
-  id: string
-  tool: string
-  args?: Record<string, any>
-  result?: string
-  error?: string
-  latencyMs?: number
-}
+import type { ToolEvent } from '../slots/types'
 
 interface ToolSlotProps {
   running?: ToolEvent[]
@@ -18,23 +11,19 @@ export function ToolSlot({ running = [], completed = [] }: ToolSlotProps) {
   if (allEmpty) {
     return (
       <div className="tool-slot">
-        <div style={{ fontSize: 28, opacity: 0.2 }}>
+        <div className="tool-empty-icon">
           <i className="ri-tools-line" />
         </div>
-        <div className="chat-empty-text" style={{ color: 'var(--text-muted)' }}>
-          工具面板
-        </div>
+        <div className="chat-empty-text tool-empty-text">AI 在回答过程中使用工具时，工具调用会显示在此</div>
       </div>
     )
   }
 
   return (
-    <div className="tool-slot" style={{ justifyContent: 'flex-start', paddingTop: 'var(--space-xl)' }}>
+    <div className="tool-slot tool-slot-content">
       {running.length > 0 && (
-        <div style={{ width: '100%', maxWidth: 600, margin: '0 auto' }}>
-          <div style={{ fontSize: 'var(--fs-small)', fontWeight: 500, color: 'var(--text-muted)', marginBottom: 'var(--space-sm)' }}>
-            执行中
-          </div>
+        <div className="tool-slot-section">
+          <div className="tool-slot-heading">执行中</div>
           {running.map((t) => (
             <div key={t.id} className="tool-item tool-item-running">
               <div className="tool-item-icon">
@@ -49,10 +38,8 @@ export function ToolSlot({ running = [], completed = [] }: ToolSlotProps) {
         </div>
       )}
       {completed.length > 0 && (
-        <div style={{ width: '100%', maxWidth: 600, margin: '0 auto', marginTop: running.length > 0 ? 'var(--space-lg)' : 0 }}>
-          <div style={{ fontSize: 'var(--fs-small)', fontWeight: 500, color: 'var(--text-muted)', marginBottom: 'var(--space-sm)' }}>
-            已执行
-          </div>
+        <div className="tool-slot-section">
+          <div className="tool-slot-heading">已执行</div>
           {completed.map((t) => (
             <div key={t.id} className={`tool-item ${t.error ? 'tool-item-failed' : 'tool-item-done'}`}>
               <div className="tool-item-icon">
@@ -62,7 +49,7 @@ export function ToolSlot({ running = [], completed = [] }: ToolSlotProps) {
                 <div className="tool-item-name">{t.tool}</div>
                 <div className="tool-item-meta">
                   {t.latencyMs !== undefined && <span>{(t.latencyMs / 1000).toFixed(1)}s</span>}
-                  {t.error && <span style={{ color: 'oklch(0.6 0.18 30)', marginLeft: 8 }}>{t.error}</span>}
+                  {t.error && <span className="tool-error-text">{t.error}</span>}
                 </div>
               </div>
             </div>

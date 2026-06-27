@@ -1,30 +1,30 @@
 :root {
-  /* ─── 纯白基底 ─── */
-  --bg-base: oklch(1 0 0);                 /* 纯白 */
-  --bg-main: oklch(0.97 0.003 240);         /* 主内容区 · 极浅冷灰 */
-  --bg-surface: oklch(0.95 0.004 240 / 0.6); /* 侧栏浮层 */
-  --bg-topbar: oklch(0.98 0.003 240 / 0.95);/* 顶栏 */
-  --bg-input: oklch(0.94 0.005 240 / 0.5);  /* 输入栏 */
+  /* ─── 暖白基底 ─── */
+  --bg-base: oklch(0.99 0.003 30);             /* warm off-white */
+  --bg-main: oklch(0.96 0.005 30);              /* 主内容区 · 暖灰 */
+  --bg-surface: oklch(0.93 0.006 30 / 0.5);     /* 侧栏浮层 */
+  --bg-topbar: oklch(0.97 0.004 30 / 0.92);     /* 顶栏 */
+  --bg-input: oklch(0.92 0.006 30 / 0.4);        /* 输入栏 */
 
   /* ─── 玻璃泛光层 ─── */
-  --bg-glass: oklch(0.85 0.008 250 / 0.25);
-  --bg-glass-strong: oklch(0.8 0.01 250 / 0.3);
-  --bg-glass-hover: oklch(0.75 0.01 250 / 0.35);
+  --bg-glass: oklch(0.88 0.005 30 / 0.35);
+  --bg-glass-strong: oklch(0.82 0.008 30 / 0.4);
+  --bg-glass-hover: oklch(0.78 0.01 30 / 0.45);
 
-  /* ─── 近黑文字 ─── */
-  --text-primary: oklch(0.08 0.005 260);
-  --text-secondary: oklch(0.35 0.008 260);
-  --text-muted: oklch(0.55 0.01 260);
-  --text-glass: oklch(0.12 0.006 260 / 0.85);
+  /* ─── 暖调近黑文字 ─── */
+  --text-primary: oklch(0.1 0.004 30);
+  --text-secondary: oklch(0.35 0.006 30);
+  --text-muted: oklch(0.55 0.008 30);
+  --text-glass: oklch(0.14 0.005 30 / 0.85);
 
-  /* ─── 冷灰边框 ─── */
-  --border-glass: oklch(0.65 0.01 260 / 0.15);
-  --border-glass-hover: oklch(0.65 0.01 260 / 0.25);
+  /* ─── 暖灰边框 ─── */
+  --border-glass: oklch(0.65 0.008 30 / 0.18);
+  --border-glass-hover: oklch(0.6 0.01 30 / 0.3);
 
-  /* ─── 暖橙点缀 ─── */
-  --accent: oklch(0.58 0.16 24);
-  --accent-soft: oklch(0.62 0.11 28);
-  --accent-glow: oklch(0.58 0.16 24 / 0.08);
+  /* ─── 暖橙点缀（更柔和） ─── */
+  --accent: oklch(0.55 0.13 24);
+  --accent-soft: oklch(0.6 0.1 28);
+  --accent-glow: oklch(0.55 0.13 24 / 0.08);
 
   /* ─── 冷蓝 Slot 指示 ─── */
   --accent-slot: oklch(0.5 0.07 240);

@@ -1,13 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 const electronAPI = {
-  closeWindow: (): void => ipcRenderer.send('window:close'),
+  closeWindow: (): Promise<{ success: boolean }> => ipcRenderer.invoke('window:close'),
 
   transcribe: (audio: ArrayBuffer): Promise<{ text: string; request_id?: string; error?: string }> =>
     ipcRenderer.invoke('asr:transcribe', audio),
 
-  chat: (text: string, requestId?: string, sessionId?: string): Promise<{ reply?: string; error?: string }> =>
-    ipcRenderer.invoke('ai:chat', text, requestId, sessionId),
+  chat: (text: string, requestId?: string, sessionId?: string, noTts?: boolean): Promise<{ reply?: string; error?: string }> =>
+    ipcRenderer.invoke('ai:chat', text, requestId, sessionId, noTts),
 
   speak: (text: string): Promise<void> => ipcRenderer.invoke('tts:speak', text),
 
@@ -108,20 +108,20 @@ const electronAPI = {
 
   // ── Coding Agent UI ──
 
-  // 工具调用事件
-  onToolInvoked: (callback: (data: { tool: string; args: Record<string, any> }) => void) => {
+  // 工具调用事件（ChatExecutor 实际发出含 id/latencyMs 的 payload）
+  onToolInvoked: (callback: (data: { tool: string; args: Record<string, any>; id: string }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('agent:tool_invoked', handler)
     return () => ipcRenderer.removeListener('agent:tool_invoked', handler)
   },
 
-  onToolCompleted: (callback: (data: { tool: string; result: string }) => void) => {
+  onToolCompleted: (callback: (data: { tool: string; result: string; id: string; latencyMs: number }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('agent:tool_completed', handler)
     return () => ipcRenderer.removeListener('agent:tool_completed', handler)
   },
 
-  onToolFailed: (callback: (data: { tool: string; error: string }) => void) => {
+  onToolFailed: (callback: (data: { tool: string; error: string; id: string; latencyMs: number }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('agent:tool_failed', handler)
     return () => ipcRenderer.removeListener('agent:tool_failed', handler)

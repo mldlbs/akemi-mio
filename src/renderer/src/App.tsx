@@ -1,4 +1,3 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
 import { VoiceInput } from './components/VoiceInput'
 import { TopBar } from './components/TopBar'
 import { Sidebar } from './components/Sidebar'
@@ -8,210 +7,32 @@ import { ChatSlot } from './components/ChatSlot'
 import { ToolSlot } from './components/ToolSlot'
 import { PreviewSlot } from './components/PreviewSlot'
 import { SettingsModal } from './components/SettingsModal'
-import { playTTS, playTTSBuffer, onTTSStart, onTTSError } from './components/audioShared'
-import { useIPCEvent } from './hooks/useIPCEvent'
-import { useTimerControl } from './hooks/useTimer'
 import { useSlots } from './slots/SlotContext'
-import type { MessageItem } from './components/ChatBubble'
+import { useSessions, useAIOutput, useTools, useDeviceStatus } from './hooks'
 
-export type { MessageItem }
-
-interface ToolEvent {
-  id: string
-  tool: string
-  args?: Record<string, any>
-  result?: string
-  error?: string
-  latencyMs?: number
-}
-
-interface SessionItem {
-  id: string
-  label: string
-  messageCount: number
-  lastActivityAt: number
-  createdAt: number
-}
+export type { MessageItem } from './slots/types'
 
 function App() {
-  const [active, setActive] = useState(false)
-  const [ttsPlaying, setTtsPlaying] = useState(false)
-  const [error, setError] = useState<string | undefined>()
-  const [historyMessages, setHistoryMessages] = useState<MessageItem[]>([])
-  const [sessionHealth, setSessionHealth] = useState('100:HEALTHY:RUNNING')
-  const [pendingText, setPendingText] = useState('')
-  const [displayText, setDisplayText] = useState('')
-  const [transcribed, setTranscribed] = useState('')
-  const [toolStatus, setToolStatus] = useState<{ type: string; tool: string; message: string } | null>(null)
-  const [personaLevel, setPersonaLevel] = useState<string>('core')
-  const [sessions, setSessions] = useState<SessionItem[]>([])
-  const [activeSessionId, setActiveSessionId] = useState<string>('')
-  const [settingsOpen, setSettingsOpen] = useState(false)
-const [toolRunning, setToolRunning] = useState<ToolEvent[]>([])
-const [toolCompleted, setToolCompleted] = useState<ToolEvent[]>([])
-
-  const fadeTimer = useTimerControl()
-  const revealTimer = useTimerControl()
-  const textRef = useRef('')
-  const { uiState, setActiveSlot } = useSlots()
-
-  useEffect(() => {
-    textRef.current = pendingText
-  }, [pendingText])
-
-  useEffect(() => {
-    const onStart = (duration: number) => {
-      const t = textRef.current
-      if (!t) return
-      revealTimer.clear()
-      setDisplayText('')
-      const totalMs = duration * 1000
-      const intervalMs = Math.max(20, totalMs / t.length)
-      let i = 0
-      revealTimer.setInterval(() => {
-        i++
-        setDisplayText(t.slice(0, i))
-        if (i >= t.length) revealTimer.clear()
-      }, intervalMs)
-    }
-    const onError = (err: string) => {
-      setError(err)
-    }
-    onTTSStart(onStart)
-    onTTSError(onError)
-    return () => {
-      revealTimer.clear()
-      fadeTimer.clear()
-    }
-  }, [])
-
-  // 加载会话列表
-  useEffect(() => {
-    window.electronAPI
-      .getSessions()
-      .then((s) => {
-        setSessions(s)
-        if (s.length > 0 && !activeSessionId) {
-          setActiveSessionId(s[0].id)
-        }
-      })
-      .catch(() => {})
-  }, [])
-
-  // 按活跃 session 加载消息
-  useEffect(() => {
-    if (!activeSessionId) return
-    window.electronAPI
-      .getMessagesBySession(activeSessionId)
-      .then((msgs) => {
-        setHistoryMessages(msgs)
-      })
-      .catch(() => {})
-  }, [activeSessionId])
-
-  useIPCEvent(window.electronAPI.onStateUpdate, (s) => {
-    if (s.error) setError(s.error as string)
-    if (s.ttsPlaying !== undefined) setTtsPlaying(s.ttsPlaying as boolean)
-    if (s.sessionHealth) setSessionHealth(s.sessionHealth as string)
-  })
-
-  useIPCEvent(window.electronAPI.onAIChunk, (chunk) => {
-    setPendingText((prev) => prev + chunk)
-    fadeTimer.clear()
-  })
-
-  useIPCEvent(window.electronAPI.onTTSAudio, (filePath) => {
-    playTTS(filePath)
-  })
-
-  useIPCEvent(window.electronAPI.onTTSBuffer, (buf) => {
-    playTTSBuffer(buf)
-  })
-
-  useIPCEvent(window.electronAPI.onToolStatus, (status) => {
-    if (status.type === 'start') {
-      setToolRunning([])
-      setToolCompleted([])
-      setToolStatus(status)
-      setActiveSlot('tool')
-    } else {
-      setToolStatus(null)
-      setActiveSlot('chat')
-    }
-  })
-
-  useIPCEvent(window.electronAPI.onToolInvoked, (data) => {
-    setToolRunning((prev) => [...prev, { id: data.id, tool: data.tool, args: data.args }])
-  })
-
-  useIPCEvent(window.electronAPI.onToolCompleted, (data) => {
-    setToolRunning((prev) => prev.filter((t) => t.id !== data.id))
-    setToolCompleted((prev) => [...prev, { id: data.id, tool: data.tool, latencyMs: data.latencyMs, result: data.result }])
-  })
-
-  useIPCEvent(window.electronAPI.onToolFailed, (data) => {
-    setToolRunning((prev) => prev.filter((t) => t.id !== data.id))
-    setToolCompleted((prev) => [...prev, { id: data.id, tool: data.tool, latencyMs: data.latencyMs, error: data.error }])
-  })
-
-  useIPCEvent(window.electronAPI.onMessageNew, (msg) => {
-    // 新消息到来时始终追加到当前会话，并自动切换到最新 session
-    if (msg.sessionId && msg.sessionId !== activeSessionId) {
-      setActiveSessionId(msg.sessionId)
-      setHistoryMessages([msg])
-    } else if (msg.sessionId === activeSessionId) {
-      setHistoryMessages((prev) => [...prev, msg])
-    }
-    setPendingText('')
-    setDisplayText('')
-    revealTimer.clear()
-    // 刷新会话列表
-    window.electronAPI
-      .getSessions()
-      .then(setSessions)
-      .catch(() => {})
-  })
-
-  useIPCEvent(window.electronAPI.onPersonaUpdated, (data) => {
-    setPersonaLevel(data.level)
-  })
-
-  const handleResult = useCallback(
-    async (t: string) => {
-      if (!t) return
-      setTranscribed(t)
-      setError(undefined)
-      setPendingText('')
-      setDisplayText('')
-      setToolStatus(null)
-      revealTimer.clear()
-      try {
-        await window.electronAPI.chat(t, undefined, activeSessionId || undefined)
-      } catch (err) {
-        setError(String(err))
-      }
-      fadeTimer.set(() => {
-        setPendingText('')
-        setDisplayText('')
-        setTranscribed('')
-      }, 10000)
-    },
-    [activeSessionId],
+  const { sessions, activeSessionId, historyMessages, historyLoading, handleSelectChat } = useSessions()
+  const device = useDeviceStatus()
+  const { pendingText, displayText, transcribed, toolStatus, agentState, handleResult } = useAIOutput(
+    activeSessionId,
+    device.active,
+    device.setError,
   )
-
-  const handleSelectChat = useCallback((sessionId: string) => {
-    setActiveSessionId(sessionId)
-  }, [])
+  const { uiState } = useSlots()
+  const { toolRunning, toolCompleted } = useTools()
 
   return (
     <div className="app-shell">
       <TopBar
-        conversationActive={active}
-        ttsPlaying={ttsPlaying}
-        error={error}
-        sessionHealth={sessionHealth}
-        personaLevel={personaLevel}
-        onOpenSettings={() => setSettingsOpen(true)}
+        conversationActive={device.active}
+        ttsPlaying={device.ttsPlaying}
+        error={device.error}
+        sessionHealth={device.sessionHealth}
+        personaLevel={device.personaLevel}
+        onOpenSettings={() => device.setSettingsOpen(true)}
+        agentState={agentState}
         agentSlot={
           <button className="cap-toggle-btn" onClick={() => window.electronAPI.openAgentWindow()} title="Agent 面板">
             <i className="ri-robot-2-line" />
@@ -221,24 +42,32 @@ const [toolCompleted, setToolCompleted] = useState<ToolEvent[]>([])
       <div className="app-body">
         <Sidebar sessions={sessions} activeSessionId={activeSessionId} onSelectChat={handleSelectChat} />
         <MainArea>
-          {uiState.activeSlot === 'chat' && (
+          {/* ChatSlot 始终渲染；用户主动切换到 tool/preview 时显示替换层 */}
+          {uiState.activeSlot === 'tool' ? (
+            <ToolSlot running={toolRunning} completed={toolCompleted} />
+          ) : uiState.activeSlot === 'preview' ? (
+            <PreviewSlot />
+          ) : (
             <ChatSlot
               messages={historyMessages}
               pendingText={pendingText}
               displayText={displayText}
               transcribed={transcribed}
               toolStatus={toolStatus}
+              agentState={agentState}
+              toolRunning={toolRunning}
+              toolCompleted={toolCompleted}
+              historyLoading={historyLoading}
             />
           )}
-          {uiState.activeSlot === 'tool' && <ToolSlot running={toolRunning} completed={toolCompleted} />}
-          {uiState.activeSlot === 'preview' && <PreviewSlot />}
         </MainArea>
       </div>
       <InputBar
         onSend={handleResult}
-        voiceSlot={<VoiceInput onResult={handleResult} onConversationChange={setActive} ttsPlaying={ttsPlaying} />}
+        agentState={agentState}
+        voiceSlot={<VoiceInput onResult={handleResult} onConversationChange={device.setActive} ttsPlaying={device.ttsPlaying} />}
       />
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal open={device.settingsOpen} onClose={() => device.setSettingsOpen(false)} />
     </div>
   )
 }
