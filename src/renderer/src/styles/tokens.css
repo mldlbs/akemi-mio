@@ -1,32 +1,34 @@
 :root {
-  /* ─── 暖琥珀基底 ─── */
-  --bg-base: oklch(0.22 0.04 50);
-  --bg-surface: oklch(0.25 0.04 48 / 0.5);
-  --bg-topbar: oklch(0.26 0.05 48 / 0.85);
-  --bg-main: oklch(0.22 0.04 50);
-  --bg-input: oklch(0.3 0.05 48 / 0.6);
-  --bg-glass: oklch(0.4 0.07 48 / 0.25);
-  --bg-glass-strong: oklch(0.46 0.08 48 / 0.3);
-  --bg-glass-hover: oklch(0.52 0.08 48 / 0.35);
+  /* ─── 暖琥珀基底 — 分层亮度阶梯 ─── */
+  --bg-base: oklch(0.14 0.025 55);       /* 最深底 */
+  --bg-main: oklch(0.19 0.035 50);        /* 主内容区 */
+  --bg-surface: oklch(0.24 0.04 48 / 0.5); /* 侧栏浮层 */
+  --bg-topbar: oklch(0.18 0.04 48 / 0.92);/* 顶栏 */
+  --bg-input: oklch(0.22 0.04 48 / 0.85); /* 输入栏 */
+
+  /* ─── 玻璃泛光层 ─── */
+  --bg-glass: oklch(0.45 0.06 45 / 0.18);
+  --bg-glass-strong: oklch(0.5 0.06 45 / 0.25);
+  --bg-glass-hover: oklch(0.55 0.06 45 / 0.3);
 
   /* ─── 暖白文字 ─── */
-  --text-primary: oklch(0.93 0.015 70);
-  --text-secondary: oklch(0.72 0.025 60);
-  --text-muted: oklch(0.55 0.03 50);
-  --text-glass: oklch(0.93 0.015 70 / 0.88);
+  --text-primary: oklch(0.95 0.01 70);
+  --text-secondary: oklch(0.75 0.02 58);
+  --text-muted: oklch(0.5 0.03 48);
+  --text-glass: oklch(0.92 0.015 65 / 0.9);
 
   /* ─── 暖色边框 ─── */
-  --border-glass: oklch(0.75 0.05 50 / 0.1);
-  --border-glass-hover: oklch(0.75 0.05 50 / 0.2);
+  --border-glass: oklch(0.7 0.05 48 / 0.1);
+  --border-glass-hover: oklch(0.7 0.05 48 / 0.2);
 
-  /* ─── 朱红点缀 ─── */
-  --accent: oklch(0.58 0.2 28);
-  --accent-soft: oklch(0.64 0.14 32);
-  --accent-glow: oklch(0.58 0.2 28 / 0.1);
+  /* ─── 暖橙点缀（取代朱红，暗色上更透亮）─── */
+  --accent: oklch(0.62 0.17 22);
+  --accent-soft: oklch(0.68 0.12 26);
+  --accent-glow: oklch(0.62 0.17 22 / 0.12);
 
   /* ─── 冷蓝 Slot 指示 ─── */
-  --accent-slot: oklch(0.55 0.12 240);
-  --accent-slot-glow: oklch(0.55 0.12 240 / 0.1);
+  --accent-slot: oklch(0.55 0.08 230);
+  --accent-slot-glow: oklch(0.55 0.08 230 / 0.08);
 
   /* ─── 版式比例 ─── */
   --fs-display: 24px;
@@ -44,8 +46,6 @@
   --radius-bubble: 12px;
   --radius-card: 8px;
   --radius-panel: 12px;
-
-  /* ─── 面板 ─── */
   --panel-radius: 12px;
   --panel-blur: 24px;
 
