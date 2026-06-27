@@ -16,6 +16,15 @@ import type { MessageItem } from './components/ChatBubble'
 
 export type { MessageItem }
 
+interface ToolEvent {
+  id: string
+  tool: string
+  args?: Record<string, any>
+  result?: string
+  error?: string
+  latencyMs?: number
+}
+
 interface SessionItem {
   id: string
   label: string
@@ -38,6 +47,8 @@ function App() {
   const [sessions, setSessions] = useState<SessionItem[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string>('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+const [toolRunning, setToolRunning] = useState<ToolEvent[]>([])
+const [toolCompleted, setToolCompleted] = useState<ToolEvent[]>([])
 
   const fadeTimer = useTimerControl()
   const revealTimer = useTimerControl()
@@ -119,12 +130,28 @@ function App() {
 
   useIPCEvent(window.electronAPI.onToolStatus, (status) => {
     if (status.type === 'start') {
+      setToolRunning([])
+      setToolCompleted([])
       setToolStatus(status)
       setActiveSlot('tool')
     } else {
       setToolStatus(null)
       setActiveSlot('chat')
     }
+  })
+
+  useIPCEvent(window.electronAPI.onToolInvoked, (data) => {
+    setToolRunning((prev) => [...prev, { id: data.id, tool: data.tool, args: data.args }])
+  })
+
+  useIPCEvent(window.electronAPI.onToolCompleted, (data) => {
+    setToolRunning((prev) => prev.filter((t) => t.id !== data.id))
+    setToolCompleted((prev) => [...prev, { id: data.id, tool: data.tool, latencyMs: data.latencyMs, result: data.result }])
+  })
+
+  useIPCEvent(window.electronAPI.onToolFailed, (data) => {
+    setToolRunning((prev) => prev.filter((t) => t.id !== data.id))
+    setToolCompleted((prev) => [...prev, { id: data.id, tool: data.tool, latencyMs: data.latencyMs, error: data.error }])
   })
 
   useIPCEvent(window.electronAPI.onMessageNew, (msg) => {
@@ -203,7 +230,7 @@ function App() {
               toolStatus={toolStatus}
             />
           )}
-          {uiState.activeSlot === 'tool' && <ToolSlot />}
+          {uiState.activeSlot === 'tool' && <ToolSlot running={toolRunning} completed={toolCompleted} />}
           {uiState.activeSlot === 'preview' && <PreviewSlot />}
         </MainArea>
       </div>

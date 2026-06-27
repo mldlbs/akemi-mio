@@ -24,7 +24,15 @@ import { ToolScheduler, type ToolResult } from './ToolScheduler'
 import type { TokenAccount } from '../cognitive/TokenEconomy'
 import { SkillManager } from '../skill'
 import { WorkingMemory } from './WorkingMemory'
-import { createMessageId, createSessionId, insertMessage, getLastSessionId, getLastMessageTime, getMessagesBySession, type StoredMessage } from '../db/messages'
+import {
+  createMessageId,
+  createSessionId,
+  insertMessage,
+  getLastSessionId,
+  getLastMessageTime,
+  getMessagesBySession,
+  type StoredMessage,
+} from '../db/messages'
 import { RunState, RunContext } from './runstate'
 import { SessionRecoveryManager } from './SessionRecoveryManager'
 import { classify as classifyError } from './ErrorClassifier'
@@ -440,7 +448,7 @@ export class ChatExecutor {
           }
           ctx.transition(RunState.WAIT_TOOL)
           eventBus.emit('agent.progress' as any, { requestId, step: i + 1, toolNames: result.toolCalls.map((t) => t.name) })
-          result.toolCalls.forEach((tc) => eventBus.emit('agent.tool.invoked', { tool: tc.name, args: tc.arguments }))
+          result.toolCalls.forEach((tc) => eventBus.emit('agent.tool.invoked', { tool: tc.name, args: tc.arguments, id: tc.id }))
           const toolResults = await this.toolScheduler.executeAll(result.toolCalls, ctx.abortController.signal)
           this.obsLogger?.logToolBatch(toolResults)
           // 信用恢复：每个成功的工具调用降低一次拒绝计数
@@ -453,8 +461,8 @@ export class ChatExecutor {
           }
           for (const tr of toolResults) {
             this.emitToolStatus(tr.success ? 'success' : 'error', tr.name, tr.success ? '完成' : `失败: ${tr.error}`)
-            if (tr.success) eventBus.emit('agent.tool.completed', { tool: tr.name, result: tr.content })
-            else eventBus.emit('agent.tool.failed', { tool: tr.name, error: tr.error || '' })
+            if (tr.success) eventBus.emit('agent.tool.completed', { tool: tr.name, result: tr.content, id: tr.id, latencyMs: tr.latencyMs })
+            else eventBus.emit('agent.tool.failed', { tool: tr.name, error: tr.error || '', id: tr.id, latencyMs: tr.latencyMs })
             let c = tr.content || tr.error || ''
             if (c.length > 8000) c = c.slice(0, 8000) + `\n... [已截断，原长 ${c.length} 字符]`
             messages.push({ role: 'tool', tool_call_id: tr.id, content: c })
