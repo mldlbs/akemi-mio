@@ -18,7 +18,6 @@ export const analyzeTaskTool = buildTool({
       const { tier, reason } = analyzeComplexity(args.task || '')
       const defs = workflowStore.listDefinitions()
       const matched = defs.filter((d: any) => d.tags?.includes(tier) || d.name?.toLowerCase().includes(tier))
-      // fallback: 按 pipeline ID 推荐
       const fallbackId =
         tier === 'simple' ? 'preset_dev_pipeline_simple' : tier === 'medium' ? 'preset_dev_pipeline_medium' : 'preset_dev_pipeline_large'
       const wfList = matched.length
@@ -37,17 +36,30 @@ export const analyzeTaskTool = buildTool({
 
 export const listWorkflowsTool = buildTool({
   name: 'list_workflows',
-  description: '列出所有可用的工作流定义',
+  description: '列出所有可用的工作流定义，包括启用/停用状态。不传 showDisabled 则只显示已启用的。',
   inputJSONSchema: {
     type: 'object',
-    properties: {},
+    properties: {
+      showDisabled: {
+        type: 'boolean',
+        description: '是否同时显示已停用的工作流，默认 false',
+      },
+    },
     required: [],
   },
-  handler: async () => {
+  handler: async (args: { showDisabled?: boolean }) => {
     try {
-      const defs = workflowStore.listDefinitions()
+      let defs = workflowStore.listDefinitions()
+      if (!args.showDisabled) defs = defs.filter((d) => d.enabled !== false)
       if (defs.length === 0) return formatToolResult('暂无工作流定义。')
-      return formatToolResult(defs.map((d) => `• ${d.name} (${d.id}) — ${d.steps.length} 步`).join('\n'))
+      return formatToolResult(
+        defs
+          .map((d) => {
+            const status = d.enabled === false ? '[已停用]' : '[启用]'
+            return `• ${status} ${d.name} (${d.id}) — ${d.steps.length} 步`
+          })
+          .join('\n'),
+      )
     } catch (err: any) {
       return formatToolError(err.message)
     }
@@ -58,7 +70,7 @@ export const listWorkflowsTool = buildTool({
 export const createWorkflowTool = buildTool({
   name: 'create_workflow',
   description:
-    '创建一个新的工作流定义。工作流由多个步骤组成，步骤之间可以有依赖关系（DAG），支持子 agent、工具调用、API 调用、prompt 注入和 plan 五种 handler 类型。',
+    '创建一个新的工作流定义。工作流由多个步骤组成，步骤之间可以有依赖关系（DAG），支持子 agent、工具调用、API 调用、prompt 注入和 plan 五种 handler 类型。创建后默认启用。',
   inputJSONSchema: {
     type: 'object',
     properties: {
@@ -113,6 +125,7 @@ export const createWorkflowTool = buildTool({
         description: args.description,
         steps: args.steps,
         tags: args.tags || [],
+        enabled: true,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       }
@@ -126,7 +139,7 @@ export const createWorkflowTool = buildTool({
 
 export const startWorkflowTool = buildTool({
   name: 'start_workflow',
-  description: '启动一个已定义的工作流。根据步骤的 dependsOn 自动解析执行顺序，无依赖的步骤并行运行。',
+  description: '启动一个已定义的工作流。根据步骤的 dependsOn 自动解析执行顺序，无依赖的步骤并行运行。只能启动已启用的工作流。',
   inputJSONSchema: {
     type: 'object',
     properties: {
@@ -137,7 +150,8 @@ export const startWorkflowTool = buildTool({
   handler: async (args: { workflowId: string }) => {
     try {
       const def = workflowStore.getDefinition(args.workflowId)
-      if (!def) return formatToolError(`工作流 ${args.workflowId} 不存在`)
+      if (!def) return formatToolResult(`工作流 ${args.workflowId} 不存在`)
+      if (def.enabled === false) return formatToolResult(`工作流「${def.name}」已停用，无法启动。请先用 enable_workflow 启用。`)
       const scheduler = getWorkflowScheduler()
       const run = scheduler.startRun(def)
       return formatToolResult(`工作流「${def.name}」已启动 (RunID: ${run.runId})，共 ${def.steps.length} 个步骤。`)
@@ -161,7 +175,7 @@ export const getWorkflowStatusTool = buildTool({
     try {
       if (args.runId) {
         const run = workflowStore.getRun(args.runId)
-        if (!run) return formatToolError(`运行 ${args.runId} 不存在`)
+        if (!run) return formatToolResult(`运行 ${args.runId} 不存在。`)
         const stepSummary = run.steps.map((s) => `  [${s.status}] ${s.stepId}`).join('\n')
         return formatToolResult(`工作流「${run.workflowName}」状态: ${run.status}\n步骤:\n${stepSummary}`)
       }
@@ -177,6 +191,196 @@ export const getWorkflowStatusTool = buildTool({
       return formatToolError(err.message)
     }
   },
+})
+
+// ── New workflow management tools ──
+
+export const updateWorkflowTool = buildTool({
+  name: 'update_workflow',
+  description: '更新已有工作流定义的属性（名称、描述、步骤、标签等）。只需传需要修改的字段。',
+  inputJSONSchema: {
+    type: 'object',
+    properties: {
+      workflowId: { type: 'string', description: '要更新的工作流定义 ID' },
+      name: { type: 'string', description: '新的名称' },
+      description: { type: 'string', description: '新的描述' },
+      steps: {
+        type: 'array',
+        description: '新的步骤列表（全量替换）',
+        items: (() => ({
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: '步骤唯一标识' },
+            name: { type: 'string', description: '步骤名称' },
+            description: { type: 'string', description: '步骤描述' },
+            handler: { type: 'string', enum: ['subagent', 'tool', 'api', 'prompt', 'plan'] },
+            config: {
+              type: 'object',
+              properties: {
+                prompt: { type: 'string' },
+                tool: { type: 'string' },
+                apiUrl: { type: 'string' },
+                apiMethod: { type: 'string' },
+                planPrompt: { type: 'string' },
+              },
+            },
+            dependsOn: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['id', 'name', 'description', 'handler', 'dependsOn'],
+        }))() as any,
+      },
+      tags: {
+        type: 'array',
+        items: (() => ({ type: 'string' }))() as any,
+        description: '新的标签列表（全量替换）',
+      },
+    },
+    required: ['workflowId'],
+  },
+  handler: async (args: { workflowId: string; name?: string; description?: string; steps?: any[]; tags?: string[] }) => {
+    try {
+      const existing = workflowStore.getDefinition(args.workflowId)
+      if (!existing) return formatToolResult(`工作流 ${args.workflowId} 不存在。`)
+      const updated = {
+        ...existing,
+        name: args.name ?? existing.name,
+        description: args.description ?? existing.description,
+        steps: args.steps ?? existing.steps,
+        tags: args.tags ?? (existing as any).tags,
+        updatedAt: Date.now(),
+      }
+      workflowStore.saveDefinition(updated)
+      return formatToolResult(`工作流「${updated.name}」已更新。`)
+    } catch (err: any) {
+      return formatToolError(err.message)
+    }
+  },
+})
+
+export const deleteWorkflowTool = buildTool({
+  name: 'delete_workflow',
+  description: '删除一个工作流定义。此操作不可恢复。',
+  inputJSONSchema: {
+    type: 'object',
+    properties: {
+      workflowId: { type: 'string', description: '要删除的工作流定义 ID' },
+    },
+    required: ['workflowId'],
+  },
+  handler: async (args: { workflowId: string }) => {
+    try {
+      const existing = workflowStore.getDefinition(args.workflowId)
+      if (!existing) return formatToolResult(`工作流 ${args.workflowId} 不存在。`)
+      workflowStore.deleteDefinition(args.workflowId)
+      return formatToolResult(`工作流「${existing.name}」已删除。`)
+    } catch (err: any) {
+      return formatToolError(err.message)
+    }
+  },
+})
+
+export const enableWorkflowTool = buildTool({
+  name: 'enable_workflow',
+  description: '启用一个已停用的工作流，使其可以再次启动。',
+  inputJSONSchema: {
+    type: 'object',
+    properties: {
+      workflowId: { type: 'string', description: '工作流定义 ID' },
+    },
+    required: ['workflowId'],
+  },
+  handler: async (args: { workflowId: string }) => {
+    try {
+      const existing = workflowStore.getDefinition(args.workflowId)
+      if (!existing) return formatToolResult(`工作流 ${args.workflowId} 不存在。`)
+      if (existing.enabled !== false) return formatToolResult(`工作流「${existing.name}」已经是启用状态。`)
+      workflowStore.saveDefinition({ ...existing, enabled: true, updatedAt: Date.now() })
+      return formatToolResult(`工作流「${existing.name}」已启用。`)
+    } catch (err: any) {
+      return formatToolError(err.message)
+    }
+  },
+})
+
+export const disableWorkflowTool = buildTool({
+  name: 'disable_workflow',
+  description: '停用一个工作流。停用后无法 start_workflow 启动它，但已有运行中的实例不受影响。',
+  inputJSONSchema: {
+    type: 'object',
+    properties: {
+      workflowId: { type: 'string', description: '工作流定义 ID' },
+    },
+    required: ['workflowId'],
+  },
+  handler: async (args: { workflowId: string }) => {
+    try {
+      const existing = workflowStore.getDefinition(args.workflowId)
+      if (!existing) return formatToolResult(`工作流 ${args.workflowId} 不存在。`)
+      if (existing.enabled === false) return formatToolResult(`工作流「${existing.name}」已经是停用状态。`)
+      workflowStore.saveDefinition({ ...existing, enabled: false, updatedAt: Date.now() })
+      return formatToolResult(`工作流「${existing.name}」已停用。`)
+    } catch (err: any) {
+      return formatToolError(err.message)
+    }
+  },
+})
+
+export const cancelWorkflowRunTool = buildTool({
+  name: 'cancel_workflow_run',
+  description: '取消一个正在运行的工作流实例。相当于强制中止。',
+  inputJSONSchema: {
+    type: 'object',
+    properties: {
+      runId: { type: 'string', description: '运行 ID（从 get_workflow_status 获取）' },
+    },
+    required: ['runId'],
+  },
+  handler: async (args: { runId: string }) => {
+    try {
+      const scheduler = getWorkflowScheduler()
+      const ok = scheduler.stopRun(args.runId)
+      if (!ok) return formatToolResult(`运行 ${args.runId} 不存在或已结束。`)
+      return formatToolResult(`运行 ${args.runId} 已取消。`)
+    } catch (err: any) {
+      return formatToolError(err.message)
+    }
+  },
+})
+
+export const listWorkflowRunsTool = buildTool({
+  name: 'list_workflow_runs',
+  description: '查看工作流运行历史记录，按时间倒序排列。',
+  inputJSONSchema: {
+    type: 'object',
+    properties: {
+      limit: { type: 'number', description: '返回条数，默认 10，最大 50' },
+      status: {
+        type: 'string',
+        enum: ['running', 'done', 'failed', 'pending'],
+        description: '可选，按状态筛选',
+      },
+    },
+    required: [],
+  },
+  handler: async (args: { limit?: number; status?: string }) => {
+    try {
+      let runs = workflowStore.listRuns(Math.min(args.limit || 10, 50))
+      if (args.status) runs = runs.filter((r) => r.status === args.status)
+      if (runs.length === 0) return formatToolResult('暂无工作流运行记录。')
+      return formatToolResult(
+        runs
+          .map((r) => {
+            const done = r.steps.filter((s) => s.status === 'done').length
+            const failed = r.steps.filter((s) => s.status === 'failed').length
+            return `• [${r.status}] ${r.workflowName} (${r.runId}) — ${done}/${r.steps.length} 步完成${failed ? `, ${failed} 步失败` : ''}`
+          })
+          .join('\n'),
+      )
+    } catch (err: any) {
+      return formatToolError(err.message)
+    }
+  },
+  isReadOnly: true,
 })
 
 // ── Helper: complexity analysis (moved from WorkflowEngine) ──

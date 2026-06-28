@@ -404,11 +404,48 @@ export function registerHandlers(
 
   ipcMain.handle('workflow:startWorkflow', async (_event, id: string) => {
     try {
+      log('INFO', 'workflow_startWorkflow_called', { id })
       const def = workflowStore.getDefinition(id)
       if (!def) return { success: false, error: '工作流不存在' }
+      if (def.enabled === false) return { success: false, error: '工作流已停用，请先启用' }
       const scheduler = getWorkflowScheduler()
+      log('INFO', 'workflow_scheduler_got', { schedulerExists: !!scheduler })
       const run = scheduler.startRun(def)
       return { success: true, runId: run.runId }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('workflow:stopRun', async (_event, runId: string) => {
+    try {
+      const scheduler = getWorkflowScheduler()
+      const ok = scheduler.stopRun(runId)
+      return { success: ok, error: ok ? undefined : '运行未找到或已结束' }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('workflow:enableDefinition', async (_event, id: string) => {
+    try {
+      const existing = workflowStore.getDefinition(id)
+      if (!existing) return { success: false, error: '工作流不存在' }
+      if (existing.enabled !== false) return { success: false, error: '已经是启用状态' }
+      workflowStore.saveDefinition({ ...existing, enabled: true, updatedAt: Date.now() })
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('workflow:disableDefinition', async (_event, id: string) => {
+    try {
+      const existing = workflowStore.getDefinition(id)
+      if (!existing) return { success: false, error: '工作流不存在' }
+      if (existing.enabled === false) return { success: false, error: '已经是停用状态' }
+      workflowStore.saveDefinition({ ...existing, enabled: false, updatedAt: Date.now() })
+      return { success: true }
     } catch (err: any) {
       return { success: false, error: err.message }
     }

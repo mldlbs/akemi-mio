@@ -253,6 +253,62 @@
   font-size: 14px;
 }
 
+/* ─── Collapsible tool group header ─── */
+.tool-inline-group-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-card);
+  font-size: var(--fs-small);
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+  min-height: 32px;
+}
+.tool-inline-group-header:hover {
+  background: var(--bg-glass);
+}
+.tool-inline-group-header.expanded {
+  border-bottom: 1px solid var(--border-glass);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+}
+
+.tool-group-running-icon {
+  color: var(--accent);
+  font-size: 14px;
+}
+.tool-group-done-icon {
+  color: oklch(0.55 0.12 150);
+  font-size: 14px;
+}
+.tool-group-summary {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-group-count {
+  font-size: 11px;
+  background: var(--bg-glass);
+  padding: 0 6px;
+  border-radius: 8px;
+  line-height: 16px;
+  min-width: 18px;
+  text-align: center;
+}
+.tool-group-completed-header {
+  cursor: default;
+}
+.tool-inline-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+  animation: tool-in 0.2s var(--ease-glass) both;
+}
+
 .tool-inline-name {
   font-weight: 500;
   color: var(--text-primary);
@@ -643,6 +699,98 @@
   letter-spacing: 0.06em;
 }
 
+.wf-pipeline-status-text {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-sm);
+  font-size: var(--fs-small);
+}
+
+.wf-progress-running {
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.wf-elapsed {
+  font-weight: 400;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+}
+
+.wf-progress-failed {
+  color: var(--red);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.wf-progress-done {
+  color: var(--green);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.wf-progress-pct {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.wf-pipeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-md);
+}
+
+.wf-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  font-size: var(--fs-small);
+  color: var(--red);
+  background: transparent;
+  border: 1px solid var(--red);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all .15s;
+}
+
+.wf-cancel-btn:hover {
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+}
+
+.wf-step-activity {
+  margin-top: var(--space-sm);
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.wf-step-activity code {
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+  white-space: nowrap;
+  animation: wf-activity-scroll 12s linear infinite;
+  display: inline-block;
+}
+
+@keyframes wf-activity-scroll {
+  0% { transform: translateX(100%); }
+  10% { transform: translateX(0); }
+  90% { transform: translateX(0); }
+  100% { transform: translateX(-100%); }
+}
+
 .wf-pipeline-track {
   position: relative;
   height: 48px;
@@ -793,6 +941,8 @@
   background: var(--bg-glass);
   border: 1px solid var(--border-glass);
   border-radius: var(--radius-panel);
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .wf-otpar-groups {
@@ -1303,6 +1453,31 @@
 
 .wf-editor-btn-edit {
   font-size: var(--fs-small);
+}
+
+.wf-editor-btn-toggle {
+  font-size: var(--fs-small);
+}
+
+.wf-editor-btn-del {
+  font-size: var(--fs-small);
+  color: var(--danger, oklch(0.55 0.18 25));
+}
+
+.wf-editor-btn-del:hover:not(:disabled) {
+  background: oklch(0.55 0.18 25 / 0.12);
+}
+
+/* ─── Disabled workflow card ─── */
+.wf-plan-card-disabled {
+  opacity: 0.55;
+}
+
+.wf-badge-disabled {
+  background: var(--bg-glass, oklch(0.5 0 0 / 0.15));
+  color: var(--text-muted, oklch(0.6 0 0));
+  margin-left: var(--space-sm);
+  font-size: 10px;
 }
 
 .wf-editor-error {

@@ -15,17 +15,20 @@ export function useTools() {
   })
 
   useIPCEvent(window.electronAPI.onToolInvoked, (data: ToolEvent) => {
-    setToolRunning((prev) => [...prev, { id: data.id, tool: data.tool, args: data.args }])
+    const id = data.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    setToolRunning((prev) => [...prev, { id, tool: data.tool, args: data.args }])
   })
 
   useIPCEvent(window.electronAPI.onToolCompleted, (data: ToolEvent) => {
-    setToolRunning((prev) => prev.filter((t) => t.id !== data.id))
-    setToolCompleted((prev) => [...prev, { id: data.id, tool: data.tool, latencyMs: data.latencyMs, result: data.result }])
+    const id = data.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    setToolRunning((prev) => prev.filter((t) => t.id !== id))
+    setToolCompleted((prev) => [...prev, { id, tool: data.tool, latencyMs: data.latencyMs, result: data.result }])
   })
 
   useIPCEvent(window.electronAPI.onToolFailed, (data: ToolEvent) => {
-    setToolRunning((prev) => prev.filter((t) => t.id !== data.id))
-    setToolCompleted((prev) => [...prev, { id: data.id, tool: data.tool, latencyMs: data.latencyMs, error: data.error }])
+    const id = data.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    setToolRunning((prev) => prev.filter((t) => t.id !== id))
+    setToolCompleted((prev) => [...prev, { id, tool: data.tool, latencyMs: data.latencyMs, error: data.error }])
   })
 
   return { toolRunning, toolCompleted } as const

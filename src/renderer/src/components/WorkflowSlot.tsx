@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { WorkflowEditor } from './WorkflowEditor'
 import { ErrorBoundary } from './ErrorBoundary'
 
@@ -95,6 +95,28 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
   const [view, setView] = useState<ViewMode>('list')
   const [editDef, setEditDef] = useState<any | null>(null)
   const [runError, setRunError] = useState('')
+  const [elapsed, setElapsed] = useState(0)
+
+  // 活跃工作流计时器 — 每秒更新，给用户"还在跑"的反馈
+  const hasActive = workflowActiveRuns.length > 0
+  useEffect(() => {
+    if (!hasActive) {
+      setElapsed(0)
+      return
+    }
+    const t0 = Date.now()
+    const id = setInterval(() => setElapsed(Date.now() - t0), 1000)
+    return () => clearInterval(id)
+  }, [hasActive])
+
+  function fmtElapsed(ms: number): string {
+    const s = Math.floor(ms / 1000)
+    const m = Math.floor(s / 60)
+    const h = Math.floor(m / 60)
+    if (h > 0) return `${h}h ${m % 60}m ${s % 60}s`
+    if (m > 0) return `${m}m ${s % 60}s`
+    return `${s}s`
+  }
 
   // ── Editor view ──
   if (view === 'editor') {
@@ -130,10 +152,51 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
             const runDone = runSteps.filter((s: any) => s.status === 'done').length
             const runTotal = runSteps.length
             const runPct = runTotal > 0 ? Math.round((runDone / runTotal) * 100) : 0
-            const isRunning = runSteps.some((s: any) => s.status === 'running')
+            const currentStep = runSteps.find((s: any) => s.status === 'running')
+            const isRunning = !!currentStep
+            const failedStep = runSteps.find((s: any) => s.status === 'failed')
+            const statusTag = failedStep ? `${failedStep.name} 失败` : currentStep ? `${currentStep.name}` : '完成'
             return (
               <section key={run.runId} className={`wf-pipeline${isRunning ? ' running' : ''}`}>
-                <h4 className="wf-section-title">{run.workflowName}</h4>
+                <div className="wf-pipeline-header">
+                  <h4 className="wf-section-title" style={{ margin: 0 }}>
+                    {run.workflowName}
+                  </h4>
+                  {isRunning && (
+                    <button
+                      className="wf-cancel-btn"
+                      title="取消运行"
+                      onClick={async () => {
+                        await window.electronAPI.stopWorkflowRun(run.runId)
+                      }}
+                    >
+                      <i className="ri-stop-circle-line" /> 取消
+                    </button>
+                  )}
+                </div>
+                <div className="wf-pipeline-status-text">
+                  {isRunning ? (
+                    <span className="wf-progress-running">
+                      <i className="ri-loader-4-line ri-spin" />第 {runDone + 1}/{runTotal} 步：{currentStep.name}
+                      <span className="wf-elapsed">{fmtElapsed(elapsed)}</span>
+                    </span>
+                  ) : failedStep ? (
+                    <span className="wf-progress-failed">
+                      <i className="ri-close-circle-line" />第 {runDone + 1}/{runTotal} 步失败：{failedStep.error || failedStep.name}
+                    </span>
+                  ) : (
+                    <span className="wf-progress-done">
+                      <i className="ri-check-line" />
+                      {runDone}/{runTotal} 步完成
+                    </span>
+                  )}
+                  <span className="wf-progress-pct">{runPct}%</span>
+                </div>
+                {isRunning && currentStep.agentResult && (
+                  <div className="wf-step-activity">
+                    <code>{currentStep.agentResult}</code>
+                  </div>
+                )}
                 <div className="wf-pipeline-track">
                   <div className="wf-pipeline-fill" style={{ width: `${Math.max(runPct, 4)}%` }} />
                   <div className="wf-pipeline-stages">
@@ -182,9 +245,12 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
 
         {showDefs &&
           workflowDefs.map((def: any) => (
-            <section key={def.id} className="wf-plan-card">
+            <section key={def.id} className={`wf-plan-card${def.enabled === false ? ' wf-plan-card-disabled' : ''}`}>
               <div className="wf-plan-header">
-                <h3 className="wf-plan-title">{def.name}</h3>
+                <h3 className="wf-plan-title">
+                  {def.name}
+                  {def.enabled === false && <span className="wf-plan-badge wf-badge-disabled">已停用</span>}
+                </h3>
                 <span className="wf-plan-badge">{def.steps.length} 步</span>
               </div>
               <p className="wf-desc">{def.description}</p>
@@ -216,6 +282,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                 </button>
                 <button
                   className="wf-editor-btn wf-editor-btn-run"
+                  disabled={def.enabled === false}
                   onClick={async () => {
                     setRunError('')
                     const result = await window.electronAPI.startWorkflow(def.id)
@@ -228,6 +295,23 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                 >
                   <i className="ri-play-circle-line" />
                   运行
+                </button>
+                <button
+                  className="wf-editor-btn wf-editor-btn-toggle"
+                  onClick={async () => {
+                    setRunError('')
+                    const fn =
+                      def.enabled === false ? window.electronAPI.enableWorkflowDefinition : window.electronAPI.disableWorkflowDefinition
+                    const result = await fn(def.id)
+                    if (result.success) {
+                      onRefreshDefs?.()
+                    } else {
+                      setRunError(result.error ?? '操作失败')
+                    }
+                  }}
+                >
+                  <i className={`ri-${def.enabled === false ? 'play-circle' : 'pause-circle'}-line`} />
+                  {def.enabled === false ? '启用' : '停用'}
                 </button>
                 <button
                   className="wf-editor-btn wf-editor-btn-del"

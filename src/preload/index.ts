@@ -242,6 +242,13 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('workflow:run_step', handler)
   },
 
+  // 工作流定义变更 → UI 刷新
+  onWorkflowDefCreated: (callback: (data: { workflowDefId: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('workflow:def_created', handler)
+    return () => ipcRenderer.removeListener('workflow:def_created', handler)
+  },
+
   // Invoke handlers
   getActivePlan: (): Promise<{
     id: string
@@ -285,6 +292,11 @@ const electronAPI = {
   saveWorkflowDefinition: (def: any): Promise<{ success: boolean }> => ipcRenderer.invoke('workflow:saveDefinition', def),
   startWorkflow: (id: string): Promise<{ success: boolean; runId?: string; error?: string }> =>
     ipcRenderer.invoke('workflow:startWorkflow', id),
+  enableWorkflowDefinition: (id: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('workflow:enableDefinition', id),
+  disableWorkflowDefinition: (id: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('workflow:disableDefinition', id),
+  stopWorkflowRun: (runId: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('workflow:stopRun', runId),
 
   // ── Writing Status ──
   getWritingStatus: (): Promise<{ stories: any[]; totalStories: number; totalScenes: number }> => ipcRenderer.invoke('writing:getStatus'),

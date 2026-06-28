@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import type { MessageItem, ToolEvent } from '../slots/types'
 import type { AgentState } from '../hooks/useAIOutput'
 
@@ -41,6 +41,48 @@ const AGENT_LABELS: Record<AgentState, string | null> = {
   replying: null,
 }
 
+// 工具名 → 用户友好的简短描述
+function humanToolName(t: ToolEvent): string {
+  const n = t.tool
+  if (n === 'read_file') return '读取文件'
+  if (n === 'edit_file') return '编辑文件'
+  if (n === 'write_file') return '写入文件'
+  if (n === 'run_command') return '执行命令'
+  if (n === 'grep' || n === 'grep_code') return '搜索代码'
+  if (n === 'list_files') return '浏览目录'
+  if (n === 'remember_fact') return '记忆事实'
+  if (n === 'analyze_task') return '分析任务'
+  if (n === 'list_workflows') return '查看工作流'
+  if (n === 'create_workflow') return '创建工作流'
+  if (n === 'start_workflow') return '启动工作流'
+  if (n === 'get_workflow_status') return '工作流状态'
+  if (n === 'create_dev_plan') return '创建设计方案'
+  if (n === 'update_plan_progress') return '更新计划进度'
+  if (n === 'list_plans') return '查看设计方案'
+  if (n === 'query_trends') return '查询热搜'
+  if (n === 'generate_image') return '生成图片'
+  if (n === 'card_generator') return '生成卡片'
+  if (n.startsWith('centos_')) return n.replace('centos_', '远程-')
+  return n
+}
+
+// 根据工具类型提取关键参数摘要
+function summarizeArgs(tool: string, args: Record<string, any>): string {
+  const v = (key: string) => (args[key] ?? '').toString().slice(0, 60)
+  if (tool === 'run_command') return v('command')
+  if (tool === 'read_file') return v('path').split('/').pop() || v('file_path').split('/').pop() || v('path')
+  if (tool === 'edit_file' || tool === 'write_file') return v('path').split('/').pop() || v('path')
+  if (tool === 'grep' || tool === 'grep_code') return v('pattern')
+  if (tool === 'list_files') return v('path')
+  if (tool === 'create_workflow') return v('name')
+  if (tool === 'start_workflow') return v('workflowId')
+  return Object.values(args)
+    .filter((v) => typeof v === 'string')
+    .map((s) => s.slice(0, 30))
+    .join(' ')
+    .slice(0, 80)
+}
+
 export function ChatSlot({
   messages,
   pendingText,
@@ -53,6 +95,7 @@ export function ChatSlot({
   historyLoading,
 }: ChatSlotProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  const [toolsCollapsed, setToolsCollapsed] = useState(false)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -62,6 +105,15 @@ export function ChatSlot({
   const agentLabel = AGENT_LABELS[agentState]
   const hasTools = toolRunning.length > 0 || toolCompleted.length > 0
   const showEmpty = messages.length === 0 && !hasPending && !transcribed && !hasTools && !agentLabel && !historyLoading
+
+  // 根据工具名生成可读的描述
+  const toolSummary = useMemo(() => {
+    const allTools = [...toolRunning, ...toolCompleted]
+    const names = [...new Set(allTools.map((t) => humanToolName(t)))]
+    if (names.length === 0) return ''
+    if (names.length <= 2) return names.join('、')
+    return `${names[0]} 等 ${names.length} 个工具`
+  }, [toolRunning, toolCompleted])
 
   // 加载中状态
   if (historyLoading) {
@@ -123,30 +175,49 @@ export function ChatSlot({
         </div>
       ))}
 
-      {/* 正在执行的 tool 卡片 */}
+      {/* 正在执行的 tool 卡片 — 可收起/展开 */}
       {toolRunning.length > 0 && (
         <div className="tool-inline-group">
-          {toolRunning.map((t) => (
-            <div key={t.id} className="tool-inline tool-inline-running">
-              <i className="ri-loader-4-line ri-spin" />
-              <span className="tool-inline-name">{t.tool}</span>
-              {t.args && <span className="tool-inline-args">{JSON.stringify(t.args).slice(0, 80)}</span>}
+          <div
+            className={`tool-inline-group-header${toolsCollapsed ? '' : ' expanded'}`}
+            onClick={() => setToolsCollapsed(!toolsCollapsed)}
+          >
+            <i className={`ri-arrow-${toolsCollapsed ? 'right' : 'down'}-s-line`} />
+            <i className="ri-loader-4-line ri-spin tool-group-running-icon" />
+            <span className="tool-group-summary">{toolSummary}</span>
+            <span className="tool-group-count">{toolRunning.length}</span>
+          </div>
+          {!toolsCollapsed && (
+            <div className="tool-inline-items">
+              {toolRunning.map((t) => (
+                <div key={t.id} className="tool-inline tool-inline-running">
+                  <i className="ri-loader-4-line ri-spin" />
+                  <span className="tool-inline-name">{humanToolName(t)}</span>
+                  {t.args && <span className="tool-inline-args">{summarizeArgs(t.tool, t.args)}</span>}
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
 
-      {/* 刚完成的 tool 卡片 */}
+      {/* 刚完成的 tool 卡片 — 自动折叠 */}
       {toolCompleted.length > 0 && (
         <div className="tool-inline-group">
-          {toolCompleted.map((t) => (
-            <div key={t.id} className={`tool-inline ${t.error ? 'tool-inline-failed' : 'tool-inline-done'}`}>
-              <i className={`ri-${t.error ? 'close-circle-line' : 'check-line'}`} />
-              <span className="tool-inline-name">{t.tool}</span>
-              {t.latencyMs !== undefined && <span className="tool-inline-meta">{(t.latencyMs / 1000).toFixed(1)}s</span>}
-              {t.error && <span className="tool-inline-error">{t.error}</span>}
-            </div>
-          ))}
+          <div className="tool-inline-group-header tool-group-completed-header">
+            <i className="ri-check-line tool-group-done-icon" />
+            <span className="tool-group-summary">完成 {toolCompleted.length} 个工具</span>
+          </div>
+          <div className="tool-inline-items">
+            {toolCompleted.map((t) => (
+              <div key={t.id} className={`tool-inline ${t.error ? 'tool-inline-failed' : 'tool-inline-done'}`}>
+                <i className={`ri-${t.error ? 'close-circle-line' : 'check-line'}`} />
+                <span className="tool-inline-name">{humanToolName(t)}</span>
+                {t.latencyMs !== undefined && <span className="tool-inline-meta">{(t.latencyMs / 1000).toFixed(1)}s</span>}
+                {t.error && <span className="tool-inline-error">{t.error}</span>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

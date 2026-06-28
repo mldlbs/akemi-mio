@@ -30,6 +30,8 @@ export class WorkflowScheduler {
 
     log('INFO', 'workflow_run_started', { runId: run.runId, defId: def.id, steps: def.steps.length })
 
+    log('INFO', 'workflow_before_executeLoop', { runId: run.runId })
+
     // Execute in background
     this.executeLoop(run, def).catch((err) => {
       log('ERROR', 'workflow_execution_error', { runId: run.runId, error: String(err) })
@@ -42,6 +44,8 @@ export class WorkflowScheduler {
   }
 
   private async executeLoop(run: WorkflowRun, def: WorkflowDef): Promise<void> {
+    console.log('[wf] executeLoop ENTERED', { runId: run.runId, steps: def.steps.length, runStatus: run.status })
+    log('INFO', 'workflow_executeLoop_entered', { runId: run.runId, steps: def.steps.length })
     const stepDefs = [...def.steps]
     const completed = new Set<string>()
     const failures = new Set<string>()
@@ -122,7 +126,15 @@ export class WorkflowScheduler {
             }
             case 'plan': {
               const planPrompt = sd.config.planPrompt || sd.config.prompt || sd.description
-              this.dispatch.runPlan(planPrompt)
+              const planId = this.dispatch.runPlan(planPrompt)
+              // 0 步的 plan → 立即完成（plan 仅含自由文本 prompt，无步骤可执行）
+              const ps0 = this.dispatch.getPlanStatus()
+              if (ps0 && ps0.status === 'active' && ps0.total === 0) {
+                log('INFO', 'workflow_plan_zero_step_completed', { runId: run.runId, stepId: sd.id, planId })
+                workflowStore.updateStep(run, sd.id, 'done', `Plan 指令已注入：${planPrompt.slice(0, 60)}...`)
+                completed.add(sd.id)
+                return
+              }
               // Poll for plan completion
               for (let i = 0; i < 600; i++) {
                 const ps = this.dispatch.getPlanStatus()
@@ -168,11 +180,26 @@ export class WorkflowScheduler {
   }
 
   private async waitForAgents(agentIds: string[], run: WorkflowRun, sd: WorkflowStepDef): Promise<void> {
-    for (let i = 0; i < 300; i++) {
+    console.log('[wf] waitForAgents ENTERED', { agentIds, stepId: sd.id })
+    const maxWait = 60 * 60 * 1000
+    const interval = 2000
+    let waited = 0
+    while (waited < maxWait) {
       const results = this.dispatch.getCompletedAgentResults()
+      console.log('[wf] waitForAgents poll', { agentIds, results, waited })
       const done = agentIds.every((id) => results.some((r) => r.id === id))
-      if (done) return
-      await sleep(1000)
+      if (done) {
+        console.log('[wf] waitForAgents done', { agentIds, results })
+        return
+      }
+      eventBus.emit('workflow.run.step' as any, {
+        runId: run.runId,
+        stepId: sd.id,
+        status: 'running',
+        agentResult: `⏳ ${Math.floor(waited / 1000)}s`,
+      })
+      await sleep(interval)
+      waited += interval
     }
     log('WARN', 'workflow_agent_wait_timeout', { runId: run.runId, stepId: sd.id })
   }

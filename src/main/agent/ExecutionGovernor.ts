@@ -14,6 +14,7 @@ import { log } from '../logger/Logger'
 import type { ToolCallInfo } from '../llm/LlmService'
 import type { ToolResult } from './ToolScheduler'
 import type { RunContext } from './runstate'
+import { classifyToolError, ToolErrorType } from '../tool/ToolErrorType'
 
 export type GovernorAction = 'continue' | 'stop' | 'shift'
 
@@ -55,17 +56,21 @@ export class ExecutionGovernor {
     const failed = toolResults.filter((r) => !r.success)
     const allFailed = failed.length > 0 && failed.length === toolResults.length
 
-    // ─ 1. ALL_FAILED：本轮全部工具失败 → stop ─
+    // ─ 1. ALL_FAILED：本轮全部工具失败 → shift（引导换路而非直接放弃） ─
     if (allFailed && toolResults.length > 0) {
       log('WARN', 'governor_all_failed', { step: ctx.step, count: failed.length })
       this.resetState()
       const names = [...new Set(failed.map((r) => r.name))]
       return {
-        action: 'stop',
+        action: 'shift',
         reason: `all_tools_failed: ${names.join(', ')}`,
         message:
           `【ExecutionGovernor】本轮全部工具调用失败（${names.join(', ')}）。` +
-          `当前路径阻塞，请停止尝试。如果问题需要解决，向用户报告失败情况并请求指导。`,
+          `失败原因：${failed
+            .map((r) => r.error)
+            .filter(Boolean)
+            .join('; ')}。` +
+          `请尝试其他方式达到同样目的，或向用户报告失败情况。`,
       }
     }
 
@@ -77,12 +82,17 @@ export class ExecutionGovernor {
       if (prev === key) {
         log('WARN', 'governor_same_failure', { step: ctx.step, tool: tr.name, args: prev })
         this.resetState()
+        const errorType = classifyToolError(tr.error || '')
+        const isEnv = errorType === ToolErrorType.ENVIRONMENT
         return {
           action: 'shift',
           reason: `same_tool_failure: ${tr.name}`,
-          message:
-            `【ExecutionGovernor】${tr.name} 参数相同且连续失败 2 次。` +
-            `当前操作路径不可行，请切换策略重试。不要重复相同的操作。失败原因：${tr.error || '未知'}`,
+          message: isEnv
+            ? `【ExecutionGovernor】${tr.name} 连续失败。` +
+              `当前工具不可用（环境缺少必要依赖），请尝试其他命令或工具达到同样目的。` +
+              `失败原因：${tr.error || '未知'}`
+            : `【ExecutionGovernor】${tr.name} 参数相同且连续失败 2 次。` +
+              `当前操作路径不可行，请切换策略重试。不要重复相同的操作。失败原因：${tr.error || '未知'}`,
         }
       }
       this.lastFailedTools.set(tr.name, key)
@@ -106,7 +116,7 @@ export class ExecutionGovernor {
       }
     }
 
-    // ─ 4. CASCADE_FAIL：连续 N 轮有失败 → stop ─
+    // ─ 4. CASCADE_FAIL：连续 N 轮有失败 → shift ─
     if (failed.length > 0) {
       this.cascadeCount++
     } else {
@@ -116,11 +126,11 @@ export class ExecutionGovernor {
       log('WARN', 'governor_cascade_fail', { step: ctx.step, cascadeCount: this.cascadeCount })
       this.resetState()
       return {
-        action: 'stop',
+        action: 'shift',
         reason: `cascade_fail: ${this.cascadeCount} consecutive rounds with failures`,
         message:
-          `【ExecutionGovernor】连续 ${this.cascadeCount} 轮工具调用均存在失败，当前执行路径不可收敛。` +
-          `立即停止自动执行，向用户报告当前进展和遇到的问题。`,
+          `【ExecutionGovernor】连续 ${this.cascadeCount} 轮工具调用均存在失败。` +
+          `请总结当前进展，尝试全新策略，或向用户报告遇到的问题。`,
       }
     }
 

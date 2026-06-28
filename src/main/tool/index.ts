@@ -15,6 +15,12 @@ import {
   createWorkflowTool,
   startWorkflowTool,
   getWorkflowStatusTool,
+  updateWorkflowTool,
+  deleteWorkflowTool,
+  enableWorkflowTool,
+  disableWorkflowTool,
+  cancelWorkflowRunTool,
+  listWorkflowRunsTool,
 } from './definitions/WorkflowTools'
 import { listSkillsTool, enableSkillTool, disableSkillTool } from './definitions/SkillTools'
 import { writingSystemTool } from './definitions/WritingTool'
@@ -49,6 +55,12 @@ export function getAllTools(): Tool[] {
     createWorkflowTool as Tool,
     startWorkflowTool as Tool,
     getWorkflowStatusTool as Tool,
+    updateWorkflowTool as Tool,
+    deleteWorkflowTool as Tool,
+    enableWorkflowTool as Tool,
+    disableWorkflowTool as Tool,
+    cancelWorkflowRunTool as Tool,
+    listWorkflowRunsTool as Tool,
     listSkillsTool as Tool,
     enableSkillTool as Tool,
     disableSkillTool as Tool,

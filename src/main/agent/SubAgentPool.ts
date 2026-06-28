@@ -96,7 +96,7 @@ class SubAgentInstance {
         throw new DOMException('Aborted', 'AbortError')
       }
 
-      const result = await this.llm.chatWithTools(messages, `sub_${this.id}_${i}`, 30000)
+      const result = await this.llm.chatWithTools(messages, `sub_${this.id}_${i}`, 120000, this.abortController.signal)
 
       if (result.error === 'TIMEOUT') {
         log('WARN', 'subagent_timeout', { id: this.id, step: i })
@@ -144,8 +144,9 @@ class SubAgentInstance {
 
 // ── 子 Agent 池 ──
 
-const SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000 // 5 分钟
-const WATCHDOG_INTERVAL_MS = 30_000 // 每 30 秒检查一次
+// 超时仅作为安全网，正常情况下用户通过取消按钮手动终止
+const SUBAGENT_TIMEOUT_MS = 60 * 60 * 1000 // 60 分钟
+const WATCHDOG_INTERVAL_MS = 30_000
 
 export class SubAgentPool {
   private agents = new Map<string, SubAgentInstance>()

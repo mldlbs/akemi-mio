@@ -46,9 +46,25 @@ export function useWorkflowDefinitions() {
     refresh()
   }, [refresh])
 
-  // 工作流新运行创建 → 全量刷新
-  useIPCEvent(window.electronAPI.onWorkflowRunCreated, () => {
-    window.electronAPI.listWorkflowRuns(20).then(setRuns)
+  // 工作流新运行创建 → 直接使用事件携带的全量数据
+  useIPCEvent(window.electronAPI.onWorkflowRunCreated, (data: any) => {
+    setRuns((prev) => {
+      if (prev.some((r) => r.runId === data.runId)) return prev
+      const run: WorkflowRun = {
+        runId: data.runId,
+        workflowDefId: data.workflowDefId,
+        workflowName: data.workflowName || '',
+        status: 'running',
+        steps: data.steps || [],
+        startedAt: data.startedAt || Date.now(),
+      }
+      return [run, ...prev].slice(0, 20)
+    })
+  })
+
+  // 工作流定义创建 → 全量刷新列表
+  useIPCEvent(window.electronAPI.onWorkflowDefCreated, () => {
+    window.electronAPI.listWorkflowDefinitions().then(setDefinitions)
   })
 
   // 运行状态变更 → 原地更新

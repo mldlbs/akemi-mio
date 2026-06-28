@@ -91,5 +91,9 @@ export class UIBridge {
 
     const dWfStep = eventBus.on('workflow.run.step' as any, (p) => this.send('workflow:run_step', p))
     this.disposers.push(dWfStep)
+
+    // 工作流定义变更 → UI 刷新列表
+    const dWfDefCreated = eventBus.on('workflow.def.created' as any, (p) => this.send('workflow:def_created', p))
+    this.disposers.push(dWfDefCreated)
   }
 }

@@ -103,7 +103,14 @@ export class WorkflowStore {
       startedAt: Date.now(),
     }
     writeJsonSafe(join(RUNS_DIR, `${run.runId}.json`), run)
-    eventBus.emit('workflow.run.created' as any, { runId: run.runId, workflowDefId: def.id })
+    eventBus.emit('workflow.run.created' as any, {
+      runId: run.runId,
+      workflowDefId: def.id,
+      workflowName: def.name,
+      steps: def.steps.map((s) => ({ stepId: s.id, status: 'pending' })),
+      startedAt: run.startedAt,
+      status: 'running',
+    })
     log('INFO', 'workflow_run_created', { runId: run.runId, defId: def.id })
     return run
   }

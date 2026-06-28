@@ -24,6 +24,8 @@ export interface WorkflowDef {
   steps: WorkflowStepDef[]
   createdAt: number
   updatedAt: number
+  /** 是否启用，false 时不允许启动 */
+  enabled?: boolean
 }
 
 export type StepRunStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped'
