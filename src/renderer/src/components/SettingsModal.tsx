@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react'
+import { useTheme, type ThemeName } from '../hooks/useTheme'
 
 interface SettingsModalProps {
   open: boolean
@@ -16,6 +17,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [ttsMode, setTtsMode] = useState('cloud')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
+  const { theme, setTheme } = useTheme()
 
   useEffect(() => {
     if (!open) return
@@ -50,14 +52,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
   }
 
-  if (!open) return null
-
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     },
     [onClose],
   )
+
+  if (!open) return null
 
   return (
     <div className="settings-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
@@ -104,6 +106,31 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           </div>
 
           {message && <div className={`settings-message settings-${message.type}`}>{message.text}</div>}
+
+          <div className="settings-field">
+            <span className="settings-label">主题</span>
+            <div className="settings-toggle" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {[
+                { id: 'mio', label: 'Mio', icon: '🌸' },
+                { id: 'ocean', label: 'Ocean', icon: '🌊' },
+                { id: 'sunset', label: 'Sunset', icon: '🌅' },
+                { id: 'arctic', label: 'Arctic', icon: '❄️' },
+                { id: 'garden', label: 'Garden', icon: '🌿' },
+                { id: 'tech', label: 'Tech', icon: '⚡' },
+                { id: 'minimal', label: 'Minimal', icon: '◇' },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`settings-toggle-btn${theme === t.id ? ' active' : ''}`}
+                  onClick={() => setTheme(t.id as ThemeName)}
+                  style={{ flex: '1 0 calc(50% - 6px)', minWidth: 0 }}
+                >
+                  {t.icon} {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="settings-actions">
             <button type="submit" className="settings-save" disabled={saving}>

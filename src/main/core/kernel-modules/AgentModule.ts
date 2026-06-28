@@ -31,7 +31,7 @@ export class AgentModule implements IModule {
         return { busy: this.agentService['isBusy']?.() ?? false }
 
       case 'get_context_stats':
-        return { messageCount: this.agentService.getContext()?.messages.length ?? 0 }
+        return { messageCount: this.agentService.getContext().getMessages().length ?? 0 }
 
       case 'inject_system_message': {
         const p = params as { message?: string }
@@ -64,7 +64,7 @@ export class AgentModule implements IModule {
 
   async stop(): Promise<void> {
     this.state = 'stopping'
-    this.agentService.saveRecoverySnapshot?.('module_stop')
+    this.agentService.saveRecoverySnapshot?.('shutdown', 'module_stop')
     log('INFO', 'agent_module.stopped')
     this.state = 'stopped'
   }
@@ -76,7 +76,7 @@ export class AgentModule implements IModule {
   async healthCheck(): Promise<HealthCheckResult> {
     return {
       healthy: true,
-      detail: `Agent module, ${this.agentService.getContext()?.messages.length ?? 0} messages`,
+      detail: `Agent module, ${this.agentService.getContext()?.getMessages().length ?? 0} messages`,
     }
   }
 }

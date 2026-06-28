@@ -9,7 +9,7 @@ let dwmFunc: ((hwnd: Buffer, attr: number, value: Buffer, size: number) => numbe
 
 function getDwmFunc(): (hwnd: Buffer, attr: number, value: Buffer, size: number) => number {
   if (!dwmFunc) {
-    const lib = koffi.load('dwmapi.dll')
+    const lib: any = koffi.load('dwmapi.dll')
     lib.func('DwmSetWindowAttribute', 'long', ['void*', 'int', 'void*', 'int'])
     dwmFunc = lib.DwmSetWindowAttribute as (hwnd: Buffer, attr: number, value: Buffer, size: number) => number
   }

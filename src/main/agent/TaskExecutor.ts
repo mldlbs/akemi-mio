@@ -16,7 +16,7 @@ import { Guardrail } from './Guardrail'
 import { ToolScheduler } from './ToolScheduler'
 import type { PlanManagerLike } from '../evolution/types'
 import { ResourceBudget } from '../core/ResourceBudget'
-import { RunContext, RunState } from './runstate'
+import { RunContext, RunState, GovernorRecord } from './runstate'
 import type { ProceduralMemory } from './ProceduralMemory'
 import type { FailureAnalyzer } from './FailureAnalyzer'
 import { runObserve } from './ObserveStage'
@@ -170,7 +170,20 @@ export class TaskExecutor {
 
           const gr = this.guardrail.apply(toolResults, result.toolCalls, messages, ctx)
           // ── [DECIDE] ExecutionGovernor 强制决策门 ──
+          const failedTools = toolResults.filter((r) => !r.success).map((r) => r.name)
+          const hasFail = failedTools.length > 0
+          const allFail = hasFail && failedTools.length === toolResults.length
+          const roundResult: GovernorRecord['roundResult'] = allFail ? 'all_failed' : hasFail ? 'partial' : 'all_ok'
           const gd = this.executionGovernor.evaluate(toolResults, result.toolCalls, ctx)
+          ctx.recordGovernor(gd, failedTools, roundResult)
+          eventBus.emit('agent.governor' as any, {
+            requestId: ctx.runId,
+            step: i,
+            action: gd.action,
+            reason: gd.reason,
+            roundResult,
+            failedTools,
+          })
           if (gd.action === 'stop') {
             log('WARN', 'task_governor_stop', { step: i, reason: gd.reason })
             if (gd.message) messages.push({ role: 'user', content: gd.message })
@@ -183,10 +196,6 @@ export class TaskExecutor {
             ctx.transition(RunState.RUNNING)
             continue
           }
-          if (gr.workflowActivation) {
-            log('INFO', 'task_executor_workflow_activation', { hasModule: !!gr.workflowActivation.moduleContent })
-          }
-
           ctx.transition(RunState.RUNNING)
           continue
         }

@@ -51,8 +51,6 @@ export class AgentService {
   private toolScheduler: ToolScheduler
   /** Guardrail — 工具循环安全护栏 */
   private guardrail: Guardrail
-  /** 当前激活的工作流提示模块 */
-  private activeWorkflowModule: string | null = null
   /** 自任务超时中止控制器 — 用于取消 timed-out 的进化分析任务 */
   private selfTaskAbortController: AbortController | null = null
   /** 自任务开始时间戳，用于检测挂起超时任务 */
@@ -242,8 +240,7 @@ export class AgentService {
       ? this.skillManager?.getMatchedPromptModules(lastUserText) || []
       : this.skillManager?.getEnabledPromptModules() || []
     const extraModules = skillModules.length > 0 ? skillModules : undefined
-    const wfModule = this.activeWorkflowModule
-    const allExtraModules = wfModule ? [wfModule, ...(extraModules || [])] : extraModules
+    const allExtraModules = extraModules
     const allContextParts = [memCtx, procCtx, reflectCtx, this.failureAnalyzer.getFormattedContext()].filter(Boolean)
     const combinedContext = allContextParts.join('\n\n')
     if (combinedContext || allExtraModules) {

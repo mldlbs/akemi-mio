@@ -2,7 +2,7 @@ import { ChildProcess, fork } from 'child_process'
 import { join } from 'path'
 import { log } from '../logger/Logger'
 import { eventBus } from './EventBus'
-import type { ISubsystem, HealthCheckResult, SubsystemState } from '../lifecycle/types'
+import type { ISubsystem, HealthCheckResult, SubsystemState } from './lifecycle/types'
 
 // ==================== Types ====================
 

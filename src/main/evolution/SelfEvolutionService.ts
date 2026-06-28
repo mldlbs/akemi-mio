@@ -115,6 +115,7 @@ export class SelfEvolutionService implements ISubsystem {
   readonly metaLearner: MetaLearner
   readonly evaluatorCalibrator: EvaluatorCalibrator
   private consecutiveCleanCycles = 0
+  private consecutiveDegenerateDetections = 0
 
   // ==================== 状态持久化 ====================
   private stateFilePath: string
@@ -209,7 +210,7 @@ export class SelfEvolutionService implements ISubsystem {
         if (!p.success) this.onTriggerEvent('evolution.cycle.completed', p)
       }) as any,
       // Phase 2: 接收创造力系统的高分假设
-      this.eventBus.on('creativity.hypothesis.selected', (p: any) => {
+      (this.eventBus.on as any)('creativity.hypothesis.selected', (p: any) => {
         this.creativityHypothesis = {
           title: p.title,
           idea: p.idea,

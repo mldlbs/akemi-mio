@@ -11,9 +11,12 @@ import { checkForUpdates, downloadUpdate, quitAndInstall } from '../updater/Upda
 import { MetricsCollector } from '../observability/MetricsCollector'
 import { getRecentMessages, getSessions, getMessagesBySession } from '../db/messages'
 import { planManager as planManagerImport } from '../evolution'
+import { workflowStore } from '../workflow/WorkflowStore'
+import { getWorkflowScheduler } from '../workflow/WorkflowScheduler'
 import { createAgentWindow, closeAgentWindow } from '../core/Lifecycle'
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
+import { eventBus } from '../core/EventBus'
 
 /** 打开的沙盒窗口表，防止重复打开 */
 const sandboxWindows = new Map<string, BrowserWindow>()
@@ -77,8 +80,8 @@ export function registerHandlers(
       // 关闭前保存所有状态
       agentService.pause()
       await agentService.stopConversation().catch(() => {})
-      eventBus?.emit('agent.session.flush', {})
-      agentService.saveRecoverySnapshot?.('window_close')
+      eventBus.emit('agent.session.flush' as any, {})
+      agentService.saveRecoverySnapshot?.('window_close' as any)
     } catch (err) {
       log('WARN', 'window_close_save_failed', { error: String(err) })
     }
@@ -345,6 +348,102 @@ export function registerHandlers(
       return { success: true }
     } catch {
       return { success: false }
+    }
+  })
+
+  // ── Workflow System ──
+
+  ipcMain.handle('workflow:listDefinitions', async () => {
+    try {
+      return workflowStore.listDefinitions()
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('workflow:getDefinition', async (_event, id: string) => {
+    try {
+      return workflowStore.getDefinition(id)
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle('workflow:listRuns', async (_event, limit?: number) => {
+    try {
+      return workflowStore.listRuns(limit)
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('workflow:getRun', async (_event, runId: string) => {
+    try {
+      return workflowStore.getRun(runId)
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle('workflow:deleteDefinition', async (_event, id: string) => {
+    try {
+      return { success: workflowStore.deleteDefinition(id) }
+    } catch {
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('workflow:saveDefinition', async (_event, def: any) => {
+    try {
+      workflowStore.saveDefinition(def)
+      return { success: true }
+    } catch {
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('workflow:startWorkflow', async (_event, id: string) => {
+    try {
+      const def = workflowStore.getDefinition(id)
+      if (!def) return { success: false, error: '工作流不存在' }
+      const scheduler = getWorkflowScheduler()
+      const run = scheduler.startRun(def)
+      return { success: true, runId: run.runId }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  // ── Writing API status ──
+
+  ipcMain.handle('writing:getStatus', async () => {
+    try {
+      const res = await fetch('https://www.crlkcloud.cyou/writing/api/stories')
+      const stories: any[] = await res.json()
+      const withScenes = await Promise.all(
+        stories.slice(0, 20).map(async (s) => {
+          try {
+            const sr = await fetch(`https://www.crlkcloud.cyou/writing/api/scenes?storyId=${s.id}`)
+            const scenes = await sr.json()
+            return {
+              id: s.id,
+              title: s.title,
+              genre: s.genre,
+              sceneCount: Array.isArray(scenes) ? scenes.length : 0,
+              createdAt: s.createdAt,
+            }
+          } catch {
+            return { id: s.id, title: s.title, genre: s.genre, sceneCount: 0, createdAt: s.createdAt }
+          }
+        }),
+      )
+      return {
+        stories: withScenes,
+        totalStories: withScenes.length,
+        totalScenes: withScenes.reduce((a: number, b: any) => a + b.sceneCount, 0),
+      }
+    } catch {
+      return { stories: [], totalStories: 0, totalScenes: 0 }
     }
   })
 }

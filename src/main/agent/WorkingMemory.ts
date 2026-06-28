@@ -142,9 +142,9 @@ export class AttentionSet {
 // ─── WorkingMemory ───
 
 export class WorkingMemory {
-  readonly context: ConversationContext
+  context: ConversationContext
   readonly scratchpad: Scratchpad
-  readonly attention: AttentionSet
+  attention: AttentionSet
   private mode: 'chat' | 'task' | 'evolution'
   private tickCount = 0
 
@@ -214,7 +214,14 @@ export class WorkingMemory {
     clearHistory?: boolean,
   ): void {
     if (clearHistory) {
-      this.context = new ConversationContext(memoryContext, undefined, extraModules, undefined, reflectionContext, identityContext)
+      ;(this as { context: ConversationContext }).context = new ConversationContext(
+        memoryContext,
+        undefined,
+        extraModules,
+        undefined,
+        reflectionContext,
+        identityContext,
+      )
     } else {
       this.context.rebuildSystemPrompt(memoryContext, extraModules, reflectionContext, identityContext)
     }
@@ -233,7 +240,7 @@ export class WorkingMemory {
   /** 清空但不失上下文 */
   clear(keepShortTerm = true): void {
     this.scratchpad.clear()
-    this.attention = new AttentionSet()
+    ;(this as { attention: AttentionSet }).attention = new AttentionSet()
     this.context.clear(keepShortTerm)
   }
 

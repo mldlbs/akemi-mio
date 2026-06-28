@@ -123,13 +123,17 @@ export class MemoryIndexer {
       for (const p of PATTERNS) {
         const match = entry.content.match(p.regex)
         if (match) {
+          const now = Date.now()
           engineeringEntries.push({
+            id: `idx_${now}_${engineeringEntries.length}`,
             type: p.type,
             content: match[1].trim(),
             source: `memory:${entry.id || 'unknown'}`,
             confidence: entry.confidence * 0.8,
             relatedFiles: [],
             tags: this.inferTags(p.type, match[1]),
+            createdAt: now,
+            updatedAt: now,
           })
         }
       }

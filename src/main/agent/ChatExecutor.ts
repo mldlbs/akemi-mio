@@ -33,7 +33,7 @@ import {
   getMessagesBySession,
   type StoredMessage,
 } from '../db/messages'
-import { RunState, RunContext } from './runstate'
+import { RunState, RunContext, GovernorRecord } from './runstate'
 import { SessionRecoveryManager } from './SessionRecoveryManager'
 import { classify as classifyError } from './ErrorClassifier'
 import { evaluateMilestone } from './CheckpointScheduler'
@@ -47,6 +47,7 @@ import { ExecutionGovernor } from './ExecutionGovernor'
 import { ObservabilityLogger } from '../observability/ObservabilityLogger'
 import { PersonaStateManager } from './PersonaStateManager'
 import { PersonaDriftControlSystem, DRIFT_CORRECTION_PROMPT } from './PersonaDriftControlSystem'
+import { classifyContent } from './ContentClassifier'
 
 export class ChatExecutor {
   private llmService: LlmService
@@ -70,9 +71,8 @@ export class ChatExecutor {
   private consecutiveInvalidRequest = 0
   private lastCheckpointStep = -1
   private lastCheckpointTime = 0
-  private activeWorkflowModule: string | null = null
-  private runContext: RunContext | null = null
   private identityContext = ''
+  private runContext: RunContext | null = null
   private proceduralMemory: ProceduralMemory | null = null
   private failureAnalyzer: FailureAnalyzer | null = null
   private thinkStageCount = 0
@@ -84,6 +84,9 @@ export class ChatExecutor {
   private driftControl = new PersonaDriftControlSystem()
   /** 上轮 drift 评估产生的待注入消息信号 */
   private pendingDriftSignal: string | null = null
+  /** 当前轮 user 消息的 content category */
+  private currentCategory = 'chat'
+
   /** 当前加载的 session，用于切换 session 时重建上下文 */
   private currentSessionId: string | null = null
   /** 执行决策门 — 每轮 tool batch 后强制决策 */
@@ -177,7 +180,7 @@ export class ChatExecutor {
     const memCtx = this.memoryService.getFormattedContext()
     this.obsLogger?.logMemory(this.lastUserText, memCtx)
     const reflectCtx = this.reflectLoop.getFormattedContext()
-    // 按需注入：根据用户输入匹配技能
+    // 按需注入：根据用户输入匹配外部技能
     const skillModules = this.lastUserText
       ? this.skillManager?.getMatchedPromptModules(this.lastUserText) || []
       : this.skillManager?.getEnabledPromptModules() || []
@@ -188,8 +191,7 @@ export class ChatExecutor {
     if (this.driftControl.needsCorrectionPrompt()) {
       extraModules.unshift(DRIFT_CORRECTION_PROMPT)
     }
-    const wfModule = this.activeWorkflowModule
-    const allExtraModules = wfModule ? [wfModule, ...extraModules] : extraModules.length > 0 ? extraModules : undefined
+    const allExtraModules = extraModules.length > 0 ? extraModules : undefined
     if (memCtx || reflectCtx || allExtraModules || this.identityContext) {
       this.workingMemory.refreshMemory(memCtx, reflectCtx, allExtraModules, this.identityContext || undefined)
     }
@@ -212,6 +214,7 @@ export class ChatExecutor {
       source: source as any,
       role: 'assistant',
       content: reply,
+      category: this.currentCategory,
       createdAt: Date.now(),
     }
     insertMessage(msg)
@@ -268,11 +271,14 @@ export class ChatExecutor {
     this.workingMemory.addUser(text)
     eventBus.emit('agent.input.received', { text, requestId: rid, source })
     const effectiveSessionId = sessionId || this.resolveSessionId()
+    const contentCategory = classifyContent(text)
+    this.currentCategory = contentCategory
     const userMsg: StoredMessage = {
       id: createMessageId(),
       source,
       role: 'user',
       content: text,
+      category: contentCategory,
       sessionId: effectiveSessionId,
       telegramChatId: extra?.telegramChatId ?? null,
       telegramUserId: extra?.telegramUserId ?? null,
@@ -307,6 +313,7 @@ export class ChatExecutor {
           source,
           role: 'assistant',
           content: reply,
+          category: 'chat',
           sessionId: effectiveSessionId,
           createdAt: Date.now(),
         }
@@ -325,8 +332,8 @@ export class ChatExecutor {
         this.memoryService.metaController.onInteractionEnd({
           userMessage: text,
           assistantReply: reply,
-          tokenUsed: this.resourceBudget.getLlmUsage?.() || 0,
-          tokenBudget: this.resourceBudget.getChatBudget?.() || 200000,
+          tokenUsed: this.resourceBudget.getSnapshot().chatLlmCalls || 0,
+          tokenBudget: this.resourceBudget.getConfig().maxChatLlmCalls || 200000,
           planActive: this.sessionPlanIds.size > 0,
           agentId: 'chat',
         })
@@ -457,7 +464,7 @@ export class ChatExecutor {
           }
           ctx.transition(RunState.WAIT_TOOL)
           eventBus.emit('agent.progress' as any, { requestId, step: i + 1, toolNames: result.toolCalls.map((t) => t.name) })
-          result.toolCalls.forEach((tc) => eventBus.emit('agent.tool.invoked', { tool: tc.name, args: tc.arguments, id: tc.id }))
+          result.toolCalls.forEach((tc) => eventBus.emit('agent.tool.invoked', { tool: tc.name, args: tc.arguments }))
           const toolResults = await this.toolScheduler.executeAll(result.toolCalls, ctx.abortController.signal)
           this.obsLogger?.logToolBatch(toolResults)
           // 信用恢复：每个成功的工具调用降低一次拒绝计数
@@ -470,8 +477,8 @@ export class ChatExecutor {
           }
           for (const tr of toolResults) {
             this.emitToolStatus(tr.success ? 'success' : 'error', tr.name, tr.success ? '完成' : `失败: ${tr.error}`)
-            if (tr.success) eventBus.emit('agent.tool.completed', { tool: tr.name, result: tr.content, id: tr.id, latencyMs: tr.latencyMs })
-            else eventBus.emit('agent.tool.failed', { tool: tr.name, error: tr.error || '', id: tr.id, latencyMs: tr.latencyMs })
+            if (tr.success) eventBus.emit('agent.tool.completed', { tool: tr.name, result: tr.content })
+            else eventBus.emit('agent.tool.failed', { tool: tr.name, error: tr.error || '' })
             let c = tr.content || tr.error || ''
             if (c.length > 8000) c = c.slice(0, 8000) + `\n... [已截断，原长 ${c.length} 字符]`
             messages.push({ role: 'tool', tool_call_id: tr.id, content: c })
@@ -485,7 +492,20 @@ export class ChatExecutor {
           }
           const gr = this.guardrail.apply(toolResults, result.toolCalls, messages, ctx)
           // ── [DECIDE] ExecutionGovernor 强制决策门 ──
+          const failedTools = toolResults.filter((r) => !r.success).map((r) => r.name)
+          const hasFail = failedTools.length > 0
+          const allFail = hasFail && failedTools.length === toolResults.length
+          const roundResult: GovernorRecord['roundResult'] = allFail ? 'all_failed' : hasFail ? 'partial' : 'all_ok'
           const gd = this.executionGovernor.evaluate(toolResults, result.toolCalls, ctx)
+          ctx.recordGovernor(gd, failedTools, roundResult)
+          eventBus.emit('agent.governor' as any, {
+            requestId,
+            step: i,
+            action: gd.action,
+            reason: gd.reason,
+            roundResult,
+            failedTools,
+          })
           if (gd.action === 'stop') {
             log('WARN', 'chat_governor_stop', { step: i, reason: gd.reason })
             if (gd.message) messages.push({ role: 'user', content: gd.message })
@@ -497,15 +517,7 @@ export class ChatExecutor {
             if (gd.message) messages.push({ role: 'user', content: gd.message })
             continue
           }
-          if (gr.workflowActivation) {
-            this.activeWorkflowModule = gr.workflowActivation.moduleContent
-            const memCtx = this.memoryService?.getFormattedContext() || '',
-              sm = this.skillManager?.getEnabledPromptModules() || []
-            this.workingMemory.refreshMemory(memCtx, undefined, [gr.workflowActivation.moduleContent, ...sm], undefined, true)
-            messages.length = 0
-            messages.push(...this.workingMemory.getMessages())
-          }
-          this.checkMilestone(i, toolResults, ctx, requestId, !!gr.workflowActivation)
+          this.checkMilestone(i, toolResults, ctx, requestId)
           ctx.transition(RunState.RUNNING)
           continue
         }
@@ -572,7 +584,7 @@ export class ChatExecutor {
         log('ERROR', 'chat_invalid_request_rollback', { step, count: this.consecutiveInvalidRequest })
         const stm = this.workingMemory.context.getShortTermMemoryPairs()
         const lastUser = [...m].reverse().find((msg) => msg.role === 'user')
-        rollbackToLastKnownGood(m, stm, lastUser?.content)
+        rollbackToLastKnownGood(m, stm, lastUser?.content ?? undefined)
         this.workingMemory.scratchpad.add('error_hint', '会话状态异常，已回滚到最近的健康检查点，请重试。')
         return 'continue'
       }
@@ -586,7 +598,7 @@ export class ChatExecutor {
       log('ERROR', 'chat_corrupted_state_rollback', { step, category: c.category })
       const stm = this.workingMemory.context.getShortTermMemoryPairs()
       const lastUser = [...m].reverse().find((msg) => msg.role === 'user')
-      rollbackToLastKnownGood(m, stm, lastUser?.content)
+      rollbackToLastKnownGood(m, stm, lastUser?.content ?? undefined)
       this.workingMemory.scratchpad.add('error_hint', '会话状态异常，已回滚到最近的健康检查点。')
       return 'continue'
     }
@@ -642,14 +654,13 @@ export class ChatExecutor {
     return 'continue'
   }
 
-  private checkMilestone(step: number, tr: ToolResult[], ctx: RunContext, rid: string, changed: boolean): void {
+  private checkMilestone(step: number, tr: ToolResult[], ctx: RunContext, rid: string): void {
     if (!this.recoveryManager) return
     const ap = this.planManager?.getActivePlan?.()
     const ms = evaluateMilestone({
       step,
       toolResultsLength: tr.length,
       runContext: ctx,
-      activePlanChanged: changed,
       lastCheckpointStep: this.lastCheckpointStep,
       lastCheckpointTime: this.lastCheckpointTime,
       consecutiveTimeoutRecoveries: ctx.consecutiveTimeouts,

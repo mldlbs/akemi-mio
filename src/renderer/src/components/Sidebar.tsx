@@ -7,6 +7,17 @@ interface SidebarProps {
   onSelectChat: (id: string) => void
 }
 
+const CATEGORY_META: Record<string, { label: string; icon: string }> = {
+  chat: { label: '聊天', icon: 'ri-chat-1-line' },
+  writing: { label: '写作', icon: 'ri-quill-pen-line' },
+  image_gen: { label: '生图', icon: 'ri-image-ai-line' },
+  evolution: { label: '进化', icon: 'ri-robot-2-line' },
+  creativity: { label: '创造力', icon: 'ri-lightbulb-line' },
+  dream: { label: '梦境', icon: 'ri-moon-line' },
+}
+
+const CATEGORY_ORDER = ['chat', 'writing', 'image_gen', 'evolution', 'creativity', 'dream'] as const
+
 function isSameDay(a: number, b: number): boolean {
   const da = new Date(a),
     db = new Date(b)
@@ -34,33 +45,65 @@ function groupSessions(sessions: SessionItem[]) {
 }
 
 export function Sidebar({ sessions, activeSessionId, onSelectChat }: SidebarProps) {
-  const groups = useMemo(() => groupSessions(sessions), [sessions])
+  // 按 category 分组
+  const grouped = useMemo(() => {
+    const map = new Map<string, SessionItem[]>()
+    for (const s of sessions) {
+      const cat = CATEGORY_META[s.category] ? s.category : 'chat'
+      if (!map.has(cat)) map.set(cat, [])
+      map.get(cat)!.push(s)
+    }
+    return map
+  }, [sessions])
+
+  // 排序：按 CATEGORY_ORDER + 按 lastActivityAt 排序
+  const panels = useMemo(() => {
+    const cats = Array.from(grouped.keys()).sort((a, b) => CATEGORY_ORDER.indexOf(a as any) - CATEGORY_ORDER.indexOf(b as any))
+    return cats.map((cat) => ({
+      cat,
+      meta: CATEGORY_META[cat] || { label: cat, icon: 'ri-chat-1-line' },
+      groups: groupSessions(grouped.get(cat)!.sort((a, b) => b.lastActivityAt - a.lastActivityAt)),
+    }))
+  }, [grouped])
+
+  if (sessions.length === 0) {
+    return (
+      <aside className="sidebar">
+        <div className="sidebar-content">
+          <div className="sidebar-empty">暂无会话 · 输入文字或点击麦克风开始</div>
+        </div>
+      </aside>
+    )
+  }
 
   return (
     <aside className="sidebar">
       <div className="sidebar-content">
-        {sessions.length === 0 ? (
-          <div className="sidebar-empty">暂无会话 · 输入文字或点击麦克风开始</div>
-        ) : (
-          groups.map(([date, items]) => (
-            <div key={date}>
-              <div className="sidebar-date-header">{date}</div>
-              {items.map((s) => (
-                <button
-                  key={s.id}
-                  className={`sidebar-item${s.id === activeSessionId ? ' active' : ''}`}
-                  onClick={() => onSelectChat(s.id)}
-                >
-                  <i className="ri-chat-1-line sidebar-icon" />
-                  <span title={s.label}>{s.label}</span>
-                  <span className="sidebar-item-time">
-                    {new Date(s.lastActivityAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </button>
-              ))}
+        {panels.map(({ cat, meta, groups }) => (
+          <div key={cat} className="sidebar-panel">
+            <div className="sidebar-panel-header">
+              <i className={meta.icon} />
+              <span>{meta.label}</span>
             </div>
-          ))
-        )}
+            {groups.map(([date, items]) => (
+              <div key={date}>
+                <div className="sidebar-date-header">{date}</div>
+                {items.map((s) => (
+                  <button
+                    key={s.id}
+                    className={`sidebar-item${s.id === activeSessionId ? ' active' : ''}`}
+                    onClick={() => onSelectChat(s.id)}
+                  >
+                    <span title={s.label}>{s.label}</span>
+                    <span className="sidebar-item-time">
+                      {new Date(s.lastActivityAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        ))}
       </div>
     </aside>
   )

@@ -11,12 +11,10 @@ export const rememberProcedureTool = buildTool({
       description: { type: 'string', description: '流程的简要描述，说明何时使用此流程' },
       steps: {
         type: 'array',
-        items: { type: 'string' },
         description: '步骤列表，每步一个字符串，如["grep错误信息","read_file定位问题文件","edit_file修复"]',
       },
       triggerKeywords: {
         type: 'array',
-        items: { type: 'string' },
         description: '触发词列表，当用户输入或场景包含这些词时自动提示此流程',
       },
     },

@@ -175,8 +175,8 @@ export class UumitService {
       url: UUMIT_SSE_URL,
       requestTimeoutMs: 60000,
       headers: {
-        'X-API-Key': apiKey,
-        'X-Platform-User-Id': platformUserId,
+        'X-API-Key': this.apiKey,
+        'X-Platform-User-Id': this.platformUserId,
       },
     }
 
@@ -193,7 +193,7 @@ export class UumitService {
 
       this.connected = true
       this.reconnectAttempts = 0
-      eventBus.emit('uumit.connected', { serverInfo: this.client.getServerInfo() })
+      eventBus.emit('uumit.connected' as any, { serverInfo: this.client.getServerInfo() })
 
       if ('connectSSE' in (this.client as any).transport) {
         await (this.client as any).transport.connectSSE().catch((err: Error) => {
@@ -202,7 +202,7 @@ export class UumitService {
       }
     } catch (err: any) {
       log('WARN', 'uumit_connect_failed', { error: err.message, attempt: this.reconnectAttempts })
-      eventBus.emit('uumit.disconnected', { error: err.message })
+      eventBus.emit('uumit.disconnected' as any, { error: err.message })
       this.scheduleReconnect()
     }
   }
@@ -223,10 +223,15 @@ export class UumitService {
         const text = params?.text || params?.message || ''
         if (text) {
           this.agentService
-            .processTextInput(text, undefined, 'uumit', {
-              uumitTaskId: params?.taskId,
-              uumitOrderId: params?.orderId,
-            })
+            .processTextInput(
+              text,
+              undefined,
+              'uumit' as any,
+              {
+                uumitTaskId: params?.taskId,
+                uumitOrderId: params?.orderId,
+              } as any,
+            )
             .catch((err) => {
               log('ERROR', 'uumit_chat_error', { error: String(err) })
             })
@@ -291,7 +296,7 @@ export class UumitService {
       this.client = null
     }
     this.connected = false
-    eventBus.emit('uumit.disconnected', { reason: 'shutdown' })
+    eventBus.emit('uumit.disconnected' as any, { reason: 'shutdown' })
     log('INFO', 'uumit_service_stopped')
   }
 }

@@ -69,12 +69,12 @@ export class EarningScheduler {
     } catch {}
 
     try {
-      const { stdout } = await execAsync('npx tsx now.ts', {
+      const rawStdout = await execAsync('npx tsx now.ts', {
         cwd: EARNING_DIR,
         timeout: 10 * 60 * 1000,
-        env: { ...process.env, NODE_ENV: 'production' } as any,
       })
-      log('INFO', 'earning_script_output', { stdout: stdout.toString().slice(0, 500) })
+      const stdout = rawStdout
+      log('INFO', 'earning_script_output', { stdout: stdout.slice(0, 500) })
 
       try {
         await fs.promises.access(RESULT_FILE)

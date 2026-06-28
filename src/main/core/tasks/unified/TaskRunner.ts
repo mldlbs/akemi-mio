@@ -1,4 +1,5 @@
-import type { BackgroundTaskType, TaskExecutionResult, TaskExecutor, TaskTier } from './TaskTypes'
+import type { BackgroundTaskType, TaskExecutionResult, TaskExecutor } from './TaskTypes'
+import { TaskTier } from './TaskTypes'
 import { TaskStore } from './TaskStore'
 import { log } from '../../../logger/Logger'
 import { eventBus } from '../../../core/EventBus'
@@ -20,11 +21,13 @@ export interface RegisteredTask {
 /** 根据 Tier 确定默认 maxFailures */
 function defaultMaxFailuresByTier(tier: TaskTier): number {
   switch (tier) {
-    case 'critical':
+    case TaskTier.CRITICAL:
       return 10
-    case 'important':
+    case TaskTier.IMPORTANT:
       return 5
-    case 'best_effort':
+    case TaskTier.BEST_EFFORT:
+      return 3
+    default:
       return 3
   }
 }
@@ -55,7 +58,7 @@ export class TaskRunner {
       tier?: TaskTier
     },
   ): void {
-    const tier = options?.tier ?? 'best_effort'
+    const tier = options?.tier ?? TaskTier.BEST_EFFORT
     this.tasks.set(type, {
       type,
       executor,
@@ -126,12 +129,12 @@ export class TaskRunner {
     for (const [type] of this.tasks) {
       const state = this.store.get(type)
       const task = this.tasks.get(type)
-      const disabled = task?.tier === 'best_effort' && state.consecutiveFailures >= task.maxFailures
+      const disabled = task?.tier === TaskTier.BEST_EFFORT && state.consecutiveFailures >= task.maxFailures
       summary.push({
         type,
         status: state.status,
         consecutiveFailures: state.consecutiveFailures,
-        tier: task?.tier ?? 'best_effort',
+        tier: task?.tier ?? TaskTier.BEST_EFFORT,
         disabled,
       })
     }
@@ -174,7 +177,7 @@ export class TaskRunner {
       const failures = state.consecutiveFailures + 1
       if (failures >= task.maxFailures) {
         // BEST_EFFORT 任务达到上限后停止定时器（不再重试），其余进入 cooldown
-        if (task.tier === 'best_effort') {
+        if (task.tier === TaskTier.BEST_EFFORT) {
           this.stopType(type)
           log('WARN', 'task_runner_disabled', { type, failures, tier: task.tier })
           eventBus.emit(`${type}.completed` as any, {

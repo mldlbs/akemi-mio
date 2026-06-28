@@ -55,6 +55,7 @@ import type { IModule, SubsystemState } from '../core/lifecycle/types'
 import { TelegramService } from '../telegram/TelegramService'
 import { OutboxWorker } from '../telegram/OutboxWorker'
 import { UumitService } from '../uumit/index'
+import type { TaskExecutionResult } from '../core/tasks/unified/TaskTypes'
 import { TaskRunner } from '../core/tasks/unified/TaskRunner'
 import { MetricsCollector } from '../observability/MetricsCollector'
 import { SystemStabilityScore } from '../observability/SystemStabilityScore'
@@ -166,6 +167,47 @@ export class AppRuntime {
 
     const recoveryManager = new SessionRecoveryManager(join(WORKSPACE.evolution, 'recovery'))
     agentService.setRecoveryManager(recoveryManager)
+
+    // 初始化 WorkflowScheduler
+    const { WorkflowScheduler, setWorkflowScheduler } = await import('../workflow/WorkflowScheduler')
+    const scheduler = new WorkflowScheduler({
+      runSubAgent: (goal, parentGoal) => agentService['subAgentPool'].spawn(goal, parentGoal),
+      runTool: async (name, args) => {
+        const result = await mcpManager.callTool(name, args)
+        return typeof result === 'string' ? result : JSON.stringify(result)
+      },
+      runApi: async (url, method, body) => {
+        const res = await fetch(url, {
+          method,
+          headers: body ? { 'Content-Type': 'application/json' } : undefined,
+          body: body ? JSON.stringify(body) : undefined,
+        })
+        return res.text()
+      },
+      injectPrompt: () => {},
+      getCompletedAgentResults: () =>
+        agentService['subAgentPool'].collectCompleted().map((r) => ({ id: r.id, summary: r.summary, error: r.error })),
+      runPlan: (prompt) => {
+        const planManager = agentService['planManager']
+        return planManager.createPlan('Workflow Plan', prompt, []).id
+      },
+      getPlanStatus: () => {
+        const pm = agentService['planManager']
+        const plan = pm.getActivePlan()
+        if (!plan) return null
+        const done = plan.steps.filter((s: any) => s.status === 'done').length
+        return {
+          id: plan.id,
+          title: plan.title || '',
+          total: plan.steps.length,
+          done,
+          pending: plan.steps.filter((s: any) => s.status !== 'done').map((s: any) => s.description),
+          status: plan.status,
+        }
+      },
+    })
+    setWorkflowScheduler(scheduler)
+
     const telegramService = new TelegramService(agentService)
 
     // === Stage 2: Electron 窗口 ===
@@ -504,8 +546,8 @@ export class AppRuntime {
     // 社交平台自动发布（每分钟检查 content_calendar.yaml）
     const socialDir = join(WORKSPACE.evolution, 'social')
     this.taskRunner.register(
-      'social.tick',
-      async () => {
+      'social.tick' as any,
+      async (): Promise<TaskExecutionResult> => {
         try {
           const { execSync } = require('child_process')
           const result = execSync(`node "${join(socialDir, 'cli.mjs')}" tick`, { encoding: 'utf-8', timeout: 30000, cwd: socialDir })
@@ -516,6 +558,7 @@ export class AppRuntime {
         } catch (err) {
           log('WARN', 'social_tick_error', { error: String(err) })
         }
+        return { success: true }
       },
       60000,
       { cooldownMs: 30000 },
@@ -917,16 +960,14 @@ export class AppRuntime {
   }
 
   private buildCreativitySources(memoryService: MemoryService, pm: any): any[] {
-    const memInfo = memoryService?.getInfo?.()
-    const recentTopics = memInfo?.recentTopics || []
+    const recentTopics: string[] = []
+    const entryCount = 0
     const interactionCount = memoryService?.getInteractionCount?.() || 0
 
     const sources: any[] = [
       {
         name: 'Memory',
-        content: memInfo
-          ? `对话记忆：${memInfo.entryCount || 0} 条记录，最近话题 ${recentTopics.slice(0, 3).join('、') || '无'}`
-          : '对话记忆系统',
+        content: `对话记忆：${entryCount || 0} 条记录，最近话题 ${recentTopics.slice(0, 3).join('、') || '无'}`,
         type: 'knowledge',
         weight: 0.9,
       },

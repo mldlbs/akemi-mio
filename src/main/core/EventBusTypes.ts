@@ -1,4 +1,4 @@
-import type { EventPayload, Listener } from './EventBus'
+import type { EventName, EventPayload, Listener } from './EventBus'
 
 export type Priority = 'high' | 'normal' | 'low'
 

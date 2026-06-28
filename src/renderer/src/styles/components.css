@@ -55,8 +55,8 @@
 }
 
 @keyframes breathe-glow-active {
-  0%, 100% { box-shadow: 0 2px 12px oklch(0.55 0.13 24 / 0.25); }
-  50% { box-shadow: 0 2px 22px oklch(0.55 0.13 24 / 0.4); }
+  0%, 100% { box-shadow: 0 2px 12px var(--accent-glow); }
+  50% { box-shadow: 0 2px 22px oklch(0.60 0.12 12 / 0.35); }
 }
 
 @keyframes ripple-out {
@@ -81,13 +81,13 @@
 
 .status-dot.active {
   background: var(--accent);
-  box-shadow: 0 0 14px oklch(0.6 0.18 30 / 0.35);
+  box-shadow: 0 0 14px oklch(0.60 0.12 12 / 0.3);
   animation: pulse-dot 2s ease-in-out infinite;
 }
 
 @keyframes pulse-dot {
-  0%, 100% { box-shadow: 0 0 14px oklch(0.6 0.18 30 / 0.35); }
-  50% { box-shadow: 0 0 24px oklch(0.6 0.18 30 / 0.5); }
+  0%, 100% { box-shadow: 0 0 14px oklch(0.60 0.12 12 / 0.3); }
+  50% { box-shadow: 0 0 24px oklch(0.60 0.12 12 / 0.45); }
 }
 
 .status-label {
@@ -116,8 +116,8 @@
 }
 
 .status-health.health-ok { color: var(--accent); }
-.status-health.health-warn { color: oklch(0.7 0.15 70); }
-.status-health.health-bad { color: oklch(0.6 0.18 30); }
+.status-health.health-warn { color: oklch(0.70 0.10 60); }
+.status-health.health-bad { color: oklch(0.55 0.14 16); }
 
 /* ─── 人格标记 ─── */
 .persona-badge {
@@ -132,14 +132,14 @@
   margin-left: 8px;
 }
 .persona-badge.persona-hybrid {
-  background: oklch(0.55 0.12 280 / 0.2);
-  color: oklch(0.7 0.15 280);
-  border: 1px solid oklch(0.55 0.12 280 / 0.3);
+  background: oklch(0.60 0.12 12 / 0.15);
+  color: var(--accent);
+  border: 1px solid oklch(0.60 0.12 12 / 0.25);
 }
 .persona-badge.persona-writer {
-  background: oklch(0.55 0.15 40 / 0.2);
-  color: oklch(0.75 0.15 40);
-  border: 1px solid oklch(0.55 0.15 40 / 0.3);
+  background: oklch(0.56 0.10 50 / 0.15);
+  color: oklch(0.56 0.10 50);
+  border: 1px solid oklch(0.56 0.10 50 / 0.25);
 }
 
 /* ─── Agent 面板切换按钮 ─── */
@@ -161,6 +161,13 @@
   color: var(--text-secondary);
   border-color: var(--border-glass);
   background: var(--bg-glass);
+}
+
+.cap-toggle-btn.active {
+  color: var(--accent);
+  border-color: var(--accent-glow);
+  background: var(--accent-glow);
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 
 /* ─── Agent 状态指示 ─── */
@@ -232,17 +239,17 @@
 }
 
 .tool-inline-done i {
-  color: oklch(0.55 0.15 160);
+  color: oklch(0.55 0.12 150);
   font-size: 14px;
 }
 
 .tool-inline-failed {
   color: var(--text-secondary);
-  border-color: oklch(0.6 0.18 30 / 0.3);
+  border-color: oklch(0.55 0.14 16 / 0.25);
 }
 
 .tool-inline-failed i {
-  color: oklch(0.6 0.18 30);
+  color: oklch(0.55 0.14 16);
   font-size: 14px;
 }
 
@@ -270,7 +277,7 @@
 }
 
 .tool-inline-error {
-  color: oklch(0.6 0.18 30);
+  color: oklch(0.55 0.14 16);
   font-size: 11px;
   margin-left: auto;
   overflow: hidden;
@@ -312,6 +319,1414 @@
 }
 
 .tool-error-text {
-  color: oklch(0.6 0.18 30);
+  color: oklch(0.55 0.14 16);
   margin-left: 8px;
+}
+
+/* ═══════════════════════════════════════
+   Workflow Slot
+   ═══════════════════════════════════════ */
+
+.workflow-slot {
+  flex: 1;
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  color: var(--text-muted);
+}
+
+.workflow-slot-content {
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: var(--space-xl);
+  gap: var(--space-xl);
+  overflow-y: auto;
+}
+
+/* 内容区子元素的入场动画 */
+.workflow-slot-content > * {
+  animation: slot-section-in 0.4s var(--ease-glass) both;
+}
+
+.workflow-slot-content > *:nth-child(2) { animation-delay: 0.05s; }
+.workflow-slot-content > *:nth-child(3) { animation-delay: 0.1s; }
+.workflow-slot-content > *:nth-child(4) { animation-delay: 0.15s; }
+.workflow-slot-content > *:nth-child(5) { animation-delay: 0.2s; }
+
+@keyframes slot-section-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
+
+.workflow-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.workflow-empty-icon {
+  font-size: 32px;
+  opacity: 0.25;
+}
+
+.workflow-empty-text {
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.workflow-empty-sub {
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ─── Plan card ─── */
+.wf-plan-card {
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-panel);
+  padding: var(--space-lg);
+  transition: border-color var(--duration-normal) var(--ease-glass),
+              box-shadow var(--duration-normal) var(--ease-glass);
+}
+
+/* 运行中卡片 — 呼吸光晕 */
+.wf-plan-card.running {
+  border-color: var(--accent-glow);
+  box-shadow: 0 0 16px var(--accent-glow), inset 0 0 16px var(--accent-glow);
+  animation: card-breathe 2.5s ease-in-out infinite;
+}
+
+@keyframes card-breathe {
+  0%, 100% { box-shadow: 0 0 12px var(--accent-glow), inset 0 0 12px var(--accent-glow); }
+  50% { box-shadow: 0 0 24px var(--accent-glow), inset 0 0 20px var(--accent-glow); }
+}
+
+.wf-plan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-md);
+}
+
+.wf-plan-title {
+  font-size: var(--fs-heading);
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.wf-plan-badge {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-glass-strong);
+  color: var(--text-muted);
+  border: 1px solid var(--border-glass);
+}
+
+/* 语义状态色 */
+.wf-plan-badge.running,
+.wf-plan-badge.in_progress {
+  background: oklch(0.60 0.12 12 / 0.12);
+  color: var(--accent);
+  border-color: var(--accent-glow);
+  animation: badge-pulse 2s ease-in-out infinite;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50% { box-shadow: 0 0 6px 0 var(--accent-glow); }
+}
+
+.wf-plan-badge.done,
+.wf-plan-badge.completed {
+  background: oklch(0.52 0.10 150 / 0.12);
+  color: oklch(0.52 0.10 150);
+  border-color: oklch(0.52 0.10 150 / 0.22);
+}
+
+.wf-plan-badge.failed {
+  background: oklch(0.55 0.14 16 / 0.10);
+  color: oklch(0.55 0.14 16);
+  border-color: oklch(0.55 0.14 16 / 0.18);
+}
+
+.wf-plan-badge.pending {
+  background: var(--bg-glass-strong);
+  color: var(--text-muted);
+  border-color: var(--border-glass);
+}
+
+/* ─── Progress bar — 渐变填充 ─── */
+.wf-progress-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.wf-progress-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-glass-strong);
+  overflow: hidden;
+}
+
+.wf-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent) 0%, oklch(0.55 0.10 200) 100%);
+  transition: width var(--duration-slow) var(--ease-glass);
+  position: relative;
+}
+
+.wf-progress-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(1 0 0 / 0.18) 50%,
+    transparent 100%
+  );
+  animation: progress-shimmer 2s ease-in-out infinite;
+}
+
+@keyframes progress-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.wf-progress-text {
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ─── Steps (definition list) ─── */
+.wf-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.wf-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-card);
+  font-size: var(--fs-small);
+  color: var(--text-secondary);
+  transition: background var(--duration-fast) var(--ease-glass);
+}
+
+.wf-step:hover {
+  background: var(--bg-glass-strong);
+}
+
+.wf-step i {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.wf-step-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.wf-step-result {
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-step-failed .wf-step-result {
+  color: oklch(0.55 0.14 16);
+}
+
+.wf-step-handler-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.wf-step-handler-tag i {
+  font-size: 10px;
+}
+
+.wf-handler-subagent {
+  background: oklch(0.60 0.12 12 / 0.12);
+  color: var(--accent);
+}
+.wf-handler-prompt {
+  background: oklch(0.55 0.10 200 / 0.12);
+  color: oklch(0.55 0.10 200);
+}
+.wf-handler-tool {
+  background: oklch(0.60 0.12 12 / 0.12);
+  color: var(--accent);
+}
+.wf-handler-api {
+  background: oklch(0.52 0.10 150 / 0.12);
+  color: oklch(0.55 0.12 150);
+}
+.wf-handler-plan {
+  background: oklch(0.52 0.10 150 / 0.12);
+  color: oklch(0.55 0.12 150);
+}
+
+.wf-step-done i {
+  color: oklch(0.52 0.10 150);
+}
+
+.wf-step-running i {
+  color: var(--accent);
+}
+
+.wf-step-failed i {
+  color: oklch(0.55 0.14 16);
+}
+
+.wf-step-pending i {
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+/* ─── Pipeline — 连续流动轨道 ─── */
+.wf-pipeline {
+  padding: var(--space-lg);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-panel);
+}
+
+.wf-section-title {
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-md) 0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.wf-pipeline-track {
+  position: relative;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  margin: 0 8px;
+}
+
+/* 背景轨道 */
+.wf-pipeline-track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-glass-strong);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* 流动填充 — 从左侧按进度增长 */
+.wf-pipeline-fill {
+  position: absolute;
+  left: 0;
+  height: 3px;
+  border-radius: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, var(--accent) 0%, oklch(0.55 0.10 200) 100%);
+  transition: width var(--duration-slow) var(--ease-glass);
+  z-index: 1;
+}
+
+/* 填充流动光效 — 仅运行中 (wf-step-running appears in the steps list) */
+.wf-pipeline.running .wf-pipeline-fill {
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0%,
+    oklch(0.60 0.12 180) 40%,
+    var(--accent) 60%,
+    oklch(0.60 0.12 180) 100%
+  );
+  background-size: 200% 100%;
+  animation: pipeline-flow 2s linear infinite;
+}
+
+@keyframes pipeline-flow {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.wf-pipeline-stages {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  position: relative;
+  z-index: 2;
+}
+
+.wf-pipeline-stage {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  position: relative;
+}
+
+.wf-stage-dot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: 1;
+  position: relative;
+}
+
+/* 圆点 */
+.wf-stage-dot-inner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bg-glass-strong);
+  border: 2px solid var(--border-glass);
+  transition: all var(--duration-normal) var(--ease-glass);
+  position: relative;
+  z-index: 2;
+}
+
+.wf-stage-dot.done .wf-stage-dot-inner {
+  background: oklch(0.52 0.10 150);
+  border-color: oklch(0.52 0.10 150);
+  box-shadow: 0 0 6px oklch(0.52 0.10 150 / 0.3);
+}
+
+.wf-stage-dot.current .wf-stage-dot-inner {
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+  animation: pulse-stage 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-stage {
+  0%, 100% { box-shadow: 0 0 8px var(--accent-glow); transform: scale(1); }
+  50% { box-shadow: 0 0 20px var(--accent-glow); transform: scale(1.1); }
+}
+
+.wf-stage-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+  transition: color var(--duration-normal) var(--ease-glass);
+}
+
+.wf-stage-dot.done .wf-stage-label,
+.wf-stage-dot.current .wf-stage-label,
+.wf-stage-dot.failed .wf-stage-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.wf-stage-dot.failed .wf-stage-dot-inner {
+  background: oklch(0.55 0.14 16);
+  border-color: oklch(0.55 0.14 16);
+  box-shadow: 0 0 6px oklch(0.55 0.14 16 / 0.3);
+}
+
+.wf-stage-dot.current .wf-stage-label {
+  color: var(--accent);
+}
+
+.wf-stage-error {
+  font-size: 9px;
+  color: oklch(0.55 0.14 16);
+  text-align: center;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
+
+/* ─── OTPAR 认知循环组 ─── */
+.wf-otpar {
+  padding: var(--space-lg);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-panel);
+}
+
+.wf-otpar-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* 单个认知循环卡片 */
+.wf-otpar-group {
+  background: var(--bg-glass-strong);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-card);
+  padding: var(--space-md);
+  animation: slot-section-in 0.35s var(--ease-glass) both;
+}
+
+.wf-otpar-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-sm);
+}
+
+.wf-otpar-group-step {
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wf-otpar-group-progress {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 三阶段行布局 */
+.wf-otpar-group-phases {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--space-xs);
+}
+
+.wf-otpar-phase {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-card);
+  border: 1px solid transparent;
+  background: var(--bg-glass);
+  transition: all var(--duration-fast) var(--ease-glass);
+  min-height: 72px;
+}
+
+/* 等待中 — 灰色占位 */
+.wf-otpar-phase-pending {
+  border-color: var(--border-glass);
+  background: transparent;
+  opacity: 0.35;
+}
+
+.wf-otpar-phase-pending .wf-otpar-phase-icon {
+  opacity: 0.4;
+}
+
+/* 运行中 — 当前阶段带光晕 */
+.wf-otpar-phase.current {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.wf-otpar-phase-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+
+.wf-otpar-observe {
+  background: oklch(0.55 0.10 200 / 0.15);
+  color: oklch(0.55 0.10 200);
+}
+
+.wf-otpar-think {
+  background: oklch(0.60 0.12 12 / 0.15);
+  color: var(--accent);
+}
+
+.wf-otpar-reflect {
+  background: oklch(0.52 0.10 150 / 0.15);
+  color: oklch(0.55 0.12 150);
+}
+
+.wf-otpar-phase-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wf-otpar-phase-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.wf-otpar-phase-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.wf-otpar-phase-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.wf-otpar-phase-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse-dot 1.5s ease-in-out infinite;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.wf-otpar-phase-detail {
+  font-size: 10px;
+  color: var(--text-secondary);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ─── History ─── */
+.wf-history {
+  padding: var(--space-lg);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-panel);
+}
+
+.wf-history-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+
+.wf-history-toggle:hover {
+  color: var(--text-secondary);
+}
+
+.wf-history-list {
+  margin-top: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.wf-history-item {
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-card);
+  background: var(--bg-glass-strong);
+  transition: background var(--duration-fast) var(--ease-glass);
+}
+
+.wf-history-item:hover {
+  background: var(--bg-glass-hover);
+}
+
+.wf-history-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.wf-history-title {
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-history-status {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--bg-glass);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.wf-history-meta {
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ─── Tabs — 下划线指示器 ─── */
+.wf-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  overflow-x: auto;
+  position: relative;
+}
+
+/* 底部条 */
+.wf-tabs::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--border-glass);
+}
+
+.wf-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-small);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-glass);
+  white-space: nowrap;
+  position: relative;
+  margin-bottom: 0;
+}
+
+.wf-tab::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px 1px 0 0;
+  transform: scaleX(0);
+  transition: transform var(--duration-normal) var(--ease-glass);
+  z-index: 1;
+}
+
+.wf-tab:hover {
+  color: var(--text-secondary);
+  background: transparent;
+}
+
+.wf-tab.active {
+  color: var(--accent);
+  font-weight: 500;
+  background: transparent;
+}
+
+.wf-tab.active::after {
+  transform: scaleX(1);
+}
+
+.wf-tab i {
+  font-size: 14px;
+}
+
+.wf-tab-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+/* ─── Hint text ─── */
+.wf-hint {
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+  text-align: center;
+  margin: 0;
+  padding: var(--space-xs) 0;
+}
+
+/* ─── Summary row ─── */
+.wf-summary-row {
+  text-align: center;
+  padding: var(--space-xs) 0;
+}
+
+.wf-summary-label {
+  font-size: var(--fs-small);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* ─── Description ─── */
+.wf-desc {
+  font-size: var(--fs-small);
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-md) 0;
+}
+
+/* ─── Meta row — 时间戳 ─── */
+.wf-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: var(--space-sm);
+}
+
+.wf-meta-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Doc preview ─── */
+.wf-doc-card {
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-glass);
+}
+
+.wf-doc-card:hover {
+  border-color: var(--border-glass-hover);
+}
+
+.wf-doc-preview {
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  background: var(--bg-glass-strong);
+  border-radius: var(--radius-card);
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  line-height: 1.5;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* ─── List header with add button ─── */
+.wf-list-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+/* ─── Summary row (edit/run buttons) ─── */
+.wf-summary-row {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-glass);
+}
+
+/* ═══════════════════════════════════════
+   Workflow Editor
+   ═══════════════════════════════════════ */
+
+.wf-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--text-primary);
+  animation: tool-in 0.2s var(--ease-glass) both;
+}
+
+.wf-editor-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-lg) var(--space-xl);
+  border-bottom: 1px solid var(--border-glass);
+  background: var(--bg-glass);
+  position: relative;
+}
+
+/* 头部底部微光 */
+.wf-editor-header::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
+  opacity: 0.5;
+}
+
+.wf-editor-back {
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+.wf-editor-back:hover {
+  color: var(--text-primary);
+  background: var(--bg-glass-hover);
+  border-color: var(--border-glass);
+}
+
+.wf-editor-title {
+  font-size: var(--fs-heading);
+  font-weight: 500;
+  flex: 1;
+  margin: 0;
+}
+
+.wf-editor-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.wf-editor-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  background: var(--bg-glass-strong);
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-glass);
+}
+.wf-editor-btn:hover:not(:disabled) {
+  background: var(--bg-glass-hover);
+  color: var(--text-primary);
+}
+.wf-editor-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wf-editor-btn-save {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.wf-editor-btn-save:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.wf-editor-btn-run {
+  background: oklch(0.52 0.10 150);
+  color: white;
+  border-color: oklch(0.52 0.10 150);
+}
+.wf-editor-btn-run:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.wf-editor-btn-add {
+  color: var(--accent);
+  border-color: var(--accent-glow);
+}
+.wf-editor-btn-add:hover {
+  background: var(--accent-glow);
+}
+
+.wf-editor-btn-edit {
+  font-size: var(--fs-small);
+}
+
+.wf-editor-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-xl);
+  background: oklch(0.55 0.14 16 / 0.08);
+  color: oklch(0.55 0.14 16);
+  font-size: var(--fs-small);
+  animation: slot-section-in 0.2s var(--ease-glass) both;
+}
+
+.wf-editor-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* Left panel */
+.wf-editor-steps-panel {
+  width: 50%;
+  min-width: 320px;
+  padding: var(--space-xl);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  border-right: 1px solid var(--border-glass);
+}
+
+.wf-editor-field label {
+  display: block;
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.wf-editor-field input,
+.wf-editor-field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  background: var(--bg-glass-strong);
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--duration-normal) var(--ease-glass), box-shadow var(--duration-normal) var(--ease-glass);
+  box-sizing: border-box;
+}
+.wf-editor-field input:focus,
+.wf-editor-field textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+/* ─── DAG 可视化 —— 纵向流程线 ─── */
+.wf-editor-dag {
+  margin-top: var(--space-sm);
+}
+
+.wf-editor-dag-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: var(--space-md);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-panel);
+  position: relative;
+}
+
+/* 左侧纵向连接线 */
+.wf-editor-dag-graph::before {
+  content: '';
+  position: absolute;
+  left: 20px;
+  top: 28px;
+  bottom: 28px;
+  width: 2px;
+  background: var(--border-glass);
+  border-radius: 1px;
+}
+
+.wf-dag-node {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 8px 10px 8px 14px;
+  background: var(--bg-glass-strong);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-glass);
+  position: relative;
+  margin-bottom: 6px;
+}
+
+.wf-dag-node:last-child {
+  margin-bottom: 0;
+}
+
+.wf-dag-node:hover {
+  border-color: var(--border-glass-hover);
+  background: var(--bg-glass-hover);
+}
+.wf-dag-node.active {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.wf-dag-node-index {
+  width: 22px; height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+
+.wf-dag-node.active .wf-dag-node-index {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.wf-dag-node-name {
+  flex: 1;
+  font-size: var(--fs-small);
+  font-weight: 500;
+}
+
+.wf-dag-node-deps {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Step list header */
+.wf-editor-step-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.wf-editor-step-list-header label {
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.wf-editor-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wf-editor-step-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 40px 0;
+  color: var(--text-muted);
+  font-size: var(--fs-small);
+}
+.wf-editor-step-empty i {
+  font-size: 28px;
+  opacity: 0.3;
+}
+
+/* ─── 步骤卡片 ─── */
+.wf-editor-step-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 10px 12px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-glass);
+  position: relative;
+  overflow: hidden;
+}
+
+.wf-editor-step-card:hover {
+  border-color: var(--border-glass-hover);
+  background: var(--bg-glass-hover);
+}
+
+/* 编辑中状态的左边框标记 */
+.wf-editor-step-card.editing {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.wf-editor-step-card.editing::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
+
+.wf-editor-step-card-order {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 24px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+
+.wf-editor-step-card.editing .wf-editor-step-card-order {
+  color: var(--accent);
+}
+
+.wf-editor-step-move {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity var(--duration-normal) var(--ease-glass);
+}
+.wf-editor-step-card:hover .wf-editor-step-move {
+  opacity: 0.6;
+}
+.wf-editor-step-move:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--text-primary);
+}
+.wf-editor-step-move:disabled {
+  opacity: 0.15;
+  cursor: default;
+}
+
+.wf-editor-step-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wf-editor-step-card-name {
+  font-size: var(--fs-small);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-editor-step-placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.wf-editor-step-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 10px;
+}
+
+.wf-editor-step-handler-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.wf-editor-step-dep-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-muted);
+}
+
+.wf-editor-step-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity var(--duration-normal) var(--ease-glass);
+}
+.wf-editor-step-card:hover .wf-editor-step-remove {
+  opacity: 0.5;
+}
+.wf-editor-step-remove:hover {
+  opacity: 1 !important;
+  color: oklch(0.55 0.14 16);
+  background: oklch(0.55 0.14 16 / 0.08);
+}
+
+/* ─── Right: config panel ─── */
+
+.wf-editor-config-panel {
+  flex: 1;
+  padding: var(--space-xl);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.wf-editor-config-title {
+  font-size: var(--fs-heading);
+  font-weight: 500;
+  margin: 0;
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border-glass);
+}
+
+.wf-editor-config-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  color: var(--text-muted);
+  font-size: var(--fs-small);
+}
+.wf-editor-config-empty i {
+  font-size: 36px;
+  opacity: 0.25;
+}
+
+/* Handler selector grid — 改为更现代的按钮样式 */
+.wf-editor-handler-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.wf-editor-handler-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 4px 10px;
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  background: var(--bg-glass);
+  color: var(--text-muted);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-glass);
+  position: relative;
+}
+.wf-editor-handler-opt:hover {
+  background: var(--bg-glass-hover);
+  color: var(--text-secondary);
+  border-color: var(--border-glass-hover);
+  transform: translateY(-1px);
+}
+.wf-editor-handler-opt.active {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: var(--accent);
+  box-shadow: 0 2px 8px var(--accent-glow);
+}
+.wf-editor-handler-opt i {
+  font-size: 20px;
+  transition: transform var(--duration-fast) var(--ease-glass);
+}
+.wf-editor-handler-opt.active i {
+  transform: scale(1.1);
+}
+
+/* Dependency checkboxes */
+.wf-editor-dep-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wf-editor-dep-empty {
+  color: var(--text-muted);
+  font-size: var(--fs-small);
+}
+
+.wf-editor-dep-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--fs-small);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+.wf-editor-dep-checkbox:hover {
+  color: var(--text-primary);
+}
+.wf-editor-dep-checkbox input {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
 }

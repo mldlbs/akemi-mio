@@ -9,3 +9,27 @@ html, body, #root {
   font-family: 'Inter', 'Noto Sans SC', 'PingFang SC', -apple-system, sans-serif;
   user-select: none;
 }
+
+/* ─── 全局精致滚动条 ─── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 3px;
+  transition: background var(--duration-fast) var(--ease-glass);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}

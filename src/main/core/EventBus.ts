@@ -186,7 +186,7 @@ export interface EventPayload {
   }
 }
 
-type Listener<E extends EventName> = (payload: EventPayload[E]) => void
+export type Listener<E extends EventName> = (payload: EventPayload[E]) => void
 
 /**
  * 订阅追踪器 — 收集所有 EventBus 订阅的清理函数，统一 dispose

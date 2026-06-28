@@ -363,7 +363,7 @@ export class SessionGovernor implements ISubsystem {
         return true
 
       default:
-        log('INFO', 'sg_action:not_implemented', { level, name: RECOVERY_ACTIONS[level].name })
+        log('INFO', 'sg_action:not_implemented', { level, name: RECOVERY_ACTIONS[level as RecoveryActionLevel].name })
         return true
     }
   }

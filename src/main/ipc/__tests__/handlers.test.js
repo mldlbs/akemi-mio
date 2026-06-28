@@ -39,6 +39,9 @@ vi.mock('../../config', () => ({
     WAKE_WORDS: ['秋山澪', 'mio'],
     LLM_API_URL: 'https://api.example.com/chat',
     LLM_CODE_API_URL: 'https://api.example.com/code',
+    LLM_TEXT_API_URL: 'https://api.example.com/text',
+    LLM_VISION_API_URL: 'https://api.example.com/vision',
+    WORKSPACE: { evolution: process.cwd() },
 }));
 import { registerHandlers } from '../handlers';
 describe('IPC handlers', () => {
@@ -55,11 +58,12 @@ describe('IPC handlers', () => {
                 transcribe: vi.fn().mockResolvedValue('识别文本'),
             }),
             getMcpManager: vi.fn().mockReturnValue({
-                listServers: vi.fn().mockReturnValue([
-                    { name: 'server1', initialized: true },
-                ]),
+                listServers: vi.fn().mockReturnValue([{ name: 'server1', initialized: true }]),
             }),
             isBusy: vi.fn().mockReturnValue(false),
+            isPaused: vi.fn().mockReturnValue(false),
+            pause: vi.fn(),
+            resume: vi.fn(),
         };
         stateManager = {
             get: vi.fn().mockReturnValue({
@@ -76,7 +80,7 @@ describe('IPC handlers', () => {
             getLastRun: vi.fn().mockReturnValue(0),
             getConsecutiveFailures: vi.fn().mockReturnValue(0),
         };
-        registerHandlers(agentService, stateManager, ttsService, evolutionService);
+        registerHandlers(agentService, stateManager, ttsService, { current: evolutionService });
     });
     describe('handler 注册', () => {
         it('注册所有必需的 IPC handler', () => {
@@ -149,7 +153,9 @@ describe('IPC handlers', () => {
             expect(result).toEqual({ asr: 'idle', audioLevel: 0 });
         });
         it('异常时返回错误对象', async () => {
-            stateManager.get.mockImplementation(() => { throw new Error('state error'); });
+            stateManager.get.mockImplementation(() => {
+                throw new Error('state error');
+            });
             const handler = registeredHandlers.get('state:get');
             const result = await handler();
             expect(result).toHaveProperty('error');

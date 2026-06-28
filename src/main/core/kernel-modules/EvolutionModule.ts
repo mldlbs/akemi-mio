@@ -31,13 +31,12 @@ export class EvolutionModule implements IModule {
         return { state: this.evolutionService['state'] ?? 'unknown' }
 
       case 'trigger_cycle':
-        if (!this.evolutionService.runAnalysisCycle) throw new Error('runAnalysisCycle not available')
-        return this.evolutionService.runAnalysisCycle()
+        return (this.evolutionService as any).runAnalysisCycle()
 
       case 'get_snapshot':
         return {
           state: this.evolutionService['state'],
-          currentMode: this.evolutionService['currentMode'],
+          currentMode: (this.evolutionService as any)['currentMode'],
           safetyMode: this.evolutionService['safetyMode'],
         }
 

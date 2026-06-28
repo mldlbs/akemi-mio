@@ -67,23 +67,32 @@ const electronAPI = {
 
   getMessageHistory: (
     limit?: number,
-  ): Promise<{ id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number }[]> =>
+  ): Promise<{ id: string; source: string; role: string; content: string; category: string; sessionId?: string; createdAt: number }[]> =>
     ipcRenderer.invoke('messages:getHistory', limit),
 
-  getSessions: (): Promise<{ id: string; label: string; messageCount: number; lastActivityAt: number; createdAt: number }[]> =>
-    ipcRenderer.invoke('messages:getSessions'),
+  getSessions: (): Promise<
+    { id: string; source: string; category: string; label: string; messageCount: number; lastActivityAt: number; createdAt: number }[]
+  > => ipcRenderer.invoke('messages:getSessions'),
 
   getMessagesBySession: (
     sessionId: string,
-  ): Promise<{ id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number }[]> =>
+  ): Promise<{ id: string; source: string; role: string; content: string; category: string; sessionId?: string; createdAt: number }[]> =>
     ipcRenderer.invoke('messages:getBySession', sessionId),
 
   onMessageNew: (
-    callback: (msg: { id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number }) => void,
+    callback: (msg: {
+      id: string
+      source: string
+      role: string
+      content: string
+      category: string
+      sessionId?: string
+      createdAt: number
+    }) => void,
   ) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      msg: { id: string; source: string; role: string; content: string; sessionId?: string; createdAt: number },
+      msg: { id: string; source: string; role: string; content: string; category: string; sessionId?: string; createdAt: number },
     ) => callback(msg)
     ipcRenderer.on('message:new', handler)
     return () => {
@@ -214,6 +223,25 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('agent:error', handler)
   },
 
+  // 工作流运行事件
+  onWorkflowRunCreated: (callback: (data: { runId: string; workflowDefId: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('workflow:run_created', handler)
+    return () => ipcRenderer.removeListener('workflow:run_created', handler)
+  },
+
+  onWorkflowRunUpdated: (callback: (data: { runId: string; status: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('workflow:run_updated', handler)
+    return () => ipcRenderer.removeListener('workflow:run_updated', handler)
+  },
+
+  onWorkflowRunStep: (callback: (data: { runId: string; stepId: string; status: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('workflow:run_step', handler)
+    return () => ipcRenderer.removeListener('workflow:run_step', handler)
+  },
+
   // Invoke handlers
   getActivePlan: (): Promise<{
     id: string
@@ -247,6 +275,19 @@ const electronAPI = {
     ipcRenderer.on('persona:updated', handler)
     return () => ipcRenderer.removeListener('persona:updated', handler)
   },
+
+  // ── Workflow System ──
+  listWorkflowDefinitions: (): Promise<any[]> => ipcRenderer.invoke('workflow:listDefinitions'),
+  getWorkflowDefinition: (id: string): Promise<any> => ipcRenderer.invoke('workflow:getDefinition', id),
+  listWorkflowRuns: (limit?: number): Promise<any[]> => ipcRenderer.invoke('workflow:listRuns', limit),
+  getWorkflowRun: (runId: string): Promise<any> => ipcRenderer.invoke('workflow:getRun', runId),
+  deleteWorkflowDefinition: (id: string): Promise<{ success: boolean }> => ipcRenderer.invoke('workflow:deleteDefinition', id),
+  saveWorkflowDefinition: (def: any): Promise<{ success: boolean }> => ipcRenderer.invoke('workflow:saveDefinition', def),
+  startWorkflow: (id: string): Promise<{ success: boolean; runId?: string; error?: string }> =>
+    ipcRenderer.invoke('workflow:startWorkflow', id),
+
+  // ── Writing Status ──
+  getWritingStatus: (): Promise<{ stories: any[]; totalStories: number; totalScenes: number }> => ipcRenderer.invoke('writing:getStatus'),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)

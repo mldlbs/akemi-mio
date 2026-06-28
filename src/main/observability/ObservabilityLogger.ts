@@ -55,7 +55,7 @@ export class ObservabilityLogger {
         content = (m.content || '(empty)').slice(0, 500)
       }
       if (m.tool_calls?.length) {
-        content += ` [tool_calls: ${m.tool_calls.map((t) => t.name).join(', ')}]`
+        content += ` [tool_calls: ${m.tool_calls.map((t: any) => t.function?.name || t.name).join(', ')}]`
       }
       parts.push(`  [${role}] ${content}`)
     }

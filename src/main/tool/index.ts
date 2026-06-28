@@ -9,7 +9,13 @@ import { createDevPlanTool, updatePlanProgressTool, listPlansTool, completePlanT
 import { analyzeCodebaseTool } from './definitions/AnalyzeCodebaseTool'
 import { getCredentialTool, setCredentialTool, listCredentialsTool } from './definitions/CredentialTools'
 import { rememberFactTool } from './definitions/RememberFactTool'
-import { analyzeTaskTool, listWorkflowsTool } from './definitions/WorkflowTools'
+import {
+  analyzeTaskTool,
+  listWorkflowsTool,
+  createWorkflowTool,
+  startWorkflowTool,
+  getWorkflowStatusTool,
+} from './definitions/WorkflowTools'
 import { listSkillsTool, enableSkillTool, disableSkillTool } from './definitions/SkillTools'
 import { writingSystemTool } from './definitions/WritingTool'
 import { generateImageTool } from './definitions/ImageGenerationTool'
@@ -40,6 +46,9 @@ export function getAllTools(): Tool[] {
     rememberFactTool as Tool,
     analyzeTaskTool as Tool,
     listWorkflowsTool as Tool,
+    createWorkflowTool as Tool,
+    startWorkflowTool as Tool,
+    getWorkflowStatusTool as Tool,
     listSkillsTool as Tool,
     enableSkillTool as Tool,
     disableSkillTool as Tool,

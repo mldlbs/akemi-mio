@@ -15,6 +15,8 @@ import type { EventBus, EventName } from './EventBus'
 
 // ───── 桥接配置 ─────
 
+// ───── 桥接配置 ─────
+
 export interface BridgeRule {
   event: EventName
   command?: CommandChannel
@@ -308,9 +310,9 @@ export class SystemBus {
   private aggregateChannel<T>(channel: QueryChannel, results: QueryResult<T>[]): T | null {
     if (results.length === 0) return null
     if (channel === 'utility-score') {
-      const nums = results.filter((r): r is QueryResult<number> => r.success && typeof r.value === 'number')
+      const nums = results.filter((r) => r.success && typeof (r as any).value === 'number') as QueryResult<number>[]
       if (nums.length === 0) return 0.5 as T
-      const avg = nums.reduce((s, r) => s + r.value, 0) / nums.length
+      const avg = nums.reduce((s, r) => s + (r.value as number), 0) / nums.length
       return Math.max(0, Math.min(1, avg)) as T
     }
     return results.find((r) => r.success)?.value ?? null

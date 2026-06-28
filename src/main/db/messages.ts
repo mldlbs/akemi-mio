@@ -6,6 +6,7 @@ export interface StoredMessage {
   source: 'electron' | 'telegram'
   role: 'user' | 'assistant'
   content: string
+  category: string
   sessionId?: string
   telegramChatId?: number | null
   telegramUserId?: number | null
@@ -16,6 +17,8 @@ export interface StoredMessage {
 
 export interface SessionItem {
   id: string
+  source: 'electron' | 'telegram'
+  category: string
   label: string
   messageCount: number
   lastActivityAt: number
@@ -34,13 +37,14 @@ export function insertMessage(msg: StoredMessage): void {
   try {
     const db = getRawDb()
     db.run(
-      `INSERT INTO messages (id, source, role, content, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (id, source, role, content, category, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         msg.id,
         msg.source,
         msg.role,
         msg.content,
+        msg.category,
         msg.sessionId ?? null,
         msg.telegramChatId ?? null,
         msg.telegramUserId ?? null,
@@ -60,6 +64,7 @@ interface StoredMessageRow {
   source: string
   role: string
   content: string
+  category: string
   session_id: string | null
   telegram_chat_id: number | null
   telegram_user_id: number | null
@@ -72,7 +77,7 @@ export function getRecentMessages(limit = 100): StoredMessage[] {
   try {
     const db = getRawDb()
     const rows = db.exec(
-      `SELECT id, source, role, content, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at
+      `SELECT id, source, role, content, category, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at
        FROM messages ORDER BY created_at ASC LIMIT ?`,
       [limit],
     )
@@ -95,6 +100,11 @@ export function getSessions(): SessionItem[] {
     const rows = db.exec(
       `SELECT session_id,
               (SELECT content FROM messages AS sub WHERE sub.session_id = m.session_id AND sub.role = 'user' ORDER BY sub.created_at ASC LIMIT 1) AS label,
+              (SELECT source FROM messages AS sub2 WHERE sub2.session_id = m.session_id ORDER BY sub2.created_at ASC LIMIT 1) AS source,
+              COALESCE(
+                (SELECT category FROM messages AS sub3 WHERE sub3.session_id = m.session_id AND sub3.category != 'chat' ORDER BY sub3.created_at ASC LIMIT 1),
+                (SELECT category FROM messages AS sub4 WHERE sub4.session_id = m.session_id ORDER BY sub4.created_at ASC LIMIT 1)
+              ) AS category,
               COUNT(*) AS message_count,
               MAX(created_at) AS last_activity_at,
               MIN(created_at) AS created_at
@@ -110,6 +120,8 @@ export function getSessions(): SessionItem[] {
       for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i]
       return {
         id: obj.session_id as string,
+        source: (obj.source as string) === 'telegram' ? 'telegram' : 'electron',
+        category: (obj.category as string) || 'chat',
         label: (obj.label as string)?.slice(0, 40) || '新对话',
         messageCount: obj.message_count as number,
         lastActivityAt: obj.last_activity_at as number,
@@ -126,7 +138,7 @@ export function getMessagesBySession(sessionId: string): StoredMessage[] {
   try {
     const db = getRawDb()
     const rows = db.exec(
-      `SELECT id, source, role, content, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at
+      `SELECT id, source, role, content, category, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at
        FROM messages WHERE session_id = ? ORDER BY created_at ASC`,
       [sessionId],
     )
@@ -175,6 +187,7 @@ function rowToMessage(row: StoredMessageRow): StoredMessage {
     source: row.source as 'electron' | 'telegram',
     role: row.role as 'user' | 'assistant',
     content: row.content,
+    category: row.category || 'chat',
     sessionId: row.session_id ?? undefined,
     telegramChatId: row.telegram_chat_id,
     telegramUserId: row.telegram_user_id,

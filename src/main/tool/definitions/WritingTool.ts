@@ -8,7 +8,7 @@ async function writingFetch(method: string, path: string, body?: any) {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
-    timeout: 30000,
+    signal: AbortSignal.timeout(30000),
   })
   if (!res.ok) {
     const text = await res.text()

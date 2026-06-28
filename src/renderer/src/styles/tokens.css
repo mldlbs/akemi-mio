@@ -1,30 +1,34 @@
 :root {
-  /* ─── 暖白基底 ─── */
-  --bg-base: oklch(0.99 0.003 30);             /* warm off-white */
-  --bg-main: oklch(0.96 0.005 30);              /* 主内容区 · 暖灰 */
-  --bg-surface: oklch(0.93 0.006 30 / 0.5);     /* 侧栏浮层 */
-  --bg-topbar: oklch(0.97 0.004 30 / 0.92);     /* 顶栏 */
-  --bg-input: oklch(0.92 0.006 30 / 0.4);        /* 输入栏 */
+  /* ─── 粉白基底 ─── */
+  --bg-base: oklch(0.995 0.002 12);             /* 最外层 · 白中透一点粉 */
+  --bg-main: oklch(0.985 0.004 14);              /* 主内容区 · 粉灰 */
+  --bg-surface: oklch(0.975 0.006 18 / 0.4);     /* 侧栏 · 淡淡粉雾 */
+  --bg-topbar: oklch(0.99 0.003 10 / 0.88);       /* 顶栏 · 半透粉白 */
+  --bg-input: oklch(0.97 0.006 20 / 0.3);          /* 输入栏 · 更透粉雾 */
 
-  /* ─── 玻璃泛光层 ─── */
-  --bg-glass: oklch(0.88 0.005 30 / 0.35);
-  --bg-glass-strong: oklch(0.82 0.008 30 / 0.4);
-  --bg-glass-hover: oklch(0.78 0.01 30 / 0.45);
+  /* ─── 玻璃泛光层 · 粉调 ─── */
+  --bg-glass: oklch(0.95 0.008 16 / 0.28);
+  --bg-glass-strong: oklch(0.92 0.012 18 / 0.32);
+  --bg-glass-hover: oklch(0.90 0.015 20 / 0.38);
 
-  /* ─── 暖调近黑文字 ─── */
-  --text-primary: oklch(0.1 0.004 30);
-  --text-secondary: oklch(0.35 0.006 30);
-  --text-muted: oklch(0.55 0.008 30);
-  --text-glass: oklch(0.14 0.005 30 / 0.85);
+  /* ─── 暖调近黑文字 · 带一丝粉 ─── */
+  --text-primary: oklch(0.10 0.006 18);
+  --text-secondary: oklch(0.35 0.008 20);
+  --text-muted: oklch(0.55 0.010 18);
+  --text-glass: oklch(0.14 0.006 20 / 0.82);
 
-  /* ─── 暖灰边框 ─── */
-  --border-glass: oklch(0.65 0.008 30 / 0.18);
-  --border-glass-hover: oklch(0.6 0.01 30 / 0.3);
+  /* ─── 暖灰边框 · 粉融 ─── */
+  --border-glass: oklch(0.68 0.012 16 / 0.12);
+  --border-glass-hover: oklch(0.62 0.018 18 / 0.20);
 
-  /* ─── 暖橙点缀（更柔和） ─── */
-  --accent: oklch(0.55 0.13 24);
-  --accent-soft: oklch(0.6 0.1 28);
-  --accent-glow: oklch(0.55 0.13 24 / 0.08);
+  /* ─── 粉嫩点缀 · 红豆沙 ─── */
+  --accent: oklch(0.60 0.12 12);
+  --accent-soft: oklch(0.66 0.09 16);
+  --accent-glow: oklch(0.60 0.12 12 / 0.10);
+
+  /* ─── 冷蓝 Slot 指示 ─── */
+  --accent-slot: oklch(0.5 0.07 240);
+  --accent-slot-glow: oklch(0.5 0.07 240 / 0.06);
 
   /* ─── 冷蓝 Slot 指示 ─── */
   --accent-slot: oklch(0.5 0.07 240);

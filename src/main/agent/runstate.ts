@@ -1,5 +1,13 @@
 import { log } from '../logger/Logger'
 
+export interface GovernorRecord {
+  step: number
+  action: 'continue' | 'stop' | 'shift'
+  reason: string
+  failedTools: string[]
+  roundResult: 'all_ok' | 'partial' | 'all_failed'
+}
+
 /**
  * Agent 运行状态枚举
  * 替代旧的二值 inToolLoop boolean，支持打断、审批、错误等完整生命周期
@@ -68,6 +76,8 @@ export class RunContext {
   softReplyInjected = false
   /** 前几轮已经口头汇报过的内容摘要 */
   spokenReplies: string[] = []
+  /** ExecutionGovernor 决策历史 */
+  governorHistory: GovernorRecord[] = []
 
   constructor(runId: string) {
     this.runId = runId
@@ -109,6 +119,22 @@ export class RunContext {
     this.forceContinueCount = 0
     this.lastForceContinuePendingDesc = ''
     this.forceContinueStagnation = 0
+    this.governorHistory = []
+  }
+
+  /** 记录 ExecutionGovernor 决策 */
+  recordGovernor(
+    decision: { action: GovernorRecord['action']; reason: string },
+    failedTools: string[],
+    roundResult: GovernorRecord['roundResult'],
+  ): void {
+    this.governorHistory.push({
+      step: this.step,
+      action: decision.action,
+      reason: decision.reason,
+      failedTools,
+      roundResult,
+    })
   }
 
   get running(): boolean {

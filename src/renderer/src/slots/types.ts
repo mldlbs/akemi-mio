@@ -1,4 +1,4 @@
-export type ActiveSlot = 'chat' | 'tool' | 'preview'
+export type ActiveSlot = 'chat' | 'tool' | 'preview' | 'workflow' | 'otpar' | 'devplan'
 
 export interface UiState {
   sidebarOpen: boolean
@@ -10,12 +10,15 @@ export interface MessageItem {
   source: 'electron' | 'telegram'
   role: 'user' | 'assistant'
   content: string
+  category: string
   sessionId?: string
   createdAt: number
 }
 
 export interface SessionItem {
   id: string
+  source: 'electron' | 'telegram'
+  category: string
   label: string
   messageCount: number
   lastActivityAt: number

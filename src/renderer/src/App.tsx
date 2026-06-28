@@ -6,9 +6,13 @@ import { InputBar } from './components/InputBar'
 import { ChatSlot } from './components/ChatSlot'
 import { ToolSlot } from './components/ToolSlot'
 import { PreviewSlot } from './components/PreviewSlot'
+import { WorkflowSlot } from './components/WorkflowSlot'
+import { DevPlanSlot } from './components/DevPlanSlot'
+import { OtparSlot } from './components/OtparSlot'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { SettingsModal } from './components/SettingsModal'
 import { useSlots } from './slots/SlotContext'
-import { useSessions, useAIOutput, useTools, useDeviceStatus } from './hooks'
+import { useSessions, useAIOutput, useTools, useDeviceStatus, usePlans, useWorkflowDefinitions } from './hooks'
 
 export type { MessageItem } from './slots/types'
 
@@ -22,6 +26,14 @@ function App() {
   )
   const { uiState } = useSlots()
   const { toolRunning, toolCompleted } = useTools()
+  const { activePlan, otparStages } = usePlans()
+  const {
+    definitions: workflowDefs,
+    runs: workflowRuns,
+    activeRuns: workflowActiveRuns,
+    loading: wfLoading,
+    refresh: refreshWorkflows,
+  } = useWorkflowDefinitions()
 
   return (
     <div className="app-shell">
@@ -33,18 +45,30 @@ function App() {
         personaLevel={device.personaLevel}
         onOpenSettings={() => device.setSettingsOpen(true)}
         agentState={agentState}
-        agentSlot={
-          <button className="cap-toggle-btn" onClick={() => window.electronAPI.openAgentWindow()} title="Agent 面板">
-            <i className="ri-robot-2-line" />
-          </button>
-        }
       />
       <div className="app-body">
         <Sidebar sessions={sessions} activeSessionId={activeSessionId} onSelectChat={handleSelectChat} />
         <MainArea>
-          {/* ChatSlot 始终渲染；用户主动切换到 tool/preview 时显示替换层 */}
           {uiState.activeSlot === 'tool' ? (
             <ToolSlot running={toolRunning} completed={toolCompleted} />
+          ) : uiState.activeSlot === 'otpar' ? (
+            <ErrorBoundary>
+              <OtparSlot otparStages={otparStages} />
+            </ErrorBoundary>
+          ) : uiState.activeSlot === 'devplan' ? (
+            <ErrorBoundary>
+              <DevPlanSlot activePlan={activePlan} />
+            </ErrorBoundary>
+          ) : uiState.activeSlot === 'workflow' ? (
+            <ErrorBoundary>
+              <WorkflowSlot
+                workflowDefs={workflowDefs}
+                workflowRuns={workflowRuns}
+                workflowActiveRuns={workflowActiveRuns}
+                wfLoading={wfLoading}
+                onRefreshDefs={refreshWorkflows}
+              />
+            </ErrorBoundary>
           ) : uiState.activeSlot === 'preview' ? (
             <PreviewSlot />
           ) : (

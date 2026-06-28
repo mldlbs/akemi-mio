@@ -1,4 +1,5 @@
 import { buildTool, formatToolResult, formatToolError } from '../types'
+import type { MCPToolResult } from '../../mcp/types'
 import { LLM_IMAGE_KEY, LLM_IMAGE_MODEL, LLM_IMAGE_API_URL, WORKSPACE } from '../../config'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
@@ -68,7 +69,7 @@ export const generateImageTool = buildTool({
 
 // ─── ComfyUI 本地生图 ───
 
-async function generateWithComfyUI(prompt: string, size?: string, negativePrompt?: string, refImage?: string): Promise<string> {
+async function generateWithComfyUI(prompt: string, size?: string, negativePrompt?: string, refImage?: string): Promise<MCPToolResult> {
   const [width, height] = parseSize(size) ?? [1024, 1024]
 
   try {
@@ -88,7 +89,7 @@ async function generateWithComfyUI(prompt: string, size?: string, negativePrompt
 
 // ─── CogView 在线 API（fallback） ───
 
-async function generateWithCogView(prompt: string, args: any): Promise<string> {
+async function generateWithCogView(prompt: string, args: any): Promise<MCPToolResult> {
   const apiKey = LLM_IMAGE_KEY
   if (!apiKey) {
     return formatToolError('未配置 LLM_IMAGE_KEY，且 ComfyUI 未就绪。请在 .env 中设置 LLM_IMAGE_KEY 或安装 ComfyUI')

@@ -9,23 +9,12 @@ interface TopBarProps {
   error?: string
   sessionHealth?: string
   personaLevel?: string
-  /** Agent window toggle button — renders into actions area if provided */
-  agentSlot?: ReactNode
   onOpenSettings?: () => void
   agentState?: AgentState
 }
 
-export function TopBar({
-  conversationActive,
-  ttsPlaying,
-  error,
-  sessionHealth,
-  personaLevel,
-  agentSlot,
-  onOpenSettings,
-  agentState,
-}: TopBarProps) {
-  const { uiState, toggleSidebar } = useSlots()
+export function TopBar({ conversationActive, ttsPlaying, error, sessionHealth, personaLevel, onOpenSettings, agentState }: TopBarProps) {
+  const { uiState, toggleSidebar, setActiveSlot } = useSlots()
 
   return (
     <header className="topbar">
@@ -46,10 +35,30 @@ export function TopBar({
       </div>
 
       <div className="topbar-actions">
+        <button
+          className={`cap-toggle-btn${uiState.activeSlot === 'otpar' ? ' active' : ''}`}
+          onClick={() => setActiveSlot(uiState.activeSlot === 'otpar' ? 'chat' : 'otpar')}
+          title="OTPAR 认知循环"
+        >
+          <i className="ri-brain-line" />
+        </button>
+        <button
+          className={`cap-toggle-btn${uiState.activeSlot === 'devplan' ? ' active' : ''}`}
+          onClick={() => setActiveSlot(uiState.activeSlot === 'devplan' ? 'chat' : 'devplan')}
+          title="开发计划"
+        >
+          <i className="ri-code-s-slash-line" />
+        </button>
+        <button
+          className={`cap-toggle-btn${uiState.activeSlot === 'workflow' ? ' active' : ''}`}
+          onClick={() => setActiveSlot(uiState.activeSlot === 'workflow' ? 'chat' : 'workflow')}
+          title="工作流"
+        >
+          <i className="ri-flow-chart" />
+        </button>
         <button className="cap-toggle-btn" onClick={onOpenSettings} title="设置">
           <i className="ri-settings-3-line" />
         </button>
-        {agentSlot}
         <button className="topbar-close" onClick={() => window.electronAPI.closeWindow()} title="关闭">
           <i className="ri-close-line" />
         </button>

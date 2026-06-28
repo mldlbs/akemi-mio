@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
+// @ts-ignore — ssh2 has no types
 import { Client } from 'ssh2'
 import { getCredentialsManager } from '../deps'
 
@@ -52,7 +53,7 @@ function connectSSH(host: string, port: number, username: string, auth: Record<s
       clearTimeout(timer)
       resolve(client)
     })
-    client.on('error', (err) => {
+    client.on('error', (err: any) => {
       clearTimeout(timer)
       reject(err)
     })
@@ -79,7 +80,7 @@ function execCommand(client: Client, command: string, timeout?: number): Promise
       reject(new Error(`SSH 命令执行超时 (${execTimeout}ms): ${command.slice(0, 100)}`))
     }, execTimeout)
 
-    client.exec(command, (err, stream) => {
+    client.exec(command, (err: any, stream: any) => {
       if (err) {
         clearTimeout(timer)
         return reject(err)
@@ -125,9 +126,9 @@ export async function sshReadFile(remotePath: string): Promise<string> {
   const client = await connectSSH(cfg.host, cfg.port, cfg.username, auth)
   try {
     return await new Promise((resolve, reject) => {
-      client.sftp((err, sftp) => {
+      client.sftp((err: any, sftp: any) => {
         if (err) return reject(new Error(`SFTP 连接失败: ${err.message}`))
-        sftp.readFile(remotePath, (err2, data) => {
+        sftp.readFile(remotePath, (err2: any, data: any) => {
           sftp.end()
           if (err2) return reject(new Error(`远程读取文件失败: ${err2.message}`))
           resolve(data.toString('utf-8'))
@@ -148,9 +149,9 @@ export async function sshWriteFile(remotePath: string, content: string): Promise
   const client = await connectSSH(cfg.host, cfg.port, cfg.username, auth)
   try {
     await new Promise<void>((resolve, reject) => {
-      client.sftp((err, sftp) => {
+      client.sftp((err: any, sftp: any) => {
         if (err) return reject(new Error(`SFTP 连接失败: ${err.message}`))
-        sftp.writeFile(remotePath, Buffer.from(content, 'utf-8'), (err2) => {
+        sftp.writeFile(remotePath, Buffer.from(content, 'utf-8'), (err2: any) => {
           sftp.end()
           if (err2) return reject(new Error(`远程写入文件失败: ${err2.message}`))
           resolve()

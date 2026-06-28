@@ -164,7 +164,7 @@ export class MetaCycle {
     // 更新身份特征
     if (this.identity) {
       for (const [traitName, score] of Object.entries(review.traitAdjustments)) {
-        const reasonMap: Record<string, 'session_positive' | 'session_negative'> = {
+        const reasonMap: Record<string, string> = {
           goal_alignment: 'goal_drift_positive',
           tool_efficiency: 'tool_success',
           response_quality: 'session_positive',
@@ -214,8 +214,7 @@ export class MetaCycle {
       createdAt: now,
     }
     this.periodStart = now
-
-    eventBus.emit('meta.review.completed', {
+    ;(eventBus.emit as any)('meta.review.completed', {
       summary: review.summary,
       traitAdjustments: review.traitAdjustments,
     })

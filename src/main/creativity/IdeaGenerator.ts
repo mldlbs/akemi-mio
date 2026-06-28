@@ -1,4 +1,4 @@
-import type { CreativitySource, ConceptCombo, Hypothesis, CreativeIdea, Strategy } from './types'
+import type { CreativitySource, ConceptCombo, Hypothesis, CreativeIdea, Strategy, ExternalSignal } from './types'
 import { ConceptMixer } from './ConceptMixer'
 import { HypothesisGenerator } from './HypothesisGenerator'
 import { ExperimentPlanner } from './ExperimentPlanner'

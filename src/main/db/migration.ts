@@ -498,6 +498,13 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
     `,
   },
+  {
+    version: 25,
+    sql: `
+      ALTER TABLE messages ADD COLUMN category TEXT NOT NULL DEFAULT 'chat';
+      CREATE INDEX IF NOT EXISTS idx_messages_category ON messages(category);
+    `,
+  },
 ]
 
 export function runMigrations(sqlite: SqlJsDatabase): void {
