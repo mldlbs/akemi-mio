@@ -6,27 +6,10 @@ interface Props {
 
 function stageIcon(status: string): string {
   switch (status) {
-    case 'done':
-      return 'ri-check-line'
-    case 'in_progress':
-      return 'ri-loader-4-line ri-spin'
-    case 'failed':
-      return 'ri-close-circle-line'
-    default:
-      return 'ri-circle-line'
-  }
-}
-
-function stageColor(status: string): string {
-  switch (status) {
-    case 'done':
-      return 'wf-step-done'
-    case 'in_progress':
-      return 'wf-step-running'
-    case 'failed':
-      return 'wf-step-failed'
-    default:
-      return 'wf-step-pending'
+    case 'done': return 'ri-checkbox-circle-fill'
+    case 'in_progress': return 'ri-loader-4-line ri-spin'
+    case 'failed': return 'ri-close-circle-fill'
+    default: return 'ri-checkbox-blank-circle-line'
   }
 }
 
@@ -36,39 +19,72 @@ export function DevPlanSlot({ activePlan }: Props) {
   const progress = totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0
 
   return (
-    <div className="workflow-slot workflow-slot-content">
+    <div className="devplan-slot">
       <ErrorBoundary>
+        <div className="devplan-header">
+          <i className="ri-code-s-slash-line" />
+          <span>开发计划</span>
+        </div>
+
         {activePlan ? (
-          <section className="wf-plan-card running">
-            <div className="wf-plan-header">
-              <h3 className="wf-plan-title">{activePlan.title}</h3>
-              <span className={`wf-plan-badge ${activePlan.status}`}>{activePlan.status}</span>
-            </div>
-            <div className="wf-progress-row">
-              <div className="wf-progress-bar">
-                <div className="wf-progress-fill" style={{ width: `${Math.max(progress, 4)}%` }} />
+          <div className="devplan-body">
+            {/* 计划卡片 */}
+            <div className="devplan-card">
+              <div className="devplan-card-top">
+                <h3 className="devplan-title">{activePlan.title}</h3>
+                <span className={`devplan-status devplan-status--${activePlan.status}`}>
+                  <i className={activePlan.status === 'in_progress' || activePlan.status === 'running' ? 'ri-loader-4-line ri-spin' : activePlan.status === 'done' || activePlan.status === 'completed' ? 'ri-check-line' : 'ri-time-line'} />
+                  {activePlan.status === 'in_progress' ? '进行中' : activePlan.status === 'done' || activePlan.status === 'completed' ? '已完成' : activePlan.status === 'failed' ? '失败' : activePlan.status === 'running' ? '运行中' : activePlan.status}
+                </span>
               </div>
-              <span className="wf-progress-text">
-                {doneSteps}/{totalSteps}
-              </span>
+
+              <div className="devplan-progress">
+                <div className="devplan-progress-bar">
+                  <div className="devplan-progress-fill" style={{ width: `${Math.max(progress, 3)}%` }} />
+                </div>
+                <span className="devplan-progress-text">{doneSteps}/{totalSteps} 步</span>
+              </div>
             </div>
-            <ul className="wf-steps">
-              {activePlan.steps.map((step: any) => (
-                <li key={step.id} className={`wf-step ${stageColor(step.status)}`}>
-                  <i className={stageIcon(step.status)} />
-                  <span className="wf-step-text">{step.description}</span>
-                  {step.result && <span className="wf-step-result">{step.result}</span>}
-                </li>
-              ))}
-            </ul>
-          </section>
+
+            {/* 步骤列表 */}
+            <div className="devplan-steps">
+              <div className="devplan-steps-header">
+                <span>执行步骤</span>
+              </div>
+              {activePlan.steps.map((step: any, idx: number) => {
+                const isRunning = step.status === 'in_progress' || step.status === 'running'
+                const isDone = step.status === 'done' || step.status === 'completed'
+                const isFailed = step.status === 'failed'
+                return (
+                  <div key={step.id} className={`devplan-step devplan-step--${isDone ? 'done' : isRunning ? 'running' : isFailed ? 'failed' : 'pending'}`}>
+                    <div className="devplan-step-icon">
+                      {isRunning ? (
+                        <div className="devplan-step-spinner" />
+                      ) : (
+                        <i className={stageIcon(step.status)} />
+                      )}
+                    </div>
+                    <div className="devplan-step-body">
+                      <div className="devplan-step-title">
+                        <span className="devplan-step-num">#{idx + 1}</span>
+                        <span>{step.description}</span>
+                      </div>
+                      {step.result && (
+                        <div className="devplan-step-result">{step.result}</div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         ) : (
-          <div className="workflow-empty" style={{ padding: '60px 0' }}>
-            <div className="workflow-empty-icon">
+          <div className="devplan-empty">
+            <div className="devplan-empty-icon">
               <i className="ri-code-s-slash-line" />
             </div>
-            <div className="workflow-empty-text">当前没有活跃的开发计划</div>
-            <div className="workflow-empty-sub">向 AI 描述需求，自动生成开发管线</div>
+            <div className="devplan-empty-text">当前没有活跃的开发计划</div>
+            <div className="devplan-empty-sub">向 AI 描述需求，自动生成开发管线</div>
           </div>
         )}
       </ErrorBoundary>
