@@ -164,8 +164,7 @@ export class WorkflowScheduler {
           }
 
           if (agentIds.length > 0) {
-            await this.waitForAgents(agentIds, run, sd)
-            const results = this.dispatch.getCompletedAgentResults()
+            const results = await this.waitForAgents(agentIds, run, sd)
             const agentResult = results.find((r) => agentIds.includes(r.id))
             if (agentResult?.error) {
               workflowStore.updateStep(run, sd.id, 'failed', agentResult.summary, agentResult.error)
@@ -186,7 +185,11 @@ export class WorkflowScheduler {
     }
   }
 
-  private async waitForAgents(agentIds: string[], run: WorkflowRun, sd: WorkflowStepDef): Promise<void> {
+  private async waitForAgents(
+    agentIds: string[],
+    run: WorkflowRun,
+    sd: WorkflowStepDef,
+  ): Promise<{ id: string; summary: string; error?: string }[]> {
     console.log('[wf] waitForAgents ENTERED', { agentIds, stepId: sd.id })
     const maxWait = 60 * 60 * 1000
     const interval = 2000
@@ -197,7 +200,7 @@ export class WorkflowScheduler {
       const done = agentIds.every((id) => results.some((r) => r.id === id))
       if (done) {
         console.log('[wf] waitForAgents done', { agentIds, results })
-        return
+        return results
       }
       eventBus.emit('workflow.run.step' as any, {
         runId: run.runId,
@@ -209,6 +212,7 @@ export class WorkflowScheduler {
       waited += interval
     }
     log('WARN', 'workflow_agent_wait_timeout', { runId: run.runId, stepId: sd.id })
+    return []
   }
 
   stopRun(runId: string): boolean {
