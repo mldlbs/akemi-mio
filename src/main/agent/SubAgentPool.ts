@@ -27,6 +27,12 @@ interface SubAgentTask {
   model?: string
 }
 
+/** spawnTask options */
+export interface SpawnTaskOptions {
+  maxTurns?: number
+  llmTimeoutMs?: number
+}
+
 // ── 单个子 Agent 实例 ──
 
 class SubAgentInstance {
@@ -42,14 +48,27 @@ class SubAgentInstance {
   private context: ConversationContext
   private abortController = new AbortController()
   private mcpManager: ServerManager
+  private eventBus: EventBus
+  private maxTurns: number
+  private llmTimeoutMs: number
 
-  constructor(task: SubAgentTask, mcpManager: ServerManager, chatKey: string, codeKey: string) {
+  constructor(
+    task: SubAgentTask,
+    mcpManager: ServerManager,
+    chatKey: string,
+    codeKey: string,
+    systemPrompt?: string,
+    options?: SpawnTaskOptions,
+  ) {
     this.id = task.id
     this.goal = task.goal
     this.mcpManager = mcpManager
+    this.eventBus = eventBus
+    this.maxTurns = options?.maxTurns ?? 15
+    this.llmTimeoutMs = options?.llmTimeoutMs ?? 120000
     this.llm = new LlmService(mcpManager)
     this.llm.setConfig(chatKey, codeKey)
-    this.context = new ConversationContext()
+    this.context = new ConversationContext(undefined, undefined, undefined, systemPrompt)
   }
 
   async run(agentGoal?: string): Promise<void> {
@@ -89,14 +108,13 @@ class SubAgentInstance {
 
   private async toolLoop(): Promise<string> {
     const messages = this.context.getMessages()
-    const maxTurns = 15
 
-    for (let i = 0; i < maxTurns; i++) {
+    for (let i = 0; i < this.maxTurns; i++) {
       if (this.abortController.signal.aborted) {
         throw new DOMException('Aborted', 'AbortError')
       }
 
-      const result = await this.llm.chatWithTools(messages, `sub_${this.id}_${i}`, 120000, this.abortController.signal)
+      const result = await this.llm.chatWithTools(messages, `sub_${this.id}_${i}`, this.llmTimeoutMs, this.abortController.signal)
 
       if (result.error === 'TIMEOUT') {
         log('WARN', 'subagent_timeout', { id: this.id, step: i })
@@ -124,14 +142,18 @@ class SubAgentInstance {
         throw new DOMException('Aborted', 'AbortError')
       }
 
+      this.emitToolInvoked(call.name, call.arguments)
+
       try {
         const output = await this.mcpManager.callTool(call.name, call.arguments)
+        this.emitToolCompleted(call.name, typeof output === 'string' ? output : JSON.stringify(output))
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
           content: typeof output === 'string' ? output : JSON.stringify(output),
         })
       } catch (err: any) {
+        this.emitToolFailed(call.name, err.message)
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -139,6 +161,18 @@ class SubAgentInstance {
         })
       }
     }
+  }
+
+  private emitToolInvoked(tool: string, args: Record<string, any>): void {
+    this.eventBus.emit('agent.tool.invoked' as any, { tool, args })
+  }
+
+  private emitToolCompleted(tool: string, result: string): void {
+    this.eventBus.emit('agent.tool.completed' as any, { tool, result })
+  }
+
+  private emitToolFailed(tool: string, error: string): void {
+    this.eventBus.emit('agent.tool.failed' as any, { tool, error })
   }
 }
 
@@ -187,6 +221,38 @@ export class SubAgentPool {
   /** 派发多个并行任务 */
   spawnBatch(tasks: { goal: string }[], parentGoal?: string): string[] {
     return tasks.map((t) => this.spawn(t.goal, parentGoal))
+  }
+
+  /**
+   * 派发一个可等待的子任务，返回 Promise<SubAgentResult>
+   * 与 spawn() 的区别：
+   *  - 支持自定义 systemPrompt
+   *  - 支持配置 maxTurns / llmTimeoutMs
+   *  - 结果通过 Promise 返回，不进入 completedQueue
+   */
+  async spawnTask(goal: string, systemPrompt?: string, options?: SpawnTaskOptions): Promise<SubAgentResult> {
+    const id = `agt_${++this.counter}_${Date.now().toString(36)}`
+    const task: SubAgentTask = { id, goal }
+    const instance = new SubAgentInstance(task, this.mcpManager, this.chatKey, this.codeKey, systemPrompt, options)
+    this.agents.set(id, instance)
+    this.ensureWatchdog()
+
+    log('INFO', 'subagent_spawn_task', { id, goal: goal.slice(0, 60) })
+
+    try {
+      await instance.run()
+      return {
+        id: instance.id,
+        goal: instance.goal,
+        status: instance.status,
+        summary: instance.summary,
+        error: instance.error,
+        startedAt: instance.startedAt,
+        completedAt: instance.completedAt,
+      }
+    } finally {
+      this.agents.delete(id)
+    }
   }
 
   /**

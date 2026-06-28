@@ -546,4 +546,24 @@ export class AgentService {
       this.runContext = null
     }
   }
+
+  /**
+   * 通过 SubAgentPool 在独立子 agent 中运行任务。
+   * 与 runSelfTask 的区别：
+   *  - 不进 completedQueue，不影响主对话 collectCompleted()
+   *  - 不占用 isBusy() 锁
+   *  - 没有 context save/restore
+   *  - 没有 inSelfTask 互斥守卫（可并发）
+   */
+  async runAgentTask(
+    task: string,
+    systemPrompt?: string,
+    options?: { maxTurns?: number; llmTimeoutMs?: number },
+  ): Promise<{ success: boolean; summary: string }> {
+    const result = await this.subAgentPool.spawnTask(task, systemPrompt, options)
+    return {
+      success: result.status === 'completed',
+      summary: result.summary,
+    }
+  }
 }

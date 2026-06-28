@@ -723,6 +723,7 @@ export class AppRuntime {
         const kernel = Kernel.getInstance()
         await kernel.registerModule(evolutionModule)
         evolution.scheduleEvolution(2)
+        evolutionRef.current = evolution
         log('INFO', 'evolution_service_started', { interval_hours: 2 })
       },
     })

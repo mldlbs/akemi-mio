@@ -150,7 +150,7 @@ export class PromptEvolutionManager {
 
     try {
       const result = await withTimeout(
-        () => agentRunner.runSelfTask(llmPrompt, '你是 prompt 优化器。只输出反模式指令列表。'),
+        () => agentRunner.runAgentTask(llmPrompt, '你是 prompt 优化器。只输出反模式指令列表。'),
         5000,
         'prompt_llm_evolve_timeout',
       )

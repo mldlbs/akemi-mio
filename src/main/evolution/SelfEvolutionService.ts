@@ -893,7 +893,7 @@ export class SelfEvolutionService implements ISubsystem {
     try {
       const result = await withTimeout(
         () =>
-          this.agentService.runSelfTask(
+          this.agentService.runAgentTask(
             '【预热测试】请调用 analyze_codebase 快速检查项目状态，然后回复"预热完成"。不要创建计划。',
             '你是秋山澪的自进化系统。当前是预热模式。请调用 analyze_codebase(quick=true) 然后回复。',
           ),

@@ -103,7 +103,7 @@ export class EvolutionAnalyzer implements ISubsystem {
       (input.creativityCtx ? '\n' + input.creativityCtx : '')
 
     try {
-      const result = await this.agentService.runSelfTask(prompt, buildEvolutionSystemPrompt(undefined, this.promptOverlay))
+      const result = await this.agentService.runAgentTask(prompt, buildEvolutionSystemPrompt(undefined, this.promptOverlay))
 
       if (result.success) {
         this.recordCycle({
