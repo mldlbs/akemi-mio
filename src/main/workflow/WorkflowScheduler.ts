@@ -2,9 +2,10 @@ import { log } from '../logger/Logger'
 import { eventBus } from '../core/EventBus'
 import { workflowStore } from './WorkflowStore'
 import type { WorkflowDef, WorkflowRun, WorkflowStepDef, WorkflowStepRun } from './types'
+import type { SpawnTaskOptions } from '../agent/SubAgentPool'
 
 export interface WorkflowDispatch {
-  runSubAgent: (goal: string, parentGoal?: string) => string
+  runSubAgent: (goal: string, parentGoal?: string, options?: SpawnTaskOptions) => string
   runTool: (name: string, args: Record<string, any>) => Promise<string>
   runApi: (url: string, method: string, body?: any) => Promise<string>
   injectPrompt: (prompt: string) => void
@@ -101,7 +102,13 @@ export class WorkflowScheduler {
 
           switch (sd.handler) {
             case 'subagent': {
-              const agentId = this.dispatch.runSubAgent(sd.config.prompt || sd.description, def.description)
+              const subOptions: SpawnTaskOptions = {}
+              const allowedTools = sd.config.allowedTools
+              // allowedTools 在 step 定义中存在时才限制（undefined=不限制，[]=禁所有，非空数组=白名单）
+              if (allowedTools !== undefined) {
+                subOptions.allowedToolNames = allowedTools
+              }
+              const agentId = this.dispatch.runSubAgent(sd.config.prompt || sd.description, def.description, subOptions)
               agentIds.push(agentId)
               this.pendingAgents.set(run.runId, agentIds)
               break

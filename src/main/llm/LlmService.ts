@@ -188,10 +188,25 @@ export class LlmService {
     return systemTokens + estimateTokens(userText) + messages.slice(1).reduce((s, m) => s + estimateTokens(m.content), 0)
   }
 
-  private _doFetch(messages: Message[], stream: boolean, signal: AbortSignal, model?: string): Promise<Response> {
+  private _getFilteredSchemas(allowedToolNames?: string[]) {
+    const allSchemas = this.mcpManager.getAllSchemas()
+    // undefined → 不限制（向后兼容）
+    if (allowedToolNames === undefined) return allSchemas
+    // 显式传入数组（[] 表示无工具可用）→ 过滤
+    return allSchemas.filter((s) => allowedToolNames.includes(s.function.name))
+  }
+
+  private _doFetch(
+    messages: Message[],
+    stream: boolean,
+    signal: AbortSignal,
+    model?: string,
+    allowedToolNames?: string[],
+  ): Promise<Response> {
     const isCode = !!model
     const baseUrl = isCode ? LLM_CODE_API_URL : LLM_API_URL
     const key = isCode ? this.codeApiKey! : this.chatApiKey!
+    const tools = this._getFilteredSchemas(allowedToolNames)
     return fetch(baseUrl, {
       method: 'POST',
       headers: {
@@ -202,7 +217,7 @@ export class LlmService {
         model: model || this.apiModel,
         messages,
         stream,
-        ...(stream ? {} : { tools: this.mcpManager.getAllSchemas(), tool_choice: 'auto' }),
+        ...(stream ? {} : { tools: tools.length > 0 ? tools : undefined, tool_choice: 'auto' }),
       }),
       signal,
     })
@@ -322,6 +337,7 @@ export class LlmService {
     timeoutMs = 60000,
     onChunk?: ChunkCallback,
     externalSignal?: AbortSignal,
+    allowedToolNames?: string[],
   ): Promise<{ reply?: string; toolCalls?: ToolCallInfo[]; error?: string }> {
     if (!this.codeApiKey) return { error: 'NO_KEY' }
 
@@ -357,7 +373,7 @@ export class LlmService {
       try {
         // 有 onChunk 回调时使用流式，边收 token 边喂给 TTS
         if (onChunk) {
-          const result = await this._chatWithToolsStream(messages, requestId, t0, controller.signal, onChunk)
+          const result = await this._chatWithToolsStream(messages, requestId, t0, controller.signal, onChunk, allowedToolNames)
           if (result.error && RETRYABLE.has(result.error)) {
             if (attempt < 3) {
               const delay = Math.min(1000 * Math.pow(2, attempt - 1), 4000)
@@ -369,7 +385,7 @@ export class LlmService {
           return result
         }
 
-        const res = await this._doFetch(messages, false, controller.signal, this.codeModel)
+        const res = await this._doFetch(messages, false, controller.signal, this.codeModel, allowedToolNames)
 
         // 429 可重试
         if (res.status === 429) {
@@ -437,10 +453,12 @@ export class LlmService {
     t0: number,
     signal: AbortSignal,
     onChunk: ChunkCallback,
+    allowedToolNames?: string[],
   ): Promise<{ reply?: string; toolCalls?: ToolCallInfo[]; error?: string }> {
     // 发流式请求前清理孤儿 tool_calls（兜底，与 chatWithTools 入口处互补）
     trimOrphanedToolCallsFrom(messages)
     // 流式请求中同时携带 tools 声明，让 LLM 仍可选工具调用
+    const tools = this._getFilteredSchemas(allowedToolNames)
     const res = await fetch(LLM_CODE_API_URL, {
       method: 'POST',
       headers: {
@@ -451,7 +469,7 @@ export class LlmService {
         model: this.codeModel,
         messages,
         stream: true,
-        tools: this.mcpManager.getAllSchemas(),
+        tools: tools.length > 0 ? tools : undefined,
         tool_choice: 'auto',
       }),
       signal,

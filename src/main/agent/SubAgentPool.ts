@@ -31,6 +31,7 @@ interface SubAgentTask {
 export interface SpawnTaskOptions {
   maxTurns?: number
   llmTimeoutMs?: number
+  allowedToolNames?: string[]
 }
 
 // ── 单个子 Agent 实例 ──
@@ -51,6 +52,7 @@ class SubAgentInstance {
   private eventBus: EventBus
   private maxTurns: number
   private llmTimeoutMs: number
+  private allowedToolNames?: string[]
 
   constructor(
     task: SubAgentTask,
@@ -66,6 +68,7 @@ class SubAgentInstance {
     this.eventBus = eventBus
     this.maxTurns = options?.maxTurns ?? 15
     this.llmTimeoutMs = options?.llmTimeoutMs ?? 120000
+    this.allowedToolNames = options?.allowedToolNames
     this.llm = new LlmService(mcpManager)
     this.llm.setConfig(chatKey, codeKey)
     this.context = new ConversationContext(undefined, undefined, undefined, systemPrompt)
@@ -114,7 +117,13 @@ class SubAgentInstance {
         throw new DOMException('Aborted', 'AbortError')
       }
 
-      const result = await this.llm.chatWithTools(messages, `sub_${this.id}_${i}`, this.llmTimeoutMs, this.abortController.signal)
+      const result = await this.llm.chatWithTools(
+        messages,
+        `sub_${this.id}_${i}`,
+        this.llmTimeoutMs,
+        this.abortController.signal,
+        this.allowedToolNames,
+      )
 
       if (result.error === 'TIMEOUT') {
         log('WARN', 'subagent_timeout', { id: this.id, step: i })
@@ -202,10 +211,10 @@ export class SubAgentPool {
   }
 
   /** 派发一个子任务，立即返回 id */
-  spawn(goal: string, parentGoal?: string): string {
+  spawn(goal: string, parentGoal?: string, options?: SpawnTaskOptions): string {
     const id = `sub_${++this.counter}_${Date.now().toString(36)}`
     const task: SubAgentTask = { id, goal }
-    const instance = new SubAgentInstance(task, this.mcpManager, this.chatKey, this.codeKey)
+    const instance = new SubAgentInstance(task, this.mcpManager, this.chatKey, this.codeKey, undefined, options)
     this.agents.set(id, instance)
 
     // 确保 watchdog 在首次 spawn 时启动

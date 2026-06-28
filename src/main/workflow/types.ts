@@ -11,6 +11,8 @@ export interface WorkflowStepDef {
     apiUrl?: string
     apiMethod?: string
     planPrompt?: string
+    /** 允许子代理看到的工具名列表。不设置则看到全部工具。设为 [] 禁所有工具。 */
+    allowedTools?: string[]
   }
   dependsOn: string[]
   /** 执行条件: 'success'=仅当所有依赖都成功时执行(默认), 'failure'=仅当至少一个依赖失败时执行 */
