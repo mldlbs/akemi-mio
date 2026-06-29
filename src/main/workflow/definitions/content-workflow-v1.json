@@ -1,0 +1,109 @@
+{
+  "id": "preset_content_workflow_v1",
+  "name": "秋山澪 Content Workflow V1",
+  "description": "以工作流驱动内容生产，而非单次 Prompt。流程可视化、节点职责单一、可插拔、支持循环优化。",
+  "inputSchema": "主题: string, 平台: string",
+  "steps": [
+    {
+      "id": "s1",
+      "name": "意图分析",
+      "description": "分析用户需求，输出内容类型、平台、风格、目标用户、输出长度、创作目标",
+      "handler": "subagent",
+      "config": {
+        "maxTurns": 10,
+        "prompt": "你的任务是从以下渠道找到今天最适合创作的内容主题：\n\n1. 阅读排期表 evolution_workspace/analysis/content-schedule.md，查看是否有今日待完成的选题\n2. 查看 observer 最新趋势数据 evolution_workspace/observer/trends/，了解当前热点\n3. 查看 observer 已有的研究短文 evolution_workspace/observer/essays/，看哪些可以转化为内容\n4. 查看已有草稿 evolution_workspace/social/drafts/ 下的目录名，避免主题重复\n\n选定主题后，输出结构化分析结果：\n内容类型：\n目标平台：\n风格：\n目标用户画像：\n输出长度：\n创作目标：\n选定的主题名称：",
+        "allowedTools": ["read_file"]
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "s_audience",
+      "name": "受众与平台分析",
+      "description": "分析目标受众群体、平台推荐机制和避坑策略，输出受众画像和平台适配策略",
+      "handler": "subagent",
+      "config": {
+        "allowedTools": ["read_file"],
+        "maxTurns": 8,
+        "prompt": "基于意图分析结果，分析目标受众和平台策略。\n\n使用 read_file 读取以下数据作为分析依据（不要只靠 LLM 训练数据猜测）：\n\n1. evolution_workspace/analysis/content-schedule.md — 查看排期历史和已发布的系列文章\n2. evolution_workspace/social/drafts/ — 查看已有草稿目录名（了解之前写过什么主题）\n3. evolution_workspace/observer/trends/ — 查看最新热点趋势数据\n4. evolution_workspace/observer/observations/ — 查看之前的观察记录（可能包含平台变化信息）\n5. evolution_workspace/observer/insights/ — 查看已有的洞察分析\n\n读完数据后，进行以下分析：\n\n## 01. 基于数据的受众判断\n\n**这个主题在什么平台有真实读者？**\n- 趋势数据显示哪些平台对这类内容有流量？（不要假设全都适合发）\n- 过去同类主题的草稿在哪个平台发过？是否有反馈数据？\n- 这个主题的搜索热度在上升还是下降？\n- 根据趋势数据，当前受众更关注这个主题的哪个侧面？\n\n**信息需求分层**（要写具体，不要泛泛而谈）\n- 入门层受众：他们在这个主题上最常搜索什么关键词？\n- 进阶层受众：他们卡在什么地方？缺什么信息？\n- 专业层受众：什么内容能让他们转发/收藏？\n\n## 02. 平台避坑分析（基于观察数据）\n\n输出去读到的相关记录中对以下问题的回答：\n- observer 数据中有没有提到哪些平台对哪些类型限流的案例？\n- 这类主题在哪些平台容易被判低质/同质化？\n- 什么关键词或表述之前被标记过？\n\n## 03. 平台推荐策略\n\n对趋势数据中有流量信号的平台逐一分析：\n\n**平台：[平台名]**\n- 该平台当前对这类内容的流量倾向（从数据中看到的证据）\n- 什么形式的标题/开头容易过审核并拿到推荐？\n- 什么表述可能导致限流？（引用 observer 中的具体案例）\n- 该平台上同类内容的发布时间有什么规律？\n\n## 04. 最终建议\n\n基于以上分析（不要凭空猜测），给出：\n1. 推荐首发平台（1-2 个）及理由（引用趋势数据）\n2. 不推荐发布的平台及理由\n3. 正文必须避免的表述（避限流，引用 observer 案例）\n4. 正文必须包含的元素（提高推荐权重）\n\n注意：最终输出中标注每条结论的数据来源，比如“根据 2026-06-29 的趋势数据：…”"
+      },
+      "dependsOn": ["s1"]
+    },
+    {
+      "id": "s2",
+      "name": "内容规划",
+      "description": "生成结构化内容方案：每个章节有核心主张、必须解释的原因、预埋的例子。S4 将直接基于此展开",
+      "handler": "subagent",
+      "config": {
+        "allowedTools": [],
+        "maxTurns": 10,
+        "prompt": "基于意图分析结果，生成结构化内容方案。这不是大纲，而是为 S4（正文展开器）提供精确的展开指令。\n\n输出格式（严格按此结构）：\n\n## 标题方向\n1. 标题1\n2. 标题2\n3. 标题3\n\n## Hook 开头\n（一段话，吸引读者）\n\n## 章节列表\n\n每个章节格式如下：\n\n### Section: [章节名]\n\n**Topic:** 一句话说明本节在讲什么\n\n**CoreClaim:**\n- （本节最核心的主张，2-3 条）\n\n**MustExplain:**\n- （这些主张必须解释的原因。比如“为什么 Review 要放在 Draft 后面而不是之前”而不是“Review 很重要”）\n\n**Example:**\n- （预埋的具体例子，描述一个流程或场景。S4 会直接展开这段）\n\n**Avoid:**\n- （S4 展开时不要碰的内容，防止跑偏）\n\n## CTA 行动号召\n\n注意：只出方案，不写正文。每个章节的 CoreClaim + MustExplain + Example 越具体，正文质量越高。"
+      },
+      "dependsOn": ["s1"]
+    },
+    {
+      "id": "s3",
+      "name": "素材收集",
+      "description": "收集知识、记忆、案例、参考和用户资料，整理为统一Context",
+      "handler": "subagent",
+      "config": {
+        "maxTurns": 10,
+        "prompt": "收集与当前内容主题相关的素材。使用 read_file 读取以下来源：\n- evolution_workspace/observer/observations/ — 相关观察记录\n- evolution_workspace/observer/research/ — 相关研究资料\n- evolution_workspace/memory/ — 相关知识记忆\n\n整理为结构化的Context：\n知识要点：\n案例参考：\n数据支撑：\n素材汇总：",
+        "allowedTools": ["read_file"]
+      },
+      "dependsOn": ["s1"]
+    },
+    {
+      "id": "s4",
+      "name": "初稿生成",
+      "description": "根据 Planner 的结构化方案和素材，展开为第一版正文",
+      "handler": "subagent",
+      "config": {
+        "allowedTools": [],
+        "maxTurns": 20,
+        "prompt": "你的任务是根据 Planner 的结构化方案和 Material 素材，展开为第一版正文。\n\n你不是作者，你是 Expander（展开器）。Planner 已经规划了每个章节的 CoreClaim（核心主张）、MustExplain（必须解释的原因）、Example（预埋例子），你把这些信息组织成自然、流畅、可读的正文。\n\n不需要额外发明新观点，不要补 Planner 没说过的内容。\n\n---\n\n## Writing Contract\n\n每写一段，心里检查以下 10 条：\n\n1. 每个自然段必须提供新的信息。禁止不同段落表达同一个意思。\n2. 优先写具体机制，而不是抽象概念。比如“把 Review 放到 Draft 后面可以提前发现方向问题”胜于“提高质量”。\n3. 每个重要观点尽量解释原因（Why）。不要只说什么，要说为什么。\n4. 每 2~3 个观点至少提供一个例子、场景或流程。读者需要“看到”过程。\n5. 描述过程，少写结论。比如“Review 给出 62 分 → 自动跳回 Rewrite → 第二轮 81 分 → 进入 Adapter”胜于“工作流支持循环”。\n6. 不重复 Planner 已经表达过的话。Planner 的方案内容已在前置步骤给出，正文不应复述方案本身。\n7. 一句话只表达一个意思。如果一句话需要用“和”连接两个意思，拆成两句。\n8. 保持逻辑递进：问题 → 原因 → 例子 → 小结，不要说明书式的平铺。\n9. 无法具体化的内容，宁可省略，不要空泛扩写。\n10. 输出的是“可发布的正文”，不是方案说明，也不是 Prompt 解析。\n\n---\n\n开始展开。"
+      },
+      "dependsOn": ["s2", "s3", "s_audience"]
+    },
+    {
+      "id": "s5",
+      "name": "审查与重写",
+      "description": "对照 Writing Contract 逐条检查，不满足则标记重写",
+      "handler": "subagent",
+      "config": {
+        "allowedTools": [],
+        "maxTurns": 10,
+        "prompt": "检查正文，按以下 10 条 Writing Contract 逐条打分（0-10）。\n\n1. 每个自然段是否都提供了新的信息？有没有两段在说同一个意思？\n2. 是否优先写具体机制而非抽象概念？\n3. 每个重要观点是否解释了原因（Why）？\n4. 是否每 2~3 个观点有例子/场景/流程？\n5. 是否描述过程而不仅是给出结论？\n6. 有没有复述 Planner 的方案本身？\n7. 每句话是否只表达一个意思？\n8. 逻辑递进是否为：问题 → 原因 → 例子 → 小结？\n9. 有没有无法具体化却空泛扩写的段落？\n10. 输出的是“可发布的正文”还是更像方案说明？\n\n输出格式：\n\n## 综合评分：x/10\n\n## 各条评分\n1. 信息增量：x/10 — 问题点\n2. 具体性：x/10 — 问题点\n...\n\n## 必须修改的问题（优先列出违反 Contract 第 1、2、6 条的问题）\n\n## 修改建议\n\n如果评分低于 7/10，在「重写版本」中输出修改后的正文。只修改有问题的部分。最多循环 3 次。"
+      },
+      "dependsOn": ["s4"]
+    },
+    {
+      "id": "s6",
+      "name": "平台适配",
+      "description": "统一转换适配各平台格式：公众号、知乎、小红书、微博、B站、抖音",
+      "handler": "subagent",
+      "config": {
+        "allowedTools": [],
+        "maxTurns": 10,
+        "prompt": "将正文适配到各平台格式：公众号排版、知乎长文、小红书笔记、微博短博文、B站文案、抖音短视频脚本。输出各平台版本。"
+      },
+      "dependsOn": ["s5"]
+    },
+    {
+      "id": "s7",
+      "name": "输出",
+      "description": "输出最终版本：正文、标题、标签、CTA、摘要、Metadata",
+      "handler": "subagent",
+      "config": {
+        "allowedTools": [],
+        "maxTurns": 5,
+        "prompt": "输出最终内容包。要求严格按照以下 JSON 格式输出，不要用代码块包裹，直接输出纯 JSON：\n\n{\n  \"title\": \"文章标题\",\n  \"summary\": \"摘要\",\n  \"tags\": [\"标签1\", \"标签2\"],\n  \"platforms\": {\n    \"wechat_mp\": { \"title\": \"公众号标题\", \"body\": \"公众号版本正文\" },\n    \"zhihu\": { \"title\": \"知乎标题\", \"body\": \"知乎长文版本正文\" },\n    \"xiaohongshu\": { \"title\": \"小红书标题\", \"body\": \"小红书笔记正文\" },\n    \"weibo\": { \"title\": \"微博标题\", \"body\": \"微博正文\" },\n    \"bilibili\": { \"title\": \"B站标题\", \"body\": \"B站文案正文\" },\n    \"douyin\": { \"title\": \"抖音标题\", \"body\": \"抖音短视频脚本正文\" }\n  },\n  \"cta\": \"行动号召\",\n  \"metadata\": { \"word_count\": 0, \"content_type\": \"article\" }\n}\n\n注意：不要用对话语气，直接输出纯 JSON，不要加 ``` 代码块。",
+        "outputFile": "C:/Users/gf191/AppData/Roaming/akemi-mio/evolution_workspace/social/drafts/{DATE}-workflow-output/.meta"
+      },
+      "dependsOn": ["s6"]
+    }
+  ],
+  "tags": ["medium", "social"],
+  "enabled": true,
+  "createdAt": 0,
+  "updatedAt": 0
+}

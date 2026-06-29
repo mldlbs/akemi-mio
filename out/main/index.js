@@ -12006,6 +12006,11 @@ ${failureSummary}`,
         Logger.log("WARN", "evolution_integrity_check_failed", { error_count: result.issues.filter((i) => i.severity === "error").length });
         for (const p of allPlans) {
           if (p.status === "active") {
+            if (!p.steps || p.steps.length === 0) {
+              pm.updatePlanStatus(p.id, "abandoned");
+              Logger.log("INFO", "evolution_plan_auto_abandoned", { planId: p.id, reason: "计划没有步骤" });
+              continue;
+            }
             const fixResult = checker.autoFix(p);
             if (fixResult.fixed > 0)
               for (let i = 0; i < p.steps.length; i++) pm.updateStep(p.id, i, p.steps[i].status, p.steps[i].result);

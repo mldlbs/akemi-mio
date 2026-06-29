@@ -13839,6 +13839,7 @@ function stageIcon$1(status) {
   switch (status) {
     case "done":
       return "ri-check-line";
+    case "running":
     case "in_progress":
       return "ri-loader-4-line ri-spin";
     case "failed":
@@ -13851,6 +13852,7 @@ function stageColor(status) {
   switch (status) {
     case "done":
       return "wf-step-done";
+    case "running":
     case "in_progress":
       return "wf-step-running";
     case "failed":
@@ -13916,12 +13918,15 @@ function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, wfLoadin
   const [searchQuery, setSearchQuery] = reactExports.useState("");
   const [expandedDefs, setExpandedDefs] = reactExports.useState({});
   const [pipelineLogs, setPipelineLogs] = reactExports.useState({});
-  const logEndRef = reactExports.useRef(null);
+  const logBodyRef = reactExports.useRef(null);
   const [historyOpen, setHistoryOpen] = reactExports.useState(false);
   const [historyExpandedRun, setHistoryExpandedRun] = reactExports.useState(null);
   const [historyFilter, setHistoryFilter] = reactExports.useState("all");
   reactExports.useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = logBodyRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
   }, [pipelineLogs]);
   const hasActive = workflowActiveRuns.length > 0;
   reactExports.useEffect(() => {
@@ -14173,10 +14178,7 @@ function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, wfLoadin
             /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-terminal-line" }),
             " 实时输出"
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-pipeline-log-body", children: [
-            logs.map((line, idx) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-pipeline-log-line", children: line }, idx)),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref: logEndRef })
-          ] })
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-pipeline-log-body", ref: logBodyRef, children: logs.map((line, idx) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-pipeline-log-line", children: line }, idx)) })
         ] })
       ] }, run.runId);
     }),
