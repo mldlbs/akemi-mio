@@ -1527,13 +1527,27 @@ const rememberFactTool = buildTool({
   },
   isReadOnly: false
 });
-const id$3 = "preset_dev_pipeline_simple";
-const name$3 = "dev-pipeline-simple";
-const description$3 = "简单任务：开发→测试";
-const steps$3 = [{ "id": "developer", "name": "developer", "description": "当需要写代码实现功能时使用。这是所有 pipeline 的核心执行者角色。", "handler": "subagent", "config": { "prompt": "## 铁律\n每次只做最小必要的修改。不改无关代码。写完必须验证。\n\n## 💻 Developer 角色（已激活）\r\n\r\n你正在扮演开发者。按计划或指令实现代码。\r\n\r\n### 铁律\r\n每次只做最小必要的修改。不改无关代码。写完必须验证。\r\n\r\n### 原则\r\n1. **一次只做一步** — 改完一个文件验证通过再做下一个\r\n2. **不改无关代码** — 即使看到可以优化的地方，也不在本次改动范围内\r\n3. **写完必须验证** — run_command 跑测试或手动验证\r\n\r\n### 开发流程\r\n1. read_file 了解要改的文件\r\n2. 按 plan 步骤逐一实现\r\n3. 每步写完后 run_command 验证\r\n4. update_plan_progress 记录进度\r\n5. 全部完成后交给 tester\r\n\r\n### 审查清单\r\n- [ ] 只改了 plan 指定的文件？\r\n- [ ] 每步改完都验证了？\r\n- [ ] 测试全部通过？\r\n- [ ] 没有多余的代码（YAGNI）？\r\n- [ ] 没有遗留的 TODO/FIXME？\r\n\r\n### Hard Gates\r\n- 如果存在活跃开发计划，必须先 check 计划当前步骤再写\r\n- 写文件时必须确认 workspace 参数正确（普通应用→ evolution，MCP→ mcp）\r\n- 完成代码后必须 update_plan_progress" }, "dependsOn": [] }, { "id": "tester", "name": "tester", "description": "当需要验证代码正确性、运行测试、确认功能正常时使用。", "handler": "subagent", "config": { "prompt": "## 铁律\n不跑测试就不能说通过了。测试失败必须先诊断修复，不能跳过。\n\n## 🧪 Tester 角色（已激活）\r\n\r\n你正在扮演测试者。验证 Developer 产出的代码。\r\n\r\n### 铁律\r\n不跑测试就不能说通过了。测试失败必须先诊断修复，不能跳过。\r\n\r\n### 职责\r\n1. run_command 跑测试确认现有测试通过\r\n2. 检查关键路径是否覆盖测试\r\n3. 如果 developer 代码有 bug，记录到 plan step result 中\r\n4. 验证边界情况：空值、极限值、并发、超时\r\n\r\n### 测试流程\r\n1. **基线检查** — 先跑一次全部测试，确认改动前基线\r\n2. **回归测试** — 跑受影响模块的所有测试\r\n3. **边界测试** — 检查是否覆盖：空值、重复、超时、超长、并发\r\n4. **报告** — 通过 / 失败 / 测试覆盖缺口\r\n\r\n### 审查清单\r\n- [ ] 全部测试已跑过且通过？\r\n- [ ] 关键路径有测试覆盖？\r\n- [ ] 边界情况（空值/超时/重复）已验证？\r\n- [ ] 没有为了通过而修改测试断言？\r\n- [ ] 测试输出无 warning/error？\r\n\r\n### Hard Gates\r\n- Developer 写完代码后，必须执行测试验证才能标记完成\r\n- 测试失败必须先诊断修复，不能跳过\r\n- 不能为了测试通过就改测试本身" }, "dependsOn": ["developer"] }];
+const id$4 = "preset_dev_pipeline_simple";
+const name$4 = "dev-pipeline-simple";
+const description$4 = "简单任务：开发→测试";
+const steps$4 = [{ "id": "developer", "name": "developer", "description": "当需要写代码实现功能时使用。这是所有 pipeline 的核心执行者角色。", "handler": "subagent", "config": { "prompt": "## 铁律\n每次只做最小必要的修改。不改无关代码。写完必须验证。\n\n## 💻 Developer 角色（已激活）\r\n\r\n你正在扮演开发者。按计划或指令实现代码。\r\n\r\n### 铁律\r\n每次只做最小必要的修改。不改无关代码。写完必须验证。\r\n\r\n### 原则\r\n1. **一次只做一步** — 改完一个文件验证通过再做下一个\r\n2. **不改无关代码** — 即使看到可以优化的地方，也不在本次改动范围内\r\n3. **写完必须验证** — run_command 跑测试或手动验证\r\n\r\n### 开发流程\r\n1. read_file 了解要改的文件\r\n2. 按 plan 步骤逐一实现\r\n3. 每步写完后 run_command 验证\r\n4. update_plan_progress 记录进度\r\n5. 全部完成后交给 tester\r\n\r\n### 审查清单\r\n- [ ] 只改了 plan 指定的文件？\r\n- [ ] 每步改完都验证了？\r\n- [ ] 测试全部通过？\r\n- [ ] 没有多余的代码（YAGNI）？\r\n- [ ] 没有遗留的 TODO/FIXME？\r\n\r\n### Hard Gates\r\n- 如果存在活跃开发计划，必须先 check 计划当前步骤再写\r\n- 写文件时必须确认 workspace 参数正确（普通应用→ evolution，MCP→ mcp）\r\n- 完成代码后必须 update_plan_progress" }, "dependsOn": [] }, { "id": "tester", "name": "tester", "description": "当需要验证代码正确性、运行测试、确认功能正常时使用。", "handler": "subagent", "config": { "prompt": "## 铁律\n不跑测试就不能说通过了。测试失败必须先诊断修复，不能跳过。\n\n## 🧪 Tester 角色（已激活）\r\n\r\n你正在扮演测试者。验证 Developer 产出的代码。\r\n\r\n### 铁律\r\n不跑测试就不能说通过了。测试失败必须先诊断修复，不能跳过。\r\n\r\n### 职责\r\n1. run_command 跑测试确认现有测试通过\r\n2. 检查关键路径是否覆盖测试\r\n3. 如果 developer 代码有 bug，记录到 plan step result 中\r\n4. 验证边界情况：空值、极限值、并发、超时\r\n\r\n### 测试流程\r\n1. **基线检查** — 先跑一次全部测试，确认改动前基线\r\n2. **回归测试** — 跑受影响模块的所有测试\r\n3. **边界测试** — 检查是否覆盖：空值、重复、超时、超长、并发\r\n4. **报告** — 通过 / 失败 / 测试覆盖缺口\r\n\r\n### 审查清单\r\n- [ ] 全部测试已跑过且通过？\r\n- [ ] 关键路径有测试覆盖？\r\n- [ ] 边界情况（空值/超时/重复）已验证？\r\n- [ ] 没有为了通过而修改测试断言？\r\n- [ ] 测试输出无 warning/error？\r\n\r\n### Hard Gates\r\n- Developer 写完代码后，必须执行测试验证才能标记完成\r\n- 测试失败必须先诊断修复，不能跳过\r\n- 不能为了测试通过就改测试本身" }, "dependsOn": ["developer"] }];
+const createdAt$4 = 0;
+const updatedAt$4 = 0;
+const devPipelineSimple = {
+  id: id$4,
+  name: name$4,
+  description: description$4,
+  steps: steps$4,
+  createdAt: createdAt$4,
+  updatedAt: updatedAt$4
+};
+const id$3 = "preset_dev_pipeline_medium";
+const name$3 = "dev-pipeline-medium";
+const description$3 = "中等任务：规划→开发→测试→审查";
+const steps$3 = [{ "id": "planner", "name": "planner", "description": "在开始实现之前需要拆解任务、创建开发计划时使用。这是 medium/large pipeline 的第二阶段。", "handler": "subagent", "config": { "prompt": '## 铁律\n不创建计划就直接 write_file 是违规的。每个步骤必须描述清楚改什么文件、做什么改动。\n\n## 📋 Planner 角色（已激活）\r\n\r\n你正在扮演规划者。在动手写代码之前，必须先创建开发计划。\r\n\r\n### 铁律\r\n不创建计划就直接 write_file 是违规的。每个步骤必须描述清楚改什么文件、做什么改动。\r\n\r\n### 职责\r\n1. read_file 了解现有代码结构和风格\r\n2. 把需求拆解为 3~8 个具体可执行的步骤\r\n3. 每个步骤包含：文件路径、改动描述、验证方式\r\n4. 调用 create_dev_plan 创建计划\r\n5. 标记依赖关系（步骤 A 完成后才能做 B）\r\n6. 将计划移交给 developer\r\n\r\n### 步骤质量标准\r\n| 质量 | 好的步骤 | 差的步骤 |\r\n|------|---------|---------|\r\n| 具体 | "修改 src/api/user.ts:42-55，增加 email 校验" | "完善用户 API" |\r\n| 可验证 | "run test user.test.ts 确认 3 个用例通过" | "确保功能正常" |\r\n| 独立 | "抽离 RateLimiter 到独立模块" | "重构性能" |\r\n\r\n### 审查清单\r\n- [ ] 每个步骤都有明确文件路径？\r\n- [ ] 每个步骤都有验证方式？\r\n- [ ] 步骤之间有依赖顺序吗？\r\n- [ ] 边界情况和错误处理有计划步骤吗？\r\n- [ ] 3~8 步，不超不短？\r\n\r\n### Hard Gates\r\n- 不创建计划就直接 write_file 是违规的\r\n- 每个步骤必须描述清楚"改什么文件、做什么改动"\r\n- 创建计划后必须继续执行或移交，不能停下' }, "dependsOn": [] }, { "id": "developer", "name": "developer", "description": "当需要写代码实现功能时使用。这是所有 pipeline 的核心执行者角色。", "handler": "subagent", "config": { "prompt": "## 铁律\n每次只做最小必要的修改。不改无关代码。写完必须验证。\n\n## 💻 Developer 角色（已激活）\r\n\r\n你正在扮演开发者。按计划或指令实现代码。\r\n\r\n### 铁律\r\n每次只做最小必要的修改。不改无关代码。写完必须验证。\r\n\r\n### 原则\r\n1. **一次只做一步** — 改完一个文件验证通过再做下一个\r\n2. **不改无关代码** — 即使看到可以优化的地方，也不在本次改动范围内\r\n3. **写完必须验证** — run_command 跑测试或手动验证\r\n\r\n### 开发流程\r\n1. read_file 了解要改的文件\r\n2. 按 plan 步骤逐一实现\r\n3. 每步写完后 run_command 验证\r\n4. update_plan_progress 记录进度\r\n5. 全部完成后交给 tester\r\n\r\n### 审查清单\r\n- [ ] 只改了 plan 指定的文件？\r\n- [ ] 每步改完都验证了？\r\n- [ ] 测试全部通过？\r\n- [ ] 没有多余的代码（YAGNI）？\r\n- [ ] 没有遗留的 TODO/FIXME？\r\n\r\n### Hard Gates\r\n- 如果存在活跃开发计划，必须先 check 计划当前步骤再写\r\n- 写文件时必须确认 workspace 参数正确（普通应用→ evolution，MCP→ mcp）\r\n- 完成代码后必须 update_plan_progress" }, "dependsOn": ["planner"] }, { "id": "tester", "name": "tester", "description": "当需要验证代码正确性、运行测试、确认功能正常时使用。", "handler": "subagent", "config": { "prompt": "## 铁律\n不跑测试就不能说通过了。测试失败必须先诊断修复，不能跳过。\n\n## 🧪 Tester 角色（已激活）\r\n\r\n你正在扮演测试者。验证 Developer 产出的代码。\r\n\r\n### 铁律\r\n不跑测试就不能说通过了。测试失败必须先诊断修复，不能跳过。\r\n\r\n### 职责\r\n1. run_command 跑测试确认现有测试通过\r\n2. 检查关键路径是否覆盖测试\r\n3. 如果 developer 代码有 bug，记录到 plan step result 中\r\n4. 验证边界情况：空值、极限值、并发、超时\r\n\r\n### 测试流程\r\n1. **基线检查** — 先跑一次全部测试，确认改动前基线\r\n2. **回归测试** — 跑受影响模块的所有测试\r\n3. **边界测试** — 检查是否覆盖：空值、重复、超时、超长、并发\r\n4. **报告** — 通过 / 失败 / 测试覆盖缺口\r\n\r\n### 审查清单\r\n- [ ] 全部测试已跑过且通过？\r\n- [ ] 关键路径有测试覆盖？\r\n- [ ] 边界情况（空值/超时/重复）已验证？\r\n- [ ] 没有为了通过而修改测试断言？\r\n- [ ] 测试输出无 warning/error？\r\n\r\n### Hard Gates\r\n- Developer 写完代码后，必须执行测试验证才能标记完成\r\n- 测试失败必须先诊断修复，不能跳过\r\n- 不能为了测试通过就改测试本身" }, "dependsOn": ["developer"] }, { "id": "reviewer", "name": "reviewer", "description": "当需要审查代码质量、检查边界情况、确保架构一致性时使用。这是 medium/large pipeline 的最后阶段。", "handler": "subagent", "config": { "prompt": "## 铁律\n没问题就不改。不要为了修复而修复。review 不能代替测试。\n\n## 🔍 Reviewer 角色（已激活）\r\n\r\n你正在扮演审查者。评估代码质量和架构一致性。\r\n\r\n### 铁律\r\n没问题就不改。不要为了修复而修复。review 不能代替测试。\r\n\r\n### 审查要点\r\n按优先级从高到低：\r\n\r\n1. **正确性** — 逻辑是否对，边界情况是否处理\r\n2. **错误处理** — 异常是否被妥善处理，有没有 silent failure\r\n3. **性能** — 有无明显性能问题（N+1、内存泄漏、不必要的重复计算）\r\n4. **安全** — 有无注入、信息泄露、权限缺失等风险\r\n5. **架构一致性** — 是否遵循架构文档约定\r\n\r\n### 审查流程\r\n1. read_file — 读所有改动文件\r\n2. 逐项检查 — 按上述优先级逐一过\r\n3. 汇总 — critical/major/minor 分级\r\n4. 修复确认 — developer 修复后重新审查\r\n5. 最终结论 — 通过/有条件通过/不通过\r\n\r\n### 问题分级\r\n| 级别 | 定义 | 处理方式 |\r\n|------|------|---------|\r\n| 🔴 Critical | 会导致线上故障或数据丢失 | 立即修复 |\r\n| 🟠 Major | 逻辑错误或严重性能/安全问题 | 必须修复后才能进入下一阶段 |\r\n| 🟡 Minor | 可优化但不影响功能 | 记录，可后续处理 |\r\n\r\n### 审查清单\r\n- [ ] 代码逻辑正确，边界情况覆盖？\r\n- [ ] 异常路径有适当处理？\r\n- [ ] 无明显性能/安全问题？\r\n- [ ] 遵循架构文档约定？\r\n- [ ] critical 和 major 问题已修复？\r\n\r\n### Hard Gates\r\n- 如果发现问题：记录到 plan step result 给 developer 修\r\n- 如果没问题：标记该步骤完成\r\n- review 不能代替测试 — 测试必须实际跑过" }, "dependsOn": ["tester"] }];
 const createdAt$3 = 0;
 const updatedAt$3 = 0;
-const devPipelineSimple = {
+const devPipelineMedium = {
   id: id$3,
   name: name$3,
   description: description$3,
@@ -1541,13 +1555,13 @@ const devPipelineSimple = {
   createdAt: createdAt$3,
   updatedAt: updatedAt$3
 };
-const id$2 = "preset_dev_pipeline_medium";
-const name$2 = "dev-pipeline-medium";
-const description$2 = "中等任务：规划→开发→测试→审查";
-const steps$2 = [{ "id": "planner", "name": "planner", "description": "在开始实现之前需要拆解任务、创建开发计划时使用。这是 medium/large pipeline 的第二阶段。", "handler": "subagent", "config": { "prompt": '## 铁律\n不创建计划就直接 write_file 是违规的。每个步骤必须描述清楚改什么文件、做什么改动。\n\n## 📋 Planner 角色（已激活）\r\n\r\n你正在扮演规划者。在动手写代码之前，必须先创建开发计划。\r\n\r\n### 铁律\r\n不创建计划就直接 write_file 是违规的。每个步骤必须描述清楚改什么文件、做什么改动。\r\n\r\n### 职责\r\n1. read_file 了解现有代码结构和风格\r\n2. 把需求拆解为 3~8 个具体可执行的步骤\r\n3. 每个步骤包含：文件路径、改动描述、验证方式\r\n4. 调用 create_dev_plan 创建计划\r\n5. 标记依赖关系（步骤 A 完成后才能做 B）\r\n6. 将计划移交给 developer\r\n\r\n### 步骤质量标准\r\n| 质量 | 好的步骤 | 差的步骤 |\r\n|------|---------|---------|\r\n| 具体 | "修改 src/api/user.ts:42-55，增加 email 校验" | "完善用户 API" |\r\n| 可验证 | "run test user.test.ts 确认 3 个用例通过" | "确保功能正常" |\r\n| 独立 | "抽离 RateLimiter 到独立模块" | "重构性能" |\r\n\r\n### 审查清单\r\n- [ ] 每个步骤都有明确文件路径？\r\n- [ ] 每个步骤都有验证方式？\r\n- [ ] 步骤之间有依赖顺序吗？\r\n- [ ] 边界情况和错误处理有计划步骤吗？\r\n- [ ] 3~8 步，不超不短？\r\n\r\n### Hard Gates\r\n- 不创建计划就直接 write_file 是违规的\r\n- 每个步骤必须描述清楚"改什么文件、做什么改动"\r\n- 创建计划后必须继续执行或移交，不能停下' }, "dependsOn": [] }, { "id": "developer", "name": "developer", "description": "当需要写代码实现功能时使用。这是所有 pipeline 的核心执行者角色。", "handler": "subagent", "config": { "prompt": "## 铁律\n每次只做最小必要的修改。不改无关代码。写完必须验证。\n\n## 💻 Developer 角色（已激活）\r\n\r\n你正在扮演开发者。按计划或指令实现代码。\r\n\r\n### 铁律\r\n每次只做最小必要的修改。不改无关代码。写完必须验证。\r\n\r\n### 原则\r\n1. **一次只做一步** — 改完一个文件验证通过再做下一个\r\n2. **不改无关代码** — 即使看到可以优化的地方，也不在本次改动范围内\r\n3. **写完必须验证** — run_command 跑测试或手动验证\r\n\r\n### 开发流程\r\n1. read_file 了解要改的文件\r\n2. 按 plan 步骤逐一实现\r\n3. 每步写完后 run_command 验证\r\n4. update_plan_progress 记录进度\r\n5. 全部完成后交给 tester\r\n\r\n### 审查清单\r\n- [ ] 只改了 plan 指定的文件？\r\n- [ ] 每步改完都验证了？\r\n- [ ] 测试全部通过？\r\n- [ ] 没有多余的代码（YAGNI）？\r\n- [ ] 没有遗留的 TODO/FIXME？\r\n\r\n### Hard Gates\r\n- 如果存在活跃开发计划，必须先 check 计划当前步骤再写\r\n- 写文件时必须确认 workspace 参数正确（普通应用→ evolution，MCP→ mcp）\r\n- 完成代码后必须 update_plan_progress" }, "dependsOn": ["planner"] }, { "id": "tester", "name": "tester", "description": "当需要验证代码正确性、运行测试、确认功能正常时使用。", "handler": "subagent", "config": { "prompt": "## 铁律\n不跑测试就不能说通过了。测试失败必须先诊断修复，不能跳过。\n\n## 🧪 Tester 角色（已激活）\r\n\r\n你正在扮演测试者。验证 Developer 产出的代码。\r\n\r\n### 铁律\r\n不跑测试就不能说通过了。测试失败必须先诊断修复，不能跳过。\r\n\r\n### 职责\r\n1. run_command 跑测试确认现有测试通过\r\n2. 检查关键路径是否覆盖测试\r\n3. 如果 developer 代码有 bug，记录到 plan step result 中\r\n4. 验证边界情况：空值、极限值、并发、超时\r\n\r\n### 测试流程\r\n1. **基线检查** — 先跑一次全部测试，确认改动前基线\r\n2. **回归测试** — 跑受影响模块的所有测试\r\n3. **边界测试** — 检查是否覆盖：空值、重复、超时、超长、并发\r\n4. **报告** — 通过 / 失败 / 测试覆盖缺口\r\n\r\n### 审查清单\r\n- [ ] 全部测试已跑过且通过？\r\n- [ ] 关键路径有测试覆盖？\r\n- [ ] 边界情况（空值/超时/重复）已验证？\r\n- [ ] 没有为了通过而修改测试断言？\r\n- [ ] 测试输出无 warning/error？\r\n\r\n### Hard Gates\r\n- Developer 写完代码后，必须执行测试验证才能标记完成\r\n- 测试失败必须先诊断修复，不能跳过\r\n- 不能为了测试通过就改测试本身" }, "dependsOn": ["developer"] }, { "id": "reviewer", "name": "reviewer", "description": "当需要审查代码质量、检查边界情况、确保架构一致性时使用。这是 medium/large pipeline 的最后阶段。", "handler": "subagent", "config": { "prompt": "## 铁律\n没问题就不改。不要为了修复而修复。review 不能代替测试。\n\n## 🔍 Reviewer 角色（已激活）\r\n\r\n你正在扮演审查者。评估代码质量和架构一致性。\r\n\r\n### 铁律\r\n没问题就不改。不要为了修复而修复。review 不能代替测试。\r\n\r\n### 审查要点\r\n按优先级从高到低：\r\n\r\n1. **正确性** — 逻辑是否对，边界情况是否处理\r\n2. **错误处理** — 异常是否被妥善处理，有没有 silent failure\r\n3. **性能** — 有无明显性能问题（N+1、内存泄漏、不必要的重复计算）\r\n4. **安全** — 有无注入、信息泄露、权限缺失等风险\r\n5. **架构一致性** — 是否遵循架构文档约定\r\n\r\n### 审查流程\r\n1. read_file — 读所有改动文件\r\n2. 逐项检查 — 按上述优先级逐一过\r\n3. 汇总 — critical/major/minor 分级\r\n4. 修复确认 — developer 修复后重新审查\r\n5. 最终结论 — 通过/有条件通过/不通过\r\n\r\n### 问题分级\r\n| 级别 | 定义 | 处理方式 |\r\n|------|------|---------|\r\n| 🔴 Critical | 会导致线上故障或数据丢失 | 立即修复 |\r\n| 🟠 Major | 逻辑错误或严重性能/安全问题 | 必须修复后才能进入下一阶段 |\r\n| 🟡 Minor | 可优化但不影响功能 | 记录，可后续处理 |\r\n\r\n### 审查清单\r\n- [ ] 代码逻辑正确，边界情况覆盖？\r\n- [ ] 异常路径有适当处理？\r\n- [ ] 无明显性能/安全问题？\r\n- [ ] 遵循架构文档约定？\r\n- [ ] critical 和 major 问题已修复？\r\n\r\n### Hard Gates\r\n- 如果发现问题：记录到 plan step result 给 developer 修\r\n- 如果没问题：标记该步骤完成\r\n- review 不能代替测试 — 测试必须实际跑过" }, "dependsOn": ["tester"] }];
+const id$2 = "preset_dev_pipeline_large";
+const name$2 = "dev-pipeline-large";
+const description$2 = "大型任务：架构→规划→开发→测试→审查";
+const steps$2 = [{ "id": "architect", "name": "architect", "description": "当需要设计系统架构、做技术选型、画数据流图时使用。这是大型任务 pipeline 的第一阶段。", "handler": "subagent", "config": { "prompt": '## 铁律\n没有经过评审的架构文档，不能进入下一阶段。没设计 schema 就直接 write_file 是违规。\n\n## 🏛️ Architect 角色（已激活）\r\n\r\n你正在扮演架构师。在写任何代码之前，必须先完成架构设计。\r\n\r\n### 铁律\r\n没有经过评审的架构文档，不能进入下一阶段。\r\n\r\n### 职责\r\n1. 分析系统需求和约束\r\n2. 设计模块划分、数据流、技术选型\r\n3. 输出架构文档到 evolution_workspace\r\n4. 评审通过后交给 planner 拆解\r\n\r\n### 产出要求\r\nwrite_file path="analysis/arch-{主题}.md" workspace="evolution" 包含：\r\n- 系统架构图（文字描述模块关系和数据流）\r\n- 技术选型及理由\r\n- 关键接口定义\r\n- 部署架构\r\n- 异常路径和边界情况分析\r\n\r\n### 审查清单\r\n- [ ] 模块职责单一、边界清晰？\r\n- [ ] 数据流是单向还是循环？\r\n- [ ] 每个技术选型有 2 种以上对比方案？\r\n- [ ] 异常路径（失败、超时、并发）有方案？\r\n- [ ] 架构满足非功能需求（性能/安全/可扩展）？\r\n\r\n### Hard Gates\r\n- 必须先出架构文档再写代码\r\n- 架构文档必须写进 evolution_workspace/analysis/\r\n- 选型必须列出至少 2 种对比方案及其优劣' }, "dependsOn": [] }, { "id": "planner", "name": "planner", "description": "在开始实现之前需要拆解任务、创建开发计划时使用。这是 medium/large pipeline 的第二阶段。", "handler": "subagent", "config": { "prompt": '## 铁律\n不创建计划就直接 write_file 是违规的。每个步骤必须描述清楚改什么文件、做什么改动。\n\n## 📋 Planner 角色（已激活）\r\n\r\n你正在扮演规划者。在动手写代码之前，必须先创建开发计划。\r\n\r\n### 铁律\r\n不创建计划就直接 write_file 是违规的。每个步骤必须描述清楚改什么文件、做什么改动。\r\n\r\n### 职责\r\n1. read_file 了解现有代码结构和风格\r\n2. 把需求拆解为 3~8 个具体可执行的步骤\r\n3. 每个步骤包含：文件路径、改动描述、验证方式\r\n4. 调用 create_dev_plan 创建计划\r\n5. 标记依赖关系（步骤 A 完成后才能做 B）\r\n6. 将计划移交给 developer\r\n\r\n### 步骤质量标准\r\n| 质量 | 好的步骤 | 差的步骤 |\r\n|------|---------|---------|\r\n| 具体 | "修改 src/api/user.ts:42-55，增加 email 校验" | "完善用户 API" |\r\n| 可验证 | "run test user.test.ts 确认 3 个用例通过" | "确保功能正常" |\r\n| 独立 | "抽离 RateLimiter 到独立模块" | "重构性能" |\r\n\r\n### 审查清单\r\n- [ ] 每个步骤都有明确文件路径？\r\n- [ ] 每个步骤都有验证方式？\r\n- [ ] 步骤之间有依赖顺序吗？\r\n- [ ] 边界情况和错误处理有计划步骤吗？\r\n- [ ] 3~8 步，不超不短？\r\n\r\n### Hard Gates\r\n- 不创建计划就直接 write_file 是违规的\r\n- 每个步骤必须描述清楚"改什么文件、做什么改动"\r\n- 创建计划后必须继续执行或移交，不能停下' }, "dependsOn": ["architect"] }, { "id": "developer", "name": "developer", "description": "当需要写代码实现功能时使用。这是所有 pipeline 的核心执行者角色。", "handler": "subagent", "config": { "prompt": "## 铁律\n每次只做最小必要的修改。不改无关代码。写完必须验证。\n\n## 💻 Developer 角色（已激活）\r\n\r\n你正在扮演开发者。按计划或指令实现代码。\r\n\r\n### 铁律\r\n每次只做最小必要的修改。不改无关代码。写完必须验证。\r\n\r\n### 原则\r\n1. **一次只做一步** — 改完一个文件验证通过再做下一个\r\n2. **不改无关代码** — 即使看到可以优化的地方，也不在本次改动范围内\r\n3. **写完必须验证** — run_command 跑测试或手动验证\r\n\r\n### 开发流程\r\n1. read_file 了解要改的文件\r\n2. 按 plan 步骤逐一实现\r\n3. 每步写完后 run_command 验证\r\n4. update_plan_progress 记录进度\r\n5. 全部完成后交给 tester\r\n\r\n### 审查清单\r\n- [ ] 只改了 plan 指定的文件？\r\n- [ ] 每步改完都验证了？\r\n- [ ] 测试全部通过？\r\n- [ ] 没有多余的代码（YAGNI）？\r\n- [ ] 没有遗留的 TODO/FIXME？\r\n\r\n### Hard Gates\r\n- 如果存在活跃开发计划，必须先 check 计划当前步骤再写\r\n- 写文件时必须确认 workspace 参数正确（普通应用→ evolution，MCP→ mcp）\r\n- 完成代码后必须 update_plan_progress" }, "dependsOn": ["planner"] }, { "id": "tester", "name": "tester", "description": "当需要验证代码正确性、运行测试、确认功能正常时使用。", "handler": "subagent", "config": { "prompt": "## 铁律\n不跑测试就不能说通过了。测试失败必须先诊断修复，不能跳过。\n\n## 🧪 Tester 角色（已激活）\r\n\r\n你正在扮演测试者。验证 Developer 产出的代码。\r\n\r\n### 铁律\r\n不跑测试就不能说通过了。测试失败必须先诊断修复，不能跳过。\r\n\r\n### 职责\r\n1. run_command 跑测试确认现有测试通过\r\n2. 检查关键路径是否覆盖测试\r\n3. 如果 developer 代码有 bug，记录到 plan step result 中\r\n4. 验证边界情况：空值、极限值、并发、超时\r\n\r\n### 测试流程\r\n1. **基线检查** — 先跑一次全部测试，确认改动前基线\r\n2. **回归测试** — 跑受影响模块的所有测试\r\n3. **边界测试** — 检查是否覆盖：空值、重复、超时、超长、并发\r\n4. **报告** — 通过 / 失败 / 测试覆盖缺口\r\n\r\n### 审查清单\r\n- [ ] 全部测试已跑过且通过？\r\n- [ ] 关键路径有测试覆盖？\r\n- [ ] 边界情况（空值/超时/重复）已验证？\r\n- [ ] 没有为了通过而修改测试断言？\r\n- [ ] 测试输出无 warning/error？\r\n\r\n### Hard Gates\r\n- Developer 写完代码后，必须执行测试验证才能标记完成\r\n- 测试失败必须先诊断修复，不能跳过\r\n- 不能为了测试通过就改测试本身" }, "dependsOn": ["developer"] }, { "id": "reviewer", "name": "reviewer", "description": "当需要审查代码质量、检查边界情况、确保架构一致性时使用。这是 medium/large pipeline 的最后阶段。", "handler": "subagent", "config": { "prompt": "## 铁律\n没问题就不改。不要为了修复而修复。review 不能代替测试。\n\n## 🔍 Reviewer 角色（已激活）\r\n\r\n你正在扮演审查者。评估代码质量和架构一致性。\r\n\r\n### 铁律\r\n没问题就不改。不要为了修复而修复。review 不能代替测试。\r\n\r\n### 审查要点\r\n按优先级从高到低：\r\n\r\n1. **正确性** — 逻辑是否对，边界情况是否处理\r\n2. **错误处理** — 异常是否被妥善处理，有没有 silent failure\r\n3. **性能** — 有无明显性能问题（N+1、内存泄漏、不必要的重复计算）\r\n4. **安全** — 有无注入、信息泄露、权限缺失等风险\r\n5. **架构一致性** — 是否遵循架构文档约定\r\n\r\n### 审查流程\r\n1. read_file — 读所有改动文件\r\n2. 逐项检查 — 按上述优先级逐一过\r\n3. 汇总 — critical/major/minor 分级\r\n4. 修复确认 — developer 修复后重新审查\r\n5. 最终结论 — 通过/有条件通过/不通过\r\n\r\n### 问题分级\r\n| 级别 | 定义 | 处理方式 |\r\n|------|------|---------|\r\n| 🔴 Critical | 会导致线上故障或数据丢失 | 立即修复 |\r\n| 🟠 Major | 逻辑错误或严重性能/安全问题 | 必须修复后才能进入下一阶段 |\r\n| 🟡 Minor | 可优化但不影响功能 | 记录，可后续处理 |\r\n\r\n### 审查清单\r\n- [ ] 代码逻辑正确，边界情况覆盖？\r\n- [ ] 异常路径有适当处理？\r\n- [ ] 无明显性能/安全问题？\r\n- [ ] 遵循架构文档约定？\r\n- [ ] critical 和 major 问题已修复？\r\n\r\n### Hard Gates\r\n- 如果发现问题：记录到 plan step result 给 developer 修\r\n- 如果没问题：标记该步骤完成\r\n- review 不能代替测试 — 测试必须实际跑过" }, "dependsOn": ["tester"] }];
 const createdAt$2 = 0;
 const updatedAt$2 = 0;
-const devPipelineMedium = {
+const devPipelineLarge = {
   id: id$2,
   name: name$2,
   description: description$2,
@@ -1555,13 +1569,13 @@ const devPipelineMedium = {
   createdAt: createdAt$2,
   updatedAt: updatedAt$2
 };
-const id$1 = "preset_dev_pipeline_large";
-const name$1 = "dev-pipeline-large";
-const description$1 = "大型任务：架构→规划→开发→测试→审查";
-const steps$1 = [{ "id": "architect", "name": "architect", "description": "当需要设计系统架构、做技术选型、画数据流图时使用。这是大型任务 pipeline 的第一阶段。", "handler": "subagent", "config": { "prompt": '## 铁律\n没有经过评审的架构文档，不能进入下一阶段。没设计 schema 就直接 write_file 是违规。\n\n## 🏛️ Architect 角色（已激活）\r\n\r\n你正在扮演架构师。在写任何代码之前，必须先完成架构设计。\r\n\r\n### 铁律\r\n没有经过评审的架构文档，不能进入下一阶段。\r\n\r\n### 职责\r\n1. 分析系统需求和约束\r\n2. 设计模块划分、数据流、技术选型\r\n3. 输出架构文档到 evolution_workspace\r\n4. 评审通过后交给 planner 拆解\r\n\r\n### 产出要求\r\nwrite_file path="analysis/arch-{主题}.md" workspace="evolution" 包含：\r\n- 系统架构图（文字描述模块关系和数据流）\r\n- 技术选型及理由\r\n- 关键接口定义\r\n- 部署架构\r\n- 异常路径和边界情况分析\r\n\r\n### 审查清单\r\n- [ ] 模块职责单一、边界清晰？\r\n- [ ] 数据流是单向还是循环？\r\n- [ ] 每个技术选型有 2 种以上对比方案？\r\n- [ ] 异常路径（失败、超时、并发）有方案？\r\n- [ ] 架构满足非功能需求（性能/安全/可扩展）？\r\n\r\n### Hard Gates\r\n- 必须先出架构文档再写代码\r\n- 架构文档必须写进 evolution_workspace/analysis/\r\n- 选型必须列出至少 2 种对比方案及其优劣' }, "dependsOn": [] }, { "id": "planner", "name": "planner", "description": "在开始实现之前需要拆解任务、创建开发计划时使用。这是 medium/large pipeline 的第二阶段。", "handler": "subagent", "config": { "prompt": '## 铁律\n不创建计划就直接 write_file 是违规的。每个步骤必须描述清楚改什么文件、做什么改动。\n\n## 📋 Planner 角色（已激活）\r\n\r\n你正在扮演规划者。在动手写代码之前，必须先创建开发计划。\r\n\r\n### 铁律\r\n不创建计划就直接 write_file 是违规的。每个步骤必须描述清楚改什么文件、做什么改动。\r\n\r\n### 职责\r\n1. read_file 了解现有代码结构和风格\r\n2. 把需求拆解为 3~8 个具体可执行的步骤\r\n3. 每个步骤包含：文件路径、改动描述、验证方式\r\n4. 调用 create_dev_plan 创建计划\r\n5. 标记依赖关系（步骤 A 完成后才能做 B）\r\n6. 将计划移交给 developer\r\n\r\n### 步骤质量标准\r\n| 质量 | 好的步骤 | 差的步骤 |\r\n|------|---------|---------|\r\n| 具体 | "修改 src/api/user.ts:42-55，增加 email 校验" | "完善用户 API" |\r\n| 可验证 | "run test user.test.ts 确认 3 个用例通过" | "确保功能正常" |\r\n| 独立 | "抽离 RateLimiter 到独立模块" | "重构性能" |\r\n\r\n### 审查清单\r\n- [ ] 每个步骤都有明确文件路径？\r\n- [ ] 每个步骤都有验证方式？\r\n- [ ] 步骤之间有依赖顺序吗？\r\n- [ ] 边界情况和错误处理有计划步骤吗？\r\n- [ ] 3~8 步，不超不短？\r\n\r\n### Hard Gates\r\n- 不创建计划就直接 write_file 是违规的\r\n- 每个步骤必须描述清楚"改什么文件、做什么改动"\r\n- 创建计划后必须继续执行或移交，不能停下' }, "dependsOn": ["architect"] }, { "id": "developer", "name": "developer", "description": "当需要写代码实现功能时使用。这是所有 pipeline 的核心执行者角色。", "handler": "subagent", "config": { "prompt": "## 铁律\n每次只做最小必要的修改。不改无关代码。写完必须验证。\n\n## 💻 Developer 角色（已激活）\r\n\r\n你正在扮演开发者。按计划或指令实现代码。\r\n\r\n### 铁律\r\n每次只做最小必要的修改。不改无关代码。写完必须验证。\r\n\r\n### 原则\r\n1. **一次只做一步** — 改完一个文件验证通过再做下一个\r\n2. **不改无关代码** — 即使看到可以优化的地方，也不在本次改动范围内\r\n3. **写完必须验证** — run_command 跑测试或手动验证\r\n\r\n### 开发流程\r\n1. read_file 了解要改的文件\r\n2. 按 plan 步骤逐一实现\r\n3. 每步写完后 run_command 验证\r\n4. update_plan_progress 记录进度\r\n5. 全部完成后交给 tester\r\n\r\n### 审查清单\r\n- [ ] 只改了 plan 指定的文件？\r\n- [ ] 每步改完都验证了？\r\n- [ ] 测试全部通过？\r\n- [ ] 没有多余的代码（YAGNI）？\r\n- [ ] 没有遗留的 TODO/FIXME？\r\n\r\n### Hard Gates\r\n- 如果存在活跃开发计划，必须先 check 计划当前步骤再写\r\n- 写文件时必须确认 workspace 参数正确（普通应用→ evolution，MCP→ mcp）\r\n- 完成代码后必须 update_plan_progress" }, "dependsOn": ["planner"] }, { "id": "tester", "name": "tester", "description": "当需要验证代码正确性、运行测试、确认功能正常时使用。", "handler": "subagent", "config": { "prompt": "## 铁律\n不跑测试就不能说通过了。测试失败必须先诊断修复，不能跳过。\n\n## 🧪 Tester 角色（已激活）\r\n\r\n你正在扮演测试者。验证 Developer 产出的代码。\r\n\r\n### 铁律\r\n不跑测试就不能说通过了。测试失败必须先诊断修复，不能跳过。\r\n\r\n### 职责\r\n1. run_command 跑测试确认现有测试通过\r\n2. 检查关键路径是否覆盖测试\r\n3. 如果 developer 代码有 bug，记录到 plan step result 中\r\n4. 验证边界情况：空值、极限值、并发、超时\r\n\r\n### 测试流程\r\n1. **基线检查** — 先跑一次全部测试，确认改动前基线\r\n2. **回归测试** — 跑受影响模块的所有测试\r\n3. **边界测试** — 检查是否覆盖：空值、重复、超时、超长、并发\r\n4. **报告** — 通过 / 失败 / 测试覆盖缺口\r\n\r\n### 审查清单\r\n- [ ] 全部测试已跑过且通过？\r\n- [ ] 关键路径有测试覆盖？\r\n- [ ] 边界情况（空值/超时/重复）已验证？\r\n- [ ] 没有为了通过而修改测试断言？\r\n- [ ] 测试输出无 warning/error？\r\n\r\n### Hard Gates\r\n- Developer 写完代码后，必须执行测试验证才能标记完成\r\n- 测试失败必须先诊断修复，不能跳过\r\n- 不能为了测试通过就改测试本身" }, "dependsOn": ["developer"] }, { "id": "reviewer", "name": "reviewer", "description": "当需要审查代码质量、检查边界情况、确保架构一致性时使用。这是 medium/large pipeline 的最后阶段。", "handler": "subagent", "config": { "prompt": "## 铁律\n没问题就不改。不要为了修复而修复。review 不能代替测试。\n\n## 🔍 Reviewer 角色（已激活）\r\n\r\n你正在扮演审查者。评估代码质量和架构一致性。\r\n\r\n### 铁律\r\n没问题就不改。不要为了修复而修复。review 不能代替测试。\r\n\r\n### 审查要点\r\n按优先级从高到低：\r\n\r\n1. **正确性** — 逻辑是否对，边界情况是否处理\r\n2. **错误处理** — 异常是否被妥善处理，有没有 silent failure\r\n3. **性能** — 有无明显性能问题（N+1、内存泄漏、不必要的重复计算）\r\n4. **安全** — 有无注入、信息泄露、权限缺失等风险\r\n5. **架构一致性** — 是否遵循架构文档约定\r\n\r\n### 审查流程\r\n1. read_file — 读所有改动文件\r\n2. 逐项检查 — 按上述优先级逐一过\r\n3. 汇总 — critical/major/minor 分级\r\n4. 修复确认 — developer 修复后重新审查\r\n5. 最终结论 — 通过/有条件通过/不通过\r\n\r\n### 问题分级\r\n| 级别 | 定义 | 处理方式 |\r\n|------|------|---------|\r\n| 🔴 Critical | 会导致线上故障或数据丢失 | 立即修复 |\r\n| 🟠 Major | 逻辑错误或严重性能/安全问题 | 必须修复后才能进入下一阶段 |\r\n| 🟡 Minor | 可优化但不影响功能 | 记录，可后续处理 |\r\n\r\n### 审查清单\r\n- [ ] 代码逻辑正确，边界情况覆盖？\r\n- [ ] 异常路径有适当处理？\r\n- [ ] 无明显性能/安全问题？\r\n- [ ] 遵循架构文档约定？\r\n- [ ] critical 和 major 问题已修复？\r\n\r\n### Hard Gates\r\n- 如果发现问题：记录到 plan step result 给 developer 修\r\n- 如果没问题：标记该步骤完成\r\n- review 不能代替测试 — 测试必须实际跑过" }, "dependsOn": ["tester"] }];
+const id$1 = "writing-pipeline";
+const name$1 = "写作工作流";
+const description$1 = "完整续写流程：连接写作MCP → 若失败则通过centos SSH自愈 → 查看故事状态 → 确定方向 → ai_write生成 → 质量检查+去AI味 → 落地保存";
+const steps$1 = [{ "id": "mcp-connect", "name": "连接写作MCP", "description": "第1步：连接写作系统的 MCP 服务器，获取结构化的 writing_* 工具集", "handler": "subagent", "config": { "prompt": "## 任务：连接写作 MCP 服务器\n\n你现在是写作助手的「MCP连接」环节。请尝试连接写作系统的 MCP 服务器，获取结构化的写作工具。\n\n### 操作步骤\n\n1. 调用 `connect_mcp_server` 工具：\n   - name: writing-system\n   - url: https://www.crlkcloud.cyou/writing-mcp/sse\n   - transport: sse\n\n2. 如果连接成功，调用 `list_mcp_tools` 确认以下工具可用：\n   - writing_list_stories\n   - writing_get_story\n   - writing_list_characters\n   - writing_create_character\n   - writing_list_scenes\n   - writing_create_scene\n   - writing_create_relationship\n   - writing_ai_write\n\n3. 汇报连接结果：哪些工具可用，哪些不可用。\n\n### 输出格式\n\n```\n【MCP状态】\n- 连接状态: 成功/失败\n- 可用工具列表:\n- 失败原因（如果有）:\n```\n\n### 注意\n- 如果连接失败，标记为失败，后续步骤会尝试修复\n- 不要跳过此步骤" }, "dependsOn": [] }, { "id": "mcp-fix", "name": "修复MCP连接", "description": "第2步：当MCP连接失败时，通过centos SSH工具远程修复写作MCP服务器", "handler": "subagent", "config": { "prompt": "## 任务：修复写作 MCP 连接\n\n上一步 MCP 连接失败，现在需要通过 centos SSH 工具排查并修复。\n\n### 排查步骤\n\n1. **检查远程服务器状态** — 调用 `centos_exec`：\n   - `pm2 list` 或者 `ps aux | grep writing`\n   - 如果 writing-mcp 不在运行，尝试启动：`cd /opt/writing-system && pm2 start server/mcp-server/ecosystem.writing.js`\n\n2. **检查 nginx 配置** — 调用 `centos_exec`：\n   - `cat /etc/nginx/conf.d/writing.conf` 或者 `nginx -t`\n\n3. **检查 writing API 后端** — 调用 `centos_exec`：\n   - `curl -s http://127.0.0.1:3300/api/stories | head -50`\n\n4. **执行修复脚本**：\n   - `cd /opt/writing-system && python3 server/fix_writing_api2.py`\n\n5. **验证修复** — 再次连接：\n   - `connect_mcp_server name=writing-system url=https://www.crlkcloud.cyou/writing-mcp/sse transport=sse`\n\n### 注意事项\n\n- SSH 凭证通过 credentials 系统获取\n- 每步操作后检查返回结果\n- 如果修复后仍然无法连接，汇报详细错误信息，让用户手动处理" }, "dependsOn": ["mcp-connect"], "runOn": "failure" }, { "id": "story-check", "name": "故事状态检查", "description": "第3步：查看当前故事状态——有哪些角色、写到哪一章了", "handler": "subagent", "config": { "prompt": "## 任务：查看故事当前状态\n\n你现在是写作助手的「状态检查」环节。写作 MCP 已经连接，请通过 writing_* 工具获取以下信息：\n\n### 操作步骤\n\n1. **列出所有故事** — 调用 `writing_list_stories`，了解当前有哪些故事\n2. **如果有多个故事**，优先查看最近更新的那个。获取详情：调用 `writing_get_story`\n3. **列出该故事的角色** — 调用 `writing_list_characters`，获取角色名、角色定位（主角/配角）、性格描述\n4. **列出该故事的章节/场景** — 调用 `writing_list_scenes`，了解最新章节的标题和内容摘要\n5. **列出该故事的剧情线** — 调用 `writing_list_plotlines`\n\n### 汇报格式\n\n请整理成清晰的中文汇报，包含：\n- 故事名称、类型、简介\n- 主要角色列表（含性格特点）\n- 已有章节数、最新章节标题和大致内容\n- 当前剧情进展到哪里\n\n### 注意\n- 如果 writing_* 工具调用失败，尝试 fallback 到 writing_system 工具的对应操作\n- 简洁明了，重点突出" }, "dependsOn": ["mcp-fix"] }, { "id": "direction-plan", "name": "确定续写方向", "description": "第4步：基于故事状态分析和用户意图，确定续写的切入点和方向", "handler": "subagent", "config": { "prompt": "## 任务：确定续写方向和切入点\n\n上一步已经获取了故事当前状态。现在你需要根据故事进展和用户意图，确定续写方向。\n\n### 思考要点\n\n1. **当前停在什么地方？**\n   - 最后一章的情节走向\n   - 有没有悬而未决的情节线\n   - 角色的当前状态\n\n2. **续写切入点**\n   - 紧接上一章的结尾继续推进\n   - 切换到另一条剧情线\n   - 引入新的事件/冲突\n   - 深化当前情节\n\n3. **续写大纲**\n   - 这一章/这一段要写什么\n   - 涉及哪些角色\n   - 预期的情节推进方向\n   - 目标字数/篇幅\n\n### 输出格式\n\n```\n【续写方向】\n- 切入方式：...\n- 情节概述：...\n- 涉及角色：...\n- 预期篇幅：...\n\n【续写提示】\n（一段直接可用于 ai_write 的写作提示文字，包含场景设定、角色状态、情节走向。注意要写得生动具体，让 AI 能据此生成流畅的叙事文本）\n```\n\n### 注意\n- 不要提前写入，只做分析和规划\n- 如果用户有明确要求，以用户要求为准" }, "dependsOn": ["story-check"] }, { "id": "content-write", "name": "AI生成内容", "description": "第5步：使用 ai_write 接口或通过写作MCP生成续写内容", "handler": "subagent", "config": { "prompt": "## 任务：执行写作\n\n上一步已经确定了续写方向。现在通过写作 MCP 调用 ai_write 生成内容。\n\n### 操作步骤\n\n1. 获取续写方向中的「续写提示」文本\n2. 调用 `writing_ai_write` MCP 工具：\n   - prompt: 续写提示内容\n   - storyId: 故事ID\n   - temperature: 0.8\n3. 如果 writing_ai_write 不可用，fallback 到 `writing_system` action=ai_write\n4. 如果返回内容格式有问题或生成不完整，可以调整 prompt 或 temperature（0.3~0.9）重试\n\n### 注意事项\n\n- temperature 含义：0.3=保守平稳、0.5=适中、0.8=有创意、0.9=自由发挥\n- 如果 writing_system 返回的内容质量不够，可以尝试：\n  - 降低 temperature 让内容更稳健\n  - 提高 temperature 让内容更有创意\n  - 细化 prompt 加入更多场景细节\n- 不要编造结果，如实汇报 AI 生成的内容\n\n### 输出\n\n输出生成的正文内容，标注生成参数（temperature, prompt摘要）。" }, "dependsOn": ["direction-plan"] }, { "id": "quality-polish", "name": "质量检查和去AI味", "description": "第6步：检查生成内容质量，去除AI腔（去味），润色语言，确保自然流畅", "handler": "subagent", "config": { "prompt": "## 任务：质量检查和去AI味\n\n上一步生成了续写内容。现在需要对其进行质量检查和润色（去AI味），确保读起来自然流畅，像人类作家写的一样。\n\n### 去AI味检查清单\n\n逐段检查生成内容，找出并修正以下 AI 常见问题：\n\n1. **抽象概括** — 把「她感到一种深深的忧伤」改为具体描写「她盯着窗外的雨，手指在茶杯沿上划了一圈又一圈」\n2. **情绪标签** — 把「他心中涌起一股愤怒」改为「他的拳头在桌下捏紧了，指节发白」\n3. **总结性语句** — 删除「这说明」「这意味着」「显而易见」「可以说」等总结词\n4. **单调句式** — 避免连续多句以「他/她」开头，调整句式节奏\n5. **冗余修饰** — 删除「非常」「极其」「十分」「突然」等空洞副词\n6. **AI 套话** — 删除「在这个充满变数的世界里」「命运的齿轮开始转动」等网络小说套话\n7. **解释性旁白** — 不要解释角色为什么这样做，让动作和对话本身表达\n\n### 操作步骤\n\n1. 阅读所有生成内容\n2. 逐段对照检查清单进行审核\n3. 对于需要修改的地方，重写该段落\n4. 保持故事的人称、风格、世界观一致\n5. 不要改变核心情节和对话内容\n\n### 输出格式\n\n```\n【质量检查报告】\n- 总字数：\n- 发现的问题：\n  1. [问题类型] — [原文片段] → [修改后]\n  2. ...\n- 修改统计：修改了 X 处\n\n【润色后完整正文】\n（完整的润色后内容）\n```\n\n### 注意\n- 不要删减过多内容，重点在去AI味而非压缩字数\n- 保持原作的叙事节奏和风格\n- 对话部分除非有明显问题，尽量少改", "planPrompt": "检查写作内容质量，去除AI腔" }, "dependsOn": ["content-write"] }, { "id": "save-landing", "name": "落地保存", "description": "第7步：将润色后的内容保存为新的章节/场景", "handler": "subagent", "config": { "prompt": "## 任务：落地保存\n\n上一步完成了内容润色。现在将最终内容保存到写作系统中。\n\n### 操作步骤\n\n1. 获取润色后的完整正文和故事ID\n2. 确认当前最新的章节序号（通过 writing_list_scenes 获取）\n3. 调用 `writing_create_scene`：\n   - title: 章节标题（与故事风格一致）\n   - content: 润色后的完整正文\n   - storyId: 故事ID\n   - order: 最新序号+1\n4. 验证：调用 `writing_list_scenes` 确认新章节已成功保存\n\n### 注意事项\n\n- 标题要与故事风格一致\n- order 序号不能重复，比最大序号+1\n- 如果 writing MCP 工具不可用，fallback 到 `writing_system` action=create_scene\n\n### 输出\n\n保存结果汇报：\n- ✓ 章节ID\n- ✓ 章节标题\n- ✓ 字数\n- ✓ 在故事中的位置（第X章）\n- ✓ 保存状态：成功" }, "dependsOn": ["quality-polish"] }];
 const createdAt$1 = 0;
 const updatedAt$1 = 0;
-const devPipelineLarge = {
+const writingPipeline = {
   id: id$1,
   name: name$1,
   description: description$1,
@@ -1569,21 +1583,33 @@ const devPipelineLarge = {
   createdAt: createdAt$1,
   updatedAt: updatedAt$1
 };
-const id = "writing-pipeline";
-const name = "写作工作流";
-const description = "完整续写流程：连接写作MCP → 若失败则通过centos SSH自愈 → 查看故事状态 → 确定方向 → ai_write生成 → 质量检查+去AI味 → 落地保存";
-const steps = [{ "id": "mcp-connect", "name": "连接写作MCP", "description": "第1步：连接写作系统的 MCP 服务器，获取结构化的 writing_* 工具集", "handler": "subagent", "config": { "prompt": "## 任务：连接写作 MCP 服务器\n\n你现在是写作助手的「MCP连接」环节。请尝试连接写作系统的 MCP 服务器，获取结构化的写作工具。\n\n### 操作步骤\n\n1. 调用 `connect_mcp_server` 工具：\n   - name: writing-system\n   - url: https://www.crlkcloud.cyou/writing-mcp/sse\n   - transport: sse\n\n2. 如果连接成功，调用 `list_mcp_tools` 确认以下工具可用：\n   - writing_list_stories\n   - writing_get_story\n   - writing_list_characters\n   - writing_create_character\n   - writing_list_scenes\n   - writing_create_scene\n   - writing_create_relationship\n   - writing_ai_write\n\n3. 汇报连接结果：哪些工具可用，哪些不可用。\n\n### 输出格式\n\n```\n【MCP状态】\n- 连接状态: 成功/失败\n- 可用工具列表:\n- 失败原因（如果有）:\n```\n\n### 注意\n- 如果连接失败，标记为失败，后续步骤会尝试修复\n- 不要跳过此步骤" }, "dependsOn": [] }, { "id": "mcp-fix", "name": "修复MCP连接", "description": "第2步：当MCP连接失败时，通过centos SSH工具远程修复写作MCP服务器", "handler": "subagent", "config": { "prompt": "## 任务：修复写作 MCP 连接\n\n上一步 MCP 连接失败，现在需要通过 centos SSH 工具排查并修复。\n\n### 排查步骤\n\n1. **检查远程服务器状态** — 调用 `centos_exec`：\n   - `pm2 list` 或者 `ps aux | grep writing`\n   - 如果 writing-mcp 不在运行，尝试启动：`cd /opt/writing-system && pm2 start server/mcp-server/ecosystem.writing.js`\n\n2. **检查 nginx 配置** — 调用 `centos_exec`：\n   - `cat /etc/nginx/conf.d/writing.conf` 或者 `nginx -t`\n\n3. **检查 writing API 后端** — 调用 `centos_exec`：\n   - `curl -s http://127.0.0.1:3300/api/stories | head -50`\n\n4. **执行修复脚本**：\n   - `cd /opt/writing-system && python3 server/fix_writing_api2.py`\n\n5. **验证修复** — 再次连接：\n   - `connect_mcp_server name=writing-system url=https://www.crlkcloud.cyou/writing-mcp/sse transport=sse`\n\n### 注意事项\n\n- SSH 凭证通过 credentials 系统获取\n- 每步操作后检查返回结果\n- 如果修复后仍然无法连接，汇报详细错误信息，让用户手动处理" }, "dependsOn": ["mcp-connect"], "runOn": "failure" }, { "id": "story-check", "name": "故事状态检查", "description": "第3步：查看当前故事状态——有哪些角色、写到哪一章了", "handler": "subagent", "config": { "prompt": "## 任务：查看故事当前状态\n\n你现在是写作助手的「状态检查」环节。写作 MCP 已经连接，请通过 writing_* 工具获取以下信息：\n\n### 操作步骤\n\n1. **列出所有故事** — 调用 `writing_list_stories`，了解当前有哪些故事\n2. **如果有多个故事**，优先查看最近更新的那个。获取详情：调用 `writing_get_story`\n3. **列出该故事的角色** — 调用 `writing_list_characters`，获取角色名、角色定位（主角/配角）、性格描述\n4. **列出该故事的章节/场景** — 调用 `writing_list_scenes`，了解最新章节的标题和内容摘要\n5. **列出该故事的剧情线** — 调用 `writing_list_plotlines`\n\n### 汇报格式\n\n请整理成清晰的中文汇报，包含：\n- 故事名称、类型、简介\n- 主要角色列表（含性格特点）\n- 已有章节数、最新章节标题和大致内容\n- 当前剧情进展到哪里\n\n### 注意\n- 如果 writing_* 工具调用失败，尝试 fallback 到 writing_system 工具的对应操作\n- 简洁明了，重点突出" }, "dependsOn": ["mcp-fix"] }, { "id": "direction-plan", "name": "确定续写方向", "description": "第4步：基于故事状态分析和用户意图，确定续写的切入点和方向", "handler": "subagent", "config": { "prompt": "## 任务：确定续写方向和切入点\n\n上一步已经获取了故事当前状态。现在你需要根据故事进展和用户意图，确定续写方向。\n\n### 思考要点\n\n1. **当前停在什么地方？**\n   - 最后一章的情节走向\n   - 有没有悬而未决的情节线\n   - 角色的当前状态\n\n2. **续写切入点**\n   - 紧接上一章的结尾继续推进\n   - 切换到另一条剧情线\n   - 引入新的事件/冲突\n   - 深化当前情节\n\n3. **续写大纲**\n   - 这一章/这一段要写什么\n   - 涉及哪些角色\n   - 预期的情节推进方向\n   - 目标字数/篇幅\n\n### 输出格式\n\n```\n【续写方向】\n- 切入方式：...\n- 情节概述：...\n- 涉及角色：...\n- 预期篇幅：...\n\n【续写提示】\n（一段直接可用于 ai_write 的写作提示文字，包含场景设定、角色状态、情节走向。注意要写得生动具体，让 AI 能据此生成流畅的叙事文本）\n```\n\n### 注意\n- 不要提前写入，只做分析和规划\n- 如果用户有明确要求，以用户要求为准" }, "dependsOn": ["story-check"] }, { "id": "content-write", "name": "AI生成内容", "description": "第5步：使用 ai_write 接口或通过写作MCP生成续写内容", "handler": "subagent", "config": { "prompt": "## 任务：执行写作\n\n上一步已经确定了续写方向。现在通过写作 MCP 调用 ai_write 生成内容。\n\n### 操作步骤\n\n1. 获取续写方向中的「续写提示」文本\n2. 调用 `writing_ai_write` MCP 工具：\n   - prompt: 续写提示内容\n   - storyId: 故事ID\n   - temperature: 0.8\n3. 如果 writing_ai_write 不可用，fallback 到 `writing_system` action=ai_write\n4. 如果返回内容格式有问题或生成不完整，可以调整 prompt 或 temperature（0.3~0.9）重试\n\n### 注意事项\n\n- temperature 含义：0.3=保守平稳、0.5=适中、0.8=有创意、0.9=自由发挥\n- 如果 writing_system 返回的内容质量不够，可以尝试：\n  - 降低 temperature 让内容更稳健\n  - 提高 temperature 让内容更有创意\n  - 细化 prompt 加入更多场景细节\n- 不要编造结果，如实汇报 AI 生成的内容\n\n### 输出\n\n输出生成的正文内容，标注生成参数（temperature, prompt摘要）。" }, "dependsOn": ["direction-plan"] }, { "id": "quality-polish", "name": "质量检查和去AI味", "description": "第6步：检查生成内容质量，去除AI腔（去味），润色语言，确保自然流畅", "handler": "subagent", "config": { "prompt": "## 任务：质量检查和去AI味\n\n上一步生成了续写内容。现在需要对其进行质量检查和润色（去AI味），确保读起来自然流畅，像人类作家写的一样。\n\n### 去AI味检查清单\n\n逐段检查生成内容，找出并修正以下 AI 常见问题：\n\n1. **抽象概括** — 把「她感到一种深深的忧伤」改为具体描写「她盯着窗外的雨，手指在茶杯沿上划了一圈又一圈」\n2. **情绪标签** — 把「他心中涌起一股愤怒」改为「他的拳头在桌下捏紧了，指节发白」\n3. **总结性语句** — 删除「这说明」「这意味着」「显而易见」「可以说」等总结词\n4. **单调句式** — 避免连续多句以「他/她」开头，调整句式节奏\n5. **冗余修饰** — 删除「非常」「极其」「十分」「突然」等空洞副词\n6. **AI 套话** — 删除「在这个充满变数的世界里」「命运的齿轮开始转动」等网络小说套话\n7. **解释性旁白** — 不要解释角色为什么这样做，让动作和对话本身表达\n\n### 操作步骤\n\n1. 阅读所有生成内容\n2. 逐段对照检查清单进行审核\n3. 对于需要修改的地方，重写该段落\n4. 保持故事的人称、风格、世界观一致\n5. 不要改变核心情节和对话内容\n\n### 输出格式\n\n```\n【质量检查报告】\n- 总字数：\n- 发现的问题：\n  1. [问题类型] — [原文片段] → [修改后]\n  2. ...\n- 修改统计：修改了 X 处\n\n【润色后完整正文】\n（完整的润色后内容）\n```\n\n### 注意\n- 不要删减过多内容，重点在去AI味而非压缩字数\n- 保持原作的叙事节奏和风格\n- 对话部分除非有明显问题，尽量少改", "planPrompt": "检查写作内容质量，去除AI腔" }, "dependsOn": ["content-write"] }, { "id": "save-landing", "name": "落地保存", "description": "第7步：将润色后的内容保存为新的章节/场景", "handler": "subagent", "config": { "prompt": "## 任务：落地保存\n\n上一步完成了内容润色。现在将最终内容保存到写作系统中。\n\n### 操作步骤\n\n1. 获取润色后的完整正文和故事ID\n2. 确认当前最新的章节序号（通过 writing_list_scenes 获取）\n3. 调用 `writing_create_scene`：\n   - title: 章节标题（与故事风格一致）\n   - content: 润色后的完整正文\n   - storyId: 故事ID\n   - order: 最新序号+1\n4. 验证：调用 `writing_list_scenes` 确认新章节已成功保存\n\n### 注意事项\n\n- 标题要与故事风格一致\n- order 序号不能重复，比最大序号+1\n- 如果 writing MCP 工具不可用，fallback 到 `writing_system` action=create_scene\n\n### 输出\n\n保存结果汇报：\n- ✓ 章节ID\n- ✓ 章节标题\n- ✓ 字数\n- ✓ 在故事中的位置（第X章）\n- ✓ 保存状态：成功" }, "dependsOn": ["quality-polish"] }];
+const id = "preset_content_workflow_v1";
+const name = "秋山澪 Content Workflow V1";
+const description = "以工作流驱动内容生产，而非单次 Prompt。流程可视化、节点职责单一、可插拔、支持循环优化。";
+const inputSchema = "主题: string, 平台: string";
+const steps = [{ "id": "s1", "name": "意图分析", "description": "分析用户需求，输出内容类型、平台、风格、目标用户、输出长度、创作目标", "handler": "subagent", "config": { "maxTurns": 10, "prompt": "你的任务是从以下渠道找到今天最适合创作的内容主题：\n\n1. 阅读排期表 evolution_workspace/analysis/content-schedule.md，查看是否有今日待完成的选题\n2. 查看 observer 最新趋势数据 evolution_workspace/observer/trends/，了解当前热点\n3. 查看 observer 已有的研究短文 evolution_workspace/observer/essays/，看哪些可以转化为内容\n4. 查看已有草稿 evolution_workspace/social/drafts/ 下的目录名，避免主题重复\n\n选定主题后，输出结构化分析结果：\n内容类型：\n目标平台：\n风格：\n目标用户画像：\n输出长度：\n创作目标：\n选定的主题名称：", "allowedTools": ["read_file"] }, "dependsOn": [] }, { "id": "s_audience", "name": "受众与平台分析", "description": "分析目标受众群体、平台推荐机制和避坑策略，输出受众画像和平台适配策略", "handler": "subagent", "config": { "allowedTools": ["read_file"], "maxTurns": 8, "prompt": "基于意图分析结果，分析目标受众和平台策略。\n\n使用 read_file 读取以下数据作为分析依据（不要只靠 LLM 训练数据猜测）：\n\n1. evolution_workspace/analysis/content-schedule.md — 查看排期历史和已发布的系列文章\n2. evolution_workspace/social/drafts/ — 查看已有草稿目录名（了解之前写过什么主题）\n3. evolution_workspace/observer/trends/ — 查看最新热点趋势数据\n4. evolution_workspace/observer/observations/ — 查看之前的观察记录（可能包含平台变化信息）\n5. evolution_workspace/observer/insights/ — 查看已有的洞察分析\n\n读完数据后，进行以下分析：\n\n## 01. 基于数据的受众判断\n\n**这个主题在什么平台有真实读者？**\n- 趋势数据显示哪些平台对这类内容有流量？（不要假设全都适合发）\n- 过去同类主题的草稿在哪个平台发过？是否有反馈数据？\n- 这个主题的搜索热度在上升还是下降？\n- 根据趋势数据，当前受众更关注这个主题的哪个侧面？\n\n**信息需求分层**（要写具体，不要泛泛而谈）\n- 入门层受众：他们在这个主题上最常搜索什么关键词？\n- 进阶层受众：他们卡在什么地方？缺什么信息？\n- 专业层受众：什么内容能让他们转发/收藏？\n\n## 02. 平台避坑分析（基于观察数据）\n\n输出去读到的相关记录中对以下问题的回答：\n- observer 数据中有没有提到哪些平台对哪些类型限流的案例？\n- 这类主题在哪些平台容易被判低质/同质化？\n- 什么关键词或表述之前被标记过？\n\n## 03. 平台推荐策略\n\n对趋势数据中有流量信号的平台逐一分析：\n\n**平台：[平台名]**\n- 该平台当前对这类内容的流量倾向（从数据中看到的证据）\n- 什么形式的标题/开头容易过审核并拿到推荐？\n- 什么表述可能导致限流？（引用 observer 中的具体案例）\n- 该平台上同类内容的发布时间有什么规律？\n\n## 04. 最终建议\n\n基于以上分析（不要凭空猜测），给出：\n1. 推荐首发平台（1-2 个）及理由（引用趋势数据）\n2. 不推荐发布的平台及理由\n3. 正文必须避免的表述（避限流，引用 observer 案例）\n4. 正文必须包含的元素（提高推荐权重）\n\n注意：最终输出中标注每条结论的数据来源，比如“根据 2026-06-29 的趋势数据：…”" }, "dependsOn": ["s1"] }, { "id": "s2", "name": "内容规划", "description": "生成结构化内容方案：每个章节有核心主张、必须解释的原因、预埋的例子。S4 将直接基于此展开", "handler": "subagent", "config": { "allowedTools": [], "maxTurns": 10, "prompt": "基于意图分析结果，生成结构化内容方案。这不是大纲，而是为 S4（正文展开器）提供精确的展开指令。\n\n输出格式（严格按此结构）：\n\n## 标题方向\n1. 标题1\n2. 标题2\n3. 标题3\n\n## Hook 开头\n（一段话，吸引读者）\n\n## 章节列表\n\n每个章节格式如下：\n\n### Section: [章节名]\n\n**Topic:** 一句话说明本节在讲什么\n\n**CoreClaim:**\n- （本节最核心的主张，2-3 条）\n\n**MustExplain:**\n- （这些主张必须解释的原因。比如“为什么 Review 要放在 Draft 后面而不是之前”而不是“Review 很重要”）\n\n**Example:**\n- （预埋的具体例子，描述一个流程或场景。S4 会直接展开这段）\n\n**Avoid:**\n- （S4 展开时不要碰的内容，防止跑偏）\n\n## CTA 行动号召\n\n注意：只出方案，不写正文。每个章节的 CoreClaim + MustExplain + Example 越具体，正文质量越高。" }, "dependsOn": ["s1"] }, { "id": "s3", "name": "素材收集", "description": "收集知识、记忆、案例、参考和用户资料，整理为统一Context", "handler": "subagent", "config": { "maxTurns": 10, "prompt": "收集与当前内容主题相关的素材。使用 read_file 读取以下来源：\n- evolution_workspace/observer/observations/ — 相关观察记录\n- evolution_workspace/observer/research/ — 相关研究资料\n- evolution_workspace/memory/ — 相关知识记忆\n\n整理为结构化的Context：\n知识要点：\n案例参考：\n数据支撑：\n素材汇总：", "allowedTools": ["read_file"] }, "dependsOn": ["s1"] }, { "id": "s4", "name": "初稿生成", "description": "根据 Planner 的结构化方案和素材，展开为第一版正文", "handler": "subagent", "config": { "allowedTools": [], "maxTurns": 20, "prompt": "你的任务是根据 Planner 的结构化方案和 Material 素材，展开为第一版正文。\n\n你不是作者，你是 Expander（展开器）。Planner 已经规划了每个章节的 CoreClaim（核心主张）、MustExplain（必须解释的原因）、Example（预埋例子），你把这些信息组织成自然、流畅、可读的正文。\n\n不需要额外发明新观点，不要补 Planner 没说过的内容。\n\n---\n\n## Writing Contract\n\n每写一段，心里检查以下 10 条：\n\n1. 每个自然段必须提供新的信息。禁止不同段落表达同一个意思。\n2. 优先写具体机制，而不是抽象概念。比如“把 Review 放到 Draft 后面可以提前发现方向问题”胜于“提高质量”。\n3. 每个重要观点尽量解释原因（Why）。不要只说什么，要说为什么。\n4. 每 2~3 个观点至少提供一个例子、场景或流程。读者需要“看到”过程。\n5. 描述过程，少写结论。比如“Review 给出 62 分 → 自动跳回 Rewrite → 第二轮 81 分 → 进入 Adapter”胜于“工作流支持循环”。\n6. 不重复 Planner 已经表达过的话。Planner 的方案内容已在前置步骤给出，正文不应复述方案本身。\n7. 一句话只表达一个意思。如果一句话需要用“和”连接两个意思，拆成两句。\n8. 保持逻辑递进：问题 → 原因 → 例子 → 小结，不要说明书式的平铺。\n9. 无法具体化的内容，宁可省略，不要空泛扩写。\n10. 输出的是“可发布的正文”，不是方案说明，也不是 Prompt 解析。\n\n---\n\n开始展开。" }, "dependsOn": ["s2", "s3", "s_audience"] }, { "id": "s5", "name": "审查与重写", "description": "对照 Writing Contract 逐条检查，不满足则标记重写", "handler": "subagent", "config": { "allowedTools": [], "maxTurns": 10, "prompt": "检查正文，按以下 10 条 Writing Contract 逐条打分（0-10）。\n\n1. 每个自然段是否都提供了新的信息？有没有两段在说同一个意思？\n2. 是否优先写具体机制而非抽象概念？\n3. 每个重要观点是否解释了原因（Why）？\n4. 是否每 2~3 个观点有例子/场景/流程？\n5. 是否描述过程而不仅是给出结论？\n6. 有没有复述 Planner 的方案本身？\n7. 每句话是否只表达一个意思？\n8. 逻辑递进是否为：问题 → 原因 → 例子 → 小结？\n9. 有没有无法具体化却空泛扩写的段落？\n10. 输出的是“可发布的正文”还是更像方案说明？\n\n输出格式：\n\n## 综合评分：x/10\n\n## 各条评分\n1. 信息增量：x/10 — 问题点\n2. 具体性：x/10 — 问题点\n...\n\n## 必须修改的问题（优先列出违反 Contract 第 1、2、6 条的问题）\n\n## 修改建议\n\n如果评分低于 7/10，在「重写版本」中输出修改后的正文。只修改有问题的部分。最多循环 3 次。" }, "dependsOn": ["s4"] }, { "id": "s6", "name": "平台适配", "description": "统一转换适配各平台格式：公众号、知乎、小红书、微博、B站、抖音", "handler": "subagent", "config": { "allowedTools": [], "maxTurns": 10, "prompt": "将正文适配到各平台格式：公众号排版、知乎长文、小红书笔记、微博短博文、B站文案、抖音短视频脚本。输出各平台版本。" }, "dependsOn": ["s5"] }, { "id": "s7", "name": "输出", "description": "输出最终版本：正文、标题、标签、CTA、摘要、Metadata", "handler": "subagent", "config": { "allowedTools": [], "maxTurns": 5, "prompt": '输出最终内容包。要求严格按照以下 JSON 格式输出，不要用代码块包裹，直接输出纯 JSON：\n\n{\n  "title": "文章标题",\n  "summary": "摘要",\n  "tags": ["标签1", "标签2"],\n  "platforms": {\n    "wechat_mp": { "title": "公众号标题", "body": "公众号版本正文" },\n    "zhihu": { "title": "知乎标题", "body": "知乎长文版本正文" },\n    "xiaohongshu": { "title": "小红书标题", "body": "小红书笔记正文" },\n    "weibo": { "title": "微博标题", "body": "微博正文" },\n    "bilibili": { "title": "B站标题", "body": "B站文案正文" },\n    "douyin": { "title": "抖音标题", "body": "抖音短视频脚本正文" }\n  },\n  "cta": "行动号召",\n  "metadata": { "word_count": 0, "content_type": "article" }\n}\n\n注意：不要用对话语气，直接输出纯 JSON，不要加 ``` 代码块。', "outputFile": "C:/Users/gf191/AppData/Roaming/akemi-mio/evolution_workspace/social/drafts/{DATE}-workflow-output/.meta" }, "dependsOn": ["s6"] }];
+const tags = ["medium", "social"];
+const enabled = true;
 const createdAt = 0;
 const updatedAt = 0;
-const writingPipeline = {
+const contentWorkflowV1 = {
   id,
   name,
   description,
+  inputSchema,
   steps,
+  tags,
+  enabled,
   createdAt,
   updatedAt
 };
-const PRESET_DEFINITIONS = [devPipelineSimple, devPipelineMedium, devPipelineLarge, writingPipeline];
+const PRESET_DEFINITIONS = [
+  devPipelineSimple,
+  devPipelineMedium,
+  devPipelineLarge,
+  writingPipeline,
+  contentWorkflowV1
+];
 let idCounter$b = 0;
 const DEFINITIONS_DIR = path$1.join(WORKSPACE.workflows, "definitions");
 const RUNS_DIR = path$1.join(WORKSPACE.workflows, "runs");
@@ -1972,10 +1998,15 @@ class WorkflowScheduler {
   dispatch;
   pendingAgents = /* @__PURE__ */ new Map();
   active = false;
+  /** 当前正在运行的工作流定义 ID 集合，用于防止重复启动同一工作流 */
+  runningDefs = /* @__PURE__ */ new Set();
   constructor(dispatch) {
     this.dispatch = dispatch;
   }
   startRun(def, userInput) {
+    if (this.runningDefs.has(def.id)) {
+      throw new Error(`工作流「${def.name}」已在运行中，不能重复启动`);
+    }
     const run = workflowStore.createRun(def);
     run.userInput = userInput;
     run.status = "running";
@@ -1983,6 +2014,7 @@ class WorkflowScheduler {
     run._outputDir = outputDir;
     workflowStore.updateRun(run);
     this.active = true;
+    this.runningDefs.add(def.id);
     Logger.log("INFO", "workflow_run_started", { runId: run.runId, defId: def.id, steps: def.steps.length, outputDir });
     Logger.log("INFO", "workflow_before_executeLoop", { runId: run.runId });
     this.executeLoop(run, def, outputDir).catch((err) => {
@@ -1990,6 +2022,7 @@ class WorkflowScheduler {
       run.status = "failed";
       workflowStore.updateRun(run);
       this.active = false;
+      this.runningDefs.delete(def.id);
     });
     return run;
   }
@@ -2013,6 +2046,14 @@ class WorkflowScheduler {
             workflowStore.updateStep(run, sd.id, "skipped", "(条件不满足，跳过)");
             skipped.add(sd.id);
           }
+        }
+      }
+      for (const sd of stepDefs) {
+        if (completed.has(sd.id) || failures.has(sd.id) || skipped.has(sd.id)) continue;
+        if (sd.runOn === "failure") continue;
+        if (sd.dependsOn.some((depId) => failures.has(depId))) {
+          workflowStore.updateStep(run, sd.id, "skipped", "(依赖步骤失败，跳过)");
+          skipped.add(sd.id);
         }
       }
       const runnable = stepDefs.filter((sd) => {
@@ -2039,112 +2080,114 @@ class WorkflowScheduler {
         else run.status = completed.size > 0 ? "done" : "failed";
         workflowStore.updateRun(run);
         this.active = false;
+        this.runningDefs.delete(def.id);
         return;
       }
       const promises = runnable.map(async (sd) => {
-        workflowStore.updateStep(run, sd.id, "running");
-        try {
-          const agentIds = [];
-          switch (sd.handler) {
-            case "subagent": {
-              const subOptions = {};
-              const allowedTools = sd.config.allowedTools;
-              if (allowedTools !== void 0) {
-                subOptions.allowedToolNames = allowedTools;
-              }
-              if (sd.config.maxTurns !== void 0) {
-                subOptions.maxTurns = sd.config.maxTurns;
-              }
-              if (sd.config.llmTimeoutMs !== void 0) {
-                subOptions.llmTimeoutMs = sd.config.llmTimeoutMs;
-              }
-              const depContext = this.buildDependencyContext(sd, run);
-              const basePrompt = sd.config.prompt || sd.description;
-              const withInput = basePrompt.replace(
-                /\{INPUT\}/g,
-                run.userInput || "（用户未指定主题，请自行选择一个适合当前时间和社会热点的内容主题来创作）"
-              );
-              const withOutputDir = withInput.replace(/\{OUTPUT_DIR\}/g, outputDir);
-              let fullPrompt;
-              if (withOutputDir.includes("(dependency_context)")) {
-                fullPrompt = withOutputDir.replaceAll("(dependency_context)", depContext);
-              } else {
-                fullPrompt = withOutputDir + depContext;
-              }
-              const agentId = this.dispatch.runSubAgent(fullPrompt, def.description, subOptions);
-              agentIds.push(agentId);
-              this.pendingAgents.set(run.runId, agentIds);
-              break;
-            }
-            case "tool": {
-              const result = await this.dispatch.runTool(sd.config.tool || "", {});
-              workflowStore.updateStep(run, sd.id, "done", result);
-              completed.add(sd.id);
-              return;
-            }
-            case "api": {
-              const result = await this.dispatch.runApi(sd.config.apiUrl || "", sd.config.apiMethod || "GET");
-              workflowStore.updateStep(run, sd.id, "done", result);
-              completed.add(sd.id);
-              return;
-            }
-            case "prompt": {
-              this.dispatch.injectPrompt(sd.config.prompt || sd.description);
-              workflowStore.updateStep(run, sd.id, "done", "(prompt injected)");
-              completed.add(sd.id);
-              return;
-            }
-            case "plan": {
-              const planPrompt = sd.config.planPrompt || sd.config.prompt || sd.description;
-              const planId = this.dispatch.runPlan(planPrompt);
-              const ps0 = this.dispatch.getPlanStatus();
-              if (ps0 && ps0.status === "active" && ps0.total === 0) {
-                Logger.log("INFO", "workflow_plan_zero_step_completed", { runId: run.runId, stepId: sd.id, planId });
-                workflowStore.updateStep(run, sd.id, "done", `Plan 指令已注入：${planPrompt.slice(0, 60)}...`);
-                completed.add(sd.id);
-                return;
-              }
-              for (let i = 0; i < 600; i++) {
-                const ps = this.dispatch.getPlanStatus();
-                if (!ps || ps.status === "abandoned" || ps.status === "completed") {
-                  if (ps?.status === "completed") {
-                    workflowStore.updateStep(run, sd.id, "done", `Plan「${ps.title}」${ps.done}/${ps.total} 步完成`);
-                  } else {
-                    workflowStore.updateStep(run, sd.id, "failed", void 0, "Plan was abandoned");
-                    failures.add(sd.id);
-                  }
-                  completed.add(sd.id);
-                  return;
-                }
-                await sleep$1(5e3);
-              }
-              workflowStore.updateStep(run, sd.id, "failed", void 0, "Plan wait timeout");
-              failures.add(sd.id);
-              return;
-            }
-          }
-          if (agentIds.length > 0) {
-            const results = await this.waitForAgents(agentIds, run, sd);
-            const agentResult = results.find((r) => agentIds.includes(r.id));
-            if (agentResult?.error) {
-              workflowStore.updateStep(run, sd.id, "failed", agentResult.summary, agentResult.error);
-              failures.add(sd.id);
-            } else {
-              workflowStore.updateStep(run, sd.id, "done", agentResult?.summary || "(completed)");
-              completed.add(sd.id);
-              this.writeStepOutput(sd, agentResult?.summary, outputDir);
-              if (sd.id === "s_browser" && agentResult?.summary) {
-                this.collectScreenshots(agentResult.summary, outputDir);
-              }
-            }
-          }
-        } catch (err) {
-          Logger.log("WARN", "workflow_step_failed", { runId: run.runId, stepId: sd.id, error: err.message });
-          workflowStore.updateStep(run, sd.id, "failed", void 0, err.message);
-          failures.add(sd.id);
-        }
+        const stepTimeout = sd.config.stepTimeoutMs ?? 60 * 60 * 1e3;
+        const stepPromise = this.executeStep(sd, run, def, outputDir, completed, failures);
+        await Promise.race([
+          stepPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error(`步骤「${sd.id}」执行超时 (${stepTimeout}ms)`)), stepTimeout))
+        ]);
       });
       await Promise.allSettled(promises);
+    }
+  }
+  /** 执行单个步骤（handler 分发 + waitForAgents），executeLoop 中的 Promise.race 调用它 */
+  async executeStep(sd, run, def, outputDir, completed, failures) {
+    workflowStore.updateStep(run, sd.id, "running");
+    try {
+      const agentIds = [];
+      switch (sd.handler) {
+        case "subagent": {
+          const subOptions = {};
+          const allowedTools = sd.config.allowedTools;
+          if (allowedTools !== void 0) subOptions.allowedToolNames = allowedTools;
+          if (sd.config.maxTurns !== void 0) subOptions.maxTurns = sd.config.maxTurns;
+          if (sd.config.llmTimeoutMs !== void 0) subOptions.llmTimeoutMs = sd.config.llmTimeoutMs;
+          subOptions.onProgress = (msg) => {
+            eventBus.emit("workflow.run.step", { runId: run.runId, stepId: sd.id, status: "running", agentResult: msg });
+          };
+          const depContext = this.buildDependencyContext(sd, run);
+          const basePrompt = sd.config.prompt || sd.description;
+          const withInput = basePrompt.replace(
+            /\{INPUT\}/g,
+            run.userInput || "（用户未指定主题，请自行选择一个适合当前时间和社会热点的内容主题来创作）"
+          );
+          const withOutputDir = withInput.replace(/\{OUTPUT_DIR\}/g, outputDir);
+          const fullPrompt = withOutputDir.includes("(dependency_context)") ? withOutputDir.replaceAll("(dependency_context)", depContext) : withOutputDir + depContext;
+          const agentId = this.dispatch.runSubAgent(fullPrompt, def.description, subOptions);
+          agentIds.push(agentId);
+          this.pendingAgents.set(run.runId, agentIds);
+          break;
+        }
+        case "tool": {
+          const result = await this.dispatch.runTool(sd.config.tool || "", {});
+          workflowStore.updateStep(run, sd.id, "done", result);
+          completed.add(sd.id);
+          return;
+        }
+        case "api": {
+          const result = await this.dispatch.runApi(sd.config.apiUrl || "", sd.config.apiMethod || "GET");
+          workflowStore.updateStep(run, sd.id, "done", result);
+          completed.add(sd.id);
+          return;
+        }
+        case "prompt": {
+          this.dispatch.injectPrompt(sd.config.prompt || sd.description);
+          workflowStore.updateStep(run, sd.id, "done", "(prompt injected)");
+          completed.add(sd.id);
+          return;
+        }
+        case "plan": {
+          const planPrompt = sd.config.planPrompt || sd.config.prompt || sd.description;
+          const planId = this.dispatch.runPlan(planPrompt);
+          const ps0 = this.dispatch.getPlanStatus();
+          if (ps0 && ps0.status === "active" && ps0.total === 0) {
+            Logger.log("INFO", "workflow_plan_zero_step_completed", { runId: run.runId, stepId: sd.id, planId });
+            workflowStore.updateStep(run, sd.id, "done", `Plan 指令已注入：${planPrompt.slice(0, 60)}...`);
+            completed.add(sd.id);
+            return;
+          }
+          for (let i = 0; i < 600; i++) {
+            const ps = this.dispatch.getPlanStatus();
+            if (!ps || ps.status === "abandoned" || ps.status === "completed") {
+              if (ps?.status === "completed") {
+                workflowStore.updateStep(run, sd.id, "done", `Plan「${ps.title}」${ps.done}/${ps.total} 步完成`);
+              } else {
+                workflowStore.updateStep(run, sd.id, "failed", void 0, "Plan was abandoned");
+                failures.add(sd.id);
+              }
+              completed.add(sd.id);
+              return;
+            }
+            await sleep$1(5e3);
+          }
+          workflowStore.updateStep(run, sd.id, "failed", void 0, "Plan wait timeout");
+          failures.add(sd.id);
+          return;
+        }
+      }
+      if (agentIds.length > 0) {
+        const results = await this.waitForAgents(agentIds, run, sd);
+        const agentResult = results.find((r) => agentIds.includes(r.id));
+        if (agentResult?.error) {
+          workflowStore.updateStep(run, sd.id, "failed", agentResult.summary, agentResult.error);
+          failures.add(sd.id);
+        } else {
+          workflowStore.updateStep(run, sd.id, "done", agentResult?.summary || "(completed)");
+          completed.add(sd.id);
+          this.writeStepOutput(sd, agentResult?.summary, outputDir);
+          if (sd.id === "s_browser" && agentResult?.summary) {
+            this.collectScreenshots(agentResult.summary, outputDir);
+          }
+        }
+      }
+    } catch (err) {
+      Logger.log("WARN", "workflow_step_failed", { runId: run.runId, stepId: sd.id, error: err.message });
+      workflowStore.updateStep(run, sd.id, "failed", void 0, err.message);
+      failures.add(sd.id);
     }
   }
   /** 收集依赖步骤的结果，拼接成上下文 */
@@ -2167,28 +2210,18 @@ ${stepRun.agentResult}`);
   }
   async waitForAgents(agentIds, run, sd) {
     console.log("[wf] waitForAgents ENTERED", { agentIds, stepId: sd.id });
-    const maxWait = 60 * 60 * 1e3;
-    const interval = 2e3;
-    let waited = 0;
-    while (waited < maxWait) {
-      const results = this.dispatch.getCompletedAgentResults();
-      console.log("[wf] waitForAgents poll", { agentIds, results, waited });
-      const done = agentIds.every((id2) => results.some((r) => r.id === id2));
-      if (done) {
-        console.log("[wf] waitForAgents done", { agentIds, results });
-        return results;
-      }
-      eventBus.emit("workflow.run.step", {
+    const timeout = sd.config.stepTimeoutMs ?? 60 * 60 * 1e3;
+    const results = await Promise.allSettled(agentIds.map((id2) => this.dispatch.waitForAgent(id2, timeout)));
+    return results.map((r, i) => {
+      if (r.status === "fulfilled") return r.value;
+      Logger.log("WARN", "workflow_agent_wait_error", {
         runId: run.runId,
         stepId: sd.id,
-        status: "running",
-        agentResult: `⏳ ${Math.floor(waited / 1e3)}s`
+        agentId: agentIds[i],
+        error: r.reason
       });
-      await sleep$1(interval);
-      waited += interval;
-    }
-    Logger.log("WARN", "workflow_agent_wait_timeout", { runId: run.runId, stepId: sd.id });
-    return [];
+      return { id: agentIds[i], summary: "", error: String(r.reason) };
+    });
   }
   stopRun(runId) {
     const run = workflowStore.getRun(runId);
@@ -2196,6 +2229,7 @@ ${stepRun.agentResult}`);
     run.status = "failed";
     workflowStore.updateRun(run);
     this.active = false;
+    this.runningDefs.delete(run.workflowDefId);
     return true;
   }
   isActive() {
@@ -3115,7 +3149,7 @@ function toSlug(s) {
   return s.toLowerCase().replace(/[^a-z0-9一-鿿]+/g, "_").replace(/^_|_$/g, "").slice(0, 48);
 }
 function buildCardSVG(params) {
-  const { title, description: description2, severity, category, tags, fontBase64, fontName } = params;
+  const { title, description: description2, severity, category, tags: tags2, fontBase64, fontName } = params;
   const style = STYLES[severity] || STYLES.info;
   const cardW = 600;
   const cardH = 420;
@@ -3142,7 +3176,7 @@ function buildCardSVG(params) {
       descLines[descLines.length - 1] += "…";
     }
   }
-  const tagBadges = tags.slice(0, 4).map((t, i) => {
+  const tagBadges = tags2.slice(0, 4).map((t, i) => {
     const x = pad + i * 90;
     return `<rect x="${x}" y="350" width="80" height="22" rx="4" fill="${style.badgeBg}" opacity="0.6"/>
 <text x="${x + 40}" y="365" fill="${style.badgeText}" font-size="11" font-family="${fontName}" text-anchor="middle" dominant-baseline="middle">${escapeXml(t)}</text>`;
@@ -3230,9 +3264,9 @@ const cardGeneratorTool = buildTool({
       const severity = args.severity || "info";
       if (!STYLES[severity]) return formatToolError(`不支持的 severity: ${severity}，可选: ${Object.keys(STYLES).join(", ")}`);
       const category = args.category || "未分类";
-      const tags = args.tags ? args.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+      const tags2 = args.tags ? args.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
       const { base64: fontBase64, name: fontName } = loadFont();
-      const svg = buildCardSVG({ title, description: description2, severity, category, tags, fontBase64, fontName });
+      const svg = buildCardSVG({ title, description: description2, severity, category, tags: tags2, fontBase64, fontName });
       const sharp = (await Promise.resolve().then(() => require("./chunks/index-sEO6DPNC.js")).then((n) => n.index)).default;
       const buf = await sharp(Buffer.from(svg)).png().toBuffer();
       const cardsDir = path$1.join(WORKSPACE.cache, "cards");
@@ -3251,7 +3285,7 @@ const cardGeneratorTool = buildTool({
           `标题: ${title}`,
           `类别: ${category}`,
           `严重程度: ${severity}`,
-          `标签: ${tags.join(", ") || "(无)"}`,
+          `标签: ${tags2.join(", ") || "(无)"}`,
           `尺寸: 600×420 PNG`
         ].join("\n")
       );
@@ -12006,6 +12040,11 @@ ${failureSummary}`,
         Logger.log("WARN", "evolution_integrity_check_failed", { error_count: result.issues.filter((i) => i.severity === "error").length });
         for (const p of allPlans) {
           if (p.status === "active") {
+            if (!p.steps || p.steps.length === 0) {
+              pm.updatePlanStatus(p.id, "abandoned");
+              Logger.log("INFO", "evolution_plan_auto_abandoned", { planId: p.id, reason: "计划没有步骤" });
+              continue;
+            }
             const fixResult = checker.autoFix(p);
             if (fixResult.fixed > 0)
               for (let i = 0; i < p.steps.length; i++) pm.updateStep(p.id, i, p.steps[i].status, p.steps[i].result);
@@ -12439,6 +12478,7 @@ class ScopedAgent {
 class SubAgentInstance {
   id;
   goal;
+  namespace;
   status = "pending";
   summary = "";
   error;
@@ -12452,14 +12492,17 @@ class SubAgentInstance {
   maxTurns;
   llmTimeoutMs;
   allowedToolNames;
-  constructor(task, mcpManager, chatKey, codeKey, systemPrompt, options) {
+  onProgress;
+  constructor(task, mcpManager, chatKey, codeKey, systemPrompt, options, namespace) {
     this.id = task.id;
     this.goal = task.goal;
+    this.namespace = namespace;
     this.mcpManager = mcpManager;
     this.eventBus = eventBus;
     this.maxTurns = options?.maxTurns ?? 15;
     this.llmTimeoutMs = options?.llmTimeoutMs ?? 12e4;
     this.allowedToolNames = options?.allowedToolNames;
+    this.onProgress = options?.onProgress;
     this.llm = new LlmService(mcpManager);
     this.llm.setConfig(chatKey, codeKey);
     this.context = new ConversationContext(void 0, void 0, void 0, systemPrompt);
@@ -12502,6 +12545,7 @@ class SubAgentInstance {
       if (this.abortController.signal.aborted) {
         throw new DOMException("Aborted", "AbortError");
       }
+      this.onProgress?.(`🤔 LLM 思考中… (第 ${i + 1}/${this.maxTurns} 轮)`);
       const result = await this.llm.chatWithTools(
         messages2,
         `sub_${this.id}_${i}`,
@@ -12523,7 +12567,7 @@ class SubAgentInstance {
       }
       return result.reply || "";
     }
-    return "操作次数过多，已自动停止";
+    throw new Error(`已达最大工具调用轮次 (${this.maxTurns} 轮)，任务未完成`);
   }
   async processToolCalls(toolCalls, messages2) {
     for (const call of toolCalls) {
@@ -12534,6 +12578,8 @@ class SubAgentInstance {
       try {
         const output = await this.mcpManager.callTool(call.name, call.arguments);
         this.emitToolCompleted(call.name, typeof output === "string" ? output : JSON.stringify(output));
+        const snippet = (typeof output === "string" ? output : JSON.stringify(output)).slice(0, 120);
+        this.onProgress?.(`🔧 ${call.name} → ${snippet}`);
         messages2.push({
           role: "tool",
           tool_call_id: call.id,
@@ -12541,6 +12587,7 @@ class SubAgentInstance {
         });
       } catch (err) {
         this.emitToolFailed(call.name, err.message);
+        this.onProgress?.(`🔧 ${call.name} → ❌ ${err.message}`);
         messages2.push({
           role: "tool",
           tool_call_id: call.id,
@@ -12566,6 +12613,8 @@ class SubAgentPool {
   scopedAgents = /* @__PURE__ */ new Map();
   /** 已完成但尚未被主 agent 消费的结果 */
   completedQueue = [];
+  /** 等待特定 agent 完成的 Promise waiters（供 waitForAgent 使用） */
+  pendingWaiters = /* @__PURE__ */ new Map();
   mcpManager;
   eventBus;
   counter = 0;
@@ -12579,10 +12628,10 @@ class SubAgentPool {
     this.codeKey = codeKey || "";
   }
   /** 派发一个子任务，立即返回 id */
-  spawn(goal, parentGoal, options) {
+  spawn(goal, parentGoal, options, namespace) {
     const id2 = `sub_${++this.counter}_${Date.now().toString(36)}`;
     const task = { id: id2, goal };
-    const instance = new SubAgentInstance(task, this.mcpManager, this.chatKey, this.codeKey, void 0, options);
+    const instance = new SubAgentInstance(task, this.mcpManager, this.chatKey, this.codeKey, void 0, options, namespace);
     this.agents.set(id2, instance);
     this.ensureWatchdog();
     instance.run(parentGoal).then(() => this.onAgentDone(instance));
@@ -12680,6 +12729,45 @@ class SubAgentPool {
     this.completedQueue = [];
     return results;
   }
+  /**
+   * 等待指定 agent 完成，返回其结果
+   * - 如果 agent 已存在于 agents 映射中且状态为 completed/failed → 立即返回
+   * - 如果结果已在 completedQueue 中 → 取出返回
+   * - 否则注册 Promise 到 pendingWaiters，agent 完成时 resolve
+   */
+  waitForAgent(agentId, timeoutMs) {
+    const inst = this.agents.get(agentId);
+    if (inst && (inst.status === "completed" || inst.status === "failed" || inst.status === "interrupted")) {
+      return Promise.resolve({
+        id: inst.id,
+        goal: inst.goal,
+        status: inst.status,
+        summary: inst.summary,
+        error: inst.error,
+        startedAt: inst.startedAt,
+        completedAt: inst.completedAt
+      });
+    }
+    const qIdx = this.completedQueue.findIndex((r) => r.id === agentId);
+    if (qIdx !== -1) {
+      const result = this.completedQueue[qIdx];
+      this.completedQueue.splice(qIdx, 1);
+      return Promise.resolve(result);
+    }
+    return new Promise((resolve, reject) => {
+      const entry = {
+        resolve,
+        reject
+      };
+      if (timeoutMs !== void 0 && timeoutMs > 0) {
+        entry.timer = setTimeout(() => {
+          this.pendingWaiters.delete(agentId);
+          reject(new Error(`等待 agent「${agentId}」超时 (${timeoutMs}ms)`));
+        }, timeoutMs);
+      }
+      this.pendingWaiters.set(agentId, entry);
+    });
+  }
   /** 当前运行中的任务列表 */
   listRunning() {
     const running = [];
@@ -12693,15 +12781,24 @@ class SubAgentPool {
   }
   onAgentDone(instance) {
     this.agents.delete(instance.id);
-    this.completedQueue.push({
+    const result = {
       id: instance.id,
       goal: instance.goal,
       status: instance.status,
       summary: instance.summary,
       error: instance.error,
       startedAt: instance.startedAt,
-      completedAt: instance.completedAt
-    });
+      completedAt: instance.completedAt,
+      namespace: instance.namespace
+    };
+    const waiter = this.pendingWaiters.get(instance.id);
+    if (waiter) {
+      this.pendingWaiters.delete(instance.id);
+      if (waiter.timer) clearTimeout(waiter.timer);
+      waiter.resolve(result);
+    } else {
+      this.completedQueue.push(result);
+    }
     this.eventBus.emit("subagent.completed", {
       id: instance.id,
       goal: instance.goal,
@@ -12737,6 +12834,11 @@ class SubAgentPool {
       this.watchdogTimer = null;
     }
     this.interruptAll();
+    for (const [id2, waiter] of this.pendingWaiters) {
+      if (waiter.timer) clearTimeout(waiter.timer);
+      waiter.reject(new Error("SubAgentPool 已销毁"));
+    }
+    this.pendingWaiters.clear();
     this.agents.clear();
     this.scopedAgents.clear();
     this.completedQueue = [];
@@ -26160,12 +26262,12 @@ class MemoryIndexer {
   }
   /** 根据类型和内容推断标签 */
   inferTags(type, content) {
-    const tags = [type.replace("_", ":")];
+    const tags2 = [type.replace("_", ":")];
     const keywords = content.match(/[a-zA-Z]{3,}/g) || [];
     for (const kw of keywords.slice(0, 3)) {
-      tags.push(kw.toLowerCase());
+      tags2.push(kw.toLowerCase());
     }
-    return tags;
+    return tags2;
   }
 }
 const KERNEL_MODULES = [
@@ -31282,7 +31384,7 @@ class AppRuntime {
     agentService.setRecoveryManager(recoveryManager);
     const { WorkflowScheduler: WorkflowScheduler2, setWorkflowScheduler: setWorkflowScheduler2 } = await Promise.resolve().then(() => WorkflowScheduler$1);
     const scheduler2 = new WorkflowScheduler2({
-      runSubAgent: (goal, parentGoal, options) => agentService["subAgentPool"].spawn(goal, parentGoal, options),
+      runSubAgent: (goal, parentGoal, options) => agentService["subAgentPool"].spawn(goal, parentGoal, options, "workflow"),
       runTool: async (name2, args) => {
         const result = await mcpManager.callTool(name2, args);
         return typeof result === "string" ? result : JSON.stringify(result);
@@ -31297,7 +31399,7 @@ class AppRuntime {
       },
       injectPrompt: () => {
       },
-      getCompletedAgentResults: () => agentService["subAgentPool"].collectCompleted().map((r) => ({ id: r.id, summary: r.summary, error: r.error })),
+      waitForAgent: (agentId, timeoutMs) => agentService["subAgentPool"].waitForAgent(agentId, timeoutMs).then((r) => ({ id: r.id, summary: r.summary, error: r.error })),
       runPlan: (prompt) => {
         const planManager2 = agentService["planManager"];
         return planManager2.createPlan("Workflow Plan", prompt, []).id;

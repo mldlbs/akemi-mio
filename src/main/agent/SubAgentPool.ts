@@ -19,6 +19,8 @@ export interface SubAgentResult {
   error?: string
   startedAt: number
   completedAt?: number
+  /** 结果所属的命名空间（用于隔离不同类型 agent 的结果） */
+  namespace?: string
 }
 
 interface SubAgentTask {
@@ -35,6 +37,8 @@ export interface SpawnTaskOptions {
   allowedToolNames?: string[]
   /** 指定子 agent 角色名（定义见 roles.ts）。会拼入 system prompt 最前面 */
   role?: SubAgentRoleName
+  /** 工具调用进度回调 — 每次工具完成时触发 */
+  onProgress?: (msg: string) => void
 }
 
 // ── 单个子 Agent 实例 ──
@@ -42,6 +46,7 @@ export interface SpawnTaskOptions {
 class SubAgentInstance {
   readonly id: string
   readonly goal: string
+  readonly namespace?: string
   status: SubAgentStatus = 'pending'
   summary = ''
   error?: string
@@ -56,6 +61,7 @@ class SubAgentInstance {
   private maxTurns: number
   private llmTimeoutMs: number
   private allowedToolNames?: string[]
+  private onProgress?: (msg: string) => void
 
   constructor(
     task: SubAgentTask,
@@ -64,14 +70,17 @@ class SubAgentInstance {
     codeKey: string,
     systemPrompt?: string,
     options?: SpawnTaskOptions,
+    namespace?: string,
   ) {
     this.id = task.id
     this.goal = task.goal
+    this.namespace = namespace
     this.mcpManager = mcpManager
     this.eventBus = eventBus
     this.maxTurns = options?.maxTurns ?? 15
     this.llmTimeoutMs = options?.llmTimeoutMs ?? 120000
     this.allowedToolNames = options?.allowedToolNames
+    this.onProgress = options?.onProgress
     this.llm = new LlmService(mcpManager)
     this.llm.setConfig(chatKey, codeKey)
     this.context = new ConversationContext(undefined, undefined, undefined, systemPrompt)
@@ -120,6 +129,8 @@ class SubAgentInstance {
         throw new DOMException('Aborted', 'AbortError')
       }
 
+      this.onProgress?.(`🤔 LLM 思考中… (第 ${i + 1}/${this.maxTurns} 轮)`)
+
       const result = await this.llm.chatWithTools(
         messages,
         `sub_${this.id}_${i}`,
@@ -146,7 +157,7 @@ class SubAgentInstance {
       return result.reply || ''
     }
 
-    return '操作次数过多，已自动停止'
+    throw new Error(`已达最大工具调用轮次 (${this.maxTurns} 轮)，任务未完成`)
   }
 
   private async processToolCalls(toolCalls: ToolCallInfo[], messages: Message[]): Promise<void> {
@@ -160,6 +171,8 @@ class SubAgentInstance {
       try {
         const output = await this.mcpManager.callTool(call.name, call.arguments)
         this.emitToolCompleted(call.name, typeof output === 'string' ? output : JSON.stringify(output))
+        const snippet = (typeof output === 'string' ? output : JSON.stringify(output)).slice(0, 120)
+        this.onProgress?.(`🔧 ${call.name} → ${snippet}`)
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -167,6 +180,7 @@ class SubAgentInstance {
         })
       } catch (err: any) {
         this.emitToolFailed(call.name, err.message)
+        this.onProgress?.(`🔧 ${call.name} → ❌ ${err.message}`)
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -200,6 +214,15 @@ export class SubAgentPool {
   private scopedAgents = new Map<string, ScopedAgent>()
   /** 已完成但尚未被主 agent 消费的结果 */
   private completedQueue: SubAgentResult[] = []
+  /** 等待特定 agent 完成的 Promise waiters（供 waitForAgent 使用） */
+  private pendingWaiters = new Map<
+    string,
+    {
+      resolve: (result: SubAgentResult) => void
+      reject: (err: Error) => void
+      timer?: ReturnType<typeof setTimeout>
+    }
+  >()
   private mcpManager: ServerManager
   private eventBus: EventBus
   private counter = 0
@@ -215,10 +238,10 @@ export class SubAgentPool {
   }
 
   /** 派发一个子任务，立即返回 id */
-  spawn(goal: string, parentGoal?: string, options?: SpawnTaskOptions): string {
+  spawn(goal: string, parentGoal?: string, options?: SpawnTaskOptions, namespace?: string): string {
     const id = `sub_${++this.counter}_${Date.now().toString(36)}`
     const task: SubAgentTask = { id, goal }
-    const instance = new SubAgentInstance(task, this.mcpManager, this.chatKey, this.codeKey, undefined, options)
+    const instance = new SubAgentInstance(task, this.mcpManager, this.chatKey, this.codeKey, undefined, options, namespace)
     this.agents.set(id, instance)
 
     // 确保 watchdog 在首次 spawn 时启动
@@ -333,6 +356,51 @@ export class SubAgentPool {
     return results
   }
 
+  /**
+   * 等待指定 agent 完成，返回其结果
+   * - 如果 agent 已存在于 agents 映射中且状态为 completed/failed → 立即返回
+   * - 如果结果已在 completedQueue 中 → 取出返回
+   * - 否则注册 Promise 到 pendingWaiters，agent 完成时 resolve
+   */
+  waitForAgent(agentId: string, timeoutMs?: number): Promise<SubAgentResult> {
+    // 1. 检查 agents 映射中是否已有结果
+    const inst = this.agents.get(agentId)
+    if (inst && (inst.status === 'completed' || inst.status === 'failed' || inst.status === 'interrupted')) {
+      return Promise.resolve({
+        id: inst.id,
+        goal: inst.goal,
+        status: inst.status,
+        summary: inst.summary,
+        error: inst.error,
+        startedAt: inst.startedAt,
+        completedAt: inst.completedAt,
+      })
+    }
+
+    // 2. 检查 completedQueue 中是否已有该结果
+    const qIdx = this.completedQueue.findIndex((r) => r.id === agentId)
+    if (qIdx !== -1) {
+      const result = this.completedQueue[qIdx]
+      this.completedQueue.splice(qIdx, 1)
+      return Promise.resolve(result)
+    }
+
+    // 3. 注册 waiter（如果 agent 还在 running 或 pending）
+    return new Promise((resolve, reject) => {
+      const entry: { resolve: (r: SubAgentResult) => void; reject: (err: Error) => void; timer?: ReturnType<typeof setTimeout> } = {
+        resolve,
+        reject,
+      }
+      if (timeoutMs !== undefined && timeoutMs > 0) {
+        entry.timer = setTimeout(() => {
+          this.pendingWaiters.delete(agentId)
+          reject(new Error(`等待 agent「${agentId}」超时 (${timeoutMs}ms)`))
+        }, timeoutMs)
+      }
+      this.pendingWaiters.set(agentId, entry)
+    })
+  }
+
   /** 当前运行中的任务列表 */
   listRunning(): { id: string; goal: string; elapsed: number }[] {
     const running: { id: string; goal: string; elapsed: number }[] = []
@@ -347,7 +415,7 @@ export class SubAgentPool {
 
   private onAgentDone(instance: SubAgentInstance): void {
     this.agents.delete(instance.id)
-    this.completedQueue.push({
+    const result: SubAgentResult = {
       id: instance.id,
       goal: instance.goal,
       status: instance.status,
@@ -355,7 +423,19 @@ export class SubAgentPool {
       error: instance.error,
       startedAt: instance.startedAt,
       completedAt: instance.completedAt,
-    })
+      namespace: instance.namespace,
+    }
+
+    // 优先通过 pendingWaiters 通知等待者，避免经过队列
+    const waiter = this.pendingWaiters.get(instance.id)
+    if (waiter) {
+      this.pendingWaiters.delete(instance.id)
+      if (waiter.timer) clearTimeout(waiter.timer)
+      waiter.resolve(result)
+    } else {
+      this.completedQueue.push(result)
+    }
+
     this.eventBus.emit('subagent.completed' as any, {
       id: instance.id,
       goal: instance.goal,
@@ -393,6 +473,12 @@ export class SubAgentPool {
       this.watchdogTimer = null
     }
     this.interruptAll()
+    // reject 所有等待中的 Promise
+    for (const [id, waiter] of this.pendingWaiters) {
+      if (waiter.timer) clearTimeout(waiter.timer)
+      waiter.reject(new Error('SubAgentPool 已销毁'))
+    }
+    this.pendingWaiters.clear()
     this.agents.clear()
     this.scopedAgents.clear()
     this.completedQueue = []

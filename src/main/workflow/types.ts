@@ -19,6 +19,8 @@ export interface WorkflowStepDef {
     llmTimeoutMs?: number
     /** 输出文件路径。如果设置，agentResult 会写入此路径 */
     outputFile?: string
+    /** 步骤级整体超时(ms)。缺省 3600000 (60min)。内容生成步骤建议设大 */
+    stepTimeoutMs?: number
   }
   dependsOn: string[]
   /** 执行条件: 'success'=仅当所有依赖都成功时执行(默认), 'failure'=仅当至少一个依赖失败时执行 */

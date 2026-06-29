@@ -6,6 +6,14 @@ import devPipelineMedium from './definitions/dev-pipeline-medium.json'
 import devPipelineLarge from './definitions/dev-pipeline-large.json'
 // @ts-ignore - JSON module not in tsconfig
 import writingPipeline from './definitions/writing-pipeline.json'
+// @ts-ignore - JSON module not in tsconfig
+import contentWorkflowV1 from './definitions/content-workflow-v1.json'
 import type { WorkflowDef } from './types'
 
-export const PRESET_DEFINITIONS: WorkflowDef[] = [devPipelineSimple, devPipelineMedium, devPipelineLarge, writingPipeline] as WorkflowDef[]
+export const PRESET_DEFINITIONS: WorkflowDef[] = [
+  devPipelineSimple,
+  devPipelineMedium,
+  devPipelineLarge,
+  writingPipeline,
+  contentWorkflowV1,
+] as WorkflowDef[]

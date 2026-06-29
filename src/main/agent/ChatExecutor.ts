@@ -130,6 +130,10 @@ export class ChatExecutor {
     this.mainWindow = win
   }
 
+  getPersonaStateManager(): PersonaStateManager {
+    return this.personaManager
+  }
+
   updateDeps(deps: {
     memoryService?: MemoryService | null
     skillManager?: SkillManager | null

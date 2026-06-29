@@ -31,6 +31,7 @@ import { TaskExecutor } from './TaskExecutor'
 import { ChatExecutor } from './ChatExecutor'
 import { ProceduralMemory } from './ProceduralMemory'
 import { setProceduralMemory } from '../tool/deps'
+import type { ExecutionRuntime } from '../runtime'
 
 export class AgentService {
   private llmService: LlmService
@@ -91,6 +92,8 @@ export class AgentService {
   private chatExecutor: ChatExecutor | null = null
   /** TaskExecutor — Evolution 循环执行引擎 */
   private taskExecutor: TaskExecutor | null = null
+  /** ExecutionRuntime — 统一任务执行运行时 */
+  private executionRuntime: ExecutionRuntime | null = null
 
   constructor(
     llmService: LlmService,
@@ -264,6 +267,11 @@ export class AgentService {
     this.chatExecutor?.setMainWindow(win)
   }
 
+  /** 注入 ExecutionRuntime */
+  setExecutionRuntime(runtime: ExecutionRuntime): void {
+    this.executionRuntime = runtime
+  }
+
   getContext(): ConversationContext {
     return this.context
   }
@@ -419,6 +427,11 @@ export class AgentService {
   /** 获取子 agent 状态 */
   getSubAgentStatus(): { running: { id: string; goal: string; elapsed: number }[] } {
     return { running: this.subAgentPool.listRunning() }
+  }
+
+  /** 获取人格状态管理器 */
+  getPersonaStateManager() {
+    return this.chatExecutor?.getPersonaStateManager() ?? null
   }
 
   /** 设置会话恢复管理器 */

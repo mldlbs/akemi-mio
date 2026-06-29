@@ -31,7 +31,20 @@ import { initInsight, insightService, insightStore } from '../insight'
 import { initCreativity, creativityService } from '../creativity'
 import { initInspiration } from '../inspiration'
 import { setMemoryService } from '../mcp/LocalProvider'
-import { setPlanManager, setCredentialsManager, setSkillManager as setToolSkillManager } from '../tool/deps'
+import {
+  setPlanManager,
+  setCredentialsManager,
+  setSkillManager as setToolSkillManager,
+  setCognitiveService,
+  setPersonaStateManager,
+  setCreativityService,
+  setInsightService,
+  setEvolutionService,
+  setSubAgentPool as setToolSubAgentPool,
+  setLocalModelService,
+  setObserverService,
+  setHealthManager,
+} from '../tool/deps'
 import { PluginLoader, toolRegistry } from '../plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '../skill'
 import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
@@ -69,6 +82,7 @@ import { SessionRecoveryManager } from '../agent/SessionRecoveryManager'
 import { UIBridge } from '../agent/UIBridge'
 import { EventStore } from '../core/event-sourcing/EventStore'
 import { RuntimeHealthManager } from '../health/RuntimeHealthManager'
+import { ExecutionRuntime, GoalScheduler, FeedbackCollector } from '../runtime'
 
 /**
  * AppRuntime — 应用启动生命周期编排器。
@@ -98,6 +112,11 @@ export class AppRuntime {
   private checkpointV2?: CheckpointV2
   private runtimeHealthManager?: RuntimeHealthManager
   private comfyUI?: ComfyUIManager
+
+  // Runtime 子系统 (P0)
+  private executionRuntime?: ExecutionRuntime
+  private goalScheduler?: GoalScheduler
+  private feedbackCollector?: FeedbackCollector
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
     this.crashGuard = crashGuard ?? { flushMemory: null }
@@ -162,9 +181,10 @@ export class AppRuntime {
     const ttsService = new TtsService((state) => stateManager.update(state))
     const agentService = new AgentService(llmService, asrService, ttsService, eventBus, mcpManager)
     this.agentServiceRef = agentService
-    // 将 SubAgentPool 引用注入到 SkillAgentTools 全局
+    // 将 SubAgentPool 引用注入到 SkillAgentTools 和工具 DI 全局
     const { setSubAgentPool } = await import('../tool/definitions/SkillAgentTools')
     setSubAgentPool(agentService['subAgentPool'])
+    setToolSubAgentPool(agentService['subAgentPool'])
 
     const recoveryManager = new SessionRecoveryManager(join(WORKSPACE.evolution, 'recovery'))
     agentService.setRecoveryManager(recoveryManager)
@@ -172,7 +192,7 @@ export class AppRuntime {
     // 初始化 WorkflowScheduler
     const { WorkflowScheduler, setWorkflowScheduler } = await import('../workflow/WorkflowScheduler')
     const scheduler = new WorkflowScheduler({
-      runSubAgent: (goal, parentGoal, options) => agentService['subAgentPool'].spawn(goal, parentGoal, options),
+      runSubAgent: (goal, parentGoal, options) => agentService['subAgentPool'].spawn(goal, parentGoal, options, 'workflow'),
       runTool: async (name, args) => {
         const result = await mcpManager.callTool(name, args)
         return typeof result === 'string' ? result : JSON.stringify(result)
@@ -186,8 +206,8 @@ export class AppRuntime {
         return res.text()
       },
       injectPrompt: () => {},
-      getCompletedAgentResults: () =>
-        agentService['subAgentPool'].collectCompleted().map((r) => ({ id: r.id, summary: r.summary, error: r.error })),
+      waitForAgent: (agentId, timeoutMs) =>
+        agentService['subAgentPool'].waitForAgent(agentId, timeoutMs).then((r) => ({ id: r.id, summary: r.summary, error: r.error })),
       runPlan: (prompt) => {
         const planManager = agentService['planManager']
         return planManager.createPlan('Workflow Plan', prompt, []).id
@@ -392,11 +412,37 @@ export class AppRuntime {
     await this.runtimeHealthManager.init()
     this.healthChecker.register(this.runtimeHealthManager)
     await this.runtimeHealthManager.start()
+    // 工具 DI：注入健康管理器
+    setHealthManager(this.runtimeHealthManager)
     // Phase 4: ProcessManager 启动（此时开始健康检查）
     await this.processManager!.start()
     log('INFO', 'process_manager_ready')
     log('INFO', 'workerpool_ready', { workers: ['memory-indexer', 'verification', 'observer'] })
     log('INFO', 'health_checker_started')
+
+    // === P0: ExecutionRuntime 初始化 ===
+    this.executionRuntime = new ExecutionRuntime(llmService, mcpManager)
+    // 注入到 AgentService（使 runAgentTask 可走 Runtime）
+    agentService.setExecutionRuntime(this.executionRuntime)
+    this.feedbackCollector = new FeedbackCollector()
+    // 连接 FeedbackCollector → ExecutionRuntime
+    this.executionRuntime.onFeedback(async (event) => {
+      await this.feedbackCollector!.handle(event)
+    })
+    // 注入 ResourceBudget（检查）
+    this.executionRuntime.setResourceBudget(this.resourceBudget!)
+    // 注入 CapabilityEngine（通过 checkCallAllowed）
+    if (this.capabilityEngine) {
+      this.executionRuntime.setCapabilityChecker(async (tool: string, args: Record<string, unknown>) => {
+        const allowed = this.capabilityEngine!.checkCallAllowed('mcp.call', `tool:${tool}`, 'ExecutionRuntime')
+        return { allowed, reason: allowed ? undefined : `工具 ${tool} 不在当前能力边界内` }
+      })
+    }
+    // GoalScheduler
+    this.goalScheduler = new GoalScheduler()
+    this.goalScheduler.setRuntime(this.executionRuntime)
+    this.goalScheduler.start()
+    log('INFO', 'execution_runtime_initialized')
 
     // === Stage 6: Task Runtime & Memory Indexer ===
     this.taskRunner = new TaskRunner()
@@ -451,10 +497,23 @@ export class AppRuntime {
     agentService['identityContext'] = cognitiveService.identity.getFormattedContext()
     // Phase 5: 延迟注入 GoalGuardrail 的 GoalEngine（CognitiveService 在此阶段可用）
     agentService.goalGuardrail.setGoalEngine(cognitiveService.goals)
+    // 工具 DI：注入认知服务和人格状态管理器
+    setCognitiveService(cognitiveService)
+    setPersonaStateManager(agentService.getPersonaStateManager())
     log('INFO', 'cognitive_service_ready', {
       goals: cognitiveService.goals.getActiveGoals().length,
       tokenBalance: cognitiveService.tokenAccount.getBalance(),
     })
+
+    // 连接 GoalScheduler → GoalEngine
+    this.goalScheduler?.setGoalEngine(cognitiveService.goals)
+    // 连接 ExecutionRuntime → GoalEngine (allocate 阶段检查)
+    this.executionRuntime?.setGoalEngine(cognitiveService.goals)
+    // 连接 FeedbackCollector → IdentityModule
+    this.feedbackCollector?.setGoalEngine(cognitiveService.goals)
+    this.feedbackCollector?.setIdentityModule(cognitiveService.identity)
+    this.feedbackCollector?.setEngineeringMemory(memoryService.engineering)
+    this.feedbackCollector?.setMemoryService(memoryService)
 
     // Wire LLMKnowledgeExtractor into KnowledgeGraph
     const { LLMKnowledgeExtractor } = await import('../memory/extractors/LLMKnowledgeExtractor')
@@ -737,6 +796,8 @@ export class AppRuntime {
         await kernel.registerModule(evolutionModule)
         evolution.scheduleEvolution(2)
         evolutionRef.current = evolution
+        // 工具 DI：注入进化服务
+        setEvolutionService(evolution)
         log('INFO', 'evolution_service_started', { interval_hours: 2 })
       },
     })
@@ -778,6 +839,7 @@ export class AppRuntime {
           this.taskRunner,
         )
         insight.start()
+        setInsightService(insight)
         log('INFO', 'insight_service_started')
       },
     })
@@ -817,6 +879,7 @@ export class AppRuntime {
           llmService.chatJsonWithCode.bind(llmService),
         )
         creativity.start()
+        setCreativityService(creativity)
         log('INFO', 'creativity_service_started')
       },
     })

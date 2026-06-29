@@ -237,7 +237,9 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('workflow:run_updated', handler)
   },
 
-  onWorkflowRunStep: (callback: (data: { runId: string; stepId: string; status: string }) => void) => {
+  onWorkflowRunStep: (
+    callback: (data: { runId: string; stepId: string; status: string; error?: string; agentResult?: string }) => void,
+  ) => {
     const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('workflow:run_step', handler)
     return () => ipcRenderer.removeListener('workflow:run_step', handler)

@@ -31,6 +31,20 @@ import { centosExecTool, centosReadFileTool, centosWriteFileTool, centosGrepTool
 import { spawnSkillAgentTool } from './definitions/SkillAgentTools'
 import { socialPipelineTool } from './definitions/SocialPipelineTool'
 import { queryTrendsTool } from './definitions/TrendQueryTool'
+import { createGoalTool, listGoalsTool, updateGoalTool } from './definitions/GoalTools'
+import { listStrategiesTool, createStrategyTool } from './definitions/StrategyTools'
+import { getTokenStatusTool } from './definitions/TokenTool'
+import { getIdentityTool } from './definitions/IdentityTool'
+import { getPersonaStateTool } from './definitions/PersonaTool'
+import { runSelfReviewTool } from './definitions/SelfReviewTool'
+import { getSystemHealthTool } from './definitions/HealthTool'
+import { triggerCreativityTool, triggerDreamCycleTool, listIdeasTool } from './definitions/CreativityTools'
+import { triggerInsightAnalysisTool, listInsightsTool } from './definitions/InsightTools'
+import { getEvolutionStatusTool, triggerEvolutionTool, setEvolutionSafetyModeTool } from './definitions/EvolutionTools'
+import { spawnAgentTool, listAgentsTool, interruptAgentTool } from './definitions/AgentPoolTools'
+import { runLocalModelTool } from './definitions/LocalModelTool'
+import { triggerCollectTool, triggerFermentTool, triggerDeepResearchTool } from './definitions/ObserverTools'
+import { githubTrendsTool } from './definitions/GitHubTool'
 
 export function getAllTools(): Tool[] {
   return [
@@ -77,6 +91,35 @@ export function getAllTools(): Tool[] {
     centosSearchFilesTool as Tool,
     socialPipelineTool as Tool,
     queryTrendsTool as Tool,
+    // Phase 1: 认知与内省
+    createGoalTool as Tool,
+    listGoalsTool as Tool,
+    updateGoalTool as Tool,
+    listStrategiesTool as Tool,
+    createStrategyTool as Tool,
+    getTokenStatusTool as Tool,
+    getIdentityTool as Tool,
+    getPersonaStateTool as Tool,
+    runSelfReviewTool as Tool,
+    getSystemHealthTool as Tool,
+    // Phase 2: 创意、洞察与进化
+    triggerCreativityTool as Tool,
+    triggerDreamCycleTool as Tool,
+    listIdeasTool as Tool,
+    triggerInsightAnalysisTool as Tool,
+    listInsightsTool as Tool,
+    getEvolutionStatusTool as Tool,
+    triggerEvolutionTool as Tool,
+    setEvolutionSafetyModeTool as Tool,
+    // Phase 3: 扩展能力
+    spawnAgentTool as Tool,
+    listAgentsTool as Tool,
+    interruptAgentTool as Tool,
+    runLocalModelTool as Tool,
+    triggerCollectTool as Tool,
+    triggerFermentTool as Tool,
+    triggerDeepResearchTool as Tool,
+    githubTrendsTool as Tool,
   ]
 }
 
