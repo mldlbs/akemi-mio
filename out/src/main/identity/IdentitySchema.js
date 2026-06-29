@@ -1,0 +1,53 @@
+/**
+ * IdentityModule 类型定义
+ *
+ * CoreIdentity — 从 CONSTITUTION.md 冷启动解析的不可变核心自我认知
+ * EvolvedTrait — 运行时观测到的可进化特质（随交互积累更新）
+ * GrowthMetrics — 运行统计数据，用于驱动 trait 演化
+ */
+export const DEFAULT_TRAITS = [
+    { name: 'goal_alignment', value: 0.7, trend: 'stable', sampleCount: 0, updatedAt: Date.now() },
+    { name: 'tool_efficiency', value: 0.6, trend: 'stable', sampleCount: 0, updatedAt: Date.now() },
+    { name: 'response_quality', value: 0.7, trend: 'stable', sampleCount: 0, updatedAt: Date.now() },
+];
+// ───── Row mapping helpers ─────
+export function rowToCoreIdentity(row) {
+    return {
+        constitutionHash: row.constitution_hash,
+        name: row.name,
+        role: row.role,
+        personality: safeJsonParse(row.personality, []),
+        capabilities: safeJsonParse(row.capabilities, []),
+        constraints: safeJsonParse(row.constraints, []),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+    };
+}
+export function rowToEvolvedTrait(row) {
+    return {
+        name: row.name,
+        value: row.value,
+        trend: row.trend,
+        sampleCount: row.sample_count,
+        updatedAt: row.updated_at,
+    };
+}
+export function rowToGrowthMetrics(row) {
+    return {
+        sessionsCompleted: row.sessions_completed,
+        toolsUsed: row.tools_used,
+        goalsCompleted: row.goals_completed,
+        goalsDrifted: row.goals_drifted,
+        avgScore: row.avg_score,
+        constitutionChecksum: row.constitution_checksum,
+        lastUpdated: row.last_updated,
+    };
+}
+function safeJsonParse(val, fallback) {
+    try {
+        return JSON.parse(val);
+    }
+    catch {
+        return fallback;
+    }
+}

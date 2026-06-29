@@ -30,7 +30,7 @@ describe('Evolution Pipeline 集成测试', () => {
     resetEvents()
     tempDir = makeTempDir()
     agentService = {
-      runSelfTask: vi.fn().mockResolvedValue({ success: true, summary: '分析完成' }),
+      runAgentTask: vi.fn().mockResolvedValue({ success: true, summary: '分析完成' }),
       isBusy: vi.fn(() => false),
       abortSelfTask: vi.fn(),
     }

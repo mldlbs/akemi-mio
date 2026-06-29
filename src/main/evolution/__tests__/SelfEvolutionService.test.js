@@ -172,7 +172,7 @@ function createMockAgentService() {
     let lastPrompt = '';
     return {
         isBusy: vi.fn(() => busy),
-        runSelfTask: vi.fn(async (task) => {
+        runAgentTask: vi.fn(async (task) => {
             lastPrompt = task;
             busy = true;
             await Promise.resolve();
@@ -240,7 +240,7 @@ describe('SelfEvolutionService — 集成测试', () => {
             });
             warmupReady(service);
             await service.runAnalysisCycle();
-            expect(mockAgent.runSelfTask).toHaveBeenCalledTimes(1);
+            expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(1);
             const prompt = mockAgent._lastPrompt();
             expect(prompt).toContain('分析模式');
             expect(prompt).toContain('禁止 write_file');
@@ -335,7 +335,7 @@ describe('SelfEvolutionService — 集成测试', () => {
     describe('tryRun 超时和失败处理', () => {
         it('连续分析失败超过 maxFailures（3次）后应跳过分析', async () => {
             const mockAgent = createMockAgentService();
-            mockAgent.runSelfTask = vi.fn(async () => ({
+            mockAgent.runAgentTask = vi.fn(async () => ({
                 success: false,
                 summary: '分析失败（mock）',
             }));
@@ -348,15 +348,15 @@ describe('SelfEvolutionService — 集成测试', () => {
             for (let i = 0; i < 3; i++) {
                 await service.runAnalysisCycle();
             }
-            const callCountBeforeSkip = mockAgent.runSelfTask.mock.calls.length;
+            const callCountBeforeSkip = mockAgent.runAgentTask.mock.calls.length;
             await service.runAnalysisCycle();
-            expect(mockAgent.runSelfTask).toHaveBeenCalledTimes(callCountBeforeSkip);
+            expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(callCountBeforeSkip);
             expect(service.getConsecutiveFailures()).toBeGreaterThanOrEqual(3);
         });
         it('失败后成功一次应重置连续失败计数', async () => {
             const mockAgent = createMockAgentService();
             let callCount = 0;
-            mockAgent.runSelfTask = vi.fn(async () => {
+            mockAgent.runAgentTask = vi.fn(async () => {
                 callCount++;
                 if (callCount <= 2)
                     return { success: false, summary: '失败' };
@@ -385,7 +385,7 @@ describe('SelfEvolutionService — 集成测试', () => {
             });
             warmupReady(service);
             await service.runAnalysisCycle();
-            expect(mockAgent.runSelfTask).toHaveBeenCalledTimes(1);
+            expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(1);
         });
     });
     describe('错误恢复', () => {
@@ -405,7 +405,7 @@ describe('SelfEvolutionService — 集成测试', () => {
     describe('拆分错误计数器', () => {
         it('分析失败应累积 tryRunFailures，不影响 executeFailures', async () => {
             const mockAgent = createMockAgentService();
-            mockAgent.runSelfTask = vi.fn(async () => ({
+            mockAgent.runAgentTask = vi.fn(async () => ({
                 success: false,
                 summary: '分析失败（mock）',
             }));
@@ -423,7 +423,7 @@ describe('SelfEvolutionService — 集成测试', () => {
     describe('冷却恢复定时器', () => {
         it('连续 3 次分析失败后应设置冷却时间', async () => {
             const mockAgent = createMockAgentService();
-            mockAgent.runSelfTask = vi.fn(async () => ({
+            mockAgent.runAgentTask = vi.fn(async () => ({
                 success: false,
                 summary: '失败',
             }));
@@ -439,13 +439,13 @@ describe('SelfEvolutionService — 集成测试', () => {
             const cooldown = service.getRecoveryCooldown();
             expect(cooldown.active).toBe(true);
             expect(cooldown.remainingMs).toBeGreaterThan(0);
-            const callCountBeforeSkip = mockAgent.runSelfTask.mock.calls.length;
+            const callCountBeforeSkip = mockAgent.runAgentTask.mock.calls.length;
             await service.runAnalysisCycle();
-            expect(mockAgent.runSelfTask).toHaveBeenCalledTimes(callCountBeforeSkip);
+            expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(callCountBeforeSkip);
         });
         it('冷却时间过后应自动恢复', async () => {
             const mockAgent = createMockAgentService();
-            mockAgent.runSelfTask = vi.fn(async () => ({
+            mockAgent.runAgentTask = vi.fn(async () => ({
                 success: false,
                 summary: '失败',
             }));
@@ -471,7 +471,7 @@ describe('SelfEvolutionService — 集成测试', () => {
             const existingPlan = makePlan('计数测试', 3, 0);
             const mockAgent = createMockAgentService();
             const mockPlan = createMockPlanManager(existingPlan);
-            mockAgent.runSelfTask = vi.fn(async () => ({
+            mockAgent.runAgentTask = vi.fn(async () => ({
                 success: false,
                 summary: '步骤执行失败（mock）',
             }));
@@ -514,7 +514,7 @@ describe('SelfEvolutionService — 集成测试', () => {
                 cognitiveCtx: '',
             };
             await service.executor.executeNextStep(execCtx);
-            expect(mockAgent.runSelfTask).toHaveBeenCalledTimes(0);
+            expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(0);
             expect(existingPlan.steps[0].status).toBe('pending');
         });
         it('safetyMode=auto 时 executor 应正常执行', async () => {
@@ -535,7 +535,7 @@ describe('SelfEvolutionService — 集成测试', () => {
                 cognitiveCtx: '',
             };
             await service.executor.executeNextStep(execCtx);
-            expect(mockAgent.runSelfTask).toHaveBeenCalledTimes(1);
+            expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(1);
         });
         it('failed 步骤应自动重试（最多 3 次）', async () => {
             const existingPlan = makePlan('重试测试', 1, 0);
@@ -543,7 +543,7 @@ describe('SelfEvolutionService — 集成测试', () => {
             const mockPlan = createMockPlanManager(existingPlan);
             mockPlan.lock.run = async (fn) => fn();
             let callCount = 0;
-            mockAgent.runSelfTask = vi.fn(async () => {
+            mockAgent.runAgentTask = vi.fn(async () => {
                 callCount++;
                 if (callCount < 3)
                     return { success: false, summary: '临时失败' };
@@ -569,7 +569,7 @@ describe('SelfEvolutionService — 集成测试', () => {
             const mockAgent = createMockAgentService();
             const mockPlan = createMockPlanManager(existingPlan);
             mockPlan.lock.run = async (fn) => fn();
-            mockAgent.runSelfTask = vi.fn(async () => ({
+            mockAgent.runAgentTask = vi.fn(async () => ({
                 success: false,
                 summary: '永远失败',
             }));
@@ -592,7 +592,7 @@ describe('SelfEvolutionService — 集成测试', () => {
             const mockAgent = createMockAgentService();
             const mockPlan = createMockPlanManager(existingPlan);
             mockPlan.lock.run = async (fn) => fn();
-            mockAgent.runSelfTask = vi.fn(async () => ({
+            mockAgent.runAgentTask = vi.fn(async () => ({
                 success: false,
                 summary: '步骤失败',
             }));
@@ -629,7 +629,7 @@ describe('SelfEvolutionService — 集成测试', () => {
             service.setSafetyMode('auto');
             const execCtx = { planId: planA.id, stepIndex: 0, stepDescription: planA.steps[0].description, planCtx: '', cognitiveCtx: '' };
             await service.executor.executeNextStep(execCtx);
-            expect(mockAgent.runSelfTask).toHaveBeenCalledTimes(1);
+            expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(1);
         });
     });
     describe('状态持久化 — saveState/loadState 闭环', () => {

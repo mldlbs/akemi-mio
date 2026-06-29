@@ -7,7 +7,7 @@ describe('EvolutionExecutor', () => {
     let planManager;
     beforeEach(() => {
         agentService = {
-            runSelfTask: vi.fn().mockResolvedValue({ success: true, summary: 'OK' }),
+            runAgentTask: vi.fn().mockResolvedValue({ success: true, summary: 'OK' }),
             isBusy: vi.fn(() => false),
             abortSelfTask: vi.fn(),
         };

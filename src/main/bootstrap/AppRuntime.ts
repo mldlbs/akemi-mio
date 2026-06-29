@@ -36,6 +36,7 @@ import { PluginLoader, toolRegistry } from '../plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '../skill'
 import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
 import { setupStartupLogging, createWindow, setupWallpaperListener } from '../core/Lifecycle'
+import { initTray, destroyTray } from '../core/TrayManager'
 import { initUpdater, setUpdateWindow } from '../updater/UpdaterService'
 import { initDatabase, closeDatabase } from '../db/connection'
 import { ConstitutionEngine } from '../constitution'
@@ -229,6 +230,9 @@ export class AppRuntime {
         win.webContents.send('tts:play_audio', filePath)
       }
     })
+
+    // 系统托盘 — 关闭窗口时隐藏到托盘而非退出
+    initTray(() => getMainWindow())
 
     // UIBridge: 将 EventBus 事件桥接到 Renderer 窗口
     const uiBridge = new UIBridge()
@@ -586,9 +590,18 @@ export class AppRuntime {
     })
 
     // === before-quit ===
-    app.on('before-quit', () => this.shutdown())
+    app.on('before-quit', () => {
+      this.shutdown()
+      destroyTray()
+    })
     app.on('window-all-closed', () => {
-      if (process.platform !== 'darwin') app.quit()
+      // 关闭窗口时隐藏到托盘，不退出进程
+      if (process.platform !== 'darwin') {
+        const win = getMainWindow()
+        if (win && !win.isDestroyed()) {
+          win.hide()
+        }
+      }
     })
   }
 

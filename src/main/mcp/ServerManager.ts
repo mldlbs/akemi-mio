@@ -580,10 +580,15 @@ export class ServerManager {
       budget = { attempts: [], disabled: false }
       this.restartBudgets.set(name, budget)
     }
-    if (budget.disabled) return false
     const now = Date.now()
     // 清理过期记录
     budget.attempts = budget.attempts.filter((t) => now - t < this.RESTART_BUDGET_WINDOW)
+    // 如果 disabled 但所有记录已过期，自动恢复
+    if (budget.disabled && budget.attempts.length === 0) {
+      budget.disabled = false
+      log('INFO', 'mcp_restart_budget_recovered', { name })
+    }
+    if (budget.disabled) return false
     if (budget.attempts.length >= this.RESTART_BUDGET_MAX) {
       budget.disabled = true
       log('ERROR', 'mcp_restart_budget_exhausted', { name, maxPerHour: this.RESTART_BUDGET_MAX })

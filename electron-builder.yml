@@ -5,7 +5,8 @@ directories:
   buildResources: build
 afterPack: build/afterPack.js
 files:
-  - "**/*"
+  - "out/**/*"
+  - "package.json"
   - "!models/**"
   - "!out/**/*.map"
   - "!docs/**"

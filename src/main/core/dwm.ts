@@ -5,15 +5,15 @@ import { log } from '../logger/Logger'
 const DWMWA_NCRENDERING_POLICY = 2
 const DWMNCRP_DISABLED = 1
 
-let dwmFunc: ((hwnd: Buffer, attr: number, value: Buffer, size: number) => number) | null = null
+let lib: any = null
 
 function getDwmFunc(): (hwnd: Buffer, attr: number, value: Buffer, size: number) => number {
-  if (!dwmFunc) {
-    const lib: any = koffi.load('dwmapi.dll')
+  if (!lib) {
+    lib = koffi.load('dwmapi.dll')
     lib.func('DwmSetWindowAttribute', 'long', ['void*', 'int', 'void*', 'int'])
-    dwmFunc = lib.DwmSetWindowAttribute as (hwnd: Buffer, attr: number, value: Buffer, size: number) => number
   }
-  return dwmFunc
+  // 每次调用时重新访问属性，避免 koffi 代理绑定丢失
+  return (...args) => lib.DwmSetWindowAttribute(...args)
 }
 
 /**

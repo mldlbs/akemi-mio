@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync, unlinkSync } from 'fs'
 import { join, dirname } from 'path'
+import * as os from 'os'
 import { WORKSPACE } from '../config/index'
 import { eventBus } from '../core/EventBus'
 import { log } from '../logger/Logger'
@@ -63,6 +64,33 @@ export class WorkflowStore {
 
   deleteDefinition(id: string): boolean {
     const path = join(DEFINITIONS_DIR, `${id}.json`)
+    if (!existsSync(path)) return false
+    try {
+      unlinkSync(path)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  duplicateDefinition(id: string): WorkflowDef | null {
+    const existing = this.getDefinition(id)
+    if (!existing) return null
+    const copy: WorkflowDef = {
+      ...existing,
+      id: `wf_dup_${Date.now()}`,
+      name: `${existing.name} (副本)`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      enabled: false,
+      steps: existing.steps.map((s) => ({ ...s, id: `s_dup_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` })),
+    }
+    this.saveDefinition(copy)
+    return copy
+  }
+
+  deleteRun(runId: string): boolean {
+    const path = join(RUNS_DIR, `${runId}.json`)
     if (!existsSync(path)) return false
     try {
       unlinkSync(path)
@@ -149,5 +177,13 @@ export class WorkflowStore {
   }
 }
 
-// ── Module-level singleton ──
 export const workflowStore = new WorkflowStore()
+
+/** 解析本次运行的成果输出根目录
+ *  优先使用 def.outputDir（支持 ~/Desktop 扩展），否则落到 runs/wf_{名称}/{时间戳}
+ */
+export function resolveRunOutputDir(def: WorkflowDef, run: WorkflowRun): string {
+  const base = def.outputDir ? def.outputDir.replace(/^~/, os.homedir()) : join(RUNS_DIR, `wf_${def.name}`)
+  const ts = new Date(run.startedAt).toISOString().slice(0, 16).replace('T', 'T')
+  return join(base, ts)
+}

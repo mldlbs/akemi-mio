@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 const electronAPI = {
   closeWindow: (): Promise<{ success: boolean }> => ipcRenderer.invoke('window:close'),
+  minimizeWindow: (): Promise<{ success: boolean }> => ipcRenderer.invoke('window:minimize'),
 
   transcribe: (audio: ArrayBuffer): Promise<{ text: string; request_id?: string; error?: string }> =>
     ipcRenderer.invoke('asr:transcribe', audio),
@@ -297,9 +298,17 @@ const electronAPI = {
   disableWorkflowDefinition: (id: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('workflow:disableDefinition', id),
   stopWorkflowRun: (runId: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('workflow:stopRun', runId),
+  duplicateWorkflowDefinition: (id: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('workflow:duplicateDefinition', id),
+  deleteWorkflowRun: (runId: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('workflow:deleteRun', runId),
 
   // ── Writing Status ──
   getWritingStatus: (): Promise<{ stories: any[]; totalStories: number; totalScenes: number }> => ipcRenderer.invoke('writing:getStatus'),
+
+  // ── Evolution ──
+  evolutionStatus: (): Promise<{ lastRun: number | null; consecutiveFailures: number; isBusy: boolean }> =>
+    ipcRenderer.invoke('evolution:status'),
+  evolutionTrigger: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('evolution:trigger'),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)

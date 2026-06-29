@@ -1,0 +1,2 @@
+import { type TaskHandler } from '../types';
+export declare const evolutionTickHandler: TaskHandler;

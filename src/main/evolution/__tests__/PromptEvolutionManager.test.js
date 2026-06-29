@@ -81,7 +81,7 @@ describe('PromptEvolutionManager', () => {
     });
     it('llmEvolvePrompt 失败时回退到硬编码模式', async () => {
         const failingAgent = {
-            runSelfTask: async () => {
+            runAgentTask: async () => {
                 throw new Error('timeout');
             },
         };
@@ -91,7 +91,7 @@ describe('PromptEvolutionManager', () => {
     });
     it('llmEvolvePrompt 使用 LLM 输出时解析反模式指令', async () => {
         const mockAgent = {
-            runSelfTask: async () => ({ success: true, summary: '- 第一条指令\n- 第二条指令\n' }),
+            runAgentTask: async () => ({ success: true, summary: '- 第一条指令\n- 第二条指令\n' }),
         };
         const pv = await manager.llmEvolvePrompt('analysis_prompt', '退化', '失败摘要', mockAgent);
         expect(pv).not.toBeNull();

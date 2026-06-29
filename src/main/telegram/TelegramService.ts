@@ -426,7 +426,7 @@ export class TelegramService {
       if (p.planTitle) {
         lines.push(`计划: ${p.planTitle}${p.planProgress ? ` (${p.planProgress})` : ''}`)
       }
-      const summary = (p.summary || '').slice(0, 600)
+      const summary = (p.summary || '').slice(0, 1500)
       if (summary) lines.push(`\n📝 ${summary}`)
       this.enqueueReply(chatId, lines.join('\n'), 'evolution')
     })

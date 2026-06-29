@@ -1,0 +1,9 @@
+export { EventBus, eventBus } from './EventBus';
+export type { EventName, EventPayload } from './EventBus';
+export { StateManager } from './StateManager';
+export type { UIState } from './StateManager';
+export { Kernel, KERNEL_PREFIXES, KERNEL_NAMES } from './Kernel';
+export type { KernelModule } from './Kernel';
+export { SystemBus, systemBus } from './SystemBus';
+export type { QueryChannel, CommandChannel, QueryContext, AggregatedResult, CommandResult } from './SystemBus';
+export type { ISubsystem, IModule, SubsystemState, HealthCheckResult } from './lifecycle/types';

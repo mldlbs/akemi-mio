@@ -694,25 +694,9 @@
   font-size: var(--fs-small);
   font-weight: 500;
   color: var(--text-muted);
-  margin: 0 0 var(--space-md) 0;
+  margin: 0;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-}
-
-.wf-pipeline-status-text {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--space-sm);
-  font-size: var(--fs-small);
-}
-
-.wf-progress-running {
-  color: var(--accent);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
 }
 
 .wf-elapsed {
@@ -720,22 +704,6 @@
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
   margin-left: 4px;
-}
-
-.wf-progress-failed {
-  color: var(--red);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
-}
-
-.wf-progress-done {
-  color: var(--green);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
 }
 
 .wf-progress-pct {
@@ -766,173 +734,6 @@
 
 .wf-cancel-btn:hover {
   background: color-mix(in srgb, var(--red) 15%, transparent);
-}
-
-.wf-step-activity {
-  margin-top: var(--space-sm);
-  padding: 6px 10px;
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.wf-step-activity code {
-  font-size: var(--fs-small);
-  color: var(--text-muted);
-  white-space: nowrap;
-  animation: wf-activity-scroll 12s linear infinite;
-  display: inline-block;
-}
-
-@keyframes wf-activity-scroll {
-  0% { transform: translateX(100%); }
-  10% { transform: translateX(0); }
-  90% { transform: translateX(0); }
-  100% { transform: translateX(-100%); }
-}
-
-.wf-pipeline-track {
-  position: relative;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  margin: 0 8px;
-}
-
-/* 背景轨道 */
-.wf-pipeline-track::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--bg-glass-strong);
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-/* 流动填充 — 从左侧按进度增长 */
-.wf-pipeline-fill {
-  position: absolute;
-  left: 0;
-  height: 3px;
-  border-radius: 2px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: linear-gradient(90deg, var(--accent) 0%, oklch(0.55 0.10 200) 100%);
-  transition: width var(--duration-slow) var(--ease-glass);
-  z-index: 1;
-}
-
-/* 填充流动光效 — 仅运行中 (wf-step-running appears in the steps list) */
-.wf-pipeline.running .wf-pipeline-fill {
-  background: linear-gradient(
-    90deg,
-    var(--accent) 0%,
-    oklch(0.60 0.12 180) 40%,
-    var(--accent) 60%,
-    oklch(0.60 0.12 180) 100%
-  );
-  background-size: 200% 100%;
-  animation: pipeline-flow 2s linear infinite;
-}
-
-@keyframes pipeline-flow {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-.wf-pipeline-stages {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  position: relative;
-  z-index: 2;
-}
-
-.wf-pipeline-stage {
-  display: flex;
-  align-items: center;
-  flex: 1;
-  position: relative;
-}
-
-.wf-stage-dot {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-xs);
-  flex: 1;
-  position: relative;
-}
-
-/* 圆点 */
-.wf-stage-dot-inner {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--bg-glass-strong);
-  border: 2px solid var(--border-glass);
-  transition: all var(--duration-normal) var(--ease-glass);
-  position: relative;
-  z-index: 2;
-}
-
-.wf-stage-dot.done .wf-stage-dot-inner {
-  background: oklch(0.52 0.10 150);
-  border-color: oklch(0.52 0.10 150);
-  box-shadow: 0 0 6px oklch(0.52 0.10 150 / 0.3);
-}
-
-.wf-stage-dot.current .wf-stage-dot-inner {
-  width: 18px;
-  height: 18px;
-  background: var(--accent);
-  border-color: var(--accent);
-  box-shadow: 0 0 12px var(--accent-glow);
-  animation: pulse-stage 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse-stage {
-  0%, 100% { box-shadow: 0 0 8px var(--accent-glow); transform: scale(1); }
-  50% { box-shadow: 0 0 20px var(--accent-glow); transform: scale(1.1); }
-}
-
-.wf-stage-label {
-  font-size: 10px;
-  color: var(--text-muted);
-  text-align: center;
-  white-space: nowrap;
-  transition: color var(--duration-normal) var(--ease-glass);
-}
-
-.wf-stage-dot.done .wf-stage-label,
-.wf-stage-dot.current .wf-stage-label,
-.wf-stage-dot.failed .wf-stage-label {
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.wf-stage-dot.failed .wf-stage-dot-inner {
-  background: oklch(0.55 0.14 16);
-  border-color: oklch(0.55 0.14 16);
-  box-shadow: 0 0 6px oklch(0.55 0.14 16 / 0.3);
-}
-
-.wf-stage-dot.current .wf-stage-label {
-  color: var(--accent);
-}
-
-.wf-stage-error {
-  font-size: 9px;
-  color: oklch(0.55 0.14 16);
-  text-align: center;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: help;
 }
 
 /* ─── OTPAR 认知循环组 ─── */
@@ -1902,4 +1703,736 @@
   width: 14px;
   height: 14px;
   cursor: pointer;
+}
+
+/* ═══════════════════════════════════════
+   Workflow UX Upgrades
+   ═══════════════════════════════════════ */
+
+/* ─── Action bar: search + action ─── */
+.wf-action-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.wf-search-box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 6px 12px;
+  background: var(--bg-glass-strong);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  transition: border-color var(--duration-fast) var(--ease-glass),
+              box-shadow var(--duration-fast) var(--ease-glass);
+}
+
+.wf-search-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.wf-search-box > i {
+  font-size: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.wf-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--fs-small);
+  font-family: inherit;
+  outline: none;
+}
+
+.wf-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.wf-search-clear {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+
+.wf-search-clear:hover {
+  color: var(--text-primary);
+}
+
+.wf-search-clear-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0 4px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ─── Card improvements ─── */
+.wf-plan-card-main {
+  cursor: pointer;
+  user-select: none;
+}
+
+.wf-plan-title-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.wf-plan-header-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+.wf-plan-expand-icon {
+  font-size: 18px;
+  color: var(--text-muted);
+  transition: transform var(--duration-fast) var(--ease-glass);
+}
+
+.wf-plan-card:hover .wf-plan-expand-icon {
+  color: var(--text-secondary);
+}
+
+/* ─── Run button in card ─── */
+.wf-editor-btn-run-plan {
+  background: oklch(0.52 0.10 150);
+  color: white;
+  border-color: oklch(0.52 0.10 150);
+  font-weight: 500;
+}
+
+.wf-editor-btn-run-plan:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.wf-editor-btn-run-plan:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ─── Pipeline badge ─── */
+.wf-pipeline-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: oklch(0.60 0.12 12 / 0.12);
+  color: var(--accent);
+  border: 1px solid var(--accent-glow);
+  animation: badge-pulse 2s ease-in-out infinite;
+  margin-left: var(--space-sm);
+}
+
+.wf-pipeline-title-group {
+  display: flex;
+  align-items: center;
+}
+
+/* ─── Progress section ─── */
+.wf-pipeline-progress-main {
+  margin-bottom: var(--space-md);
+}
+
+.wf-pipeline-progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-sm);
+}
+
+.wf-pipeline-step-label {
+  font-size: var(--fs-small);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.wf-pipeline-step-label i {
+  color: var(--accent);
+}
+
+.wf-pipeline-progress-stats {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--fs-small);
+}
+
+/* ─── Progress bar refinements ─── */
+.wf-progress-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-glass-strong);
+  overflow: hidden;
+}
+
+.wf-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent) 0%, oklch(0.55 0.10 200) 100%);
+  transition: width var(--duration-slow) var(--ease-glass);
+  position: relative;
+}
+
+.wf-progress-fill.running {
+  background: linear-gradient(90deg, var(--accent) 0%, oklch(0.60 0.12 180) 40%, var(--accent) 60%, oklch(0.60 0.12 180) 100%);
+  background-size: 200% 100%;
+  animation: pipeline-flow 2s linear infinite;
+}
+
+.wf-progress-fill.failed {
+  background: linear-gradient(90deg, oklch(0.55 0.14 16) 0%, oklch(0.50 0.12 10) 100%);
+}
+
+.wf-progress-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, oklch(1 0 0 / 0.18) 50%, transparent 100%);
+  animation: progress-shimmer 2s ease-in-out infinite;
+}
+
+@keyframes progress-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes pipeline-flow {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ─── Pipeline track line ─── */
+.wf-pipeline-track {
+  position: relative;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  margin: 0 4px;
+}
+
+.wf-pipeline-track-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-glass-strong);
+  top: 18px;
+}
+
+.wf-pipeline-stages {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  position: relative;
+  z-index: 2;
+}
+
+.wf-pipeline-stage {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  position: relative;
+}
+
+.wf-pipeline-stage-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  position: relative;
+}
+
+/* ─── Stage dots ─── */
+.wf-stage-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-glass-strong);
+  border: 2px solid var(--border-glass);
+  transition: all var(--duration-normal) var(--ease-glass);
+  position: relative;
+  z-index: 2;
+  font-size: 12px;
+  color: transparent;
+}
+
+.wf-stage-dot.done {
+  background: oklch(0.52 0.10 150);
+  border-color: oklch(0.52 0.10 150);
+  color: white;
+  box-shadow: 0 0 6px oklch(0.52 0.10 150 / 0.3);
+}
+
+.wf-stage-dot.current {
+  width: 28px;
+  height: 28px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  box-shadow: 0 0 12px var(--accent-glow);
+  animation: pulse-stage 1.5s ease-in-out infinite;
+}
+
+.wf-stage-dot.failed {
+  background: oklch(0.55 0.14 16);
+  border-color: oklch(0.55 0.14 16);
+  color: white;
+  box-shadow: 0 0 6px oklch(0.55 0.14 16 / 0.3);
+}
+
+.wf-stage-dot-inner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.4;
+}
+
+@keyframes pulse-stage {
+  0%, 100% { box-shadow: 0 0 8px var(--accent-glow); transform: scale(1); }
+  50% { box-shadow: 0 0 20px var(--accent-glow); transform: scale(1.1); }
+}
+
+.wf-stage-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--duration-normal) var(--ease-glass);
+}
+
+.wf-stage-dot.done + .wf-stage-label,
+.wf-stage-dot.current + .wf-stage-label,
+.wf-stage-dot.failed + .wf-stage-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.wf-stage-dot.current + .wf-stage-label {
+  color: var(--accent);
+}
+
+.wf-stage-connector {
+  flex: 1;
+  height: 3px;
+  background: var(--bg-glass-strong);
+  margin: 0 -1px;
+  align-self: center;
+  margin-bottom: 24px;
+  transition: background var(--duration-normal) var(--ease-glass);
+}
+
+.wf-stage-connector.done {
+  background: oklch(0.52 0.10 150);
+}
+
+.wf-stage-connector.active {
+  background: var(--accent);
+  animation: connector-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes connector-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.wf-stage-error {
+  font-size: 9px;
+  color: oklch(0.55 0.14 16);
+  text-align: center;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
+
+/* ─── Pipeline log area ─── */
+.wf-pipeline-log {
+  margin-top: var(--space-md);
+  background: oklch(0.15 0.01 250);
+  border: 1px solid oklch(0.25 0.01 250);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.wf-pipeline-log-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 6px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  color: oklch(0.65 0 0);
+  background: oklch(0.18 0.01 250);
+  border-bottom: 1px solid oklch(0.25 0.01 250);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.wf-pipeline-log-body {
+  padding: 8px 12px;
+  max-height: 160px;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: oklch(0.72 0.01 150);
+}
+
+.wf-pipeline-log-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: log-line-in 0.15s var(--ease-glass) both;
+}
+
+@keyframes log-line-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ─── History improvements ─── */
+.wf-history-count {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--bg-glass-strong);
+  color: var(--text-muted);
+  margin-left: var(--space-xs);
+}
+
+.wf-history-toggle-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.wf-history-clear-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+
+.wf-history-clear-btn:hover {
+  color: oklch(0.55 0.14 16);
+}
+
+.wf-history-filters {
+  display: flex;
+  gap: var(--space-xs);
+  margin-top: var(--space-md);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--border-glass);
+}
+
+.wf-history-filter-tag {
+  padding: 3px 12px;
+  border: 1px solid var(--border-glass);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-caption);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+
+.wf-history-filter-tag:hover {
+  border-color: var(--border-glass-hover);
+  color: var(--text-secondary);
+}
+
+.wf-history-filter-tag.active {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.wf-history-empty {
+  padding: var(--space-lg);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--fs-small);
+}
+
+.wf-history-item-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.wf-history-time {
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+}
+
+.wf-history-item-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
+.wf-history-status-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wf-history-status-badge.done {
+  background: oklch(0.52 0.10 150 / 0.12);
+  color: oklch(0.52 0.10 150);
+}
+
+.wf-history-status-badge.failed {
+  background: oklch(0.55 0.14 16 / 0.10);
+  color: oklch(0.55 0.14 16);
+}
+
+.wf-history-status-badge.pending {
+  background: var(--bg-glass-strong);
+  color: var(--text-muted);
+}
+
+/* ─── Override duplicated .wf-pipeline-track (keep only our new structure) ─── */
+.workflow-slot-content .wf-pipeline-track {
+  height: 56px;
+  margin: 0 4px;
+}
+
+.workflow-slot-content .wf-pipeline-track::before {
+  display: none;
+}
+
+/* ═══════════════════════════════════════
+   Workflow UX Upgrades — Part 2
+   ═══════════════════════════════════════ */
+
+/* ─── Success feedback ─── */
+.wf-editor-success {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-xl);
+  background: oklch(0.52 0.10 150 / 0.08);
+  color: oklch(0.52 0.10 150);
+  font-size: var(--fs-small);
+  animation: slot-section-in 0.2s var(--ease-glass) both;
+}
+
+/* ─── Preset quick-start cards ─── */
+.wf-presets {
+  padding: var(--space-lg);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-panel);
+}
+
+.wf-presets-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.wf-presets-hint {
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+}
+
+.wf-presets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-sm);
+}
+
+.wf-preset-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--bg-glass-strong);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-card);
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-glass);
+}
+
+.wf-preset-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px oklch(0 0 0 / 0.08);
+}
+
+.wf-preset-card-icon {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 10px;
+  background: var(--accent-glow);
+  border: 1px solid var(--accent-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--accent);
+}
+
+.wf-preset-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wf-preset-card-name {
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.wf-preset-card-desc {
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-preset-card-steps {
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: var(--bg-glass);
+  flex-shrink: 0;
+}
+
+.wf-preset-card-play {
+  font-size: 18px;
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-glass), transform var(--duration-fast) var(--ease-glass);
+}
+
+.wf-preset-card:hover .wf-preset-card-play {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+/* ─── Duplicate button ─── */
+.wf-editor-btn-dup {
+  font-size: var(--fs-small);
+  color: oklch(0.55 0.10 200);
+}
+
+.wf-editor-btn-dup:hover:not(:disabled) {
+  background: oklch(0.55 0.10 200 / 0.12);
+}
+
+/* ─── History action buttons ─── */
+.wf-history-actions {
+  display: flex;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-glass);
+}
+
+.wf-history-item:hover .wf-history-actions {
+  opacity: 1;
+}
+
+.wf-history-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-glass);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+
+.wf-history-action-btn:hover {
+  background: var(--bg-glass-hover);
+  color: var(--text-secondary);
+  border-color: var(--border-glass-hover);
+}
+
+.wf-history-action-btn-del:hover {
+  color: oklch(0.55 0.14 16);
+  border-color: oklch(0.55 0.14 16 / 0.3);
+  background: oklch(0.55 0.14 16 / 0.08);
+}
+
+/* ─── Step duration ─── */
+.wf-step-duration {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  margin-right: var(--space-sm);
+}
+
+.wf-step-done .wf-step-duration {
+  color: oklch(0.52 0.10 150);
 }

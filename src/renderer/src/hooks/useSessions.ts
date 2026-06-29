@@ -43,8 +43,11 @@ export function useSessions() {
   useIPCEvent<MessageItem>(window.electronAPI.onMessageNew as any, (msg) => {
     if (!msg.sessionId) return
     if (msg.sessionId !== activeSessionId) {
-      skipDbLoadRef.current = true
-      setActiveSessionId(msg.sessionId)
+      // 进化消息不强制切换会话，避免打扰用户
+      if (msg.category !== 'evolution') {
+        skipDbLoadRef.current = true
+        setActiveSessionId(msg.sessionId)
+      }
     }
     setHistoryMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]))
     window.electronAPI

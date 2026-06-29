@@ -57,7 +57,7 @@ const TEST_STATE_PATH = join(TEST_STATE_DIR, 'evolution_state.test.json')
 function createMockAgent(overrides?: Partial<AgentService>): AgentService {
   return {
     isBusy: vi.fn().mockReturnValue(false),
-    runSelfTask: vi.fn().mockResolvedValue({ success: true, summary: 'test analysis done' }),
+    runAgentTask: vi.fn().mockResolvedValue({ success: true, summary: 'test analysis done' }),
     setSuppressForceContinue: vi.fn(),
     ...overrides,
   } as unknown as AgentService
@@ -276,7 +276,7 @@ describe('Analysis Cycle — state file creation', () => {
 
   it('should update state file after failed analysis', async () => {
     const agent = createMockAgent({
-      runSelfTask: vi.fn().mockResolvedValue({ success: false, summary: 'error' }),
+      runAgentTask: vi.fn().mockResolvedValue({ success: false, summary: 'error' }),
     })
     const svc = makeService({ agent })
     ;(svc as any).firstRunComplete = true

@@ -1,0 +1,12 @@
+import { BrowserWindow } from 'electron';
+import { StateManager } from './StateManager';
+export declare function addGlobalDisposer(fn: () => void): void;
+export declare function runGlobalDisposers(): void;
+export declare function getMainWindow(): BrowserWindow | null;
+export declare function setMainWindow(w: BrowserWindow | null): void;
+export declare function createWindow(stateManager: StateManager): BrowserWindow;
+export declare function getAgentWindow(): BrowserWindow | null;
+export declare function createAgentWindow(): BrowserWindow;
+export declare function closeAgentWindow(): void;
+export declare function setupStartupLogging(): void;
+export declare function setupWallpaperListener(stateManager: StateManager): void;

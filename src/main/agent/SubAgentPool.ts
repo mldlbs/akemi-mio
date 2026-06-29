@@ -5,6 +5,7 @@ import { EventBus, eventBus } from '../core/EventBus'
 import { log, createRequestId } from '../logger/Logger'
 import { ScopedAgent } from './scoped/ScopedAgent'
 import type { SkillAgentDef } from '../skill/SkillAgentRegistry'
+import { type SubAgentRoleName } from './roles'
 
 // ── 类型定义 ──
 
@@ -32,6 +33,8 @@ export interface SpawnTaskOptions {
   maxTurns?: number
   llmTimeoutMs?: number
   allowedToolNames?: string[]
+  /** 指定子 agent 角色名（定义见 roles.ts）。会拼入 system prompt 最前面 */
+  role?: SubAgentRoleName
 }
 
 // ── 单个子 Agent 实例 ──
@@ -121,6 +124,7 @@ class SubAgentInstance {
         messages,
         `sub_${this.id}_${i}`,
         this.llmTimeoutMs,
+        undefined,
         this.abortController.signal,
         this.allowedToolNames,
       )

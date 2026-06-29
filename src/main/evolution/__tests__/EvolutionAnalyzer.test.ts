@@ -22,7 +22,7 @@ describe('EvolutionAnalyzer', () => {
     paths = makeTestPaths()
     planManager = { getActivePlan: vi.fn(() => null), listPlans: vi.fn(() => []), getFormattedContext: vi.fn(() => '') }
     agentService = {
-      runSelfTask: vi.fn().mockResolvedValue({ success: true, summary: '分析完成' }),
+      runAgentTask: vi.fn().mockResolvedValue({ success: true, summary: '分析完成' }),
       isBusy: vi.fn(() => false),
       abortSelfTask: vi.fn(),
     }
@@ -109,12 +109,12 @@ describe('EvolutionAnalyzer', () => {
       promptMode: 'full' as any,
     }
     const result = await analyzer.analyze(input)
-    expect(agentService.runSelfTask).toHaveBeenCalled()
+    expect(agentService.runAgentTask).toHaveBeenCalled()
     expect(result.success).toBe(true)
   })
 
   it('analyze 异常时返回 hadTimeout', async () => {
-    agentService.runSelfTask = vi.fn().mockRejectedValue(new Error('API error'))
+    agentService.runAgentTask = vi.fn().mockRejectedValue(new Error('API error'))
     const input = {
       mode: 'first_run' as any,
       planContext: '',

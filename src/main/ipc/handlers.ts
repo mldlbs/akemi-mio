@@ -85,7 +85,14 @@ export function registerHandlers(
     } catch (err) {
       log('WARN', 'window_close_save_failed', { error: String(err) })
     }
-    win.close()
+    win.hide() // 隐藏到托盘而非关闭窗口
+    return { success: true }
+  })
+
+  ipcMain.handle('window:minimize', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false }
+    win.minimize()
     return { success: true }
   })
 
@@ -402,15 +409,15 @@ export function registerHandlers(
     }
   })
 
-  ipcMain.handle('workflow:startWorkflow', async (_event, id: string) => {
+  ipcMain.handle('workflow:startWorkflow', async (_event, id: string, userInput?: string) => {
     try {
-      log('INFO', 'workflow_startWorkflow_called', { id })
+      log('INFO', 'workflow_startWorkflow_called', { id, userInput })
       const def = workflowStore.getDefinition(id)
       if (!def) return { success: false, error: '工作流不存在' }
       if (def.enabled === false) return { success: false, error: '工作流已停用，请先启用' }
       const scheduler = getWorkflowScheduler()
       log('INFO', 'workflow_scheduler_got', { schedulerExists: !!scheduler })
-      const run = scheduler.startRun(def)
+      const run = scheduler.startRun(def, userInput)
       return { success: true, runId: run.runId }
     } catch (err: any) {
       return { success: false, error: err.message }
@@ -446,6 +453,25 @@ export function registerHandlers(
       if (existing.enabled === false) return { success: false, error: '已经是停用状态' }
       workflowStore.saveDefinition({ ...existing, enabled: false, updatedAt: Date.now() })
       return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('workflow:duplicateDefinition', async (_event, id: string) => {
+    try {
+      const copy = workflowStore.duplicateDefinition(id)
+      if (!copy) return { success: false, error: '工作流不存在' }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('workflow:deleteRun', async (_event, runId: string) => {
+    try {
+      const ok = workflowStore.deleteRun(runId)
+      return { success: ok, error: ok ? undefined : '运行记录不存在' }
     } catch (err: any) {
       return { success: false, error: err.message }
     }

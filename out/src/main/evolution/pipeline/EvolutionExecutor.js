@@ -1,0 +1,221 @@
+/**
+ * EvolutionExecutor — 进化流水线 Stage 3
+ *
+ * 职责：执行进化计划的下一步，管理 Git 快照/回滚，指数退避重试
+ * 生命周期：init() → [executeNextStep()] → destroy()
+ */
+import { log } from '../../logger/Logger';
+import { eventBus } from '../../core/EventBus';
+import { buildEvolutionSystemPrompt } from '../SelfEvolutionPrompt';
+import { PLAN_EXECUTE_PROMPT } from '../EvolutionPromptBuilder';
+import { withTimeout } from '../../utils/async';
+import { AsyncLock } from '../../utils/AsyncLock';
+export class EvolutionExecutor {
+    constructor(agentService, planManager, options) {
+        this.name = 'EvolutionExecutor';
+        this.state = 'created';
+        this.gitOps = null;
+        this.planExecConsecutiveErrors = 0;
+        this.executeFailures = 0;
+        this.currentSnapshotBranch = null;
+        this.executionLock = new AsyncLock();
+        this.proposalValidator = null;
+        this.safetyMode = 'auto';
+        this.agentService = agentService;
+        this.planManager = planManager;
+        this.planExecTimeoutMs = options?.planExecTimeoutMs ?? 300000;
+        this.stepRetryBaseMs = options?.stepRetryBaseMs ?? 1000;
+    }
+    async init() {
+        this.state = 'initializing';
+        log('INFO', 'evolution_executor.init');
+        this.state = 'ready';
+    }
+    async start() {
+        this.state = 'running';
+    }
+    async stop() {
+        this.currentSnapshotBranch = null;
+        this.state = 'ready';
+    }
+    async destroy() {
+        this.state = 'stopped';
+    }
+    async healthCheck() {
+        return { healthy: true, metrics: { consecutiveErrors: this.planExecConsecutiveErrors, executeFailures: this.executeFailures } };
+    }
+    setGitOps(gitOps) {
+        this.gitOps = gitOps;
+    }
+    setProposalValidator(v) {
+        this.proposalValidator = v;
+    }
+    setSafetyMode(mode) {
+        this.safetyMode = mode;
+    }
+    getExecuteFailures() {
+        return this.executeFailures;
+    }
+    // ==================== 步骤检测 ====================
+    hasPendingStep() {
+        const pm = this.planManager;
+        if (!pm)
+            return false;
+        const plan = pm.getActivePlan();
+        if (!plan)
+            return false;
+        return plan.steps.some((s) => s.status === 'pending' || s.status === 'failed');
+    }
+    getPlanProgress() {
+        const plan = this.planManager?.getActivePlan();
+        if (!plan)
+            return { completed: 0, total: 0 };
+        return {
+            completed: plan.steps.filter((s) => s.status === 'done').length,
+            total: plan.steps.length,
+        };
+    }
+    // ==================== 步骤执行 ====================
+    async executeNextStep(input) {
+        if (this.safetyMode === 'review') {
+            log('INFO', 'plan_exec_skipped_review', { safetyMode: this.safetyMode });
+            return { success: false, stepIndex: input.stepIndex, error: 'review mode, skip execution', planCompleted: false };
+        }
+        const pm = this.planManager;
+        if (!pm)
+            return { success: false, stepIndex: input.stepIndex, error: 'no plan manager', planCompleted: false };
+        return this.executionLock.run(async () => {
+            const allPlans = pm.listPlans();
+            const activePlans = allPlans
+                .filter((p) => p.status === 'active')
+                .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+            const plan = activePlans.length > 0 ? activePlans[0] : null;
+            if (!plan)
+                return { success: false, stepIndex: input.stepIndex, error: 'no active plan', planCompleted: false };
+            // 查找 pending 或 failed 步骤
+            let nextStep = plan.steps.find((s) => s.status === 'pending');
+            if (!nextStep)
+                nextStep = plan.steps.find((s) => s.status === 'failed');
+            if (!nextStep) {
+                const inProgress = plan.steps.find((s) => s.status === 'in_progress');
+                if (!inProgress) {
+                    pm.completePlan(plan.id, '所有步骤已完成');
+                    this.autoGitCommit(plan.title).catch(() => { });
+                    return { success: true, stepIndex: -1, planCompleted: true };
+                }
+                return { success: false, stepIndex: input.stepIndex, error: 'step already in progress', planCompleted: false };
+            }
+            const stepIdx = plan.steps.indexOf(nextStep);
+            return this.executeStep(plan, nextStep, stepIdx);
+        });
+    }
+    async executeStep(plan, step, stepIdx) {
+        const pm = this.planManager;
+        log('INFO', 'plan_exec_step', { plan_id: plan.id, step: step.description });
+        pm.updateStep(plan.id, stepIdx, 'in_progress');
+        // Git 快照
+        if (this.gitOps && !this.currentSnapshotBranch) {
+            const tag = `${plan.id}_step_${stepIdx}`;
+            const branch = await this.gitOps.createSnapshot(tag);
+            if (branch) {
+                this.currentSnapshotBranch = branch;
+                eventBus.emit('evolution.snapshot.created', { tag, branch, timestamp: Date.now() });
+            }
+        }
+        // ProposalValidator
+        if (this.proposalValidator) {
+            try {
+                const vr = await this.proposalValidator.validate({
+                    id: plan.id,
+                    title: plan.title,
+                    description: plan.description,
+                    targetFiles: plan.steps?.map((s) => s.description) || [],
+                    expectedOutcome: '',
+                    risk: 'medium',
+                    createdAt: Date.now(),
+                });
+                if (!vr.passed)
+                    log('WARN', 'plan_exec_proposal_validation_failed', { planId: plan.id });
+            }
+            catch (err) {
+                log('WARN', 'plan_exec_proposal_validation_error', { error: String(err) });
+            }
+        }
+        // 指数退避重试
+        const MAX_RETRIES = 3;
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                const planCtx = pm.getFormattedContext();
+                const execPrompt = PLAN_EXECUTE_PROMPT(planCtx, step.description);
+                const result = await withTimeout(() => this.agentService.runSelfTask(execPrompt, buildEvolutionSystemPrompt()), this.planExecTimeoutMs, 'plan_exec_timeout');
+                if (result.success) {
+                    pm.updateStep(plan.id, stepIdx, 'done', result.summary);
+                    this.planExecConsecutiveErrors = 0;
+                    this.executeFailures = 0;
+                    log('INFO', 'plan_step_done', { plan_id: plan.id, step: step.description });
+                    this.cleanupSnapshot();
+                    return { success: true, stepIndex: stepIdx, planCompleted: false };
+                }
+                else {
+                    if (attempt < MAX_RETRIES) {
+                        const delay = Math.pow(2, attempt - 1) * this.stepRetryBaseMs;
+                        await new Promise((r) => setTimeout(r, delay));
+                    }
+                    else {
+                        return this.handleStepFailure(plan, step, stepIdx, result.summary);
+                    }
+                }
+            }
+            catch (err) {
+                if (attempt < MAX_RETRIES) {
+                    const delay = Math.pow(2, attempt - 1) * this.stepRetryBaseMs;
+                    await new Promise((r) => setTimeout(r, delay));
+                }
+                else {
+                    return this.handleStepFailure(plan, step, stepIdx, String(err));
+                }
+            }
+        }
+        return { success: false, stepIndex: stepIdx, error: 'unreachable', planCompleted: false };
+    }
+    async handleStepFailure(plan, step, stepIdx, error) {
+        const pm = this.planManager;
+        pm.updateStep(plan.id, stepIdx, 'failed', error);
+        this.planExecConsecutiveErrors++;
+        this.executeFailures++;
+        // 回滚
+        if (this.currentSnapshotBranch && this.gitOps) {
+            const rollbackSuccess = await this.gitOps.rollbackToSnapshot(this.currentSnapshotBranch);
+            eventBus.emit('evolution.rollback.completed', {
+                level: 'task',
+                ref: this.currentSnapshotBranch,
+                success: rollbackSuccess,
+                error: rollbackSuccess ? undefined : '回滚执行失败',
+            });
+            this.currentSnapshotBranch = null;
+        }
+        log('ERROR', 'plan_step_error', { plan_id: plan.id, step: step.description, error });
+        if (this.planExecConsecutiveErrors >= 3) {
+            pm.abandonPlan(plan.id, '自动放弃：连续步骤执行失败');
+            this.planExecConsecutiveErrors = 0;
+            log('WARN', 'plan_auto_abandoned', { plan_id: plan.id });
+        }
+        return { success: false, stepIndex: stepIdx, error, planCompleted: false };
+    }
+    cleanupSnapshot() {
+        if (this.currentSnapshotBranch && this.gitOps) {
+            this.gitOps.cleanupSnapshot(this.currentSnapshotBranch).catch(() => { });
+            this.currentSnapshotBranch = null;
+        }
+    }
+    /** 重置执行计数器（外部调用，如冷却恢复时） */
+    resetFailures() {
+        this.planExecConsecutiveErrors = 0;
+        this.executeFailures = 0;
+    }
+    async autoGitCommit(planTitle) {
+        if (!this.gitOps)
+            return;
+        await this.gitOps.autoGitCommit(planTitle).catch(() => { });
+    }
+}

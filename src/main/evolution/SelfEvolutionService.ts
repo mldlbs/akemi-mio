@@ -38,6 +38,8 @@ import { PromptEvolutionManager, type PromptSlot } from './PromptEvolutionManage
 import { EvolutionSelfEvaluator } from './EvolutionSelfEvaluator'
 import { MetaLearner } from './MetaLearner'
 import { EvaluatorCalibrator } from './EvaluatorCalibrator'
+import { insertMessage, createMessageId } from '../db/messages'
+import { getMainWindow } from '../core/Lifecycle'
 
 // =============================================================================
 // 调度状态机状态枚举
@@ -224,6 +226,10 @@ export class SelfEvolutionService implements ISubsystem {
           title: p.title,
           score: p.novelty + p.feasibility + p.impact,
         })
+      }) as any,
+      // 将进化结果持久化为 UI 消息
+      (this.eventBus.on as any)('evolution.cycle.completed', (p: any) => {
+        this.persistEvolutionMessage(p.summary, p.success, p.durationMs)
       }) as any,
     )
   }
@@ -933,6 +939,12 @@ export class SelfEvolutionService implements ISubsystem {
         log('WARN', 'evolution_integrity_check_failed', { error_count: result.issues.filter((i: any) => i.severity === 'error').length })
         for (const p of allPlans) {
           if (p.status === 'active') {
+            // 无步骤的计划自动标记为 abandoned
+            if (!p.steps || p.steps.length === 0) {
+              pm.updatePlanStatus(p.id, 'abandoned')
+              log('INFO', 'evolution_plan_auto_abandoned', { planId: p.id, reason: '计划没有步骤' })
+              continue
+            }
             const fixResult = checker.autoFix(p)
             if (fixResult.fixed > 0)
               for (let i = 0; i < p.steps.length; i++) pm.updateStep(p.id, i, p.steps[i].status as any, p.steps[i].result)
@@ -987,6 +999,49 @@ export class SelfEvolutionService implements ISubsystem {
     } catch {
       return { newFiles: [], modifiedFiles: [] }
     }
+  }
+
+  // ==================== 将进化结果发送到 UI ====================
+
+  /** 固定的 evolution 会话 ID，用于在 UI 中展示进化消息 */
+  private static readonly EVOLUTION_SESSION_ID = 'session_evolution'
+
+  /**
+   * 将进化分析结果持久化为 assistant 消息，显示在 chat 会话中。
+   */
+  private persistEvolutionMessage(summary: string, success: boolean, durationMs: number): void {
+    try {
+      if (!summary) return
+      const content = this.formatEvolutionSummary(summary, success, durationMs)
+      const msg = {
+        id: createMessageId(),
+        source: 'electron' as const,
+        role: 'assistant' as const,
+        content,
+        category: 'evolution',
+        sessionId: SelfEvolutionService.EVOLUTION_SESSION_ID,
+        createdAt: Date.now(),
+      }
+      insertMessage(msg)
+      // 发送到渲染进程
+      try {
+        const win = getMainWindow()
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('message:new', msg)
+        }
+      } catch {
+        // 窗口可能尚未创建
+      }
+    } catch (err) {
+      log('WARN', 'evolve_persist_msg_failed', { error: String(err) })
+    }
+  }
+
+  private formatEvolutionSummary(summary: string, success: boolean, durationMs: number): string {
+    const icon = success ? '✅' : '⚠️'
+    const duration = durationMs > 0 ? `（${(durationMs / 1000).toFixed(0)}s）` : ''
+    const trimmed = summary.length > 2000 ? summary.slice(0, 2000) + '…' : summary
+    return `[自进化] ${icon}${duration}\n\n${trimmed}`
   }
 
   // ==================== 状态持久化 ====================

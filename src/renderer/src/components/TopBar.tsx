@@ -59,6 +59,9 @@ export function TopBar({ conversationActive, ttsPlaying, error, sessionHealth, p
         <button className="cap-toggle-btn" onClick={onOpenSettings} title="设置">
           <i className="ri-settings-3-line" />
         </button>
+        <button className="topbar-window-btn" onClick={() => window.electronAPI.minimizeWindow()} title="最小化">
+          <i className="ri-subtract-line" />
+        </button>
         <button className="topbar-close" onClick={() => window.electronAPI.closeWindow()} title="关闭">
           <i className="ri-close-line" />
         </button>

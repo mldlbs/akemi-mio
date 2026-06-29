@@ -12,7 +12,8 @@ import { eventBus, EventBus } from '../core/EventBus'
 import type { PlanManagerLike } from '../evolution/types'
 import { extractJsonFromLLMReply } from '../utils/llm'
 import { planManager as defaultPlanManager } from '../evolution'
-import { SubAgentPool } from './SubAgentPool'
+import { SubAgentPool, type SpawnTaskOptions } from './SubAgentPool'
+import { getRolePrompt, type SubAgentRoleName } from './roles'
 import { ReflectLoop } from './ReflectLoop'
 import { FailureAnalyzer } from './FailureAnalyzer'
 import { Guardrail } from './Guardrail'
@@ -558,9 +559,15 @@ export class AgentService {
   async runAgentTask(
     task: string,
     systemPrompt?: string,
-    options?: { maxTurns?: number; llmTimeoutMs?: number },
+    options?: { maxTurns?: number; llmTimeoutMs?: number; role?: SubAgentRoleName },
   ): Promise<{ success: boolean; summary: string }> {
-    const result = await this.subAgentPool.spawnTask(task, systemPrompt, options)
+    const rolePrompt = options?.role ? getRolePrompt(options.role) : undefined
+    const combinedPrompt = [rolePrompt, systemPrompt].filter(Boolean).join('\n\n')
+    const spawnOptions: SpawnTaskOptions = {
+      maxTurns: options?.maxTurns,
+      llmTimeoutMs: options?.llmTimeoutMs,
+    }
+    const result = await this.subAgentPool.spawnTask(task, combinedPrompt, spawnOptions)
     return {
       success: result.status === 'completed',
       summary: result.summary,

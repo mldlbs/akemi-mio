@@ -144,17 +144,20 @@ export const startWorkflowTool = buildTool({
     type: 'object',
     properties: {
       workflowId: { type: 'string', description: '工作流定义 ID（从 list_workflows 获取）' },
+      userInput: { type: 'string', description: '（可选）用户输入的主题/需求，工作流中的 {INPUT} 占位符会被替换为此值' },
     },
     required: ['workflowId'],
   },
-  handler: async (args: { workflowId: string }) => {
+  handler: async (args: { workflowId: string; userInput?: string }) => {
     try {
       const def = workflowStore.getDefinition(args.workflowId)
       if (!def) return formatToolResult(`工作流 ${args.workflowId} 不存在`)
       if (def.enabled === false) return formatToolResult(`工作流「${def.name}」已停用，无法启动。请先用 enable_workflow 启用。`)
       const scheduler = getWorkflowScheduler()
-      const run = scheduler.startRun(def)
-      return formatToolResult(`工作流「${def.name}」已启动 (RunID: ${run.runId})，共 ${def.steps.length} 个步骤。`)
+      const run = scheduler.startRun(def, args.userInput)
+      return formatToolResult(
+        `工作流「${def.name}」已启动 (RunID: ${run.runId})，共 ${def.steps.length} 个步骤。${args.userInput ? ` 输入: "${args.userInput}"` : ''}`,
+      )
     } catch (err: any) {
       return formatToolError(err.message)
     }
