@@ -196,6 +196,7 @@ const electronAPI = {
   stopWorkflowRun: (runId) => electron.ipcRenderer.invoke("workflow:stopRun", runId),
   duplicateWorkflowDefinition: (id) => electron.ipcRenderer.invoke("workflow:duplicateDefinition", id),
   deleteWorkflowRun: (runId) => electron.ipcRenderer.invoke("workflow:deleteRun", runId),
+  approveGate: (runId, stepId, decision, modifiedInput) => electron.ipcRenderer.invoke("workflow:approveGate", runId, stepId, decision, modifiedInput),
   // ── Writing Status ──
   getWritingStatus: () => electron.ipcRenderer.invoke("writing:getStatus"),
   // ── Evolution ──

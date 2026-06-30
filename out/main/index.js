@@ -21,6 +21,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
+Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 const electron = require("electron");
 const path$1 = require("path");
 const fs = require("fs");
@@ -30,15 +31,14 @@ const require$$0 = require("child_process");
 const https = require("https");
 const http = require("http");
 const require$$3$1 = require("util");
+const initSqlJs = require("sql.js");
+const sqliteProxy = require("drizzle-orm/sqlite-proxy");
+const sqliteCore = require("drizzle-orm/sqlite-core");
 const os = require("os");
-const ExcelJS = require("exceljs");
 const ssh2 = require("ssh2");
 const whisper = require("@kutalia/whisper-node-addon");
 const openccJs = require("opencc-js");
 const transformers = require("@xenova/transformers");
-const initSqlJs = require("sql.js");
-const sqliteProxy = require("drizzle-orm/sqlite-proxy");
-const sqliteCore = require("drizzle-orm/sqlite-core");
 const koffi = require("koffi");
 const electronUpdater = require("electron-updater");
 const url = require("url");
@@ -63,7 +63,6 @@ function _interopNamespaceDefault(e) {
 const path__namespace = /* @__PURE__ */ _interopNamespaceDefault(path$1);
 const fs__namespace = /* @__PURE__ */ _interopNamespaceDefault(fs);
 const os__namespace = /* @__PURE__ */ _interopNamespaceDefault(os);
-const ExcelJS__namespace = /* @__PURE__ */ _interopNamespaceDefault(ExcelJS);
 process.env.ORT_LOG_SEVERITY_LEVEL = "3";
 const cpuCount = require("os").cpus().length;
 const threadCount = Math.max(2, Math.min(cpuCount - 2, 8));
@@ -1527,6 +1526,1021 @@ const rememberFactTool = buildTool({
   },
   isReadOnly: false
 });
+const events = sqliteCore.sqliteTable("events", {
+  id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
+  channel: sqliteCore.text("channel").notNull(),
+  payload: sqliteCore.text("payload").notNull(),
+  source: sqliteCore.text("source"),
+  traceId: sqliteCore.text("trace_id"),
+  timestamp: sqliteCore.integer("timestamp").notNull()
+});
+const plans = sqliteCore.sqliteTable("plans", {
+  id: sqliteCore.text("id").primaryKey(),
+  title: sqliteCore.text("title").notNull(),
+  description: sqliteCore.text("description").notNull(),
+  status: sqliteCore.text("status", { enum: ["active", "completed", "abandoned"] }).notNull().default("active"),
+  reflection: sqliteCore.text("reflection"),
+  createdAt: sqliteCore.integer("created_at").notNull(),
+  updatedAt: sqliteCore.integer("updated_at").notNull()
+});
+const planSteps = sqliteCore.sqliteTable("plan_steps", {
+  id: sqliteCore.text("id").primaryKey(),
+  planId: sqliteCore.text("plan_id").notNull().references(() => plans.id, { onDelete: "cascade" }),
+  stepIndex: sqliteCore.integer("step_index").notNull(),
+  description: sqliteCore.text("description").notNull(),
+  status: sqliteCore.text("status", { enum: ["pending", "in_progress", "done", "failed"] }).notNull().default("pending"),
+  result: sqliteCore.text("result")
+});
+const insights = sqliteCore.sqliteTable("insights", {
+  id: sqliteCore.text("id").primaryKey(),
+  detector: sqliteCore.text("detector").notNull(),
+  title: sqliteCore.text("title").notNull(),
+  description: sqliteCore.text("description").notNull(),
+  evidence: sqliteCore.text("evidence").notNull(),
+  score: sqliteCore.real("score").notNull(),
+  confidence: sqliteCore.real("confidence").notNull(),
+  reported: sqliteCore.integer("reported", { mode: "boolean" }).notNull().default(false),
+  createdAt: sqliteCore.integer("created_at").notNull()
+});
+const conceptCombos = sqliteCore.sqliteTable("concept_combos", {
+  id: sqliteCore.text("id").primaryKey(),
+  sources: sqliteCore.text("sources").notNull(),
+  description: sqliteCore.text("description").notNull(),
+  createdAt: sqliteCore.integer("created_at").notNull()
+});
+const hypotheses = sqliteCore.sqliteTable("hypotheses", {
+  id: sqliteCore.text("id").primaryKey(),
+  title: sqliteCore.text("title").notNull(),
+  idea: sqliteCore.text("idea").notNull(),
+  expectedBenefit: sqliteCore.text("expected_benefit").notNull(),
+  risk: sqliteCore.text("risk").notNull(),
+  sourceLabels: sqliteCore.text("source_labels").notNull(),
+  novelty: sqliteCore.real("novelty").notNull(),
+  feasibility: sqliteCore.real("feasibility").notNull(),
+  impact: sqliteCore.real("impact").notNull(),
+  status: sqliteCore.text("status", { enum: ["draft", "active", "experimenting", "validated", "rejected"] }).notNull().default("draft"),
+  createdAt: sqliteCore.integer("created_at").notNull()
+});
+const experiments = sqliteCore.sqliteTable("experiments", {
+  hypothesisId: sqliteCore.text("hypothesis_id").primaryKey(),
+  title: sqliteCore.text("title").notNull(),
+  steps: sqliteCore.text("steps").notNull(),
+  successCriteria: sqliteCore.text("success_criteria").notNull(),
+  estimatedDuration: sqliteCore.text("estimated_duration").notNull(),
+  createdAt: sqliteCore.integer("created_at").notNull()
+});
+const dreamCycles = sqliteCore.sqliteTable("dream_cycles", {
+  timestamp: sqliteCore.integer("timestamp").primaryKey(),
+  sourcesExamined: sqliteCore.integer("sources_examined").notNull(),
+  combosGenerated: sqliteCore.integer("combos_generated").notNull(),
+  hypothesesGenerated: sqliteCore.integer("hypotheses_generated").notNull(),
+  topIdea: sqliteCore.text("top_idea")
+});
+const memories = sqliteCore.sqliteTable("memories", {
+  id: sqliteCore.text("id").primaryKey(),
+  type: sqliteCore.text("type", { enum: ["user_fact", "interaction"] }).notNull(),
+  content: sqliteCore.text("content").notNull(),
+  confidence: sqliteCore.real("confidence").notNull().default(0.5),
+  tier: sqliteCore.text("tier", { enum: ["permanent", "semi", "ephemeral"] }).notNull().default("ephemeral"),
+  reinforceCount: sqliteCore.integer("reinforce_count").notNull().default(0),
+  createdAt: sqliteCore.integer("created_at").notNull(),
+  updatedAt: sqliteCore.integer("updated_at").notNull()
+});
+sqliteCore.sqliteTable("memory_archive", {
+  id: sqliteCore.text("id").primaryKey(),
+  type: sqliteCore.text("type", { enum: ["user_fact", "interaction"] }).notNull(),
+  content: sqliteCore.text("content").notNull(),
+  confidence: sqliteCore.real("confidence").notNull(),
+  tier: sqliteCore.text("tier", { enum: ["permanent", "semi", "ephemeral"] }).notNull(),
+  reason: sqliteCore.text("reason").notNull().default("pruned"),
+  archivedAt: sqliteCore.integer("archived_at").notNull()
+});
+sqliteCore.sqliteTable("knowledge_graph", {
+  id: sqliteCore.text("id").primaryKey(),
+  entity: sqliteCore.text("entity").notNull(),
+  attribute: sqliteCore.text("attribute").notNull(),
+  value: sqliteCore.text("value").notNull(),
+  confidence: sqliteCore.real("confidence").notNull().default(0.5),
+  updatedAt: sqliteCore.integer("updated_at").notNull()
+});
+const memorySummaries = sqliteCore.sqliteTable("memory_summaries", {
+  id: sqliteCore.text("id").primaryKey(),
+  summary: sqliteCore.text("summary").notNull(),
+  turnStart: sqliteCore.integer("turn_start").notNull(),
+  turnEnd: sqliteCore.integer("turn_end").notNull(),
+  createdAt: sqliteCore.integer("created_at").notNull()
+});
+const memoryVectors = sqliteCore.sqliteTable("memory_vectors", {
+  id: sqliteCore.text("id").primaryKey(),
+  content: sqliteCore.text("content").notNull(),
+  embedding: sqliteCore.text("embedding").notNull(),
+  confidence: sqliteCore.real("confidence").notNull(),
+  source: sqliteCore.text("source", { enum: ["user_fact", "summary"] }).notNull(),
+  createdAt: sqliteCore.integer("created_at").notNull(),
+  updatedAt: sqliteCore.integer("updated_at").notNull()
+});
+const credentials = sqliteCore.sqliteTable("credentials", {
+  key: sqliteCore.text("key").primaryKey(),
+  value: sqliteCore.text("value").notNull()
+});
+const goals = sqliteCore.sqliteTable("goals", {
+  id: sqliteCore.text("id").primaryKey(),
+  title: sqliteCore.text("title").notNull(),
+  description: sqliteCore.text("description").notNull(),
+  priority: sqliteCore.integer("priority").notNull().default(0),
+  status: sqliteCore.text("status", { enum: ["active", "paused", "completed", "abandoned"] }).notNull().default("active"),
+  category: sqliteCore.text("category", { enum: ["mission", "long_term", "short_term", "initiative"] }).notNull(),
+  parentGoalId: sqliteCore.text("parent_goal_id"),
+  progress: sqliteCore.integer("progress").notNull().default(0),
+  createdAt: sqliteCore.integer("created_at").notNull(),
+  updatedAt: sqliteCore.integer("updated_at").notNull()
+});
+const strategies = sqliteCore.sqliteTable("strategies", {
+  id: sqliteCore.text("id").primaryKey(),
+  name: sqliteCore.text("name").notNull().unique(),
+  description: sqliteCore.text("description").notNull(),
+  promptTemplate: sqliteCore.text("prompt_template").notNull(),
+  applicableContext: sqliteCore.text("applicable_context").notNull(),
+  priority: sqliteCore.integer("priority").notNull().default(0),
+  active: sqliteCore.integer("active").notNull().default(1),
+  version: sqliteCore.integer("version").notNull().default(1),
+  createdAt: sqliteCore.integer("created_at").notNull(),
+  updatedAt: sqliteCore.integer("updated_at").notNull()
+});
+const promptTemplates = sqliteCore.sqliteTable("prompt_templates", {
+  id: sqliteCore.text("id").primaryKey(),
+  name: sqliteCore.text("name").notNull(),
+  category: sqliteCore.text("category", { enum: ["identity", "core", "tools", "evolution", "custom"] }).notNull(),
+  content: sqliteCore.text("content").notNull(),
+  version: sqliteCore.integer("version").notNull().default(1),
+  active: sqliteCore.integer("active").notNull().default(1),
+  variables: sqliteCore.text("variables").notNull().default("[]"),
+  createdAt: sqliteCore.integer("created_at").notNull(),
+  updatedAt: sqliteCore.integer("updated_at").notNull()
+});
+const messages = sqliteCore.sqliteTable("messages", {
+  id: sqliteCore.text("id").primaryKey(),
+  source: sqliteCore.text("source", { enum: ["electron", "telegram"] }).notNull(),
+  role: sqliteCore.text("role", { enum: ["user", "assistant"] }).notNull(),
+  content: sqliteCore.text("content").notNull(),
+  telegramChatId: sqliteCore.integer("telegram_chat_id"),
+  telegramUserId: sqliteCore.integer("telegram_user_id"),
+  telegramFrom: sqliteCore.text("telegram_from"),
+  telegramMessageId: sqliteCore.integer("telegram_message_id"),
+  createdAt: sqliteCore.integer("created_at").notNull()
+});
+const telegramOutbox = sqliteCore.sqliteTable("telegram_outbox", {
+  id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
+  chatId: sqliteCore.text("chat_id").notNull(),
+  bot: sqliteCore.text("bot").default("chat"),
+  msgType: sqliteCore.text("msg_type", { enum: ["send", "edit", "reply", "action", "photo", "media_group"] }).notNull(),
+  category: sqliteCore.text("category", {
+    enum: ["dialogue", "evolution", "insight", "creativity", "plan", "budget", "recovery", "stability", "system"]
+  }).notNull().default("dialogue"),
+  message: sqliteCore.text("message").notNull(),
+  targetMessageId: sqliteCore.integer("target_message_id"),
+  hash: sqliteCore.text("hash"),
+  status: sqliteCore.text("status", { enum: ["pending", "sent", "failed"] }).notNull().default("pending"),
+  retryCount: sqliteCore.integer("retry_count").notNull().default(0),
+  lastError: sqliteCore.text("last_error"),
+  createdAt: sqliteCore.integer("created_at").notNull(),
+  updatedAt: sqliteCore.integer("updated_at")
+});
+const decisions = sqliteCore.sqliteTable("decisions", {
+  id: sqliteCore.text("id").primaryKey(),
+  timestamp: sqliteCore.integer("timestamp").notNull(),
+  agentId: sqliteCore.text("agent_id").notNull(),
+  category: sqliteCore.text("category", {
+    enum: ["tool_select", "strategy", "plan_route", "goal_adjust", "recovery"]
+  }).notNull(),
+  context: sqliteCore.text("context").notNull(),
+  choice: sqliteCore.text("choice").notNull(),
+  alternatives: sqliteCore.text("alternatives").notNull().default("[]"),
+  outcome: sqliteCore.text("outcome", { enum: ["pending", "success", "failure"] }).notNull().default("pending"),
+  confidence: sqliteCore.real("confidence").notNull().default(0.5),
+  relatedPlanId: sqliteCore.text("related_plan_id"),
+  createdAt: sqliteCore.integer("created_at").notNull()
+});
+const workflowDefs = sqliteCore.sqliteTable("workflow_defs", {
+  id: sqliteCore.text("id").primaryKey(),
+  name: sqliteCore.text("name").notNull(),
+  description: sqliteCore.text("description").notNull(),
+  definition: sqliteCore.text("definition").notNull(),
+  // JSON: full WorkflowDef
+  enabled: sqliteCore.integer("enabled").notNull().default(1),
+  createdAt: sqliteCore.integer("created_at").notNull(),
+  updatedAt: sqliteCore.integer("updated_at").notNull()
+});
+const workflowRuns = sqliteCore.sqliteTable("workflow_runs", {
+  runId: sqliteCore.text("run_id").primaryKey(),
+  workflowDefId: sqliteCore.text("workflow_def_id").notNull(),
+  workflowName: sqliteCore.text("workflow_name").notNull(),
+  status: sqliteCore.text("status", { enum: ["pending", "running", "paused", "done", "failed"] }).notNull().default("pending"),
+  trigger: sqliteCore.text("trigger"),
+  // JSON: WorkflowTrigger
+  context: sqliteCore.text("context"),
+  // JSON: execution context (step results)
+  pendingGate: sqliteCore.text("pending_gate"),
+  // JSON: awaiting gate info
+  userInput: sqliteCore.text("user_input"),
+  startedAt: sqliteCore.integer("started_at").notNull(),
+  completedAt: sqliteCore.integer("completed_at")
+});
+const workflowStepRuns = sqliteCore.sqliteTable("workflow_step_runs", {
+  id: sqliteCore.text("id").primaryKey(),
+  runId: sqliteCore.text("run_id").notNull().references(() => workflowRuns.runId, { onDelete: "cascade" }),
+  stepId: sqliteCore.text("step_id").notNull(),
+  status: sqliteCore.text("status", { enum: ["pending", "running", "done", "failed", "skipped"] }).notNull().default("pending"),
+  input: sqliteCore.text("input"),
+  // JSON: step input
+  output: sqliteCore.text("output"),
+  // JSON: structured output (agentResult)
+  error: sqliteCore.text("error"),
+  retryCount: sqliteCore.integer("retry_count").notNull().default(0),
+  startedAt: sqliteCore.integer("started_at"),
+  completedAt: sqliteCore.integer("completed_at")
+});
+const schema = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  conceptCombos,
+  credentials,
+  decisions,
+  dreamCycles,
+  events,
+  experiments,
+  goals,
+  hypotheses,
+  insights,
+  memories,
+  memorySummaries,
+  memoryVectors,
+  messages,
+  planSteps,
+  plans,
+  promptTemplates,
+  strategies,
+  telegramOutbox,
+  workflowDefs,
+  workflowRuns,
+  workflowStepRuns
+}, Symbol.toStringTag, { value: "Module" }));
+const MIGRATIONS = [
+  {
+    version: 1,
+    sql: `
+      CREATE TABLE IF NOT EXISTS plans (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'completed', 'abandoned')),
+        reflection TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS plan_steps (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+        step_index INTEGER NOT NULL,
+        description TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'in_progress', 'done', 'failed')),
+        result TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_plan_steps_plan_id ON plan_steps(plan_id);
+      CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
+    `
+  },
+  {
+    version: 2,
+    sql: `
+      CREATE TABLE IF NOT EXISTS insights (
+        id TEXT PRIMARY KEY,
+        detector TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        evidence TEXT NOT NULL,
+        score REAL NOT NULL,
+        confidence REAL NOT NULL,
+        reported INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS concept_combos (
+        id TEXT PRIMARY KEY,
+        sources TEXT NOT NULL,
+        description TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS hypotheses (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        idea TEXT NOT NULL,
+        expected_benefit TEXT NOT NULL,
+        risk TEXT NOT NULL,
+        source_labels TEXT NOT NULL,
+        novelty REAL NOT NULL,
+        feasibility REAL NOT NULL,
+        impact REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','active','experimenting','validated','rejected')),
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS experiments (
+        hypothesis_id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        steps TEXT NOT NULL,
+        success_criteria TEXT NOT NULL,
+        estimated_duration TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS dream_cycles (
+        timestamp INTEGER PRIMARY KEY,
+        sources_examined INTEGER NOT NULL,
+        combos_generated INTEGER NOT NULL,
+        hypotheses_generated INTEGER NOT NULL,
+        top_idea TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_insights_reported ON insights(reported);
+      CREATE INDEX IF NOT EXISTS idx_hypotheses_status ON hypotheses(status);
+    `
+  },
+  {
+    version: 3,
+    sql: `
+      CREATE TABLE IF NOT EXISTS memories (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL CHECK(type IN ('user_fact', 'interaction')),
+        content TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 0.5,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS memory_summaries (
+        id TEXT PRIMARY KEY,
+        summary TEXT NOT NULL,
+        turn_start INTEGER NOT NULL,
+        turn_end INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS memory_vectors (
+        id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        embedding TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        source TEXT NOT NULL CHECK(source IN ('user_fact', 'summary')),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
+      CREATE INDEX IF NOT EXISTS idx_memories_content ON memories(content);
+    `
+  },
+  {
+    version: 4,
+    sql: `
+      CREATE TABLE IF NOT EXISTS credentials (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `
+  },
+  {
+    version: 5,
+    sql: `
+      ALTER TABLE memories ADD COLUMN tier TEXT NOT NULL DEFAULT 'ephemeral';
+      ALTER TABLE memories ADD COLUMN reinforce_count INTEGER NOT NULL DEFAULT 0;
+    `
+  },
+  {
+    version: 6,
+    sql: `
+      CREATE TABLE IF NOT EXISTS memory_archive (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        content TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        tier TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT 'pruned',
+        archived_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS knowledge_graph (
+        id TEXT PRIMARY KEY,
+        entity TEXT NOT NULL,
+        attribute TEXT NOT NULL,
+        value TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 0.5,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_kg_entity ON knowledge_graph(entity);
+    `
+  },
+  {
+    version: 7,
+    sql: `
+      CREATE TABLE IF NOT EXISTS goals (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        priority INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','completed','abandoned')),
+        category TEXT NOT NULL CHECK(category IN ('mission','long_term','short_term','initiative')),
+        parent_goal_id TEXT,
+        progress INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS strategies (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT NOT NULL,
+        prompt_template TEXT NOT NULL,
+        applicable_context TEXT NOT NULL,
+        priority INTEGER NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1,
+        version INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS prompt_templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL CHECK(category IN ('identity','core','tools','evolution','custom')),
+        content TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        active INTEGER NOT NULL DEFAULT 1,
+        variables TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `
+  },
+  {
+    version: 8,
+    sql: `
+      CREATE TABLE IF NOT EXISTS engineering_memory (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL CHECK(type IN ('architecture_pattern','coding_convention','design_decision','test_pattern','failure_pattern')),
+        content TEXT NOT NULL,
+        source TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 0.5,
+        related_files TEXT NOT NULL DEFAULT '[]',
+        tags TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_engmem_type ON engineering_memory(type);
+    `
+  },
+  {
+    version: 9,
+    sql: `
+      CREATE TABLE IF NOT EXISTS audit_trail (
+        id TEXT PRIMARY KEY,
+        timestamp INTEGER NOT NULL,
+        source TEXT NOT NULL CHECK(source IN ('agent','plugin','user','evolution','system')),
+        action TEXT NOT NULL CHECK(action IN ('tool_call','file_write','file_read','command','permission_change','plugin_load','plugin_unload')),
+        target TEXT NOT NULL,
+        plugin_name TEXT,
+        tool_name TEXT,
+        details TEXT NOT NULL DEFAULT '{}',
+        allowed INTEGER NOT NULL DEFAULT 1,
+        duration INTEGER,
+        reason TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_trail(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_audit_source ON audit_trail(source);
+      CREATE TABLE IF NOT EXISTS permission_grants (
+        plugin_name TEXT NOT NULL,
+        tool_name TEXT NOT NULL,
+        permission TEXT NOT NULL,
+        granted INTEGER NOT NULL DEFAULT 1,
+        persistent INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (plugin_name, tool_name, permission)
+      );
+    `
+  },
+  {
+    version: 10,
+    sql: `
+      CREATE TABLE IF NOT EXISTS token_account (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT OR IGNORE INTO token_account (key, value) VALUES ('balance', '0');
+      INSERT OR IGNORE INTO token_account (key, value) VALUES ('lifetime_earned', '0');
+      INSERT OR IGNORE INTO token_account (key, value) VALUES ('lifetime_spent', '0');
+
+      CREATE TABLE IF NOT EXISTS token_transactions (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL CHECK(type IN ('income', 'expense')),
+        amount INTEGER NOT NULL,
+        category TEXT NOT NULL DEFAULT 'general',
+        note TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_token_txn_created ON token_transactions(created_at);
+    `
+  },
+  {
+    version: 11,
+    sql: `
+      CREATE TABLE IF NOT EXISTS procedures (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        steps TEXT NOT NULL DEFAULT '[]',
+        trigger_keywords TEXT NOT NULL DEFAULT '[]',
+        success_count INTEGER NOT NULL DEFAULT 0,
+        fail_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_procedures_name ON procedures(name);
+    `
+  },
+  {
+    version: 12,
+    sql: `
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL CHECK(source IN ('electron', 'telegram')),
+        role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+        content TEXT NOT NULL,
+        telegram_chat_id INTEGER,
+        telegram_user_id INTEGER,
+        telegram_from TEXT,
+        telegram_message_id INTEGER,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+    `
+  },
+  {
+    version: 13,
+    sql: `
+      CREATE TABLE IF NOT EXISTS telegram_outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id TEXT NOT NULL,
+        msg_type TEXT NOT NULL CHECK(msg_type IN ('send', 'edit', 'reply', 'action')),
+        message TEXT NOT NULL,
+        target_message_id INTEGER,
+        hash TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'sent', 'failed')),
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_outbox_status ON telegram_outbox(status);
+      CREATE INDEX IF NOT EXISTS idx_outbox_hash ON telegram_outbox(hash);
+    `
+  },
+  {
+    version: 14,
+    sql: `
+      ALTER TABLE telegram_outbox ADD COLUMN category TEXT NOT NULL DEFAULT 'dialogue';
+      CREATE INDEX IF NOT EXISTS idx_outbox_category ON telegram_outbox(category);
+    `
+  },
+  {
+    version: 15,
+    sql: `
+      CREATE TABLE IF NOT EXISTS identity_core (
+        id TEXT PRIMARY KEY DEFAULT 'singleton',
+        constitution_hash TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        personality TEXT NOT NULL DEFAULT '[]',
+        capabilities TEXT NOT NULL DEFAULT '[]',
+        constraints TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS identity_traits (
+        name TEXT PRIMARY KEY,
+        value REAL NOT NULL DEFAULT 0.5,
+        trend TEXT NOT NULL DEFAULT 'stable' CHECK(trend IN ('growing','stable','declining')),
+        sample_count INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+
+      INSERT OR IGNORE INTO identity_traits (name, value, trend, sample_count, updated_at)
+      VALUES ('goal_alignment', 0.7, 'stable', 0, strftime('%s','now') * 1000);
+
+      INSERT OR IGNORE INTO identity_traits (name, value, trend, sample_count, updated_at)
+      VALUES ('tool_efficiency', 0.6, 'stable', 0, strftime('%s','now') * 1000);
+
+      INSERT OR IGNORE INTO identity_traits (name, value, trend, sample_count, updated_at)
+      VALUES ('response_quality', 0.7, 'stable', 0, strftime('%s','now') * 1000);
+
+      CREATE TABLE IF NOT EXISTS identity_metrics (
+        id TEXT PRIMARY KEY DEFAULT 'singleton',
+        sessions_completed INTEGER NOT NULL DEFAULT 0,
+        tools_used INTEGER NOT NULL DEFAULT 0,
+        goals_completed INTEGER NOT NULL DEFAULT 0,
+        goals_drifted INTEGER NOT NULL DEFAULT 0,
+        avg_score REAL NOT NULL DEFAULT 1.0,
+        constitution_checksum TEXT NOT NULL DEFAULT '',
+        last_updated INTEGER NOT NULL
+      );
+    `
+  },
+  {
+    version: 16,
+    sql: `
+      ALTER TABLE procedures ADD COLUMN embedding TEXT;
+      CREATE INDEX IF NOT EXISTS idx_procedures_updated_at ON procedures(updated_at);
+    `
+  },
+  {
+    version: 17,
+    sql: `
+      CREATE TABLE IF NOT EXISTS meta_reviews (
+        id TEXT PRIMARY KEY,
+        period_start INTEGER NOT NULL,
+        period_end INTEGER NOT NULL,
+        summary TEXT NOT NULL,
+        patterns TEXT NOT NULL DEFAULT '[]',
+        improvements TEXT NOT NULL DEFAULT '[]',
+        trait_deltas TEXT NOT NULL DEFAULT '{}',
+        created_at INTEGER NOT NULL
+      );
+    `
+  },
+  {
+    version: 18,
+    sql: `
+      CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        source TEXT,
+        trace_id TEXT,
+        timestamp INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_events_channel_ts ON events(channel, timestamp);
+    `
+  },
+  {
+    version: 19,
+    sql: `
+      CREATE TABLE IF NOT EXISTS decisions (
+        id TEXT PRIMARY KEY,
+        timestamp INTEGER NOT NULL,
+        agent_id TEXT NOT NULL,
+        category TEXT NOT NULL CHECK(category IN ('tool_select','strategy','plan_route','goal_adjust','recovery')),
+        context TEXT NOT NULL,
+        choice TEXT NOT NULL,
+        alternatives TEXT NOT NULL DEFAULT '[]',
+        outcome TEXT NOT NULL DEFAULT 'pending' CHECK(outcome IN ('pending','success','failure')),
+        confidence REAL NOT NULL DEFAULT 0.5,
+        related_plan_id TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_decisions_category ON decisions(category);
+      CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp);
+    `
+  },
+  {
+    version: 20,
+    sql: `
+      CREATE TABLE IF NOT EXISTS agent_events (
+        id TEXT PRIMARY KEY,
+        timestamp INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        agent_id TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'system',
+        detail TEXT NOT NULL DEFAULT '',
+        duration_ms INTEGER,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type);
+    `
+  },
+  {
+    version: 21,
+    sql: `
+      CREATE TABLE IF NOT EXISTS explored_pairs (
+        pair_key TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL
+      );
+    `
+  },
+  {
+    version: 22,
+    sql: `
+      ALTER TABLE plans ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+    `
+  },
+  {
+    version: 23,
+    sql: `
+      DROP TABLE IF EXISTS telegram_outbox_new;
+      CREATE TABLE telegram_outbox_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id TEXT NOT NULL,
+        bot TEXT NOT NULL DEFAULT 'chat',
+        msg_type TEXT NOT NULL CHECK(msg_type IN ('send', 'edit', 'reply', 'action', 'photo', 'media_group')),
+        category TEXT NOT NULL DEFAULT 'dialogue',
+        message TEXT NOT NULL,
+        target_message_id INTEGER,
+        hash TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'sent', 'failed')),
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER
+      );
+      INSERT INTO telegram_outbox_new SELECT id, chat_id, 'chat', msg_type, IFNULL(category,'dialogue'), message, target_message_id, hash, status, retry_count, last_error, created_at, updated_at FROM telegram_outbox;
+      DROP TABLE telegram_outbox;
+      ALTER TABLE telegram_outbox_new RENAME TO telegram_outbox;
+      CREATE INDEX IF NOT EXISTS idx_outbox_status ON telegram_outbox(status);
+      CREATE INDEX IF NOT EXISTS idx_outbox_hash ON telegram_outbox(hash);
+      CREATE INDEX IF NOT EXISTS idx_outbox_category ON telegram_outbox(category);
+    `
+  },
+  {
+    version: 24,
+    sql: `
+      ALTER TABLE messages ADD COLUMN session_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
+    `
+  },
+  {
+    version: 25,
+    sql: `
+      ALTER TABLE messages ADD COLUMN category TEXT NOT NULL DEFAULT 'chat';
+      CREATE INDEX IF NOT EXISTS idx_messages_category ON messages(category);
+    `
+  },
+  {
+    version: 26,
+    sql: `
+      CREATE TABLE IF NOT EXISTS workflow_defs (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        definition TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_runs (
+        run_id TEXT PRIMARY KEY,
+        workflow_def_id TEXT NOT NULL,
+        workflow_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','paused','done','failed')),
+        trigger TEXT,
+        context TEXT,
+        pending_gate TEXT,
+        user_input TEXT,
+        started_at INTEGER NOT NULL,
+        completed_at INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_step_runs (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES workflow_runs(run_id) ON DELETE CASCADE,
+        step_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','done','failed','skipped')),
+        input TEXT,
+        output TEXT,
+        error TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        started_at INTEGER,
+        completed_at INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_wf_runs_def_id ON workflow_runs(workflow_def_id);
+      CREATE INDEX IF NOT EXISTS idx_wf_runs_status ON workflow_runs(status);
+      CREATE INDEX IF NOT EXISTS idx_wf_step_runs_run_id ON workflow_step_runs(run_id);
+    `
+  }
+];
+function runMigrations(sqlite2) {
+  sqlite2.run("CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)");
+  const applied = new Set(sqlite2.exec("SELECT version FROM _migrations").flatMap((r) => r.values).map((v) => Number(v)));
+  for (const m of MIGRATIONS) {
+    if (!applied.has(m.version)) {
+      Logger.log("INFO", "db_migration_applying", { version: m.version });
+      sqlite2.run(m.sql);
+      sqlite2.run("INSERT INTO _migrations (version, applied_at) VALUES (?, ?)", [m.version, Date.now()]);
+      Logger.log("INFO", "db_migration_applied", { version: m.version });
+    }
+  }
+}
+const PATTERNS$2 = [
+  {
+    category: "writing",
+    patterns: [
+      /写.*故事|写.*小说|创作.*故事/,
+      /小说|故事|剧情|角色|章节|情节/,
+      /文笔|润色|改写|描写|修辞/,
+      /氛围|气氛|画面感|灵感|细节|描写/,
+      /写作|著书|文稿|手稿|连载|番外|同人|小说创作/
+    ]
+  },
+  {
+    category: "image_gen",
+    patterns: [
+      /画|绘制|生成.*图|生成.*画|作图|绘图/,
+      /图片|照片|图像|插图|插画/,
+      /设计.*图|设计.*海报|设计.*封面/,
+      /FLUX|CogView|ComfyUI/,
+      /生图|AI.*图|AI.*画|文生图|图生图/
+    ]
+  },
+  {
+    category: "evolution",
+    patterns: [
+      /进化|自我改进|自我优化|self.evolve|self.improv/i,
+      /优化.*系统|改进.*能力|提升.*性能|升级.*功能/,
+      /分析.*代码|重构.*架构|重构.*代码|代码.*审查/,
+      /性能.*优化|内存.*泄漏|bug.*修复|自动化.*测试/
+    ]
+  },
+  {
+    category: "creativity",
+    patterns: [
+      /创意|灵感|点子|头脑风暴|brainstorm/i,
+      /创新|新颖|独特.*想法|出主意/,
+      /有什么.*想法|你觉得.*怎么样|有没有.*思路/,
+      /设计方案|产品.*构思|新功能.*建议/
+    ]
+  },
+  {
+    category: "dream",
+    patterns: [/梦境|梦到|做梦|梦见|潜意识|催眠/i, /dream|subconscious|REM/i, /解梦|弗洛伊德|荣格|释梦/]
+  }
+];
+function classifyContent(text) {
+  if (!text) return "chat";
+  for (const { category, patterns } of PATTERNS$2) {
+    for (const p of patterns) {
+      if (p.test(text)) return category;
+    }
+  }
+  return "chat";
+}
+let db = null;
+let sqlite = null;
+let dbPath = "";
+let saveTimer = null;
+let dirty = false;
+let initializing = false;
+async function proxyCallback(sql, params, method) {
+  if (!sqlite) throw new Error("Database not initialized");
+  const convertedSql = sql.replace(/\$\d+/g, "?");
+  try {
+    if (method === "run") {
+      sqlite.run(convertedSql, params);
+      return { rows: [] };
+    }
+    const stmt = sqlite.prepare(convertedSql);
+    stmt.bind(params);
+    if (method === "get") {
+      const row = stmt.step() ? stmt.getAsObject() : null;
+      stmt.free();
+      return { rows: row ? [row] : [] };
+    }
+    if (method === "values") {
+      const rows2 = [];
+      while (stmt.step()) {
+        rows2.push(stmt.get());
+      }
+      stmt.free();
+      return { rows: rows2 };
+    }
+    const rows = [];
+    while (stmt.step()) {
+      rows.push(stmt.getAsObject());
+    }
+    stmt.free();
+    return { rows };
+  } catch (err) {
+    Logger.log("ERROR", "db_query_error", { sql: convertedSql.slice(0, 100), error: String(err) });
+    throw err;
+  }
+}
+async function initDatabase() {
+  if (db) return;
+  if (initializing) {
+    while (initializing) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return;
+  }
+  initializing = true;
+  dbPath = path$1.join(WORKSPACE_ROOT, "akemi-mio.db");
+  Logger.log("INFO", "db_init", { path: dbPath });
+  const SQL = await initSqlJs();
+  if (fs.existsSync(dbPath)) {
+    const buffer = fs.readFileSync(dbPath);
+    sqlite = new SQL.Database(buffer);
+  } else {
+    sqlite = new SQL.Database();
+  }
+  sqlite.run("PRAGMA journal_mode = WAL");
+  sqlite.run("PRAGMA foreign_keys = ON");
+  db = sqliteProxy.drizzle(proxyCallback, { schema });
+  runMigrations(sqlite);
+  try {
+    const rows = sqlite.exec(
+      `SELECT id, content, session_id FROM messages WHERE role = 'user' AND category = 'chat' ORDER BY created_at ASC`
+    );
+    if (rows.length && rows[0].values.length) {
+      const cols = rows[0].columns;
+      const idIdx = cols.indexOf("id");
+      const contentIdx = cols.indexOf("content");
+      const sessionIdx = cols.indexOf("session_id");
+      const stmt1 = sqlite.prepare("UPDATE messages SET category = ? WHERE id = ?");
+      const stmt2 = sqlite.prepare("UPDATE messages SET category = ? WHERE session_id = ? AND role = ? AND category = ?");
+      for (const row of rows[0].values) {
+        const content = String(row[contentIdx] || "");
+        const cat = classifyContent(content);
+        if (cat !== "chat") {
+          const id2 = String(row[idIdx]);
+          stmt1.bind([cat, id2]);
+          stmt1.step();
+          stmt1.reset();
+          const sessionId = row[sessionIdx];
+          if (sessionId) {
+            stmt2.bind([cat, sessionId, "assistant", "chat"]);
+            stmt2.step();
+            stmt2.reset();
+          }
+        }
+      }
+      stmt1.free();
+      stmt2.free();
+      markDirty();
+    }
+  } catch (err) {
+    Logger.log("ERROR", "db_backfill_categories_failed", { error: String(err) });
+  }
+  saveTimer = setInterval(() => {
+    if (dirty && sqlite) {
+      const data = sqlite.export();
+      fs.writeFileSync(dbPath, Buffer.from(data));
+      dirty = false;
+    }
+  }, 1e4);
+  Logger.log("INFO", "db_ready");
+  initializing = false;
+}
+function getDatabase() {
+  if (!db) throw new Error("Database not initialized. Call initDatabase() first.");
+  return db;
+}
+function markDirty() {
+  dirty = true;
+}
+function flushDatabase() {
+  if (!sqlite || !dbPath) return;
+  const data = sqlite.export();
+  fs.writeFileSync(dbPath, Buffer.from(data));
+  dirty = false;
+  Logger.log("INFO", "db_flushed", { size: data.length });
+}
+function closeDatabase() {
+  if (saveTimer) {
+    clearInterval(saveTimer);
+    saveTimer = null;
+  }
+  if (sqlite) {
+    flushDatabase();
+    try {
+      sqlite.close();
+    } catch {
+    }
+    sqlite = null;
+    db = null;
+  }
+}
+function getRawDb() {
+  if (!sqlite) throw new Error("Database not initialized");
+  return sqlite;
+}
+const connection = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  closeDatabase,
+  flushDatabase,
+  getDatabase,
+  getRawDb,
+  initDatabase,
+  markDirty
+}, Symbol.toStringTag, { value: "Module" }));
 const id$3 = "preset_dev_pipeline_simple";
 const name$3 = "dev-pipeline-simple";
 const description$3 = "简单任务：开发→测试";
@@ -1585,60 +2599,74 @@ const writingPipeline = {
 };
 const PRESET_DEFINITIONS = [devPipelineSimple, devPipelineMedium, devPipelineLarge, writingPipeline];
 let idCounter$b = 0;
-const DEFINITIONS_DIR = path$1.join(WORKSPACE.workflows, "definitions");
-const RUNS_DIR = path$1.join(WORKSPACE.workflows, "runs");
-function ensureDirs() {
-  if (!fs.existsSync(DEFINITIONS_DIR)) fs.mkdirSync(DEFINITIONS_DIR, { recursive: true });
-  if (!fs.existsSync(RUNS_DIR)) fs.mkdirSync(RUNS_DIR, { recursive: true });
-}
-function readJson(path2, fallback) {
-  try {
-    if (!fs.existsSync(path2)) return fallback;
-    return JSON.parse(fs.readFileSync(path2, "utf-8"));
-  } catch {
-    return fallback;
+class WorkflowStoreV2 {
+  seeded = false;
+  get db() {
+    return getRawDb();
   }
-}
-function writeJsonSafe(path2, data) {
-  try {
-    const dir = path$1.dirname(path2);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const tmp = path2 + ".tmp." + Date.now();
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-    fs.renameSync(tmp, path2);
-  } catch (err) {
-    Logger.log("ERROR", "workflow_write_failed", { path: path2, error: String(err) });
-  }
-}
-class WorkflowStore {
   // ── Definitions ──
   listDefinitions() {
-    ensureDirs();
     this.seedPresets();
-    if (!fs.existsSync(DEFINITIONS_DIR)) return [];
-    const files = fs.readdirSync(DEFINITIONS_DIR).filter((f) => f.endsWith(".json"));
-    return files.map((f) => readJson(path$1.join(DEFINITIONS_DIR, f), null)).filter(Boolean);
+    const rows = this.db.exec("SELECT definition FROM workflow_defs ORDER BY created_at DESC");
+    if (!rows.length || !rows[0].values.length) return [];
+    return rows[0].values.map((row) => {
+      try {
+        return JSON.parse(row[0]);
+      } catch {
+        return null;
+      }
+    }).filter(Boolean);
   }
   getDefinition(id2) {
-    return readJson(path$1.join(DEFINITIONS_DIR, `${id2}.json`), null);
+    const stmt = this.db.prepare("SELECT definition FROM workflow_defs WHERE id = ?");
+    stmt.bind([id2]);
+    if (!stmt.step()) {
+      stmt.free();
+      return null;
+    }
+    const row = stmt.getAsObject();
+    stmt.free();
+    try {
+      return JSON.parse(row.definition);
+    } catch {
+      return null;
+    }
   }
   saveDefinition(def) {
-    ensureDirs();
     def.updatedAt = Date.now();
     if (!def.createdAt) def.createdAt = Date.now();
-    writeJsonSafe(path$1.join(DEFINITIONS_DIR, `${def.id}.json`), def);
+    const existing = this.db.prepare("SELECT 1 FROM workflow_defs WHERE id = ?");
+    existing.bind([def.id]);
+    const exists = existing.step();
+    existing.free();
+    if (exists) {
+      this.db.run("UPDATE workflow_defs SET name = ?, description = ?, definition = ?, enabled = ?, updated_at = ? WHERE id = ?", [
+        def.name,
+        def.description,
+        JSON.stringify(def),
+        def.enabled !== false ? 1 : 0,
+        def.updatedAt,
+        def.id
+      ]);
+    } else {
+      this.db.run(
+        "INSERT INTO workflow_defs (id, name, description, definition, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [def.id, def.name, def.description, JSON.stringify(def), def.enabled !== false ? 1 : 0, def.createdAt, def.updatedAt]
+      );
+    }
+    markDirty();
     eventBus.emit("workflow.def.created", { workflowDefId: def.id, name: def.name });
     Logger.log("INFO", "workflow_def_saved", { id: def.id, name: def.name, steps: def.steps.length });
   }
   deleteDefinition(id2) {
-    const path2 = path$1.join(DEFINITIONS_DIR, `${id2}.json`);
-    if (!fs.existsSync(path2)) return false;
-    try {
-      fs.unlinkSync(path2);
-      return true;
-    } catch {
-      return false;
-    }
+    const stmt = this.db.prepare("SELECT 1 FROM workflow_defs WHERE id = ?");
+    stmt.bind([id2]);
+    const exists = stmt.step();
+    stmt.free();
+    if (!exists) return false;
+    this.db.run("DELETE FROM workflow_defs WHERE id = ?", [id2]);
+    markDirty();
+    return true;
   }
   duplicateDefinition(id2) {
     const existing = this.getDefinition(id2);
@@ -1655,45 +2683,79 @@ class WorkflowStore {
     this.saveDefinition(copy);
     return copy;
   }
-  deleteRun(runId) {
-    const path2 = path$1.join(RUNS_DIR, `${runId}.json`);
-    if (!fs.existsSync(path2)) return false;
-    try {
-      fs.unlinkSync(path2);
-      return true;
-    } catch {
-      return false;
-    }
+  enableDefinition(id2) {
+    this.db.run("UPDATE workflow_defs SET enabled = 1 WHERE id = ?", [id2]);
+    markDirty();
+    return true;
+  }
+  disableDefinition(id2) {
+    this.db.run("UPDATE workflow_defs SET enabled = 0 WHERE id = ?", [id2]);
+    markDirty();
+    return true;
   }
   // ── Runs ──
-  listRuns(limit = 20) {
-    ensureDirs();
-    if (!fs.existsSync(RUNS_DIR)) return [];
-    const files = fs.readdirSync(RUNS_DIR).filter((f) => f.endsWith(".json")).sort().reverse().slice(0, limit);
-    return files.map((f) => readJson(path$1.join(RUNS_DIR, f), null)).filter(Boolean);
+  listRuns(limit = 50) {
+    const stmt = this.db.prepare("SELECT * FROM workflow_runs ORDER BY started_at DESC LIMIT ?");
+    stmt.bind([limit]);
+    const runs = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      runs.push(this.rowToRun(row));
+    }
+    stmt.free();
+    return runs;
+  }
+  listActiveRuns() {
+    const stmt = this.db.prepare("SELECT * FROM workflow_runs WHERE status IN ('running','paused') ORDER BY started_at DESC");
+    const runs = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      runs.push(this.rowToRun(row));
+    }
+    stmt.free();
+    return runs;
   }
   getRun(runId) {
-    return readJson(path$1.join(RUNS_DIR, `${runId}.json`), null);
+    const stmt = this.db.prepare("SELECT * FROM workflow_runs WHERE run_id = ?");
+    stmt.bind([runId]);
+    if (!stmt.step()) {
+      stmt.free();
+      return null;
+    }
+    const row = stmt.getAsObject();
+    stmt.free();
+    return this.rowToRun(row);
   }
-  createRun(def) {
-    ensureDirs();
+  createRun(def, trigger) {
+    const runId = `run_${Date.now()}_${++idCounter$b}`;
+    const now = Date.now();
     const run = {
-      runId: `run_${Date.now()}_${++idCounter$b}`,
+      runId,
       workflowDefId: def.id,
       workflowName: def.name,
       status: "pending",
-      steps: def.steps.map((s) => ({
-        stepId: s.id,
-        status: "pending"
-      })),
-      startedAt: Date.now()
+      steps: def.steps.map((s) => ({ stepId: s.id, status: "pending" })),
+      startedAt: now,
+      trigger
     };
-    writeJsonSafe(path$1.join(RUNS_DIR, `${run.runId}.json`), run);
+    this.db.run(
+      `INSERT INTO workflow_runs (run_id, workflow_def_id, workflow_name, status, trigger, context, pending_gate, user_input, started_at)
+       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+      [runId, def.id, def.name, trigger ? JSON.stringify(trigger) : null, null, null, null, now]
+    );
+    for (const s of def.steps) {
+      this.db.run(
+        `INSERT INTO workflow_step_runs (id, run_id, step_id, status, retry_count, started_at)
+         VALUES (?, ?, ?, 'pending', 0, ?)`,
+        [`${runId}_${s.id}`, runId, s.id, now]
+      );
+    }
+    markDirty();
     eventBus.emit("workflow.run.created", {
       runId: run.runId,
       workflowDefId: def.id,
       workflowName: def.name,
-      steps: def.steps.map((s) => ({ stepId: s.id, status: "pending" })),
+      steps: run.steps,
       startedAt: run.startedAt,
       status: "running"
     });
@@ -1701,491 +2763,836 @@ class WorkflowStore {
     return run;
   }
   updateRun(run) {
-    writeJsonSafe(path$1.join(RUNS_DIR, `${run.runId}.json`), run);
+    this.db.run(
+      `UPDATE workflow_runs SET status = ?, context = ?, pending_gate = ?, completed_at = ?
+       WHERE run_id = ?`,
+      [
+        run.status,
+        run.context ? JSON.stringify(run.context) : null,
+        run.pendingGate ? JSON.stringify(run.pendingGate) : null,
+        run.completedAt ?? null,
+        run.runId
+      ]
+    );
+    markDirty();
     eventBus.emit("workflow.run.updated", { runId: run.runId, status: run.status });
   }
   updateStep(run, stepId, status, result, error) {
+    const now = Date.now();
     const step = run.steps.find((s) => s.stepId === stepId);
     if (!step) return;
     step.status = status;
-    if (result) step.agentResult = result;
-    if (error) step.error = error;
-    if (status === "running" && !step.startedAt) step.startedAt = Date.now();
-    if (status === "done" || status === "failed") step.completedAt = Date.now();
+    if (result !== void 0) step.agentResult = result;
+    if (error !== void 0) step.error = error;
+    if (status === "running" && !step.startedAt) step.startedAt = now;
+    if (status === "done" || status === "failed") step.completedAt = now;
+    this.db.run(
+      `UPDATE workflow_step_runs SET status = ?, output = ?, error = ?, retry_count = ?, completed_at = ?
+       WHERE run_id = ? AND step_id = ?`,
+      [
+        status,
+        result ? result : null,
+        error ?? null,
+        step.retryCount ?? 0,
+        status === "done" || status === "failed" ? now : null,
+        run.runId,
+        stepId
+      ]
+    );
+    markDirty();
     this.updateRun(run);
     eventBus.emit("workflow.run.step", { runId: run.runId, stepId, status, error, agentResult: result });
   }
-  // ── Preset seeding ──
-  seeded = false;
+  deleteRun(runId) {
+    this.db.run("DELETE FROM workflow_step_runs WHERE run_id = ?", [runId]);
+    this.db.run("DELETE FROM workflow_runs WHERE run_id = ?", [runId]);
+    markDirty();
+    return true;
+  }
+  // ── Presets ──
   seedPresets() {
     if (this.seeded) return;
     this.seeded = true;
-    ensureDirs();
     for (const def of PRESET_DEFINITIONS) {
-      const path2 = path$1.join(DEFINITIONS_DIR, `${def.id}.json`);
-      if (!fs.existsSync(path2)) {
-        writeJsonSafe(path2, def);
+      const stmt = this.db.prepare("SELECT 1 FROM workflow_defs WHERE id = ?");
+      stmt.bind([def.id]);
+      const exists = stmt.step();
+      stmt.free();
+      if (!exists) {
+        this.saveDefinition(def);
       }
     }
   }
+  // ── Row mapping ──
+  rowToRun(row) {
+    const stmt = this.db.prepare("SELECT * FROM workflow_step_runs WHERE run_id = ? ORDER BY started_at ASC");
+    stmt.bind([row.run_id]);
+    const steps2 = [];
+    while (stmt.step()) {
+      const sr = stmt.getAsObject();
+      steps2.push({
+        stepId: sr.step_id,
+        status: sr.status,
+        agentResult: sr.output,
+        error: sr.error,
+        retryCount: sr.retry_count,
+        startedAt: sr.started_at,
+        completedAt: sr.completed_at
+      });
+    }
+    stmt.free();
+    return {
+      runId: row.run_id,
+      workflowDefId: row.workflow_def_id,
+      workflowName: row.workflow_name,
+      status: row.status,
+      steps: steps2,
+      startedAt: row.started_at,
+      completedAt: row.completed_at ?? void 0,
+      userInput: row.user_input ?? void 0,
+      trigger: row.trigger ? JSON.parse(row.trigger) : void 0,
+      context: row.context ? JSON.parse(row.context) : void 0,
+      pendingGate: row.pending_gate ? JSON.parse(row.pending_gate) : void 0
+    };
+  }
 }
-const workflowStore = new WorkflowStore();
+const workflowStore = new WorkflowStoreV2();
 function resolveRunOutputDir(def, run) {
+  const RUNS_DIR = path$1.join(process.env["WORKSPACE"] || process.cwd(), "runs");
   const base = def.outputDir ? def.outputDir.replace(/^~/, os__namespace.homedir()) : path$1.join(RUNS_DIR, `wf_${def.name}`);
   const ts = new Date(run.startedAt).toISOString().slice(0, 16).replace("T", "T");
   return path$1.join(base, ts);
 }
-async function writeWorkflowExcel(run, outputDir) {
-  try {
-    const wb = new ExcelJS__namespace.Workbook();
-    wb.creator = "Akemi-Mio Workflow";
-    wb.created = new Date(run.startedAt);
-    const qualifiedSheet = wb.addWorksheet("合格人员台账");
-    const failSheet = wb.addWorksheet("不合格清单");
-    const detailSheet = wb.addWorksheet("检查明细");
-    const headerStyle = {
-      font: { bold: true, color: { argb: "FFFFFFFF" } },
-      fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FF4472C4" } },
-      border: {
-        top: { style: "thin" },
-        bottom: { style: "thin" },
-        left: { style: "thin" },
-        right: { style: "thin" }
-      }
-    };
-    const qualifiedHeaders = [
-      "企业名称",
-      "技术负责人",
-      "身份证号",
-      "业绩项目",
-      "项目等级",
-      "五方",
-      "七项",
-      "含身份证",
-      "有效业绩数",
-      "判定"
-    ];
-    qualifiedSheet.addRow(qualifiedHeaders);
-    qualifiedSheet.getRow(1).eachCell((cell) => {
-      cell.style = headerStyle;
-    });
-    qualifiedSheet.columns = qualifiedHeaders.map((h) => ({ header: h, width: Math.max(h.length * 2, 18) }));
-    const failHeaders = ["企业名称", "技术负责人", "不合格原因", "状态"];
-    failSheet.addRow(failHeaders);
-    failSheet.getRow(1).eachCell((cell) => {
-      cell.style = headerStyle;
-    });
-    failSheet.columns = failHeaders.map((h) => ({ header: h, width: Math.max(h.length * 2, 20) }));
-    const detailHeaders = ["步骤", "企业", "项目", "检查项", "结果", "详情"];
-    detailSheet.addRow(detailHeaders);
-    detailSheet.getRow(1).eachCell((cell) => {
-      cell.style = headerStyle;
-    });
-    detailSheet.columns = detailHeaders.map((h) => ({ header: h, width: Math.max(h.length * 2, 22) }));
-    for (const step of run.steps) {
-      if (!step.agentResult) continue;
-      if (step.stepId === "s_browser") {
-        const parsed = tryParseBrowserJson(step.agentResult);
-        if (parsed) {
-          for (const ent of parsed.enterprises || []) {
-            for (const p of ent.personnel || []) {
-              const count = p.有效业绩数 || 0;
-              if (p.双业绩合格) {
-                qualifiedSheet.addRow([
-                  ent.name,
-                  p.姓名,
-                  p.身份证号 || "",
-                  (p.关联项目 || []).join(";"),
-                  "",
-                  "",
-                  "",
-                  "",
-                  String(count),
-                  "✅ 合格"
-                ]);
-              } else {
-                const reason = `有效业绩 ${count} 条，不足 2 条`;
-                failSheet.addRow([ent.name, p.姓名, reason, "不合格"]);
-              }
-            }
-            if (!ent.personnel || ent.personnel.length === 0) {
-              failSheet.addRow([ent.name, "无", ent.enterprise_verdict || "无技术负责人", "不合格"]);
-            }
-          }
-        }
-        if (parsed) {
-          for (const ent of parsed.enterprises || []) {
-            for (const proj of ent.projects || []) {
-              detailSheet.addRow(["s_browser", ent.name, proj.name, "技术指标", proj.grade, proj.verdict || ""]);
-              detailSheet.addRow([
-                "s_browser",
-                ent.name,
-                proj.name,
-                "五方",
-                proj.五方齐全 ? "齐全" : "不齐",
-                proj.五方含施工企业 ? "含施工" : "不含施工"
-              ]);
-              detailSheet.addRow([
-                "s_browser",
-                ent.name,
-                proj.name,
-                "七项",
-                proj.七项完整 ? "完整" : "不完整",
-                proj.竣工含身份证 ? "含身份证" : "无身份证"
-              ]);
-            }
-          }
-        }
-      }
-      if (step.stepId === "s8") {
-        const qualified = {};
-        const failed = {};
-        const lines = step.agentResult.split("\n");
-        let currentName = "";
-        let currentEnterprise = "";
-        let tableLines = [];
-        for (const line of lines) {
-          const titleMatch = line.match(/\*\*技术负责人：(\S+)\*\*.*\*\*企业：(\S+)\*\*/);
-          if (titleMatch) {
-            if (currentName && tableLines.length > 1) {
-              parseTableRows(tableLines, currentEnterprise, currentName, qualified, failed);
-            }
-            currentName = titleMatch[1];
-            currentEnterprise = titleMatch[2];
-            tableLines = [];
-            continue;
-          }
-          if (line.includes("| ---") || line.trim().startsWith("|") && line.trim().endsWith("|")) {
-            tableLines.push(line);
-          }
-        }
-        if (currentName && tableLines.length > 1) {
-          parseTableRows(tableLines, currentEnterprise, currentName, qualified, failed);
-        }
-        for (const [name2, rows] of Object.entries(qualified)) {
-          for (const r of rows) {
-            qualifiedSheet.addRow([
-              r.enterprise,
-              name2,
-              r.idCard || "",
-              r.project,
-              r.grade,
-              r.wufang,
-              r.qixiang,
-              r.idCardFlag,
-              r.count,
-              r.verdict
-            ]);
-          }
-        }
-        for (const [name2, rows] of Object.entries(failed)) {
-          for (const r of rows) {
-            failSheet.addRow([r.enterprise, name2, r.reason, "不合格"]);
-          }
-        }
-      }
-      if (["s4", "s5", "s6", "s7"].includes(step.stepId)) {
-        const lines = step.agentResult.split("\n");
-        for (const line of lines) {
-          if (line.trim().startsWith("|") && line.includes("|")) {
-            const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
-            if (cols.length >= 3) {
-              detailSheet.addRow([step.stepId, ...cols.slice(0, 5)]);
-            }
-          }
-        }
-      }
-    }
-    ;
-    [qualifiedSheet, failSheet, detailSheet].forEach((sheet) => {
-      sheet.eachRow((row) => {
-        row.eachCell((cell) => {
-          cell.border = {
-            top: { style: "thin" },
-            bottom: { style: "thin" },
-            left: { style: "thin" },
-            right: { style: "thin" }
-          };
-          cell.alignment = { vertical: "middle", wrapText: true };
-        });
-      });
-    });
-    if (!fs__namespace.existsSync(outputDir)) {
-      fs__namespace.mkdirSync(outputDir, { recursive: true });
-    }
-    const filePath = path__namespace.join(outputDir, "技术负责人业绩台账.xlsx");
-    await wb.xlsx.writeFile(filePath);
-    Logger.log("INFO", "workflow_excel_written", { path: filePath });
-    return filePath;
-  } catch (err) {
-    Logger.log("ERROR", "workflow_excel_write_failed", { error: err.message });
-    return null;
-  }
+const WorkflowStoreV2$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  WorkflowStoreV2,
+  resolveRunOutputDir,
+  workflowStore
+}, Symbol.toStringTag, { value: "Module" }));
+const TEMPLATE_RE = /\{\{([^}]+)\}\}/g;
+function resolveTemplate(template, context) {
+  if (!template) return "";
+  return template.replace(TEMPLATE_RE, (match2, expr) => {
+    const resolved = resolveExpression(expr.trim(), context);
+    return resolved !== void 0 && resolved !== null ? String(resolved) : match2;
+  });
 }
-function parseTableRows(lines, enterprise, name2, qualified, failed) {
-  const dataLines = lines.filter((l) => !l.includes("---") && !l.includes("序号 |"));
-  for (const line of dataLines) {
-    const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
-    if (cols.length < 6) continue;
-    const project = cols[1] || "";
-    const grade = cols[2] || "";
-    const wufang = cols[3] === "✓" ? "齐全" : cols[3];
-    const qixiang = cols[4] === "✓" ? "齐全" : cols[4];
-    const idCard = cols[5] === "✓" ? "有" : cols[5];
-    const valid = cols[cols.length - 1] || "";
-    const row = { enterprise, project, grade, wufang, qixiang, idCardFlag: idCard, count: "1", verdict: valid, idCard: "", reason: "" };
-    if (valid.includes("✅")) {
-      if (!qualified[name2]) qualified[name2] = [];
-      qualified[name2].push(row);
+function resolveExpression(expr, context) {
+  const [pathExpr, defaultVal] = splitDefault(expr);
+  if (pathExpr === "input") return context["input"] ?? defaultVal;
+  if (pathExpr.startsWith("steps.")) {
+    const parts = pathExpr.split(".");
+    const stepId = parts[1];
+    const stepCtx = context?.steps?.[stepId];
+    if (!stepCtx) return defaultVal;
+    let val2;
+    if (parts[2] === "result") {
+      val2 = stepCtx.result;
+      val2 = navigatePath(val2, parts.slice(3));
     } else {
-      row.reason = `等级:${grade} 五方:${wufang} 七项:${qixiang} 身份证:${idCard}`;
-      if (!failed[name2]) failed[name2] = [];
-      failed[name2].push(row);
+      val2 = navigatePath(stepCtx, parts.slice(2));
     }
+    return val2 ?? defaultVal;
+  }
+  const val = navigatePath(context, pathExpr.split("."));
+  return val ?? defaultVal;
+}
+function splitDefault(expr) {
+  const idx = expr.lastIndexOf(" | ");
+  if (idx === -1) return [expr, void 0];
+  const rawPath = expr.slice(0, idx).trim();
+  const rawDefault = expr.slice(idx + 3).trim();
+  if (rawDefault === "true") return [rawPath, true];
+  if (rawDefault === "false") return [rawPath, false];
+  if (rawDefault === "null") return [rawPath, null];
+  if (/^-?\d+(\.\d+)?$/.test(rawDefault)) return [rawPath, Number(rawDefault)];
+  if (rawDefault.startsWith("'") && rawDefault.endsWith("'")) return [rawPath, rawDefault.slice(1, -1)];
+  if (rawDefault.startsWith('"') && rawDefault.endsWith('"')) return [rawPath, rawDefault.slice(1, -1)];
+  return [rawPath, rawDefault];
+}
+function navigatePath(obj, path2) {
+  let current = obj;
+  for (const segment of path2) {
+    if (current === null || current === void 0) return void 0;
+    const arrMatch = segment.match(/^(\w+)\[(\d+)\]$/);
+    if (arrMatch) {
+      current = current[arrMatch[1]];
+      if (current === null || current === void 0) return void 0;
+      current = current[Number(arrMatch[2])];
+    } else if (typeof current === "object" && segment in current) {
+      current = current[segment];
+    } else {
+      return void 0;
+    }
+  }
+  return current;
+}
+function evaluateCondition(condition, actual) {
+  if (!condition || condition === "") return true;
+  const trimmed = condition.trim();
+  if (trimmed === "true") return actual === true;
+  if (trimmed === "false") return actual === false;
+  if (trimmed === "null" || trimmed === "undefined") return actual === null || actual === void 0;
+  const result = trySimpleCompare(trimmed, actual);
+  if (result !== void 0) return result;
+  return evaluateCompound(trimmed, actual);
+}
+function trySimpleCompare(expr, actual) {
+  const patterns = [
+    { re: /^>\s*([\d.]+)$/, op: ">" },
+    { re: /^>=\s*([\d.]+)$/, op: ">=" },
+    { re: /^<\s*([\d.]+)$/, op: "<" },
+    { re: /^<=\s*([\d.]+)$/, op: "<=" },
+    { re: /^==\s*(.+)$/, op: "==" },
+    { re: /^!=\s*(.+)$/, op: "!=" },
+    { re: /^contains\s+(.+)$/, op: "contains" },
+    { re: /^startsWith\s+(.+)$/, op: "startsWith" }
+  ];
+  for (const p of patterns) {
+    const m = expr.match(p.re);
+    if (!m) continue;
+    const rhs = parseLiteral(m[1]);
+    return applyCompare(p.op, actual, rhs);
+  }
+  return void 0;
+}
+function parseLiteral(s) {
+  const v = s.trim();
+  if (v === "true") return true;
+  if (v === "false") return false;
+  if (v === "null") return null;
+  if (v === "undefined") return void 0;
+  if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
+  if (v.startsWith("'") && v.endsWith("'") || v.startsWith('"') && v.endsWith('"')) {
+    return v.slice(1, -1);
+  }
+  return v;
+}
+function applyCompare(op, actual, expected) {
+  switch (op) {
+    case ">":
+      return typeof actual === "number" && typeof expected === "number" ? actual > expected : false;
+    case ">=":
+      return typeof actual === "number" && typeof expected === "number" ? actual >= expected : false;
+    case "<":
+      return typeof actual === "number" && typeof expected === "number" ? actual < expected : false;
+    case "<=":
+      return typeof actual === "number" && typeof expected === "number" ? actual <= expected : false;
+    case "==":
+      return actual == expected;
+    case "!=":
+      return actual != expected;
+    case "contains":
+      return typeof actual === "string" && typeof expected === "string" ? actual.toLowerCase().includes(expected.toLowerCase()) : false;
+    case "startsWith":
+      return typeof actual === "string" && typeof expected === "string" ? actual.toLowerCase().startsWith(expected.toLowerCase()) : false;
+    default:
+      return false;
   }
 }
-function tryParseBrowserJson(result) {
-  try {
-    const parsed = JSON.parse(result);
-    if (parsed.enterprises) return parsed;
-  } catch {
-  }
-  const match2 = result.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (match2) {
-    try {
-      const parsed = JSON.parse(match2[1].trim());
-      if (parsed.enterprises) return parsed;
-    } catch {
-    }
-  }
-  const braceIdx = result.indexOf("{");
-  if (braceIdx >= 0) {
-    try {
-      const parsed = JSON.parse(result.slice(braceIdx));
-      if (parsed.enterprises) return parsed;
-    } catch {
-    }
-  }
-  return null;
+function evaluateCompound(expr, actual) {
+  const tokens = tokenize$1(expr);
+  if (tokens.length === 0) return false;
+  let pos = 0;
+  return parseOr(tokens, actual, () => pos);
 }
-class WorkflowScheduler {
+function tokenize$1(expr) {
+  const tokens = [];
+  let i = 0;
+  while (i < expr.length) {
+    if (expr[i] === " ") {
+      i++;
+      continue;
+    }
+    if (expr[i] === "(") {
+      tokens.push({ type: "lparen" });
+      i++;
+      continue;
+    }
+    if (expr[i] === ")") {
+      tokens.push({ type: "rparen" });
+      i++;
+      continue;
+    }
+    if (/[\d.]/.test(expr[i])) {
+      const numMatch = expr.slice(i).match(/^[\d.]+/);
+      if (numMatch) {
+        tokens.push({ type: "number", value: Number(numMatch[0]) });
+        i += numMatch[0].length;
+        continue;
+      }
+    }
+    const opMatch = expr.slice(i).match(/^(>=|<=|==|!=|>|<)/);
+    if (opMatch) {
+      tokens.push({ type: "op", value: opMatch[1] });
+      i += opMatch[1].length;
+      continue;
+    }
+    const wordMatch = expr.slice(i).match(/^(contains|startsWith|not|and|or)\b/);
+    if (wordMatch) {
+      const word = wordMatch[1];
+      if (word === "and" || word === "or" || word === "not") {
+        tokens.push({ type: "logical", value: word });
+      } else {
+        tokens.push({ type: "op", value: word });
+      }
+      i += wordMatch[1].length;
+      continue;
+    }
+    if (expr[i] === "'" || expr[i] === '"') {
+      const quote = expr[i];
+      let j = i + 1;
+      while (j < expr.length && expr[j] !== quote) j++;
+      tokens.push({ type: "string", value: expr.slice(i + 1, j) });
+      i = j + 1;
+      continue;
+    }
+    const litMatch = expr.slice(i).match(/^(true|false|null|undefined)\b/);
+    if (litMatch) {
+      tokens.push({ type: "bool", value: litMatch[1] === "true" });
+      i += litMatch[1].length;
+      continue;
+    }
+    const bare = expr.slice(i).match(/^[^\s()]+/);
+    if (bare) {
+      tokens.push({ type: "string", value: bare[0] });
+      i += bare[0].length;
+      continue;
+    }
+    i++;
+  }
+  return tokens;
+}
+function parseOr(tokens, actual, pos) {
+  return parseLoop(tokens, actual, pos, "or", parseAnd);
+}
+function parseAnd(tokens, actual, pos) {
+  return parseLoop(tokens, actual, pos, "and", parseNot);
+}
+function parseNot(tokens, actual, pos) {
+  if (hasMore(pos, tokens) && is("logical", "not")(tokens[pos()])) {
+    pos = inc(pos);
+    return !parsePrimary(tokens, actual, pos);
+  }
+  return parsePrimary(tokens, actual, pos);
+}
+function parsePrimary(tokens, actual, pos) {
+  if (!hasMore(pos, tokens)) return false;
+  if (is("lparen")(tokens[pos()])) {
+    pos = inc(pos);
+    const result = parseOr(tokens, actual, pos);
+    if (hasMore(pos, tokens) && is("rparen")(tokens[pos()])) pos = inc(pos);
+    return result;
+  }
+  if (isOp(tokens[pos()])) {
+    const op = tokens[pos()].value;
+    pos = inc(pos);
+    const rhs = literalValue(tokens, pos);
+    pos = inc(pos);
+    return applyCompare(op, actual, rhs);
+  }
+  const lhs = literalValue(tokens, pos);
+  if (lhs === void 0) pos = inc(pos);
+  else pos = inc(pos);
+  if (hasMore(pos, tokens) && isOp(tokens[pos()])) {
+    const op = tokens[pos()].value;
+    pos = inc(pos);
+    const rhs = literalValue(tokens, pos);
+    if (rhs !== void 0) pos = inc(pos);
+    return applyCompare(op, lhs, rhs);
+  }
+  if (is("bool")(tokens[pos()])) {
+    const val = tokens[pos()].value;
+    pos = inc(pos);
+    return val;
+  }
+  return false;
+}
+function parseLoop(tokens, actual, pos, logical, next) {
+  let left = next(tokens, actual, pos);
+  while (hasMore(pos, tokens) && is("logical", logical)(tokens[pos()])) {
+    pos = inc(pos);
+    const right = next(tokens, actual, pos);
+    left = logical === "and" ? left && right : left || right;
+  }
+  return left;
+}
+function literalValue(tokens, pos) {
+  if (!hasMore(pos, tokens)) return void 0;
+  const t = tokens[pos()];
+  if (t.type === "number") return t.value;
+  if (t.type === "string") return t.value;
+  if (t.type === "bool") return t.value;
+  return void 0;
+}
+function hasMore(pos, tokens) {
+  return pos() < tokens.length;
+}
+function is(type, value) {
+  return (t) => t.type === type && (value === void 0 || t.value === value);
+}
+function isOp(t) {
+  return t.type === "op";
+}
+function inc(p) {
+  let v = p();
+  return () => v + 1;
+}
+class WorkflowSchedulerV2 {
   dispatch;
-  pendingAgents = /* @__PURE__ */ new Map();
-  active = false;
+  running = /* @__PURE__ */ new Map();
+  maxConcurrency = 5;
   constructor(dispatch) {
     this.dispatch = dispatch;
   }
   startRun(def, userInput) {
-    const run = workflowStore.createRun(def);
+    const run = workflowStore.createRun(def, def.trigger);
     run.userInput = userInput;
     run.status = "running";
-    const outputDir = resolveRunOutputDir(def, run);
-    run._outputDir = outputDir;
     workflowStore.updateRun(run);
-    this.active = true;
-    Logger.log("INFO", "workflow_run_started", { runId: run.runId, defId: def.id, steps: def.steps.length, outputDir });
-    Logger.log("INFO", "workflow_before_executeLoop", { runId: run.runId });
-    this.executeLoop(run, def, outputDir).catch((err) => {
-      Logger.log("ERROR", "workflow_execution_error", { runId: run.runId, error: String(err) });
+    const abort = new AbortController();
+    this.running.set(run.runId, abort);
+    Logger.log("INFO", "workflow_v2_run_started", { runId: run.runId, defId: def.id, steps: def.steps.length });
+    this.executeLoop(run, def, abort.signal).catch((err) => {
+      Logger.log("ERROR", "workflow_v2_error", { runId: run.runId, error: String(err) });
       run.status = "failed";
       workflowStore.updateRun(run);
-      this.active = false;
+      this.running.delete(run.runId);
     });
     return run;
   }
-  async executeLoop(run, def, outputDir) {
-    console.log("[wf] executeLoop ENTERED", { runId: run.runId, steps: def.steps.length, runStatus: run.status, outputDir });
-    Logger.log("INFO", "workflow_executeLoop_entered", { runId: run.runId, steps: def.steps.length });
+  async executeLoop(run, def, signal) {
+    const outputDir = resolveRunOutputDir(def, run);
     const stepDefs = [...def.steps];
     const completed = /* @__PURE__ */ new Set();
     const failures = /* @__PURE__ */ new Set();
     const skipped = /* @__PURE__ */ new Set();
-    while (this.active && run.status === "running") {
+    const concurrency = def.maxConcurrency ?? this.maxConcurrency;
+    const ctx = {
+      steps: {},
+      input: run.userInput ?? ""
+    };
+    while (!signal.aborted && run.status === "running") {
+      if (run.pendingGate) {
+        run.status = "paused";
+        workflowStore.updateRun(run);
+        Logger.log("INFO", "workflow_v2_paused_gate", { runId: run.runId, stepId: run.pendingGate.stepId });
+        return;
+      }
       for (const sd of stepDefs) {
-        if (completed.has(sd.id) || failures.has(sd.id) || skipped.has(sd.id)) continue;
-        const stepRun = run.steps.find((s) => s.stepId === sd.id);
-        if (!stepRun || stepRun.status !== "pending") continue;
-        const depsReady = sd.dependsOn.every((depId) => completed.has(depId) || failures.has(depId) || skipped.has(depId));
-        if (!depsReady) continue;
+        if (!isPending(sd, completed, failures, skipped)) continue;
+        if (!depsReady(sd, completed, failures, skipped)) continue;
         if (sd.runOn === "failure") {
-          const anyDepFailed = sd.dependsOn.some((depId) => failures.has(depId));
-          if (!anyDepFailed) {
-            workflowStore.updateStep(run, sd.id, "skipped", "(条件不满足，跳过)");
-            skipped.add(sd.id);
+          if (!sd.dependsOn.some((d) => failures.has(d))) {
+            markSkipped(run, sd, "(条件不满足，跳过)", skipped, workflowStore);
           }
         }
       }
       const runnable = stepDefs.filter((sd) => {
-        if (completed.has(sd.id) || failures.has(sd.id) || skipped.has(sd.id)) return false;
-        const stepRun = run.steps.find((s) => s.stepId === sd.id);
-        if (!stepRun || stepRun.status !== "pending") return false;
-        const depsReady = sd.dependsOn.every((depId) => completed.has(depId) || failures.has(depId) || skipped.has(depId));
-        if (!depsReady) return false;
+        if (!isPending(sd, completed, failures, skipped)) return false;
+        if (!depsReady(sd, completed, failures, skipped)) return false;
         if (sd.runOn === "failure") {
-          return sd.dependsOn.some((depId) => failures.has(depId));
-        } else {
-          return sd.dependsOn.every((depId) => completed.has(depId) || skipped.has(depId));
+          return sd.dependsOn.some((d) => failures.has(d));
         }
+        return sd.dependsOn.every((d) => completed.has(d) || skipped.has(d));
       });
       if (runnable.length === 0) {
-        const allDone = stepDefs.every((sd) => completed.has(sd.id) || skipped.has(sd.id));
-        const allFailed = stepDefs.every((sd) => failures.has(sd.id));
-        if (allDone) {
-          run.status = "done";
-          writeWorkflowExcel(run, outputDir).then((path2) => {
-            if (path2) Logger.log("INFO", "workflow_excel_generated", { runId: run.runId, path: path2 });
-          }).catch((err) => Logger.log("WARN", "workflow_excel_generation_failed", { runId: run.runId, error: String(err) }));
-        } else if (allFailed) run.status = "failed";
-        else run.status = completed.size > 0 ? "done" : "failed";
-        workflowStore.updateRun(run);
-        this.active = false;
+        finishRun(run, stepDefs, completed, failures, skipped, workflowStore);
+        this.running.delete(run.runId);
         return;
       }
-      const promises = runnable.map(async (sd) => {
-        workflowStore.updateStep(run, sd.id, "running");
-        try {
-          const agentIds = [];
-          switch (sd.handler) {
-            case "subagent": {
-              const subOptions = {};
-              const allowedTools = sd.config.allowedTools;
-              if (allowedTools !== void 0) {
-                subOptions.allowedToolNames = allowedTools;
-              }
-              if (sd.config.maxTurns !== void 0) {
-                subOptions.maxTurns = sd.config.maxTurns;
-              }
-              if (sd.config.llmTimeoutMs !== void 0) {
-                subOptions.llmTimeoutMs = sd.config.llmTimeoutMs;
-              }
-              subOptions.onProgress = (msg) => {
-                eventBus.emit("workflow.run.step", {
-                  runId: run.runId,
-                  stepId: sd.id,
-                  status: "running",
-                  agentResult: msg
-                });
-              };
-              const depContext = this.buildDependencyContext(sd, run);
-              const basePrompt = sd.config.prompt || sd.description;
-              const withInput = basePrompt.replace(
-                /\{INPUT\}/g,
-                run.userInput || "（用户未指定主题，请自行选择一个适合当前时间和社会热点的内容主题来创作）"
-              );
-              const withOutputDir = withInput.replace(/\{OUTPUT_DIR\}/g, outputDir);
-              let fullPrompt;
-              if (withOutputDir.includes("(dependency_context)")) {
-                fullPrompt = withOutputDir.replaceAll("(dependency_context)", depContext);
-              } else {
-                fullPrompt = withOutputDir + depContext;
-              }
-              const agentId = this.dispatch.runSubAgent(fullPrompt, def.description, subOptions);
-              agentIds.push(agentId);
-              this.pendingAgents.set(run.runId, agentIds);
-              break;
-            }
-            case "tool": {
-              const result = await this.dispatch.runTool(sd.config.tool || "", {});
-              workflowStore.updateStep(run, sd.id, "done", result);
+      const queue = [...runnable];
+      const active = [];
+      while (queue.length > 0 && !signal.aborted) {
+        while (queue.length > 0 && active.length < concurrency) {
+          const sd = queue.shift();
+          const promise = this.executeStep(sd, run, def, outputDir, ctx, signal).then((result) => {
+            if (result.status === "done") {
               completed.add(sd.id);
-              return;
-            }
-            case "api": {
-              const result = await this.dispatch.runApi(sd.config.apiUrl || "", sd.config.apiMethod || "GET");
-              workflowStore.updateStep(run, sd.id, "done", result);
-              completed.add(sd.id);
-              return;
-            }
-            case "prompt": {
-              this.dispatch.injectPrompt(sd.config.prompt || sd.description);
-              workflowStore.updateStep(run, sd.id, "done", "(prompt injected)");
-              completed.add(sd.id);
-              return;
-            }
-            case "plan": {
-              const planPrompt = sd.config.planPrompt || sd.config.prompt || sd.description;
-              const planId = this.dispatch.runPlan(planPrompt);
-              const ps0 = this.dispatch.getPlanStatus();
-              if (ps0 && ps0.status === "active" && ps0.total === 0) {
-                Logger.log("INFO", "workflow_plan_zero_step_completed", { runId: run.runId, stepId: sd.id, planId });
-                workflowStore.updateStep(run, sd.id, "done", `Plan 指令已注入：${planPrompt.slice(0, 60)}...`);
-                completed.add(sd.id);
-                return;
-              }
-              for (let i = 0; i < 600; i++) {
-                const ps = this.dispatch.getPlanStatus();
-                if (!ps || ps.status === "abandoned" || ps.status === "completed") {
-                  if (ps?.status === "completed") {
-                    workflowStore.updateStep(run, sd.id, "done", `Plan「${ps.title}」${ps.done}/${ps.total} 步完成`);
-                  } else {
-                    workflowStore.updateStep(run, sd.id, "failed", void 0, "Plan was abandoned");
-                    failures.add(sd.id);
-                  }
-                  completed.add(sd.id);
-                  return;
-                }
-                await sleep$1(5e3);
-              }
-              workflowStore.updateStep(run, sd.id, "failed", void 0, "Plan wait timeout");
+              ctx.steps[sd.id] = { result: result.data, status: "done" };
+            } else if (result.status === "failed") {
               failures.add(sd.id);
-              return;
+              ctx.steps[sd.id] = { result: null, status: "failed", error: result.error };
+            } else if (result.status === "skipped") {
+              skipped.add(sd.id);
             }
-          }
-          if (agentIds.length > 0) {
-            const results = await this.waitForAgents(agentIds, run, sd);
-            const agentResult = results.find((r) => agentIds.includes(r.id));
-            if (agentResult?.error) {
-              workflowStore.updateStep(run, sd.id, "failed", agentResult.summary, agentResult.error);
-              failures.add(sd.id);
-            } else {
-              workflowStore.updateStep(run, sd.id, "done", agentResult?.summary || "(completed)");
-              completed.add(sd.id);
-              this.writeStepOutput(sd, agentResult?.summary, outputDir);
-              if (sd.id === "s_browser" && agentResult?.summary) {
-                this.collectScreenshots(agentResult.summary, outputDir);
-              }
+            if (result.pauseRun) {
+              run.status = "paused";
+              run.pendingGate = result.pendingGate;
+              workflowStore.updateRun(run);
             }
-          }
-        } catch (err) {
-          Logger.log("WARN", "workflow_step_failed", { runId: run.runId, stepId: sd.id, error: err.message });
-          workflowStore.updateStep(run, sd.id, "failed", void 0, err.message);
-          failures.add(sd.id);
+          });
+          active.push(promise);
         }
-      });
-      await Promise.allSettled(promises);
-    }
-  }
-  /** 收集依赖步骤的结果，拼接成上下文 */
-  buildDependencyContext(sd, run) {
-    if (!sd.dependsOn || sd.dependsOn.length === 0) return "";
-    const parts = [];
-    for (const depId of sd.dependsOn) {
-      const stepRun = run.steps.find((s) => s.stepId === depId);
-      if (stepRun && stepRun.agentResult && stepRun.agentResult !== "(completed)") {
-        run.steps.find((s) => s.stepId === depId);
-        parts.push(`
-
-## 来自步骤「${depId}」的结果
-
-${stepRun.agentResult}`);
+        if (active.length > 0) {
+          const settled = await Promise.allSettled(active.map((p, i) => p.then(() => i).catch(() => i)));
+          const doneIdx = new Set(settled.map((r) => r.value));
+          for (const i of doneIdx) active[i] = void 0;
+          while (active.length > 0 && active[active.length - 1] === void 0) active.pop();
+        }
+        if (run.pendingGate) break;
+      }
+      if (active.length > 0 && !run.pendingGate) {
+        await Promise.allSettled(active);
       }
     }
-    if (parts.length === 0) return "";
-    return "\n\n---\n" + parts.join("\n") + "\n\n请基于以上步骤结果进行你的工作。";
+    if (signal.aborted) {
+      run.status = "failed";
+      workflowStore.updateRun(run);
+      this.running.delete(run.runId);
+    }
   }
+  async executeStep(sd, run, def, outputDir, ctx, signal) {
+    workflowStore.updateStep(run, sd.id, "running");
+    let retries = 0;
+    const maxRetries = sd.retryCount ?? 0;
+    while (retries <= maxRetries && !signal.aborted) {
+      try {
+        const result = await this.dispatchHandler(sd, run, def, outputDir, ctx, signal);
+        if (result.pauseRun) return result;
+        if (sd.outputSchema && result.data !== void 0) {
+          const errors = validateSchema(result.data, sd.outputSchema);
+          if (errors.length > 0) {
+            Logger.log("WARN", "workflow_v2_schema_validation", { stepId: sd.id, errors });
+            if (sd.config.outputFile) {
+              this.writeOutputFile(sd, JSON.stringify(result.data, null, 2), outputDir);
+            }
+            return { status: "failed", error: errors.join("; ") };
+          }
+        }
+        if (sd.config.outputFile && result.data !== void 0) {
+          this.writeOutputFile(sd, typeof result.data === "string" ? result.data : JSON.stringify(result.data, null, 2), outputDir);
+        }
+        return result;
+      } catch (err) {
+        retries++;
+        Logger.log("WARN", "workflow_v2_step_retry", { stepId: sd.id, retry: retries, maxRetries, error: err.message });
+        if (retries > maxRetries) {
+          workflowStore.updateStep(run, sd.id, "failed", void 0, err.message);
+          return { status: "failed", error: err.message };
+        }
+        const delay = sd.retryDelayMs ?? 5e3;
+        await sleep$1(delay);
+      }
+    }
+    return { status: "failed", error: "Aborted" };
+  }
+  async dispatchHandler(sd, run, def, outputDir, ctx, signal) {
+    switch (sd.handler) {
+      case "condition":
+        return this.handleCondition(sd, run, ctx);
+      case "foreach":
+        return this.handleForeach(sd, run, def, outputDir, ctx, signal);
+      case "transform":
+        return this.handleTransform(sd, ctx);
+      case "gate":
+        return this.handleGate(sd, run, ctx);
+      case "aggregate":
+        return this.handleAggregate(sd, ctx);
+      case "subflow":
+        return this.handleSubflow(sd, run, def, outputDir, ctx, signal);
+      case "wait":
+        return this.handleWait(sd, ctx, signal);
+      case "script":
+        return this.handleScript(sd, ctx);
+      case "event":
+        return this.handleEvent(sd, ctx);
+      default:
+        return this.handleLegacy(sd, run, def, outputDir, signal);
+    }
+  }
+  // ── New handler implementations ──
+  async handleCondition(sd, run, ctx) {
+    const cfg = sd.config.condition;
+    if (!cfg) return { status: "done", data: { goto: null } };
+    const sourceVal = resolveTemplate(cfg.source, ctx);
+    let goto = null;
+    for (const c of cfg.cases) {
+      if (evaluateCondition(c.if, sourceVal)) {
+        goto = c.goto;
+        break;
+      }
+    }
+    if (!goto) goto = cfg.defaultGoto ?? null;
+    workflowStore.updateStep(run, sd.id, "done", JSON.stringify({ source: sourceVal, goto }));
+    return { status: "done", data: { source: sourceVal, goto } };
+  }
+  async handleForeach(sd, run, def, outputDir, ctx, signal) {
+    const cfg = sd.config.foreach;
+    if (!cfg) return { status: "done", data: [] };
+    const rawItems = resolveExpression(cfg.items, ctx);
+    if (!Array.isArray(rawItems)) {
+      return { status: "done", data: [] };
+    }
+    const concurrency = cfg.concurrency ?? 3;
+    const results = [];
+    let subDef = null;
+    if (cfg.workflowId) {
+      subDef = this.dispatch.getDefinition(cfg.workflowId);
+    }
+    if (!subDef && cfg.inlineSteps) {
+      subDef = {
+        id: `_inline_${sd.id}`,
+        name: sd.name,
+        description: sd.description,
+        steps: cfg.inlineSteps,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+    }
+    if (!subDef) return { status: "done", data: [] };
+    const queue = [...rawItems];
+    const active = [];
+    while (queue.length > 0 && !signal.aborted) {
+      while (queue.length > 0 && active.length < concurrency) {
+        const item = queue.shift();
+        const p = this.runForeachItem(subDef, def, run, outputDir, ctx, item, signal, results);
+        active.push(p);
+      }
+      if (active.length > 0) {
+        const settled = await Promise.allSettled(active.map((p, i) => p.then(() => i).catch(() => i)));
+        const doneIdx = new Set(settled.map((r) => r.value));
+        for (const i of doneIdx) active[i] = void 0;
+        while (active.length > 0 && active[active.length - 1] === void 0) active.pop();
+      }
+    }
+    await Promise.allSettled(active);
+    workflowStore.updateStep(run, sd.id, "done", JSON.stringify(results));
+    return { status: "done", data: results };
+  }
+  async runForeachItem(subDef, _parentDef, _parentRun, _outputDir, _ctx, item, signal, results) {
+    const itemCtx = { steps: {}, input: item };
+    for (const step of subDef.steps) {
+      if (signal.aborted) break;
+      try {
+        const result = await this.dispatchHandler(step, null, subDef, "", itemCtx, signal);
+        if (result.status === "done" && result.data !== void 0) {
+          itemCtx.steps[step.id] = { result: result.data, status: "done" };
+        } else {
+          itemCtx.steps[step.id] = { result: null, status: result.status, error: result.error };
+        }
+      } catch {
+      }
+    }
+    results.push(itemCtx.steps);
+    return itemCtx;
+  }
+  async handleTransform(sd, ctx) {
+    const cfg = sd.config.transform;
+    if (!cfg) return { status: "done", data: {} };
+    const inputVal = resolveExpression(cfg.input, ctx);
+    const mappingCtx = { ...ctx, input: inputVal };
+    const output = {};
+    for (const [key, expr] of Object.entries(cfg.mapping)) {
+      const raw = resolveTemplate(expr, mappingCtx);
+      if (raw === "true") output[key] = true;
+      else if (raw === "false") output[key] = false;
+      else if (raw === "null") output[key] = null;
+      else if (/^-?\d+(\.\d+)?$/.test(raw)) output[key] = Number(raw);
+      else output[key] = raw;
+    }
+    return { status: "done", data: output };
+  }
+  async handleGate(sd, run, ctx) {
+    const cfg = sd.config.gate;
+    if (!cfg) return { status: "done", data: { approved: true } };
+    const message = resolveTemplate(cfg.message, ctx);
+    const preview = resolveTemplate(cfg.preview, ctx);
+    const options = cfg.options ?? ["approve", "reject"];
+    const pendingGate = { stepId: sd.id, message, preview, options };
+    workflowStore.updateStep(run, sd.id, "running", `⏳ 等待审批: ${message}`);
+    return {
+      status: "running",
+      data: null,
+      pauseRun: true,
+      pendingGate
+    };
+  }
+  approveGate(runId, stepId, decision, modifiedInput) {
+    const run = workflowStore.getRun(runId);
+    if (!run || !run.pendingGate || run.pendingGate.stepId !== stepId) return false;
+    run.pendingGate = void 0;
+    run.status = "running";
+    workflowStore.updateStep(run, stepId, "done", JSON.stringify({ decision, modifiedInput }));
+    workflowStore.updateRun(run);
+    const def = workflowStore.getDefinition(run.workflowDefId);
+    if (def) {
+      this.executeLoop(run, def, new AbortController().signal).catch((err) => {
+        Logger.log("ERROR", "workflow_v2_resume_error", { runId, error: String(err) });
+        run.status = "failed";
+        workflowStore.updateRun(run);
+      });
+    }
+    return true;
+  }
+  async handleAggregate(sd, ctx) {
+    const cfg = sd.config.aggregate;
+    if (!cfg) return { status: "done", data: {} };
+    const sources = cfg.sources ?? sd.dependsOn;
+    const items = sources.map((src) => ctx.steps[src]?.result).filter((r) => r !== void 0);
+    let result;
+    switch (cfg.strategy) {
+      case "merge":
+        result = Object.assign({}, ...items);
+        break;
+      case "concat":
+        result = items.flat();
+        break;
+      case "pick-first":
+        result = items[0] ?? null;
+        break;
+      case "custom":
+        result = cfg.expression ? resolveTemplate(cfg.expression, ctx) : items;
+        break;
+      default:
+        result = items;
+    }
+    return { status: "done", data: result };
+  }
+  async handleSubflow(sd, run, def, outputDir, ctx, signal) {
+    const cfg = sd.config.subflow;
+    if (!cfg) return { status: "done", data: null };
+    let subDef = null;
+    if (cfg.workflowId) {
+      subDef = this.dispatch.getDefinition(cfg.workflowId);
+    }
+    if (!subDef && cfg.inlineSteps) {
+      subDef = {
+        id: `_sub_${sd.id}`,
+        name: sd.name,
+        description: sd.description,
+        steps: cfg.inlineSteps,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+    }
+    if (!subDef) return { status: "done", data: null };
+    const subCtx = {
+      steps: {},
+      input: cfg.input ? resolveTemplate(JSON.stringify(cfg.input), ctx) : ctx.input
+    };
+    for (const step of subDef.steps) {
+      if (signal.aborted) break;
+      try {
+        const result = await this.dispatchHandler(step, run, def, outputDir, subCtx, signal);
+        if (result.status === "done" && result.data !== void 0) {
+          subCtx.steps[step.id] = { result: result.data, status: "done" };
+        } else {
+          subCtx.steps[step.id] = { result: null, status: result.status, error: result.error };
+        }
+        if (result.pauseRun) return result;
+      } catch (err) {
+        return { status: "failed", error: err.message };
+      }
+    }
+    return { status: "done", data: subCtx.steps };
+  }
+  async handleWait(sd, _ctx, signal) {
+    const cfg = sd.config.wait;
+    if (!cfg) return { status: "done", data: null };
+    if (cfg.durationMs) {
+      await sleepWithSignal(cfg.durationMs, signal);
+      return { status: "done", data: { waited: cfg.durationMs } };
+    }
+    return { status: "done", data: null };
+  }
+  async handleScript(sd, ctx) {
+    const cfg = sd.config.script;
+    if (!cfg || !cfg.code) return { status: "done", data: null };
+    try {
+      const fn = new Function("ctx", "steps", "input", cfg.code);
+      const result = fn(ctx, ctx.steps, ctx.input);
+      return { status: "done", data: result };
+    } catch (err) {
+      return { status: "failed", error: `Script error: ${err.message}` };
+    }
+  }
+  async handleEvent(sd, _ctx) {
+    const cfg = sd.config.event;
+    if (!cfg) return { status: "done", data: null };
+    const payload = cfg.payload ? resolveTemplate(cfg.payload, _ctx) : void 0;
+    eventBus.emit(cfg.eventName, payload ? { workflow: true, payload } : { workflow: true });
+    return { status: "done", data: { event: cfg.eventName, emitted: true } };
+  }
+  // ── Legacy handlers ──
+  async handleLegacy(sd, run, def, outputDir, signal) {
+    switch (sd.handler) {
+      case "subagent":
+        return this.handleSubagent(sd, run, def, outputDir);
+      case "tool":
+        return this.handleToolStep(sd);
+      case "api":
+        return this.handleApiStep(sd);
+      case "prompt":
+        return this.handlePromptStep(sd);
+      case "plan":
+        return this.handlePlanStep(sd);
+      default:
+        return { status: "failed", error: `Unknown handler: ${sd.handler}` };
+    }
+  }
+  async handleSubagent(sd, run, def, outputDir) {
+    const subOptions = {};
+    if (sd.config.allowedTools !== void 0) subOptions.allowedToolNames = sd.config.allowedTools;
+    if (sd.config.maxTurns !== void 0) subOptions.maxTurns = sd.config.maxTurns;
+    if (sd.config.llmTimeoutMs !== void 0) subOptions.llmTimeoutMs = sd.config.llmTimeoutMs;
+    subOptions.onProgress = (msg) => {
+      eventBus.emit("workflow.run.step", { runId: run.runId, stepId: sd.id, status: "running", agentResult: msg });
+    };
+    const basePrompt = sd.config.prompt || sd.description || "";
+    const withInput = basePrompt.replace(/\{INPUT\}/g, run.userInput || "(请输入主题)");
+    const withOutputDir = withInput.replace(/\{OUTPUT_DIR\}/g, outputDir);
+    const fullPrompt = withOutputDir.replaceAll("(dependency_context)", "");
+    const agentId = this.dispatch.runSubAgent(fullPrompt, def.description, subOptions);
+    const pendingAgents = [agentId];
+    const results = await this.waitForAgents(pendingAgents, run, sd);
+    const agentResult = results.find((r) => pendingAgents.includes(r.id));
+    if (agentResult?.error) {
+      return { status: "failed", error: agentResult.error, data: agentResult.summary };
+    }
+    const summary = agentResult?.summary || "(completed)";
+    return { status: "done", data: summary };
+  }
+  async handleToolStep(sd) {
+    const result = await this.dispatch.runTool(sd.config.tool || "", {});
+    return { status: "done", data: result };
+  }
+  async handleApiStep(sd) {
+    const result = await this.dispatch.runApi(sd.config.apiUrl || "", sd.config.apiMethod || "GET");
+    return { status: "done", data: result };
+  }
+  async handlePromptStep(sd) {
+    this.dispatch.injectPrompt(sd.config.prompt || sd.description || "");
+    return { status: "done", data: "(prompt injected)" };
+  }
+  async handlePlanStep(sd) {
+    const planPrompt = sd.config.planPrompt || sd.config.prompt || sd.description || "";
+    this.dispatch.runPlan(planPrompt);
+    const ps0 = this.dispatch.getPlanStatus();
+    if (ps0 && ps0.status === "active" && ps0.total === 0) {
+      return { status: "done", data: `Plan 指令已注入：${planPrompt.slice(0, 60)}...` };
+    }
+    for (let i = 0; i < 600; i++) {
+      const ps = this.dispatch.getPlanStatus();
+      if (!ps || ps.status === "abandoned" || ps.status === "completed") {
+        if (ps?.status === "completed") {
+          return { status: "done", data: `Plan「${ps.title}」${ps.done}/${ps.total} 步完成` };
+        }
+        return { status: "failed", error: "Plan was abandoned" };
+      }
+      await sleep$1(5e3);
+    }
+    return { status: "failed", error: "Plan wait timeout" };
+  }
+  // ── Utilities ──
   async waitForAgents(agentIds, run, sd) {
-    console.log("[wf] waitForAgents ENTERED", { agentIds, stepId: sd.id });
     const maxWait = 60 * 60 * 1e3;
     const interval = 2e3;
     let waited = 0;
     while (waited < maxWait) {
       const results = this.dispatch.getCompletedAgentResults();
-      console.log("[wf] waitForAgents poll", { agentIds, results, waited });
       const done = agentIds.every((id2) => results.some((r) => r.id === id2));
-      if (done) {
-        console.log("[wf] waitForAgents done", { agentIds, results });
-        return results;
-      }
+      if (done) return results;
       eventBus.emit("workflow.run.step", {
         runId: run.runId,
         stepId: sd.id,
@@ -2195,61 +3602,10 @@ ${stepRun.agentResult}`);
       await sleep$1(interval);
       waited += interval;
     }
-    Logger.log("WARN", "workflow_agent_wait_timeout", { runId: run.runId, stepId: sd.id });
+    Logger.log("WARN", "workflow_v2_agent_wait_timeout", { runId: run.runId, stepId: sd.id });
     return [];
   }
-  stopRun(runId) {
-    const run = workflowStore.getRun(runId);
-    if (!run || run.status !== "running") return false;
-    run.status = "failed";
-    workflowStore.updateRun(run);
-    this.active = false;
-    return true;
-  }
-  isActive() {
-    return this.active;
-  }
-  /** 从 s_browser 的 JSON 输出中提取截图路径，将文件移到成果目录 */
-  collectScreenshots(agentResult, outputDir) {
-    try {
-      const parsed = JSON.parse(agentResult);
-      const screenshotDir = path__namespace.join(outputDir, "截图");
-      if (!fs__namespace.existsSync(screenshotDir)) fs__namespace.mkdirSync(screenshotDir, { recursive: true });
-      const screenshots = [];
-      const enterprises = parsed.enterprises || [];
-      for (const ent of enterprises) {
-        const projects = ent.projects || [];
-        for (const proj of projects) {
-          const ss = proj.screenshots || {};
-          Object.values(ss).forEach((p) => {
-            if (typeof p === "string" && p.endsWith(".png")) screenshots.push(p);
-          });
-        }
-      }
-      for (const src of screenshots) {
-        try {
-          if (fs__namespace.existsSync(src)) {
-            const basename = path__namespace.basename(src);
-            const dest = path__namespace.join(screenshotDir, basename);
-            if (src !== dest) fs__namespace.renameSync(src, dest);
-          }
-        } catch {
-        }
-      }
-      if (screenshots.length > 0) {
-        Logger.log("INFO", "workflow_screenshots_collected", { count: screenshots.length, dir: screenshotDir });
-      }
-    } catch {
-    }
-  }
-  /** 如果步骤配置了 outputFile，把步骤结果写入到该文件
-   *
-   * 占位符支持：
-   * - {DATE} → 当天日期
-   * - {OUTPUT_DIR} → 本次运行的根输出目录
-   * - {STEP_ID} → 步骤 ID
-   */
-  writeStepOutput(sd, content, outputDir) {
+  writeOutputFile(sd, content, outputDir) {
     let outputFile = sd.config.outputFile;
     if (!outputFile || !content) return;
     try {
@@ -2258,68 +3614,104 @@ ${stepRun.agentResult}`);
       if (!path__namespace.isAbsolute(outputFile) && outputDir) {
         outputFile = path__namespace.join(outputDir, outputFile);
       }
-      const parsed = tryParsePlatformContent(content);
-      if (parsed) {
-        this.writePlatformFiles(path__namespace.dirname(outputFile), parsed);
-        return;
-      }
       const dir = path__namespace.dirname(outputFile);
       if (!fs__namespace.existsSync(dir)) fs__namespace.mkdirSync(dir, { recursive: true });
       fs__namespace.writeFileSync(outputFile, content, "utf-8");
-      Logger.log("INFO", "workflow_step_output_written", { stepId: sd.id, path: outputFile, bytes: content.length });
+      Logger.log("INFO", "workflow_v2_output_written", { stepId: sd.id, path: outputFile, bytes: content.length });
     } catch (err) {
-      Logger.log("WARN", "workflow_step_output_write_failed", { stepId: sd.id, path: outputFile, error: err.message });
+      Logger.log("WARN", "workflow_v2_output_failed", { stepId: sd.id, error: err.message });
     }
   }
-  /** 按平台写入多个文件 */
-  writePlatformFiles(baseDir, platforms) {
-    for (const [platform, data] of Object.entries(platforms)) {
-      const dir = path__namespace.join(baseDir, platform);
-      if (!fs__namespace.existsSync(dir)) fs__namespace.mkdirSync(dir, { recursive: true });
-      const title = data.title || "未命名";
-      const safeName = title.replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
-      const filePath = path__namespace.join(dir, `${safeName}.md`);
-      const md = [`# ${title}`, "", data.body, data.cta ? `
----
-${data.cta}` : ""].join("\n");
-      fs__namespace.writeFileSync(filePath, md, "utf-8");
-      Logger.log("INFO", "workflow_platform_output_written", { platform, path: filePath, bytes: md.length });
+  stopRun(runId) {
+    const abort = this.running.get(runId);
+    if (abort) {
+      abort.abort();
+      this.running.delete(runId);
     }
-  }
-}
-function sleep$1(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-function tryParsePlatformContent(content) {
-  try {
-    const root = JSON.parse(content);
-    const pkg = root.contentPackage || root;
-    const platforms = pkg.platforms;
-    if (platforms && typeof platforms === "object") return platforms;
-  } catch {
-  }
-  const match2 = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (match2) {
-    try {
-      const root = JSON.parse(match2[1].trim());
-      const platforms = root.contentPackage?.platforms || root.platforms;
-      if (platforms && typeof platforms === "object") return platforms;
-    } catch {
+    const run = workflowStore.getRun(runId);
+    if (run && run.status === "running") {
+      run.status = "failed";
+      workflowStore.updateRun(run);
+      return true;
     }
+    return false;
   }
-  return null;
+  isActive(runId) {
+    if (runId) return this.running.has(runId);
+    return this.running.size > 0;
+  }
 }
 let _scheduler = null;
 function setWorkflowScheduler(s) {
   _scheduler = s;
 }
 function getWorkflowScheduler() {
-  if (!_scheduler) throw new Error("WorkflowScheduler not initialized");
+  if (!_scheduler) throw new Error("WorkflowSchedulerV2 not initialized");
   return _scheduler;
 }
-const WorkflowScheduler$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+function isPending(sd, completed, failures, skipped) {
+  return !completed.has(sd.id) && !failures.has(sd.id) && !skipped.has(sd.id);
+}
+function depsReady(sd, completed, failures, skipped) {
+  if (!sd.dependsOn || sd.dependsOn.length === 0) return true;
+  return sd.dependsOn.every((d) => completed.has(d) || failures.has(d) || skipped.has(d));
+}
+function markSkipped(run, sd, reason, skipped, store) {
+  store.updateStep(run, sd.id, "skipped", reason);
+  skipped.add(sd.id);
+}
+function finishRun(run, stepDefs, completed, failures, skipped, store) {
+  const allDone = stepDefs.every((sd) => completed.has(sd.id) || skipped.has(sd.id));
+  if (allDone) {
+    run.status = "done";
+  } else if (stepDefs.every((sd) => failures.has(sd.id))) {
+    run.status = "failed";
+  } else {
+    run.status = completed.size > 0 || skipped.size > 0 ? "done" : "failed";
+  }
+  run.completedAt = Date.now();
+  store.updateRun(run);
+  Logger.log("INFO", "workflow_v2_run_completed", { runId: run.runId, status: run.status });
+}
+function sleep$1(ms) {
+  return new Promise((r) => {
+    setTimeout(r, ms);
+  });
+}
+function sleepWithSignal(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const t = setTimeout(() => {
+      if (!signal.aborted) resolve();
+    }, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        resolve();
+      },
+      { once: true }
+    );
+  });
+}
+function validateSchema(data, schema2) {
+  const errors = [];
+  for (const [key, field] of Object.entries(schema2)) {
+    const val = data?.[key];
+    if (val === void 0 || val === null) {
+      if (!field.optional) errors.push(`${key}: required`);
+      continue;
+    }
+    if (field.type === "string" && typeof val !== "string") errors.push(`${key}: expected string, got ${typeof val}`);
+    else if (field.type === "number" && typeof val !== "number") errors.push(`${key}: expected number, got ${typeof val}`);
+    else if (field.type === "boolean" && typeof val !== "boolean") errors.push(`${key}: expected boolean, got ${typeof val}`);
+    else if (field.type === "array" && !Array.isArray(val)) errors.push(`${key}: expected array`);
+  }
+  return errors;
+}
+const WorkflowScheduler = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  WorkflowScheduler,
+  WorkflowSchedulerV2,
   getWorkflowScheduler,
   setWorkflowScheduler
 }, Symbol.toStringTag, { value: "Module" }));
@@ -7070,935 +8462,6 @@ class TtsService {
     }
   }
 }
-const events = sqliteCore.sqliteTable("events", {
-  id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
-  channel: sqliteCore.text("channel").notNull(),
-  payload: sqliteCore.text("payload").notNull(),
-  source: sqliteCore.text("source"),
-  traceId: sqliteCore.text("trace_id"),
-  timestamp: sqliteCore.integer("timestamp").notNull()
-});
-const plans = sqliteCore.sqliteTable("plans", {
-  id: sqliteCore.text("id").primaryKey(),
-  title: sqliteCore.text("title").notNull(),
-  description: sqliteCore.text("description").notNull(),
-  status: sqliteCore.text("status", { enum: ["active", "completed", "abandoned"] }).notNull().default("active"),
-  reflection: sqliteCore.text("reflection"),
-  createdAt: sqliteCore.integer("created_at").notNull(),
-  updatedAt: sqliteCore.integer("updated_at").notNull()
-});
-const planSteps = sqliteCore.sqliteTable("plan_steps", {
-  id: sqliteCore.text("id").primaryKey(),
-  planId: sqliteCore.text("plan_id").notNull().references(() => plans.id, { onDelete: "cascade" }),
-  stepIndex: sqliteCore.integer("step_index").notNull(),
-  description: sqliteCore.text("description").notNull(),
-  status: sqliteCore.text("status", { enum: ["pending", "in_progress", "done", "failed"] }).notNull().default("pending"),
-  result: sqliteCore.text("result")
-});
-const insights = sqliteCore.sqliteTable("insights", {
-  id: sqliteCore.text("id").primaryKey(),
-  detector: sqliteCore.text("detector").notNull(),
-  title: sqliteCore.text("title").notNull(),
-  description: sqliteCore.text("description").notNull(),
-  evidence: sqliteCore.text("evidence").notNull(),
-  score: sqliteCore.real("score").notNull(),
-  confidence: sqliteCore.real("confidence").notNull(),
-  reported: sqliteCore.integer("reported", { mode: "boolean" }).notNull().default(false),
-  createdAt: sqliteCore.integer("created_at").notNull()
-});
-const conceptCombos = sqliteCore.sqliteTable("concept_combos", {
-  id: sqliteCore.text("id").primaryKey(),
-  sources: sqliteCore.text("sources").notNull(),
-  description: sqliteCore.text("description").notNull(),
-  createdAt: sqliteCore.integer("created_at").notNull()
-});
-const hypotheses = sqliteCore.sqliteTable("hypotheses", {
-  id: sqliteCore.text("id").primaryKey(),
-  title: sqliteCore.text("title").notNull(),
-  idea: sqliteCore.text("idea").notNull(),
-  expectedBenefit: sqliteCore.text("expected_benefit").notNull(),
-  risk: sqliteCore.text("risk").notNull(),
-  sourceLabels: sqliteCore.text("source_labels").notNull(),
-  novelty: sqliteCore.real("novelty").notNull(),
-  feasibility: sqliteCore.real("feasibility").notNull(),
-  impact: sqliteCore.real("impact").notNull(),
-  status: sqliteCore.text("status", { enum: ["draft", "active", "experimenting", "validated", "rejected"] }).notNull().default("draft"),
-  createdAt: sqliteCore.integer("created_at").notNull()
-});
-const experiments = sqliteCore.sqliteTable("experiments", {
-  hypothesisId: sqliteCore.text("hypothesis_id").primaryKey(),
-  title: sqliteCore.text("title").notNull(),
-  steps: sqliteCore.text("steps").notNull(),
-  successCriteria: sqliteCore.text("success_criteria").notNull(),
-  estimatedDuration: sqliteCore.text("estimated_duration").notNull(),
-  createdAt: sqliteCore.integer("created_at").notNull()
-});
-const dreamCycles = sqliteCore.sqliteTable("dream_cycles", {
-  timestamp: sqliteCore.integer("timestamp").primaryKey(),
-  sourcesExamined: sqliteCore.integer("sources_examined").notNull(),
-  combosGenerated: sqliteCore.integer("combos_generated").notNull(),
-  hypothesesGenerated: sqliteCore.integer("hypotheses_generated").notNull(),
-  topIdea: sqliteCore.text("top_idea")
-});
-const memories = sqliteCore.sqliteTable("memories", {
-  id: sqliteCore.text("id").primaryKey(),
-  type: sqliteCore.text("type", { enum: ["user_fact", "interaction"] }).notNull(),
-  content: sqliteCore.text("content").notNull(),
-  confidence: sqliteCore.real("confidence").notNull().default(0.5),
-  tier: sqliteCore.text("tier", { enum: ["permanent", "semi", "ephemeral"] }).notNull().default("ephemeral"),
-  reinforceCount: sqliteCore.integer("reinforce_count").notNull().default(0),
-  createdAt: sqliteCore.integer("created_at").notNull(),
-  updatedAt: sqliteCore.integer("updated_at").notNull()
-});
-sqliteCore.sqliteTable("memory_archive", {
-  id: sqliteCore.text("id").primaryKey(),
-  type: sqliteCore.text("type", { enum: ["user_fact", "interaction"] }).notNull(),
-  content: sqliteCore.text("content").notNull(),
-  confidence: sqliteCore.real("confidence").notNull(),
-  tier: sqliteCore.text("tier", { enum: ["permanent", "semi", "ephemeral"] }).notNull(),
-  reason: sqliteCore.text("reason").notNull().default("pruned"),
-  archivedAt: sqliteCore.integer("archived_at").notNull()
-});
-sqliteCore.sqliteTable("knowledge_graph", {
-  id: sqliteCore.text("id").primaryKey(),
-  entity: sqliteCore.text("entity").notNull(),
-  attribute: sqliteCore.text("attribute").notNull(),
-  value: sqliteCore.text("value").notNull(),
-  confidence: sqliteCore.real("confidence").notNull().default(0.5),
-  updatedAt: sqliteCore.integer("updated_at").notNull()
-});
-const memorySummaries = sqliteCore.sqliteTable("memory_summaries", {
-  id: sqliteCore.text("id").primaryKey(),
-  summary: sqliteCore.text("summary").notNull(),
-  turnStart: sqliteCore.integer("turn_start").notNull(),
-  turnEnd: sqliteCore.integer("turn_end").notNull(),
-  createdAt: sqliteCore.integer("created_at").notNull()
-});
-const memoryVectors = sqliteCore.sqliteTable("memory_vectors", {
-  id: sqliteCore.text("id").primaryKey(),
-  content: sqliteCore.text("content").notNull(),
-  embedding: sqliteCore.text("embedding").notNull(),
-  confidence: sqliteCore.real("confidence").notNull(),
-  source: sqliteCore.text("source", { enum: ["user_fact", "summary"] }).notNull(),
-  createdAt: sqliteCore.integer("created_at").notNull(),
-  updatedAt: sqliteCore.integer("updated_at").notNull()
-});
-const credentials = sqliteCore.sqliteTable("credentials", {
-  key: sqliteCore.text("key").primaryKey(),
-  value: sqliteCore.text("value").notNull()
-});
-const goals = sqliteCore.sqliteTable("goals", {
-  id: sqliteCore.text("id").primaryKey(),
-  title: sqliteCore.text("title").notNull(),
-  description: sqliteCore.text("description").notNull(),
-  priority: sqliteCore.integer("priority").notNull().default(0),
-  status: sqliteCore.text("status", { enum: ["active", "paused", "completed", "abandoned"] }).notNull().default("active"),
-  category: sqliteCore.text("category", { enum: ["mission", "long_term", "short_term", "initiative"] }).notNull(),
-  parentGoalId: sqliteCore.text("parent_goal_id"),
-  progress: sqliteCore.integer("progress").notNull().default(0),
-  createdAt: sqliteCore.integer("created_at").notNull(),
-  updatedAt: sqliteCore.integer("updated_at").notNull()
-});
-const strategies = sqliteCore.sqliteTable("strategies", {
-  id: sqliteCore.text("id").primaryKey(),
-  name: sqliteCore.text("name").notNull().unique(),
-  description: sqliteCore.text("description").notNull(),
-  promptTemplate: sqliteCore.text("prompt_template").notNull(),
-  applicableContext: sqliteCore.text("applicable_context").notNull(),
-  priority: sqliteCore.integer("priority").notNull().default(0),
-  active: sqliteCore.integer("active").notNull().default(1),
-  version: sqliteCore.integer("version").notNull().default(1),
-  createdAt: sqliteCore.integer("created_at").notNull(),
-  updatedAt: sqliteCore.integer("updated_at").notNull()
-});
-const promptTemplates = sqliteCore.sqliteTable("prompt_templates", {
-  id: sqliteCore.text("id").primaryKey(),
-  name: sqliteCore.text("name").notNull(),
-  category: sqliteCore.text("category", { enum: ["identity", "core", "tools", "evolution", "custom"] }).notNull(),
-  content: sqliteCore.text("content").notNull(),
-  version: sqliteCore.integer("version").notNull().default(1),
-  active: sqliteCore.integer("active").notNull().default(1),
-  variables: sqliteCore.text("variables").notNull().default("[]"),
-  createdAt: sqliteCore.integer("created_at").notNull(),
-  updatedAt: sqliteCore.integer("updated_at").notNull()
-});
-const messages = sqliteCore.sqliteTable("messages", {
-  id: sqliteCore.text("id").primaryKey(),
-  source: sqliteCore.text("source", { enum: ["electron", "telegram"] }).notNull(),
-  role: sqliteCore.text("role", { enum: ["user", "assistant"] }).notNull(),
-  content: sqliteCore.text("content").notNull(),
-  telegramChatId: sqliteCore.integer("telegram_chat_id"),
-  telegramUserId: sqliteCore.integer("telegram_user_id"),
-  telegramFrom: sqliteCore.text("telegram_from"),
-  telegramMessageId: sqliteCore.integer("telegram_message_id"),
-  createdAt: sqliteCore.integer("created_at").notNull()
-});
-const telegramOutbox = sqliteCore.sqliteTable("telegram_outbox", {
-  id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
-  chatId: sqliteCore.text("chat_id").notNull(),
-  bot: sqliteCore.text("bot").default("chat"),
-  msgType: sqliteCore.text("msg_type", { enum: ["send", "edit", "reply", "action", "photo", "media_group"] }).notNull(),
-  category: sqliteCore.text("category", {
-    enum: ["dialogue", "evolution", "insight", "creativity", "plan", "budget", "recovery", "stability", "system"]
-  }).notNull().default("dialogue"),
-  message: sqliteCore.text("message").notNull(),
-  targetMessageId: sqliteCore.integer("target_message_id"),
-  hash: sqliteCore.text("hash"),
-  status: sqliteCore.text("status", { enum: ["pending", "sent", "failed"] }).notNull().default("pending"),
-  retryCount: sqliteCore.integer("retry_count").notNull().default(0),
-  lastError: sqliteCore.text("last_error"),
-  createdAt: sqliteCore.integer("created_at").notNull(),
-  updatedAt: sqliteCore.integer("updated_at")
-});
-const decisions = sqliteCore.sqliteTable("decisions", {
-  id: sqliteCore.text("id").primaryKey(),
-  timestamp: sqliteCore.integer("timestamp").notNull(),
-  agentId: sqliteCore.text("agent_id").notNull(),
-  category: sqliteCore.text("category", {
-    enum: ["tool_select", "strategy", "plan_route", "goal_adjust", "recovery"]
-  }).notNull(),
-  context: sqliteCore.text("context").notNull(),
-  choice: sqliteCore.text("choice").notNull(),
-  alternatives: sqliteCore.text("alternatives").notNull().default("[]"),
-  outcome: sqliteCore.text("outcome", { enum: ["pending", "success", "failure"] }).notNull().default("pending"),
-  confidence: sqliteCore.real("confidence").notNull().default(0.5),
-  relatedPlanId: sqliteCore.text("related_plan_id"),
-  createdAt: sqliteCore.integer("created_at").notNull()
-});
-const schema = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-  __proto__: null,
-  conceptCombos,
-  credentials,
-  decisions,
-  dreamCycles,
-  events,
-  experiments,
-  goals,
-  hypotheses,
-  insights,
-  memories,
-  memorySummaries,
-  memoryVectors,
-  messages,
-  planSteps,
-  plans,
-  promptTemplates,
-  strategies,
-  telegramOutbox
-}, Symbol.toStringTag, { value: "Module" }));
-const MIGRATIONS = [
-  {
-    version: 1,
-    sql: `
-      CREATE TABLE IF NOT EXISTS plans (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'completed', 'abandoned')),
-        reflection TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS plan_steps (
-        id TEXT PRIMARY KEY,
-        plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
-        step_index INTEGER NOT NULL,
-        description TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'in_progress', 'done', 'failed')),
-        result TEXT
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_plan_steps_plan_id ON plan_steps(plan_id);
-      CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
-    `
-  },
-  {
-    version: 2,
-    sql: `
-      CREATE TABLE IF NOT EXISTS insights (
-        id TEXT PRIMARY KEY,
-        detector TEXT NOT NULL,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL,
-        evidence TEXT NOT NULL,
-        score REAL NOT NULL,
-        confidence REAL NOT NULL,
-        reported INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS concept_combos (
-        id TEXT PRIMARY KEY,
-        sources TEXT NOT NULL,
-        description TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS hypotheses (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        idea TEXT NOT NULL,
-        expected_benefit TEXT NOT NULL,
-        risk TEXT NOT NULL,
-        source_labels TEXT NOT NULL,
-        novelty REAL NOT NULL,
-        feasibility REAL NOT NULL,
-        impact REAL NOT NULL,
-        status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','active','experimenting','validated','rejected')),
-        created_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS experiments (
-        hypothesis_id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        steps TEXT NOT NULL,
-        success_criteria TEXT NOT NULL,
-        estimated_duration TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS dream_cycles (
-        timestamp INTEGER PRIMARY KEY,
-        sources_examined INTEGER NOT NULL,
-        combos_generated INTEGER NOT NULL,
-        hypotheses_generated INTEGER NOT NULL,
-        top_idea TEXT
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_insights_reported ON insights(reported);
-      CREATE INDEX IF NOT EXISTS idx_hypotheses_status ON hypotheses(status);
-    `
-  },
-  {
-    version: 3,
-    sql: `
-      CREATE TABLE IF NOT EXISTS memories (
-        id TEXT PRIMARY KEY,
-        type TEXT NOT NULL CHECK(type IN ('user_fact', 'interaction')),
-        content TEXT NOT NULL,
-        confidence REAL NOT NULL DEFAULT 0.5,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS memory_summaries (
-        id TEXT PRIMARY KEY,
-        summary TEXT NOT NULL,
-        turn_start INTEGER NOT NULL,
-        turn_end INTEGER NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS memory_vectors (
-        id TEXT PRIMARY KEY,
-        content TEXT NOT NULL,
-        embedding TEXT NOT NULL,
-        confidence REAL NOT NULL,
-        source TEXT NOT NULL CHECK(source IN ('user_fact', 'summary')),
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
-      CREATE INDEX IF NOT EXISTS idx_memories_content ON memories(content);
-    `
-  },
-  {
-    version: 4,
-    sql: `
-      CREATE TABLE IF NOT EXISTS credentials (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-    `
-  },
-  {
-    version: 5,
-    sql: `
-      ALTER TABLE memories ADD COLUMN tier TEXT NOT NULL DEFAULT 'ephemeral';
-      ALTER TABLE memories ADD COLUMN reinforce_count INTEGER NOT NULL DEFAULT 0;
-    `
-  },
-  {
-    version: 6,
-    sql: `
-      CREATE TABLE IF NOT EXISTS memory_archive (
-        id TEXT PRIMARY KEY,
-        type TEXT NOT NULL,
-        content TEXT NOT NULL,
-        confidence REAL NOT NULL,
-        tier TEXT NOT NULL,
-        reason TEXT NOT NULL DEFAULT 'pruned',
-        archived_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS knowledge_graph (
-        id TEXT PRIMARY KEY,
-        entity TEXT NOT NULL,
-        attribute TEXT NOT NULL,
-        value TEXT NOT NULL,
-        confidence REAL NOT NULL DEFAULT 0.5,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_kg_entity ON knowledge_graph(entity);
-    `
-  },
-  {
-    version: 7,
-    sql: `
-      CREATE TABLE IF NOT EXISTS goals (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL,
-        priority INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','completed','abandoned')),
-        category TEXT NOT NULL CHECK(category IN ('mission','long_term','short_term','initiative')),
-        parent_goal_id TEXT,
-        progress INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS strategies (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        description TEXT NOT NULL,
-        prompt_template TEXT NOT NULL,
-        applicable_context TEXT NOT NULL,
-        priority INTEGER NOT NULL DEFAULT 0,
-        active INTEGER NOT NULL DEFAULT 1,
-        version INTEGER NOT NULL DEFAULT 1,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS prompt_templates (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        category TEXT NOT NULL CHECK(category IN ('identity','core','tools','evolution','custom')),
-        content TEXT NOT NULL,
-        version INTEGER NOT NULL DEFAULT 1,
-        active INTEGER NOT NULL DEFAULT 1,
-        variables TEXT NOT NULL DEFAULT '[]',
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-    `
-  },
-  {
-    version: 8,
-    sql: `
-      CREATE TABLE IF NOT EXISTS engineering_memory (
-        id TEXT PRIMARY KEY,
-        type TEXT NOT NULL CHECK(type IN ('architecture_pattern','coding_convention','design_decision','test_pattern','failure_pattern')),
-        content TEXT NOT NULL,
-        source TEXT NOT NULL,
-        confidence REAL NOT NULL DEFAULT 0.5,
-        related_files TEXT NOT NULL DEFAULT '[]',
-        tags TEXT NOT NULL DEFAULT '[]',
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_engmem_type ON engineering_memory(type);
-    `
-  },
-  {
-    version: 9,
-    sql: `
-      CREATE TABLE IF NOT EXISTS audit_trail (
-        id TEXT PRIMARY KEY,
-        timestamp INTEGER NOT NULL,
-        source TEXT NOT NULL CHECK(source IN ('agent','plugin','user','evolution','system')),
-        action TEXT NOT NULL CHECK(action IN ('tool_call','file_write','file_read','command','permission_change','plugin_load','plugin_unload')),
-        target TEXT NOT NULL,
-        plugin_name TEXT,
-        tool_name TEXT,
-        details TEXT NOT NULL DEFAULT '{}',
-        allowed INTEGER NOT NULL DEFAULT 1,
-        duration INTEGER,
-        reason TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_trail(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_audit_source ON audit_trail(source);
-      CREATE TABLE IF NOT EXISTS permission_grants (
-        plugin_name TEXT NOT NULL,
-        tool_name TEXT NOT NULL,
-        permission TEXT NOT NULL,
-        granted INTEGER NOT NULL DEFAULT 1,
-        persistent INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL,
-        PRIMARY KEY (plugin_name, tool_name, permission)
-      );
-    `
-  },
-  {
-    version: 10,
-    sql: `
-      CREATE TABLE IF NOT EXISTS token_account (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      INSERT OR IGNORE INTO token_account (key, value) VALUES ('balance', '0');
-      INSERT OR IGNORE INTO token_account (key, value) VALUES ('lifetime_earned', '0');
-      INSERT OR IGNORE INTO token_account (key, value) VALUES ('lifetime_spent', '0');
-
-      CREATE TABLE IF NOT EXISTS token_transactions (
-        id TEXT PRIMARY KEY,
-        type TEXT NOT NULL CHECK(type IN ('income', 'expense')),
-        amount INTEGER NOT NULL,
-        category TEXT NOT NULL DEFAULT 'general',
-        note TEXT,
-        created_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_token_txn_created ON token_transactions(created_at);
-    `
-  },
-  {
-    version: 11,
-    sql: `
-      CREATE TABLE IF NOT EXISTS procedures (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        description TEXT NOT NULL,
-        steps TEXT NOT NULL DEFAULT '[]',
-        trigger_keywords TEXT NOT NULL DEFAULT '[]',
-        success_count INTEGER NOT NULL DEFAULT 0,
-        fail_count INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_procedures_name ON procedures(name);
-    `
-  },
-  {
-    version: 12,
-    sql: `
-      CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY,
-        source TEXT NOT NULL CHECK(source IN ('electron', 'telegram')),
-        role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
-        content TEXT NOT NULL,
-        telegram_chat_id INTEGER,
-        telegram_user_id INTEGER,
-        telegram_from TEXT,
-        telegram_message_id INTEGER,
-        created_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
-    `
-  },
-  {
-    version: 13,
-    sql: `
-      CREATE TABLE IF NOT EXISTS telegram_outbox (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        chat_id TEXT NOT NULL,
-        msg_type TEXT NOT NULL CHECK(msg_type IN ('send', 'edit', 'reply', 'action')),
-        message TEXT NOT NULL,
-        target_message_id INTEGER,
-        hash TEXT,
-        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'sent', 'failed')),
-        retry_count INTEGER NOT NULL DEFAULT 0,
-        last_error TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER
-      );
-      CREATE INDEX IF NOT EXISTS idx_outbox_status ON telegram_outbox(status);
-      CREATE INDEX IF NOT EXISTS idx_outbox_hash ON telegram_outbox(hash);
-    `
-  },
-  {
-    version: 14,
-    sql: `
-      ALTER TABLE telegram_outbox ADD COLUMN category TEXT NOT NULL DEFAULT 'dialogue';
-      CREATE INDEX IF NOT EXISTS idx_outbox_category ON telegram_outbox(category);
-    `
-  },
-  {
-    version: 15,
-    sql: `
-      CREATE TABLE IF NOT EXISTS identity_core (
-        id TEXT PRIMARY KEY DEFAULT 'singleton',
-        constitution_hash TEXT NOT NULL,
-        name TEXT NOT NULL,
-        role TEXT NOT NULL,
-        personality TEXT NOT NULL DEFAULT '[]',
-        capabilities TEXT NOT NULL DEFAULT '[]',
-        constraints TEXT NOT NULL DEFAULT '[]',
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS identity_traits (
-        name TEXT PRIMARY KEY,
-        value REAL NOT NULL DEFAULT 0.5,
-        trend TEXT NOT NULL DEFAULT 'stable' CHECK(trend IN ('growing','stable','declining')),
-        sample_count INTEGER NOT NULL DEFAULT 0,
-        updated_at INTEGER NOT NULL
-      );
-
-      INSERT OR IGNORE INTO identity_traits (name, value, trend, sample_count, updated_at)
-      VALUES ('goal_alignment', 0.7, 'stable', 0, strftime('%s','now') * 1000);
-
-      INSERT OR IGNORE INTO identity_traits (name, value, trend, sample_count, updated_at)
-      VALUES ('tool_efficiency', 0.6, 'stable', 0, strftime('%s','now') * 1000);
-
-      INSERT OR IGNORE INTO identity_traits (name, value, trend, sample_count, updated_at)
-      VALUES ('response_quality', 0.7, 'stable', 0, strftime('%s','now') * 1000);
-
-      CREATE TABLE IF NOT EXISTS identity_metrics (
-        id TEXT PRIMARY KEY DEFAULT 'singleton',
-        sessions_completed INTEGER NOT NULL DEFAULT 0,
-        tools_used INTEGER NOT NULL DEFAULT 0,
-        goals_completed INTEGER NOT NULL DEFAULT 0,
-        goals_drifted INTEGER NOT NULL DEFAULT 0,
-        avg_score REAL NOT NULL DEFAULT 1.0,
-        constitution_checksum TEXT NOT NULL DEFAULT '',
-        last_updated INTEGER NOT NULL
-      );
-    `
-  },
-  {
-    version: 16,
-    sql: `
-      ALTER TABLE procedures ADD COLUMN embedding TEXT;
-      CREATE INDEX IF NOT EXISTS idx_procedures_updated_at ON procedures(updated_at);
-    `
-  },
-  {
-    version: 17,
-    sql: `
-      CREATE TABLE IF NOT EXISTS meta_reviews (
-        id TEXT PRIMARY KEY,
-        period_start INTEGER NOT NULL,
-        period_end INTEGER NOT NULL,
-        summary TEXT NOT NULL,
-        patterns TEXT NOT NULL DEFAULT '[]',
-        improvements TEXT NOT NULL DEFAULT '[]',
-        trait_deltas TEXT NOT NULL DEFAULT '{}',
-        created_at INTEGER NOT NULL
-      );
-    `
-  },
-  {
-    version: 18,
-    sql: `
-      CREATE TABLE IF NOT EXISTS events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel TEXT NOT NULL,
-        payload TEXT NOT NULL,
-        source TEXT,
-        trace_id TEXT,
-        timestamp INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_events_channel_ts ON events(channel, timestamp);
-    `
-  },
-  {
-    version: 19,
-    sql: `
-      CREATE TABLE IF NOT EXISTS decisions (
-        id TEXT PRIMARY KEY,
-        timestamp INTEGER NOT NULL,
-        agent_id TEXT NOT NULL,
-        category TEXT NOT NULL CHECK(category IN ('tool_select','strategy','plan_route','goal_adjust','recovery')),
-        context TEXT NOT NULL,
-        choice TEXT NOT NULL,
-        alternatives TEXT NOT NULL DEFAULT '[]',
-        outcome TEXT NOT NULL DEFAULT 'pending' CHECK(outcome IN ('pending','success','failure')),
-        confidence REAL NOT NULL DEFAULT 0.5,
-        related_plan_id TEXT,
-        created_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_decisions_category ON decisions(category);
-      CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp);
-    `
-  },
-  {
-    version: 20,
-    sql: `
-      CREATE TABLE IF NOT EXISTS agent_events (
-        id TEXT PRIMARY KEY,
-        timestamp INTEGER NOT NULL,
-        event_type TEXT NOT NULL,
-        agent_id TEXT NOT NULL DEFAULT '',
-        source TEXT NOT NULL DEFAULT 'system',
-        detail TEXT NOT NULL DEFAULT '',
-        duration_ms INTEGER,
-        created_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type);
-    `
-  },
-  {
-    version: 21,
-    sql: `
-      CREATE TABLE IF NOT EXISTS explored_pairs (
-        pair_key TEXT PRIMARY KEY,
-        created_at INTEGER NOT NULL
-      );
-    `
-  },
-  {
-    version: 22,
-    sql: `
-      ALTER TABLE plans ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
-    `
-  },
-  {
-    version: 23,
-    sql: `
-      DROP TABLE IF EXISTS telegram_outbox_new;
-      CREATE TABLE telegram_outbox_new (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        chat_id TEXT NOT NULL,
-        bot TEXT NOT NULL DEFAULT 'chat',
-        msg_type TEXT NOT NULL CHECK(msg_type IN ('send', 'edit', 'reply', 'action', 'photo', 'media_group')),
-        category TEXT NOT NULL DEFAULT 'dialogue',
-        message TEXT NOT NULL,
-        target_message_id INTEGER,
-        hash TEXT,
-        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'sent', 'failed')),
-        retry_count INTEGER NOT NULL DEFAULT 0,
-        last_error TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER
-      );
-      INSERT INTO telegram_outbox_new SELECT id, chat_id, 'chat', msg_type, IFNULL(category,'dialogue'), message, target_message_id, hash, status, retry_count, last_error, created_at, updated_at FROM telegram_outbox;
-      DROP TABLE telegram_outbox;
-      ALTER TABLE telegram_outbox_new RENAME TO telegram_outbox;
-      CREATE INDEX IF NOT EXISTS idx_outbox_status ON telegram_outbox(status);
-      CREATE INDEX IF NOT EXISTS idx_outbox_hash ON telegram_outbox(hash);
-      CREATE INDEX IF NOT EXISTS idx_outbox_category ON telegram_outbox(category);
-    `
-  },
-  {
-    version: 24,
-    sql: `
-      ALTER TABLE messages ADD COLUMN session_id TEXT;
-      CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
-    `
-  },
-  {
-    version: 25,
-    sql: `
-      ALTER TABLE messages ADD COLUMN category TEXT NOT NULL DEFAULT 'chat';
-      CREATE INDEX IF NOT EXISTS idx_messages_category ON messages(category);
-    `
-  }
-];
-function runMigrations(sqlite2) {
-  sqlite2.run("CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)");
-  const applied = new Set(sqlite2.exec("SELECT version FROM _migrations").flatMap((r) => r.values).map((v) => Number(v)));
-  for (const m of MIGRATIONS) {
-    if (!applied.has(m.version)) {
-      Logger.log("INFO", "db_migration_applying", { version: m.version });
-      sqlite2.run(m.sql);
-      sqlite2.run("INSERT INTO _migrations (version, applied_at) VALUES (?, ?)", [m.version, Date.now()]);
-      Logger.log("INFO", "db_migration_applied", { version: m.version });
-    }
-  }
-}
-const PATTERNS$2 = [
-  {
-    category: "writing",
-    patterns: [
-      /写.*故事|写.*小说|创作.*故事/,
-      /小说|故事|剧情|角色|章节|情节/,
-      /文笔|润色|改写|描写|修辞/,
-      /氛围|气氛|画面感|灵感|细节|描写/,
-      /写作|著书|文稿|手稿|连载|番外|同人|小说创作/
-    ]
-  },
-  {
-    category: "image_gen",
-    patterns: [
-      /画|绘制|生成.*图|生成.*画|作图|绘图/,
-      /图片|照片|图像|插图|插画/,
-      /设计.*图|设计.*海报|设计.*封面/,
-      /FLUX|CogView|ComfyUI/,
-      /生图|AI.*图|AI.*画|文生图|图生图/
-    ]
-  },
-  {
-    category: "evolution",
-    patterns: [
-      /进化|自我改进|自我优化|self.evolve|self.improv/i,
-      /优化.*系统|改进.*能力|提升.*性能|升级.*功能/,
-      /分析.*代码|重构.*架构|重构.*代码|代码.*审查/,
-      /性能.*优化|内存.*泄漏|bug.*修复|自动化.*测试/
-    ]
-  },
-  {
-    category: "creativity",
-    patterns: [
-      /创意|灵感|点子|头脑风暴|brainstorm/i,
-      /创新|新颖|独特.*想法|出主意/,
-      /有什么.*想法|你觉得.*怎么样|有没有.*思路/,
-      /设计方案|产品.*构思|新功能.*建议/
-    ]
-  },
-  {
-    category: "dream",
-    patterns: [/梦境|梦到|做梦|梦见|潜意识|催眠/i, /dream|subconscious|REM/i, /解梦|弗洛伊德|荣格|释梦/]
-  }
-];
-function classifyContent(text) {
-  if (!text) return "chat";
-  for (const { category, patterns } of PATTERNS$2) {
-    for (const p of patterns) {
-      if (p.test(text)) return category;
-    }
-  }
-  return "chat";
-}
-let db = null;
-let sqlite = null;
-let dbPath = "";
-let saveTimer = null;
-let dirty = false;
-let initializing = false;
-async function proxyCallback(sql, params, method) {
-  if (!sqlite) throw new Error("Database not initialized");
-  const convertedSql = sql.replace(/\$\d+/g, "?");
-  try {
-    if (method === "run") {
-      sqlite.run(convertedSql, params);
-      return { rows: [] };
-    }
-    const stmt = sqlite.prepare(convertedSql);
-    stmt.bind(params);
-    if (method === "get") {
-      const row = stmt.step() ? stmt.getAsObject() : null;
-      stmt.free();
-      return { rows: row ? [row] : [] };
-    }
-    if (method === "values") {
-      const rows2 = [];
-      while (stmt.step()) {
-        rows2.push(stmt.get());
-      }
-      stmt.free();
-      return { rows: rows2 };
-    }
-    const rows = [];
-    while (stmt.step()) {
-      rows.push(stmt.getAsObject());
-    }
-    stmt.free();
-    return { rows };
-  } catch (err) {
-    Logger.log("ERROR", "db_query_error", { sql: convertedSql.slice(0, 100), error: String(err) });
-    throw err;
-  }
-}
-async function initDatabase() {
-  if (db) return;
-  if (initializing) {
-    while (initializing) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    return;
-  }
-  initializing = true;
-  dbPath = path$1.join(WORKSPACE_ROOT, "akemi-mio.db");
-  Logger.log("INFO", "db_init", { path: dbPath });
-  const SQL = await initSqlJs();
-  if (fs.existsSync(dbPath)) {
-    const buffer = fs.readFileSync(dbPath);
-    sqlite = new SQL.Database(buffer);
-  } else {
-    sqlite = new SQL.Database();
-  }
-  sqlite.run("PRAGMA journal_mode = WAL");
-  sqlite.run("PRAGMA foreign_keys = ON");
-  db = sqliteProxy.drizzle(proxyCallback, { schema });
-  runMigrations(sqlite);
-  try {
-    const rows = sqlite.exec(
-      `SELECT id, content, session_id FROM messages WHERE role = 'user' AND category = 'chat' ORDER BY created_at ASC`
-    );
-    if (rows.length && rows[0].values.length) {
-      const cols = rows[0].columns;
-      const idIdx = cols.indexOf("id");
-      const contentIdx = cols.indexOf("content");
-      const sessionIdx = cols.indexOf("session_id");
-      const stmt1 = sqlite.prepare("UPDATE messages SET category = ? WHERE id = ?");
-      const stmt2 = sqlite.prepare("UPDATE messages SET category = ? WHERE session_id = ? AND role = ? AND category = ?");
-      for (const row of rows[0].values) {
-        const content = String(row[contentIdx] || "");
-        const cat = classifyContent(content);
-        if (cat !== "chat") {
-          const id2 = String(row[idIdx]);
-          stmt1.bind([cat, id2]);
-          stmt1.step();
-          stmt1.reset();
-          const sessionId = row[sessionIdx];
-          if (sessionId) {
-            stmt2.bind([cat, sessionId, "assistant", "chat"]);
-            stmt2.step();
-            stmt2.reset();
-          }
-        }
-      }
-      stmt1.free();
-      stmt2.free();
-      markDirty();
-    }
-  } catch (err) {
-    Logger.log("ERROR", "db_backfill_categories_failed", { error: String(err) });
-  }
-  saveTimer = setInterval(() => {
-    if (dirty && sqlite) {
-      const data = sqlite.export();
-      fs.writeFileSync(dbPath, Buffer.from(data));
-      dirty = false;
-    }
-  }, 1e4);
-  Logger.log("INFO", "db_ready");
-  initializing = false;
-}
-function getDatabase() {
-  if (!db) throw new Error("Database not initialized. Call initDatabase() first.");
-  return db;
-}
-function markDirty() {
-  dirty = true;
-}
-function flushDatabase() {
-  if (!sqlite || !dbPath) return;
-  const data = sqlite.export();
-  fs.writeFileSync(dbPath, Buffer.from(data));
-  dirty = false;
-  Logger.log("INFO", "db_flushed", { size: data.length });
-}
-function closeDatabase() {
-  if (saveTimer) {
-    clearInterval(saveTimer);
-    saveTimer = null;
-  }
-  if (sqlite) {
-    flushDatabase();
-    try {
-      sqlite.close();
-    } catch {
-    }
-    sqlite = null;
-    db = null;
-  }
-}
-function getRawDb() {
-  if (!sqlite) throw new Error("Database not initialized");
-  return sqlite;
-}
-const connection = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-  __proto__: null,
-  closeDatabase,
-  flushDatabase,
-  getDatabase,
-  getRawDb,
-  initDatabase,
-  markDirty
-}, Symbol.toStringTag, { value: "Module" }));
 class AsyncLock {
   locked = false;
   queue = [];
@@ -18873,6 +19336,15 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef2,
     try {
       const ok = workflowStore.deleteRun(runId);
       return { success: ok, error: ok ? void 0 : "运行记录不存在" };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+  electron.ipcMain.handle("workflow:approveGate", async (_event, runId, stepId, decision, modifiedInput) => {
+    try {
+      const scheduler2 = getWorkflowScheduler();
+      const ok = scheduler2.approveGate(runId, stepId, decision, modifiedInput);
+      return { success: ok, error: ok ? void 0 : "审批请求不存在" };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -31520,8 +31992,9 @@ class AppRuntime {
     setSubAgentPool2(agentService["subAgentPool"]);
     const recoveryManager = new SessionRecoveryManager(path$1.join(WORKSPACE.evolution, "recovery"));
     agentService.setRecoveryManager(recoveryManager);
-    const { WorkflowScheduler: WorkflowScheduler2, setWorkflowScheduler: setWorkflowScheduler2 } = await Promise.resolve().then(() => WorkflowScheduler$1);
-    const scheduler2 = new WorkflowScheduler2({
+    const { WorkflowSchedulerV2: WorkflowSchedulerV22, setWorkflowScheduler: setWorkflowScheduler2 } = await Promise.resolve().then(() => WorkflowScheduler);
+    const { workflowStore: workflowStore2 } = await Promise.resolve().then(() => WorkflowStoreV2$1);
+    const scheduler2 = new WorkflowSchedulerV22({
       runSubAgent: (goal, parentGoal, options) => agentService["subAgentPool"].spawn(goal, parentGoal, options),
       runTool: async (name2, args) => {
         const result = await mcpManager.callTool(name2, args);
@@ -31555,9 +32028,13 @@ class AppRuntime {
           pending: plan.steps.filter((s) => s.status !== "done").map((s) => s.description),
           status: plan.status
         };
-      }
+      },
+      getDefinition: (id2) => workflowStore2.getDefinition(id2)
     });
     setWorkflowScheduler2(scheduler2);
+    const { WorkflowTriggerManager } = await Promise.resolve().then(() => require("./chunks/WorkflowTriggerManager-VJDw9yPr.js"));
+    const triggerManager = new WorkflowTriggerManager();
+    triggerManager.start();
     const telegramService = new TelegramService(agentService);
     await electron.app.whenReady();
     Logger.initLogFile(WORKSPACE.logs);
@@ -32297,3 +32774,6 @@ process.on("unhandledRejection", (reason) => {
 });
 const runtime = new AppRuntime(crashGuard);
 runtime.start();
+exports.eventBus = eventBus;
+exports.getWorkflowScheduler = getWorkflowScheduler;
+exports.workflowStore = workflowStore;
