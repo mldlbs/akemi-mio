@@ -249,12 +249,14 @@ export class ChatExecutor {
     this.consecutiveInvalidRequest = 0
     this.obsLogger = new ObservabilityLogger(rid)
     this.obsLogger.logInput(text, source)
+    // 统一 resolve sessionId（只调一次），后续分支和 DB 存储共用
+    const effectiveSessionId = sessionId || this.resolveSessionId()
     // session 切换时加载对应历史到 workingMemory
-    if (sessionId && sessionId !== this.currentSessionId) {
-      this.currentSessionId = sessionId
+    if (effectiveSessionId !== this.currentSessionId) {
+      this.currentSessionId = effectiveSessionId
       this.workingMemory = new WorkingMemory('chat')
       this.refreshMemory()
-      const history = getMessagesBySession(sessionId)
+      const history = getMessagesBySession(effectiveSessionId)
       for (const m of history) {
         if (m.role === 'user') {
           this.workingMemory.context.addUser(m.content)
@@ -262,15 +264,11 @@ export class ChatExecutor {
           this.workingMemory.context.addAssistant(m.content)
         }
       }
-    } else if (!sessionId) {
-      this.currentSessionId = null
-      this.workingMemory = new WorkingMemory('chat')
     }
     // 先刷新 memory（可能重建 context），再加用户消息，确保消息不丢失
     this.refreshMemory()
     this.workingMemory.addUser(text)
     eventBus.emit('agent.input.received', { text, requestId: rid, source })
-    const effectiveSessionId = sessionId || this.resolveSessionId()
     const contentCategory = classifyContent(text)
     this.currentCategory = contentCategory
     const userMsg: StoredMessage = {

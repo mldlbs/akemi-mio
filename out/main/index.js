@@ -3357,7 +3357,7 @@ class WorkflowSchedulerV2 {
       case "event":
         return this.handleEvent(sd, ctx);
       default:
-        return this.handleLegacy(sd, run, def, outputDir, signal);
+        return this.handleLegacy(sd, run, def, outputDir, ctx, signal);
     }
   }
   // ── New handler implementations ──
@@ -3574,10 +3574,10 @@ class WorkflowSchedulerV2 {
     return { status: "done", data: { event: cfg.eventName, emitted: true } };
   }
   // ── Legacy handlers ──
-  async handleLegacy(sd, run, def, outputDir, signal) {
+  async handleLegacy(sd, run, def, outputDir, ctx, signal) {
     switch (sd.handler) {
       case "subagent":
-        return this.handleSubagent(sd, run, def, outputDir);
+        return this.handleSubagent(sd, run, def, outputDir, ctx);
       case "tool":
         return this.handleToolStep(sd);
       case "api":
@@ -3590,7 +3590,7 @@ class WorkflowSchedulerV2 {
         return { status: "failed", error: `Unknown handler: ${sd.handler}` };
     }
   }
-  async handleSubagent(sd, run, def, outputDir) {
+  async handleSubagent(sd, run, def, outputDir, ctx) {
     const subOptions = {};
     if (sd.config.allowedTools !== void 0) subOptions.allowedToolNames = sd.config.allowedTools;
     if (sd.config.maxTurns !== void 0) subOptions.maxTurns = sd.config.maxTurns;
@@ -3598,10 +3598,17 @@ class WorkflowSchedulerV2 {
     subOptions.onProgress = (msg) => {
       eventBus.emit("workflow.run.step", { runId: run.runId, stepId: sd.id, status: "running", agentResult: msg });
     };
+    const depContext = sd.dependsOn.map((depId) => {
+      const step = ctx.steps[depId];
+      if (!step) return "";
+      const resultStr = typeof step.result === "string" ? step.result : JSON.stringify(step.result, null, 2);
+      return `【上一步 ${depId} 的输出】
+${resultStr}`;
+    }).filter(Boolean).join("\n\n");
     const basePrompt = sd.config.prompt || sd.description || "";
     const withInput = basePrompt.replace(/\{INPUT\}/g, run.userInput || "(请输入主题)");
     const withOutputDir = withInput.replace(/\{OUTPUT_DIR\}/g, outputDir);
-    const fullPrompt = withOutputDir.replaceAll("(dependency_context)", "");
+    const fullPrompt = withOutputDir.replace("(dependency_context)", depContext);
     const agentId = this.dispatch.runSubAgent(fullPrompt, def.description, subOptions);
     const pendingAgents = [agentId];
     const results = await this.waitForAgents(pendingAgents, run, sd);
@@ -12685,7 +12692,7 @@ function runGlobalDisposers() {
   }
   globalDisposers = [];
 }
-function getMainWindow$1() {
+function getMainWindow() {
   return mainWindow$1;
 }
 function createWindow(stateManager) {
@@ -12842,10 +12849,10 @@ function setupWallpaperListener(stateManager) {
       onWallpaperEvent((event) => {
         try {
           if (event === "pause") {
-            const win = getMainWindow$1();
+            const win = getMainWindow();
             win?.webContents.send("state:update", { recording: false });
           } else if (event === "resume") {
-            const win = getMainWindow$1();
+            const win = getMainWindow();
             win?.webContents.send("state:update", { asr: "ready" });
           }
         } catch (err) {
@@ -13468,7 +13475,8 @@ ${failureSummary}`,
           success: result.success,
           summary: result.summary,
           timestamp: Date.now(),
-          durationMs: Date.now() - this.lastRun
+          durationMs: Date.now() - this.lastRun,
+          planCreated: result.planCreated
         });
         this.eventBus.emit("evolution.plan.outcome", {
           success: result.success,
@@ -13660,7 +13668,7 @@ ${failureSummary}`,
       };
       insertMessage(msg);
       try {
-        const win = getMainWindow$1();
+        const win = getMainWindow();
         if (win && !win.isDestroyed()) {
           win.webContents.send("message:new", msg);
         }
@@ -17477,11 +17485,12 @@ class ChatExecutor {
     this.consecutiveInvalidRequest = 0;
     this.obsLogger = new ObservabilityLogger(rid);
     this.obsLogger.logInput(text, source);
-    if (sessionId && sessionId !== this.currentSessionId) {
-      this.currentSessionId = sessionId;
+    const effectiveSessionId = sessionId || this.resolveSessionId();
+    if (effectiveSessionId !== this.currentSessionId) {
+      this.currentSessionId = effectiveSessionId;
       this.workingMemory = new WorkingMemory("chat");
       this.refreshMemory();
-      const history = getMessagesBySession(sessionId);
+      const history = getMessagesBySession(effectiveSessionId);
       for (const m of history) {
         if (m.role === "user") {
           this.workingMemory.context.addUser(m.content);
@@ -17489,14 +17498,10 @@ class ChatExecutor {
           this.workingMemory.context.addAssistant(m.content);
         }
       }
-    } else if (!sessionId) {
-      this.currentSessionId = null;
-      this.workingMemory = new WorkingMemory("chat");
     }
     this.refreshMemory();
     this.workingMemory.addUser(text);
     eventBus.emit("agent.input.received", { text, requestId: rid, source });
-    const effectiveSessionId = sessionId || this.resolveSessionId();
     const contentCategory = classifyContent(text);
     this.currentCategory = contentCategory;
     const userMsg = {
@@ -19891,7 +19896,7 @@ function quitAndInstall() {
 function createServiceRef() {
   return { current: null };
 }
-function registerHandlers(agentService, stateManager, ttsService, evolutionRef2, metricsCollector) {
+function registerHandlers(agentService, stateManager, ttsService, evolutionRef, metricsCollector) {
   electron.ipcMain.handle("window:close", async (event) => {
     const win = electron.BrowserWindow.fromWebContents(event.sender);
     if (!win) return { success: false };
@@ -19976,12 +19981,26 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef2,
       return { error: String(err) };
     }
   });
-  if (evolutionRef2) {
+  if (evolutionRef) {
     electron.ipcMain.handle("evolution:trigger", async () => {
-      return { success: false, error: "evolution not ready" };
+      const svc = evolutionRef.current;
+      if (!svc) return { success: false, error: "evolution not ready" };
+      try {
+        await svc.triggerNow();
+        return { success: true };
+      } catch (err) {
+        Logger.log("ERROR", "evolution_trigger_failed", { error: String(err) });
+        return { success: false, error: String(err) };
+      }
     });
     electron.ipcMain.handle("evolution:status", async () => {
-      return { lastRun: null, consecutiveFailures: 0, isBusy: false };
+      const svc = evolutionRef.current;
+      if (!svc) return { lastRun: null, consecutiveFailures: 0, isBusy: false };
+      return {
+        lastRun: svc.getLastRun(),
+        consecutiveFailures: svc.getConsecutiveFailures(),
+        isBusy: agentService.isBusy()
+      };
     });
   }
   electron.ipcMain.handle("credentials:list", async () => {
@@ -33040,8 +33059,8 @@ class AppRuntime {
     Logger.log("INFO", "audit_trail_ready");
     Logger.log("INFO", "mcp_ready", { servers: mcpManager.listServers().length, tools: mcpManager.listTools().length });
     telegramService.initialize();
-    const evolutionRef2 = createServiceRef();
-    registerHandlers(agentService, stateManager, ttsService, evolutionRef2);
+    const evolutionRef = createServiceRef();
+    registerHandlers(agentService, stateManager, ttsService, evolutionRef);
     const constitutionEngine = new ConstitutionEngine();
     await constitutionEngine.initialize(path$1.join(WORKSPACE.evolution, "constitution"));
     constitutionEngine.setEnforcementMode("enforce");
@@ -33184,7 +33203,16 @@ class AppRuntime {
     setUpdateWindow(win);
     initUpdater();
     this.lazyInit = new LazyServiceGroup();
-    this.registerLazyServices(agentService, llmService, memoryService, memoryIndexer, stateManager, planManager, cognitiveService);
+    this.registerLazyServices(
+      agentService,
+      llmService,
+      memoryService,
+      memoryIndexer,
+      stateManager,
+      planManager,
+      cognitiveService,
+      evolutionRef
+    );
     const outboxUrl = credentialsManager.get("telegram_server_url") || process.env.TELEGRAM_SERVER_URL || "https://skills.crlkcloud.cyou/telegram";
     const outboxWorker = new OutboxWorker(outboxUrl);
     this.taskRunner.register("telegram.outbox", () => outboxWorker.tick(), 2e3, { cooldownMs: 1e4 });
@@ -33333,7 +33361,7 @@ class AppRuntime {
       "runtime:context_compress"
     );
   }
-  registerLazyServices(agentService, llmService, memoryService, memoryIndexer, stateManager, planManager2, cognitiveService) {
+  registerLazyServices(agentService, llmService, memoryService, memoryIndexer, stateManager, planManager2, cognitiveService, evolutionRef) {
     this.lazyInit.add({
       name: "evolution",
       priority: "normal",
@@ -33547,6 +33575,27 @@ class AppRuntime {
           this.subs,
           "runtime:creativity_dream"
         );
+        eventBus.track(
+          "evolution.cycle.completed",
+          async (p) => {
+            if (p.success && p.planCreated && this.workerPool?.isActive("observer") && !this.workerPool.isBusy("observer")) {
+              Logger.log("INFO", "chain_evolution_to_observer", { planSummary: p.summary?.slice(0, 80) });
+              try {
+                const result = await this.workerPool.sendTaskAndWait("observer", "pipeline", { mode: "analytical" }, 18e4);
+                if (result) {
+                  Logger.log("INFO", "chain_observer_insight_from_evolution", { topic: result.payload?.topic });
+                }
+              } catch (err) {
+                Logger.log("WARN", "chain_observer_pipeline_failed", { error: err.message });
+              }
+            }
+          },
+          this.subs,
+          "runtime:chain_evolution_to_observer"
+        );
+        Logger.log("INFO", "chain_service_triggers_ready", {
+          evolution_to_observer: true
+        });
       }
     });
   }

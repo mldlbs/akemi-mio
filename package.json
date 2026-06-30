@@ -22,6 +22,7 @@
     "test:renderer": "vitest run --config vitest.config.renderer.ts",
     "test:renderer:watch": "vitest --config vitest.config.renderer.ts",
     "coverage:renderer": "vitest run --config vitest.config.renderer.ts --coverage",
+    "test:preload": "vitest run --config vitest.config.preload.ts",
     "audit": "npm audit --audit-level=high"
   },
   "dependencies": {

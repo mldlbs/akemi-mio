@@ -35,7 +35,7 @@ import { setPlanManager, setCredentialsManager, setSkillManager as setToolSkillM
 import { PluginLoader, toolRegistry } from '../plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '../skill'
 import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
-import { setupStartupLogging, createWindow, setupWallpaperListener } from '../core/Lifecycle'
+import { setupStartupLogging, createWindow, setupWallpaperListener, getMainWindow } from '../core/Lifecycle'
 import { initTray, destroyTray } from '../core/TrayManager'
 import { initUpdater, setUpdateWindow } from '../updater/UpdaterService'
 import { initDatabase, closeDatabase } from '../db/connection'
@@ -546,7 +546,16 @@ export class AppRuntime {
 
     // === Stage 7: 延迟服务 ===
     this.lazyInit = new LazyServiceGroup()
-    this.registerLazyServices(agentService, llmService, memoryService, memoryIndexer, stateManager, planManager, cognitiveService)
+    this.registerLazyServices(
+      agentService,
+      llmService,
+      memoryService,
+      memoryIndexer,
+      stateManager,
+      planManager,
+      cognitiveService,
+      evolutionRef,
+    )
 
     // 注册 Telegram outbox worker（在 taskRunner 启动前注册，start 后生效）
     const outboxUrl =
@@ -720,6 +729,7 @@ export class AppRuntime {
     stateManager: StateManager,
     planManager: any,
     cognitiveService: CognitiveService,
+    evolutionRef?: ServiceRef<SelfEvolutionService>,
   ): void {
     // 进化服务
     this.lazyInit!.add({
@@ -963,6 +973,37 @@ export class AppRuntime {
           this.subs,
           'runtime:creativity_dream',
         )
+
+        // ── Chain: Evolution → Observer pipeline ──
+        // Evolution 产出有效计划后，立即触发 Observer pipeline 而非等 4h 定时
+        eventBus.track(
+          'evolution.cycle.completed',
+          async (p: any) => {
+            if (p.success && p.planCreated && this.workerPool?.isActive('observer') && !this.workerPool.isBusy('observer')) {
+              log('INFO', 'chain_evolution_to_observer', { planSummary: p.summary?.slice(0, 80) })
+              try {
+                const result = await this.workerPool.sendTaskAndWait('observer', 'pipeline', { mode: 'analytical' }, 180_000)
+                if (result) {
+                  log('INFO', 'chain_observer_insight_from_evolution', { topic: result.payload?.topic })
+                }
+              } catch (err: any) {
+                log('WARN', 'chain_observer_pipeline_failed', { error: err.message })
+              }
+            }
+          },
+          this.subs,
+          'runtime:chain_evolution_to_observer',
+        )
+
+        // ── Chain: Observer pipeline → Creativity nudge ──
+        // Observer 完成 insight 产出后（通过 WorkerPool 回调不可观测），
+        // 此链由 creatority.cycle.completed 隐含覆盖：
+        // CreativityService.WorldTrendProvider 自动读取 Observer store，
+        // 下一个 Creativity 周期即包含最新趋势。
+        // 这里只做监控日志，验证链式工作在运行。
+        log('INFO', 'chain_service_triggers_ready', {
+          evolution_to_observer: true,
+        })
       },
     })
   }

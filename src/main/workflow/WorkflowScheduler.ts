@@ -276,7 +276,7 @@ export class WorkflowSchedulerV2 {
       case 'event':
         return this.handleEvent(sd, ctx)
       default:
-        return this.handleLegacy(sd, run, def, outputDir, signal)
+        return this.handleLegacy(sd, run, def, outputDir, ctx, signal)
     }
   }
 
@@ -568,11 +568,12 @@ export class WorkflowSchedulerV2 {
     run: WorkflowRun,
     def: WorkflowDef,
     outputDir: string,
+    ctx: StepContext,
     signal: AbortSignal,
   ): Promise<{ status: string; data?: any; error?: string }> {
     switch (sd.handler) {
       case 'subagent':
-        return this.handleSubagent(sd, run, def, outputDir)
+        return this.handleSubagent(sd, run, def, outputDir, ctx)
       case 'tool':
         return this.handleToolStep(sd)
       case 'api':
@@ -591,6 +592,7 @@ export class WorkflowSchedulerV2 {
     run: WorkflowRun,
     def: WorkflowDef,
     outputDir: string,
+    ctx: StepContext,
   ): Promise<{ status: string; data?: any; error?: string }> {
     const subOptions: SpawnTaskOptions = {}
     if (sd.config.allowedTools !== undefined) subOptions.allowedToolNames = sd.config.allowedTools
@@ -601,10 +603,21 @@ export class WorkflowSchedulerV2 {
       eventBus.emit('workflow.run.step' as any, { runId: run.runId, stepId: sd.id, status: 'running', agentResult: msg })
     }
 
+    // Build dependency context from previous step results
+    const depContext = sd.dependsOn
+      .map((depId) => {
+        const step = ctx.steps[depId]
+        if (!step) return ''
+        const resultStr = typeof step.result === 'string' ? step.result : JSON.stringify(step.result, null, 2)
+        return `【上一步 ${depId} 的输出】\n${resultStr}`
+      })
+      .filter(Boolean)
+      .join('\n\n')
+
     const basePrompt = sd.config.prompt || sd.description || ''
     const withInput = basePrompt.replace(/\{INPUT\}/g, run.userInput || '(请输入主题)')
     const withOutputDir = withInput.replace(/\{OUTPUT_DIR\}/g, outputDir)
-    const fullPrompt = withOutputDir.replaceAll('(dependency_context)', '')
+    const fullPrompt = withOutputDir.replace('(dependency_context)', depContext)
 
     const agentId = this.dispatch.runSubAgent(fullPrompt, def.description, subOptions)
     const pendingAgents = [agentId]

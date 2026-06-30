@@ -801,6 +801,7 @@ export class SelfEvolutionService implements ISubsystem {
           summary: result.summary,
           timestamp: Date.now(),
           durationMs: Date.now() - this.lastRun,
+          planCreated: result.planCreated,
         })
         // Phase 3: 通知创造力系统本次分析结果
         this.eventBus.emit('evolution.plan.outcome' as any, {
