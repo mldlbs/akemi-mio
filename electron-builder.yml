@@ -29,6 +29,7 @@ files:
   - "!**/tsconfig*.json"
   - "!logs.txt"
   - "!logs/**"
+  - "!**/node_modules/**/*.map"
 win:
   icon: build/icon.ico
   target:
