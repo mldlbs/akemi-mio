@@ -3267,9 +3267,11 @@ class WorkflowSchedulerV2 {
             if (result.status === "done") {
               completed.add(sd.id);
               ctx.steps[sd.id] = { result: result.data, status: "done" };
+              workflowStore.updateStep(run, sd.id, "done", result.data);
             } else if (result.status === "failed") {
               failures.add(sd.id);
               ctx.steps[sd.id] = { result: null, status: "failed", error: result.error };
+              workflowStore.updateStep(run, sd.id, "failed", void 0, result.error);
             } else if (result.status === "skipped") {
               skipped.add(sd.id);
             }
