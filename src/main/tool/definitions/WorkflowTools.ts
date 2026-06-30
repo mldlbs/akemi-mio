@@ -1,6 +1,7 @@
 import { buildTool, formatToolResult, formatToolError } from '../types'
 import { workflowStore } from '../../workflow/WorkflowStoreV2'
 import { getWorkflowScheduler } from '../../workflow/WorkflowScheduler'
+import type { WorkflowDef, WorkflowStepDef } from '../../workflow/types'
 
 export const analyzeTaskTool = buildTool({
   name: 'analyze_task',
@@ -70,7 +71,7 @@ export const listWorkflowsTool = buildTool({
 export const createWorkflowTool = buildTool({
   name: 'create_workflow',
   description:
-    '创建一个新的工作流定义。工作流由多个步骤组成，步骤之间可以有依赖关系（DAG），支持子 agent、工具调用、API 调用、prompt 注入和 plan 五种 handler 类型。创建后默认启用。',
+    '创建一个新的工作流定义。工作流由多个步骤组成，步骤之间可以有依赖关系（DAG）。创建后默认启用。',
   inputJSONSchema: {
     type: 'object',
     properties: {
@@ -87,8 +88,8 @@ export const createWorkflowTool = buildTool({
             description: { type: 'string', description: '步骤描述' },
             handler: {
               type: 'string',
-              enum: ['subagent', 'tool', 'api', 'prompt', 'plan'],
-              description: '执行方式: subagent=子agent, tool=工具, api=API, prompt=注入prompt, plan=创建开发计划',
+              enum: ['subagent', 'tool', 'api', 'prompt', 'plan', 'condition', 'foreach', 'transform', 'gate', 'aggregate', 'subflow', 'wait', 'script', 'event'],
+              description: '执行方式: subagent=子agent, tool=工具调用, api=API请求, prompt=注入prompt, plan=创建计划, condition=条件分支, foreach=循环, transform=变换, gate=审批门, aggregate=聚合, subflow=子流程, wait=等待, script=脚本, event=事件',
             },
             config: {
               type: 'object',
@@ -98,6 +99,102 @@ export const createWorkflowTool = buildTool({
                 apiUrl: { type: 'string', description: '当 handler=api 时的 API URL' },
                 apiMethod: { type: 'string', description: '当 handler=api 时的 HTTP 方法' },
                 planPrompt: { type: 'string', description: '当 handler=plan 时的计划 prompt' },
+                allowedTools: { type: 'array', items: { type: 'string' }, description: '可用的工具列表' },
+                maxTurns: { type: 'number', description: '最大交互轮数' },
+                outputFile: { type: 'string', description: '输出文件路径' },
+                // New handlers
+                condition: {
+                  type: 'object',
+                  properties: {
+                    source: { type: 'string', description: '条件判断来源（如 {{steps.s1.result.score}}）' },
+                    cases: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          if: { type: 'string', description: '条件表达式，如 "> 7"' },
+                          goto: { type: 'string', description: '满足条件时跳转到此步骤 ID' },
+                        },
+                        required: ['if', 'goto'],
+                      },
+                    },
+                    defaultGoto: { type: 'string', description: '无匹配时跳转到的步骤 ID（可选）' },
+                  },
+                  description: 'handler=condition 时的条件分支配置',
+                },
+                foreach: {
+                  type: 'object',
+                  properties: {
+                    items: { type: 'string', description: '要遍历的数组（如 {{steps.s1.result.items}}）' },
+                    workflowId: { type: 'string', description: '对每项执行的工作流 ID' },
+                    concurrency: { type: 'number', description: '并发数，默认 1' },
+                  },
+                  description: 'handler=foreach 时的循环配置',
+                },
+                gate: {
+                  type: 'object',
+                  properties: {
+                    message: { type: 'string', description: '审批消息' },
+                    preview: { type: 'string', description: '预览内容（支持模板引用）' },
+                    options: { type: 'array', items: { type: 'string' }, description: '审批选项: approve, reject, modify' },
+                  },
+                  description: 'handler=gate 时的审批门配置',
+                },
+                transform: {
+                  type: 'object',
+                  properties: {
+                    input: { type: 'string', description: '输入来源（如 {{steps.s1.result}}）' },
+                    mapping: {
+                      type: 'object',
+                      additionalProperties: { type: 'string' },
+                      description: '输出映射，key=新字段, value=模板表达式',
+                    },
+                  },
+                  description: 'handler=transform 时的数据变换配置',
+                },
+                aggregate: {
+                  type: 'object',
+                  properties: {
+                    sources: { type: 'array', items: { type: 'string' }, description: '要聚合的步骤 ID 列表' },
+                    strategy: { type: 'string', enum: ['merge', 'concat', 'pick-first', 'custom'], description: '聚合策略' },
+                  },
+                  description: 'handler=aggregate 时的聚合配置',
+                },
+                subflow: {
+                  type: 'object',
+                  properties: {
+                    workflowId: { type: 'string', description: '子工作流 ID' },
+                    input: {
+                      type: 'object',
+                      additionalProperties: { type: 'string' },
+                      description: '传递给子工作流的输入',
+                    },
+                  },
+                  description: 'handler=subflow 时的子流程配置',
+                },
+                wait: {
+                  type: 'object',
+                  properties: {
+                    durationMs: { type: 'number', description: '等待时长（毫秒）' },
+                    waitForStep: { type: 'string', description: '等待某步骤完成' },
+                  },
+                  description: 'handler=wait 时的等待配置',
+                },
+                script: {
+                  type: 'object',
+                  properties: {
+                    code: { type: 'string', description: 'JS 函数体代码' },
+                  },
+                  description: 'handler=script 时的脚本配置',
+                },
+                event: {
+                  type: 'object',
+                  properties: {
+                    eventName: { type: 'string', description: '要发送的事件名称' },
+                    payload: { type: 'string', description: '事件载荷（可选，支持模板引用）' },
+                  },
+                  description: 'handler=event 时的事件配置',
+                },
               },
             },
             dependsOn: {
@@ -105,6 +202,9 @@ export const createWorkflowTool = buildTool({
               items: { type: 'string' },
               description: '依赖的上一步 ID 列表。空数组表示无依赖，可与其他无依赖步骤并行执行',
             },
+            retryCount: { type: 'number', description: '失败重试次数，默认 0' },
+            retryDelayMs: { type: 'number', description: '重试间隔（毫秒），默认 5000' },
+            runOn: { type: 'string', enum: ['success', 'failure'], description: '运行条件: success=仅前序成功时, failure=仅前序失败时' },
           },
           required: ['id', 'name', 'description', 'handler', 'dependsOn'],
         }))() as any,
@@ -114,23 +214,243 @@ export const createWorkflowTool = buildTool({
         items: (() => ({ type: 'string' }))() as any,
         description: '可选标签，如 simple/medium/large',
       },
+      trigger: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['manual', 'cron', 'event'], description: '触发类型' },
+          cron: { type: 'string', description: 'cron 表达式（type=cron 时必填）' },
+          event: { type: 'string', description: '事件名（type=event 时必填）' },
+          defaultInput: { type: 'string', description: '触发时的默认输入' },
+        },
+        required: ['type'],
+        description: '调度触发器配置',
+      },
+      maxConcurrency: { type: 'number', description: '最大并发步骤数，默认 5' },
     },
     required: ['name', 'description', 'steps'],
   },
-  handler: async (args: { name: string; description: string; steps: any[]; tags?: string[] }) => {
+  handler: async (args: { name: string; description: string; steps: any[]; tags?: string[]; trigger?: any; maxConcurrency?: number }) => {
     try {
-      const def = {
+      const def: WorkflowDef = {
         id: `wf_${Date.now()}`,
         name: args.name,
         description: args.description,
-        steps: args.steps,
+        steps: args.steps as WorkflowStepDef[],
         tags: args.tags || [],
         enabled: true,
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        trigger: args.trigger,
+        maxConcurrency: args.maxConcurrency,
       }
       workflowStore.saveDefinition(def)
       return formatToolResult(`工作流「${def.name}」已创建 (ID: ${def.id})，共 ${def.steps.length} 个步骤。`)
+    } catch (err: any) {
+      return formatToolError(err.message)
+    }
+  },
+})
+
+export const autoScheduleWorkflowTool = buildTool({
+  name: 'auto_schedule_workflow',
+  description:
+    '【自主调度入口】AI 自主创建并立即启动工作流。适用于：多步骤任务需要并行/串行编排、需要审批门(gate)介入、需要条件分支(condition)、需要数据变换(transform)、需要循环处理(foreach)。传 steps 数组定义步骤。创建后默认立即启动。',
+  inputJSONSchema: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: '工作流名称，反映任务目标' },
+      description: { type: 'string', description: '工作流描述，说明整体目标' },
+      steps: {
+        type: 'array',
+        description: '工作流步骤定义',
+        items: (() => ({
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: '步骤 ID，如 s1, s2, step_analyze' },
+            name: { type: 'string', description: '步骤名称' },
+            description: { type: 'string', description: '步骤描述' },
+            handler: {
+              type: 'string',
+              enum: ['subagent', 'tool', 'api', 'prompt', 'plan', 'condition', 'foreach', 'transform', 'gate', 'aggregate', 'subflow', 'wait', 'script', 'event'],
+              description: '执行方式: subagent=AI子任务, tool=工具, gate=需要你审批, condition=条件判断, foreach=循环, transform=数据变换, aggregate=聚合, wait=等待, script=脚本',
+            },
+            config: {
+              type: 'object',
+              properties: {
+                prompt: { type: 'string', description: 'subagent/prompt 的 prompt 内容。subagent 会以此为目标独立执行' },
+                tool: { type: 'string', description: 'handler=tool 时的工具名' },
+                apiUrl: { type: 'string' },
+                apiMethod: { type: 'string' },
+                planPrompt: { type: 'string' },
+                allowedTools: { type: 'array', items: { type: 'string' }, description: 'subagent 可用的工具列表' },
+                maxTurns: { type: 'number', description: 'subagent 最大交互轮数' },
+                condition: {
+                  type: 'object',
+                  properties: {
+                    source: { type: 'string', description: '条件判断来源，如 {{steps.s1.result.score}}' },
+                    cases: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          if: { type: 'string', description: '条件表达式，如 "> 7" 或 "== \\"approve\\""' },
+                          goto: { type: 'string', description: '满足条件时跳转到此步骤' },
+                        },
+                        required: ['if', 'goto'],
+                      },
+                    },
+                    defaultGoto: { type: 'string', description: '无匹配时跳转目标' },
+                  },
+                  description: '条件分支——根据某步骤的输出值决定后续流向',
+                },
+                foreach: {
+                  type: 'object',
+                  properties: {
+                    items: { type: 'string', description: '要遍历的数组变量，如 {{steps.s1.result.items}}' },
+                    workflowId: { type: 'string', description: '对每项执行的工作流 ID' },
+                    concurrency: { type: 'number', description: '并发数，默认 1' },
+                  },
+                  description: '循环——对数组每项执行子工作流',
+                },
+                gate: {
+                  type: 'object',
+                  properties: {
+                    message: { type: 'string', description: '审批时向用户展示的消息' },
+                    preview: { type: 'string', description: '预览内容，如 {{steps.s1.result}}' },
+                    options: { type: 'array', items: { type: 'string' }, description: '审批选项: approve, reject, modify' },
+                  },
+                  description: '审批门——暂停工作流等待用户确认/修改后再继续',
+                },
+                transform: {
+                  type: 'object',
+                  properties: {
+                    input: { type: 'string', description: '输入来源，如 {{steps.s1.result}}' },
+                    mapping: { type: 'object', additionalProperties: { type: 'string' }, description: '映射规则: {outputKey: "{{expression}}"}' },
+                  },
+                  description: '数据变换——将上一步输出映射为新的结构',
+                },
+                aggregate: {
+                  type: 'object',
+                  properties: {
+                    sources: { type: 'array', items: { type: 'string' }, description: '要聚合的步骤 ID 列表' },
+                    strategy: { type: 'string', enum: ['merge', 'concat', 'pick-first', 'custom'], description: '聚合策略' },
+                  },
+                  description: '聚合——将多个步骤的输出合并为一个',
+                },
+                subflow: {
+                  type: 'object',
+                  properties: {
+                    workflowId: { type: 'string', description: '子工作流 ID' },
+                    input: { type: 'object', additionalProperties: { type: 'string' }, description: '输入参数' },
+                  },
+                  description: '子流程——内嵌执行另一个工作流',
+                },
+                wait: {
+                  type: 'object',
+                  properties: {
+                    durationMs: { type: 'number', description: '等待毫秒数' },
+                    waitForStep: { type: 'string', description: '等待某步骤完成后继续' },
+                  },
+                  description: '等待——暂停指定时长',
+                },
+                script: {
+                  type: 'object',
+                  properties: {
+                    code: { type: 'string', description: 'JS 函数体: (ctx, steps) => any' },
+                  },
+                  description: '脚本——执行自定义 JS 逻辑',
+                },
+                event: {
+                  type: 'object',
+                  properties: {
+                    eventName: { type: 'string', description: '事件名' },
+                    payload: { type: 'string', description: '事件数据模板' },
+                  },
+                  description: '事件——发送系统事件',
+                },
+              },
+            },
+            dependsOn: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '依赖的上一步 ID 列表。空数组=无依赖（可并行）。[\'s1\']=等 s1 完成',
+            },
+            retryCount: { type: 'number', description: '失败重试次数，默认 0' },
+            retryDelayMs: { type: 'number', description: '重试间隔(ms)，默认 5000' },
+            runOn: { type: 'string', enum: ['success', 'failure'], description: '运行条件，默认 success' },
+          },
+          required: ['id', 'name', 'description', 'handler', 'dependsOn'],
+        }))() as any,
+      },
+      trigger: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['manual', 'cron', 'event'], description: '触发类型' },
+          cron: { type: 'string', description: 'cron 表达式（type=cron 时必填），如 "0 8 * * *"=每天8点' },
+          event: { type: 'string', description: '事件名（type=event 时必填）' },
+          defaultInput: { type: 'string', description: '触发时的默认输入' },
+        },
+        description: '调度触发器设置。不传则手动触发。设 cron 可让工作流定时自动执行',
+      },
+      maxConcurrency: { type: 'number', description: '最大并发步骤数，默认 5' },
+      userInput: { type: 'string', description: '可选，传递给工作流的初始输入' },
+      startImmediately: { type: 'boolean', description: '是否立即启动，默认 true' },
+    },
+    required: ['name', 'description', 'steps'],
+  },
+  handler: async (args: {
+    name: string
+    description: string
+    steps: any[]
+    trigger?: any
+    maxConcurrency?: number
+    userInput?: string
+    startImmediately?: boolean
+  }) => {
+    try {
+      const def: WorkflowDef = {
+        id: `wf_${Date.now()}`,
+        name: args.name,
+        description: args.description,
+        steps: args.steps as WorkflowStepDef[],
+        tags: ['auto'],
+        enabled: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        trigger: args.trigger,
+        maxConcurrency: args.maxConcurrency,
+      }
+      workflowStore.saveDefinition(def)
+
+      const startNow = args.startImmediately !== false
+      if (!startNow) {
+        return formatToolResult(
+          `工作流「${def.name}」已创建 (ID: ${def.id})，${def.steps.length} 个步骤。等待手动启动。`,
+        )
+      }
+
+      const scheduler = getWorkflowScheduler()
+      const run = scheduler.startRun(def, args.userInput)
+      const stepSummary = def.steps
+        .map((s) => {
+          const deps = s.dependsOn.length ? ` ← ${s.dependsOn.join(', ')}` : ' ⚡并行'
+          return `  [${s.handler}] ${s.name} (${s.id})${deps}`
+        })
+        .join('\n')
+
+      let triggerInfo = '手动'
+      if (def.trigger?.type === 'cron') triggerInfo = `定时: ${def.trigger.cron}`
+      else if (def.trigger?.type === 'event') triggerInfo = `事件: ${def.trigger.event}`
+
+      return formatToolResult(
+        `🤖 自主调度工作流已创建并启动\n\n` +
+        `名称: ${def.name}\n` +
+        `ID: ${def.id}\n` +
+        `运行: ${run.runId}\n` +
+        `触发: ${triggerInfo}\n` +
+        `步骤 (${def.steps.length}):\n${stepSummary}\n\n` +
+        `用 get_workflow_status runId="${run.runId}" 查看执行状态`,
+      )
     } catch (err: any) {
       return formatToolError(err.message)
     }
@@ -216,7 +536,10 @@ export const updateWorkflowTool = buildTool({
             id: { type: 'string', description: '步骤唯一标识' },
             name: { type: 'string', description: '步骤名称' },
             description: { type: 'string', description: '步骤描述' },
-            handler: { type: 'string', enum: ['subagent', 'tool', 'api', 'prompt', 'plan'] },
+            handler: {
+              type: 'string',
+              enum: ['subagent', 'tool', 'api', 'prompt', 'plan', 'condition', 'foreach', 'transform', 'gate', 'aggregate', 'subflow', 'wait', 'script', 'event'],
+            },
             config: {
               type: 'object',
               properties: {
@@ -225,9 +548,21 @@ export const updateWorkflowTool = buildTool({
                 apiUrl: { type: 'string' },
                 apiMethod: { type: 'string' },
                 planPrompt: { type: 'string' },
+                condition: { type: 'object', properties: { source: { type: 'string' }, cases: { type: 'array', items: { type: 'object', properties: { if: { type: 'string' }, goto: { type: 'string' } } } }, defaultGoto: { type: 'string' } } },
+                foreach: { type: 'object', properties: { items: { type: 'string' }, workflowId: { type: 'string' }, concurrency: { type: 'number' } } },
+                gate: { type: 'object', properties: { message: { type: 'string' }, preview: { type: 'string' }, options: { type: 'array', items: { type: 'string' } } } },
+                transform: { type: 'object', properties: { input: { type: 'string' }, mapping: { type: 'object', additionalProperties: { type: 'string' } } } },
+                aggregate: { type: 'object', properties: { sources: { type: 'array', items: { type: 'string' } }, strategy: { type: 'string', enum: ['merge', 'concat', 'pick-first', 'custom'] } } },
+                subflow: { type: 'object', properties: { workflowId: { type: 'string' }, input: { type: 'object', additionalProperties: { type: 'string' } } } },
+                wait: { type: 'object', properties: { durationMs: { type: 'number' }, waitForStep: { type: 'string' } } },
+                script: { type: 'object', properties: { code: { type: 'string' } } },
+                event: { type: 'object', properties: { eventName: { type: 'string' }, payload: { type: 'string' } } },
               },
             },
             dependsOn: { type: 'array', items: { type: 'string' } },
+            retryCount: { type: 'number' },
+            retryDelayMs: { type: 'number' },
+            runOn: { type: 'string', enum: ['success', 'failure'] },
           },
           required: ['id', 'name', 'description', 'handler', 'dependsOn'],
         }))() as any,
@@ -237,10 +572,20 @@ export const updateWorkflowTool = buildTool({
         items: (() => ({ type: 'string' }))() as any,
         description: '新的标签列表（全量替换）',
       },
+      trigger: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['manual', 'cron', 'event'] },
+          cron: { type: 'string' },
+          event: { type: 'string' },
+          defaultInput: { type: 'string' },
+        },
+      },
+      maxConcurrency: { type: 'number' },
     },
     required: ['workflowId'],
   },
-  handler: async (args: { workflowId: string; name?: string; description?: string; steps?: any[]; tags?: string[] }) => {
+  handler: async (args: { workflowId: string; name?: string; description?: string; steps?: any[]; tags?: string[]; trigger?: any; maxConcurrency?: number }) => {
     try {
       const existing = workflowStore.getDefinition(args.workflowId)
       if (!existing) return formatToolResult(`工作流 ${args.workflowId} 不存在。`)
@@ -250,6 +595,8 @@ export const updateWorkflowTool = buildTool({
         description: args.description ?? existing.description,
         steps: args.steps ?? existing.steps,
         tags: args.tags ?? (existing as any).tags,
+        trigger: args.trigger ?? (existing as any).trigger,
+        maxConcurrency: args.maxConcurrency ?? (existing as any).maxConcurrency,
         updatedAt: Date.now(),
       }
       workflowStore.saveDefinition(updated)

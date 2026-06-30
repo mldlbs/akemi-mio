@@ -125,6 +125,15 @@ const PROMPT_TOOLS = `可用工具列表：
 - remove_mcp_server — 移除 MCP 服务器
 - remember_fact — 记住重要信息（用户偏好、关键决定、项目需求），对话中主动使用
 - generate_image — 使用 FLUX.1-schnell（本地 ComfyUI GPU）或 CogView-3-Flash（智谱AI）根据提示词生成图片
+- auto_schedule_workflow — 【AI 自主调度】创建并启动工作流，适合多步骤/并行/条件分支/审批门场景
+- list_workflows — 列出已有工作流定义
+- create_workflow — 创建工作流
+- update_workflow — 更新工作流定义
+- start_workflow — 启动已有工作流
+- get_workflow_status — 查看工作流运行状态
+- cancel_workflow_run — 取消正在运行的工作流
+- list_workflow_runs — 查看工作流运行历史
+- enable_workflow / disable_workflow — 启用/停用工作流
 
 端口和进程管理：
 - netstat -ano | findstr :端口号 — 检查端口占用
@@ -143,7 +152,24 @@ evolution_workspace 目录结构约定：
 
 对于用户请求，判断是否需要操作文件/代码/项目：
 - 是 → 立即调用工具
-- 仅聊天/询问 → 用自然的短句回复`
+- 仅聊天/询问 → 用自然的短句回复
+
+🌟 自主工作流调度协议：
+对于复杂或多步骤任务，你应该主动使用 auto_schedule_workflow 创建工作流来编排执行。工作流引擎支持：
+- 多步骤 DAG 编排 — dependsOn 定义先后/并行关系
+- 审批门 (gate) — 需要人类确认的步骤，工作流自动暂停等你 approve/reject
+- 条件分支 (condition) — 根据步骤输出走不同路径
+- 循环 (foreach) — 对列表每个元素执行子工作流
+- 数据变换 (transform) — 映射步骤输出结构
+- 聚合 (aggregate) — 合并多步骤结果
+- 定时触发 (cron trigger) — "0 8 * * *" 表示每天 8 点自动执行
+- 事件触发 (event trigger) — 监听系统事件自动启动
+
+协议规则：
+1. 单步简单任务（读文件、查信息）→ 直接执行，不用工作流
+2. 多步骤、需编排、需审批、需循环/条件的复杂任务 → 用 auto_schedule_workflow
+3. 用户说"每天做"、"定时"、"监控" → 设 trigger.type="cron"
+4. 无需告诉用户你在用工作流，直接用 auto_schedule_workflow 创建并返回结果即可`
 
 const PROMPT_CREDENTIALS = `### 凭据管理
 需要第三方 API 密钥时：

@@ -2813,6 +2813,7 @@ class WorkflowStoreV2 {
   seedPresets() {
     if (this.seeded) return;
     this.seeded = true;
+    this.importLegacyDefinitions();
     for (const def of PRESET_DEFINITIONS) {
       const stmt = this.db.prepare("SELECT 1 FROM workflow_defs WHERE id = ?");
       stmt.bind([def.id]);
@@ -2821,6 +2822,31 @@ class WorkflowStoreV2 {
       if (!exists) {
         this.saveDefinition(def);
       }
+    }
+  }
+  importLegacyDefinitions() {
+    try {
+      const legacyDir = path$1.join(WORKSPACE.workflows, "definitions");
+      if (!fs__namespace.existsSync(legacyDir)) return;
+      const files = fs__namespace.readdirSync(legacyDir).filter((f) => f.endsWith(".json"));
+      for (const file of files) {
+        try {
+          const content = fs__namespace.readFileSync(path__namespace.join(legacyDir, file), "utf-8");
+          const def = JSON.parse(content);
+          if (!def.id || !def.name) continue;
+          const stmt = this.db.prepare("SELECT 1 FROM workflow_defs WHERE id = ?");
+          stmt.bind([def.id]);
+          const exists = stmt.step();
+          stmt.free();
+          if (!exists) {
+            this.saveDefinition(def);
+            Logger.log("INFO", "workflow_legacy_imported", { id: def.id, name: def.name, file });
+          }
+        } catch {
+        }
+      }
+    } catch (err) {
+      Logger.log("WARN", "workflow_legacy_import_error", { error: err.message });
     }
   }
   // ── Row mapping ──

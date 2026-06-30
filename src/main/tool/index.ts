@@ -60,6 +60,7 @@ export function getAllTools(): Tool[] {
     listCredentialsTool as Tool,
     rememberFactTool as Tool,
     analyzeTaskTool as Tool,
+    autoScheduleWorkflowTool as Tool,
     listWorkflowsTool as Tool,
     createWorkflowTool as Tool,
     startWorkflowTool as Tool,

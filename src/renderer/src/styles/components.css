@@ -664,6 +664,42 @@
   background: oklch(0.52 0.10 150 / 0.12);
   color: oklch(0.55 0.12 150);
 }
+.wf-handler-condition {
+  background: oklch(0.6 0.2 280 / 0.12);
+  color: oklch(0.6 0.2 280);
+}
+.wf-handler-foreach {
+  background: oklch(0.55 0.16 180 / 0.12);
+  color: oklch(0.55 0.16 180);
+}
+.wf-handler-transform {
+  background: oklch(0.55 0.14 200 / 0.12);
+  color: oklch(0.55 0.14 200);
+}
+.wf-handler-gate {
+  background: oklch(0.6 0.18 80 / 0.12);
+  color: oklch(0.6 0.18 80);
+}
+.wf-handler-aggregate {
+  background: oklch(0.5 0.12 260 / 0.12);
+  color: oklch(0.5 0.12 260);
+}
+.wf-handler-subflow {
+  background: oklch(0.5 0.14 220 / 0.12);
+  color: oklch(0.5 0.14 220);
+}
+.wf-handler-wait {
+  background: oklch(0.5 0.1 240 / 0.12);
+  color: oklch(0.5 0.1 240);
+}
+.wf-handler-script {
+  background: oklch(0.5 0.12 10 / 0.12);
+  color: oklch(0.5 0.12 10);
+}
+.wf-handler-event {
+  background: oklch(0.55 0.16 320 / 0.12);
+  color: oklch(0.55 0.16 320);
+}
 
 .wf-step-done i {
   color: oklch(0.52 0.10 150);
@@ -2482,6 +2518,20 @@
   border-radius: 3px;
   background: oklch(0.55 0.12 50 / 0.10);
 }
+.wf-canvas-node-foreach-badge {
+  font-size: 9px;
+  color: oklch(0.55 0.16 180);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: oklch(0.55 0.16 180 / 0.10);
+}
+.wf-canvas-node-gate-badge {
+  font-size: 9px;
+  color: oklch(0.6 0.18 80);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: oklch(0.6 0.18 80 / 0.10);
+}
 
 .wf-canvas-node-del {
   position: absolute;
@@ -2718,6 +2768,259 @@
 .wf-run-panel-item-name {
   font-weight: 600;
   font-size: 14px;
+}
+
+/* ─── 条件边 ─── */
+.wf-canvas-edge-condition {
+  stroke: oklch(0.6 0.2 280);
+  stroke-dasharray: 6 4;
+  stroke-width: 2;
+  fill: none;
+}
+.wf-canvas-edge-label {
+  font-size: 11px;
+  fill: oklch(0.6 0.2 280);
+  font-family: inherit;
+  pointer-events: none;
+}
+
+/* ─── 审批对话框 ─── */
+.wf-gate-overlay {
+  position: fixed;
+  inset: 0;
+  background: oklch(0 0 0 / 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.wf-gate-dialog {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-glass);
+  border-radius: 12px;
+  padding: 24px;
+  width: 520px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 8px 32px oklch(0 0 0 / 0.2);
+}
+.wf-gate-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: oklch(0.6 0.18 80);
+}
+.wf-gate-message {
+  font-size: 14px;
+  color: var(--text-normal);
+  line-height: 1.5;
+}
+.wf-gate-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.wf-gate-preview {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+.wf-gate-preview-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-normal);
+}
+.wf-gate-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  background: var(--bg-canvas);
+  color: var(--text-normal);
+  font-size: 13px;
+  resize: vertical;
+}
+.wf-gate-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.wf-gate-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  background: var(--bg-glass-strong);
+  color: var(--text-normal);
+}
+.wf-gate-btn:hover {
+  background: var(--bg-glass-hover);
+}
+.wf-gate-btn-approve {
+  border-color: oklch(0.55 0.15 160);
+  color: oklch(0.55 0.15 160);
+}
+.wf-gate-btn-approve:hover {
+  background: oklch(0.55 0.15 160 / 0.1);
+}
+.wf-gate-btn-modify {
+  border-color: oklch(0.6 0.15 80);
+  color: oklch(0.6 0.15 80);
+}
+.wf-gate-btn-modify:hover {
+  background: oklch(0.6 0.15 80 / 0.1);
+}
+.wf-gate-btn-reject {
+  border-color: oklch(0.55 0.2 30);
+  color: oklch(0.55 0.2 30);
+}
+.wf-gate-btn-reject:hover {
+  background: oklch(0.55 0.2 30 / 0.1);
+}
+
+/* ─── JSON 查看器 ─── */
+.wf-json-node {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.wf-json-toggle {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.wf-json-toggle:hover {
+  color: var(--text-normal);
+}
+.wf-json-preview {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.wf-json-children {
+  border-left: 1px solid var(--border-glass);
+  padding-left: 12px;
+  margin-left: 4px;
+}
+.wf-json-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+.wf-json-key {
+  color: oklch(0.55 0.18 250);
+  flex-shrink: 0;
+}
+.wf-json-value {
+  color: var(--text-normal);
+  word-break: break-all;
+}
+.wf-step-output-detail {
+  margin-top: 6px;
+  padding: 8px;
+  background: var(--bg-canvas);
+  border-radius: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.wf-step-output-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.wf-stage-retry {
+  font-size: 10px;
+  color: oklch(0.6 0.15 80);
+  margin-left: 4px;
+}
+
+/* ─── Trigger 标记 ─── */
+.wf-trigger-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-right: 6px;
+}
+.wf-trigger-badge-cron {
+  background: oklch(0.5 0.12 240 / 0.12);
+  color: oklch(0.6 0.15 240);
+}
+.wf-trigger-badge-event {
+  background: oklch(0.55 0.15 280 / 0.12);
+  color: oklch(0.65 0.18 280);
+}
+
+/* ─── 键值编辑器 ─── */
+.wf-editor-kv-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wf-editor-kv-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wf-editor-kv-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border-glass);
+  border-radius: 6px;
+  background: var(--bg-canvas);
+  color: var(--text-normal);
+  font-size: 12px;
+}
+.wf-editor-kv-input-wide {
+  flex: 2;
+}
+.wf-editor-kv-arrow {
+  color: var(--text-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.wf-editor-kv-del, .wf-editor-kv-add {
+  all: unset;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+}
+.wf-editor-kv-del:hover { color: oklch(0.55 0.2 30); background: oklch(0.55 0.2 30 / 0.1); }
+.wf-editor-kv-add:hover { color: oklch(0.55 0.15 160); background: oklch(0.55 0.15 160 / 0.1); }
+.wf-editor-kv-new {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 @keyframes wf-run-slidein {

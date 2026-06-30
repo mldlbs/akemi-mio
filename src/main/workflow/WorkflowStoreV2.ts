@@ -7,8 +7,11 @@
 import { getRawDb, markDirty } from '../db/connection'
 import { eventBus } from '../core/EventBus'
 import { log } from '../logger/Logger'
+import { WORKSPACE } from '../config/index'
 import type { WorkflowDef, WorkflowRun, WorkflowStepRun } from './types'
 import { PRESET_DEFINITIONS } from './presets'
+import * as fs from 'fs'
+import * as path from 'path'
 import * as os from 'os'
 import { join } from 'path'
 
@@ -256,6 +259,10 @@ export class WorkflowStoreV2 {
   private seedPresets(): void {
     if (this.seeded) return
     this.seeded = true
+
+    // 从旧 JSON 文件目录导入一次
+    this.importLegacyDefinitions()
+
     for (const def of PRESET_DEFINITIONS) {
       const stmt = this.db.prepare('SELECT 1 FROM workflow_defs WHERE id = ?')
       stmt.bind([def.id])
@@ -264,6 +271,33 @@ export class WorkflowStoreV2 {
       if (!exists) {
         this.saveDefinition(def)
       }
+    }
+  }
+
+  private importLegacyDefinitions(): void {
+    try {
+      const legacyDir = join(WORKSPACE.workflows, 'definitions')
+      if (!fs.existsSync(legacyDir)) return
+      const files = fs.readdirSync(legacyDir).filter((f) => f.endsWith('.json'))
+      for (const file of files) {
+        try {
+          const content = fs.readFileSync(path.join(legacyDir, file), 'utf-8')
+          const def = JSON.parse(content) as WorkflowDef
+          if (!def.id || !def.name) continue
+          const stmt = this.db.prepare('SELECT 1 FROM workflow_defs WHERE id = ?')
+          stmt.bind([def.id])
+          const exists = stmt.step()
+          stmt.free()
+          if (!exists) {
+            this.saveDefinition(def)
+            log('INFO', 'workflow_legacy_imported', { id: def.id, name: def.name, file })
+          }
+        } catch {
+          // skip malformed JSON files
+        }
+      }
+    } catch (err: any) {
+      log('WARN', 'workflow_legacy_import_error', { error: err.message })
     }
   }
 

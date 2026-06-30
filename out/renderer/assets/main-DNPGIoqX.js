@@ -13495,15 +13495,48 @@ const HANDLER_ICONS = {
   prompt: "ri-question-mark",
   tool: "ri-tools-line",
   api: "ri-api-line",
-  plan: "ri-file-list-3-line"
+  plan: "ri-file-list-3-line",
+  condition: "ri-git-branch-line",
+  foreach: "ri-loop-left-line",
+  transform: "ri-exchange-2-line",
+  gate: "ri-lock-2-line",
+  aggregate: "ri-folder-5-line",
+  subflow: "ri-organization-chart",
+  wait: "ri-timer-line",
+  script: "ri-terminal-box-line",
+  event: "ri-notification-3-line"
 };
-const HANDLER_LABELS = { subagent: "子 Agent", prompt: "Prompt", tool: "Tool", api: "API", plan: "Plan" };
+const HANDLER_LABELS = {
+  subagent: "子 Agent",
+  prompt: "Prompt",
+  tool: "Tool",
+  api: "API",
+  plan: "Plan",
+  condition: "条件",
+  foreach: "循环",
+  transform: "变换",
+  gate: "审批",
+  aggregate: "聚合",
+  subflow: "子流程",
+  wait: "等待",
+  script: "脚本",
+  event: "事件"
+};
 const HANDLER_COLORS = {
   subagent: "oklch(0.65 0.18 240)",
   prompt: "oklch(0.65 0.12 80)",
   tool: "oklch(0.55 0.14 160)",
   api: "oklch(0.55 0.16 300)",
-  plan: "oklch(0.55 0.12 30)"
+  plan: "oklch(0.55 0.12 30)",
+  condition: "oklch(0.6 0.2 280)",
+  foreach: "oklch(0.55 0.16 180)",
+  transform: "oklch(0.55 0.14 200)",
+  gate: "oklch(0.6 0.18 80)",
+  aggregate: "oklch(0.5 0.12 260)",
+  subflow: "oklch(0.5 0.14 220)",
+  wait: "oklch(0.5 0.1 240)",
+  script: "oklch(0.5 0.12 10)",
+  event: "oklch(0.55 0.16 320)"
 };
 const NODE_W = 180;
 const NODE_H = 64;
@@ -13695,6 +13728,30 @@ function WorkflowCanvas({ steps, editingStepId, onSelectStep, onAddStep, onDelet
         });
         i++;
       }
+      if (step.handler === "condition" && step.config?.condition?.cases) {
+        for (const c of step.config.condition.cases) {
+          steps.find((s) => s.id === c.goto);
+          const from = positionsRef.current[step.id];
+          const to = positionsRef.current[c.goto];
+          if (!from || !to) continue;
+          result.push({
+            id: `cond-${step.id}->${c.goto}`,
+            idx: i,
+            d: viewportBezier(
+              from.x + NODE_W / 2,
+              from.y + NODE_H,
+              to.x + NODE_W / 2,
+              to.y,
+              panXRef.current,
+              panYRef.current,
+              zoomRef.current
+            ),
+            failure: false,
+            conditionLabel: c.if
+          });
+          i++;
+        }
+      }
     }
     return result;
   }, [steps, positionVersion, renderTick]);
@@ -13709,21 +13766,29 @@ function WorkflowCanvas({ steps, editingStepId, onSelectStep, onAddStep, onDelet
         onContextMenu(e.clientX, e.clientY, null);
       },
       children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "svg",
           {
             className: "wf-canvas-edges",
             ref: svgRef,
             style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 1 },
-            children: edges.map((edge) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "path",
-              {
-                "data-edge-idx": edge.idx,
-                d: edge.d,
-                className: `wf-canvas-edge${edge.failure ? " wf-canvas-edge-failure" : ""}`
-              },
-              edge.id
-            ))
+            children: [
+              edges.map((edge) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "path",
+                {
+                  "data-edge-idx": edge.idx,
+                  d: edge.d,
+                  className: `wf-canvas-edge${edge.failure ? " wf-canvas-edge-failure" : ""}${edge.conditionLabel ? " wf-canvas-edge-condition" : ""}`
+                },
+                edge.id
+              )),
+              edges.filter((e) => e.conditionLabel).map((edge) => {
+                const mid = edge.d.match(/C\s+[\d.]+\s+[\d.]+\s*,\s*[\d.]+\s+[\d.]+\s*,\s*([\d.]+)\s+([\d.]+)/);
+                const mx = mid ? parseFloat(mid[1]) : 0;
+                const my = mid ? parseFloat(mid[2]) : 0;
+                return /* @__PURE__ */ jsxRuntimeExports.jsx("text", { x: mx, y: my - 8, className: "wf-canvas-edge-label", textAnchor: "middle", children: edge.conditionLabel }, `lbl-${edge.id}`);
+              })
+            ]
           }
         ),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-canvas-transform", ref: transformRef, style: { position: "absolute", top: 0, left: 0, zIndex: 2 }, children: steps.map((step) => {
@@ -13760,7 +13825,9 @@ function WorkflowCanvas({ steps, editingStepId, onSelectStep, onAddStep, onDelet
                     step.dependsOn.length,
                     " dep"
                   ] }),
-                  step.runOn === "failure" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-canvas-node-condition-failure", children: "on failure" })
+                  step.runOn === "failure" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-canvas-node-condition-failure", children: "on failure" }),
+                  step.handler === "foreach" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-canvas-node-foreach-badge", children: "foreach" }),
+                  step.handler === "gate" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-canvas-node-gate-badge", children: "gate" })
                 ] }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-canvas-port wf-canvas-port-output", style: { marginLeft: -10 / 2 } }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -13803,8 +13870,87 @@ function WorkflowCanvas({ steps, editingStepId, onSelectStep, onAddStep, onDelet
     activeDrag.current = { stepId, startMouseX: e.clientX, startMouseY: e.clientY, startNodeX: pos.x, startNodeY: pos.y };
   }
 }
-function WorkflowRunPanel({ runs, pipelineLogs, onCancel, onClose }) {
+function tryParseJSON(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+function JSONViewer({ data, depth = 0 }) {
+  const [open, setOpen] = reactExports.useState(depth < 2);
+  const isObject = data !== null && typeof data === "object";
+  const isArray = Array.isArray(data);
+  const indent = depth * 16;
+  if (!isObject) {
+    const display = typeof data === "string" ? `"${data.length > 80 ? data.slice(0, 80) + "..." : data}"` : String(data);
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-json-value", children: display });
+  }
+  const entries = isArray ? data : Object.keys(data);
+  const prefix = isArray ? `Array(${entries.length})` : "Object";
+  const isEmpty = entries.length === 0;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-json-node", style: { marginLeft: indent }, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { className: "wf-json-toggle", onClick: () => setOpen(!open), children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `ri-${open ? "arrow-down-s" : "arrow-right-s"}-line` }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "wf-json-preview", children: [
+        prefix,
+        open ? "" : ` ${isArray ? `[${data.length}]` : `{${Object.keys(data).slice(0, 2).join(", ")}${Object.keys(data).length > 2 ? "..." : ""}}`}`
+      ] })
+    ] }),
+    open && !isEmpty && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-json-children", children: (isArray ? data.map((v, i) => ({ k: i, v })) : Object.entries(data)).map(([k, v]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-json-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "wf-json-key", children: [
+        isArray ? `[${k}]` : k,
+        ": "
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(JSONViewer, { data: v, depth: depth + 1 })
+    ] }, k)) })
+  ] });
+}
+function GateDialog({
+  gate,
+  runId,
+  onApprove
+}) {
+  const [modifiedText, setModifiedText] = reactExports.useState("");
+  const previewIsJson = reactExports.useMemo(() => tryParseJSON(gate.preview), [gate.preview]);
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-gate-overlay", onClick: (e) => e.stopPropagation(), children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-gate-dialog", onClick: (e) => e.stopPropagation(), children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-gate-header", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-lock-2-line" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "审批请求" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-gate-message", children: gate.message }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-gate-section-label", children: "预览" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-gate-preview", children: previewIsJson ? /* @__PURE__ */ jsxRuntimeExports.jsx(JSONViewer, { data: previewIsJson }) : /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "wf-gate-preview-text", children: gate.preview }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-gate-section-label", children: "修改建议（可选）" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "textarea",
+      {
+        className: "wf-gate-input",
+        value: modifiedText,
+        onChange: (e) => setModifiedText(e.target.value),
+        placeholder: "如有修改建议，请在此输入...",
+        rows: 3
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-gate-actions", children: [
+      gate.options.includes("approve") && /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { className: "wf-gate-btn wf-gate-btn-approve", onClick: () => onApprove("approve", modifiedText), children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-check-line" }),
+        " 批准"
+      ] }),
+      gate.options.includes("modify") && modifiedText.trim() && /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { className: "wf-gate-btn wf-gate-btn-modify", onClick: () => onApprove("modify", modifiedText), children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-edit-line" }),
+        " 修改后通过"
+      ] }),
+      gate.options.includes("reject") && /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { className: "wf-gate-btn wf-gate-btn-reject", onClick: () => onApprove("reject", modifiedText), children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-close-line" }),
+        " 拒绝"
+      ] })
+    ] })
+  ] }) });
+}
+function WorkflowRunPanel({ runs, pipelineLogs, onCancel, onClose, onApproveGate }) {
   const logRef = reactExports.useRef(null);
+  const [expandedOutput, setExpandedOutput] = reactExports.useState({});
   reactExports.useEffect(() => {
     const el = logRef.current;
     if (!el) return;
@@ -13814,10 +13960,13 @@ function WorkflowRunPanel({ runs, pipelineLogs, onCancel, onClose }) {
   if (runs.length === 0) return null;
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-run-panel-inline", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-run-panel-inline-header", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("h3", { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: runs.some((r) => r.pendingGate) ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-lock-2-line" }),
+        " 等待审批"
+      ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-loader-4-line ri-spin" }),
         " 运行中"
-      ] }),
+      ] }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "wf-run-panel-close", onClick: onClose, title: "关闭运行面板", children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-close-line" }) })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-run-panel-inline-body", children: runs.map((run) => {
@@ -13829,15 +13978,28 @@ function WorkflowRunPanel({ runs, pipelineLogs, onCancel, onClose }) {
       const failed = defSteps.find((s) => s.status === "failed");
       const logs = pipelineLogs[run.runId] ?? [];
       return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-run-panel-item", children: [
+        run.pendingGate && onApproveGate && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          GateDialog,
+          {
+            gate: run.pendingGate,
+            runId: run.runId,
+            onApprove: (decision, modifiedInput) => {
+              onApproveGate(run.runId, run.pendingGate.stepId, decision, modifiedInput);
+            }
+          }
+        ),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-run-panel-item-header", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-run-panel-item-name", children: run.workflowName }),
-          run.status === "running" && /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { className: "wf-cancel-btn", onClick: () => onCancel(run.runId), children: [
+          run.status === "running" && !run.pendingGate && /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { className: "wf-cancel-btn", onClick: () => onCancel(run.runId), children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-stop-circle-line" }),
             " 取消"
           ] })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-pipeline-progress-info", style: { marginBottom: 4 }, children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-pipeline-step-label", children: current ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-pipeline-step-label", children: run.pendingGate ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-lock-2-line" }),
+            " 等待审批中"
+          ] }) : current ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-loader-4-line ri-spin" }),
             " 第 ",
             done + 1,
@@ -13874,17 +14036,31 @@ function WorkflowRunPanel({ runs, pipelineLogs, onCancel, onClose }) {
         ) }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-pipeline-track", style: { marginTop: 8 }, children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-pipeline-track-line" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-pipeline-stages", style: { gap: 8 }, children: defSteps.map((step) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-pipeline-stage", style: { minWidth: 0, flex: "0 0 auto", maxWidth: 140 }, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-pipeline-stage-content", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-pipeline-stages", style: { gap: 8 }, children: defSteps.map((step) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-pipeline-stage", style: { minWidth: 0, flex: "0 0 auto", maxWidth: 140 }, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
               "div",
               {
-                className: `wf-stage-dot${step.status === "done" ? " done" : ""}${step.status === "running" ? " current" : ""}${step.status === "failed" ? " failed" : ""}`,
-                children: step.status === "done" ? /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-check-line" }) : step.status === "failed" ? /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-close-line" }) : step.status === "running" ? /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-loader-4-line ri-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-stage-dot-inner" })
+                className: "wf-pipeline-stage-content",
+                onClick: () => setExpandedOutput((p) => ({ ...p, [step.stepId]: !p[step.stepId] })),
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "div",
+                    {
+                      className: `wf-stage-dot${step.status === "done" ? " done" : ""}${step.status === "running" ? " current" : ""}${step.status === "failed" ? " failed" : ""}`,
+                      children: step.status === "done" ? /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-check-line" }) : step.status === "failed" ? /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-close-line" }) : step.status === "running" ? /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-loader-4-line ri-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-stage-dot-inner" })
+                    }
+                  ),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-stage-label", children: step.name || step.stepId }),
+                  step.error && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-stage-error", children: step.error }),
+                  step.retryCount && step.retryCount > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "wf-stage-retry", children: [
+                    "重试 ",
+                    step.retryCount
+                  ] }) : null
+                ]
               }
             ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-stage-label", children: step.name || step.stepId }),
-            step.error && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-stage-error", children: step.error })
-          ] }) }, step.stepId)) })
+            expandedOutput[step.stepId] && step.agentResult && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-step-output-detail", children: tryParseJSON(step.agentResult) ? /* @__PURE__ */ jsxRuntimeExports.jsx(JSONViewer, { data: tryParseJSON(step.agentResult) }) : /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "wf-step-output-text", children: step.agentResult }) })
+          ] }, step.stepId)) })
         ] }),
         logs.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-pipeline-log", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-pipeline-log-header", children: [
@@ -13914,7 +14090,16 @@ const HANDLER_OPTIONS = [
   { value: "prompt", label: "Prompt 注入", icon: "ri-question-mark", tagClass: "wf-handler-prompt" },
   { value: "tool", label: "工具调用", icon: "ri-tools-line", tagClass: "wf-handler-tool" },
   { value: "api", label: "API 调用", icon: "ri-api-line", tagClass: "wf-handler-api" },
-  { value: "plan", label: "生成计划", icon: "ri-file-list-3-line", tagClass: "wf-handler-plan" }
+  { value: "plan", label: "生成计划", icon: "ri-file-list-3-line", tagClass: "wf-handler-plan" },
+  { value: "condition", label: "条件分支", icon: "ri-git-branch-line", tagClass: "wf-handler-condition" },
+  { value: "foreach", label: "循环", icon: "ri-loop-left-line", tagClass: "wf-handler-foreach" },
+  { value: "transform", label: "数据变换", icon: "ri-exchange-2-line", tagClass: "wf-handler-transform" },
+  { value: "gate", label: "审批门", icon: "ri-lock-2-line", tagClass: "wf-handler-gate" },
+  { value: "aggregate", label: "结果聚合", icon: "ri-folder-5-line", tagClass: "wf-handler-aggregate" },
+  { value: "subflow", label: "子工作流", icon: "ri-organization-chart", tagClass: "wf-handler-subflow" },
+  { value: "wait", label: "等待", icon: "ri-timer-line", tagClass: "wf-handler-wait" },
+  { value: "script", label: "脚本", icon: "ri-terminal-box-line", tagClass: "wf-handler-script" },
+  { value: "event", label: "事件", icon: "ri-notification-3-line", tagClass: "wf-handler-event" }
 ];
 let stepCounter = 0;
 function freshStepId() {
@@ -14094,11 +14279,62 @@ const HANDLER_CONFIG_FIELDS = {
         { value: "failure", label: "依赖失败时执行" }
       ]
     }
+  ],
+  condition: [
+    { key: "condition_source", type: "text", label: "条件来源（模板引用）", placeholder: "如 {{steps.s1.result.score}}" },
+    { key: "condition_cases", type: "array-editor", label: "条件分支" },
+    { key: "condition_defaultGoto", type: "text", label: "默认跳转步骤", placeholder: "如 s_fallback" }
+  ],
+  foreach: [
+    { key: "foreach_items", type: "text", label: "循环数组（模板引用）", placeholder: "如 {{steps.s2.result.platforms}}" },
+    { key: "foreach_workflowId", type: "text", label: "子工作流 ID（引用已有）", placeholder: "如 adapt-to-platform" },
+    { key: "foreach_concurrency", type: "number", label: "并发数", placeholder: "默认 3" }
+  ],
+  transform: [
+    { key: "transform_input", type: "text", label: "输入来源（模板引用）", placeholder: "如 {{steps.s1.result}}" },
+    { key: "transform_mapping", type: "kv-editor", label: "输出映射" }
+  ],
+  gate: [
+    { key: "gate_message", type: "textarea", label: "审批提示信息", placeholder: "请输入审核提示…", rows: 4 },
+    { key: "gate_preview", type: "textarea", label: "预览内容（模板引用）", placeholder: "如 {{steps.s4.result}}", rows: 6 }
+  ],
+  aggregate: [
+    { key: "aggregate_sources", type: "multi-select-steps", label: "聚合来源步骤" },
+    {
+      key: "aggregate_strategy",
+      type: "radio",
+      label: "聚合策略",
+      options: [
+        { value: "merge", label: "合并对象" },
+        { value: "concat", label: "拼接数组" },
+        { value: "pick-first", label: "取第一个" },
+        { value: "custom", label: "自定义" }
+      ]
+    },
+    { key: "aggregate_expression", type: "text", label: "自定义表达式（聚合策略选 custom 时）", placeholder: "如 {{steps.s1.result}}" }
+  ],
+  subflow: [{ key: "subflow_workflowId", type: "text", label: "子工作流 ID", placeholder: "如 my-sub-workflow" }],
+  wait: [{ key: "wait_durationMs", type: "number", label: "等待时长(ms)", placeholder: "如 5000" }],
+  script: [{ key: "script_code", type: "textarea", label: "JavaScript 代码", placeholder: "return ctx.steps.s1.result", rows: 10 }],
+  event: [
+    { key: "event_eventName", type: "text", label: "事件名称", placeholder: "如 my.custom.event" },
+    { key: "event_payload", type: "text", label: "事件载荷（模板引用）", placeholder: "可选" }
   ]
 };
 for (const [handler, fields] of Object.entries(HANDLER_CONFIG_FIELDS)) {
   new Set(fields.map((f) => f.key));
 }
+const HANDLER_PREFIX_KEYS = {
+  condition: ["condition_source", "condition_cases", "condition_defaultGoto"],
+  foreach: ["foreach_items", "foreach_workflowId", "foreach_concurrency"],
+  transform: ["transform_input", "transform_mapping"],
+  gate: ["gate_message", "gate_preview"],
+  aggregate: ["aggregate_sources", "aggregate_strategy", "aggregate_expression"],
+  subflow: ["subflow_workflowId"],
+  wait: ["wait_durationMs"],
+  script: ["script_code"],
+  event: ["event_eventName", "event_payload"]
+};
 function WorkflowEditor({ initial, onBack, onSaved }) {
   const [name, setName] = reactExports.useState(initial?.name ?? "");
   const [description, setDescription] = reactExports.useState(initial?.description ?? "");
@@ -14114,6 +14350,7 @@ function WorkflowEditor({ initial, onBack, onSaved }) {
   const copiedStep = reactExports.useRef(null);
   const editorRef = reactExports.useRef(null);
   const [expandedFields, setExpandedFields] = reactExports.useState({});
+  const [, forceRender] = reactExports.useState(0);
   const [activeRuns, setActiveRuns] = reactExports.useState([]);
   const [pipelineLogs, setPipelineLogs] = reactExports.useState({});
   const [showRunPanel, setShowRunPanel] = reactExports.useState(false);
@@ -14354,9 +14591,32 @@ function WorkflowEditor({ initial, onBack, onSaved }) {
   }, [contextMenu]);
   const editingStep = steps.find((s) => s.id === editingStepId);
   function renderConfigField(step, field) {
+    const [handlerPrefix, ...fieldParts] = field.key.split("_");
+    const isPrefixed = !!HANDLER_PREFIX_KEYS[handlerPrefix];
+    const configPath = isPrefixed ? [handlerPrefix, ...fieldParts] : [field.key];
+    function getNestedConfig(obj, path) {
+      let val = obj.config || {};
+      for (const k of path) {
+        if (val === void 0 || val === null) return void 0;
+        val = val[k];
+      }
+      return val ?? "";
+    }
+    function setNestedConfig(stepId, path, value) {
+      const current = steps.find((s) => s.id === stepId)?.config || {};
+      const newConfig = { ...current };
+      let target = newConfig;
+      for (let i = 0; i < path.length - 1; i++) {
+        if (!target[path[i]] || typeof target[path[i]] !== "object") target[path[i]] = {};
+        target = target[path[i]];
+      }
+      target[path[path.length - 1]] = value;
+      updateStepConfig(step.id, newConfig);
+    }
+    const fieldValue = getNestedConfig(step, configPath);
     switch (field.type) {
       case "textarea": {
-        const val = step.config[field.key] ?? "";
+        const val = fieldValue ?? "";
         const isExpanded = expandedFields[field.key] ?? false;
         const showToggle = typeof val === "string" && val.length > 200;
         return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-field wf-editor-prompt-field", children: [
@@ -14380,7 +14640,10 @@ function WorkflowEditor({ initial, onBack, onSaved }) {
             {
               className: "wf-editor-prompt-textarea",
               value: val,
-              onChange: (e) => updateStepConfig(step.id, { [field.key]: e.target.value }),
+              onChange: (e) => {
+                if (isPrefixed) setNestedConfig(step.id, configPath, e.target.value);
+                else updateStepConfig(step.id, { [field.key]: e.target.value });
+              },
               placeholder: field.placeholder,
               rows: isExpanded ? 24 : field.rows ?? 4
             }
@@ -14388,7 +14651,7 @@ function WorkflowEditor({ initial, onBack, onSaved }) {
         ] }, field.key);
       }
       case "number": {
-        const val = step.config[field.key];
+        const val = fieldValue;
         return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-field", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("label", { children: field.label }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -14399,7 +14662,8 @@ function WorkflowEditor({ initial, onBack, onSaved }) {
               value: val ?? "",
               onChange: (e) => {
                 const v = e.target.value;
-                updateStepConfig(step.id, { [field.key]: v ? Number(v) : void 0 });
+                if (isPrefixed) setNestedConfig(step.id, configPath, v ? Number(v) : void 0);
+                else updateStepConfig(step.id, { [field.key]: v ? Number(v) : void 0 });
               },
               placeholder: field.placeholder
             }
@@ -14407,7 +14671,7 @@ function WorkflowEditor({ initial, onBack, onSaved }) {
         ] }, field.key);
       }
       case "text": {
-        const val = step.config[field.key] ?? "";
+        const val = fieldValue ?? "";
         return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-field", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("label", { children: field.label }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -14415,7 +14679,10 @@ function WorkflowEditor({ initial, onBack, onSaved }) {
             {
               type: "text",
               value: val,
-              onChange: (e) => updateStepConfig(step.id, { [field.key]: e.target.value }),
+              onChange: (e) => {
+                if (isPrefixed) setNestedConfig(step.id, configPath, e.target.value);
+                else updateStepConfig(step.id, { [field.key]: e.target.value });
+              },
               placeholder: field.placeholder
             }
           )
@@ -14465,21 +14732,144 @@ function WorkflowEditor({ initial, onBack, onSaved }) {
         ] }, field.key);
       }
       case "radio": {
-        const val = step.runOn ?? "success";
+        const val = isPrefixed ? getNestedConfig(step, configPath) ?? "merge" : step.runOn ?? "success";
+        const onChange = isPrefixed ? (v) => setNestedConfig(step.id, configPath, v) : (v) => updateStep(step.id, { runOn: v });
         return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-field", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("label", { children: field.label }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-editor-radio-group", children: (field.options ?? []).map((opt) => /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: `wf-editor-radio-label${val === opt.value ? " active" : ""}`, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("input", { type: "radio", name: `${field.key}_${step.id}`, checked: val === opt.value, onChange: () => onChange(opt.value) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: opt.label })
+          ] }, opt.value)) })
+        ] }, field.key);
+      }
+      case "array-editor": {
+        const items = Array.isArray(fieldValue) ? fieldValue : [];
+        const [newIf, setNewIf] = reactExports.useState("");
+        const [newGoto, setNewGoto] = reactExports.useState("");
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-field", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("label", { children: field.label }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-kv-editor", children: [
+            items.map((item, idx) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-kv-row", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("input", { className: "wf-editor-kv-input", value: item.if || "", readOnly: true, placeholder: "条件" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-editor-kv-arrow", children: "→" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("input", { className: "wf-editor-kv-input", value: item.goto || "", readOnly: true, placeholder: "目标步骤" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  className: "wf-editor-kv-del",
+                  onClick: () => {
+                    const next = items.filter((_, i) => i !== idx);
+                    setNestedConfig(step.id, configPath, next.length ? next : void 0);
+                    forceRender();
+                  },
+                  children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-close-line" })
+                }
+              )
+            ] }, idx)),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-kv-new", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("input", { className: "wf-editor-kv-input", value: newIf, onChange: (e) => setNewIf(e.target.value), placeholder: "条件如 >= 7" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-editor-kv-arrow", children: "→" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "input",
+                {
+                  className: "wf-editor-kv-input",
+                  value: newGoto,
+                  onChange: (e) => setNewGoto(e.target.value),
+                  placeholder: "目标步骤 ID"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  className: "wf-editor-kv-add",
+                  onClick: () => {
+                    if (!newIf.trim() || !newGoto.trim()) return;
+                    setNestedConfig(step.id, configPath, [...items, { if: newIf.trim(), goto: newGoto.trim() }]);
+                    setNewIf("");
+                    setNewGoto("");
+                    forceRender();
+                  },
+                  children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-add-line" })
+                }
+              )
+            ] })
+          ] })
+        ] }, field.key);
+      }
+      case "kv-editor": {
+        const mapping = fieldValue && typeof fieldValue === "object" ? fieldValue : {};
+        const [newKey, setNewKey] = reactExports.useState("");
+        const [newVal, setNewVal] = reactExports.useState("");
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-field", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("label", { children: field.label }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-kv-editor", children: [
+            Object.entries(mapping).map(([k, v]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-kv-row", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("input", { className: "wf-editor-kv-input", value: k, readOnly: true }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-editor-kv-arrow", children: ":" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("input", { className: "wf-editor-kv-input wf-editor-kv-input-wide", value: String(v || ""), readOnly: true }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  className: "wf-editor-kv-del",
+                  onClick: () => {
+                    const next = { ...mapping };
+                    delete next[k];
+                    setNestedConfig(step.id, configPath, Object.keys(next).length ? next : void 0);
+                    forceRender();
+                  },
+                  children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-close-line" })
+                }
+              )
+            ] }, k)),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-kv-new", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("input", { className: "wf-editor-kv-input", value: newKey, onChange: (e) => setNewKey(e.target.value), placeholder: "字段名" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-editor-kv-arrow", children: ":" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "input",
+                {
+                  className: "wf-editor-kv-input wf-editor-kv-input-wide",
+                  value: newVal,
+                  onChange: (e) => setNewVal(e.target.value),
+                  placeholder: "模板表达式"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  className: "wf-editor-kv-add",
+                  onClick: () => {
+                    if (!newKey.trim() || !newVal.trim()) return;
+                    setNestedConfig(step.id, configPath, { ...mapping, [newKey.trim()]: newVal.trim() });
+                    setNewKey("");
+                    setNewVal("");
+                    forceRender();
+                  },
+                  children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-add-line" })
+                }
+              )
+            ] })
+          ] })
+        ] }, field.key);
+      }
+      case "multi-select-steps": {
+        const selected = Array.isArray(fieldValue) ? fieldValue : step.dependsOn.filter((d) => d !== step.id);
+        const sourceCandidates = steps.filter((s) => s.id !== step.id);
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-editor-field", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("label", { children: field.label }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-editor-multi-select", style: { maxHeight: 200, overflowY: "auto" }, children: sourceCandidates.map((s) => /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "wf-editor-multi-select-item", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               "input",
               {
-                type: "radio",
-                name: `runOn_${step.id}`,
-                checked: val === opt.value,
-                onChange: () => updateStep(step.id, { runOn: opt.value })
+                type: "checkbox",
+                checked: selected.includes(s.id),
+                onChange: () => {
+                  const next = selected.includes(s.id) ? selected.filter((id) => id !== s.id) : [...selected, s.id];
+                  setNestedConfig(step.id, configPath, next.length ? next : void 0);
+                }
               }
             ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: opt.label })
-          ] }, opt.value)) })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: s.name || s.id })
+          ] }, s.id)) })
         ] }, field.key);
       }
       default:
@@ -14548,12 +14938,15 @@ function WorkflowEditor({ initial, onBack, onSaved }) {
       showRunPanel ? /* @__PURE__ */ jsxRuntimeExports.jsx(
         WorkflowRunPanel,
         {
-          runs: activeRuns.filter((r) => r.status === "running"),
+          runs: activeRuns.filter((r) => r.status === "running" || r.pendingGate),
           pipelineLogs,
           onCancel: async (runId) => {
             await window.electronAPI.stopWorkflowRun(runId);
           },
-          onClose: () => setShowRunPanel(false)
+          onClose: () => setShowRunPanel(false),
+          onApproveGate: (runId, stepId, decision, modifiedInput) => {
+            window.electronAPI.approveGate(runId, stepId, decision, modifiedInput);
+          }
         }
       ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-editor-config-panel", children: editingStep ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "wf-editor-config-title", children: "步骤配置" }),
@@ -14753,6 +15146,24 @@ function handlerIcon(handler) {
       return "ri-api-line";
     case "plan":
       return "ri-file-list-3-line";
+    case "condition":
+      return "ri-git-branch-line";
+    case "foreach":
+      return "ri-loop-left-line";
+    case "transform":
+      return "ri-exchange-2-line";
+    case "gate":
+      return "ri-lock-2-line";
+    case "aggregate":
+      return "ri-folder-5-line";
+    case "subflow":
+      return "ri-organization-chart";
+    case "wait":
+      return "ri-timer-line";
+    case "script":
+      return "ri-terminal-box-line";
+    case "event":
+      return "ri-notification-3-line";
     default:
       return "ri-circle-line";
   }
@@ -14769,6 +15180,24 @@ function handlerClass(handler) {
       return "wf-handler-api";
     case "plan":
       return "wf-handler-plan";
+    case "condition":
+      return "wf-handler-condition";
+    case "foreach":
+      return "wf-handler-foreach";
+    case "transform":
+      return "wf-handler-transform";
+    case "gate":
+      return "wf-handler-gate";
+    case "aggregate":
+      return "wf-handler-aggregate";
+    case "subflow":
+      return "wf-handler-subflow";
+    case "wait":
+      return "wf-handler-wait";
+    case "script":
+      return "wf-handler-script";
+    case "event":
+      return "wf-handler-event";
     default:
       return "";
   }
@@ -14785,6 +15214,24 @@ function handlerLabel(handler) {
       return "API";
     case "plan":
       return "Plan";
+    case "condition":
+      return "条件";
+    case "foreach":
+      return "循环";
+    case "transform":
+      return "变换";
+    case "gate":
+      return "审批";
+    case "aggregate":
+      return "聚合";
+    case "subflow":
+      return "子流程";
+    case "wait":
+      return "等待";
+    case "script":
+      return "脚本";
+    case "event":
+      return "事件";
     default:
       return handler;
   }
@@ -15101,6 +15548,10 @@ function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, wfLoadin
               /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "wf-desc", children: def.description })
             ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-plan-header-meta", children: [
+              def.trigger?.type && def.trigger.type !== "manual" && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: `wf-trigger-badge wf-trigger-badge-${def.trigger.type}`, children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: def.trigger.type === "cron" ? "ri-timer-line" : "ri-flashlight-line" }),
+                def.trigger.type === "cron" ? def.trigger.cron : def.trigger.type
+              ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "wf-plan-badge", children: [
                 def.steps.length,
                 " 步"

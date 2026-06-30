@@ -9,6 +9,15 @@ const HANDLER_OPTIONS = [
   { value: 'tool', label: '工具调用', icon: 'ri-tools-line', tagClass: 'wf-handler-tool' },
   { value: 'api', label: 'API 调用', icon: 'ri-api-line', tagClass: 'wf-handler-api' },
   { value: 'plan', label: '生成计划', icon: 'ri-file-list-3-line', tagClass: 'wf-handler-plan' },
+  { value: 'condition', label: '条件分支', icon: 'ri-git-branch-line', tagClass: 'wf-handler-condition' },
+  { value: 'foreach', label: '循环', icon: 'ri-loop-left-line', tagClass: 'wf-handler-foreach' },
+  { value: 'transform', label: '数据变换', icon: 'ri-exchange-2-line', tagClass: 'wf-handler-transform' },
+  { value: 'gate', label: '审批门', icon: 'ri-lock-2-line', tagClass: 'wf-handler-gate' },
+  { value: 'aggregate', label: '结果聚合', icon: 'ri-folder-5-line', tagClass: 'wf-handler-aggregate' },
+  { value: 'subflow', label: '子工作流', icon: 'ri-organization-chart', tagClass: 'wf-handler-subflow' },
+  { value: 'wait', label: '等待', icon: 'ri-timer-line', tagClass: 'wf-handler-wait' },
+  { value: 'script', label: '脚本', icon: 'ri-terminal-box-line', tagClass: 'wf-handler-script' },
+  { value: 'event', label: '事件', icon: 'ri-notification-3-line', tagClass: 'wf-handler-event' },
 ] as const
 
 export interface StepDef {
@@ -240,11 +249,63 @@ const HANDLER_CONFIG_FIELDS: Record<string, FieldDef[]> = {
       ],
     },
   ],
+  condition: [
+    { key: 'condition_source', type: 'text', label: '条件来源（模板引用）', placeholder: '如 {{steps.s1.result.score}}' },
+    { key: 'condition_cases', type: 'array-editor', label: '条件分支' },
+    { key: 'condition_defaultGoto', type: 'text', label: '默认跳转步骤', placeholder: '如 s_fallback' },
+  ],
+  foreach: [
+    { key: 'foreach_items', type: 'text', label: '循环数组（模板引用）', placeholder: '如 {{steps.s2.result.platforms}}' },
+    { key: 'foreach_workflowId', type: 'text', label: '子工作流 ID（引用已有）', placeholder: '如 adapt-to-platform' },
+    { key: 'foreach_concurrency', type: 'number', label: '并发数', placeholder: '默认 3' },
+  ],
+  transform: [
+    { key: 'transform_input', type: 'text', label: '输入来源（模板引用）', placeholder: '如 {{steps.s1.result}}' },
+    { key: 'transform_mapping', type: 'kv-editor', label: '输出映射' },
+  ],
+  gate: [
+    { key: 'gate_message', type: 'textarea', label: '审批提示信息', placeholder: '请输入审核提示…', rows: 4 },
+    { key: 'gate_preview', type: 'textarea', label: '预览内容（模板引用）', placeholder: '如 {{steps.s4.result}}', rows: 6 },
+  ],
+  aggregate: [
+    { key: 'aggregate_sources', type: 'multi-select-steps', label: '聚合来源步骤' },
+    {
+      key: 'aggregate_strategy',
+      type: 'radio',
+      label: '聚合策略',
+      options: [
+        { value: 'merge', label: '合并对象' },
+        { value: 'concat', label: '拼接数组' },
+        { value: 'pick-first', label: '取第一个' },
+        { value: 'custom', label: '自定义' },
+      ],
+    },
+    { key: 'aggregate_expression', type: 'text', label: '自定义表达式（聚合策略选 custom 时）', placeholder: '如 {{steps.s1.result}}' },
+  ],
+  subflow: [{ key: 'subflow_workflowId', type: 'text', label: '子工作流 ID', placeholder: '如 my-sub-workflow' }],
+  wait: [{ key: 'wait_durationMs', type: 'number', label: '等待时长(ms)', placeholder: '如 5000' }],
+  script: [{ key: 'script_code', type: 'textarea', label: 'JavaScript 代码', placeholder: 'return ctx.steps.s1.result', rows: 10 }],
+  event: [
+    { key: 'event_eventName', type: 'text', label: '事件名称', placeholder: '如 my.custom.event' },
+    { key: 'event_payload', type: 'text', label: '事件载荷（模板引用）', placeholder: '可选' },
+  ],
 }
 
 const HANDLER_KEYS: Record<string, Set<string>> = {}
 for (const [handler, fields] of Object.entries(HANDLER_CONFIG_FIELDS)) {
   HANDLER_KEYS[handler] = new Set(fields.map((f) => f.key))
+}
+// 对于使用前缀 key 的 handler，做映射
+const HANDLER_PREFIX_KEYS: Record<string, string[]> = {
+  condition: ['condition_source', 'condition_cases', 'condition_defaultGoto'],
+  foreach: ['foreach_items', 'foreach_workflowId', 'foreach_concurrency'],
+  transform: ['transform_input', 'transform_mapping'],
+  gate: ['gate_message', 'gate_preview'],
+  aggregate: ['aggregate_sources', 'aggregate_strategy', 'aggregate_expression'],
+  subflow: ['subflow_workflowId'],
+  wait: ['wait_durationMs'],
+  script: ['script_code'],
+  event: ['event_eventName', 'event_payload'],
 }
 
 export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
@@ -265,6 +326,7 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
   const editorRef = useRef<HTMLDivElement>(null)
 
   const [expandedFields, setExpandedFields] = useState<Record<string, boolean>>({})
+  const [, forceRender] = useState(0)
 
   // ── 运行面板 ──
   const [activeRuns, setActiveRuns] = useState<any[]>([])
@@ -534,9 +596,36 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
   const editingStep = steps.find((s) => s.id === editingStepId)
 
   function renderConfigField(step: StepDef, field: FieldDef) {
+    // 处理带前缀的 key：gate_message → config.gate.message
+    const [handlerPrefix, ...fieldParts] = field.key.split('_')
+    const isPrefixed = !!HANDLER_PREFIX_KEYS[handlerPrefix]
+    const configPath = isPrefixed ? [handlerPrefix, ...fieldParts] : [field.key]
+
+    function getNestedConfig(obj: any, path: string[]): any {
+      let val = obj.config || {}
+      for (const k of path) {
+        if (val === undefined || val === null) return undefined
+        val = val[k]
+      }
+      return val ?? ''
+    }
+
+    function setNestedConfig(stepId: string, path: string[], value: any) {
+      const current = steps.find((s) => s.id === stepId)?.config || {}
+      const newConfig = { ...current }
+      let target = newConfig
+      for (let i = 0; i < path.length - 1; i++) {
+        if (!target[path[i]] || typeof target[path[i]] !== 'object') target[path[i]] = {}
+        target = target[path[i]]
+      }
+      target[path[path.length - 1]] = value
+      updateStepConfig(step.id, newConfig)
+    }
+
+    const fieldValue = getNestedConfig(step, configPath)
     switch (field.type) {
       case 'textarea': {
-        const val = (step.config as any)[field.key] ?? ''
+        const val = fieldValue ?? ''
         const isExpanded = expandedFields[field.key] ?? false
         const showToggle = typeof val === 'string' && val.length > 200
         return (
@@ -557,7 +646,10 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
             <textarea
               className="wf-editor-prompt-textarea"
               value={val}
-              onChange={(e) => updateStepConfig(step.id, { [field.key]: e.target.value })}
+              onChange={(e) => {
+                if (isPrefixed) setNestedConfig(step.id, configPath, e.target.value)
+                else updateStepConfig(step.id, { [field.key]: e.target.value })
+              }}
               placeholder={field.placeholder}
               rows={isExpanded ? 24 : (field.rows ?? 4)}
             />
@@ -565,7 +657,7 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
         )
       }
       case 'number': {
-        const val = (step.config as any)[field.key]
+        const val = fieldValue
         return (
           <div key={field.key} className="wf-editor-field">
             <label>{field.label}</label>
@@ -575,7 +667,8 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
               value={val ?? ''}
               onChange={(e) => {
                 const v = e.target.value
-                updateStepConfig(step.id, { [field.key]: v ? Number(v) : undefined })
+                if (isPrefixed) setNestedConfig(step.id, configPath, v ? Number(v) : undefined)
+                else updateStepConfig(step.id, { [field.key]: v ? Number(v) : undefined })
               }}
               placeholder={field.placeholder}
             />
@@ -583,14 +676,17 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
         )
       }
       case 'text': {
-        const val = (step.config as any)[field.key] ?? ''
+        const val = fieldValue ?? ''
         return (
           <div key={field.key} className="wf-editor-field">
             <label>{field.label}</label>
             <input
               type="text"
               value={val}
-              onChange={(e) => updateStepConfig(step.id, { [field.key]: e.target.value })}
+              onChange={(e) => {
+                if (isPrefixed) setNestedConfig(step.id, configPath, e.target.value)
+                else updateStepConfig(step.id, { [field.key]: e.target.value })
+              }}
               placeholder={field.placeholder}
             />
           </div>
@@ -646,20 +742,145 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
         )
       }
       case 'radio': {
-        const val = step.runOn ?? 'success'
+        const val = isPrefixed ? (getNestedConfig(step, configPath) ?? 'merge') : (step.runOn ?? 'success')
+        const onChange = isPrefixed
+          ? (v: string) => setNestedConfig(step.id, configPath, v)
+          : (v: string) => updateStep(step.id, { runOn: v as 'success' | 'failure' })
         return (
           <div key={field.key} className="wf-editor-field">
             <label>{field.label}</label>
             <div className="wf-editor-radio-group">
               {(field.options ?? []).map((opt) => (
                 <label key={opt.value} className={`wf-editor-radio-label${val === opt.value ? ' active' : ''}`}>
-                  <input
-                    type="radio"
-                    name={`runOn_${step.id}`}
-                    checked={val === opt.value}
-                    onChange={() => updateStep(step.id, { runOn: opt.value as 'success' | 'failure' })}
-                  />
+                  <input type="radio" name={`${field.key}_${step.id}`} checked={val === opt.value} onChange={() => onChange(opt.value)} />
                   <span>{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )
+      }
+      case 'array-editor': {
+        const items = Array.isArray(fieldValue) ? fieldValue : []
+        const [newIf, setNewIf] = useState('')
+        const [newGoto, setNewGoto] = useState('')
+        return (
+          <div key={field.key} className="wf-editor-field">
+            <label>{field.label}</label>
+            <div className="wf-editor-kv-editor">
+              {items.map((item: any, idx: number) => (
+                <div key={idx} className="wf-editor-kv-row">
+                  <input className="wf-editor-kv-input" value={item.if || ''} readOnly placeholder="条件" />
+                  <span className="wf-editor-kv-arrow">→</span>
+                  <input className="wf-editor-kv-input" value={item.goto || ''} readOnly placeholder="目标步骤" />
+                  <button
+                    className="wf-editor-kv-del"
+                    onClick={() => {
+                      const next = items.filter((_: any, i: number) => i !== idx)
+                      setNestedConfig(step.id, configPath, next.length ? next : undefined)
+                      forceRender()
+                    }}
+                  >
+                    <i className="ri-close-line" />
+                  </button>
+                </div>
+              ))}
+              <div className="wf-editor-kv-new">
+                <input className="wf-editor-kv-input" value={newIf} onChange={(e) => setNewIf(e.target.value)} placeholder="条件如 >= 7" />
+                <span className="wf-editor-kv-arrow">→</span>
+                <input
+                  className="wf-editor-kv-input"
+                  value={newGoto}
+                  onChange={(e) => setNewGoto(e.target.value)}
+                  placeholder="目标步骤 ID"
+                />
+                <button
+                  className="wf-editor-kv-add"
+                  onClick={() => {
+                    if (!newIf.trim() || !newGoto.trim()) return
+                    setNestedConfig(step.id, configPath, [...items, { if: newIf.trim(), goto: newGoto.trim() }])
+                    setNewIf('')
+                    setNewGoto('')
+                    forceRender()
+                  }}
+                >
+                  <i className="ri-add-line" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+      case 'kv-editor': {
+        const mapping = fieldValue && typeof fieldValue === 'object' ? fieldValue : {}
+        const [newKey, setNewKey] = useState('')
+        const [newVal, setNewVal] = useState('')
+        return (
+          <div key={field.key} className="wf-editor-field">
+            <label>{field.label}</label>
+            <div className="wf-editor-kv-editor">
+              {Object.entries(mapping).map(([k, v]: [string, any]) => (
+                <div key={k} className="wf-editor-kv-row">
+                  <input className="wf-editor-kv-input" value={k} readOnly />
+                  <span className="wf-editor-kv-arrow">:</span>
+                  <input className="wf-editor-kv-input wf-editor-kv-input-wide" value={String(v || '')} readOnly />
+                  <button
+                    className="wf-editor-kv-del"
+                    onClick={() => {
+                      const next = { ...mapping }
+                      delete next[k]
+                      setNestedConfig(step.id, configPath, Object.keys(next).length ? next : undefined)
+                      forceRender()
+                    }}
+                  >
+                    <i className="ri-close-line" />
+                  </button>
+                </div>
+              ))}
+              <div className="wf-editor-kv-new">
+                <input className="wf-editor-kv-input" value={newKey} onChange={(e) => setNewKey(e.target.value)} placeholder="字段名" />
+                <span className="wf-editor-kv-arrow">:</span>
+                <input
+                  className="wf-editor-kv-input wf-editor-kv-input-wide"
+                  value={newVal}
+                  onChange={(e) => setNewVal(e.target.value)}
+                  placeholder="模板表达式"
+                />
+                <button
+                  className="wf-editor-kv-add"
+                  onClick={() => {
+                    if (!newKey.trim() || !newVal.trim()) return
+                    setNestedConfig(step.id, configPath, { ...mapping, [newKey.trim()]: newVal.trim() })
+                    setNewKey('')
+                    setNewVal('')
+                    forceRender()
+                  }}
+                >
+                  <i className="ri-add-line" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+      case 'multi-select-steps': {
+        const selected: string[] = Array.isArray(fieldValue) ? fieldValue : step.dependsOn.filter((d) => d !== step.id)
+        const sourceCandidates = steps.filter((s: StepDef) => s.id !== step.id)
+        return (
+          <div key={field.key} className="wf-editor-field">
+            <label>{field.label}</label>
+            <div className="wf-editor-multi-select" style={{ maxHeight: 200, overflowY: 'auto' }}>
+              {sourceCandidates.map((s: StepDef) => (
+                <label key={s.id} className="wf-editor-multi-select-item">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(s.id)}
+                    onChange={() => {
+                      const next = selected.includes(s.id) ? selected.filter((id: string) => id !== s.id) : [...selected, s.id]
+                      setNestedConfig(step.id, configPath, next.length ? next : undefined)
+                    }}
+                  />
+                  <span>{s.name || s.id}</span>
                 </label>
               ))}
             </div>
@@ -739,12 +960,15 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
         />
         {showRunPanel ? (
           <WorkflowRunPanel
-            runs={activeRuns.filter((r) => r.status === 'running')}
+            runs={activeRuns.filter((r) => r.status === 'running' || r.pendingGate)}
             pipelineLogs={pipelineLogs}
             onCancel={async (runId) => {
               await window.electronAPI.stopWorkflowRun(runId)
             }}
             onClose={() => setShowRunPanel(false)}
+            onApproveGate={(runId, stepId, decision, modifiedInput) => {
+              window.electronAPI.approveGate(runId, stepId, decision, modifiedInput)
+            }}
           />
         ) : (
           <div className="wf-editor-config-panel">

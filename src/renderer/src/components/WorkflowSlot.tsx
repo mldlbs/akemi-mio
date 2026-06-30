@@ -46,6 +46,24 @@ function handlerIcon(handler: string): string {
       return 'ri-api-line'
     case 'plan':
       return 'ri-file-list-3-line'
+    case 'condition':
+      return 'ri-git-branch-line'
+    case 'foreach':
+      return 'ri-loop-left-line'
+    case 'transform':
+      return 'ri-exchange-2-line'
+    case 'gate':
+      return 'ri-lock-2-line'
+    case 'aggregate':
+      return 'ri-folder-5-line'
+    case 'subflow':
+      return 'ri-organization-chart'
+    case 'wait':
+      return 'ri-timer-line'
+    case 'script':
+      return 'ri-terminal-box-line'
+    case 'event':
+      return 'ri-notification-3-line'
     default:
       return 'ri-circle-line'
   }
@@ -63,6 +81,24 @@ function handlerClass(handler: string): string {
       return 'wf-handler-api'
     case 'plan':
       return 'wf-handler-plan'
+    case 'condition':
+      return 'wf-handler-condition'
+    case 'foreach':
+      return 'wf-handler-foreach'
+    case 'transform':
+      return 'wf-handler-transform'
+    case 'gate':
+      return 'wf-handler-gate'
+    case 'aggregate':
+      return 'wf-handler-aggregate'
+    case 'subflow':
+      return 'wf-handler-subflow'
+    case 'wait':
+      return 'wf-handler-wait'
+    case 'script':
+      return 'wf-handler-script'
+    case 'event':
+      return 'wf-handler-event'
     default:
       return ''
   }
@@ -80,6 +116,24 @@ function handlerLabel(handler: string): string {
       return 'API'
     case 'plan':
       return 'Plan'
+    case 'condition':
+      return '条件'
+    case 'foreach':
+      return '循环'
+    case 'transform':
+      return '变换'
+    case 'gate':
+      return '审批'
+    case 'aggregate':
+      return '聚合'
+    case 'subflow':
+      return '子流程'
+    case 'wait':
+      return '等待'
+    case 'script':
+      return '脚本'
+    case 'event':
+      return '事件'
     default:
       return handler
   }
@@ -463,6 +517,12 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                       <p className="wf-desc">{def.description}</p>
                     </div>
                     <div className="wf-plan-header-meta">
+                      {def.trigger?.type && def.trigger.type !== 'manual' && (
+                        <span className={`wf-trigger-badge wf-trigger-badge-${def.trigger.type}`}>
+                          <i className={def.trigger.type === 'cron' ? 'ri-timer-line' : 'ri-flashlight-line'} />
+                          {def.trigger.type === 'cron' ? def.trigger.cron : def.trigger.type}
+                        </span>
+                      )}
                       <span className="wf-plan-badge">{def.steps.length} 步</span>
                       <i className={`ri-arrow-${isExpanded ? 'up' : 'down'}-s-line wf-plan-expand-icon`} />
                     </div>

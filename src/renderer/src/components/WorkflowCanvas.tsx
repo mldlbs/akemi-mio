@@ -17,14 +17,47 @@ const HANDLER_ICONS: Record<string, string> = {
   tool: 'ri-tools-line',
   api: 'ri-api-line',
   plan: 'ri-file-list-3-line',
+  condition: 'ri-git-branch-line',
+  foreach: 'ri-loop-left-line',
+  transform: 'ri-exchange-2-line',
+  gate: 'ri-lock-2-line',
+  aggregate: 'ri-folder-5-line',
+  subflow: 'ri-organization-chart',
+  wait: 'ri-timer-line',
+  script: 'ri-terminal-box-line',
+  event: 'ri-notification-3-line',
 }
-const HANDLER_LABELS: Record<string, string> = { subagent: '子 Agent', prompt: 'Prompt', tool: 'Tool', api: 'API', plan: 'Plan' }
+const HANDLER_LABELS: Record<string, string> = {
+  subagent: '子 Agent',
+  prompt: 'Prompt',
+  tool: 'Tool',
+  api: 'API',
+  plan: 'Plan',
+  condition: '条件',
+  foreach: '循环',
+  transform: '变换',
+  gate: '审批',
+  aggregate: '聚合',
+  subflow: '子流程',
+  wait: '等待',
+  script: '脚本',
+  event: '事件',
+}
 const HANDLER_COLORS: Record<string, string> = {
   subagent: 'oklch(0.65 0.18 240)',
   prompt: 'oklch(0.65 0.12 80)',
   tool: 'oklch(0.55 0.14 160)',
   api: 'oklch(0.55 0.16 300)',
   plan: 'oklch(0.55 0.12 30)',
+  condition: 'oklch(0.6 0.2 280)',
+  foreach: 'oklch(0.55 0.16 180)',
+  transform: 'oklch(0.55 0.14 200)',
+  gate: 'oklch(0.6 0.18 80)',
+  aggregate: 'oklch(0.5 0.12 260)',
+  subflow: 'oklch(0.5 0.14 220)',
+  wait: 'oklch(0.5 0.1 240)',
+  script: 'oklch(0.5 0.12 10)',
+  event: 'oklch(0.55 0.16 320)',
 }
 
 const NODE_W = 180
@@ -242,7 +275,7 @@ export function WorkflowCanvas({ steps, editingStepId, onSelectStep, onAddStep, 
 
   // ── edge descriptors for initial render ──
   const edges = useMemo(() => {
-    const result: { id: string; idx: number; d: string; failure: boolean }[] = []
+    const result: { id: string; idx: number; d: string; failure: boolean; conditionLabel?: string }[] = []
     let i = 0
     for (const step of steps) {
       for (const depId of step.dependsOn) {
@@ -264,6 +297,31 @@ export function WorkflowCanvas({ steps, editingStepId, onSelectStep, onAddStep, 
           failure: step.runOn === 'failure',
         })
         i++
+      }
+      // condition goto edges: step.nodes referenced in condition.cases[].goto
+      if (step.handler === 'condition' && step.config?.condition?.cases) {
+        for (const c of step.config.condition.cases) {
+          const gotoStep = steps.find((s) => s.id === c.goto)
+          const from = positionsRef.current[step.id]
+          const to = positionsRef.current[c.goto]
+          if (!from || !to) continue
+          result.push({
+            id: `cond-${step.id}->${c.goto}`,
+            idx: i,
+            d: viewportBezier(
+              from.x + NODE_W / 2,
+              from.y + NODE_H,
+              to.x + NODE_W / 2,
+              to.y,
+              panXRef.current,
+              panYRef.current,
+              zoomRef.current,
+            ),
+            failure: false,
+            conditionLabel: c.if,
+          })
+          i++
+        }
       }
     }
     return result
@@ -293,9 +351,22 @@ export function WorkflowCanvas({ steps, editingStepId, onSelectStep, onAddStep, 
               key={edge.id}
               data-edge-idx={edge.idx}
               d={edge.d}
-              className={`wf-canvas-edge${edge.failure ? ' wf-canvas-edge-failure' : ''}`}
+              className={`wf-canvas-edge${edge.failure ? ' wf-canvas-edge-failure' : ''}${edge.conditionLabel ? ' wf-canvas-edge-condition' : ''}`}
             />
           ))}
+          {/* condition labels */}
+          {edges
+            .filter((e) => e.conditionLabel)
+            .map((edge) => {
+              const mid = edge.d.match(/C\s+[\d.]+\s+[\d.]+\s*,\s*[\d.]+\s+[\d.]+\s*,\s*([\d.]+)\s+([\d.]+)/)
+              const mx = mid ? parseFloat(mid[1]) : 0
+              const my = mid ? parseFloat(mid[2]) : 0
+              return (
+                <text key={`lbl-${edge.id}`} x={mx} y={my - 8} className="wf-canvas-edge-label" textAnchor="middle">
+                  {edge.conditionLabel}
+                </text>
+              )
+            })}
         </svg>
 
         {/* Transform layer — only for nodes */}
@@ -332,6 +403,8 @@ export function WorkflowCanvas({ steps, editingStepId, onSelectStep, onAddStep, 
                   <span className="wf-canvas-node-handler-label">{label}</span>
                   {step.dependsOn.length > 0 && <span className="wf-canvas-node-dep-count">{step.dependsOn.length} dep</span>}
                   {step.runOn === 'failure' && <span className="wf-canvas-node-condition-failure">on failure</span>}
+                  {step.handler === 'foreach' && <span className="wf-canvas-node-foreach-badge">foreach</span>}
+                  {step.handler === 'gate' && <span className="wf-canvas-node-gate-badge">gate</span>}
                 </div>
                 <div className="wf-canvas-port wf-canvas-port-output" style={{ marginLeft: -PORT_SIZE / 2 }} />
                 <button
