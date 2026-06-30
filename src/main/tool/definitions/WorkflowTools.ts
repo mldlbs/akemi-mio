@@ -1,6 +1,7 @@
 import { buildTool, formatToolResult, formatToolError } from '../types'
 import { workflowStore } from '../../workflow/WorkflowStoreV2'
 import { getWorkflowScheduler } from '../../workflow/WorkflowScheduler'
+import { validateWorkflow } from '../../workflow/WorkflowValidator'
 import type { WorkflowDef, WorkflowStepDef } from '../../workflow/types'
 
 export const analyzeTaskTool = buildTool({
@@ -258,6 +259,23 @@ export const createWorkflowTool = buildTool({
         trigger: args.trigger,
         maxConcurrency: args.maxConcurrency,
       }
+
+      // 校验工作流质量
+      const validation = validateWorkflow(def)
+      if (!validation.valid) {
+        const errSummary = validation.issues
+          .filter((i) => i.severity === 'error')
+          .map((i) => `  ⛔ [${i.stepId || '全局'}] ${i.message}`)
+          .join('\n')
+        const warnSummary = validation.issues
+          .filter((i) => i.severity === 'warning')
+          .map((i) => `  ⚠️ [${i.stepId || '全局'}] ${i.message}`)
+          .join('\n')
+        return formatToolResult(
+          `工作流「${def.name}」存在质量问题，创建失败：\n${errSummary}${warnSummary ? '\n\n警告（不影响创建）：\n' + warnSummary : ''}`,
+        )
+      }
+
       workflowStore.saveDefinition(def)
       return formatToolResult(`工作流「${def.name}」已创建 (ID: ${def.id})，共 ${def.steps.length} 个步骤。`)
     } catch (err: any) {
@@ -269,7 +287,7 @@ export const createWorkflowTool = buildTool({
 export const autoScheduleWorkflowTool = buildTool({
   name: 'auto_schedule_workflow',
   description:
-    '【自主调度入口】AI 自主创建并立即启动工作流。适用于：多步骤任务需要并行/串行编排、需要审批门(gate)介入、需要条件分支(condition)、需要数据变换(transform)、需要循环处理(foreach)。传 steps 数组定义步骤。创建后默认立即启动。',
+    '【自主调度入口】AI 创建、执行并等待工作流完成。失败时自动修复重试（最多 2 次）。适用于：多步骤任务需要并行/串行编排、需要审批门(gate)介入、需要条件分支(condition)、需要数据变换(transform)、需要循环处理(foreach)。传 steps 数组定义步骤。创建后等待执行完成并返回结果。如果最终失败请用 update_workflow 修复步骤后用 rerun_workflow 重跑。',
   inputJSONSchema: {
     type: 'object',
     properties: {
@@ -455,6 +473,23 @@ export const autoScheduleWorkflowTool = buildTool({
         trigger: args.trigger,
         maxConcurrency: args.maxConcurrency,
       }
+
+      // 校验工作流质量
+      const validation = validateWorkflow(def)
+      if (!validation.valid) {
+        const errSummary = validation.issues
+          .filter((i) => i.severity === 'error')
+          .map((i) => `  ⛔ [${i.stepId || '全局'}] ${i.message}`)
+          .join('\n')
+        const warnSummary = validation.issues
+          .filter((i) => i.severity === 'warning')
+          .map((i) => `  ⚠️ [${i.stepId || '全局'}] ${i.message}`)
+          .join('\n')
+        return formatToolResult(
+          `工作流「${def.name}」存在质量问题，创建失败：\n${errSummary}${warnSummary ? '\n\n警告（可忽略）：\n' + warnSummary : ''}`,
+        )
+      }
+
       workflowStore.saveDefinition(def)
 
       const startNow = args.startImmediately !== false
@@ -463,26 +498,73 @@ export const autoScheduleWorkflowTool = buildTool({
       }
 
       const scheduler = getWorkflowScheduler()
-      const run = scheduler.startRun(def, args.userInput)
-      const stepSummary = def.steps
+      const run = await scheduler.runAndWait(def, args.userInput)
+
+      // 检查结果
+      const doneSteps = run.steps.filter((s) => s.status === 'done').length
+      const failedSteps = run.steps.filter((s) => s.status === 'failed').length
+      const stepLines = run.steps
         .map((s) => {
-          const deps = s.dependsOn.length ? ` ← ${s.dependsOn.join(', ')}` : ' ⚡并行'
-          return `  [${s.handler}] ${s.name} (${s.id})${deps}`
+          const icon = s.status === 'done' ? '✅' : s.status === 'failed' ? '⛔' : s.status === 'running' ? '⏳' : '⬜'
+          const err = s.error ? `: ${s.error.slice(0, 100)}` : ''
+          return `  ${icon} [${s.status}] ${s.stepId}${err}`
         })
         .join('\n')
 
-      let triggerInfo = '手动'
-      if (def.trigger?.type === 'cron') triggerInfo = `定时: ${def.trigger.cron}`
-      else if (def.trigger?.type === 'event') triggerInfo = `事件: ${def.trigger.event}`
+      if (run.status === 'done') {
+        return formatToolResult(`✅ 工作流「${def.name}」执行成功（${doneSteps}/${run.steps.length} 步）\n${stepLines}`)
+      }
 
+      // 失败或暂停—返回详细结果供 AI 自动修复
+      const failedDetails = run.steps
+        .filter((s) => s.status === 'failed')
+        .map((s) => `  step="${s.stepId}" error="${s.error || '未知错误'}"`)
+        .join('\n')
+
+      const gateInfo = run.pendingGate ? `\n⏸️ 等待审批: ${run.pendingGate.message}` : ''
+
+      // 自动迭代：失败时尝试修复重跑（最多 2 次）
+      let iteration = 0
+      const MAX_ITER = 2
+      let currentRun = run
+      let currentDef = def
+
+      while (currentRun.status === 'failed' && iteration < MAX_ITER) {
+        iteration++
+        // 简单修复策略：增加重试次数和超时
+        const fixedSteps = currentDef.steps.map((s) => {
+          if (s.status === 'failed' || run.steps.find((rs) => rs.stepId === s.id && rs.status === 'failed')) {
+            return {
+              ...s,
+              retryCount: Math.max(s.retryCount ?? 0, 2),
+              retryDelayMs: Math.max(s.retryDelayMs ?? 5000, 10000),
+            }
+          }
+          return s
+        })
+        currentDef = { ...currentDef, steps: fixedSteps as WorkflowStepDef[], updatedAt: Date.now() }
+        workflowStore.saveDefinition(currentDef)
+
+        currentRun = await scheduler.runAndWait(currentDef, args.userInput)
+
+        const iterDone = currentRun.steps.filter((s) => s.status === 'done').length
+        const iterFailed = currentRun.steps.filter((s) => s.status === 'failed').length
+
+        if (currentRun.status === 'done') {
+          return formatToolResult(
+            `✅ 工作流「${def.name}」自动修复后执行成功（第 ${iteration} 次重试）\n` +
+              `步骤: ${iterDone}/${currentRun.steps.length}\n` +
+              currentRun.steps.map((s) => `  ${s.status === 'done' ? '✅' : '⛔'} [${s.status}] ${s.stepId}`).join('\n'),
+          )
+        }
+      }
+
+      // 最终失败—返回供外面 AI 继续修
       return formatToolResult(
-        `🤖 自主调度工作流已创建并启动\n\n` +
-          `名称: ${def.name}\n` +
-          `ID: ${def.id}\n` +
-          `运行: ${run.runId}\n` +
-          `触发: ${triggerInfo}\n` +
-          `步骤 (${def.steps.length}):\n${stepSummary}\n\n` +
-          `用 get_workflow_status runId="${run.runId}" 查看执行状态`,
+        `⛔ 工作流「${def.name}」执行失败（${failedSteps}/${run.steps.length} 步失败）` +
+          `${run.pendingGate ? '（暂停于审批门）' : ''}\n${stepLines}\n\n` +
+          `失败详情:\n${failedDetails}${gateInfo}\n\n` +
+          `请用 update_workflow 修复失败的步骤后用 rerun_workflow 重跑。`,
       )
     } catch (err: any) {
       return formatToolError(err.message)
@@ -506,6 +588,17 @@ export const startWorkflowTool = buildTool({
       const def = workflowStore.getDefinition(args.workflowId)
       if (!def) return formatToolResult(`工作流 ${args.workflowId} 不存在`)
       if (def.enabled === false) return formatToolResult(`工作流「${def.name}」已停用，无法启动。请先用 enable_workflow 启用。`)
+
+      // 启动前校验（防止 SQLite 中有脏数据）
+      const validation = validateWorkflow(def)
+      if (!validation.valid) {
+        const errSummary = validation.issues
+          .filter((i) => i.severity === 'error')
+          .map((i) => `  ⛔ [${i.stepId || '全局'}] ${i.message}`)
+          .join('\n')
+        return formatToolResult(`工作流「${def.name}」存在质量问题，无法启动：\n${errSummary}`)
+      }
+
       const scheduler = getWorkflowScheduler()
       const run = scheduler.startRun(def, args.userInput)
       return formatToolResult(
@@ -519,20 +612,41 @@ export const startWorkflowTool = buildTool({
 
 export const getWorkflowStatusTool = buildTool({
   name: 'get_workflow_status',
-  description: '查看工作流运行状态。不传 runId 时返回所有活跃运行。',
+  description: '查看工作流运行状态。不传 runId 时返回所有活跃运行。传 detailed=true 可看每步输出/错误。',
   inputJSONSchema: {
     type: 'object',
     properties: {
-      runId: { type: 'string', description: '可选，运行 ID' },
+      runId: { type: 'string', description: '运行 ID' },
+      detailed: { type: 'boolean', description: '显示详细步骤信息' },
     },
     required: [],
   },
-  handler: async (args: { runId?: string }) => {
+  handler: async (args: { runId?: string; detailed?: boolean }) => {
     try {
       if (args.runId) {
         const run = workflowStore.getRun(args.runId)
         if (!run) return formatToolResult(`运行 ${args.runId} 不存在。`)
-        const stepSummary = run.steps.map((s) => `  [${s.status}] ${s.stepId}`).join('\n')
+
+        if (args.detailed) {
+          let summary = `📋 ${run.workflowName}\n状态: ${run.status} | 运行ID: ${run.runId}\n`
+          for (const s of run.steps) {
+            const retryInfo = s.retryCount && s.retryCount > 0 ? ` 重试:${s.retryCount}x` : ''
+            summary += `\n[${s.status}] ${s.stepId}${retryInfo}`
+            if (s.error) summary += `\n  ⛔ ${s.error.slice(0, 300)}`
+            if (s.agentResult) {
+              const preview = s.agentResult.length > 150 ? s.agentResult.slice(0, 150) + '...' : s.agentResult
+              summary += `\n  📤 ${preview}`
+            }
+          }
+          return formatToolResult(summary)
+        }
+
+        const stepSummary = run.steps
+          .map((s) => {
+            const mark = s.status === 'done' ? '✅' : s.status === 'failed' ? '⛔' : s.status === 'running' ? '⏳' : '⬜'
+            return `  ${mark} [${s.status}] ${s.stepId}`
+          })
+          .join('\n')
         return formatToolResult(`工作流「${run.workflowName}」状态: ${run.status}\n步骤:\n${stepSummary}`)
       }
       const allRuns = workflowStore.listRuns(10)
@@ -547,6 +661,7 @@ export const getWorkflowStatusTool = buildTool({
       return formatToolError(err.message)
     }
   },
+  isReadOnly: true,
 })
 
 // ── New workflow management tools ──
@@ -776,6 +891,32 @@ export const cancelWorkflowRunTool = buildTool({
       const ok = scheduler.stopRun(args.runId)
       if (!ok) return formatToolResult(`运行 ${args.runId} 不存在或已结束。`)
       return formatToolResult(`运行 ${args.runId} 已取消。`)
+    } catch (err: any) {
+      return formatToolError(err.message)
+    }
+  },
+})
+
+export const rerunWorkflowTool = buildTool({
+  name: 'rerun_workflow',
+  description: '从历史运行记录重新运行工作流。会基于上次的定义和输入创建全新的运行。常用于失败后修复定义再重跑。',
+  inputJSONSchema: {
+    type: 'object',
+    properties: {
+      runId: { type: 'string', description: '要重跑的历史运行 ID' },
+      userInput: { type: 'string', description: '可选，覆盖上次的输入' },
+    },
+    required: ['runId'],
+  },
+  handler: async (args: { runId: string; userInput?: string }) => {
+    try {
+      const scheduler = getWorkflowScheduler()
+      const run = scheduler.rerunRun(args.runId, args.userInput)
+      if (!run) return formatToolResult(`运行 ${args.runId} 不存在或对应的定义已被删除。`)
+      return formatToolResult(
+        `工作流「${run.workflowName}」已重新启动 (新 RunID: ${run.runId})。\n` +
+          `用 get_workflow_status runId="${run.runId}" detailed=true 查看执行状态`,
+      )
     } catch (err: any) {
       return formatToolError(err.message)
     }

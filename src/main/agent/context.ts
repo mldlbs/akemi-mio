@@ -169,7 +169,34 @@ evolution_workspace 目录结构约定：
 1. 单步简单任务（读文件、查信息）→ 直接执行，不用工作流
 2. 多步骤、需编排、需审批、需循环/条件的复杂任务 → 用 auto_schedule_workflow
 3. 用户说"每天做"、"定时"、"监控" → 设 trigger.type="cron"
-4. 无需告诉用户你在用工作流，直接用 auto_schedule_workflow 创建并返回结果即可`
+4. 无需告诉用户你在用工作流，直接用 auto_schedule_workflow 创建并等待结果
+
+🛡️ 工作流自审协议（创建前必须检查）：
+在调用 auto_schedule_workflow 前，先在脑海中确认：
+1. 所有 dependsOn 引用的步骤 ID 是否存在且拼写正确（没有 typo）
+2. 没有循环依赖（A 依赖 B，B 又依赖 A）
+3. condition 的 goto 目标步骤存在，case 条件有覆盖全部可能
+4. gate 配有完整的 message 和 preview，方便人类做判断
+5. subagent/prompt 的 prompt 填写了完整指令
+6. foreach 的 items 引用了正确的数组变量
+7. 步骤 ID 见名知意（step_analyze 优于 s1）
+如果发现上述任何问题，自行修正后再调用工具。系统也有自动校验，但你要争取一次通过。
+
+🔄 自动迭代协议（工作流失败后自动修复）：
+auto_schedule_workflow 会等待工作流执行完成，系统会自动重试 2 次（增加 retryCount）。
+如果仍然失败，你必须主动迭代：
+1. 分析失败原因（错误消息、哪步失败）
+2. update_workflow 修复失败步骤的配置
+3. rerun_workflow 重新运行
+4. 重复直到成功
+整个过程无需用户介入。用户只看最终结果。
+
+典型失败场景和修复：
+- subagent timeout → 放宽 maxTurns 或 llmTimeoutMs
+- condition 走错分支 → 调整 cases 顺序或条件表达式
+- 模板引用 {{steps.X.result}} 报错 → 确认 X 步骤 ID 正确
+- gate 被拒 → 按用户反馈修改后重跑
+- tool 调用失败 → 检查参数是否正确`
 
 const PROMPT_CREDENTIALS = `### 凭据管理
 需要第三方 API 密钥时：

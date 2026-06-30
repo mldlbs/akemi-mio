@@ -35,6 +35,9 @@ export interface StepDef {
     maxTurns?: number
     llmTimeoutMs?: number
     outputFile?: string
+    retryCount?: number
+    retryDelayMs?: number
+    outputSchema?: string
   }
   dependsOn: string[]
   runOn?: 'success' | 'failure'
@@ -290,6 +293,12 @@ const HANDLER_CONFIG_FIELDS: Record<string, FieldDef[]> = {
     { key: 'event_payload', type: 'text', label: '事件载荷（模板引用）', placeholder: '可选' },
   ],
 }
+
+const SHARED_FIELDS: FieldDef[] = [
+  { key: 'retryCount', type: 'number', label: '重试次数', placeholder: '默认 0（不重试）' },
+  { key: 'retryDelayMs', type: 'number', label: '重试间隔(ms)', placeholder: '默认 5000' },
+  { key: 'outputSchema', type: 'text', label: '输出 Schema（JSON）', placeholder: '{"type":"object","properties":{…}}' },
+]
 
 const HANDLER_KEYS: Record<string, Set<string>> = {}
 for (const [handler, fields] of Object.entries(HANDLER_CONFIG_FIELDS)) {
@@ -1011,6 +1020,7 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
                   </div>
                 </div>
                 {HANDLER_CONFIG_FIELDS[editingStep.handler]?.map((field) => renderConfigField(editingStep, field))}
+                {SHARED_FIELDS.map((field) => renderConfigField(editingStep, field))}
                 <div className="wf-editor-field">
                   <label>前置依赖</label>
                   <div className="wf-editor-dep-checkboxes">

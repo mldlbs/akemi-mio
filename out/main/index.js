@@ -2895,10 +2895,10 @@ const WorkflowStoreV2$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.d
   resolveRunOutputDir,
   workflowStore
 }, Symbol.toStringTag, { value: "Module" }));
-const TEMPLATE_RE = /\{\{([^}]+)\}\}/g;
+const TEMPLATE_RE$1 = /\{\{([^}]+)\}\}/g;
 function resolveTemplate(template, context) {
   if (!template) return "";
-  return template.replace(TEMPLATE_RE, (match2, expr) => {
+  return template.replace(TEMPLATE_RE$1, (match2, expr) => {
     const resolved = resolveExpression(expr.trim(), context);
     return resolved !== void 0 && resolved !== null ? String(resolved) : match2;
   });
@@ -3186,6 +3186,37 @@ class WorkflowSchedulerV2 {
       this.running.delete(run.runId);
     });
     return run;
+  }
+  /** 从历史运行重跑：基于上次 def 创建新 run（保留上下文） */
+  rerunRun(prevRunId, userInput) {
+    const prevRun = workflowStore.getRun(prevRunId);
+    if (!prevRun) return null;
+    const def = workflowStore.getDefinition(prevRun.workflowDefId);
+    if (!def) return null;
+    return this.startRun(def, userInput ?? prevRun.userInput);
+  }
+  /** 启动并等待完成（用于 AI 自主调度后同步获取结果） */
+  runAndWait(def, userInput, timeoutMs = 12e4) {
+    const run = this.startRun(def, userInput);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        const stored = workflowStore.getRun(run.runId);
+        resolve(stored ?? run);
+      }, timeoutMs);
+      const handler = (evt) => {
+        if (evt.runId === run.runId && (evt.status === "done" || evt.status === "failed" || evt.status === "paused")) {
+          cleanup();
+          const stored = workflowStore.getRun(run.runId);
+          resolve(stored ?? run);
+        }
+      };
+      eventBus.on("workflow.run.updated", handler);
+      const cleanup = () => {
+        clearTimeout(timer);
+        eventBus.off("workflow.run.updated", handler);
+      };
+    });
   }
   async executeLoop(run, def, signal) {
     const outputDir = resolveRunOutputDir(def, run);
@@ -3741,6 +3772,267 @@ const WorkflowScheduler = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.d
   getWorkflowScheduler,
   setWorkflowScheduler
 }, Symbol.toStringTag, { value: "Module" }));
+function validateWorkflow(def) {
+  const issues = [];
+  if (!def.id) issues.push({ severity: "error", message: "工作流缺少 id" });
+  if (!def.name) issues.push({ severity: "error", message: "工作流缺少 name" });
+  if (!def.steps || def.steps.length === 0) {
+    issues.push({ severity: "error", message: "工作流没有步骤" });
+    return { valid: false, issues };
+  }
+  const allIds = /* @__PURE__ */ new Map();
+  for (let i = 0; i < def.steps.length; i++) {
+    const sid = def.steps[i].id;
+    if (allIds.has(sid)) {
+      issues.push({ severity: "error", stepId: sid, message: `步骤 ID "${sid}" 重复（第 ${allIds.get(sid) + 1} 行和第 ${i + 1} 行）` });
+    }
+    allIds.set(sid, i);
+  }
+  for (const step of def.steps) {
+    for (const dep of step.dependsOn) {
+      if (!allIds.has(dep)) {
+        issues.push({ severity: "error", stepId: step.id, message: `dependsOn 引用了不存在的步骤 "${dep}"` });
+      }
+    }
+    const cond = step.config?.condition;
+    if (cond) {
+      if (cond.cases) {
+        for (const c of cond.cases) {
+          if (c.goto && !allIds.has(c.goto)) {
+            issues.push({ severity: "error", stepId: step.id, message: `条件分支 goto="${c.goto}" 引用了不存在的步骤` });
+          }
+        }
+      }
+      if (cond.defaultGoto && !allIds.has(cond.defaultGoto)) {
+        issues.push({ severity: "error", stepId: step.id, message: `defaultGoto="${cond.defaultGoto}" 引用了不存在的步骤` });
+      }
+    }
+    const agg = step.config?.aggregate;
+    if (agg?.sources) {
+      for (const src of agg.sources) {
+        if (!allIds.has(src)) {
+          issues.push({ severity: "error", stepId: step.id, message: `aggregate.sources 引用了不存在的步骤 "${src}"` });
+        }
+      }
+    }
+  }
+  const cycleResult = detectCycle(def.steps);
+  if (cycleResult.hasCycle) {
+    issues.push({ severity: "error", message: `检测到循环依赖: ${cycleResult.path?.join(" → ")}` });
+  }
+  for (const step of def.steps) {
+    issues.push(...validateHandlerConfig(step));
+  }
+  for (const step of def.steps) {
+    issues.push(...validateTemplateRefs(step, allIds));
+  }
+  for (const step of def.steps) {
+    if (step.runOn === "failure" && (!step.dependsOn || step.dependsOn.length === 0)) {
+      issues.push({ severity: "warning", stepId: step.id, message: "runOn=failure 但没有 dependsOn，永远无法触发" });
+    }
+  }
+  const unreachable = findUnreachable(def.steps);
+  for (const sid of unreachable) {
+    issues.push({ severity: "warning", stepId: sid, message: "该步骤可能无法到达（没有路径从入口指向它）" });
+  }
+  return {
+    valid: issues.every((i) => i.severity !== "error"),
+    issues
+  };
+}
+function detectCycle(steps2) {
+  const idToIdx = /* @__PURE__ */ new Map();
+  steps2.forEach((s, i) => idToIdx.set(s.id, i));
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color = new Array(steps2.length).fill(WHITE);
+  const parent = new Array(steps2.length).fill(-1);
+  function dfs(u) {
+    color[u] = GRAY;
+    for (const dep of steps2[u].dependsOn) {
+      const v = idToIdx.get(dep);
+      if (v === void 0) continue;
+      if (color[v] === GRAY) {
+        const path2 = [steps2[u].id, steps2[v].id];
+        let cur = u;
+        while (cur !== v && parent[cur] !== -1) {
+          cur = parent[cur];
+          path2.push(steps2[cur].id);
+        }
+        path2.reverse();
+        return true;
+      }
+      if (color[v] === WHITE) {
+        parent[v] = u;
+        if (dfs(v)) return true;
+      }
+    }
+    color[u] = BLACK;
+    return false;
+  }
+  for (let i = 0; i < steps2.length; i++) {
+    if (color[i] === WHITE) {
+      if (dfs(i)) return { hasCycle: true };
+    }
+  }
+  return { hasCycle: false };
+}
+function validateHandlerConfig(step) {
+  const issues = [];
+  const cfg = step.config || {};
+  switch (step.handler) {
+    case "subagent":
+    case "prompt":
+      if (!cfg.prompt) issues.push({ severity: "error", stepId: step.id, message: `handler=${step.handler} 缺少 config.prompt` });
+      break;
+    case "tool":
+      if (!cfg.tool) issues.push({ severity: "error", stepId: step.id, message: "handler=tool 缺少 config.tool（工具名）" });
+      break;
+    case "api":
+      if (!cfg.apiUrl) issues.push({ severity: "error", stepId: step.id, message: "handler=api 缺少 config.apiUrl" });
+      if (!cfg.apiMethod) issues.push({ severity: "warning", stepId: step.id, message: "handler=api 未指定 apiMethod，默认 GET" });
+      break;
+    case "plan":
+      if (!cfg.planPrompt) issues.push({ severity: "error", stepId: step.id, message: "handler=plan 缺少 config.planPrompt" });
+      break;
+    case "condition": {
+      if (!cfg.condition) {
+        issues.push({ severity: "error", stepId: step.id, message: "handler=condition 缺少 config.condition" });
+        break;
+      }
+      if (!cfg.condition.source) issues.push({ severity: "error", stepId: step.id, message: "condition 缺少 source（条件判断来源）" });
+      if (!cfg.condition.cases || cfg.condition.cases.length === 0)
+        issues.push({ severity: "error", stepId: step.id, message: "condition 缺少 cases（条件分支列表）" });
+      break;
+    }
+    case "gate":
+      if (!cfg.gate) {
+        issues.push({ severity: "error", stepId: step.id, message: "handler=gate 缺少 config.gate" });
+        break;
+      }
+      if (!cfg.gate.message) issues.push({ severity: "error", stepId: step.id, message: "gate 缺少 message（审批消息）" });
+      if (!cfg.gate.preview) issues.push({ severity: "warning", stepId: step.id, message: "gate 缺少 preview（无法展示预览内容）" });
+      break;
+    case "foreach":
+      if (!cfg.foreach) {
+        issues.push({ severity: "error", stepId: step.id, message: "handler=foreach 缺少 config.foreach" });
+        break;
+      }
+      if (!cfg.foreach.items) issues.push({ severity: "error", stepId: step.id, message: "foreach 缺少 items（要遍历的数组变量）" });
+      break;
+    case "transform":
+      if (!cfg.transform) {
+        issues.push({ severity: "error", stepId: step.id, message: "handler=transform 缺少 config.transform" });
+        break;
+      }
+      if (!cfg.transform.mapping || Object.keys(cfg.transform.mapping).length === 0)
+        issues.push({ severity: "warning", stepId: step.id, message: "transform 没有 mapping（输出映射为空）" });
+      break;
+    case "aggregate":
+      if (!cfg.aggregate) {
+        issues.push({ severity: "error", stepId: step.id, message: "handler=aggregate 缺少 config.aggregate" });
+        break;
+      }
+      if (!cfg.aggregate.sources || cfg.aggregate.sources.length === 0)
+        issues.push({ severity: "error", stepId: step.id, message: "aggregate 缺少 sources（要聚合的步骤列表）" });
+      if (!cfg.aggregate.strategy) issues.push({ severity: "warning", stepId: step.id, message: "aggregate 未指定 strategy，默认 merge" });
+      break;
+    case "subflow":
+      if (!cfg.subflow) {
+        issues.push({ severity: "error", stepId: step.id, message: "handler=subflow 缺少 config.subflow" });
+        break;
+      }
+      if (!cfg.subflow.workflowId && !cfg.subflow.inlineSteps)
+        issues.push({ severity: "error", stepId: step.id, message: "subflow 需要 workflowId 或 inlineSteps" });
+      break;
+    case "wait":
+      if (!cfg.wait) {
+        issues.push({ severity: "error", stepId: step.id, message: "handler=wait 缺少 config.wait" });
+        break;
+      }
+      if (!cfg.wait.durationMs && !cfg.wait.waitForStep && !cfg.wait.waitUntil)
+        issues.push({ severity: "error", stepId: step.id, message: "wait 需要 durationMs 或 waitForStep 或 waitUntil" });
+      break;
+    case "script":
+      if (!cfg.script) {
+        issues.push({ severity: "error", stepId: step.id, message: "handler=script 缺少 config.script" });
+        break;
+      }
+      if (!cfg.script.code) issues.push({ severity: "error", stepId: step.id, message: "script 缺少 code（要执行的 JS 代码）" });
+      break;
+    case "event":
+      if (!cfg.event) {
+        issues.push({ severity: "error", stepId: step.id, message: "handler=event 缺少 config.event" });
+        break;
+      }
+      if (!cfg.event.eventName) issues.push({ severity: "error", stepId: step.id, message: "event 缺少 eventName（事件名称）" });
+      break;
+  }
+  return issues;
+}
+const TEMPLATE_RE = /\{\{steps\.([^.]+)\./g;
+function validateTemplateRefs(step, allIds) {
+  const issues = [];
+  const cfg = step.config || {};
+  const checkString = (label, val) => {
+    if (!val) return;
+    const matches = val.matchAll(TEMPLATE_RE);
+    for (const m of matches) {
+      const refId = m[1];
+      if (!allIds.has(refId)) {
+        issues.push({ severity: "error", stepId: step.id, message: `"${label}" 引用了不存在的步骤 "${refId}"（{{steps.${refId}...}}）` });
+      }
+    }
+  };
+  checkString("prompt", cfg.prompt);
+  checkString("planPrompt", cfg.planPrompt);
+  checkString("condition.source", cfg.condition?.source);
+  checkString("gate.preview", cfg.gate?.preview);
+  checkString("gate.message", cfg.gate?.message);
+  checkString("transform.input", cfg.transform?.input);
+  checkString("event.payload", cfg.event?.payload);
+  if (cfg.foreach?.items) {
+    const pureMatch = cfg.foreach.items.match(/^\{\{steps\.([^.]+)/);
+    if (pureMatch && !allIds.has(pureMatch[1])) {
+      issues.push({ severity: "error", stepId: step.id, message: `foreach.items 引用了不存在的步骤 "${pureMatch[1]}"` });
+    }
+  }
+  return issues;
+}
+function findUnreachable(steps2) {
+  const idToIdx = /* @__PURE__ */ new Map();
+  steps2.forEach((s, i) => idToIdx.set(s.id, i));
+  const reachable = /* @__PURE__ */ new Set();
+  const queue = [];
+  for (const s of steps2) {
+    if (!s.dependsOn || s.dependsOn.length === 0) {
+      reachable.add(s.id);
+      queue.push(s.id);
+    }
+  }
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    const idx = idToIdx.get(cur);
+    if (idx === void 0) continue;
+    for (const s of steps2) {
+      if (reachable.has(s.id)) continue;
+      if (s.dependsOn && s.dependsOn.includes(cur)) {
+        reachable.add(s.id);
+        queue.push(s.id);
+      }
+    }
+    const cond = steps2[idx].config?.condition;
+    if (cond) {
+      const gotoTargets = [...cond.cases?.map((c) => c.goto) || [], cond.defaultGoto].filter(Boolean);
+      for (const gt of gotoTargets) {
+        if (!reachable.has(gt)) {
+          reachable.add(gt);
+          queue.push(gt);
+        }
+      }
+    }
+  }
+  return steps2.filter((s) => !reachable.has(s.id)).map((s) => s.id);
+}
 const analyzeTaskTool = buildTool({
   name: "analyze_task",
   description: "【推荐入口】分析一个开发任务的复杂度，自动匹配合适的开发 pipeline。每次接到新任务时先用这个工具。系统会自动选择简单/中等/大型对应的工作流",
@@ -3806,7 +4098,7 @@ const listWorkflowsTool = buildTool({
 });
 const createWorkflowTool = buildTool({
   name: "create_workflow",
-  description: "创建一个新的工作流定义。工作流由多个步骤组成，步骤之间可以有依赖关系（DAG），支持子 agent、工具调用、API 调用、prompt 注入和 plan 五种 handler 类型。创建后默认启用。",
+  description: "创建一个新的工作流定义。工作流由多个步骤组成，步骤之间可以有依赖关系（DAG）。创建后默认启用。",
   inputJSONSchema: {
     type: "object",
     properties: {
@@ -3823,8 +4115,23 @@ const createWorkflowTool = buildTool({
             description: { type: "string", description: "步骤描述" },
             handler: {
               type: "string",
-              enum: ["subagent", "tool", "api", "prompt", "plan"],
-              description: "执行方式: subagent=子agent, tool=工具, api=API, prompt=注入prompt, plan=创建开发计划"
+              enum: [
+                "subagent",
+                "tool",
+                "api",
+                "prompt",
+                "plan",
+                "condition",
+                "foreach",
+                "transform",
+                "gate",
+                "aggregate",
+                "subflow",
+                "wait",
+                "script",
+                "event"
+              ],
+              description: "执行方式: subagent=子agent, tool=工具调用, api=API请求, prompt=注入prompt, plan=创建计划, condition=条件分支, foreach=循环, transform=变换, gate=审批门, aggregate=聚合, subflow=子流程, wait=等待, script=脚本, event=事件"
             },
             config: {
               type: "object",
@@ -3833,14 +4140,113 @@ const createWorkflowTool = buildTool({
                 tool: { type: "string", description: "当 handler=tool 时的工具名" },
                 apiUrl: { type: "string", description: "当 handler=api 时的 API URL" },
                 apiMethod: { type: "string", description: "当 handler=api 时的 HTTP 方法" },
-                planPrompt: { type: "string", description: "当 handler=plan 时的计划 prompt" }
+                planPrompt: { type: "string", description: "当 handler=plan 时的计划 prompt" },
+                allowedTools: { type: "array", items: { type: "string" }, description: "可用的工具列表" },
+                maxTurns: { type: "number", description: "最大交互轮数" },
+                outputFile: { type: "string", description: "输出文件路径" },
+                // New handlers
+                condition: {
+                  type: "object",
+                  properties: {
+                    source: { type: "string", description: "条件判断来源（如 {{steps.s1.result.score}}）" },
+                    cases: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          if: { type: "string", description: '条件表达式，如 "> 7"' },
+                          goto: { type: "string", description: "满足条件时跳转到此步骤 ID" }
+                        },
+                        required: ["if", "goto"]
+                      }
+                    },
+                    defaultGoto: { type: "string", description: "无匹配时跳转到的步骤 ID（可选）" }
+                  },
+                  description: "handler=condition 时的条件分支配置"
+                },
+                foreach: {
+                  type: "object",
+                  properties: {
+                    items: { type: "string", description: "要遍历的数组（如 {{steps.s1.result.items}}）" },
+                    workflowId: { type: "string", description: "对每项执行的工作流 ID" },
+                    concurrency: { type: "number", description: "并发数，默认 1" }
+                  },
+                  description: "handler=foreach 时的循环配置"
+                },
+                gate: {
+                  type: "object",
+                  properties: {
+                    message: { type: "string", description: "审批消息" },
+                    preview: { type: "string", description: "预览内容（支持模板引用）" },
+                    options: { type: "array", items: { type: "string" }, description: "审批选项: approve, reject, modify" }
+                  },
+                  description: "handler=gate 时的审批门配置"
+                },
+                transform: {
+                  type: "object",
+                  properties: {
+                    input: { type: "string", description: "输入来源（如 {{steps.s1.result}}）" },
+                    mapping: {
+                      type: "object",
+                      additionalProperties: { type: "string" },
+                      description: "输出映射，key=新字段, value=模板表达式"
+                    }
+                  },
+                  description: "handler=transform 时的数据变换配置"
+                },
+                aggregate: {
+                  type: "object",
+                  properties: {
+                    sources: { type: "array", items: { type: "string" }, description: "要聚合的步骤 ID 列表" },
+                    strategy: { type: "string", enum: ["merge", "concat", "pick-first", "custom"], description: "聚合策略" }
+                  },
+                  description: "handler=aggregate 时的聚合配置"
+                },
+                subflow: {
+                  type: "object",
+                  properties: {
+                    workflowId: { type: "string", description: "子工作流 ID" },
+                    input: {
+                      type: "object",
+                      additionalProperties: { type: "string" },
+                      description: "传递给子工作流的输入"
+                    }
+                  },
+                  description: "handler=subflow 时的子流程配置"
+                },
+                wait: {
+                  type: "object",
+                  properties: {
+                    durationMs: { type: "number", description: "等待时长（毫秒）" },
+                    waitForStep: { type: "string", description: "等待某步骤完成" }
+                  },
+                  description: "handler=wait 时的等待配置"
+                },
+                script: {
+                  type: "object",
+                  properties: {
+                    code: { type: "string", description: "JS 函数体代码" }
+                  },
+                  description: "handler=script 时的脚本配置"
+                },
+                event: {
+                  type: "object",
+                  properties: {
+                    eventName: { type: "string", description: "要发送的事件名称" },
+                    payload: { type: "string", description: "事件载荷（可选，支持模板引用）" }
+                  },
+                  description: "handler=event 时的事件配置"
+                }
               }
             },
             dependsOn: {
               type: "array",
               items: { type: "string" },
               description: "依赖的上一步 ID 列表。空数组表示无依赖，可与其他无依赖步骤并行执行"
-            }
+            },
+            retryCount: { type: "number", description: "失败重试次数，默认 0" },
+            retryDelayMs: { type: "number", description: "重试间隔（毫秒），默认 5000" },
+            runOn: { type: "string", enum: ["success", "failure"], description: "运行条件: success=仅前序成功时, failure=仅前序失败时" }
           },
           required: ["id", "name", "description", "handler", "dependsOn"]
         }))()
@@ -3849,7 +4255,19 @@ const createWorkflowTool = buildTool({
         type: "array",
         items: /* @__PURE__ */ (() => ({ type: "string" }))(),
         description: "可选标签，如 simple/medium/large"
-      }
+      },
+      trigger: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["manual", "cron", "event"], description: "触发类型" },
+          cron: { type: "string", description: "cron 表达式（type=cron 时必填）" },
+          event: { type: "string", description: "事件名（type=event 时必填）" },
+          defaultInput: { type: "string", description: "触发时的默认输入" }
+        },
+        required: ["type"],
+        description: "调度触发器配置"
+      },
+      maxConcurrency: { type: "number", description: "最大并发步骤数，默认 5" }
     },
     required: ["name", "description", "steps"]
   },
@@ -3863,10 +4281,273 @@ const createWorkflowTool = buildTool({
         tags: args.tags || [],
         enabled: true,
         createdAt: Date.now(),
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        trigger: args.trigger,
+        maxConcurrency: args.maxConcurrency
       };
+      const validation = validateWorkflow(def);
+      if (!validation.valid) {
+        const errSummary = validation.issues.filter((i) => i.severity === "error").map((i) => `  ⛔ [${i.stepId || "全局"}] ${i.message}`).join("\n");
+        const warnSummary = validation.issues.filter((i) => i.severity === "warning").map((i) => `  ⚠️ [${i.stepId || "全局"}] ${i.message}`).join("\n");
+        return formatToolResult(
+          `工作流「${def.name}」存在质量问题，创建失败：
+${errSummary}${warnSummary ? "\n\n警告（不影响创建）：\n" + warnSummary : ""}`
+        );
+      }
       workflowStore.saveDefinition(def);
       return formatToolResult(`工作流「${def.name}」已创建 (ID: ${def.id})，共 ${def.steps.length} 个步骤。`);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  }
+});
+const autoScheduleWorkflowTool = buildTool({
+  name: "auto_schedule_workflow",
+  description: "【自主调度入口】AI 创建、执行并等待工作流完成。失败时自动修复重试（最多 2 次）。适用于：多步骤任务需要并行/串行编排、需要审批门(gate)介入、需要条件分支(condition)、需要数据变换(transform)、需要循环处理(foreach)。传 steps 数组定义步骤。创建后等待执行完成并返回结果。如果最终失败请用 update_workflow 修复步骤后用 rerun_workflow 重跑。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "工作流名称，反映任务目标" },
+      description: { type: "string", description: "工作流描述，说明整体目标" },
+      steps: {
+        type: "array",
+        description: "工作流步骤定义",
+        items: /* @__PURE__ */ (() => ({
+          type: "object",
+          properties: {
+            id: { type: "string", description: "步骤 ID，如 s1, s2, step_analyze" },
+            name: { type: "string", description: "步骤名称" },
+            description: { type: "string", description: "步骤描述" },
+            handler: {
+              type: "string",
+              enum: [
+                "subagent",
+                "tool",
+                "api",
+                "prompt",
+                "plan",
+                "condition",
+                "foreach",
+                "transform",
+                "gate",
+                "aggregate",
+                "subflow",
+                "wait",
+                "script",
+                "event"
+              ],
+              description: "执行方式: subagent=AI子任务, tool=工具, gate=需要你审批, condition=条件判断, foreach=循环, transform=数据变换, aggregate=聚合, wait=等待, script=脚本"
+            },
+            config: {
+              type: "object",
+              properties: {
+                prompt: { type: "string", description: "subagent/prompt 的 prompt 内容。subagent 会以此为目标独立执行" },
+                tool: { type: "string", description: "handler=tool 时的工具名" },
+                apiUrl: { type: "string" },
+                apiMethod: { type: "string" },
+                planPrompt: { type: "string" },
+                allowedTools: { type: "array", items: { type: "string" }, description: "subagent 可用的工具列表" },
+                maxTurns: { type: "number", description: "subagent 最大交互轮数" },
+                condition: {
+                  type: "object",
+                  properties: {
+                    source: { type: "string", description: "条件判断来源，如 {{steps.s1.result.score}}" },
+                    cases: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          if: { type: "string", description: '条件表达式，如 "> 7" 或 "== \\"approve\\""' },
+                          goto: { type: "string", description: "满足条件时跳转到此步骤" }
+                        },
+                        required: ["if", "goto"]
+                      }
+                    },
+                    defaultGoto: { type: "string", description: "无匹配时跳转目标" }
+                  },
+                  description: "条件分支——根据某步骤的输出值决定后续流向"
+                },
+                foreach: {
+                  type: "object",
+                  properties: {
+                    items: { type: "string", description: "要遍历的数组变量，如 {{steps.s1.result.items}}" },
+                    workflowId: { type: "string", description: "对每项执行的工作流 ID" },
+                    concurrency: { type: "number", description: "并发数，默认 1" }
+                  },
+                  description: "循环——对数组每项执行子工作流"
+                },
+                gate: {
+                  type: "object",
+                  properties: {
+                    message: { type: "string", description: "审批时向用户展示的消息" },
+                    preview: { type: "string", description: "预览内容，如 {{steps.s1.result}}" },
+                    options: { type: "array", items: { type: "string" }, description: "审批选项: approve, reject, modify" }
+                  },
+                  description: "审批门——暂停工作流等待用户确认/修改后再继续"
+                },
+                transform: {
+                  type: "object",
+                  properties: {
+                    input: { type: "string", description: "输入来源，如 {{steps.s1.result}}" },
+                    mapping: {
+                      type: "object",
+                      additionalProperties: { type: "string" },
+                      description: '映射规则: {outputKey: "{{expression}}"}'
+                    }
+                  },
+                  description: "数据变换——将上一步输出映射为新的结构"
+                },
+                aggregate: {
+                  type: "object",
+                  properties: {
+                    sources: { type: "array", items: { type: "string" }, description: "要聚合的步骤 ID 列表" },
+                    strategy: { type: "string", enum: ["merge", "concat", "pick-first", "custom"], description: "聚合策略" }
+                  },
+                  description: "聚合——将多个步骤的输出合并为一个"
+                },
+                subflow: {
+                  type: "object",
+                  properties: {
+                    workflowId: { type: "string", description: "子工作流 ID" },
+                    input: { type: "object", additionalProperties: { type: "string" }, description: "输入参数" }
+                  },
+                  description: "子流程——内嵌执行另一个工作流"
+                },
+                wait: {
+                  type: "object",
+                  properties: {
+                    durationMs: { type: "number", description: "等待毫秒数" },
+                    waitForStep: { type: "string", description: "等待某步骤完成后继续" }
+                  },
+                  description: "等待——暂停指定时长"
+                },
+                script: {
+                  type: "object",
+                  properties: {
+                    code: { type: "string", description: "JS 函数体: (ctx, steps) => any" }
+                  },
+                  description: "脚本——执行自定义 JS 逻辑"
+                },
+                event: {
+                  type: "object",
+                  properties: {
+                    eventName: { type: "string", description: "事件名" },
+                    payload: { type: "string", description: "事件数据模板" }
+                  },
+                  description: "事件——发送系统事件"
+                }
+              }
+            },
+            dependsOn: {
+              type: "array",
+              items: { type: "string" },
+              description: "依赖的上一步 ID 列表。空数组=无依赖（可并行）。['s1']=等 s1 完成"
+            },
+            retryCount: { type: "number", description: "失败重试次数，默认 0" },
+            retryDelayMs: { type: "number", description: "重试间隔(ms)，默认 5000" },
+            runOn: { type: "string", enum: ["success", "failure"], description: "运行条件，默认 success" }
+          },
+          required: ["id", "name", "description", "handler", "dependsOn"]
+        }))()
+      },
+      trigger: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["manual", "cron", "event"], description: "触发类型" },
+          cron: { type: "string", description: 'cron 表达式（type=cron 时必填），如 "0 8 * * *"=每天8点' },
+          event: { type: "string", description: "事件名（type=event 时必填）" },
+          defaultInput: { type: "string", description: "触发时的默认输入" }
+        },
+        description: "调度触发器设置。不传则手动触发。设 cron 可让工作流定时自动执行"
+      },
+      maxConcurrency: { type: "number", description: "最大并发步骤数，默认 5" },
+      userInput: { type: "string", description: "可选，传递给工作流的初始输入" },
+      startImmediately: { type: "boolean", description: "是否立即启动，默认 true" }
+    },
+    required: ["name", "description", "steps"]
+  },
+  handler: async (args) => {
+    try {
+      const def = {
+        id: `wf_${Date.now()}`,
+        name: args.name,
+        description: args.description,
+        steps: args.steps,
+        tags: ["auto"],
+        enabled: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        trigger: args.trigger,
+        maxConcurrency: args.maxConcurrency
+      };
+      const validation = validateWorkflow(def);
+      if (!validation.valid) {
+        const errSummary = validation.issues.filter((i) => i.severity === "error").map((i) => `  ⛔ [${i.stepId || "全局"}] ${i.message}`).join("\n");
+        const warnSummary = validation.issues.filter((i) => i.severity === "warning").map((i) => `  ⚠️ [${i.stepId || "全局"}] ${i.message}`).join("\n");
+        return formatToolResult(
+          `工作流「${def.name}」存在质量问题，创建失败：
+${errSummary}${warnSummary ? "\n\n警告（可忽略）：\n" + warnSummary : ""}`
+        );
+      }
+      workflowStore.saveDefinition(def);
+      const startNow = args.startImmediately !== false;
+      if (!startNow) {
+        return formatToolResult(`工作流「${def.name}」已创建 (ID: ${def.id})，${def.steps.length} 个步骤。等待手动启动。`);
+      }
+      const scheduler2 = getWorkflowScheduler();
+      const run = await scheduler2.runAndWait(def, args.userInput);
+      const doneSteps = run.steps.filter((s) => s.status === "done").length;
+      const failedSteps = run.steps.filter((s) => s.status === "failed").length;
+      const stepLines = run.steps.map((s) => {
+        const icon = s.status === "done" ? "✅" : s.status === "failed" ? "⛔" : s.status === "running" ? "⏳" : "⬜";
+        const err = s.error ? `: ${s.error.slice(0, 100)}` : "";
+        return `  ${icon} [${s.status}] ${s.stepId}${err}`;
+      }).join("\n");
+      if (run.status === "done") {
+        return formatToolResult(`✅ 工作流「${def.name}」执行成功（${doneSteps}/${run.steps.length} 步）
+${stepLines}`);
+      }
+      const failedDetails = run.steps.filter((s) => s.status === "failed").map((s) => `  step="${s.stepId}" error="${s.error || "未知错误"}"`).join("\n");
+      const gateInfo = run.pendingGate ? `
+⏸️ 等待审批: ${run.pendingGate.message}` : "";
+      let iteration = 0;
+      const MAX_ITER = 2;
+      let currentRun = run;
+      let currentDef = def;
+      while (currentRun.status === "failed" && iteration < MAX_ITER) {
+        iteration++;
+        const fixedSteps = currentDef.steps.map((s) => {
+          if (s.status === "failed" || run.steps.find((rs) => rs.stepId === s.id && rs.status === "failed")) {
+            return {
+              ...s,
+              retryCount: Math.max(s.retryCount ?? 0, 2),
+              retryDelayMs: Math.max(s.retryDelayMs ?? 5e3, 1e4)
+            };
+          }
+          return s;
+        });
+        currentDef = { ...currentDef, steps: fixedSteps, updatedAt: Date.now() };
+        workflowStore.saveDefinition(currentDef);
+        currentRun = await scheduler2.runAndWait(currentDef, args.userInput);
+        const iterDone = currentRun.steps.filter((s) => s.status === "done").length;
+        const iterFailed = currentRun.steps.filter((s) => s.status === "failed").length;
+        if (currentRun.status === "done") {
+          return formatToolResult(
+            `✅ 工作流「${def.name}」自动修复后执行成功（第 ${iteration} 次重试）
+步骤: ${iterDone}/${currentRun.steps.length}
+` + currentRun.steps.map((s) => `  ${s.status === "done" ? "✅" : "⛔"} [${s.status}] ${s.stepId}`).join("\n")
+          );
+        }
+      }
+      return formatToolResult(
+        `⛔ 工作流「${def.name}」执行失败（${failedSteps}/${run.steps.length} 步失败）${run.pendingGate ? "（暂停于审批门）" : ""}
+${stepLines}
+
+失败详情:
+${failedDetails}${gateInfo}
+
+请用 update_workflow 修复失败的步骤后用 rerun_workflow 重跑。`
+      );
     } catch (err) {
       return formatToolError(err.message);
     }
@@ -3888,6 +4569,12 @@ const startWorkflowTool = buildTool({
       const def = workflowStore.getDefinition(args.workflowId);
       if (!def) return formatToolResult(`工作流 ${args.workflowId} 不存在`);
       if (def.enabled === false) return formatToolResult(`工作流「${def.name}」已停用，无法启动。请先用 enable_workflow 启用。`);
+      const validation = validateWorkflow(def);
+      if (!validation.valid) {
+        const errSummary = validation.issues.filter((i) => i.severity === "error").map((i) => `  ⛔ [${i.stepId || "全局"}] ${i.message}`).join("\n");
+        return formatToolResult(`工作流「${def.name}」存在质量问题，无法启动：
+${errSummary}`);
+      }
       const scheduler2 = getWorkflowScheduler();
       const run = scheduler2.startRun(def, args.userInput);
       return formatToolResult(
@@ -3900,11 +4587,12 @@ const startWorkflowTool = buildTool({
 });
 const getWorkflowStatusTool = buildTool({
   name: "get_workflow_status",
-  description: "查看工作流运行状态。不传 runId 时返回所有活跃运行。",
+  description: "查看工作流运行状态。不传 runId 时返回所有活跃运行。传 detailed=true 可看每步输出/错误。",
   inputJSONSchema: {
     type: "object",
     properties: {
-      runId: { type: "string", description: "可选，运行 ID" }
+      runId: { type: "string", description: "运行 ID" },
+      detailed: { type: "boolean", description: "显示详细步骤信息" }
     },
     required: []
   },
@@ -3913,7 +4601,28 @@ const getWorkflowStatusTool = buildTool({
       if (args.runId) {
         const run = workflowStore.getRun(args.runId);
         if (!run) return formatToolResult(`运行 ${args.runId} 不存在。`);
-        const stepSummary = run.steps.map((s) => `  [${s.status}] ${s.stepId}`).join("\n");
+        if (args.detailed) {
+          let summary = `📋 ${run.workflowName}
+状态: ${run.status} | 运行ID: ${run.runId}
+`;
+          for (const s of run.steps) {
+            const retryInfo = s.retryCount && s.retryCount > 0 ? ` 重试:${s.retryCount}x` : "";
+            summary += `
+[${s.status}] ${s.stepId}${retryInfo}`;
+            if (s.error) summary += `
+  ⛔ ${s.error.slice(0, 300)}`;
+            if (s.agentResult) {
+              const preview = s.agentResult.length > 150 ? s.agentResult.slice(0, 150) + "..." : s.agentResult;
+              summary += `
+  📤 ${preview}`;
+            }
+          }
+          return formatToolResult(summary);
+        }
+        const stepSummary = run.steps.map((s) => {
+          const mark = s.status === "done" ? "✅" : s.status === "failed" ? "⛔" : s.status === "running" ? "⏳" : "⬜";
+          return `  ${mark} [${s.status}] ${s.stepId}`;
+        }).join("\n");
         return formatToolResult(`工作流「${run.workflowName}」状态: ${run.status}
 步骤:
 ${stepSummary}`);
@@ -3927,7 +4636,8 @@ ${stepSummary}`);
     } catch (err) {
       return formatToolError(err.message);
     }
-  }
+  },
+  isReadOnly: true
 });
 const updateWorkflowTool = buildTool({
   name: "update_workflow",
@@ -3947,7 +4657,25 @@ const updateWorkflowTool = buildTool({
             id: { type: "string", description: "步骤唯一标识" },
             name: { type: "string", description: "步骤名称" },
             description: { type: "string", description: "步骤描述" },
-            handler: { type: "string", enum: ["subagent", "tool", "api", "prompt", "plan"] },
+            handler: {
+              type: "string",
+              enum: [
+                "subagent",
+                "tool",
+                "api",
+                "prompt",
+                "plan",
+                "condition",
+                "foreach",
+                "transform",
+                "gate",
+                "aggregate",
+                "subflow",
+                "wait",
+                "script",
+                "event"
+              ]
+            },
             config: {
               type: "object",
               properties: {
@@ -3955,10 +4683,51 @@ const updateWorkflowTool = buildTool({
                 tool: { type: "string" },
                 apiUrl: { type: "string" },
                 apiMethod: { type: "string" },
-                planPrompt: { type: "string" }
+                planPrompt: { type: "string" },
+                condition: {
+                  type: "object",
+                  properties: {
+                    source: { type: "string" },
+                    cases: { type: "array", items: { type: "object", properties: { if: { type: "string" }, goto: { type: "string" } } } },
+                    defaultGoto: { type: "string" }
+                  }
+                },
+                foreach: {
+                  type: "object",
+                  properties: { items: { type: "string" }, workflowId: { type: "string" }, concurrency: { type: "number" } }
+                },
+                gate: {
+                  type: "object",
+                  properties: {
+                    message: { type: "string" },
+                    preview: { type: "string" },
+                    options: { type: "array", items: { type: "string" } }
+                  }
+                },
+                transform: {
+                  type: "object",
+                  properties: { input: { type: "string" }, mapping: { type: "object", additionalProperties: { type: "string" } } }
+                },
+                aggregate: {
+                  type: "object",
+                  properties: {
+                    sources: { type: "array", items: { type: "string" } },
+                    strategy: { type: "string", enum: ["merge", "concat", "pick-first", "custom"] }
+                  }
+                },
+                subflow: {
+                  type: "object",
+                  properties: { workflowId: { type: "string" }, input: { type: "object", additionalProperties: { type: "string" } } }
+                },
+                wait: { type: "object", properties: { durationMs: { type: "number" }, waitForStep: { type: "string" } } },
+                script: { type: "object", properties: { code: { type: "string" } } },
+                event: { type: "object", properties: { eventName: { type: "string" }, payload: { type: "string" } } }
               }
             },
-            dependsOn: { type: "array", items: { type: "string" } }
+            dependsOn: { type: "array", items: { type: "string" } },
+            retryCount: { type: "number" },
+            retryDelayMs: { type: "number" },
+            runOn: { type: "string", enum: ["success", "failure"] }
           },
           required: ["id", "name", "description", "handler", "dependsOn"]
         }))()
@@ -3967,7 +4736,17 @@ const updateWorkflowTool = buildTool({
         type: "array",
         items: /* @__PURE__ */ (() => ({ type: "string" }))(),
         description: "新的标签列表（全量替换）"
-      }
+      },
+      trigger: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["manual", "cron", "event"] },
+          cron: { type: "string" },
+          event: { type: "string" },
+          defaultInput: { type: "string" }
+        }
+      },
+      maxConcurrency: { type: "number" }
     },
     required: ["workflowId"]
   },
@@ -3981,6 +4760,8 @@ const updateWorkflowTool = buildTool({
         description: args.description ?? existing.description,
         steps: args.steps ?? existing.steps,
         tags: args.tags ?? existing.tags,
+        trigger: args.trigger ?? existing.trigger,
+        maxConcurrency: args.maxConcurrency ?? existing.maxConcurrency,
         updatedAt: Date.now()
       };
       workflowStore.saveDefinition(updated);
@@ -4071,6 +4852,31 @@ const cancelWorkflowRunTool = buildTool({
       const ok = scheduler2.stopRun(args.runId);
       if (!ok) return formatToolResult(`运行 ${args.runId} 不存在或已结束。`);
       return formatToolResult(`运行 ${args.runId} 已取消。`);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  }
+});
+const rerunWorkflowTool = buildTool({
+  name: "rerun_workflow",
+  description: "从历史运行记录重新运行工作流。会基于上次的定义和输入创建全新的运行。常用于失败后修复定义再重跑。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      runId: { type: "string", description: "要重跑的历史运行 ID" },
+      userInput: { type: "string", description: "可选，覆盖上次的输入" }
+    },
+    required: ["runId"]
+  },
+  handler: async (args) => {
+    try {
+      const scheduler2 = getWorkflowScheduler();
+      const run = scheduler2.rerunRun(args.runId, args.userInput);
+      if (!run) return formatToolResult(`运行 ${args.runId} 不存在或对应的定义已被删除。`);
+      return formatToolResult(
+        `工作流「${run.workflowName}」已重新启动 (新 RunID: ${run.runId})。
+用 get_workflow_status runId="${run.runId}" detailed=true 查看执行状态`
+      );
     } catch (err) {
       return formatToolError(err.message);
     }
@@ -5492,6 +6298,7 @@ function getAllTools() {
     listCredentialsTool,
     rememberFactTool,
     analyzeTaskTool,
+    autoScheduleWorkflowTool,
     listWorkflowsTool,
     createWorkflowTool,
     startWorkflowTool,
@@ -5501,6 +6308,7 @@ function getAllTools() {
     enableWorkflowTool,
     disableWorkflowTool,
     cancelWorkflowRunTool,
+    rerunWorkflowTool,
     listWorkflowRunsTool,
     listSkillsTool,
     enableSkillTool,
@@ -6283,6 +7091,15 @@ const PROMPT_TOOLS = `可用工具列表：
 - remove_mcp_server — 移除 MCP 服务器
 - remember_fact — 记住重要信息（用户偏好、关键决定、项目需求），对话中主动使用
 - generate_image — 使用 FLUX.1-schnell（本地 ComfyUI GPU）或 CogView-3-Flash（智谱AI）根据提示词生成图片
+- auto_schedule_workflow — 【AI 自主调度】创建并启动工作流，适合多步骤/并行/条件分支/审批门场景
+- list_workflows — 列出已有工作流定义
+- create_workflow — 创建工作流
+- update_workflow — 更新工作流定义
+- start_workflow — 启动已有工作流
+- get_workflow_status — 查看工作流运行状态
+- cancel_workflow_run — 取消正在运行的工作流
+- list_workflow_runs — 查看工作流运行历史
+- enable_workflow / disable_workflow — 启用/停用工作流
 
 端口和进程管理：
 - netstat -ano | findstr :端口号 — 检查端口占用
@@ -6301,7 +7118,51 @@ evolution_workspace 目录结构约定：
 
 对于用户请求，判断是否需要操作文件/代码/项目：
 - 是 → 立即调用工具
-- 仅聊天/询问 → 用自然的短句回复`;
+- 仅聊天/询问 → 用自然的短句回复
+
+🌟 自主工作流调度协议：
+对于复杂或多步骤任务，你应该主动使用 auto_schedule_workflow 创建工作流来编排执行。工作流引擎支持：
+- 多步骤 DAG 编排 — dependsOn 定义先后/并行关系
+- 审批门 (gate) — 需要人类确认的步骤，工作流自动暂停等你 approve/reject
+- 条件分支 (condition) — 根据步骤输出走不同路径
+- 循环 (foreach) — 对列表每个元素执行子工作流
+- 数据变换 (transform) — 映射步骤输出结构
+- 聚合 (aggregate) — 合并多步骤结果
+- 定时触发 (cron trigger) — "0 8 * * *" 表示每天 8 点自动执行
+- 事件触发 (event trigger) — 监听系统事件自动启动
+
+协议规则：
+1. 单步简单任务（读文件、查信息）→ 直接执行，不用工作流
+2. 多步骤、需编排、需审批、需循环/条件的复杂任务 → 用 auto_schedule_workflow
+3. 用户说"每天做"、"定时"、"监控" → 设 trigger.type="cron"
+4. 无需告诉用户你在用工作流，直接用 auto_schedule_workflow 创建并等待结果
+
+🛡️ 工作流自审协议（创建前必须检查）：
+在调用 auto_schedule_workflow 前，先在脑海中确认：
+1. 所有 dependsOn 引用的步骤 ID 是否存在且拼写正确（没有 typo）
+2. 没有循环依赖（A 依赖 B，B 又依赖 A）
+3. condition 的 goto 目标步骤存在，case 条件有覆盖全部可能
+4. gate 配有完整的 message 和 preview，方便人类做判断
+5. subagent/prompt 的 prompt 填写了完整指令
+6. foreach 的 items 引用了正确的数组变量
+7. 步骤 ID 见名知意（step_analyze 优于 s1）
+如果发现上述任何问题，自行修正后再调用工具。系统也有自动校验，但你要争取一次通过。
+
+🔄 自动迭代协议（工作流失败后自动修复）：
+auto_schedule_workflow 会等待工作流执行完成，系统会自动重试 2 次（增加 retryCount）。
+如果仍然失败，你必须主动迭代：
+1. 分析失败原因（错误消息、哪步失败）
+2. update_workflow 修复失败步骤的配置
+3. rerun_workflow 重新运行
+4. 重复直到成功
+整个过程无需用户介入。用户只看最终结果。
+
+典型失败场景和修复：
+- subagent timeout → 放宽 maxTurns 或 llmTimeoutMs
+- condition 走错分支 → 调整 cases 顺序或条件表达式
+- 模板引用 {{steps.X.result}} 报错 → 确认 X 步骤 ID 正确
+- gate 被拒 → 按用户反馈修改后重跑
+- tool 调用失败 → 检查参数是否正确`;
 const PROMPT_CREDENTIALS = `### 凭据管理
 需要第三方 API 密钥时：
 1. 先 get_credential 检查是否已有

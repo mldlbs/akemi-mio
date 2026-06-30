@@ -1,268 +1,249 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { IpcRenderer } from 'electron'
 
-const electronAPI = {
-  closeWindow: (): Promise<{ success: boolean }> => ipcRenderer.invoke('window:close'),
-  minimizeWindow: (): Promise<{ success: boolean }> => ipcRenderer.invoke('window:minimize'),
+export function createElectronAPI(ipc: IpcRenderer) {
+  return {
+    closeWindow: (): Promise<{ success: boolean }> => ipc.invoke('window:close'),
+    minimizeWindow: (): Promise<{ success: boolean }> => ipc.invoke('window:minimize'),
 
-  transcribe: (audio: ArrayBuffer): Promise<{ text: string; request_id?: string; error?: string }> =>
-    ipcRenderer.invoke('asr:transcribe', audio),
+    transcribe: (audio: ArrayBuffer): Promise<{ text: string; request_id?: string; error?: string }> => ipc.invoke('asr:transcribe', audio),
 
-  chat: (text: string, requestId?: string, sessionId?: string, noTts?: boolean): Promise<{ reply?: string; error?: string }> =>
-    ipcRenderer.invoke('ai:chat', text, requestId, sessionId, noTts),
+    chat: (text: string, requestId?: string, sessionId?: string, noTts?: boolean): Promise<{ reply?: string; error?: string }> =>
+      ipc.invoke('ai:chat', text, requestId, sessionId, noTts),
 
-  speak: (text: string): Promise<void> => ipcRenderer.invoke('tts:speak', text),
+    speak: (text: string): Promise<void> => ipc.invoke('tts:speak', text),
 
-  stopSpeaking: (): Promise<void> => ipcRenderer.invoke('tts:stop'),
+    stopSpeaking: (): Promise<void> => ipc.invoke('tts:stop'),
 
-  stopConversation: (): Promise<{ success: boolean }> => ipcRenderer.invoke('conversation:stop'),
+    stopConversation: (): Promise<{ success: boolean }> => ipc.invoke('conversation:stop'),
 
-  getState: (): Promise<{ asr: string; error?: string }> => ipcRenderer.invoke('state:get'),
+    getState: (): Promise<{ asr: string; error?: string }> => ipc.invoke('state:get'),
 
-  getWakeWords: (): Promise<string[]> => ipcRenderer.invoke('config:getWakeWords'),
+    getWakeWords: (): Promise<string[]> => ipc.invoke('config:getWakeWords'),
 
-  onStateUpdate: (callback: (state: Record<string, unknown>) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, state: Record<string, unknown>) => callback(state)
-    ipcRenderer.on('state:update', handler)
-    return () => {
-      ipcRenderer.removeListener('state:update', handler)
-    }
-  },
+    onStateUpdate: (callback: (state: Record<string, unknown>) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: Record<string, unknown>) => callback(state)
+      ipc.on('state:update', handler)
+      return () => {
+        ipc.removeListener('state:update', handler)
+      }
+    },
 
-  onAIChunk: (callback: (text: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, text: string) => callback(text)
-    ipcRenderer.on('ai:chunk', handler)
-    return () => {
-      ipcRenderer.removeListener('ai:chunk', handler)
-    }
-  },
+    onAIChunk: (callback: (text: string) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, text: string) => callback(text)
+      ipc.on('ai:chunk', handler)
+      return () => {
+        ipc.removeListener('ai:chunk', handler)
+      }
+    },
 
-  onTTSAudio: (callback: (filePath: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, filePath: string) => callback(filePath)
-    ipcRenderer.on('tts:play_audio', handler)
-    return () => {
-      ipcRenderer.removeListener('tts:play_audio', handler)
-    }
-  },
+    onTTSAudio: (callback: (filePath: string) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, filePath: string) => callback(filePath)
+      ipc.on('tts:play_audio', handler)
+      return () => {
+        ipc.removeListener('tts:play_audio', handler)
+      }
+    },
 
-  onTTSBuffer: (callback: (buffer: ArrayBuffer) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, buf: Uint8Array) => callback(buf.buffer as ArrayBuffer)
-    ipcRenderer.on('tts:play_audio_buffer', handler)
-    return () => {
-      ipcRenderer.removeListener('tts:play_audio_buffer', handler)
-    }
-  },
+    onTTSBuffer: (callback: (buffer: ArrayBuffer) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, buf: Uint8Array) => callback(buf.buffer as ArrayBuffer)
+      ipc.on('tts:play_audio_buffer', handler)
+      return () => {
+        ipc.removeListener('tts:play_audio_buffer', handler)
+      }
+    },
 
-  onToolStatus: (callback: (status: { type: string; tool: string; message: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, status: { type: string; tool: string; message: string }) => callback(status)
-    ipcRenderer.on('tool:status', handler)
-    return () => {
-      ipcRenderer.removeListener('tool:status', handler)
-    }
-  },
+    onToolStatus: (callback: (status: { type: string; tool: string; message: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: { type: string; tool: string; message: string }) => callback(status)
+      ipc.on('tool:status', handler)
+      return () => {
+        ipc.removeListener('tool:status', handler)
+      }
+    },
 
-  getCredential: (key: string): Promise<string | null> => ipcRenderer.invoke('credentials:get', key),
+    getCredential: (key: string): Promise<string | null> => ipc.invoke('credentials:get', key),
 
-  setCredential: (key: string, value: string): Promise<true> => ipcRenderer.invoke('credentials:set', key, value),
+    setCredential: (key: string, value: string): Promise<true> => ipc.invoke('credentials:set', key, value),
 
-  deleteCredential: (key: string): Promise<true> => ipcRenderer.invoke('credentials:delete', key),
+    deleteCredential: (key: string): Promise<true> => ipc.invoke('credentials:delete', key),
 
-  getMessageHistory: (
-    limit?: number,
-  ): Promise<{ id: string; source: string; role: string; content: string; category: string; sessionId?: string; createdAt: number }[]> =>
-    ipcRenderer.invoke('messages:getHistory', limit),
+    getMessageHistory: (
+      limit?: number,
+    ): Promise<{ id: string; source: string; role: string; content: string; category: string; sessionId?: string; createdAt: number }[]> =>
+      ipc.invoke('messages:getHistory', limit),
 
-  getSessions: (): Promise<
-    { id: string; source: string; category: string; label: string; messageCount: number; lastActivityAt: number; createdAt: number }[]
-  > => ipcRenderer.invoke('messages:getSessions'),
+    getSessions: (): Promise<
+      { id: string; source: string; category: string; label: string; messageCount: number; lastActivityAt: number; createdAt: number }[]
+    > => ipc.invoke('messages:getSessions'),
 
-  getMessagesBySession: (
-    sessionId: string,
-  ): Promise<{ id: string; source: string; role: string; content: string; category: string; sessionId?: string; createdAt: number }[]> =>
-    ipcRenderer.invoke('messages:getBySession', sessionId),
+    getMessagesBySession: (
+      sessionId: string,
+    ): Promise<{ id: string; source: string; role: string; content: string; category: string; sessionId?: string; createdAt: number }[]> =>
+      ipc.invoke('messages:getBySession', sessionId),
 
-  onMessageNew: (
-    callback: (msg: {
-      id: string
-      source: string
-      role: string
-      content: string
-      category: string
-      sessionId?: string
-      createdAt: number
-    }) => void,
-  ) => {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      msg: { id: string; source: string; role: string; content: string; category: string; sessionId?: string; createdAt: number },
-    ) => callback(msg)
-    ipcRenderer.on('message:new', handler)
-    return () => {
-      ipcRenderer.removeListener('message:new', handler)
-    }
-  },
+    onMessageNew: (
+      callback: (msg: {
+        id: string
+        source: string
+        role: string
+        content: string
+        category: string
+        sessionId?: string
+        createdAt: number
+      }) => void,
+    ) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        msg: { id: string; source: string; role: string; content: string; category: string; sessionId?: string; createdAt: number },
+      ) => callback(msg)
+      ipc.on('message:new', handler)
+      return () => {
+        ipc.removeListener('message:new', handler)
+      }
+    },
 
-  // Auto-update
-  checkUpdate: (): Promise<{ available: boolean; version?: string; error?: string }> => ipcRenderer.invoke('update:check'),
+    checkUpdate: (): Promise<{ available: boolean; version?: string; error?: string }> => ipc.invoke('update:check'),
 
-  downloadUpdate: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('update:download'),
+    downloadUpdate: (): Promise<{ success: boolean; error?: string }> => ipc.invoke('update:download'),
 
-  installUpdate: (): Promise<{ success: boolean }> => ipcRenderer.invoke('update:install'),
+    installUpdate: (): Promise<{ success: boolean }> => ipc.invoke('update:install'),
 
-  onUpdateStatus: (callback: (status: Record<string, unknown>) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, status: Record<string, unknown>) => callback(status)
-    ipcRenderer.on('update:status', handler)
-    return () => {
-      ipcRenderer.removeListener('update:status', handler)
-    }
-  },
+    onUpdateStatus: (callback: (status: Record<string, unknown>) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: Record<string, unknown>) => callback(status)
+      ipc.on('update:status', handler)
+      return () => {
+        ipc.removeListener('update:status', handler)
+      }
+    },
 
-  // ── Coding Agent UI ──
+    // ── Coding Agent UI ──
 
-  // 工具调用事件（ChatExecutor 实际发出含 id/latencyMs 的 payload）
-  onToolInvoked: (callback: (data: { tool: string; args: Record<string, any>; id: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:tool_invoked', handler)
-    return () => ipcRenderer.removeListener('agent:tool_invoked', handler)
-  },
+    onToolInvoked: (callback: (data: { tool: string; args: Record<string, any>; id: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:tool_invoked', handler)
+      return () => ipc.removeListener('agent:tool_invoked', handler)
+    },
 
-  onToolCompleted: (callback: (data: { tool: string; result: string; id: string; latencyMs: number }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:tool_completed', handler)
-    return () => ipcRenderer.removeListener('agent:tool_completed', handler)
-  },
+    onToolCompleted: (callback: (data: { tool: string; result: string; id: string; latencyMs: number }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:tool_completed', handler)
+      return () => ipc.removeListener('agent:tool_completed', handler)
+    },
 
-  onToolFailed: (callback: (data: { tool: string; error: string; id: string; latencyMs: number }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:tool_failed', handler)
-    return () => ipcRenderer.removeListener('agent:tool_failed', handler)
-  },
+    onToolFailed: (callback: (data: { tool: string; error: string; id: string; latencyMs: number }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:tool_failed', handler)
+      return () => ipc.removeListener('agent:tool_failed', handler)
+    },
 
-  // 计划事件
-  onPlanCreated: (callback: (data: { planId: string; title: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:plan_created', handler)
-    return () => ipcRenderer.removeListener('agent:plan_created', handler)
-  },
+    onPlanCreated: (callback: (data: { planId: string; title: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:plan_created', handler)
+      return () => ipc.removeListener('agent:plan_created', handler)
+    },
 
-  onPlanStep: (callback: (data: { planId: string; stepIndex: number; status: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:plan_step', handler)
-    return () => ipcRenderer.removeListener('agent:plan_step', handler)
-  },
+    onPlanStep: (callback: (data: { planId: string; stepIndex: number; status: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:plan_step', handler)
+      return () => ipc.removeListener('agent:plan_step', handler)
+    },
 
-  onPlanCompleted: (callback: (data: { planId: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:plan_completed', handler)
-    return () => ipcRenderer.removeListener('agent:plan_completed', handler)
-  },
+    onPlanCompleted: (callback: (data: { planId: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:plan_completed', handler)
+      return () => ipc.removeListener('agent:plan_completed', handler)
+    },
 
-  // OTPAR 阶段事件
-  onAgentObserve: (
-    callback: (data: { requestId: string; step: number; proceduresFound: number; patternsFound: number; durationMs: number }) => void,
-  ) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:observe', handler)
-    return () => ipcRenderer.removeListener('agent:observe', handler)
-  },
+    onAgentObserve: (
+      callback: (data: { requestId: string; step: number; proceduresFound: number; patternsFound: number; durationMs: number }) => void,
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:observe', handler)
+      return () => ipc.removeListener('agent:observe', handler)
+    },
 
-  onAgentThink: (callback: (data: { requestId: string; step: number; toolCallCount: number; strategyPrompted: boolean }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:think', handler)
-    return () => ipcRenderer.removeListener('agent:think', handler)
-  },
+    onAgentThink: (callback: (data: { requestId: string; step: number; toolCallCount: number; strategyPrompted: boolean }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:think', handler)
+      return () => ipc.removeListener('agent:think', handler)
+    },
 
-  onAgentReflect: (
-    callback: (data: {
-      requestId: string
-      step: number
-      toolResults: number
-      successCount: number
-      summary: string
-      durationMs: number
-    }) => void,
-  ) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:reflect', handler)
-    return () => ipcRenderer.removeListener('agent:reflect', handler)
-  },
+    onAgentReflect: (
+      callback: (data: {
+        requestId: string
+        step: number
+        toolResults: number
+        successCount: number
+        summary: string
+        durationMs: number
+      }) => void,
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:reflect', handler)
+      return () => ipc.removeListener('agent:reflect', handler)
+    },
 
-  // 输入输出
-  onInputReceived: (callback: (data: { text: string; requestId: string; source: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:input_received', handler)
-    return () => ipcRenderer.removeListener('agent:input_received', handler)
-  },
+    onInputReceived: (callback: (data: { text: string; requestId: string; source: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:input_received', handler)
+      return () => ipc.removeListener('agent:input_received', handler)
+    },
 
-  onResponseGenerated: (callback: (data: { text: string; requestId: string; source: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:response_generated', handler)
-    return () => ipcRenderer.removeListener('agent:response_generated', handler)
-  },
+    onResponseGenerated: (callback: (data: { text: string; requestId: string; source: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:response_generated', handler)
+      return () => ipc.removeListener('agent:response_generated', handler)
+    },
 
-  // Guardrail & 错误
-  onGuardrail: (callback: (data: { type: string } & Record<string, any>) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:guardrail', handler)
-    return () => ipcRenderer.removeListener('agent:guardrail', handler)
-  },
+    onGuardrail: (callback: (data: { type: string } & Record<string, any>) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:guardrail', handler)
+      return () => ipc.removeListener('agent:guardrail', handler)
+    },
 
-  onBudgetExhausted: (callback: (data: { resource: string; utilization: number }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:budgetExhausted', handler)
-    return () => ipcRenderer.removeListener('agent:budgetExhausted', handler)
-  },
+    onBudgetExhausted: (callback: (data: { resource: string; utilization: number }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:budgetExhausted', handler)
+      return () => ipc.removeListener('agent:budgetExhausted', handler)
+    },
 
-  onBudgetRestored: (callback: (data: { resource: string; utilization: number }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:budgetRestored', handler)
-    return () => ipcRenderer.removeListener('agent:budgetRestored', handler)
-  },
+    onBudgetRestored: (callback: (data: { resource: string; utilization: number }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:budgetRestored', handler)
+      return () => ipc.removeListener('agent:budgetRestored', handler)
+    },
 
-  onAgentError: (callback: (data: { error: string; requestId: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('agent:error', handler)
-    return () => ipcRenderer.removeListener('agent:error', handler)
-  },
+    onAgentError: (callback: (data: { error: string; requestId: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:error', handler)
+      return () => ipc.removeListener('agent:error', handler)
+    },
 
-  // 工作流运行事件
-  onWorkflowRunCreated: (callback: (data: { runId: string; workflowDefId: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('workflow:run_created', handler)
-    return () => ipcRenderer.removeListener('workflow:run_created', handler)
-  },
+    onWorkflowRunCreated: (callback: (data: { runId: string; workflowDefId: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('workflow:run_created', handler)
+      return () => ipc.removeListener('workflow:run_created', handler)
+    },
 
-  onWorkflowRunUpdated: (callback: (data: { runId: string; status: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('workflow:run_updated', handler)
-    return () => ipcRenderer.removeListener('workflow:run_updated', handler)
-  },
+    onWorkflowRunUpdated: (callback: (data: { runId: string; status: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('workflow:run_updated', handler)
+      return () => ipc.removeListener('workflow:run_updated', handler)
+    },
 
-  onWorkflowRunStep: (callback: (data: { runId: string; stepId: string; status: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('workflow:run_step', handler)
-    return () => ipcRenderer.removeListener('workflow:run_step', handler)
-  },
+    onWorkflowRunStep: (callback: (data: { runId: string; stepId: string; status: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('workflow:run_step', handler)
+      return () => ipc.removeListener('workflow:run_step', handler)
+    },
 
-  // 工作流定义变更 → UI 刷新
-  onWorkflowDefCreated: (callback: (data: { workflowDefId: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
-    ipcRenderer.on('workflow:def_created', handler)
-    return () => ipcRenderer.removeListener('workflow:def_created', handler)
-  },
+    onWorkflowDefCreated: (callback: (data: { workflowDefId: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('workflow:def_created', handler)
+      return () => ipc.removeListener('workflow:def_created', handler)
+    },
 
-  // Invoke handlers
-  getActivePlan: (): Promise<{
-    id: string
-    title: string
-    description: string
-    steps: { id: string; description: string; status: string; result?: string }[]
-    status: string
-    createdAt: number
-    updatedAt: number
-  } | null> => ipcRenderer.invoke('agent:getActivePlan'),
-
-  listPlans: (): Promise<
-    {
+    getActivePlan: (): Promise<{
       id: string
       title: string
       description: string
@@ -270,49 +251,60 @@ const electronAPI = {
       status: string
       createdAt: number
       updatedAt: number
-    }[]
-  > => ipcRenderer.invoke('agent:listPlans'),
+    } | null> => ipc.invoke('agent:getActivePlan'),
 
-  openAgentWindow: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('agent:openWindow'),
+    listPlans: (): Promise<
+      {
+        id: string
+        title: string
+        description: string
+        steps: { id: string; description: string; status: string; result?: string }[]
+        status: string
+        createdAt: number
+        updatedAt: number
+      }[]
+    > => ipc.invoke('agent:listPlans'),
 
-  closeAgentWindow: (): Promise<{ success: boolean }> => ipcRenderer.invoke('agent:closeWindow'),
+    openAgentWindow: (): Promise<{ success: boolean; error?: string }> => ipc.invoke('agent:openWindow'),
 
-  // 人格切换事件
-  onPersonaUpdated: (callback: (data: { level: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: { level: string }) => callback(data)
-    ipcRenderer.on('persona:updated', handler)
-    return () => ipcRenderer.removeListener('persona:updated', handler)
-  },
+    closeAgentWindow: (): Promise<{ success: boolean }> => ipc.invoke('agent:closeWindow'),
 
-  // ── Workflow System ──
-  listWorkflowDefinitions: (): Promise<any[]> => ipcRenderer.invoke('workflow:listDefinitions'),
-  getWorkflowDefinition: (id: string): Promise<any> => ipcRenderer.invoke('workflow:getDefinition', id),
-  listWorkflowRuns: (limit?: number): Promise<any[]> => ipcRenderer.invoke('workflow:listRuns', limit),
-  getWorkflowRun: (runId: string): Promise<any> => ipcRenderer.invoke('workflow:getRun', runId),
-  deleteWorkflowDefinition: (id: string): Promise<{ success: boolean }> => ipcRenderer.invoke('workflow:deleteDefinition', id),
-  saveWorkflowDefinition: (def: any): Promise<{ success: boolean }> => ipcRenderer.invoke('workflow:saveDefinition', def),
-  startWorkflow: (id: string): Promise<{ success: boolean; runId?: string; error?: string }> =>
-    ipcRenderer.invoke('workflow:startWorkflow', id),
-  enableWorkflowDefinition: (id: string): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('workflow:enableDefinition', id),
-  disableWorkflowDefinition: (id: string): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('workflow:disableDefinition', id),
-  stopWorkflowRun: (runId: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('workflow:stopRun', runId),
-  duplicateWorkflowDefinition: (id: string): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('workflow:duplicateDefinition', id),
-  deleteWorkflowRun: (runId: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('workflow:deleteRun', runId),
-  approveGate: (runId: string, stepId: string, decision: string, modifiedInput?: string): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('workflow:approveGate', runId, stepId, decision, modifiedInput),
+    onPersonaUpdated: (callback: (data: { level: string }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: { level: string }) => callback(data)
+      ipc.on('persona:updated', handler)
+      return () => {
+        ipc.removeListener('persona:updated', handler)
+      }
+    },
 
-  // ── Writing Status ──
-  getWritingStatus: (): Promise<{ stories: any[]; totalStories: number; totalScenes: number }> => ipcRenderer.invoke('writing:getStatus'),
+    // ── Workflow System ──
+    listWorkflowDefinitions: (): Promise<any[]> => ipc.invoke('workflow:listDefinitions'),
+    getWorkflowDefinition: (id: string): Promise<any> => ipc.invoke('workflow:getDefinition', id),
+    listWorkflowRuns: (limit?: number): Promise<any[]> => ipc.invoke('workflow:listRuns', limit),
+    getWorkflowRun: (runId: string): Promise<any> => ipc.invoke('workflow:getRun', runId),
+    deleteWorkflowDefinition: (id: string): Promise<{ success: boolean }> => ipc.invoke('workflow:deleteDefinition', id),
+    saveWorkflowDefinition: (def: any): Promise<{ success: boolean }> => ipc.invoke('workflow:saveDefinition', def),
+    startWorkflow: (id: string): Promise<{ success: boolean; runId?: string; error?: string }> => ipc.invoke('workflow:startWorkflow', id),
+    enableWorkflowDefinition: (id: string): Promise<{ success: boolean; error?: string }> => ipc.invoke('workflow:enableDefinition', id),
+    disableWorkflowDefinition: (id: string): Promise<{ success: boolean; error?: string }> => ipc.invoke('workflow:disableDefinition', id),
+    stopWorkflowRun: (runId: string): Promise<{ success: boolean; error?: string }> => ipc.invoke('workflow:stopRun', runId),
+    duplicateWorkflowDefinition: (id: string): Promise<{ success: boolean; error?: string }> =>
+      ipc.invoke('workflow:duplicateDefinition', id),
+    deleteWorkflowRun: (runId: string): Promise<{ success: boolean; error?: string }> => ipc.invoke('workflow:deleteRun', runId),
+    approveGate: (runId: string, stepId: string, decision: string, modifiedInput?: string): Promise<{ success: boolean; error?: string }> =>
+      ipc.invoke('workflow:approveGate', runId, stepId, decision, modifiedInput),
 
-  // ── Evolution ──
-  evolutionStatus: (): Promise<{ lastRun: number | null; consecutiveFailures: number; isBusy: boolean }> =>
-    ipcRenderer.invoke('evolution:status'),
-  evolutionTrigger: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('evolution:trigger'),
+    // ── Writing Status ──
+    getWritingStatus: (): Promise<{ stories: any[]; totalStories: number; totalScenes: number }> => ipc.invoke('writing:getStatus'),
+
+    // ── Evolution ──
+    evolutionStatus: (): Promise<{ lastRun: number | null; consecutiveFailures: number; isBusy: boolean }> =>
+      ipc.invoke('evolution:status'),
+    evolutionTrigger: (): Promise<{ success: boolean; error?: string }> => ipc.invoke('evolution:trigger'),
+  }
 }
 
+const electronAPI = createElectronAPI(ipcRenderer)
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)
 
-export type ElectronAPI = typeof electronAPI
+export type ElectronAPI = ReturnType<typeof createElectronAPI>

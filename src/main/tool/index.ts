@@ -20,7 +20,9 @@ import {
   enableWorkflowTool,
   disableWorkflowTool,
   cancelWorkflowRunTool,
+  rerunWorkflowTool,
   listWorkflowRunsTool,
+  autoScheduleWorkflowTool,
 } from './definitions/WorkflowTools'
 import { listSkillsTool, enableSkillTool, disableSkillTool } from './definitions/SkillTools'
 import { writingSystemTool } from './definitions/WritingTool'
@@ -70,6 +72,7 @@ export function getAllTools(): Tool[] {
     enableWorkflowTool as Tool,
     disableWorkflowTool as Tool,
     cancelWorkflowRunTool as Tool,
+    rerunWorkflowTool as Tool,
     listWorkflowRunsTool as Tool,
     listSkillsTool as Tool,
     enableSkillTool as Tool,

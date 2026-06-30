@@ -17,13 +17,19 @@ const READONLY_TOOLS = new Set([
   'centos_read_file',
   'centos_grep',
   'centos_search_files',
+  'get_workflow_status',
+  'list_workflow_runs',
+  'query_trends',
+  'file_info',
+  'search_files',
+  'read_multiple_files',
 ])
 
 describe('getAllTools', () => {
   const tools = getAllTools()
 
-  it('返回 32 个工具', () => {
-    expect(tools).toHaveLength(32)
+  it('返回 52 个工具', () => {
+    expect(tools).toHaveLength(52)
   })
 
   it('每个工具有 name/description/inputJSONSchema/handler', () => {

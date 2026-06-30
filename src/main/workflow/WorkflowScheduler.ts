@@ -65,6 +65,41 @@ export class WorkflowSchedulerV2 {
     return run
   }
 
+  /** 从历史运行重跑：基于上次 def 创建新 run（保留上下文） */
+  rerunRun(prevRunId: string, userInput?: string): WorkflowRun | null {
+    const prevRun = workflowStore.getRun(prevRunId)
+    if (!prevRun) return null
+    const def = workflowStore.getDefinition(prevRun.workflowDefId)
+    if (!def) return null
+    return this.startRun(def, userInput ?? prevRun.userInput)
+  }
+
+  /** 启动并等待完成（用于 AI 自主调度后同步获取结果） */
+  runAndWait(def: WorkflowDef, userInput?: string, timeoutMs = 120_000): Promise<WorkflowRun> {
+    const run = this.startRun(def, userInput)
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        cleanup()
+        const stored = workflowStore.getRun(run.runId)
+        resolve(stored ?? run)
+      }, timeoutMs)
+
+      const handler = (evt: any) => {
+        if (evt.runId === run.runId && (evt.status === 'done' || evt.status === 'failed' || evt.status === 'paused')) {
+          cleanup()
+          const stored = workflowStore.getRun(run.runId)
+          resolve(stored ?? run)
+        }
+      }
+      eventBus.on('workflow.run.updated', handler)
+
+      const cleanup = () => {
+        clearTimeout(timer)
+        eventBus.off('workflow.run.updated', handler)
+      }
+    })
+  }
+
   private async executeLoop(run: WorkflowRun, def: WorkflowDef, signal: AbortSignal): Promise<void> {
     const outputDir = resolveRunOutputDir(def, run)
     const stepDefs = [...def.steps]
@@ -125,9 +160,11 @@ export class WorkflowSchedulerV2 {
             if (result.status === 'done') {
               completed.add(sd.id)
               ctx.steps[sd.id] = { result: result.data, status: 'done' }
+              workflowStore.updateStep(run, sd.id, 'done', result.data)
             } else if (result.status === 'failed') {
               failures.add(sd.id)
               ctx.steps[sd.id] = { result: null, status: 'failed', error: result.error }
+              workflowStore.updateStep(run, sd.id, 'failed', undefined, result.error)
             } else if (result.status === 'skipped') {
               skipped.add(sd.id)
             }
