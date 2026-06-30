@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { VoiceInput } from './components/VoiceInput'
 import { TopBar } from './components/TopBar'
 import { Sidebar } from './components/Sidebar'
@@ -24,7 +25,15 @@ function App() {
     device.active,
     device.setError,
   )
-  const { uiState } = useSlots()
+  const { uiState, setActiveSlot } = useSlots()
+  // 点击 sidebar 会话时自动切回聊天面板
+  const onSelectChat = useCallback(
+    (sessionId: string) => {
+      handleSelectChat(sessionId)
+      setActiveSlot('chat')
+    },
+    [handleSelectChat, setActiveSlot],
+  )
   const { toolRunning, toolCompleted } = useTools()
   const { activePlan, otparStages } = usePlans()
   const {
@@ -47,7 +56,7 @@ function App() {
         agentState={agentState}
       />
       <div className="app-body">
-        <Sidebar sessions={sessions} activeSessionId={activeSessionId} onSelectChat={handleSelectChat} />
+        <Sidebar sessions={sessions} activeSessionId={activeSessionId} onSelectChat={onSelectChat} />
         <MainArea>
           {uiState.activeSlot === 'tool' ? (
             <ToolSlot running={toolRunning} completed={toolCompleted} />

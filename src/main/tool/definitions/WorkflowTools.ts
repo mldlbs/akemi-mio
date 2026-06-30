@@ -1,5 +1,5 @@
 import { buildTool, formatToolResult, formatToolError } from '../types'
-import { workflowStore } from '../../workflow/WorkflowStore'
+import { workflowStore } from '../../workflow/WorkflowStoreV2'
 import { getWorkflowScheduler } from '../../workflow/WorkflowScheduler'
 
 export const analyzeTaskTool = buildTool({

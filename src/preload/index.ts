@@ -301,6 +301,8 @@ const electronAPI = {
   duplicateWorkflowDefinition: (id: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('workflow:duplicateDefinition', id),
   deleteWorkflowRun: (runId: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('workflow:deleteRun', runId),
+  approveGate: (runId: string, stepId: string, decision: string, modifiedInput?: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('workflow:approveGate', runId, stepId, decision, modifiedInput),
 
   // ── Writing Status ──
   getWritingStatus: (): Promise<{ stories: any[]; totalStories: number; totalScenes: number }> => ipcRenderer.invoke('writing:getStatus'),

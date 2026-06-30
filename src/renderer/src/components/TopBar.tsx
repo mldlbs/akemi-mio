@@ -36,6 +36,13 @@ export function TopBar({ conversationActive, ttsPlaying, error, sessionHealth, p
 
       <div className="topbar-actions">
         <button
+          className={`cap-toggle-btn${uiState.activeSlot === 'chat' ? ' active' : ''}`}
+          onClick={() => setActiveSlot('chat')}
+          title="会话"
+        >
+          <i className="ri-chat-1-line" />
+        </button>
+        <button
           className={`cap-toggle-btn${uiState.activeSlot === 'otpar' ? ' active' : ''}`}
           onClick={() => setActiveSlot(uiState.activeSlot === 'otpar' ? 'chat' : 'otpar')}
           title="OTPAR 认知循环"

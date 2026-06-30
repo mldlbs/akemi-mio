@@ -97,7 +97,7 @@
         "allowedTools": [],
         "maxTurns": 5,
         "prompt": "输出最终内容包。要求严格按照以下 JSON 格式输出，不要用代码块包裹，直接输出纯 JSON：\n\n{\n  \"title\": \"文章标题\",\n  \"summary\": \"摘要\",\n  \"tags\": [\"标签1\", \"标签2\"],\n  \"platforms\": {\n    \"wechat_mp\": { \"title\": \"公众号标题\", \"body\": \"公众号版本正文\" },\n    \"zhihu\": { \"title\": \"知乎标题\", \"body\": \"知乎长文版本正文\" },\n    \"xiaohongshu\": { \"title\": \"小红书标题\", \"body\": \"小红书笔记正文\" },\n    \"weibo\": { \"title\": \"微博标题\", \"body\": \"微博正文\" },\n    \"bilibili\": { \"title\": \"B站标题\", \"body\": \"B站文案正文\" },\n    \"douyin\": { \"title\": \"抖音标题\", \"body\": \"抖音短视频脚本正文\" }\n  },\n  \"cta\": \"行动号召\",\n  \"metadata\": { \"word_count\": 0, \"content_type\": \"article\" }\n}\n\n注意：不要用对话语气，直接输出纯 JSON，不要加 ``` 代码块。",
-        "outputFile": "C:/Users/gf191/AppData/Roaming/akemi-mio/evolution_workspace/social/drafts/{DATE}-workflow-output/.meta"
+        "outputFile": "C:/Users/gf191/AppData/Roaming/akemi-mio/evolution_workspace/social/drafts/{STEP_ID}"
       },
       "dependsOn": ["s6"]
     }

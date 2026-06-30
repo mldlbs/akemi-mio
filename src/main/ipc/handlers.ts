@@ -11,7 +11,7 @@ import { checkForUpdates, downloadUpdate, quitAndInstall } from '../updater/Upda
 import { MetricsCollector } from '../observability/MetricsCollector'
 import { getRecentMessages, getSessions, getMessagesBySession } from '../db/messages'
 import { planManager as planManagerImport } from '../evolution'
-import { workflowStore } from '../workflow/WorkflowStore'
+import { workflowStore } from '../workflow/WorkflowStoreV2'
 import { getWorkflowScheduler } from '../workflow/WorkflowScheduler'
 import { createAgentWindow, closeAgentWindow } from '../core/Lifecycle'
 import { join } from 'path'
@@ -472,6 +472,17 @@ export function registerHandlers(
     try {
       const ok = workflowStore.deleteRun(runId)
       return { success: ok, error: ok ? undefined : '运行记录不存在' }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  // V2: 审批 Gate
+  ipcMain.handle('workflow:approveGate', async (_event, runId: string, stepId: string, decision: string, modifiedInput?: string) => {
+    try {
+      const scheduler = getWorkflowScheduler()
+      const ok = scheduler.approveGate(runId, stepId, decision, modifiedInput)
+      return { success: ok, error: ok ? undefined : '审批请求不存在' }
     } catch (err: any) {
       return { success: false, error: err.message }
     }
