@@ -35,6 +35,8 @@ export interface SpawnTaskOptions {
   allowedToolNames?: string[]
   /** 指定子 agent 角色名（定义见 roles.ts）。会拼入 system prompt 最前面 */
   role?: SubAgentRoleName
+  /** 工具调用进度回调 — 每次工具完成时触发 */
+  onProgress?: (msg: string) => void
 }
 
 // ── 单个子 Agent 实例 ──
@@ -56,6 +58,7 @@ class SubAgentInstance {
   private maxTurns: number
   private llmTimeoutMs: number
   private allowedToolNames?: string[]
+  private onProgress?: (msg: string) => void
 
   constructor(
     task: SubAgentTask,
@@ -72,6 +75,7 @@ class SubAgentInstance {
     this.maxTurns = options?.maxTurns ?? 15
     this.llmTimeoutMs = options?.llmTimeoutMs ?? 120000
     this.allowedToolNames = options?.allowedToolNames
+    this.onProgress = options?.onProgress
     this.llm = new LlmService(mcpManager)
     this.llm.setConfig(chatKey, codeKey)
     this.context = new ConversationContext(undefined, undefined, undefined, systemPrompt)
@@ -120,6 +124,8 @@ class SubAgentInstance {
         throw new DOMException('Aborted', 'AbortError')
       }
 
+      this.onProgress?.(`🤔 LLM 思考中… (第 ${i + 1}/${this.maxTurns} 轮)`)
+
       const result = await this.llm.chatWithTools(
         messages,
         `sub_${this.id}_${i}`,
@@ -160,6 +166,8 @@ class SubAgentInstance {
       try {
         const output = await this.mcpManager.callTool(call.name, call.arguments)
         this.emitToolCompleted(call.name, typeof output === 'string' ? output : JSON.stringify(output))
+        const snippet = (typeof output === 'string' ? output : JSON.stringify(output)).slice(0, 120)
+        this.onProgress?.(`🔧 ${call.name} → ${snippet}`)
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -167,6 +175,7 @@ class SubAgentInstance {
         })
       } catch (err: any) {
         this.emitToolFailed(call.name, err.message)
+        this.onProgress?.(`🔧 ${call.name} → ❌ ${err.message}`)
         messages.push({
           role: 'tool',
           tool_call_id: call.id,

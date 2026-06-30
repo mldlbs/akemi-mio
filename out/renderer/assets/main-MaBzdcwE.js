@@ -13835,6 +13835,18 @@ class ErrorBoundary extends reactExports.Component {
     return this.props.children;
   }
 }
+function useIPCEvent(register, handler, deps = []) {
+  const handlerRef = reactExports.useRef(handler);
+  handlerRef.current = handler;
+  reactExports.useEffect(() => {
+    const cleanup = register((data) => {
+      handlerRef.current(data);
+    });
+    return () => {
+      cleanup?.();
+    };
+  }, deps);
+}
 function stageIcon$1(status) {
   switch (status) {
     case "done":
@@ -13922,6 +13934,7 @@ function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, wfLoadin
   const [historyOpen, setHistoryOpen] = reactExports.useState(false);
   const [historyExpandedRun, setHistoryExpandedRun] = reactExports.useState(null);
   const [historyFilter, setHistoryFilter] = reactExports.useState("all");
+  const [showDisabled, setShowDisabled] = reactExports.useState(false);
   reactExports.useEffect(() => {
     const el = logBodyRef.current;
     if (!el) return;
@@ -13938,29 +13951,48 @@ function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, wfLoadin
     const id = setInterval(() => setElapsed(Date.now() - t0), 1e3);
     return () => clearInterval(id);
   }, [hasActive]);
-  reactExports.useEffect(() => {
-    const newLogs = { ...pipelineLogs };
-    let changed = false;
-    for (const run of workflowActiveRuns) {
-      const step = run.steps.find((s) => s.status === "running");
-      if (step?.agentResult) {
-        const prev = newLogs[run.runId] ?? [];
-        if (!prev.includes(step.agentResult)) {
-          newLogs[run.runId] = [...prev, `[${step.stepId}] ${step.agentResult}`].slice(-100);
-          changed = true;
-        } else if (prev.length === 0 && step.agentResult) {
-          newLogs[run.runId] = [`[${step.stepId}] ${step.agentResult}`];
-          changed = true;
-        }
-      }
-    }
-    if (changed) setPipelineLogs(newLogs);
-  }, [workflowActiveRuns]);
+  useIPCEvent(window.electronAPI.onWorkflowRunStep, (data) => {
+    if (!data.agentResult) return;
+    setPipelineLogs((prev) => {
+      const lines = prev[data.runId] ?? [];
+      const last = lines[lines.length - 1];
+      if (last === data.agentResult) return prev;
+      return { ...prev, [data.runId]: [...lines, data.agentResult].slice(-100) };
+    });
+  });
   reactExports.useEffect(() => {
     if (!runSuccess) return;
     const t = setTimeout(() => setRunSuccess(""), 2500);
     return () => clearTimeout(t);
   }, [runSuccess]);
+  const filteredDefs = reactExports.useMemo(() => {
+    if (!searchQuery.trim()) return workflowDefs;
+    const q = searchQuery.toLowerCase();
+    return workflowDefs.filter((d) => d.name?.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q));
+  }, [workflowDefs, searchQuery]);
+  const historyRuns = reactExports.useMemo(() => {
+    const completed = workflowRuns.filter((r) => r.status !== "running");
+    if (historyFilter === "all") return completed;
+    return completed.filter((r) => r.status === historyFilter);
+  }, [workflowRuns, historyFilter]);
+  const presets = reactExports.useMemo(() => {
+    if (workflowDefs.length > 0) return [];
+    return [
+      { id: "dev-pipeline-simple", name: "开发流水线·简", description: "代码审查 → 构建 → 部署", steps: 3, icon: "ri-code-line" },
+      {
+        id: "dev-pipeline-medium",
+        name: "开发流水线·中",
+        description: "需求分析 → 设计 → 编码 → 审查 → 部署",
+        steps: 5,
+        icon: "ri-code-box-line"
+      },
+      { id: "writing-pipeline", name: "写作流水线", description: "选题 → 大纲 → 写作 → 润色 → 发布", steps: 5, icon: "ri-pen-nib-line" }
+    ];
+  }, [workflowDefs]);
+  const showPipeline = workflowActiveRuns.length > 0;
+  const showHistory = workflowRuns.filter((r) => r.status !== "running").length > 0;
+  const enabledDefs = reactExports.useMemo(() => filteredDefs.filter((d) => d.enabled !== false), [filteredDefs]);
+  const disabledDefs = reactExports.useMemo(() => filteredDefs.filter((d) => d.enabled === false), [filteredDefs]);
   function fmtElapsed(ms) {
     if (!ms || ms < 0) return "";
     const s = Math.floor(ms / 1e3);
@@ -14004,33 +14036,6 @@ function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, wfLoadin
       }
     );
   }
-  const filteredDefs = reactExports.useMemo(() => {
-    if (!searchQuery.trim()) return workflowDefs;
-    const q = searchQuery.toLowerCase();
-    return workflowDefs.filter((d) => d.name?.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q));
-  }, [workflowDefs, searchQuery]);
-  const historyRuns = reactExports.useMemo(() => {
-    const completed = workflowRuns.filter((r) => r.status !== "running");
-    if (historyFilter === "all") return completed;
-    return completed.filter((r) => r.status === historyFilter);
-  }, [workflowRuns, historyFilter]);
-  const presets = reactExports.useMemo(() => {
-    if (workflowDefs.length > 0) return [];
-    return [
-      { id: "dev-pipeline-simple", name: "开发流水线·简", description: "代码审查 → 构建 → 部署", steps: 3, icon: "ri-code-line" },
-      {
-        id: "dev-pipeline-medium",
-        name: "开发流水线·中",
-        description: "需求分析 → 设计 → 编码 → 审查 → 部署",
-        steps: 5,
-        icon: "ri-code-box-line"
-      },
-      { id: "writing-pipeline", name: "写作流水线", description: "选题 → 大纲 → 写作 → 润色 → 发布", steps: 5, icon: "ri-pen-nib-line" }
-    ];
-  }, [workflowDefs]);
-  const showPipeline = workflowActiveRuns.length > 0;
-  const showDefs = filteredDefs.length > 0;
-  const showHistory = workflowRuns.filter((r) => r.status !== "running").length > 0;
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "workflow-slot workflow-slot-content", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(ErrorBoundary, { children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-action-bar", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-search-box", children: [
@@ -14182,7 +14187,7 @@ function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, wfLoadin
         ] })
       ] }, run.runId);
     }),
-    !showDefs && !searchQuery && presets.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "wf-presets", children: [
+    enabledDefs.length === 0 && disabledDefs.length === 0 && !searchQuery && presets.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "wf-presets", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-presets-header", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("h4", { className: "wf-section-title", style: { margin: 0 }, children: "快速开始" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-presets-hint", children: "选择一个预设模板，或自行创建" })
@@ -14214,137 +14219,207 @@ function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, wfLoadin
         p.id
       )) })
     ] }),
-    showDefs && filteredDefs.map((def) => {
+    enabledDefs.length > 0 && enabledDefs.map((def) => {
       const isExpanded = expandedDefs[def.id] ?? false;
       const isDefRunning = workflowActiveRuns.some((r) => r.workflowDefId === def.id);
-      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        "section",
-        {
-          className: `wf-plan-card${def.enabled === false ? " wf-plan-card-disabled" : ""}${isDefRunning ? " running" : ""}`,
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-plan-card-main", onClick: () => setExpandedDefs({ ...expandedDefs, [def.id]: !isExpanded }), children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-plan-header", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-plan-title-group", children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs("h3", { className: "wf-plan-title", children: [
-                    def.name,
-                    def.enabled === false && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-plan-badge wf-badge-disabled", children: "已停用" }),
-                    isDefRunning && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-plan-badge running", children: "运行中" })
-                  ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "wf-desc", children: def.description })
-                ] }),
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-plan-header-meta", children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "wf-plan-badge", children: [
-                    def.steps.length,
-                    " 步"
-                  ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `ri-arrow-${isExpanded ? "up" : "down"}-s-line wf-plan-expand-icon` })
-                ] })
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: `wf-plan-card${isDefRunning ? " running" : ""}`, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-plan-card-main", onClick: () => setExpandedDefs({ ...expandedDefs, [def.id]: !isExpanded }), children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-plan-header", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-plan-title-group", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("h3", { className: "wf-plan-title", children: [
+                def.name,
+                isDefRunning && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-plan-badge running", children: "运行中" })
               ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-meta-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "wf-meta-time", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-time-line" }),
-                " ",
-                fmtTime(def.updatedAt || def.createdAt)
-              ] }) }),
-              isExpanded && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "wf-steps", children: def.steps.map((s) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "wf-step wf-step-pending", style: { opacity: 0.7 }, children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-circle-line" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-step-text", children: s.name }),
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: `wf-step-handler-tag ${handlerClass(s.handler)}`, children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: handlerIcon(s.handler) }),
-                  " ",
-                  handlerLabel(s.handler)
-                ] })
-              ] }, s.id)) })
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "wf-desc", children: def.description })
             ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-summary-row", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "button",
-                {
-                  className: "wf-editor-btn wf-editor-btn-edit",
-                  onClick: (e) => {
-                    e.stopPropagation();
-                    setEditDef(def);
-                    setView("editor");
-                  },
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-edit-line" }),
-                    " 编辑"
-                  ]
-                }
-              ),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "button",
-                {
-                  className: "wf-editor-btn wf-editor-btn-run-plan",
-                  disabled: def.enabled === false,
-                  onClick: (e) => {
-                    e.stopPropagation();
-                    startRun(def.id);
-                  },
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-play-circle-line" }),
-                    " 运行"
-                  ]
-                }
-              ),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "button",
-                {
-                  className: "wf-editor-btn wf-editor-btn-dup",
-                  onClick: async (e) => {
-                    e.stopPropagation();
-                    const r = await window.electronAPI.duplicateWorkflowDefinition(def.id);
-                    if (r?.success) {
-                      setRunSuccess("已复制");
-                      onRefreshDefs?.();
-                    } else setRunError(r?.error ?? "复制失败");
-                  },
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-file-copy-line" }),
-                    " 复制"
-                  ]
-                }
-              ),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "button",
-                {
-                  className: "wf-editor-btn wf-editor-btn-toggle",
-                  onClick: async (e) => {
-                    e.stopPropagation();
-                    setRunError("");
-                    const fn = def.enabled === false ? window.electronAPI.enableWorkflowDefinition : window.electronAPI.disableWorkflowDefinition;
-                    const result = await fn(def.id);
-                    if (result?.success) onRefreshDefs?.();
-                    else setRunError(result?.error ?? "操作失败");
-                  },
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `ri-${def.enabled === false ? "play-circle" : "pause-circle"}-line` }),
-                    def.enabled === false ? "启用" : "停用"
-                  ]
-                }
-              ),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "button",
-                {
-                  className: "wf-editor-btn wf-editor-btn-del",
-                  onClick: async (e) => {
-                    e.stopPropagation();
-                    if (!confirm(`确认删除工作流「${def.name}」？`)) return;
-                    await window.electronAPI.deleteWorkflowDefinition(def.id);
-                    onRefreshDefs?.();
-                  },
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-delete-bin-line" }),
-                    " 删除"
-                  ]
-                }
-              )
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-plan-header-meta", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "wf-plan-badge", children: [
+                def.steps.length,
+                " 步"
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `ri-arrow-${isExpanded ? "up" : "down"}-s-line wf-plan-expand-icon` })
             ] })
-          ]
-        },
-        def.id
-      );
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-meta-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "wf-meta-time", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-time-line" }),
+            " ",
+            fmtTime(def.updatedAt || def.createdAt)
+          ] }) }),
+          isExpanded && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "wf-steps", children: def.steps.map((s) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "wf-step wf-step-pending", style: { opacity: 0.7 }, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-circle-line" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-step-text", children: s.name }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: `wf-step-handler-tag ${handlerClass(s.handler)}`, children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: handlerIcon(s.handler) }),
+              " ",
+              handlerLabel(s.handler)
+            ] })
+          ] }, s.id)) })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-summary-row", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "button",
+            {
+              className: "wf-editor-btn wf-editor-btn-edit",
+              onClick: (e) => {
+                e.stopPropagation();
+                setEditDef(def);
+                setView("editor");
+              },
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-edit-line" }),
+                " 编辑"
+              ]
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "button",
+            {
+              className: "wf-editor-btn wf-editor-btn-run-plan",
+              onClick: (e) => {
+                e.stopPropagation();
+                startRun(def.id);
+              },
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-play-circle-line" }),
+                " 运行"
+              ]
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "button",
+            {
+              className: "wf-editor-btn wf-editor-btn-dup",
+              onClick: async (e) => {
+                e.stopPropagation();
+                const r = await window.electronAPI.duplicateWorkflowDefinition(def.id);
+                if (r?.success) {
+                  setRunSuccess("已复制");
+                  onRefreshDefs?.();
+                } else setRunError(r?.error ?? "复制失败");
+              },
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-file-copy-line" }),
+                " 复制"
+              ]
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "button",
+            {
+              className: "wf-editor-btn wf-editor-btn-toggle",
+              onClick: async (e) => {
+                e.stopPropagation();
+                setRunError("");
+                const result = await window.electronAPI.disableWorkflowDefinition(def.id);
+                if (result?.success) onRefreshDefs?.();
+                else setRunError(result?.error ?? "操作失败");
+              },
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-pause-circle-line" }),
+                " 停用"
+              ]
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "button",
+            {
+              className: "wf-editor-btn wf-editor-btn-del",
+              onClick: async (e) => {
+                e.stopPropagation();
+                if (!confirm(`确认删除工作流「${def.name}」？`)) return;
+                await window.electronAPI.deleteWorkflowDefinition(def.id);
+                onRefreshDefs?.();
+              },
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-delete-bin-line" }),
+                " 删除"
+              ]
+            }
+          )
+        ] })
+      ] }, def.id);
     }),
-    !showDefs && searchQuery && workflowDefs.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workflow-empty", children: [
+    disabledDefs.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "wf-history", style: { marginTop: 8 }, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "wf-history-toggle", onClick: () => setShowDisabled(!showDisabled), children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-history-toggle-left", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `ri-arrow-${showDisabled ? "down" : "right"}-s-line` }),
+        "停用工作流",
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-history-count", children: disabledDefs.length })
+      ] }) }),
+      showDisabled && disabledDefs.map((def) => {
+        const isExpanded = expandedDefs[def.id] ?? false;
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "wf-plan-card wf-plan-card-disabled", style: { marginTop: 8 }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-plan-card-main", onClick: () => setExpandedDefs({ ...expandedDefs, [def.id]: !isExpanded }), children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-plan-header", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-plan-title-group", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("h3", { className: "wf-plan-title", children: [
+                def.name,
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-plan-badge wf-badge-disabled", children: "已停用" })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "wf-desc", children: def.description })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-plan-header-meta", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "wf-plan-badge", children: [
+                def.steps.length,
+                " 步"
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `ri-arrow-${isExpanded ? "up" : "down"}-s-line wf-plan-expand-icon` })
+            ] })
+          ] }) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-summary-row", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                className: "wf-editor-btn wf-editor-btn-dup",
+                onClick: async (e) => {
+                  e.stopPropagation();
+                  const r = await window.electronAPI.duplicateWorkflowDefinition(def.id);
+                  if (r?.success) {
+                    setRunSuccess("已复制");
+                    onRefreshDefs?.();
+                  } else setRunError(r?.error ?? "复制失败");
+                },
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-file-copy-line" }),
+                  " 复制"
+                ]
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                className: "wf-editor-btn wf-editor-btn-toggle",
+                onClick: async (e) => {
+                  e.stopPropagation();
+                  const result = await window.electronAPI.enableWorkflowDefinition(def.id);
+                  if (result?.success) onRefreshDefs?.();
+                  else setRunError(result?.error ?? "操作失败");
+                },
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-play-circle-line" }),
+                  " 启用"
+                ]
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                className: "wf-editor-btn wf-editor-btn-del",
+                onClick: async (e) => {
+                  e.stopPropagation();
+                  if (!confirm(`确认删除工作流「${def.name}」？`)) return;
+                  await window.electronAPI.deleteWorkflowDefinition(def.id);
+                  onRefreshDefs?.();
+                },
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-delete-bin-line" }),
+                  " 删除"
+                ]
+              }
+            )
+          ] })
+        ] }, def.id);
+      })
+    ] }),
+    enabledDefs.length === 0 && disabledDefs.length === 0 && searchQuery && workflowDefs.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workflow-empty", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "workflow-empty-icon", children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-search-line" }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "workflow-empty-text", children: "没有匹配的工作流" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workflow-empty-sub", children: [
@@ -14352,7 +14427,7 @@ function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, wfLoadin
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "wf-search-clear-link", onClick: () => setSearchQuery(""), children: "清除搜索" })
       ] })
     ] }),
-    !showDefs && !showHistory && !searchQuery && presets.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workflow-empty", children: [
+    enabledDefs.length === 0 && disabledDefs.length === 0 && !showHistory && !searchQuery && presets.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "workflow-empty", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "workflow-empty-icon", children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-file-list-3-line" }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "workflow-empty-text", children: "还没有工作流" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "workflow-empty-sub", children: "点击上方「新建工作流」创建，或让 AI 通过工具自动生成" })
@@ -14889,18 +14964,6 @@ function SettingsModal({ open, onClose }) {
       ] })
     ] })
   ] }) });
-}
-function useIPCEvent(register, handler, deps = []) {
-  const handlerRef = reactExports.useRef(handler);
-  handlerRef.current = handler;
-  reactExports.useEffect(() => {
-    const cleanup = register((data) => {
-      handlerRef.current(data);
-    });
-    return () => {
-      cleanup?.();
-    };
-  }, deps);
 }
 function useTimerControl() {
   const timerRef = reactExports.useRef(null);

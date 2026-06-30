@@ -1,4 +1,5 @@
 "use strict";
+const _commonjsHelpers = require("./_commonjsHelpers-DHfMLFPC.js");
 const require$$0$2 = require("node:util");
 const require$$1$1 = require("node:stream");
 const require$$0 = require("child_process");
@@ -26,9 +27,6 @@ function _mergeNamespaces(n, m) {
     }
   }
   return Object.freeze(Object.defineProperty(n, Symbol.toStringTag, { value: "Module" }));
-}
-function getDefaultExportFromCjs(x) {
-  return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, "default") ? x["default"] : x;
 }
 /*!
   Copyright 2013 Lovell Fuller and others.
@@ -6468,7 +6466,7 @@ function requireLib() {
   return lib;
 }
 var libExports = requireLib();
-const index = /* @__PURE__ */ getDefaultExportFromCjs(libExports);
+const index = /* @__PURE__ */ _commonjsHelpers.getDefaultExportFromCjs(libExports);
 const index$1 = /* @__PURE__ */ _mergeNamespaces({
   __proto__: null,
   default: index

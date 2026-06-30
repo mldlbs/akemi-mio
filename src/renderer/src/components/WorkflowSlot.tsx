@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { WorkflowEditor } from './WorkflowEditor'
 import { ErrorBoundary } from './ErrorBoundary'
+import { useIPCEvent } from '../hooks/useIPCEvent'
 
 type ViewMode = 'list' | 'editor'
 type HistoryFilter = 'all' | 'done' | 'failed'
@@ -114,6 +115,9 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
   const [historyExpandedRun, setHistoryExpandedRun] = useState<string | null>(null)
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all')
 
+  // ── 停用工作流折叠 ──
+  const [showDisabled, setShowDisabled] = useState(false)
+
   // Auto-scroll log only if user hasn't scrolled up
   useEffect(() => {
     const el = logBodyRef.current
@@ -134,25 +138,17 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
     return () => clearInterval(id)
   }, [hasActive])
 
-  // 收集 pipeline 实时日志
-  useEffect(() => {
-    const newLogs: Record<string, string[]> = { ...pipelineLogs }
-    let changed = false
-    for (const run of workflowActiveRuns) {
-      const step = run.steps.find((s: any) => s.status === 'running')
-      if (step?.agentResult) {
-        const prev = newLogs[run.runId] ?? []
-        if (!prev.includes(step.agentResult)) {
-          newLogs[run.runId] = [...prev, `[${step.stepId}] ${step.agentResult}`].slice(-100)
-          changed = true
-        } else if (prev.length === 0 && step.agentResult) {
-          newLogs[run.runId] = [`[${step.stepId}] ${step.agentResult}`]
-          changed = true
-        }
-      }
-    }
-    if (changed) setPipelineLogs(newLogs)
-  }, [workflowActiveRuns])
+  // 收集 pipeline 实时日志 — 从步骤事件直接累积，不掉帧
+  useIPCEvent(window.electronAPI.onWorkflowRunStep, (data) => {
+    if (!data.agentResult) return
+    setPipelineLogs((prev) => {
+      const lines = prev[data.runId] ?? []
+      const last = lines[lines.length - 1]
+      // 去重：完全相同的最后一行不追加
+      if (last === data.agentResult) return prev
+      return { ...prev, [data.runId]: [...lines, data.agentResult].slice(-100) }
+    })
+  })
 
   // 2秒后自动清除成功/失败提示
   useEffect(() => {
@@ -160,6 +156,41 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
     const t = setTimeout(() => setRunSuccess(''), 2500)
     return () => clearTimeout(t)
   }, [runSuccess])
+
+  const filteredDefs = useMemo(() => {
+    if (!searchQuery.trim()) return workflowDefs
+    const q = searchQuery.toLowerCase()
+    return workflowDefs.filter((d) => d.name?.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q))
+  }, [workflowDefs, searchQuery])
+
+  const historyRuns = useMemo(() => {
+    const completed = workflowRuns.filter((r: any) => r.status !== 'running')
+    if (historyFilter === 'all') return completed
+    return completed.filter((r: any) => r.status === historyFilter)
+  }, [workflowRuns, historyFilter])
+
+  // Preset templates to suggest when empty
+  const presets = useMemo(() => {
+    if (workflowDefs.length > 0) return []
+    return [
+      { id: 'dev-pipeline-simple', name: '开发流水线·简', description: '代码审查 → 构建 → 部署', steps: 3, icon: 'ri-code-line' },
+      {
+        id: 'dev-pipeline-medium',
+        name: '开发流水线·中',
+        description: '需求分析 → 设计 → 编码 → 审查 → 部署',
+        steps: 5,
+        icon: 'ri-code-box-line',
+      },
+      { id: 'writing-pipeline', name: '写作流水线', description: '选题 → 大纲 → 写作 → 润色 → 发布', steps: 5, icon: 'ri-pen-nib-line' },
+    ]
+  }, [workflowDefs])
+
+  const showPipeline = workflowActiveRuns.length > 0
+  const showHistory = workflowRuns.filter((r: any) => r.status !== 'running').length > 0
+
+  // 按启用/禁用分组
+  const enabledDefs = useMemo(() => filteredDefs.filter((d) => d.enabled !== false), [filteredDefs])
+  const disabledDefs = useMemo(() => filteredDefs.filter((d) => d.enabled === false), [filteredDefs])
 
   function fmtElapsed(ms: number): string {
     if (!ms || ms < 0) return ''
@@ -206,38 +237,6 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
       />
     )
   }
-
-  const filteredDefs = useMemo(() => {
-    if (!searchQuery.trim()) return workflowDefs
-    const q = searchQuery.toLowerCase()
-    return workflowDefs.filter((d) => d.name?.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q))
-  }, [workflowDefs, searchQuery])
-
-  const historyRuns = useMemo(() => {
-    const completed = workflowRuns.filter((r: any) => r.status !== 'running')
-    if (historyFilter === 'all') return completed
-    return completed.filter((r: any) => r.status === historyFilter)
-  }, [workflowRuns, historyFilter])
-
-  // Preset templates to suggest when empty
-  const presets = useMemo(() => {
-    if (workflowDefs.length > 0) return []
-    return [
-      { id: 'dev-pipeline-simple', name: '开发流水线·简', description: '代码审查 → 构建 → 部署', steps: 3, icon: 'ri-code-line' },
-      {
-        id: 'dev-pipeline-medium',
-        name: '开发流水线·中',
-        description: '需求分析 → 设计 → 编码 → 审查 → 部署',
-        steps: 5,
-        icon: 'ri-code-box-line',
-      },
-      { id: 'writing-pipeline', name: '写作流水线', description: '选题 → 大纲 → 写作 → 润色 → 发布', steps: 5, icon: 'ri-pen-nib-line' },
-    ]
-  }, [workflowDefs])
-
-  const showPipeline = workflowActiveRuns.length > 0
-  const showDefs = filteredDefs.length > 0
-  const showHistory = workflowRuns.filter((r: any) => r.status !== 'running').length > 0
 
   return (
     <div className="workflow-slot workflow-slot-content">
@@ -410,7 +409,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
           })}
 
         {/* ── 快速启动模板 ── */}
-        {!showDefs && !searchQuery && presets.length > 0 && (
+        {enabledDefs.length === 0 && disabledDefs.length === 0 && !searchQuery && presets.length > 0 && (
           <section className="wf-presets">
             <div className="wf-presets-header">
               <h4 className="wf-section-title" style={{ margin: 0 }}>
@@ -446,23 +445,19 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
           </section>
         )}
 
-        {/* ── 工作流定义列表 ── */}
-        {showDefs &&
-          filteredDefs.map((def: any) => {
+        {/* ── 启用的工作流 ── */}
+        {enabledDefs.length > 0 &&
+          enabledDefs.map((def: any) => {
             const isExpanded = expandedDefs[def.id] ?? false
             const isDefRunning = workflowActiveRuns.some((r: any) => r.workflowDefId === def.id)
 
             return (
-              <section
-                key={def.id}
-                className={`wf-plan-card${def.enabled === false ? ' wf-plan-card-disabled' : ''}${isDefRunning ? ' running' : ''}`}
-              >
+              <section key={def.id} className={`wf-plan-card${isDefRunning ? ' running' : ''}`}>
                 <div className="wf-plan-card-main" onClick={() => setExpandedDefs({ ...expandedDefs, [def.id]: !isExpanded })}>
                   <div className="wf-plan-header">
                     <div className="wf-plan-title-group">
                       <h3 className="wf-plan-title">
                         {def.name}
-                        {def.enabled === false && <span className="wf-plan-badge wf-badge-disabled">已停用</span>}
                         {isDefRunning && <span className="wf-plan-badge running">运行中</span>}
                       </h3>
                       <p className="wf-desc">{def.description}</p>
@@ -504,7 +499,6 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                   </button>
                   <button
                     className="wf-editor-btn wf-editor-btn-run-plan"
-                    disabled={def.enabled === false}
                     onClick={(e) => {
                       e.stopPropagation()
                       startRun(def.id)
@@ -530,15 +524,12 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                     onClick={async (e) => {
                       e.stopPropagation()
                       setRunError('')
-                      const fn =
-                        def.enabled === false ? window.electronAPI.enableWorkflowDefinition : window.electronAPI.disableWorkflowDefinition
-                      const result = await fn(def.id)
+                      const result = await window.electronAPI.disableWorkflowDefinition(def.id)
                       if (result?.success) onRefreshDefs?.()
                       else setRunError(result?.error ?? '操作失败')
                     }}
                   >
-                    <i className={`ri-${def.enabled === false ? 'play-circle' : 'pause-circle'}-line`} />
-                    {def.enabled === false ? '启用' : '停用'}
+                    <i className="ri-pause-circle-line" /> 停用
                   </button>
                   <button
                     className="wf-editor-btn wf-editor-btn-del"
@@ -556,8 +547,82 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
             )
           })}
 
+        {/* ── 停用工作流折叠区 ── */}
+        {disabledDefs.length > 0 && (
+          <section className="wf-history" style={{ marginTop: 8 }}>
+            <button className="wf-history-toggle" onClick={() => setShowDisabled(!showDisabled)}>
+              <div className="wf-history-toggle-left">
+                <i className={`ri-arrow-${showDisabled ? 'down' : 'right'}-s-line`} />
+                停用工作流
+                <span className="wf-history-count">{disabledDefs.length}</span>
+              </div>
+            </button>
+
+            {showDisabled &&
+              disabledDefs.map((def: any) => {
+                const isExpanded = expandedDefs[def.id] ?? false
+                return (
+                  <section key={def.id} className="wf-plan-card wf-plan-card-disabled" style={{ marginTop: 8 }}>
+                    <div className="wf-plan-card-main" onClick={() => setExpandedDefs({ ...expandedDefs, [def.id]: !isExpanded })}>
+                      <div className="wf-plan-header">
+                        <div className="wf-plan-title-group">
+                          <h3 className="wf-plan-title">
+                            {def.name}
+                            <span className="wf-plan-badge wf-badge-disabled">已停用</span>
+                          </h3>
+                          <p className="wf-desc">{def.description}</p>
+                        </div>
+                        <div className="wf-plan-header-meta">
+                          <span className="wf-plan-badge">{def.steps.length} 步</span>
+                          <i className={`ri-arrow-${isExpanded ? 'up' : 'down'}-s-line wf-plan-expand-icon`} />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="wf-summary-row">
+                      <button
+                        className="wf-editor-btn wf-editor-btn-dup"
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          const r = await window.electronAPI.duplicateWorkflowDefinition(def.id)
+                          if (r?.success) {
+                            setRunSuccess('已复制')
+                            onRefreshDefs?.()
+                          } else setRunError(r?.error ?? '复制失败')
+                        }}
+                      >
+                        <i className="ri-file-copy-line" /> 复制
+                      </button>
+                      <button
+                        className="wf-editor-btn wf-editor-btn-toggle"
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          const result = await window.electronAPI.enableWorkflowDefinition(def.id)
+                          if (result?.success) onRefreshDefs?.()
+                          else setRunError(result?.error ?? '操作失败')
+                        }}
+                      >
+                        <i className="ri-play-circle-line" /> 启用
+                      </button>
+                      <button
+                        className="wf-editor-btn wf-editor-btn-del"
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          if (!confirm(`确认删除工作流「${def.name}」？`)) return
+                          await window.electronAPI.deleteWorkflowDefinition(def.id)
+                          onRefreshDefs?.()
+                        }}
+                      >
+                        <i className="ri-delete-bin-line" /> 删除
+                      </button>
+                    </div>
+                  </section>
+                )
+              })}
+          </section>
+        )}
+
         {/* ── 搜索无结果 ── */}
-        {!showDefs && searchQuery && workflowDefs.length > 0 && (
+        {enabledDefs.length === 0 && disabledDefs.length === 0 && searchQuery && workflowDefs.length > 0 && (
           <div className="workflow-empty">
             <div className="workflow-empty-icon">
               <i className="ri-search-line" />
@@ -573,7 +638,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
         )}
 
         {/* ── 全空状态 ── */}
-        {!showDefs && !showHistory && !searchQuery && presets.length === 0 && (
+        {enabledDefs.length === 0 && disabledDefs.length === 0 && !showHistory && !searchQuery && presets.length === 0 && (
           <div className="workflow-empty">
             <div className="workflow-empty-icon">
               <i className="ri-file-list-3-line" />

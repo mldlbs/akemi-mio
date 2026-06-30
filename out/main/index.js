@@ -25,11 +25,11 @@ const electron = require("electron");
 const path$1 = require("path");
 const fs = require("fs");
 const Logger = require("./chunks/Logger-BD3PzZBa.js");
-const events$1 = require("events");
+const require$$3 = require("events");
 const require$$0 = require("child_process");
 const https = require("https");
 const http = require("http");
-const util = require("util");
+const require$$3$1 = require("util");
 const os = require("os");
 const ExcelJS = require("exceljs");
 const ssh2 = require("ssh2");
@@ -181,7 +181,7 @@ class SubscriptionTracker {
   }
 }
 class EventBus {
-  emitter = new events$1.EventEmitter();
+  emitter = new require$$3.EventEmitter();
   static instance;
   static MAX_LISTENERS = 50;
   /** priority-ordered listeners per event */
@@ -1020,7 +1020,7 @@ const listFilesTool = buildTool({
   },
   isReadOnly: true
 });
-const asyncExec = util.promisify(require$$0.exec);
+const asyncExec = require$$3$1.promisify(require$$0.exec);
 const MAX_BUFFER = 1024 * 1024;
 const MAX_OUTPUT = 3e3;
 const ALLOWED_PREFIXES = [
@@ -2058,6 +2058,14 @@ class WorkflowScheduler {
               if (sd.config.llmTimeoutMs !== void 0) {
                 subOptions.llmTimeoutMs = sd.config.llmTimeoutMs;
               }
+              subOptions.onProgress = (msg) => {
+                eventBus.emit("workflow.run.step", {
+                  runId: run.runId,
+                  stepId: sd.id,
+                  status: "running",
+                  agentResult: msg
+                });
+              };
               const depContext = this.buildDependencyContext(sd, run);
               const basePrompt = sd.config.prompt || sd.description;
               const withInput = basePrompt.replace(
@@ -3233,7 +3241,7 @@ const cardGeneratorTool = buildTool({
       const tags = args.tags ? args.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
       const { base64: fontBase64, name: fontName } = loadFont();
       const svg = buildCardSVG({ title, description: description2, severity, category, tags, fontBase64, fontName });
-      const sharp = (await Promise.resolve().then(() => require("./chunks/index-sEO6DPNC.js")).then((n) => n.index)).default;
+      const sharp = (await Promise.resolve().then(() => require("./chunks/index-UwJWFVbw.js")).then((n) => n.index)).default;
       const buf = await sharp(Buffer.from(svg)).png().toBuffer();
       const cardsDir = path$1.join(WORKSPACE.cache, "cards");
       if (!fs.existsSync(cardsDir)) {
@@ -3834,6 +3842,219 @@ ${lines.join("\n")}`);
   },
   isReadOnly: true
 });
+const moveFileTool = buildTool({
+  name: "move_file",
+  description: "移动或重命名文件。source 和 target 必须在同一 workspace 内。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      source: { type: "string", description: "源文件路径" },
+      target: { type: "string", description: "目标路径（新位置/新名称）" },
+      workspace: { type: "string", description: '目标工作区，"project"（默认）、"evolution"、"mcp"' }
+    },
+    required: ["source", "target"]
+  },
+  handler: async (args) => {
+    try {
+      const ws = inferWorkspace(args.source, args.workspace);
+      const src = safeWorkspacePath(args.source, ws);
+      const dst = safeWorkspacePath(args.target, ws);
+      if (!fs.existsSync(src)) throw new Error(`源文件不存在: ${wsLabel(ws)}/${args.source}`);
+      const dstDir = path$1.dirname(dst);
+      if (!fs.existsSync(dstDir)) fs.mkdirSync(dstDir, { recursive: true });
+      fs.renameSync(src, dst);
+      return formatToolResult(`已移动 ${wsLabel(ws)}/${args.source} → ${args.target}`);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: false
+});
+const copyFileTool = buildTool({
+  name: "copy_file",
+  description: "复制文件。source 和 target 必须在同一 workspace 内。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      source: { type: "string", description: "源文件路径" },
+      target: { type: "string", description: "目标路径" },
+      workspace: { type: "string", description: '目标工作区，"project"（默认）、"evolution"、"mcp"' }
+    },
+    required: ["source", "target"]
+  },
+  handler: async (args) => {
+    try {
+      const ws = inferWorkspace(args.source, args.workspace);
+      const src = safeWorkspacePath(args.source, ws);
+      const dst = safeWorkspacePath(args.target, ws);
+      if (!fs.existsSync(src)) throw new Error(`源文件不存在: ${wsLabel(ws)}/${args.source}`);
+      const dstDir = path$1.dirname(dst);
+      if (!fs.existsSync(dstDir)) fs.mkdirSync(dstDir, { recursive: true });
+      fs.copyFileSync(src, dst);
+      return formatToolResult(`已复制 ${wsLabel(ws)}/${args.source} → ${args.target}`);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: false
+});
+const deleteFileTool = buildTool({
+  name: "delete_file",
+  description: "删除文件或空目录。谨慎操作，不可恢复。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "要删除的文件或空目录路径" },
+      workspace: { type: "string", description: '目标工作区，"project"（默认）、"evolution"、"mcp"' }
+    },
+    required: ["path"]
+  },
+  handler: async (args) => {
+    try {
+      const ws = inferWorkspace(args.path, args.workspace);
+      const p = safeWorkspacePath(args.path, ws);
+      if (!fs.existsSync(p)) throw new Error(`路径不存在: ${wsLabel(ws)}/${args.path}`);
+      fs.unlinkSync(p);
+      return formatToolResult(`已删除 ${wsLabel(ws)}/${args.path}`);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: false
+});
+const fileInfoTool = buildTool({
+  name: "file_info",
+  description: "获取文件或目录的详细信息（大小、修改时间、类型等）",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "文件或目录路径" },
+      workspace: { type: "string", description: '目标工作区，"project"（默认）、"evolution"、"mcp"' }
+    },
+    required: ["path"]
+  },
+  handler: async (args) => {
+    try {
+      const ws = inferWorkspace(args.path, args.workspace);
+      const p = safeWorkspacePath(args.path, ws);
+      if (!fs.existsSync(p)) throw new Error(`路径不存在: ${wsLabel(ws)}/${args.path}`);
+      const s = fs.statSync(p);
+      const isDir = s.isDirectory();
+      const lines = [
+        `路径: ${wsLabel(ws)}/${args.path}`,
+        `类型: ${isDir ? "目录" : "文件"}`,
+        `大小: ${isDir ? "-" : `${(s.size / 1024).toFixed(1)} KB`}`,
+        `创建时间: ${s.birthtime.toLocaleString("zh-CN")}`,
+        `修改时间: ${s.mtime.toLocaleString("zh-CN")}`,
+        `权限: ${s.mode.toString(8).slice(-3)}`
+      ];
+      if (isDir) {
+        const entries = fs.readdirSync(p);
+        lines.push(`子项数: ${entries.length}`);
+      }
+      return formatToolResult(lines.join("\n"));
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: true
+});
+const searchFilesGlobTool = buildTool({
+  name: "search_files",
+  description: "按名称模式查找文件（支持 glob 通配符如 *.ts, **/*.test.ts）。返回匹配文件列表。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      pattern: { type: "string", description: '文件名模式，如 "*.ts"、"**/*.test.ts"、"utils/**"' },
+      workspace: { type: "string", description: '目标工作区，"project"（默认）、"evolution"、"mcp"' },
+      maxResults: { type: "number", description: "最大返回数，默认 100" }
+    },
+    required: ["pattern"]
+  },
+  handler: async (args) => {
+    try {
+      const base = resolveWorkspace(args.workspace || "project");
+      const { globSync } = await Promise.resolve().then(() => require("./chunks/glob-CHVItigs.js")).then((n) => n.glob);
+      const matches = globSync(args.pattern, { cwd: base, dot: false });
+      if (!matches.length) return formatToolResult("未找到匹配文件");
+      const max = args.maxResults ?? 100;
+      const sliced = matches.slice(0, max);
+      const lines = sliced.map((f) => `${f}`);
+      const summary = matches.length > max ? `
+...及另外 ${matches.length - max} 个匹配文件` : "";
+      return formatToolResult(`【匹配文件】
+${lines.join("\n")}${summary}`);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: true
+});
+const appendFileTool = buildTool({
+  name: "append_file",
+  description: "向文件追加内容。文件不存在则自动创建。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "文件路径" },
+      content: { type: "string", description: "要追加的内容" },
+      workspace: { type: "string", description: '目标工作区，"project"（默认）、"evolution"、"mcp"' }
+    },
+    required: ["path", "content"]
+  },
+  handler: async (args) => {
+    try {
+      const ws = inferWorkspace(args.path, args.workspace);
+      const p = safeWorkspacePath(args.path, ws);
+      const dir = path$1.dirname(p);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.appendFileSync(p, args.content, "utf-8");
+      return formatToolResult(`已追加内容到 ${wsLabel(ws)}/${args.path}`);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: false
+});
+const readMultipleFilesTool = buildTool({
+  name: "read_multiple_files",
+  description: "一次读取多个文件内容。适合同时查看几个关联文件。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      paths: {
+        type: "array",
+        items: { type: "string" },
+        description: "文件路径列表，最多 10 个文件"
+      },
+      workspace: { type: "string", description: '目标工作区，"project"（默认）、"evolution"、"mcp"' }
+    },
+    required: ["paths"]
+  },
+  handler: async (args) => {
+    try {
+      if (!args.paths?.length) return formatToolError("paths 不能为空");
+      if (args.paths.length > 10) return formatToolError("一次性最多读取 10 个文件");
+      const ws = inferWorkspace(args.paths[0], args.workspace);
+      const parts = [];
+      for (const p of args.paths) {
+        const fp = safeWorkspacePath(p, ws);
+        if (!fs.existsSync(fp)) {
+          parts.push(`=== ${p} ===
+<文件不存在>`);
+          continue;
+        }
+        const content = fs.readFileSync(fp, "utf-8");
+        parts.push(`=== ${p} ===
+${content}`);
+      }
+      return formatToolResult(parts.join("\n\n"));
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: true
+});
 function getAllTools() {
   return [
     readFileTool,
@@ -3878,7 +4099,15 @@ function getAllTools() {
     centosGrepTool,
     centosSearchFilesTool,
     socialPipelineTool,
-    queryTrendsTool
+    queryTrendsTool,
+    // 文件操作增强
+    moveFileTool,
+    copyFileTool,
+    deleteFileTool,
+    fileInfoTool,
+    searchFilesGlobTool,
+    appendFileTool,
+    readMultipleFilesTool
   ];
 }
 class LocalProviderAdapter {
@@ -12457,6 +12686,7 @@ class SubAgentInstance {
   maxTurns;
   llmTimeoutMs;
   allowedToolNames;
+  onProgress;
   constructor(task, mcpManager, chatKey, codeKey, systemPrompt, options) {
     this.id = task.id;
     this.goal = task.goal;
@@ -12465,6 +12695,7 @@ class SubAgentInstance {
     this.maxTurns = options?.maxTurns ?? 15;
     this.llmTimeoutMs = options?.llmTimeoutMs ?? 12e4;
     this.allowedToolNames = options?.allowedToolNames;
+    this.onProgress = options?.onProgress;
     this.llm = new LlmService(mcpManager);
     this.llm.setConfig(chatKey, codeKey);
     this.context = new ConversationContext(void 0, void 0, void 0, systemPrompt);
@@ -12507,6 +12738,7 @@ class SubAgentInstance {
       if (this.abortController.signal.aborted) {
         throw new DOMException("Aborted", "AbortError");
       }
+      this.onProgress?.(`🤔 LLM 思考中… (第 ${i + 1}/${this.maxTurns} 轮)`);
       const result = await this.llm.chatWithTools(
         messages2,
         `sub_${this.id}_${i}`,
@@ -12539,6 +12771,8 @@ class SubAgentInstance {
       try {
         const output = await this.mcpManager.callTool(call.name, call.arguments);
         this.emitToolCompleted(call.name, typeof output === "string" ? output : JSON.stringify(output));
+        const snippet = (typeof output === "string" ? output : JSON.stringify(output)).slice(0, 120);
+        this.onProgress?.(`🔧 ${call.name} → ${snippet}`);
         messages2.push({
           role: "tool",
           tool_call_id: call.id,
@@ -12546,6 +12780,7 @@ class SubAgentInstance {
         });
       } catch (err) {
         this.emitToolFailed(call.name, err.message);
+        this.onProgress?.(`🔧 ${call.name} → ❌ ${err.message}`);
         messages2.push({
           role: "tool",
           tool_call_id: call.id,

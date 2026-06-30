@@ -127,6 +127,14 @@ export class WorkflowScheduler {
               if (sd.config.llmTimeoutMs !== undefined) {
                 subOptions.llmTimeoutMs = sd.config.llmTimeoutMs
               }
+              subOptions.onProgress = (msg) => {
+                eventBus.emit('workflow.run.step' as any, {
+                  runId: run.runId,
+                  stepId: sd.id,
+                  status: 'running',
+                  agentResult: msg,
+                })
+              }
               // 将依赖步骤的结果注入 prompt，让子代理看到上游产出
               const depContext = this.buildDependencyContext(sd, run)
               const basePrompt = sd.config.prompt || sd.description
