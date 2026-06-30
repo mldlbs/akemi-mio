@@ -70,8 +70,7 @@ export const listWorkflowsTool = buildTool({
 
 export const createWorkflowTool = buildTool({
   name: 'create_workflow',
-  description:
-    '创建一个新的工作流定义。工作流由多个步骤组成，步骤之间可以有依赖关系（DAG）。创建后默认启用。',
+  description: '创建一个新的工作流定义。工作流由多个步骤组成，步骤之间可以有依赖关系（DAG）。创建后默认启用。',
   inputJSONSchema: {
     type: 'object',
     properties: {
@@ -88,8 +87,24 @@ export const createWorkflowTool = buildTool({
             description: { type: 'string', description: '步骤描述' },
             handler: {
               type: 'string',
-              enum: ['subagent', 'tool', 'api', 'prompt', 'plan', 'condition', 'foreach', 'transform', 'gate', 'aggregate', 'subflow', 'wait', 'script', 'event'],
-              description: '执行方式: subagent=子agent, tool=工具调用, api=API请求, prompt=注入prompt, plan=创建计划, condition=条件分支, foreach=循环, transform=变换, gate=审批门, aggregate=聚合, subflow=子流程, wait=等待, script=脚本, event=事件',
+              enum: [
+                'subagent',
+                'tool',
+                'api',
+                'prompt',
+                'plan',
+                'condition',
+                'foreach',
+                'transform',
+                'gate',
+                'aggregate',
+                'subflow',
+                'wait',
+                'script',
+                'event',
+              ],
+              description:
+                '执行方式: subagent=子agent, tool=工具调用, api=API请求, prompt=注入prompt, plan=创建计划, condition=条件分支, foreach=循环, transform=变换, gate=审批门, aggregate=聚合, subflow=子流程, wait=等待, script=脚本, event=事件',
             },
             config: {
               type: 'object',
@@ -271,8 +286,24 @@ export const autoScheduleWorkflowTool = buildTool({
             description: { type: 'string', description: '步骤描述' },
             handler: {
               type: 'string',
-              enum: ['subagent', 'tool', 'api', 'prompt', 'plan', 'condition', 'foreach', 'transform', 'gate', 'aggregate', 'subflow', 'wait', 'script', 'event'],
-              description: '执行方式: subagent=AI子任务, tool=工具, gate=需要你审批, condition=条件判断, foreach=循环, transform=数据变换, aggregate=聚合, wait=等待, script=脚本',
+              enum: [
+                'subagent',
+                'tool',
+                'api',
+                'prompt',
+                'plan',
+                'condition',
+                'foreach',
+                'transform',
+                'gate',
+                'aggregate',
+                'subflow',
+                'wait',
+                'script',
+                'event',
+              ],
+              description:
+                '执行方式: subagent=AI子任务, tool=工具, gate=需要你审批, condition=条件判断, foreach=循环, transform=数据变换, aggregate=聚合, wait=等待, script=脚本',
             },
             config: {
               type: 'object',
@@ -325,7 +356,11 @@ export const autoScheduleWorkflowTool = buildTool({
                   type: 'object',
                   properties: {
                     input: { type: 'string', description: '输入来源，如 {{steps.s1.result}}' },
-                    mapping: { type: 'object', additionalProperties: { type: 'string' }, description: '映射规则: {outputKey: "{{expression}}"}' },
+                    mapping: {
+                      type: 'object',
+                      additionalProperties: { type: 'string' },
+                      description: '映射规则: {outputKey: "{{expression}}"}',
+                    },
                   },
                   description: '数据变换——将上一步输出映射为新的结构',
                 },
@@ -373,7 +408,7 @@ export const autoScheduleWorkflowTool = buildTool({
             dependsOn: {
               type: 'array',
               items: { type: 'string' },
-              description: '依赖的上一步 ID 列表。空数组=无依赖（可并行）。[\'s1\']=等 s1 完成',
+              description: "依赖的上一步 ID 列表。空数组=无依赖（可并行）。['s1']=等 s1 完成",
             },
             retryCount: { type: 'number', description: '失败重试次数，默认 0' },
             retryDelayMs: { type: 'number', description: '重试间隔(ms)，默认 5000' },
@@ -424,9 +459,7 @@ export const autoScheduleWorkflowTool = buildTool({
 
       const startNow = args.startImmediately !== false
       if (!startNow) {
-        return formatToolResult(
-          `工作流「${def.name}」已创建 (ID: ${def.id})，${def.steps.length} 个步骤。等待手动启动。`,
-        )
+        return formatToolResult(`工作流「${def.name}」已创建 (ID: ${def.id})，${def.steps.length} 个步骤。等待手动启动。`)
       }
 
       const scheduler = getWorkflowScheduler()
@@ -444,12 +477,12 @@ export const autoScheduleWorkflowTool = buildTool({
 
       return formatToolResult(
         `🤖 自主调度工作流已创建并启动\n\n` +
-        `名称: ${def.name}\n` +
-        `ID: ${def.id}\n` +
-        `运行: ${run.runId}\n` +
-        `触发: ${triggerInfo}\n` +
-        `步骤 (${def.steps.length}):\n${stepSummary}\n\n` +
-        `用 get_workflow_status runId="${run.runId}" 查看执行状态`,
+          `名称: ${def.name}\n` +
+          `ID: ${def.id}\n` +
+          `运行: ${run.runId}\n` +
+          `触发: ${triggerInfo}\n` +
+          `步骤 (${def.steps.length}):\n${stepSummary}\n\n` +
+          `用 get_workflow_status runId="${run.runId}" 查看执行状态`,
       )
     } catch (err: any) {
       return formatToolError(err.message)
@@ -538,7 +571,22 @@ export const updateWorkflowTool = buildTool({
             description: { type: 'string', description: '步骤描述' },
             handler: {
               type: 'string',
-              enum: ['subagent', 'tool', 'api', 'prompt', 'plan', 'condition', 'foreach', 'transform', 'gate', 'aggregate', 'subflow', 'wait', 'script', 'event'],
+              enum: [
+                'subagent',
+                'tool',
+                'api',
+                'prompt',
+                'plan',
+                'condition',
+                'foreach',
+                'transform',
+                'gate',
+                'aggregate',
+                'subflow',
+                'wait',
+                'script',
+                'event',
+              ],
             },
             config: {
               type: 'object',
@@ -548,12 +596,41 @@ export const updateWorkflowTool = buildTool({
                 apiUrl: { type: 'string' },
                 apiMethod: { type: 'string' },
                 planPrompt: { type: 'string' },
-                condition: { type: 'object', properties: { source: { type: 'string' }, cases: { type: 'array', items: { type: 'object', properties: { if: { type: 'string' }, goto: { type: 'string' } } } }, defaultGoto: { type: 'string' } } },
-                foreach: { type: 'object', properties: { items: { type: 'string' }, workflowId: { type: 'string' }, concurrency: { type: 'number' } } },
-                gate: { type: 'object', properties: { message: { type: 'string' }, preview: { type: 'string' }, options: { type: 'array', items: { type: 'string' } } } },
-                transform: { type: 'object', properties: { input: { type: 'string' }, mapping: { type: 'object', additionalProperties: { type: 'string' } } } },
-                aggregate: { type: 'object', properties: { sources: { type: 'array', items: { type: 'string' } }, strategy: { type: 'string', enum: ['merge', 'concat', 'pick-first', 'custom'] } } },
-                subflow: { type: 'object', properties: { workflowId: { type: 'string' }, input: { type: 'object', additionalProperties: { type: 'string' } } } },
+                condition: {
+                  type: 'object',
+                  properties: {
+                    source: { type: 'string' },
+                    cases: { type: 'array', items: { type: 'object', properties: { if: { type: 'string' }, goto: { type: 'string' } } } },
+                    defaultGoto: { type: 'string' },
+                  },
+                },
+                foreach: {
+                  type: 'object',
+                  properties: { items: { type: 'string' }, workflowId: { type: 'string' }, concurrency: { type: 'number' } },
+                },
+                gate: {
+                  type: 'object',
+                  properties: {
+                    message: { type: 'string' },
+                    preview: { type: 'string' },
+                    options: { type: 'array', items: { type: 'string' } },
+                  },
+                },
+                transform: {
+                  type: 'object',
+                  properties: { input: { type: 'string' }, mapping: { type: 'object', additionalProperties: { type: 'string' } } },
+                },
+                aggregate: {
+                  type: 'object',
+                  properties: {
+                    sources: { type: 'array', items: { type: 'string' } },
+                    strategy: { type: 'string', enum: ['merge', 'concat', 'pick-first', 'custom'] },
+                  },
+                },
+                subflow: {
+                  type: 'object',
+                  properties: { workflowId: { type: 'string' }, input: { type: 'object', additionalProperties: { type: 'string' } } },
+                },
                 wait: { type: 'object', properties: { durationMs: { type: 'number' }, waitForStep: { type: 'string' } } },
                 script: { type: 'object', properties: { code: { type: 'string' } } },
                 event: { type: 'object', properties: { eventName: { type: 'string' }, payload: { type: 'string' } } },
@@ -585,7 +662,15 @@ export const updateWorkflowTool = buildTool({
     },
     required: ['workflowId'],
   },
-  handler: async (args: { workflowId: string; name?: string; description?: string; steps?: any[]; tags?: string[]; trigger?: any; maxConcurrency?: number }) => {
+  handler: async (args: {
+    workflowId: string
+    name?: string
+    description?: string
+    steps?: any[]
+    tags?: string[]
+    trigger?: any
+    maxConcurrency?: number
+  }) => {
     try {
       const existing = workflowStore.getDefinition(args.workflowId)
       if (!existing) return formatToolResult(`工作流 ${args.workflowId} 不存在。`)
