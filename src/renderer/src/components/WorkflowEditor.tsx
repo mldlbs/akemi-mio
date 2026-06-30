@@ -1,4 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { WorkflowCanvas } from './WorkflowCanvas'
+import { WorkflowRunPanel } from './WorkflowRunPanel'
+import { useIPCEvent } from '../hooks/useIPCEvent'
 
 const HANDLER_OPTIONS = [
   { value: 'subagent', label: '子 Agent', icon: 'ri-robot-2-line', tagClass: 'wf-handler-subagent' },
@@ -8,13 +11,24 @@ const HANDLER_OPTIONS = [
   { value: 'plan', label: '生成计划', icon: 'ri-file-list-3-line', tagClass: 'wf-handler-plan' },
 ] as const
 
-interface StepDef {
+export interface StepDef {
   id: string
   name: string
   description: string
   handler: string
-  config: Record<string, string>
+  config: {
+    prompt?: string
+    tool?: string
+    apiUrl?: string
+    apiMethod?: string
+    planPrompt?: string
+    allowedTools?: string[]
+    maxTurns?: number
+    llmTimeoutMs?: number
+    outputFile?: string
+  }
   dependsOn: string[]
+  runOn?: 'success' | 'failure'
 }
 
 interface WFDef {
@@ -24,6 +38,9 @@ interface WFDef {
   steps: StepDef[]
   createdAt: number
   updatedAt: number
+  enabled?: boolean
+  inputSchema?: string
+  outputDir?: string
 }
 
 interface Props {
@@ -43,21 +60,259 @@ const EMPTY_STEP = (): StepDef => ({
   name: '',
   description: '',
   handler: 'subagent',
-  config: { prompt: '' },
+  config: {
+    allowedTools: [
+      'read_file',
+      'write_file',
+      'edit_file',
+      'grep',
+      'list_files',
+      'move_file',
+      'copy_file',
+      'delete_file',
+      'file_info',
+      'search_files',
+      'append_file',
+      'read_multiple_files',
+    ],
+  },
   dependsOn: [],
 })
+
+const TOOL_GROUPS: { label: string; tools: string[] }[] = [
+  {
+    label: '文件操作',
+    tools: [
+      'read_file',
+      'write_file',
+      'edit_file',
+      'grep',
+      'list_files',
+      'move_file',
+      'copy_file',
+      'delete_file',
+      'file_info',
+      'search_files',
+      'append_file',
+      'read_multiple_files',
+    ],
+  },
+  {
+    label: '代码/分析',
+    tools: ['analyze_codebase', 'run_command', 'create_dev_plan', 'update_plan_progress', 'list_plans', 'complete_plan', 'abandon_plan'],
+  },
+  {
+    label: '凭据/记忆',
+    tools: ['get_credential', 'set_credential', 'list_credentials', 'remember_fact', 'remember_procedure', 'list_procedures'],
+  },
+  {
+    label: '工作流',
+    tools: [
+      'analyze_task',
+      'list_workflows',
+      'create_workflow',
+      'start_workflow',
+      'get_workflow_status',
+      'update_workflow',
+      'delete_workflow',
+      'enable_workflow',
+      'disable_workflow',
+      'cancel_workflow_run',
+      'list_workflow_runs',
+    ],
+  },
+  {
+    label: 'Agent/技能',
+    tools: ['spawn_skill_agent', 'spawn_agent', 'list_agents', 'interrupt_agent', 'list_skills', 'enable_skill', 'disable_skill'],
+  },
+  {
+    label: '内容生成',
+    tools: ['writing_system', 'generate_image', 'generate_card', 'social_pipeline', 'query_trends', 'search_github_trends'],
+  },
+  {
+    label: '系统信息',
+    tools: ['get_system_health', 'get_token_status', 'get_identity', 'run_self_review'],
+  },
+  {
+    label: 'SSH/远端',
+    tools: ['centos_exec', 'centos_read_file', 'centos_write_file', 'centos_grep', 'centos_search_files'],
+  },
+  {
+    label: '本地模型',
+    tools: ['run_local_model', 'create_goal', 'list_goals', 'update_goal'],
+  },
+  {
+    label: '创意/洞察',
+    tools: [
+      'trigger_creativity',
+      'trigger_dream_cycle',
+      'list_ideas',
+      'trigger_insight_analysis',
+      'list_insights',
+      'get_evolution_status',
+      'trigger_evolution',
+      'set_evolution_safety_mode',
+      'get_persona_state',
+    ],
+  },
+  {
+    label: '观察/策略',
+    tools: ['trigger_collect', 'trigger_ferment', 'trigger_deep_research', 'list_strategies', 'create_strategy'],
+  },
+]
+
+type FieldDef = {
+  key: string
+  type: 'text' | 'textarea' | 'number' | 'multi-select' | 'radio'
+  label: string
+  placeholder?: string
+  rows?: number
+  options?: { value: string; label: string }[]
+}
+
+const HANDLER_CONFIG_FIELDS: Record<string, FieldDef[]> = {
+  subagent: [
+    { key: 'prompt', type: 'textarea', label: 'Prompt', placeholder: '输入 prompt 内容…', rows: 12 },
+    { key: 'allowedTools', type: 'multi-select', label: '可见工具（留空为全部）' },
+    { key: 'maxTurns', type: 'number', label: '最大工具轮次', placeholder: '默认 15' },
+    { key: 'llmTimeoutMs', type: 'number', label: 'LLM 超时(ms)', placeholder: '默认 120000' },
+    { key: 'outputFile', type: 'text', label: '输出文件路径', placeholder: '如 output/result.txt' },
+    {
+      key: 'runOn',
+      type: 'radio',
+      label: '执行条件',
+      options: [
+        { value: 'success', label: '依赖成功时执行' },
+        { value: 'failure', label: '依赖失败时执行' },
+      ],
+    },
+  ],
+  prompt: [
+    { key: 'prompt', type: 'textarea', label: 'Prompt', placeholder: '输入 prompt 内容…', rows: 12 },
+    { key: 'outputFile', type: 'text', label: '输出文件路径', placeholder: '如 output/result.txt' },
+    {
+      key: 'runOn',
+      type: 'radio',
+      label: '执行条件',
+      options: [
+        { value: 'success', label: '依赖成功时执行' },
+        { value: 'failure', label: '依赖失败时执行' },
+      ],
+    },
+  ],
+  tool: [
+    { key: 'tool', type: 'text', label: '工具名', placeholder: '如 analyze_task' },
+    { key: 'outputFile', type: 'text', label: '输出文件路径', placeholder: '如 output/result.txt' },
+    {
+      key: 'runOn',
+      type: 'radio',
+      label: '执行条件',
+      options: [
+        { value: 'success', label: '依赖成功时执行' },
+        { value: 'failure', label: '依赖失败时执行' },
+      ],
+    },
+  ],
+  api: [
+    { key: 'apiUrl', type: 'text', label: 'API URL', placeholder: 'https://…' },
+    { key: 'apiMethod', type: 'text', label: 'HTTP 方法', placeholder: 'GET' },
+    { key: 'outputFile', type: 'text', label: '输出文件路径', placeholder: '如 output/result.txt' },
+    {
+      key: 'runOn',
+      type: 'radio',
+      label: '执行条件',
+      options: [
+        { value: 'success', label: '依赖成功时执行' },
+        { value: 'failure', label: '依赖失败时执行' },
+      ],
+    },
+  ],
+  plan: [
+    { key: 'planPrompt', type: 'textarea', label: '计划 Prompt', placeholder: '描述需要的计划…', rows: 12 },
+    { key: 'outputFile', type: 'text', label: '输出文件路径', placeholder: '如 output/result.txt' },
+    {
+      key: 'runOn',
+      type: 'radio',
+      label: '执行条件',
+      options: [
+        { value: 'success', label: '依赖成功时执行' },
+        { value: 'failure', label: '依赖失败时执行' },
+      ],
+    },
+  ],
+}
+
+const HANDLER_KEYS: Record<string, Set<string>> = {}
+for (const [handler, fields] of Object.entries(HANDLER_CONFIG_FIELDS)) {
+  HANDLER_KEYS[handler] = new Set(fields.map((f) => f.key))
+}
 
 export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
   const [name, setName] = useState(initial?.name ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
+  const [inputSchema, setInputSchema] = useState(initial?.inputSchema ?? '')
+  const [outputDir, setOutputDir] = useState(initial?.outputDir ?? '')
   const [steps, setSteps] = useState<StepDef[]>(initial?.steps.length ? initial.steps : [EMPTY_STEP()])
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [editingStepId, setEditingStepId] = useState<string | null>(steps[0]?.id ?? null)
 
+  const [showMeta, setShowMeta] = useState(false)
+
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; stepId: string | null } | null>(null)
+  const copiedStep = useRef<StepDef | null>(null)
+  const editorRef = useRef<HTMLDivElement>(null)
+
+  const [expandedFields, setExpandedFields] = useState<Record<string, boolean>>({})
+
+  // ── 运行面板 ──
+  const [activeRuns, setActiveRuns] = useState<any[]>([])
+  const [pipelineLogs, setPipelineLogs] = useState<Record<string, string[]>>({})
+  const [showRunPanel, setShowRunPanel] = useState(false)
+  const hasActiveRuns = activeRuns.some((r) => r.status === 'running')
+
+  useIPCEvent(window.electronAPI.onWorkflowRunCreated, (data: any) => {
+    setActiveRuns((prev) => {
+      if (prev.some((r) => r.runId === data.runId)) return prev
+      return [...prev, { ...data, status: 'running' }]
+    })
+    setShowRunPanel(true)
+  })
+
+  useIPCEvent(window.electronAPI.onWorkflowRunUpdated, (data: any) => {
+    setActiveRuns((prev) => prev.map((r) => (r.runId === data.runId ? { ...r, status: data.status } : r)))
+  })
+
+  useIPCEvent(window.electronAPI.onWorkflowRunStep, (data: any) => {
+    setActiveRuns((prev) =>
+      prev.map((r) =>
+        r.runId === data.runId
+          ? {
+              ...r,
+              steps: r.steps.map((s) =>
+                s.stepId === data.stepId
+                  ? { ...s, status: data.status, error: data.error ?? s.error, agentResult: data.agentResult ?? s.agentResult }
+                  : s,
+              ),
+            }
+          : r,
+      ),
+    )
+    if (!data.agentResult) return
+    setPipelineLogs((prev) => {
+      const lines = prev[data.runId] ?? []
+      if (lines[lines.length - 1] === data.agentResult) return prev
+      return { ...prev, [data.runId]: [...lines, data.agentResult].slice(-100) }
+    })
+  })
+
   function updateStep(id: string, patch: Partial<StepDef>) {
     setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)))
+  }
+
+  function updateStepConfig(id: string, config: Record<string, any>) {
+    setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, config: { ...s.config, ...config } } : s)))
   }
 
   function removeStep(id: string) {
@@ -74,40 +329,96 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
     setEditingStepId(s.id)
   }
 
-  function moveStep(index: number, dir: -1 | 1) {
-    const to = index + dir
-    if (to < 0 || to >= steps.length) return
+  function duplicateStep(id: string) {
+    const source = steps.find((s) => s.id === id)
+    if (!source) return
+    const idx = steps.findIndex((s) => s.id === id)
+    const copy: StepDef = {
+      ...JSON.parse(JSON.stringify(source)),
+      id: freshStepId(),
+      name: source.name ? `${source.name} (复制)` : '',
+    }
     setSteps((prev) => {
       const arr = [...prev]
-      ;[arr[index], arr[to]] = [arr[to], arr[index]]
+      arr.splice(idx + 1, 0, copy)
       return arr
     })
+    setEditingStepId(copy.id)
   }
 
   function availableDeps(currentId: string): StepDef[] {
     return steps.filter((s) => s.id !== currentId)
   }
 
-  function handlerConfigFields(handler: string): { key: string; label: string; placeholder: string }[] {
-    switch (handler) {
-      case 'subagent':
-      case 'prompt':
-        return [{ key: 'prompt', label: 'Prompt', placeholder: '输入 prompt 内容…' }]
-      case 'tool':
-        return [{ key: 'tool', label: '工具名', placeholder: '如 analyze_task' }]
-      case 'api':
-        return [
-          { key: 'apiUrl', label: 'API URL', placeholder: 'https://…' },
-          { key: 'apiMethod', label: 'HTTP 方法', placeholder: 'GET' },
-        ]
-      case 'plan':
-        return [{ key: 'planPrompt', label: '计划 Prompt', placeholder: '描述需要的计划…' }]
-      default:
-        return []
-    }
+  function closeContextMenu() {
+    setContextMenu(null)
   }
 
-  async function handleSave() {
+  function contextMenuDuplicate() {
+    if (!contextMenu) return
+    duplicateStep(contextMenu.stepId)
+    closeContextMenu()
+  }
+
+  function contextMenuCopy() {
+    if (!contextMenu) return
+    const s = steps.find((st) => st.id === contextMenu.stepId)
+    if (s) copiedStep.current = JSON.parse(JSON.stringify(s))
+    closeContextMenu()
+  }
+
+  function contextMenuPaste() {
+    if (!contextMenu || !copiedStep.current) return
+    const idx = steps.findIndex((s) => s.id === contextMenu.stepId)
+    const copy: StepDef = { ...JSON.parse(JSON.stringify(copiedStep.current)), id: freshStepId() }
+    setSteps((prev) => {
+      const arr = [...prev]
+      arr.splice(idx + 1, 0, copy)
+      return arr
+    })
+    setEditingStepId(copy.id)
+    closeContextMenu()
+  }
+
+  function contextMenuMoveTop() {
+    if (!contextMenu) return
+    const idx = steps.findIndex((s) => s.id === contextMenu.stepId)
+    if (idx <= 0) {
+      closeContextMenu()
+      return
+    }
+    setSteps((prev) => {
+      const arr = [...prev]
+      const [moved] = arr.splice(idx, 1)
+      arr.unshift(moved)
+      return arr
+    })
+    closeContextMenu()
+  }
+
+  function contextMenuMoveBottom() {
+    if (!contextMenu) return
+    const idx = steps.findIndex((s) => s.id === contextMenu.stepId)
+    if (idx === -1 || idx === steps.length - 1) {
+      closeContextMenu()
+      return
+    }
+    setSteps((prev) => {
+      const arr = [...prev]
+      const [moved] = arr.splice(idx, 1)
+      arr.push(moved)
+      return arr
+    })
+    closeContextMenu()
+  }
+
+  function contextMenuDelete() {
+    if (!contextMenu) return
+    removeStep(contextMenu.stepId)
+    closeContextMenu()
+  }
+
+  const handleSave = useCallback(async () => {
     if (!name.trim()) {
       setError('请输入工作流名称')
       return
@@ -124,14 +435,20 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
       id: initial?.id ?? `wf_${now}`,
       name: name.trim(),
       description: description.trim(),
-      steps: validSteps.map((s) => ({
-        id: s.id,
-        name: s.name.trim(),
-        description: s.description.trim(),
-        handler: s.handler,
-        config: s.config,
-        dependsOn: s.dependsOn,
-      })),
+      inputSchema: inputSchema.trim() || undefined,
+      outputDir: outputDir.trim() || undefined,
+      steps: validSteps.map((s) => {
+        const clean: any = {
+          id: s.id,
+          name: s.name.trim(),
+          description: s.description.trim(),
+          handler: s.handler,
+          config: { ...s.config },
+          dependsOn: s.dependsOn,
+        }
+        if (s.runOn) clean.runOn = s.runOn
+        return clean
+      }),
       createdAt: initial?.createdAt ?? now,
       updatedAt: now,
     }
@@ -139,13 +456,12 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
     setSaving(false)
     if (result.success) {
       onSaved()
-      onBack()
     } else {
       setError('保存失败')
     }
-  }
+  }, [name, description, inputSchema, outputDir, steps, initial, onSaved, onBack])
 
-  async function handleRun() {
+  const handleRun = useCallback(async () => {
     if (!initial) {
       setError('请先保存再运行')
       return
@@ -155,24 +471,217 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
     const result = await window.electronAPI.startWorkflow(initial.id)
     setRunning(false)
     if (result.success) {
-      onSaved()
-      onBack()
+      // 立即创建初始记录，无需等 IPC 事件
+      setActiveRuns((prev) => {
+        if (prev.some((r) => r.runId === result.runId)) return prev
+        return [
+          ...prev,
+          {
+            runId: result.runId,
+            workflowDefId: initial.id,
+            workflowName: name,
+            status: 'running',
+            steps: steps.map((s) => ({
+              stepId: s.id,
+              name: s.name,
+              status: 'pending',
+            })),
+            startedAt: Date.now(),
+          },
+        ]
+      })
+      setShowRunPanel(true)
     } else {
       setError(result.error ?? '启动失败')
     }
-  }
+  }, [initial, name, steps])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault()
+        handleSave()
+        return
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd' && editingStepId) {
+        e.preventDefault()
+        duplicateStep(editingStepId)
+        return
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && editingStepId) {
+        const tag = document.activeElement?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return
+        e.preventDefault()
+        removeStep(editingStepId)
+        return
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [handleSave, editingStepId])
+
+  useEffect(() => {
+    if (!contextMenu) return
+    const close = () => closeContextMenu()
+    window.addEventListener('click', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [contextMenu])
 
   const editingStep = steps.find((s) => s.id === editingStepId)
 
+  function renderConfigField(step: StepDef, field: FieldDef) {
+    switch (field.type) {
+      case 'textarea': {
+        const val = (step.config as any)[field.key] ?? ''
+        const isExpanded = expandedFields[field.key] ?? false
+        const showToggle = typeof val === 'string' && val.length > 200
+        return (
+          <div key={field.key} className="wf-editor-field wf-editor-prompt-field">
+            <div className="wf-editor-prompt-header">
+              <label>{field.label}</label>
+              {showToggle && (
+                <button
+                  className="wf-editor-prompt-toggle"
+                  onClick={() => setExpandedFields((p) => ({ ...p, [field.key]: !isExpanded }))}
+                  type="button"
+                >
+                  <i className={`ri-${isExpanded ? 'contract' : 'expand'}-up-down-line`} />
+                  {isExpanded ? '收起' : '展开全部'}
+                </button>
+              )}
+            </div>
+            <textarea
+              className="wf-editor-prompt-textarea"
+              value={val}
+              onChange={(e) => updateStepConfig(step.id, { [field.key]: e.target.value })}
+              placeholder={field.placeholder}
+              rows={isExpanded ? 24 : (field.rows ?? 4)}
+            />
+          </div>
+        )
+      }
+      case 'number': {
+        const val = (step.config as any)[field.key]
+        return (
+          <div key={field.key} className="wf-editor-field">
+            <label>{field.label}</label>
+            <input
+              className="wf-editor-number-input"
+              type="number"
+              value={val ?? ''}
+              onChange={(e) => {
+                const v = e.target.value
+                updateStepConfig(step.id, { [field.key]: v ? Number(v) : undefined })
+              }}
+              placeholder={field.placeholder}
+            />
+          </div>
+        )
+      }
+      case 'text': {
+        const val = (step.config as any)[field.key] ?? ''
+        return (
+          <div key={field.key} className="wf-editor-field">
+            <label>{field.label}</label>
+            <input
+              type="text"
+              value={val}
+              onChange={(e) => updateStepConfig(step.id, { [field.key]: e.target.value })}
+              placeholder={field.placeholder}
+            />
+          </div>
+        )
+      }
+      case 'multi-select': {
+        const selected = (step.config.allowedTools ?? []) as string[]
+        const allTools = TOOL_GROUPS.flatMap((g) => g.tools)
+        return (
+          <div key={field.key} className="wf-editor-field">
+            <label>{field.label}</label>
+            <div className="wf-editor-multi-select">
+              {TOOL_GROUPS.map((group) => {
+                const groupSelected = group.tools.every((t) => selected.includes(t))
+                const groupPartial = group.tools.some((t) => selected.includes(t)) && !groupSelected
+                return (
+                  <div key={group.label} className="wf-editor-multi-group">
+                    <label className="wf-editor-multi-group-label">
+                      <input
+                        type="checkbox"
+                        checked={groupSelected}
+                        indeterminate={groupPartial}
+                        onChange={() => {
+                          const next = groupSelected
+                            ? selected.filter((t) => !group.tools.includes(t))
+                            : [...new Set([...selected, ...group.tools])]
+                          updateStepConfig(step.id, { allowedTools: next.length > 0 ? next : undefined })
+                        }}
+                      />
+                      <strong>{group.label}</strong>
+                      <span className="wf-editor-multi-group-count">{group.tools.length}</span>
+                    </label>
+                    <div className="wf-editor-multi-group-items">
+                      {group.tools.map((tool) => (
+                        <label key={tool} className="wf-editor-multi-select-item">
+                          <input
+                            type="checkbox"
+                            checked={selected.includes(tool)}
+                            onChange={() => {
+                              const next = selected.includes(tool) ? selected.filter((t) => t !== tool) : [...selected, tool]
+                              updateStepConfig(step.id, { allowedTools: next.length > 0 ? next : undefined })
+                            }}
+                          />
+                          <span>{tool}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      }
+      case 'radio': {
+        const val = step.runOn ?? 'success'
+        return (
+          <div key={field.key} className="wf-editor-field">
+            <label>{field.label}</label>
+            <div className="wf-editor-radio-group">
+              {(field.options ?? []).map((opt) => (
+                <label key={opt.value} className={`wf-editor-radio-label${val === opt.value ? ' active' : ''}`}>
+                  <input
+                    type="radio"
+                    name={`runOn_${step.id}`}
+                    checked={val === opt.value}
+                    onChange={() => updateStep(step.id, { runOn: opt.value as 'success' | 'failure' })}
+                  />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )
+      }
+      default:
+        return null
+    }
+  }
+
   return (
-    <div className="wf-editor">
-      {/* Header */}
+    <div className="wf-editor" ref={editorRef}>
       <div className="wf-editor-header">
         <button className="wf-editor-back" onClick={onBack}>
           <i className="ri-arrow-left-line" />
         </button>
         <h2 className="wf-editor-title">{initial ? '编辑工作流' : '新建工作流'}</h2>
         <div className="wf-editor-actions">
+          <button className={`wf-editor-btn-gear${showMeta ? ' active' : ''}`} onClick={() => setShowMeta(!showMeta)} title="工作流设置">
+            <i className="ri-settings-3-line" />
+          </button>
           {initial && (
             <button className="wf-editor-btn wf-editor-btn-run" disabled={running} onClick={handleRun}>
               <i className={`ri-play-circle-line${running ? ' ri-spin' : ''}`} />
@@ -193,203 +702,182 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
         </div>
       )}
 
-      <div className="wf-editor-body">
-        {/* Left: meta + step list */}
-        <div className="wf-editor-steps-panel">
-          {/* Meta fields */}
-          <div className="wf-editor-field">
-            <label>工作流名称</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="如：代码审查管线" />
-          </div>
-          <div className="wf-editor-field">
-            <label>描述</label>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="描述这个工作流的用途…" rows={2} />
-          </div>
-
-          {/* Dependency flow visualization */}
-          {steps.filter((s) => s.name.trim()).length >= 2 && (
-            <div className="wf-editor-dag">
-              <label>步骤依赖关系</label>
-              <div className="wf-editor-dag-graph">
-                {steps
-                  .filter((s) => s.name.trim())
-                  .map((s, i) => {
-                    const deps = s.dependsOn.map((d) => steps.find((st) => st.id === d)).filter(Boolean)
-                    return (
-                      <div
-                        key={s.id}
-                        className={`wf-dag-node${editingStepId === s.id ? ' active' : ''}`}
-                        onClick={() => setEditingStepId(s.id)}
-                      >
-                        <span className="wf-dag-node-index">{i + 1}</span>
-                        <span className="wf-dag-node-name">{s.name}</span>
-                        {deps.length > 0 && <span className="wf-dag-node-deps">← {deps.map((d: any) => d.name).join(', ')}</span>}
-                        <span className={`wf-step-handler-tag ${HANDLER_OPTIONS.find((h) => h.value === s.handler)?.tagClass ?? ''}`}>
-                          <i className={HANDLER_OPTIONS.find((h) => h.value === s.handler)?.icon ?? 'ri-circle-line'} />
-                          {HANDLER_OPTIONS.find((h) => h.value === s.handler)?.label ?? s.handler}
-                        </span>
-                      </div>
-                    )
-                  })}
-              </div>
-            </div>
-          )}
-
-          {/* Step list */}
-          <div className="wf-editor-step-list-header">
-            <label>步骤（{steps.length}）</label>
-            <button className="wf-editor-btn wf-editor-btn-add" onClick={addStep}>
-              <i className="ri-add-line" />
-              添加步骤
-            </button>
-          </div>
-
-          <div className="wf-editor-step-list">
-            {steps.length === 0 && (
-              <div className="wf-editor-step-empty">
-                <i className="ri-file-list-3-line" />
-                <span>点击「添加步骤」开始构建工作流</span>
-              </div>
-            )}
-            {steps.map((step, i) => (
-              <div
-                key={step.id}
-                className={`wf-editor-step-card${editingStepId === step.id ? ' editing' : ''}`}
-                onClick={() => setEditingStepId(step.id)}
-              >
-                <div className="wf-editor-step-card-order" onClick={(e) => e.stopPropagation()}>
-                  <button className="wf-editor-step-move" disabled={i === 0} onClick={() => moveStep(i, -1)} title="上移">
-                    <i className="ri-arrow-up-s-line" />
-                  </button>
-                  <span>{i + 1}</span>
-                  <button className="wf-editor-step-move" disabled={i === steps.length - 1} onClick={() => moveStep(i, 1)} title="下移">
-                    <i className="ri-arrow-down-s-line" />
-                  </button>
-                </div>
-                <div className="wf-editor-step-card-body">
-                  <div className="wf-editor-step-card-name">
-                    {step.name || <span className="wf-editor-step-placeholder">未命名步骤</span>}
-                  </div>
-                  <div className="wf-editor-step-card-meta">
-                    <span
-                      className={`wf-editor-step-handler-badge ${HANDLER_OPTIONS.find((h) => h.value === step.handler)?.tagClass ?? ''}`}
-                    >
-                      <i className={HANDLER_OPTIONS.find((h) => h.value === step.handler)?.icon ?? 'ri-question-line'} />
-                      {HANDLER_OPTIONS.find((h) => h.value === step.handler)?.label ?? step.handler}
-                    </span>
-                    {step.dependsOn.length > 0 && (
-                      <span className="wf-editor-step-dep-tag">
-                        <i className="ri-link" />
-                        {step.dependsOn.length} 个依赖
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <button
-                  className="wf-editor-step-remove"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    removeStep(step.id)
-                  }}
-                  title="删除步骤"
-                >
-                  <i className="ri-close-line" />
-                </button>
-              </div>
-            ))}
-          </div>
+      {/* 可折叠元信息面板 */}
+      <div className={`wf-editor-meta-section wf-editor-meta-${showMeta ? 'expanded' : 'collapsed'}`}>
+        <div className="wf-editor-field">
+          <label>工作流名称</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="如：代码审查管线" />
         </div>
-
-        {/* Right: editing panel */}
-        <div className="wf-editor-config-panel">
-          {editingStep ? (
-            <>
-              <h3 className="wf-editor-config-title">步骤配置</h3>
-              <div className="wf-editor-field">
-                <label>步骤名称</label>
-                <input
-                  value={editingStep.name}
-                  onChange={(e) => updateStep(editingStep.id, { name: e.target.value })}
-                  placeholder="如：代码编写"
-                />
-              </div>
-              <div className="wf-editor-field">
-                <label>步骤描述</label>
-                <textarea
-                  value={editingStep.description}
-                  onChange={(e) => updateStep(editingStep.id, { description: e.target.value })}
-                  placeholder="描述这个步骤要做的事…"
-                  rows={2}
-                />
-              </div>
-              <div className="wf-editor-field">
-                <label>执行方式</label>
-                <div className="wf-editor-handler-grid">
-                  {HANDLER_OPTIONS.map((h) => (
-                    <button
-                      key={h.value}
-                      className={`wf-editor-handler-opt${editingStep.handler === h.value ? ' active' : ''}`}
-                      onClick={() => updateStep(editingStep.id, { handler: h.value, config: {} })}
-                    >
-                      <i className={h.icon} />
-                      <span>{h.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {handlerConfigFields(editingStep.handler).map((field) => (
-                <div key={field.key} className="wf-editor-field">
-                  <label>{field.label}</label>
-                  <textarea
-                    value={editingStep.config[field.key] ?? ''}
-                    onChange={(e) =>
-                      updateStep(editingStep.id, {
-                        config: { ...editingStep.config, [field.key]: e.target.value },
-                      })
-                    }
-                    placeholder={field.placeholder}
-                    rows={field.key === 'prompt' || field.key === 'planPrompt' ? 6 : 2}
-                  />
-                </div>
-              ))}
-              <div className="wf-editor-field">
-                <label>前置依赖</label>
-                <div className="wf-editor-dep-checkboxes">
-                  {availableDeps(editingStep.id).length === 0 && <span className="wf-editor-dep-empty">没有其他步骤可依赖</span>}
-                  {availableDeps(editingStep.id).map((dep) => {
-                    const checked = editingStep.dependsOn.includes(dep.id)
-                    return (
-                      <label key={dep.id} className="wf-editor-dep-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => {
-                            if (checked) {
-                              updateStep(editingStep.id, {
-                                dependsOn: editingStep.dependsOn.filter((d) => d !== dep.id),
-                              })
-                            } else {
-                              updateStep(editingStep.id, {
-                                dependsOn: [...editingStep.dependsOn, dep.id],
-                              })
-                            }
-                          }}
-                        />
-                        <span>{dep.name || dep.id}</span>
-                      </label>
-                    )
-                  })}
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="wf-editor-config-empty">
-              <i className="ri-edit-box-line" />
-              <span>从左侧选择一个步骤进行配置</span>
-            </div>
-          )}
+        <div className="wf-editor-field">
+          <label>描述</label>
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="描述这个工作流的用途…" rows={2} />
+        </div>
+        <div className="wf-editor-field">
+          <label>输入参数描述 (inputSchema)</label>
+          <textarea
+            value={inputSchema}
+            onChange={(e) => setInputSchema(e.target.value)}
+            placeholder="格式: 主题: string, 目标平台: string"
+            rows={2}
+          />
+        </div>
+        <div className="wf-editor-field">
+          <label>成果输出目录 (outputDir)</label>
+          <input value={outputDir} onChange={(e) => setOutputDir(e.target.value)} placeholder="如 ~/Desktop/输出目录" />
         </div>
       </div>
+
+      <div className="wf-editor-body">
+        <WorkflowCanvas
+          steps={steps}
+          editingStepId={editingStepId}
+          onSelectStep={setEditingStepId}
+          onAddStep={addStep}
+          onDeleteStep={removeStep}
+          onDuplicateStep={duplicateStep}
+          onContextMenu={(x, y, stepId) => setContextMenu({ x, y, stepId })}
+        />
+        {showRunPanel ? (
+          <WorkflowRunPanel
+            runs={activeRuns.filter((r) => r.status === 'running')}
+            pipelineLogs={pipelineLogs}
+            onCancel={async (runId) => {
+              await window.electronAPI.stopWorkflowRun(runId)
+            }}
+            onClose={() => setShowRunPanel(false)}
+          />
+        ) : (
+          <div className="wf-editor-config-panel">
+            {editingStep ? (
+              <>
+                <h3 className="wf-editor-config-title">步骤配置</h3>
+                <div className="wf-editor-field">
+                  <label>步骤名称</label>
+                  <input
+                    value={editingStep.name}
+                    onChange={(e) => updateStep(editingStep.id, { name: e.target.value })}
+                    placeholder="如：代码编写"
+                  />
+                </div>
+                <div className="wf-editor-field">
+                  <label>步骤描述</label>
+                  <textarea
+                    value={editingStep.description}
+                    onChange={(e) => updateStep(editingStep.id, { description: e.target.value })}
+                    placeholder="描述这个步骤要做的事…"
+                    rows={2}
+                  />
+                </div>
+                <div className="wf-editor-field">
+                  <label>执行方式</label>
+                  <div className="wf-editor-handler-grid">
+                    {HANDLER_OPTIONS.map((h) => (
+                      <button
+                        key={h.value}
+                        className={`wf-editor-handler-opt${editingStep.handler === h.value ? ' active' : ''}`}
+                        onClick={() => {
+                          if (editingStep.handler === h.value) return
+                          updateStep(editingStep.id, { handler: h.value })
+                        }}
+                      >
+                        <i className={h.icon} />
+                        <span>{h.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {HANDLER_CONFIG_FIELDS[editingStep.handler]?.map((field) => renderConfigField(editingStep, field))}
+                <div className="wf-editor-field">
+                  <label>前置依赖</label>
+                  <div className="wf-editor-dep-checkboxes">
+                    {availableDeps(editingStep.id).length === 0 && <span className="wf-editor-dep-empty">没有其他步骤可依赖</span>}
+                    {availableDeps(editingStep.id).map((dep) => {
+                      const checked = editingStep.dependsOn.includes(dep.id)
+                      return (
+                        <label key={dep.id} className="wf-editor-dep-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              if (checked) {
+                                updateStep(editingStep.id, {
+                                  dependsOn: editingStep.dependsOn.filter((d) => d !== dep.id),
+                                })
+                              } else {
+                                updateStep(editingStep.id, {
+                                  dependsOn: [...editingStep.dependsOn, dep.id],
+                                })
+                              }
+                            }}
+                          />
+                          <span>{dep.name || dep.id}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="wf-editor-config-empty">
+                <i className="ri-edit-box-line" />
+                <span>从画布选择一个步骤进行配置</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {contextMenu && (
+        <div className="wf-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          {contextMenu.stepId ? (
+            <>
+              <button className="wf-context-menu-item" onClick={contextMenuCopy}>
+                <i className="ri-file-copy-line" /> 复制步骤
+              </button>
+              <button
+                className={`wf-context-menu-item${!copiedStep.current ? ' wf-context-menu-disabled' : ''}`}
+                onClick={contextMenuPaste}
+                disabled={!copiedStep.current}
+              >
+                <i className="ri-clipboard-line" /> 粘贴步骤
+              </button>
+              <button className="wf-context-menu-item" onClick={contextMenuDuplicate}>
+                <i className="ri-file-copy-2-line" /> 复制并粘贴
+              </button>
+              <div className="wf-context-menu-divider" />
+              <button className="wf-context-menu-item" onClick={contextMenuMoveTop}>
+                <i className="ri-arrow-up-double-line" /> 移到顶部
+              </button>
+              <button className="wf-context-menu-item" onClick={contextMenuMoveBottom}>
+                <i className="ri-arrow-down-double-line" /> 移到底部
+              </button>
+              <div className="wf-context-menu-divider" />
+              <button className="wf-context-menu-item wf-context-menu-danger" onClick={contextMenuDelete}>
+                <i className="ri-delete-bin-line" /> 删除步骤
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="wf-context-menu-item"
+                onClick={() => {
+                  addStep()
+                  closeContextMenu()
+                }}
+              >
+                <i className="ri-add-line" /> 添加步骤
+              </button>
+              <button
+                className={`wf-context-menu-item${!copiedStep.current ? ' wf-context-menu-disabled' : ''}`}
+                onClick={contextMenuPaste}
+                disabled={!copiedStep.current}
+              >
+                <i className="ri-clipboard-line" /> 粘贴步骤
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

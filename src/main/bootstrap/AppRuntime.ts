@@ -169,9 +169,10 @@ export class AppRuntime {
     const recoveryManager = new SessionRecoveryManager(join(WORKSPACE.evolution, 'recovery'))
     agentService.setRecoveryManager(recoveryManager)
 
-    // 初始化 WorkflowScheduler
-    const { WorkflowScheduler, setWorkflowScheduler } = await import('../workflow/WorkflowScheduler')
-    const scheduler = new WorkflowScheduler({
+    // 初始化 WorkflowScheduler V2
+    const { WorkflowSchedulerV2, setWorkflowScheduler } = await import('../workflow/WorkflowScheduler')
+    const { workflowStore } = await import('../workflow/WorkflowStoreV2')
+    const scheduler = new WorkflowSchedulerV2({
       runSubAgent: (goal, parentGoal, options) => agentService['subAgentPool'].spawn(goal, parentGoal, options),
       runTool: async (name, args) => {
         const result = await mcpManager.callTool(name, args)
@@ -206,8 +207,14 @@ export class AppRuntime {
           status: plan.status,
         }
       },
+      getDefinition: (id) => workflowStore.getDefinition(id),
     })
     setWorkflowScheduler(scheduler)
+
+    // 初始化 WorkflowTriggerManager（cron + event 触发）
+    const { WorkflowTriggerManager } = await import('../workflow/WorkflowTriggerManager')
+    const triggerManager = new WorkflowTriggerManager()
+    triggerManager.start()
 
     const telegramService = new TelegramService(agentService)
 

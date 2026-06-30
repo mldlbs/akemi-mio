@@ -13120,6 +13120,15 @@ function TopBar({ conversationActive, ttsPlaying, error, sessionHealth, personaL
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
+          className: `cap-toggle-btn${uiState.activeSlot === "chat" ? " active" : ""}`,
+          onClick: () => setActiveSlot("chat"),
+          title: "会话",
+          children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-chat-1-line" })
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
           className: `cap-toggle-btn${uiState.activeSlot === "otpar" ? " active" : ""}`,
           onClick: () => setActiveSlot(uiState.activeSlot === "otpar" ? "chat" : "otpar"),
           title: "OTPAR 认知循环",
@@ -16181,7 +16190,14 @@ function App() {
     device.active,
     device.setError
   );
-  const { uiState } = useSlots();
+  const { uiState, setActiveSlot } = useSlots();
+  const onSelectChat = reactExports.useCallback(
+    (sessionId) => {
+      handleSelectChat(sessionId);
+      setActiveSlot("chat");
+    },
+    [handleSelectChat, setActiveSlot]
+  );
   const { toolRunning, toolCompleted } = useTools();
   const { activePlan, otparStages } = usePlans();
   const {
@@ -16205,7 +16221,7 @@ function App() {
       }
     ),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "app-body", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(Sidebar, { sessions, activeSessionId, onSelectChat: handleSelectChat }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Sidebar, { sessions, activeSessionId, onSelectChat }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(MainArea, { children: uiState.activeSlot === "tool" ? /* @__PURE__ */ jsxRuntimeExports.jsx(ToolSlot, { running: toolRunning, completed: toolCompleted }) : uiState.activeSlot === "otpar" ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBoundary, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(OtparSlot, { otparStages }) }) : uiState.activeSlot === "devplan" ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBoundary, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(DevPlanSlot, { activePlan }) }) : uiState.activeSlot === "workflow" ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBoundary, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(
         WorkflowSlot,
         {
