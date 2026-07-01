@@ -1,23 +1,23 @@
-import { useState, useCallback, useRef, type KeyboardEvent, type ReactNode } from 'react'
-import type { AgentState } from '../hooks/useAIOutput'
+import { useCallback, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useAgentStore } from '../store/agentStore'
 
 interface InputBarProps {
   onSend: (text: string) => void
   /** Renders before the textarea */
   voiceSlot?: ReactNode
-  agentState?: AgentState
 }
 
-export function InputBar({ onSend, voiceSlot, agentState }: InputBarProps) {
+export function InputBar({ onSend, voiceSlot }: InputBarProps) {
+  const agentState = useAgentStore((s) => s.agentState)
   const [value, setValue] = useState('')
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [textareaRef, setTextareaRef] = useState<HTMLTextAreaElement | null>(null)
 
   const autoResize = useCallback(() => {
-    const el = textareaRef.current
+    const el = textareaRef
     if (!el) return
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 120) + 'px'
-  }, [])
+  }, [textareaRef])
 
   const isBusy = agentState === 'thinking' || agentState === 'tool_executing' || agentState === 'replying'
 
@@ -34,10 +34,10 @@ export function InputBar({ onSend, voiceSlot, agentState }: InputBarProps) {
     if (!t) return
     onSend(t)
     setValue('')
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
+    if (textareaRef) {
+      textareaRef.style.height = 'auto'
     }
-  }, [value, onSend])
+  }, [value, onSend, textareaRef])
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -54,7 +54,7 @@ export function InputBar({ onSend, voiceSlot, agentState }: InputBarProps) {
       <div className="inputbar-row">
         {voiceSlot}
         <textarea
-          ref={textareaRef}
+          ref={setTextareaRef}
           className="inputbar-field"
           value={value}
           onChange={(e) => {

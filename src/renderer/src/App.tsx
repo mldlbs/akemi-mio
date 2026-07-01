@@ -1,4 +1,3 @@
-import { useCallback } from 'react'
 import { VoiceInput } from './components/VoiceInput'
 import { TopBar } from './components/TopBar'
 import { Sidebar } from './components/Sidebar'
@@ -14,93 +13,51 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { SettingsModal } from './components/SettingsModal'
 import { useSlots } from './slots/SlotContext'
 import { useSessions, useAIOutput, useTools, useDeviceStatus, usePlans, useWorkflowDefinitions } from './hooks'
+import { useSessionStore } from './store/sessionStore'
+import type { MessageItem } from './slots/types'
 
 export type { MessageItem } from './slots/types'
 
 function App() {
-  const { sessions, activeSessionId, historyMessages, historyLoading, handleSelectChat } = useSessions()
+  // 初始化 IPC 监听器（hooks 内部负责注册事件并写入 store）
+  useSessions()
+  const { activeSessionId } = useSessionStore()
   const device = useDeviceStatus()
-  const { pendingText, displayText, transcribed, toolStatus, agentState, handleResult } = useAIOutput(
-    activeSessionId,
-    device.active,
-    device.setError,
-  )
-  const { uiState, setActiveSlot } = useSlots()
-  // 点击 sidebar 会话时自动切回聊天面板
-  const onSelectChat = useCallback(
-    (sessionId: string) => {
-      handleSelectChat(sessionId)
-      setActiveSlot('chat')
-    },
-    [handleSelectChat, setActiveSlot],
-  )
-  const { toolRunning, toolCompleted } = useTools()
-  const { activePlan, otparStages } = usePlans()
-  const {
-    definitions: workflowDefs,
-    runs: workflowRuns,
-    activeRuns: workflowActiveRuns,
-    loading: wfLoading,
-    refresh: refreshWorkflows,
-  } = useWorkflowDefinitions()
+  const { handleResult } = useAIOutput(activeSessionId, device.active, device.setError)
+  useTools()
+  usePlans()
+  useWorkflowDefinitions()
+  const { uiState } = useSlots()
 
   return (
     <div className="app-shell">
-      <TopBar
-        conversationActive={device.active}
-        ttsPlaying={device.ttsPlaying}
-        error={device.error}
-        sessionHealth={device.sessionHealth}
-        personaLevel={device.personaLevel}
-        onOpenSettings={() => device.setSettingsOpen(true)}
-        agentState={agentState}
-      />
+      <TopBar onOpenSettings={() => device.setSettingsOpen(true)} />
       <div className="app-body">
-        <Sidebar sessions={sessions} activeSessionId={activeSessionId} onSelectChat={onSelectChat} />
+        <Sidebar />
         <MainArea>
           {uiState.activeSlot === 'tool' ? (
-            <ToolSlot running={toolRunning} completed={toolCompleted} />
+            <ToolSlot />
           ) : uiState.activeSlot === 'otpar' ? (
             <ErrorBoundary>
-              <OtparSlot otparStages={otparStages} />
+              <OtparSlot />
             </ErrorBoundary>
           ) : uiState.activeSlot === 'devplan' ? (
             <ErrorBoundary>
-              <DevPlanSlot activePlan={activePlan} />
+              <DevPlanSlot />
             </ErrorBoundary>
           ) : uiState.activeSlot === 'workflow' ? (
             <ErrorBoundary>
-              <WorkflowSlot
-                workflowDefs={workflowDefs}
-                workflowRuns={workflowRuns}
-                workflowActiveRuns={workflowActiveRuns}
-                wfLoading={wfLoading}
-                onRefreshDefs={refreshWorkflows}
-              />
+              <WorkflowSlot />
             </ErrorBoundary>
           ) : uiState.activeSlot === 'preview' ? (
             <PreviewSlot />
           ) : (
-            <ChatSlot
-              messages={historyMessages}
-              pendingText={pendingText}
-              displayText={displayText}
-              transcribed={transcribed}
-              toolStatus={toolStatus}
-              agentState={agentState}
-              toolRunning={toolRunning}
-              toolCompleted={toolCompleted}
-              historyLoading={historyLoading}
-            />
+            <ChatSlot />
           )}
         </MainArea>
       </div>
-      <InputBar
-        onSend={handleResult}
-        agentState={agentState}
-        voiceSlot={<VoiceInput onResult={handleResult} onConversationChange={device.setActive} ttsPlaying={device.ttsPlaying} />}
-      />
-      <SettingsModal open={device.settingsOpen} onClose={() => device.setSettingsOpen(false)} />
+      <InputBar onSend={handleResult} voiceSlot={<VoiceInput onResult={handleResult} />} />
+      <SettingsModal />
     </div>
   )
 }

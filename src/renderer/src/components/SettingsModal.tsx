@@ -4,6 +4,7 @@ import { SettingsLLMTab } from '../settings/SettingsLLMTab'
 import { SettingsVoiceTab } from '../settings/SettingsVoiceTab'
 import { SettingsAppearanceTab } from '../settings/SettingsAppearanceTab'
 import { SettingsSystemTab } from '../settings/SettingsSystemTab'
+import { useDeviceStore } from '../store/deviceStore'
 
 export type SettingsTab = 'llm' | 'voice' | 'appearance' | 'system'
 
@@ -14,12 +15,10 @@ const TABS: { id: SettingsTab; icon: string; label: string }[] = [
   { id: 'system', icon: 'ri-computer-line', label: '系统' },
 ]
 
-interface SettingsModalProps {
-  open: boolean
-  onClose: () => void
-}
+export function SettingsModal() {
+  const open = useDeviceStore((s) => s.settingsOpen)
+  const onClose = useCallback(() => useDeviceStore.getState().setSettingsOpen(false), [])
 
-export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('llm')
   const { values, setAndSave, saving, lastSaved } = useSettings(open)
 

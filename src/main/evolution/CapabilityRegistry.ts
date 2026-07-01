@@ -91,6 +91,20 @@ export class CapabilityRegistry {
     )
   }
 
+  /** 删除一个能力（core 不可删除） */
+  remove(id: string): boolean {
+    const cap = this.capabilities.get(id)
+    if (!cap) return false
+    if (cap.tier === 'core') {
+      log('WARN', 'capability_remove_core_denied', { id })
+      return false
+    }
+    this.capabilities.delete(id)
+    this.removeFile(id)
+    log('INFO', 'capability_removed', { id, tier: cap.tier })
+    return true
+  }
+
   /** 使用计数 +1 */
   recordUsage(id: string): void {
     const cap = this.capabilities.get(id)

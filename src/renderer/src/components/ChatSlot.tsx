@@ -1,6 +1,8 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
-import type { MessageItem, ToolEvent } from '../slots/types'
-import type { AgentState } from '../hooks/useAIOutput'
+import type { ToolEvent } from '../slots/types'
+import { useSessionStore } from '../store/sessionStore'
+import { useAgentStore } from '../store/agentStore'
+import type { AgentState } from '../store/agentStore'
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -22,18 +24,6 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
-interface ChatSlotProps {
-  messages: MessageItem[]
-  pendingText?: string
-  displayText?: string
-  transcribed?: string
-  toolStatus: { type: string; tool: string; message: string } | null
-  agentState: AgentState
-  toolRunning: ToolEvent[]
-  toolCompleted: ToolEvent[]
-  historyLoading?: boolean
-}
-
 const AGENT_LABELS: Record<AgentState, string | null> = {
   idle: null,
   thinking: '思考中…',
@@ -41,7 +31,6 @@ const AGENT_LABELS: Record<AgentState, string | null> = {
   replying: null,
 }
 
-// 工具名 → 用户友好的简短描述
 function humanToolName(t: ToolEvent): string {
   const n = t.tool
   if (n === 'read_file') return '读取文件'
@@ -66,7 +55,6 @@ function humanToolName(t: ToolEvent): string {
   return n
 }
 
-// 根据工具类型提取关键参数摘要
 function summarizeArgs(tool: string, args: Record<string, any>): string {
   const v = (key: string) => (args[key] ?? '').toString().slice(0, 60)
   if (tool === 'run_command') return v('command')
@@ -83,17 +71,17 @@ function summarizeArgs(tool: string, args: Record<string, any>): string {
     .slice(0, 80)
 }
 
-export function ChatSlot({
-  messages,
-  pendingText,
-  displayText,
-  transcribed,
-  toolStatus,
-  agentState,
-  toolRunning,
-  toolCompleted,
-  historyLoading,
-}: ChatSlotProps) {
+export function ChatSlot() {
+  const messages = useSessionStore((s) => s.historyMessages)
+  const historyLoading = useSessionStore((s) => s.historyLoading)
+
+  const pendingText = useAgentStore((s) => s.pendingText)
+  const displayText = useAgentStore((s) => s.displayText)
+  const transcribed = useAgentStore((s) => s.transcribed)
+  const agentState = useAgentStore((s) => s.agentState)
+  const toolRunning = useAgentStore((s) => s.toolRunning)
+  const toolCompleted = useAgentStore((s) => s.toolCompleted)
+
   const bottomRef = useRef<HTMLDivElement>(null)
   const [toolsCollapsed, setToolsCollapsed] = useState(false)
 
@@ -106,7 +94,6 @@ export function ChatSlot({
   const hasTools = toolRunning.length > 0 || toolCompleted.length > 0
   const showEmpty = messages.length === 0 && !hasPending && !transcribed && !hasTools && !agentLabel && !historyLoading
 
-  // 根据工具名生成可读的描述
   const toolSummary = useMemo(() => {
     const allTools = [...toolRunning, ...toolCompleted]
     const names = [...new Set(allTools.map((t) => humanToolName(t)))]
@@ -115,7 +102,6 @@ export function ChatSlot({
     return `${names[0]} 等 ${names.length} 个工具`
   }, [toolRunning, toolCompleted])
 
-  // 加载中状态
   if (historyLoading) {
     return (
       <div className="chat-slot">
@@ -144,7 +130,6 @@ export function ChatSlot({
 
   return (
     <div className="chat-slot">
-      {/* Agent 状态指示 */}
       {agentLabel && (
         <div className="agent-indicator">
           <span className="agent-indicator-dot" />
@@ -152,7 +137,6 @@ export function ChatSlot({
         </div>
       )}
 
-      {/* 用户刚说的转录文本 */}
       {transcribed && (
         <div className="msg msg-row user">
           <div className="msg-label">你</div>
@@ -163,7 +147,6 @@ export function ChatSlot({
         </div>
       )}
 
-      {/* 历史消息 */}
       {messages.map((m) => (
         <div key={m.id} className={`msg msg-row ${m.role}`}>
           <div className="msg-label">{m.role === 'user' ? '你' : '秋山澪'}</div>
@@ -175,7 +158,6 @@ export function ChatSlot({
         </div>
       ))}
 
-      {/* 正在执行的 tool 卡片 — 可收起/展开 */}
       {toolRunning.length > 0 && (
         <div className="tool-inline-group">
           <div
@@ -201,7 +183,6 @@ export function ChatSlot({
         </div>
       )}
 
-      {/* 刚完成的 tool 卡片 — 自动折叠 */}
       {toolCompleted.length > 0 && (
         <div className="tool-inline-group">
           <div className="tool-inline-group-header tool-group-completed-header">
@@ -221,7 +202,6 @@ export function ChatSlot({
         </div>
       )}
 
-      {/* 流式回复 */}
       {hasPending && (
         <div className="msg msg-row assistant">
           <div className="msg-label">秋山澪</div>

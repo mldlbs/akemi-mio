@@ -1,19 +1,12 @@
-import type { ReactNode } from 'react'
 import { useSlots } from '../slots/SlotContext'
 import { StatusBar } from './StatusBar'
-import type { AgentState } from '../hooks/useAIOutput'
+import { useDeviceStore } from '../store/deviceStore'
 
 interface TopBarProps {
-  conversationActive: boolean
-  ttsPlaying?: boolean
-  error?: string
-  sessionHealth?: string
-  personaLevel?: string
   onOpenSettings?: () => void
-  agentState?: AgentState
 }
 
-export function TopBar({ conversationActive, ttsPlaying, error, sessionHealth, personaLevel, onOpenSettings, agentState }: TopBarProps) {
+export function TopBar({ onOpenSettings }: TopBarProps) {
   const { uiState, toggleSidebar, setActiveSlot } = useSlots()
 
   return (
@@ -24,14 +17,7 @@ export function TopBar({ conversationActive, ttsPlaying, error, sessionHealth, p
       <span className="topbar-logo">秋山澪</span>
 
       <div className="topbar-center">
-        <StatusBar
-          conversationActive={conversationActive}
-          ttsPlaying={ttsPlaying}
-          error={error}
-          sessionHealth={sessionHealth}
-          personaLevel={personaLevel}
-          agentState={agentState}
-        />
+        <StatusBar />
       </div>
 
       <div className="topbar-actions">

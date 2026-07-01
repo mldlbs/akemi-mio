@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { WorkflowEditor } from './WorkflowEditor'
 import { ErrorBoundary } from './ErrorBoundary'
+import { useWorkflowStore } from '../store/workflowStore'
 import { useIPCEvent } from '../hooks/useIPCEvent'
 
 type ViewMode = 'list' | 'editor'
@@ -139,15 +140,25 @@ function handlerLabel(handler: string): string {
   }
 }
 
-export interface WorkflowSlotProps {
-  workflowDefs: any[]
-  workflowRuns: any[]
-  workflowActiveRuns: any[]
-  wfLoading: boolean
-  onRefreshDefs?: () => void
-}
+export function WorkflowSlot() {
+  const store = useWorkflowStore()
+  const workflowDefs = store.definitions
+  const workflowRuns = store.runs
+  const workflowActiveRuns = store.runs.filter((r) => r.status === 'running')
+  const wfLoading = store.loading
 
-export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, wfLoading, onRefreshDefs }: WorkflowSlotProps) {
+  const refreshDefs = useCallback(() => {
+    Promise.all([window.electronAPI.listWorkflowDefinitions(), window.electronAPI.listWorkflowRuns(20)]).then(([defs, runList]) => {
+      store.setDefinitions(defs)
+      store.setRuns(runList)
+      store.setLoading(false)
+    })
+  }, [store])
+
+  useEffect(() => {
+    if (wfLoading) refreshDefs()
+  }, [wfLoading, refreshDefs])
+
   const [view, setView] = useState<ViewMode>('list')
   const [editDef, setEditDef] = useState<any | null>(null)
   const [runError, setRunError] = useState('')
@@ -198,7 +209,6 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
     setPipelineLogs((prev) => {
       const lines = prev[data.runId] ?? []
       const last = lines[lines.length - 1]
-      // 去重：完全相同的最后一行不追加
       if (last === data.agentResult) return prev
       return { ...prev, [data.runId]: [...lines, data.agentResult].slice(-100) }
     })
@@ -273,7 +283,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
     const result = await window.electronAPI.startWorkflow(defId)
     if (result?.success) {
       setRunSuccess('工作流已启动')
-      onRefreshDefs?.()
+      refreshDefs()
     } else {
       setRunError(result?.error ?? '启动失败')
     }
@@ -287,7 +297,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
           setView('list')
           setEditDef(null)
         }}
-        onSaved={() => onRefreshDefs?.()}
+        onSaved={() => refreshDefs()}
       />
     )
   }
@@ -480,7 +490,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                     const result = await window.electronAPI.startWorkflow(p.id)
                     if (result?.success) {
                       setRunSuccess(`已启动「${p.name}」`)
-                      onRefreshDefs?.()
+                      refreshDefs()
                     } else setRunError(result?.error ?? '启动失败')
                   }}
                 >
@@ -573,7 +583,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                       const r = await window.electronAPI.duplicateWorkflowDefinition(def.id)
                       if (r?.success) {
                         setRunSuccess('已复制')
-                        onRefreshDefs?.()
+                        refreshDefs()
                       } else setRunError(r?.error ?? '复制失败')
                     }}
                   >
@@ -585,7 +595,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                       e.stopPropagation()
                       setRunError('')
                       const result = await window.electronAPI.disableWorkflowDefinition(def.id)
-                      if (result?.success) onRefreshDefs?.()
+                      if (result?.success) refreshDefs()
                       else setRunError(result?.error ?? '操作失败')
                     }}
                   >
@@ -597,7 +607,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                       e.stopPropagation()
                       if (!confirm(`确认删除工作流「${def.name}」？`)) return
                       await window.electronAPI.deleteWorkflowDefinition(def.id)
-                      onRefreshDefs?.()
+                      refreshDefs()
                     }}
                   >
                     <i className="ri-delete-bin-line" /> 删除
@@ -646,7 +656,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                           const r = await window.electronAPI.duplicateWorkflowDefinition(def.id)
                           if (r?.success) {
                             setRunSuccess('已复制')
-                            onRefreshDefs?.()
+                            refreshDefs()
                           } else setRunError(r?.error ?? '复制失败')
                         }}
                       >
@@ -657,7 +667,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                         onClick={async (e) => {
                           e.stopPropagation()
                           const result = await window.electronAPI.enableWorkflowDefinition(def.id)
-                          if (result?.success) onRefreshDefs?.()
+                          if (result?.success) refreshDefs()
                           else setRunError(result?.error ?? '操作失败')
                         }}
                       >
@@ -669,7 +679,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                           e.stopPropagation()
                           if (!confirm(`确认删除工作流「${def.name}」？`)) return
                           await window.electronAPI.deleteWorkflowDefinition(def.id)
-                          onRefreshDefs?.()
+                          refreshDefs()
                         }}
                       >
                         <i className="ri-delete-bin-line" /> 删除
@@ -780,7 +790,7 @@ export function WorkflowSlot({ workflowDefs, workflowRuns, workflowActiveRuns, w
                               e.stopPropagation()
                               if (!confirm(`删除此运行记录？`)) return
                               await window.electronAPI.deleteWorkflowRun(run.runId)
-                              onRefreshDefs?.()
+                              refreshDefs()
                             }}
                           >
                             <i className="ri-delete-bin-6-line" /> 删除

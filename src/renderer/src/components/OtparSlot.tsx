@@ -1,5 +1,6 @@
+import { usePlansStore } from '../store/plansStore'
+import type { OtparEntry } from '../store/plansStore'
 import { ErrorBoundary } from './ErrorBoundary'
-import type { OtparEntry } from '../hooks/usePlans'
 
 const OTPAR_PHASES: { type: OtparEntry['type']; label: string; icon: string }[] = [
   { type: 'observe', label: 'Observe', icon: 'ri-eye-line' },
@@ -22,11 +23,9 @@ function groupOtparByStep(entries: OtparEntry[]): { step: number; entries: Otpar
     .sort((a, b) => b.step - a.step)
 }
 
-interface Props {
-  otparStages: OtparEntry[]
-}
+export function OtparSlot() {
+  const otparStages = usePlansStore((s) => s.otparStages)
 
-export function OtparSlot({ otparStages }: Props) {
   return (
     <div className="workflow-slot workflow-slot-content">
       <ErrorBoundary>

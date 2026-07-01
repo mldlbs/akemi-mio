@@ -1,65 +1,68 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useEffect } from 'react'
 import { useIPCEvent } from './useIPCEvent'
-import type { SessionItem, MessageItem } from '../slots/types'
+import { useSessionStore } from '../store/sessionStore'
+import type { MessageItem } from '../slots/types'
 
 const EMPTY: MessageItem[] = []
 
 export function useSessions() {
-  const [sessions, setSessions] = useState<SessionItem[]>([])
-  const [sessionsLoading, setSessionsLoading] = useState(true)
-  const [activeSessionId, setActiveSessionId] = useState<string>('')
-  const [historyMessages, setHistoryMessages] = useState<MessageItem[]>([])
-  const [historyLoading, setHistoryLoading] = useState(false)
-  const skipDbLoadRef = useRef(false)
+  const store = useSessionStore()
 
   useEffect(() => {
     window.electronAPI
       .getSessions()
       .then((s) => {
-        setSessions(s as SessionItem[])
-        if (s.length > 0) {
-          setActiveSessionId((prev) => prev || s[0].id)
+        store.setSessions(s)
+        if (s.length > 0 && !store.activeSessionId) {
+          store.setActiveSessionId(s[0].id)
         }
       })
       .catch(() => {})
-      .finally(() => setSessionsLoading(false))
+      .finally(() => store.setSessionsLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // DB 加载只用于 mount/handleSelectChat，onMessageNew 触发的切换跳过
   useEffect(() => {
-    if (!activeSessionId) return
-    if (skipDbLoadRef.current) {
-      skipDbLoadRef.current = false
+    if (!store.activeSessionId) return
+    if (store.skipDbLoad) {
+      store.setSkipDbLoad(false)
       return
     }
-    setHistoryLoading(true)
+    store.setHistoryLoading(true)
     window.electronAPI
-      .getMessagesBySession(activeSessionId)
-      .then((msgs) => setHistoryMessages(msgs as MessageItem[]))
-      .catch(() => setHistoryMessages([]))
-      .finally(() => setHistoryLoading(false))
-  }, [activeSessionId])
+      .getMessagesBySession(store.activeSessionId)
+      .then((msgs) => store.setHistoryMessages(msgs))
+      .catch(() => store.setHistoryMessages(EMPTY))
+      .finally(() => store.setHistoryLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.activeSessionId])
 
   useIPCEvent<MessageItem>(window.electronAPI.onMessageNew as any, (msg) => {
     if (!msg.sessionId) return
-    if (msg.sessionId !== activeSessionId) {
-      // 进化消息不强制切换会话，避免打扰用户
+    if (msg.sessionId !== store.activeSessionId) {
       if (msg.category !== 'evolution') {
-        skipDbLoadRef.current = true
-        setActiveSessionId(msg.sessionId)
+        store.setSkipDbLoad(true)
+        store.setActiveSessionId(msg.sessionId)
       }
     }
-    setHistoryMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]))
+    store.addHistoryMessage(msg)
     window.electronAPI
       .getSessions()
-      .then((s) => setSessions(s as SessionItem[]))
+      .then((s) => store.setSessions(s))
       .catch(() => {})
   })
 
-  const handleSelectChat = useCallback((sessionId: string) => {
-    setActiveSessionId(sessionId)
-    setHistoryMessages([])
-  }, [])
+  const handleSelectChat = (sessionId: string) => {
+    store.selectChat(sessionId)
+  }
 
-  return { sessions, sessionsLoading, activeSessionId, historyMessages, historyLoading, handleSelectChat } as const
+  return {
+    sessions: store.sessions,
+    sessionsLoading: store.sessionsLoading,
+    activeSessionId: store.activeSessionId,
+    historyMessages: store.historyMessages,
+    historyLoading: store.historyLoading,
+    handleSelectChat,
+  } as const
 }

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { VoiceInput } from '../VoiceInput'
+import { resetAllStores } from '../../store/reset'
+import { useDeviceStore } from '../../store/deviceStore'
+import { createMockIPC } from '../../__tests__/mockIPC'
 
 vi.mock('../audioShared', () => ({
   updateMicEnergy: vi.fn(),
@@ -26,8 +29,9 @@ class TestAudioContext {
 }
 
 beforeEach(() => {
+  resetAllStores()
   capturedProcessor = null
-  window.electronAPI = { ...window.electronAPI } as any
+  window.electronAPI = createMockIPC() as any
   Object.defineProperty(window, 'AudioContext', { writable: true, value: TestAudioContext })
 })
 
@@ -64,18 +68,20 @@ describe('VoiceInput', () => {
     expect(screen.getAllByRole('button')[0].disabled).toBe(true)
   })
 
-  it('enables stop TTS button when ttsPlaying', () => {
-    render(<VoiceInput onResult={vi.fn()} ttsPlaying />)
+  it('enables stop TTS button when ttsPlaying from store', () => {
+    useDeviceStore.getState().setTtsPlaying(true)
+    render(<VoiceInput onResult={vi.fn()} />)
     expect(screen.getAllByRole('button')[1].disabled).toBe(false)
   })
 
   it('disables stop TTS button when not ttsPlaying', () => {
-    render(<VoiceInput onResult={vi.fn()} ttsPlaying={false} />)
+    render(<VoiceInput onResult={vi.fn()} />)
     expect(screen.getAllByRole('button')[1].disabled).toBe(true)
   })
 
   it('stop TTS button calls stopSpeaking', () => {
-    render(<VoiceInput onResult={vi.fn()} ttsPlaying />)
+    useDeviceStore.getState().setTtsPlaying(true)
+    render(<VoiceInput onResult={vi.fn()} />)
     fireEvent.click(screen.getAllByRole('button')[1])
     expect(window.electronAPI.stopSpeaking).toHaveBeenCalled()
   })
@@ -87,25 +93,23 @@ describe('VoiceInput', () => {
     })
   })
 
-  it('calls onConversationChange(true) on activation', async () => {
-    const onConv = vi.fn()
-    render(<VoiceInput onResult={vi.fn()} onConversationChange={onConv} />)
+  it('sets device store active=true on activation', async () => {
+    render(<VoiceInput onResult={vi.fn()} />)
     await act(async () => {
       fireEvent.click(screen.getAllByRole('button')[0])
     })
-    expect(onConv).toHaveBeenCalledWith(true)
+    expect(useDeviceStore.getState().active).toBe(true)
   })
 
-  it('calls onConversationChange(false) on deactivation', async () => {
-    const onConv = vi.fn()
-    render(<VoiceInput onResult={vi.fn()} onConversationChange={onConv} />)
+  it('sets device store active=false on deactivation', async () => {
+    render(<VoiceInput onResult={vi.fn()} />)
     await act(async () => {
       fireEvent.click(screen.getAllByRole('button')[0])
     })
     await act(async () => {
       fireEvent.click(screen.getAllByRole('button')[0])
     })
-    expect(onConv).toHaveBeenCalledWith(false)
+    expect(useDeviceStore.getState().active).toBe(false)
   })
 
   it('calls stopConversation on deactivation', async () => {

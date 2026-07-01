@@ -9,7 +9,7 @@
       "description": "第1步：连接写作系统的 MCP 服务器，获取结构化的 writing_* 工具集",
       "handler": "subagent",
       "config": {
-        "prompt": "## 任务：连接写作 MCP 服务器\n\n你现在是写作助手的「MCP连接」环节。请尝试连接写作系统的 MCP 服务器，获取结构化的写作工具。\n\n### 操作步骤\n\n1. 调用 `connect_mcp_server` 工具：\n   - name: writing-system\n   - url: https://www.crlkcloud.cyou/writing-mcp/sse\n   - transport: sse\n\n2. 如果连接成功，调用 `list_mcp_tools` 确认以下工具可用：\n   - writing_list_stories\n   - writing_get_story\n   - writing_list_characters\n   - writing_create_character\n   - writing_list_scenes\n   - writing_create_scene\n   - writing_create_relationship\n   - writing_ai_write\n\n3. 汇报连接结果：哪些工具可用，哪些不可用。\n\n### 输出格式\n\n```\n【MCP状态】\n- 连接状态: 成功/失败\n- 可用工具列表:\n- 失败原因（如果有）:\n```\n\n### 注意\n- 如果连接失败，标记为失败，后续步骤会尝试修复\n- 不要跳过此步骤"
+        "prompt": "## 任务：连接写作 MCP 服务器\n\n你现在是写作助手的「MCP连接」环节。请尝试连接写作系统的 MCP 服务器，获取结构化的写作工具。\n\n### 操作步骤\n\n1. 调用 `connect_mcp_server` 工具：\n   - name: writing-system\n   - url: https://www.crlkcloud.cyou/writing-mcp/\n   - transport: http\n\n2. 如果连接成功，调用 `list_mcp_tools` 确认以下工具可用：\n   - writing_list_stories\n   - writing_get_story\n   - writing_list_characters\n   - writing_create_character\n   - writing_list_scenes\n   - writing_create_scene\n   - writing_create_relationship\n   - writing_ai_write\n\n3. 汇报连接结果：哪些工具可用，哪些不可用。\n\n### 输出格式\n\n```\n【MCP状态】\n- 连接状态: 成功/失败\n- 可用工具列表:\n- 失败原因（如果有）:\n```\n\n### 注意\n- 如果连接失败，标记为失败，后续步骤会尝试修复\n- 不要跳过此步骤"
       },
       "dependsOn": []
     },
@@ -19,7 +19,7 @@
       "description": "第2步：当MCP连接失败时，通过centos SSH工具远程修复写作MCP服务器",
       "handler": "subagent",
       "config": {
-        "prompt": "## 任务：修复写作 MCP 连接\n\n上一步 MCP 连接失败，现在需要通过 centos SSH 工具排查并修复。\n\n### 排查步骤\n\n1. **检查远程服务器状态** — 调用 `centos_exec`：\n   - `pm2 list` 或者 `ps aux | grep writing`\n   - 如果 writing-mcp 不在运行，尝试启动：`cd /opt/writing-system && pm2 start server/mcp-server/ecosystem.writing.js`\n\n2. **检查 nginx 配置** — 调用 `centos_exec`：\n   - `cat /etc/nginx/conf.d/writing.conf` 或者 `nginx -t`\n\n3. **检查 writing API 后端** — 调用 `centos_exec`：\n   - `curl -s http://127.0.0.1:3300/api/stories | head -50`\n\n4. **执行修复脚本**：\n   - `cd /opt/writing-system && python3 server/fix_writing_api2.py`\n\n5. **验证修复** — 再次连接：\n   - `connect_mcp_server name=writing-system url=https://www.crlkcloud.cyou/writing-mcp/sse transport=sse`\n\n### 注意事项\n\n- SSH 凭证通过 credentials 系统获取\n- 每步操作后检查返回结果\n- 如果修复后仍然无法连接，汇报详细错误信息，让用户手动处理"
+        "prompt": "## 任务：修复写作 MCP 连接\n\n上一步 MCP 连接失败，现在需要通过 centos SSH 工具排查并修复。\n\n### 排查步骤\n\n1. **检查远程服务器状态** — 调用 `centos_exec`：\n   - `pm2 list` 或者 `ps aux | grep writing`\n   - 如果 writing-mcp 不在运行，尝试启动：`cd /opt/writing-system && pm2 start server/mcp-server/ecosystem.writing.js`\n\n2. **检查 nginx 配置** — 调用 `centos_exec`：\n   - `cat /etc/nginx/conf.d/writing.conf` 或者 `nginx -t`\n\n3. **检查 writing API 后端** — 调用 `centos_exec`：\n   - `curl -s http://127.0.0.1:3300/api/stories | head -50`\n\n4. **执行修复脚本**：\n   - `cd /opt/writing-system && python3 server/fix_writing_api2.py`\n\n5. **验证修复** — 再次连接：\n   - `connect_mcp_server name=writing-system url=https://www.crlkcloud.cyou/writing-mcp/ transport=http`\n\n### 注意事项\n\n- SSH 凭证通过 credentials 系统获取\n- 每步操作后检查返回结果\n- 如果修复后仍然无法连接，汇报详细错误信息，让用户手动处理"
       },
       "dependsOn": [
         "mcp-connect"

@@ -1,11 +1,7 @@
-import { useMemo } from 'react'
+import { useSessionStore } from '../store/sessionStore'
+import { useSlots } from '../slots/SlotContext'
+import { useCallback, useMemo } from 'react'
 import type { SessionItem } from '../slots/types'
-
-interface SidebarProps {
-  sessions: SessionItem[]
-  activeSessionId: string
-  onSelectChat: (id: string) => void
-}
 
 const CATEGORY_META: Record<string, { label: string; icon: string }> = {
   chat: { label: '聊天', icon: 'ri-chat-1-line' },
@@ -31,7 +27,6 @@ function formatGroupLabel(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 
-/** 按 lastActivityAt 分组为日期段 */
 function groupSessions(sessions: SessionItem[]) {
   const dateGroupMap = new Map<string, SessionItem[]>()
   for (const s of sessions) {
@@ -44,8 +39,20 @@ function groupSessions(sessions: SessionItem[]) {
   return Array.from(dateGroupMap.entries())
 }
 
-export function Sidebar({ sessions, activeSessionId, onSelectChat }: SidebarProps) {
-  // 按 category 分组
+export function Sidebar() {
+  const sessions = useSessionStore((s) => s.sessions)
+  const activeSessionId = useSessionStore((s) => s.activeSessionId)
+  const handleSelectChat = useSessionStore((s) => s.selectChat)
+  const { setActiveSlot } = useSlots()
+
+  const onSelectChat = useCallback(
+    (sessionId: string) => {
+      handleSelectChat(sessionId)
+      setActiveSlot('chat')
+    },
+    [handleSelectChat, setActiveSlot],
+  )
+
   const grouped = useMemo(() => {
     const map = new Map<string, SessionItem[]>()
     for (const s of sessions) {
@@ -56,7 +63,6 @@ export function Sidebar({ sessions, activeSessionId, onSelectChat }: SidebarProp
     return map
   }, [sessions])
 
-  // 排序：按 CATEGORY_ORDER + 按 lastActivityAt 排序
   const panels = useMemo(() => {
     const cats = Array.from(grouped.keys()).sort((a, b) => CATEGORY_ORDER.indexOf(a as any) - CATEGORY_ORDER.indexOf(b as any))
     return cats.map((cat) => ({

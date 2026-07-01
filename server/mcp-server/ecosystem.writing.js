@@ -44,8 +44,8 @@ module.exports = {
 在 chat 中告诉 AI：
 "请使用 connect_mcp_server 工具连接写作系统 MCP：
   name: writing-system
-  url: https://www.crlkcloud.cyou/writing-mcp/sse
-  transport: sse"
+  url: https://www.crlkcloud.cyou/writing-mcp/
+  transport: http"
 
-然后 AI 就可以用结构化的 writing_* 工具直接操作写作系统了。
+然后 AI 就可以用 writing_* 工具直接操作写作系统了。
 */

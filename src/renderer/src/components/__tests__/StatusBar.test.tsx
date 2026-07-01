@@ -1,55 +1,64 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { StatusBar } from '../StatusBar'
+import { resetAllStores } from '../../store/reset'
+import { useDeviceStore } from '../../store/deviceStore'
+import { useAgentStore } from '../../store/agentStore'
+
+beforeEach(() => {
+  resetAllStores()
+})
 
 describe('StatusBar', () => {
   it('shows "待命" when idle', () => {
-    render(<StatusBar conversationActive={false} />)
+    render(<StatusBar />)
     expect(screen.getByText('待命')).toBeTruthy()
   })
 
   it('shows "正在聆听" when conversation is active', () => {
-    render(<StatusBar conversationActive={true} />)
+    useDeviceStore.getState().setActive(true)
+    render(<StatusBar />)
     expect(screen.getByText('正在聆听')).toBeTruthy()
   })
 
   it('shows "思考中" when agentState is thinking', () => {
-    render(<StatusBar conversationActive={false} agentState="thinking" />)
+    useAgentStore.getState().setAgentState('thinking')
+    render(<StatusBar />)
     expect(screen.getByText('思考中')).toBeTruthy()
   })
 
   it('shows "执行工具" when agentState is tool_executing', () => {
-    render(<StatusBar conversationActive={false} agentState="tool_executing" />)
+    useAgentStore.getState().setAgentState('tool_executing')
+    render(<StatusBar />)
     expect(screen.getByText('执行工具')).toBeTruthy()
   })
 
   it('shows "回复中" when ttsPlaying', () => {
-    render(<StatusBar conversationActive={false} ttsPlaying={true} />)
+    useDeviceStore.getState().setTtsPlaying(true)
+    render(<StatusBar />)
     expect(screen.getByText('回复中')).toBeTruthy()
   })
 
-  it('shows health display when sessionHealth is provided', () => {
-    render(<StatusBar conversationActive={false} sessionHealth="85:HEALTHY:memory" />)
+  it('shows health display', () => {
+    useDeviceStore.getState().setSessionHealth('85:HEALTHY:memory')
+    render(<StatusBar />)
     expect(screen.getByText('85 HEALTHY')).toBeTruthy()
   })
 
-  it('does NOT show health when sessionHealth is missing', () => {
-    const { container } = render(<StatusBar conversationActive={false} />)
-    expect(container.querySelector('.status-health')).toBeNull()
-  })
-
   it('shows persona badge for non-core levels', () => {
-    render(<StatusBar conversationActive={false} personaLevel="writer" />)
+    useDeviceStore.getState().setPersonaLevel('writer')
+    render(<StatusBar />)
     expect(screen.getByText('写作')).toBeTruthy()
   })
 
   it('does NOT show persona badge for core level', () => {
-    const { container } = render(<StatusBar conversationActive={false} personaLevel="core" />)
+    const { container } = render(<StatusBar />)
     expect(container.querySelector('.persona-badge')).toBeNull()
   })
 
   it('shows error text when provided', () => {
-    render(<StatusBar conversationActive={false} error="Something went wrong" />)
+    useDeviceStore.getState().setError('Something went wrong')
+    render(<StatusBar />)
     expect(screen.getByText('Something went wrong')).toBeTruthy()
   })
 })

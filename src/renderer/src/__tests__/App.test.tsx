@@ -2,16 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { renderWithProviders } from './renderWithProviders'
 import { createMockIPC } from './mockIPC'
+import { resetAllStores } from '../store/reset'
 
-// Mock the hooks barrel for predictable return values
+// Mock the hooks barrel for predictable return values (hooks still use IPC internally)
 vi.mock('../hooks', () => ({
-  useSessions: () => ({
-    sessions: [],
-    activeSessionId: null,
-    historyMessages: [],
-    historyLoading: false,
-    handleSelectChat: vi.fn(),
-  }),
+  useSessions: () => {},
   useDeviceStatus: () => ({
     active: false,
     ttsPlaying: false,
@@ -31,26 +26,15 @@ vi.mock('../hooks', () => ({
     agentState: 'idle',
     handleResult: vi.fn(),
   }),
-  useTools: () => ({
-    toolRunning: [],
-    toolCompleted: [],
-  }),
-  usePlans: () => ({
-    activePlan: null,
-    otparStages: [],
-  }),
-  useWorkflowDefinitions: () => ({
-    definitions: [],
-    runs: [],
-    activeRuns: [],
-    loading: false,
-    refresh: vi.fn(),
-  }),
+  useTools: () => {},
+  usePlans: () => {},
+  useWorkflowDefinitions: () => {},
 }))
 
 import App from '../App'
 
 beforeEach(() => {
+  resetAllStores()
   window.electronAPI = createMockIPC() as any
 })
 

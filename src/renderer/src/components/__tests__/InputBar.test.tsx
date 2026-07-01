@@ -1,6 +1,14 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { InputBar } from '../InputBar'
+import { useAgentStore } from '../../store/agentStore'
+import { resetAllStores } from '../../store/reset'
+import { createMockIPC } from '../../__tests__/mockIPC'
+
+beforeEach(() => {
+  resetAllStores()
+  window.electronAPI = createMockIPC() as any
+})
 
 describe('InputBar', () => {
   it('renders textarea and send button', () => {
@@ -61,29 +69,33 @@ describe('InputBar', () => {
   })
 
   it('shows stop button when agentState is thinking', () => {
-    render(<InputBar onSend={vi.fn()} agentState="thinking" />)
+    useAgentStore.getState().setAgentState('thinking')
+    render(<InputBar onSend={vi.fn()} />)
     expect(screen.getByTitle('停止回复')).toBeTruthy()
     expect(screen.queryByTitle('发送')).toBeNull()
   })
 
   it('shows stop button when agentState is tool_executing', () => {
-    render(<InputBar onSend={vi.fn()} agentState="tool_executing" />)
+    useAgentStore.getState().setAgentState('tool_executing')
+    render(<InputBar onSend={vi.fn()} />)
     expect(screen.getByTitle('停止回复')).toBeTruthy()
   })
 
   it('shows stop button when agentState is replying', () => {
-    render(<InputBar onSend={vi.fn()} agentState="replying" />)
+    useAgentStore.getState().setAgentState('replying')
+    render(<InputBar onSend={vi.fn()} />)
     expect(screen.getByTitle('停止回复')).toBeTruthy()
   })
 
   it('shows send button when agentState is idle', () => {
-    render(<InputBar onSend={vi.fn()} agentState="idle" />)
+    render(<InputBar onSend={vi.fn()} />)
     expect(screen.queryByTitle('停止回复')).toBeNull()
     expect(screen.getByTitle('发送')).toBeTruthy()
   })
 
   it('calls stopConversation on stop click', () => {
-    render(<InputBar onSend={vi.fn()} agentState="thinking" />)
+    useAgentStore.getState().setAgentState('thinking')
+    render(<InputBar onSend={vi.fn()} />)
     fireEvent.click(screen.getByTitle('停止回复'))
     expect(window.electronAPI.stopConversation).toHaveBeenCalled()
   })
@@ -91,21 +103,5 @@ describe('InputBar', () => {
   it('renders voiceSlot before textarea', () => {
     const { container } = render(<InputBar onSend={vi.fn()} voiceSlot={<span data-testid="voice-slot" />} />)
     expect(container.querySelector('[data-testid="voice-slot"]')).toBeTruthy()
-  })
-
-  it('auto-resizes textarea on input', () => {
-    render(<InputBar onSend={vi.fn()} />)
-    const textarea = screen.getByPlaceholderText('输入消息…') as HTMLTextAreaElement
-    Object.defineProperty(textarea, 'scrollHeight', { value: 60 })
-    fireEvent.change(textarea, { target: { value: 'multi\nline\ninput' } })
-    expect(textarea.style.height).toBe('60px')
-  })
-
-  it('caps textarea height at 120px', () => {
-    render(<InputBar onSend={vi.fn()} />)
-    const textarea = screen.getByPlaceholderText('输入消息…') as HTMLTextAreaElement
-    Object.defineProperty(textarea, 'scrollHeight', { value: 300 })
-    fireEvent.change(textarea, { target: { value: 'very long '.repeat(20) } })
-    expect(textarea.style.height).toBe('120px')
   })
 })

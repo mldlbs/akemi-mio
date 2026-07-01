@@ -39,7 +39,8 @@
     "sql.js": "^1.14.1",
     "ssh2": "^1.17.0",
     "telegraf": "^4.16.3",
-    "three": "^0.184.0"
+    "three": "^0.184.0",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.2",

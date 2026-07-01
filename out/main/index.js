@@ -280,7 +280,7 @@ class EventBus {
     }
   }
   listenerCount(event) {
-    const priorityCount = Array.from(this.priorityListeners.get(event)?.values() ?? []).reduce((sum, list) => sum + list.length, 0);
+    const priorityCount = Array.from(this.priorityListeners.get(event)?.values() ?? []).reduce((sum, list2) => sum + list2.length, 0);
     return Math.max(priorityCount, this.emitter.listenerCount(event));
   }
   /** 诊断：当前所有活跃订阅概况 */
@@ -288,7 +288,7 @@ class EventBus {
     const stats = {};
     const events2 = /* @__PURE__ */ new Set([...this.emitter.eventNames().map(String), ...this.priorityListeners.keys()]);
     for (const event of events2) {
-      const priorityCount = Array.from(this.priorityListeners.get(event)?.values() ?? []).reduce((sum, list) => sum + list.length, 0);
+      const priorityCount = Array.from(this.priorityListeners.get(event)?.values() ?? []).reduce((sum, list2) => sum + list2.length, 0);
       const count = Math.max(priorityCount, this.emitter.listenerCount(event));
       const labels = Array.from(this.subscriptionLabels.get(event) || []);
       const buckets = {};
@@ -1210,12 +1210,12 @@ const createDevPlanTool = buildTool({
     try {
       const pm = getPlanManager();
       if (!pm) return formatToolError("计划管理器尚未就绪");
-      const plan = pm.createPlan(args.title, args.description, args.steps);
+      const plan2 = pm.createPlan(args.title, args.description, args.steps);
       const result = JSON.stringify(
         {
-          id: plan.id,
-          title: plan.title,
-          steps: plan.steps.map((s, i) => `${i}: ${s.description}`)
+          id: plan2.id,
+          title: plan2.title,
+          steps: plan2.steps.map((s, i) => `${i}: ${s.description}`)
         },
         null,
         2
@@ -2586,7 +2586,7 @@ const devPipelineLarge = {
 const id = "writing-pipeline";
 const name = "写作工作流";
 const description = "完整续写流程：连接写作MCP → 若失败则通过centos SSH自愈 → 查看故事状态 → 确定方向 → ai_write生成 → 质量检查+去AI味 → 落地保存";
-const steps = [{ "id": "mcp-connect", "name": "连接写作MCP", "description": "第1步：连接写作系统的 MCP 服务器，获取结构化的 writing_* 工具集", "handler": "subagent", "config": { "prompt": "## 任务：连接写作 MCP 服务器\n\n你现在是写作助手的「MCP连接」环节。请尝试连接写作系统的 MCP 服务器，获取结构化的写作工具。\n\n### 操作步骤\n\n1. 调用 `connect_mcp_server` 工具：\n   - name: writing-system\n   - url: https://www.crlkcloud.cyou/writing-mcp/sse\n   - transport: sse\n\n2. 如果连接成功，调用 `list_mcp_tools` 确认以下工具可用：\n   - writing_list_stories\n   - writing_get_story\n   - writing_list_characters\n   - writing_create_character\n   - writing_list_scenes\n   - writing_create_scene\n   - writing_create_relationship\n   - writing_ai_write\n\n3. 汇报连接结果：哪些工具可用，哪些不可用。\n\n### 输出格式\n\n```\n【MCP状态】\n- 连接状态: 成功/失败\n- 可用工具列表:\n- 失败原因（如果有）:\n```\n\n### 注意\n- 如果连接失败，标记为失败，后续步骤会尝试修复\n- 不要跳过此步骤" }, "dependsOn": [] }, { "id": "mcp-fix", "name": "修复MCP连接", "description": "第2步：当MCP连接失败时，通过centos SSH工具远程修复写作MCP服务器", "handler": "subagent", "config": { "prompt": "## 任务：修复写作 MCP 连接\n\n上一步 MCP 连接失败，现在需要通过 centos SSH 工具排查并修复。\n\n### 排查步骤\n\n1. **检查远程服务器状态** — 调用 `centos_exec`：\n   - `pm2 list` 或者 `ps aux | grep writing`\n   - 如果 writing-mcp 不在运行，尝试启动：`cd /opt/writing-system && pm2 start server/mcp-server/ecosystem.writing.js`\n\n2. **检查 nginx 配置** — 调用 `centos_exec`：\n   - `cat /etc/nginx/conf.d/writing.conf` 或者 `nginx -t`\n\n3. **检查 writing API 后端** — 调用 `centos_exec`：\n   - `curl -s http://127.0.0.1:3300/api/stories | head -50`\n\n4. **执行修复脚本**：\n   - `cd /opt/writing-system && python3 server/fix_writing_api2.py`\n\n5. **验证修复** — 再次连接：\n   - `connect_mcp_server name=writing-system url=https://www.crlkcloud.cyou/writing-mcp/sse transport=sse`\n\n### 注意事项\n\n- SSH 凭证通过 credentials 系统获取\n- 每步操作后检查返回结果\n- 如果修复后仍然无法连接，汇报详细错误信息，让用户手动处理" }, "dependsOn": ["mcp-connect"], "runOn": "failure" }, { "id": "story-check", "name": "故事状态检查", "description": "第3步：查看当前故事状态——有哪些角色、写到哪一章了", "handler": "subagent", "config": { "prompt": "## 任务：查看故事当前状态\n\n你现在是写作助手的「状态检查」环节。写作 MCP 已经连接，请通过 writing_* 工具获取以下信息：\n\n### 操作步骤\n\n1. **列出所有故事** — 调用 `writing_list_stories`，了解当前有哪些故事\n2. **如果有多个故事**，优先查看最近更新的那个。获取详情：调用 `writing_get_story`\n3. **列出该故事的角色** — 调用 `writing_list_characters`，获取角色名、角色定位（主角/配角）、性格描述\n4. **列出该故事的章节/场景** — 调用 `writing_list_scenes`，了解最新章节的标题和内容摘要\n5. **列出该故事的剧情线** — 调用 `writing_list_plotlines`\n\n### 汇报格式\n\n请整理成清晰的中文汇报，包含：\n- 故事名称、类型、简介\n- 主要角色列表（含性格特点）\n- 已有章节数、最新章节标题和大致内容\n- 当前剧情进展到哪里\n\n### 注意\n- 如果 writing_* 工具调用失败，尝试 fallback 到 writing_system 工具的对应操作\n- 简洁明了，重点突出" }, "dependsOn": ["mcp-fix"] }, { "id": "direction-plan", "name": "确定续写方向", "description": "第4步：基于故事状态分析和用户意图，确定续写的切入点和方向", "handler": "subagent", "config": { "prompt": "## 任务：确定续写方向和切入点\n\n上一步已经获取了故事当前状态。现在你需要根据故事进展和用户意图，确定续写方向。\n\n### 思考要点\n\n1. **当前停在什么地方？**\n   - 最后一章的情节走向\n   - 有没有悬而未决的情节线\n   - 角色的当前状态\n\n2. **续写切入点**\n   - 紧接上一章的结尾继续推进\n   - 切换到另一条剧情线\n   - 引入新的事件/冲突\n   - 深化当前情节\n\n3. **续写大纲**\n   - 这一章/这一段要写什么\n   - 涉及哪些角色\n   - 预期的情节推进方向\n   - 目标字数/篇幅\n\n### 输出格式\n\n```\n【续写方向】\n- 切入方式：...\n- 情节概述：...\n- 涉及角色：...\n- 预期篇幅：...\n\n【续写提示】\n（一段直接可用于 ai_write 的写作提示文字，包含场景设定、角色状态、情节走向。注意要写得生动具体，让 AI 能据此生成流畅的叙事文本）\n```\n\n### 注意\n- 不要提前写入，只做分析和规划\n- 如果用户有明确要求，以用户要求为准" }, "dependsOn": ["story-check"] }, { "id": "content-write", "name": "AI生成内容", "description": "第5步：使用 ai_write 接口或通过写作MCP生成续写内容", "handler": "subagent", "config": { "prompt": "## 任务：执行写作\n\n上一步已经确定了续写方向。现在通过写作 MCP 调用 ai_write 生成内容。\n\n### 操作步骤\n\n1. 获取续写方向中的「续写提示」文本\n2. 调用 `writing_ai_write` MCP 工具：\n   - prompt: 续写提示内容\n   - storyId: 故事ID\n   - temperature: 0.8\n3. 如果 writing_ai_write 不可用，fallback 到 `writing_system` action=ai_write\n4. 如果返回内容格式有问题或生成不完整，可以调整 prompt 或 temperature（0.3~0.9）重试\n\n### 注意事项\n\n- temperature 含义：0.3=保守平稳、0.5=适中、0.8=有创意、0.9=自由发挥\n- 如果 writing_system 返回的内容质量不够，可以尝试：\n  - 降低 temperature 让内容更稳健\n  - 提高 temperature 让内容更有创意\n  - 细化 prompt 加入更多场景细节\n- 不要编造结果，如实汇报 AI 生成的内容\n\n### 输出\n\n输出生成的正文内容，标注生成参数（temperature, prompt摘要）。" }, "dependsOn": ["direction-plan"] }, { "id": "quality-polish", "name": "质量检查和去AI味", "description": "第6步：检查生成内容质量，去除AI腔（去味），润色语言，确保自然流畅", "handler": "subagent", "config": { "prompt": "## 任务：质量检查和去AI味\n\n上一步生成了续写内容。现在需要对其进行质量检查和润色（去AI味），确保读起来自然流畅，像人类作家写的一样。\n\n### 去AI味检查清单\n\n逐段检查生成内容，找出并修正以下 AI 常见问题：\n\n1. **抽象概括** — 把「她感到一种深深的忧伤」改为具体描写「她盯着窗外的雨，手指在茶杯沿上划了一圈又一圈」\n2. **情绪标签** — 把「他心中涌起一股愤怒」改为「他的拳头在桌下捏紧了，指节发白」\n3. **总结性语句** — 删除「这说明」「这意味着」「显而易见」「可以说」等总结词\n4. **单调句式** — 避免连续多句以「他/她」开头，调整句式节奏\n5. **冗余修饰** — 删除「非常」「极其」「十分」「突然」等空洞副词\n6. **AI 套话** — 删除「在这个充满变数的世界里」「命运的齿轮开始转动」等网络小说套话\n7. **解释性旁白** — 不要解释角色为什么这样做，让动作和对话本身表达\n\n### 操作步骤\n\n1. 阅读所有生成内容\n2. 逐段对照检查清单进行审核\n3. 对于需要修改的地方，重写该段落\n4. 保持故事的人称、风格、世界观一致\n5. 不要改变核心情节和对话内容\n\n### 输出格式\n\n```\n【质量检查报告】\n- 总字数：\n- 发现的问题：\n  1. [问题类型] — [原文片段] → [修改后]\n  2. ...\n- 修改统计：修改了 X 处\n\n【润色后完整正文】\n（完整的润色后内容）\n```\n\n### 注意\n- 不要删减过多内容，重点在去AI味而非压缩字数\n- 保持原作的叙事节奏和风格\n- 对话部分除非有明显问题，尽量少改", "planPrompt": "检查写作内容质量，去除AI腔" }, "dependsOn": ["content-write"] }, { "id": "save-landing", "name": "落地保存", "description": "第7步：将润色后的内容保存为新的章节/场景", "handler": "subagent", "config": { "prompt": "## 任务：落地保存\n\n上一步完成了内容润色。现在将最终内容保存到写作系统中。\n\n### 操作步骤\n\n1. 获取润色后的完整正文和故事ID\n2. 确认当前最新的章节序号（通过 writing_list_scenes 获取）\n3. 调用 `writing_create_scene`：\n   - title: 章节标题（与故事风格一致）\n   - content: 润色后的完整正文\n   - storyId: 故事ID\n   - order: 最新序号+1\n4. 验证：调用 `writing_list_scenes` 确认新章节已成功保存\n\n### 注意事项\n\n- 标题要与故事风格一致\n- order 序号不能重复，比最大序号+1\n- 如果 writing MCP 工具不可用，fallback 到 `writing_system` action=create_scene\n\n### 输出\n\n保存结果汇报：\n- ✓ 章节ID\n- ✓ 章节标题\n- ✓ 字数\n- ✓ 在故事中的位置（第X章）\n- ✓ 保存状态：成功" }, "dependsOn": ["quality-polish"] }];
+const steps = [{ "id": "mcp-connect", "name": "连接写作MCP", "description": "第1步：连接写作系统的 MCP 服务器，获取结构化的 writing_* 工具集", "handler": "subagent", "config": { "prompt": "## 任务：连接写作 MCP 服务器\n\n你现在是写作助手的「MCP连接」环节。请尝试连接写作系统的 MCP 服务器，获取结构化的写作工具。\n\n### 操作步骤\n\n1. 调用 `connect_mcp_server` 工具：\n   - name: writing-system\n   - url: https://www.crlkcloud.cyou/writing-mcp/\n   - transport: http\n\n2. 如果连接成功，调用 `list_mcp_tools` 确认以下工具可用：\n   - writing_list_stories\n   - writing_get_story\n   - writing_list_characters\n   - writing_create_character\n   - writing_list_scenes\n   - writing_create_scene\n   - writing_create_relationship\n   - writing_ai_write\n\n3. 汇报连接结果：哪些工具可用，哪些不可用。\n\n### 输出格式\n\n```\n【MCP状态】\n- 连接状态: 成功/失败\n- 可用工具列表:\n- 失败原因（如果有）:\n```\n\n### 注意\n- 如果连接失败，标记为失败，后续步骤会尝试修复\n- 不要跳过此步骤" }, "dependsOn": [] }, { "id": "mcp-fix", "name": "修复MCP连接", "description": "第2步：当MCP连接失败时，通过centos SSH工具远程修复写作MCP服务器", "handler": "subagent", "config": { "prompt": "## 任务：修复写作 MCP 连接\n\n上一步 MCP 连接失败，现在需要通过 centos SSH 工具排查并修复。\n\n### 排查步骤\n\n1. **检查远程服务器状态** — 调用 `centos_exec`：\n   - `pm2 list` 或者 `ps aux | grep writing`\n   - 如果 writing-mcp 不在运行，尝试启动：`cd /opt/writing-system && pm2 start server/mcp-server/ecosystem.writing.js`\n\n2. **检查 nginx 配置** — 调用 `centos_exec`：\n   - `cat /etc/nginx/conf.d/writing.conf` 或者 `nginx -t`\n\n3. **检查 writing API 后端** — 调用 `centos_exec`：\n   - `curl -s http://127.0.0.1:3300/api/stories | head -50`\n\n4. **执行修复脚本**：\n   - `cd /opt/writing-system && python3 server/fix_writing_api2.py`\n\n5. **验证修复** — 再次连接：\n   - `connect_mcp_server name=writing-system url=https://www.crlkcloud.cyou/writing-mcp/ transport=http`\n\n### 注意事项\n\n- SSH 凭证通过 credentials 系统获取\n- 每步操作后检查返回结果\n- 如果修复后仍然无法连接，汇报详细错误信息，让用户手动处理" }, "dependsOn": ["mcp-connect"], "runOn": "failure" }, { "id": "story-check", "name": "故事状态检查", "description": "第3步：查看当前故事状态——有哪些角色、写到哪一章了", "handler": "subagent", "config": { "prompt": "## 任务：查看故事当前状态\n\n你现在是写作助手的「状态检查」环节。写作 MCP 已经连接，请通过 writing_* 工具获取以下信息：\n\n### 操作步骤\n\n1. **列出所有故事** — 调用 `writing_list_stories`，了解当前有哪些故事\n2. **如果有多个故事**，优先查看最近更新的那个。获取详情：调用 `writing_get_story`\n3. **列出该故事的角色** — 调用 `writing_list_characters`，获取角色名、角色定位（主角/配角）、性格描述\n4. **列出该故事的章节/场景** — 调用 `writing_list_scenes`，了解最新章节的标题和内容摘要\n5. **列出该故事的剧情线** — 调用 `writing_list_plotlines`\n\n### 汇报格式\n\n请整理成清晰的中文汇报，包含：\n- 故事名称、类型、简介\n- 主要角色列表（含性格特点）\n- 已有章节数、最新章节标题和大致内容\n- 当前剧情进展到哪里\n\n### 注意\n- 如果 writing_* 工具调用失败，尝试 fallback 到 writing_system 工具的对应操作\n- 简洁明了，重点突出" }, "dependsOn": ["mcp-fix"] }, { "id": "direction-plan", "name": "确定续写方向", "description": "第4步：基于故事状态分析和用户意图，确定续写的切入点和方向", "handler": "subagent", "config": { "prompt": "## 任务：确定续写方向和切入点\n\n上一步已经获取了故事当前状态。现在你需要根据故事进展和用户意图，确定续写方向。\n\n### 思考要点\n\n1. **当前停在什么地方？**\n   - 最后一章的情节走向\n   - 有没有悬而未决的情节线\n   - 角色的当前状态\n\n2. **续写切入点**\n   - 紧接上一章的结尾继续推进\n   - 切换到另一条剧情线\n   - 引入新的事件/冲突\n   - 深化当前情节\n\n3. **续写大纲**\n   - 这一章/这一段要写什么\n   - 涉及哪些角色\n   - 预期的情节推进方向\n   - 目标字数/篇幅\n\n### 输出格式\n\n```\n【续写方向】\n- 切入方式：...\n- 情节概述：...\n- 涉及角色：...\n- 预期篇幅：...\n\n【续写提示】\n（一段直接可用于 ai_write 的写作提示文字，包含场景设定、角色状态、情节走向。注意要写得生动具体，让 AI 能据此生成流畅的叙事文本）\n```\n\n### 注意\n- 不要提前写入，只做分析和规划\n- 如果用户有明确要求，以用户要求为准" }, "dependsOn": ["story-check"] }, { "id": "content-write", "name": "AI生成内容", "description": "第5步：使用 ai_write 接口或通过写作MCP生成续写内容", "handler": "subagent", "config": { "prompt": "## 任务：执行写作\n\n上一步已经确定了续写方向。现在通过写作 MCP 调用 ai_write 生成内容。\n\n### 操作步骤\n\n1. 获取续写方向中的「续写提示」文本\n2. 调用 `writing_ai_write` MCP 工具：\n   - prompt: 续写提示内容\n   - storyId: 故事ID\n   - temperature: 0.8\n3. 如果 writing_ai_write 不可用，fallback 到 `writing_system` action=ai_write\n4. 如果返回内容格式有问题或生成不完整，可以调整 prompt 或 temperature（0.3~0.9）重试\n\n### 注意事项\n\n- temperature 含义：0.3=保守平稳、0.5=适中、0.8=有创意、0.9=自由发挥\n- 如果 writing_system 返回的内容质量不够，可以尝试：\n  - 降低 temperature 让内容更稳健\n  - 提高 temperature 让内容更有创意\n  - 细化 prompt 加入更多场景细节\n- 不要编造结果，如实汇报 AI 生成的内容\n\n### 输出\n\n输出生成的正文内容，标注生成参数（temperature, prompt摘要）。" }, "dependsOn": ["direction-plan"] }, { "id": "quality-polish", "name": "质量检查和去AI味", "description": "第6步：检查生成内容质量，去除AI腔（去味），润色语言，确保自然流畅", "handler": "subagent", "config": { "prompt": "## 任务：质量检查和去AI味\n\n上一步生成了续写内容。现在需要对其进行质量检查和润色（去AI味），确保读起来自然流畅，像人类作家写的一样。\n\n### 去AI味检查清单\n\n逐段检查生成内容，找出并修正以下 AI 常见问题：\n\n1. **抽象概括** — 把「她感到一种深深的忧伤」改为具体描写「她盯着窗外的雨，手指在茶杯沿上划了一圈又一圈」\n2. **情绪标签** — 把「他心中涌起一股愤怒」改为「他的拳头在桌下捏紧了，指节发白」\n3. **总结性语句** — 删除「这说明」「这意味着」「显而易见」「可以说」等总结词\n4. **单调句式** — 避免连续多句以「他/她」开头，调整句式节奏\n5. **冗余修饰** — 删除「非常」「极其」「十分」「突然」等空洞副词\n6. **AI 套话** — 删除「在这个充满变数的世界里」「命运的齿轮开始转动」等网络小说套话\n7. **解释性旁白** — 不要解释角色为什么这样做，让动作和对话本身表达\n\n### 操作步骤\n\n1. 阅读所有生成内容\n2. 逐段对照检查清单进行审核\n3. 对于需要修改的地方，重写该段落\n4. 保持故事的人称、风格、世界观一致\n5. 不要改变核心情节和对话内容\n\n### 输出格式\n\n```\n【质量检查报告】\n- 总字数：\n- 发现的问题：\n  1. [问题类型] — [原文片段] → [修改后]\n  2. ...\n- 修改统计：修改了 X 处\n\n【润色后完整正文】\n（完整的润色后内容）\n```\n\n### 注意\n- 不要删减过多内容，重点在去AI味而非压缩字数\n- 保持原作的叙事节奏和风格\n- 对话部分除非有明显问题，尽量少改", "planPrompt": "检查写作内容质量，去除AI腔" }, "dependsOn": ["content-write"] }, { "id": "save-landing", "name": "落地保存", "description": "第7步：将润色后的内容保存为新的章节/场景", "handler": "subagent", "config": { "prompt": "## 任务：落地保存\n\n上一步完成了内容润色。现在将最终内容保存到写作系统中。\n\n### 操作步骤\n\n1. 获取润色后的完整正文和故事ID\n2. 确认当前最新的章节序号（通过 writing_list_scenes 获取）\n3. 调用 `writing_create_scene`：\n   - title: 章节标题（与故事风格一致）\n   - content: 润色后的完整正文\n   - storyId: 故事ID\n   - order: 最新序号+1\n4. 验证：调用 `writing_list_scenes` 确认新章节已成功保存\n\n### 注意事项\n\n- 标题要与故事风格一致\n- order 序号不能重复，比最大序号+1\n- 如果 writing MCP 工具不可用，fallback 到 `writing_system` action=create_scene\n\n### 输出\n\n保存结果汇报：\n- ✓ 章节ID\n- ✓ 章节标题\n- ✓ 字数\n- ✓ 在故事中的位置（第X章）\n- ✓ 保存状态：成功" }, "dependsOn": ["quality-polish"] }];
 const createdAt = 0;
 const updatedAt = 0;
 const writingPipeline = {
@@ -6942,7 +6942,7 @@ const PROMPT_WRITING = `【小说创作工具】
 
 使用方式（二选一）：
 方案 A（推荐）：通过 MCP 协议连接写作系统（结构化工具，无需手动拼 JSON）
-  1. connect_mcp_server name=writing-system url=https://www.crlkcloud.cyou/writing-mcp/sse transport=sse
+  1. connect_mcp_server name=writing-system url=https://www.crlkcloud.cyou/writing-mcp/ transport=http
   2. 连接后可使用 writing_create_story、writing_create_character 等结构化工具
 
 方案 B（兼容）：通过旧版 writing_system 工具直接调用远程 API
@@ -9439,8 +9439,8 @@ class DrizzlePlanManager {
     }
     const db2 = tryDb();
     if (!db2) {
-      const plan = this.createInMemoryPlan(title, description2, stepDescriptions, Date.now(), priority);
-      return plan;
+      const plan2 = this.createInMemoryPlan(title, description2, stepDescriptions, Date.now(), priority);
+      return plan2;
     }
     const planId = `plan_${Date.now()}_${++idCounter$a}`;
     const now = Date.now();
@@ -9820,39 +9820,39 @@ class PlanIntegrityChecker {
   /**
    * 检查单个计划的完整性
    */
-  checkPlan(plan) {
+  checkPlan(plan2) {
     const issues = [];
-    if (!plan.id) {
+    if (!plan2.id) {
       issues.push({
-        planId: plan.id || "(missing)",
-        planTitle: plan.title || "(missing)",
+        planId: plan2.id || "(missing)",
+        planTitle: plan2.title || "(missing)",
         severity: "error",
         category: "empty_title",
         description: "计划 ID 为空"
       });
     }
-    if (!plan.title || plan.title.trim() === "") {
+    if (!plan2.title || plan2.title.trim() === "") {
       issues.push({
-        planId: plan.id,
-        planTitle: plan.title || "(empty)",
+        planId: plan2.id,
+        planTitle: plan2.title || "(empty)",
         severity: "error",
         category: "empty_title",
         description: "计划标题为空"
       });
     }
-    if (!VALID_PLAN_STATUSES.has(plan.status)) {
+    if (!VALID_PLAN_STATUSES.has(plan2.status)) {
       issues.push({
-        planId: plan.id,
-        planTitle: plan.title,
+        planId: plan2.id,
+        planTitle: plan2.title,
         severity: "error",
         category: "invalid_plan_status",
-        description: `计划状态非法: "${plan.status}"，合法值: ${[...VALID_PLAN_STATUSES].join(", ")}`
+        description: `计划状态非法: "${plan2.status}"，合法值: ${[...VALID_PLAN_STATUSES].join(", ")}`
       });
     }
-    if (!plan.steps || plan.steps.length === 0) {
+    if (!plan2.steps || plan2.steps.length === 0) {
       issues.push({
-        planId: plan.id,
-        planTitle: plan.title,
+        planId: plan2.id,
+        planTitle: plan2.title,
         severity: "warn",
         category: "step_index_gap",
         description: "计划没有步骤"
@@ -9860,12 +9860,12 @@ class PlanIntegrityChecker {
       return issues;
     }
     const seenIndices = /* @__PURE__ */ new Set();
-    for (let i = 0; i < plan.steps.length; i++) {
-      const step = plan.steps[i];
+    for (let i = 0; i < plan2.steps.length; i++) {
+      const step = plan2.steps[i];
       if (!step.description || step.description.trim() === "" || step.description === "undefined" || step.description === "null") {
         issues.push({
-          planId: plan.id,
-          planTitle: plan.title,
+          planId: plan2.id,
+          planTitle: plan2.title,
           severity: "error",
           category: "empty_step_description",
           description: `步骤 ${i} (id=${step.id}) 的描述为空或为"${step.description}"`
@@ -9873,8 +9873,8 @@ class PlanIntegrityChecker {
       }
       if (!VALID_STEP_STATUSES.has(step.status)) {
         issues.push({
-          planId: plan.id,
-          planTitle: plan.title,
+          planId: plan2.id,
+          planTitle: plan2.title,
           severity: "error",
           category: "invalid_step_status",
           description: `步骤 ${i} 状态非法: "${step.status}"`
@@ -9882,8 +9882,8 @@ class PlanIntegrityChecker {
       }
       if (seenIndices.has(i)) {
         issues.push({
-          planId: plan.id,
-          planTitle: plan.title,
+          planId: plan2.id,
+          planTitle: plan2.title,
           severity: "error",
           category: "duplicate_step_index",
           description: `步骤索引 ${i} 重复`
@@ -9891,11 +9891,11 @@ class PlanIntegrityChecker {
       }
       seenIndices.add(i);
     }
-    for (let i = 0; i < plan.steps.length; i++) {
+    for (let i = 0; i < plan2.steps.length; i++) {
       if (!seenIndices.has(i)) {
         issues.push({
-          planId: plan.id,
-          planTitle: plan.title,
+          planId: plan2.id,
+          planTitle: plan2.title,
           severity: "error",
           category: "step_index_gap",
           description: `步骤索引不连续，缺少索引 ${i}`
@@ -9909,8 +9909,8 @@ class PlanIntegrityChecker {
    */
   checkAllPlans(plans2) {
     const allIssues = [];
-    for (const plan of plans2) {
-      const issues = this.checkPlan(plan);
+    for (const plan2 of plans2) {
+      const issues = this.checkPlan(plan2);
       allIssues.push(...issues);
     }
     const result = {
@@ -9940,10 +9940,10 @@ class PlanIntegrityChecker {
    * 自动修复可修复的完整性问题
    * 返回修复了的问题数量
    */
-  autoFix(plan) {
+  autoFix(plan2) {
     const fixes = [];
-    for (let i = 0; i < plan.steps.length; i++) {
-      const step = plan.steps[i];
+    for (let i = 0; i < plan2.steps.length; i++) {
+      const step = plan2.steps[i];
       if (!step.description || step.description.trim() === "" || step.description === "undefined" || step.description === "null") {
         const origDesc = step.description;
         step.description = `步骤 ${i + 1}`;
@@ -9952,10 +9952,10 @@ class PlanIntegrityChecker {
     }
     return { fixed: fixes.length, fixes };
   }
-  checkRollbackReadiness(plan) {
+  checkRollbackReadiness(plan2) {
     const hasGit = true;
-    const hasSnapshot = plan.steps.some((s) => s.status === "done" || s.status === "in_progress");
-    const hasPendingChanges = plan.steps.some((s) => s.status === "pending" || s.status === "failed");
+    const hasSnapshot = plan2.steps.some((s) => s.status === "done" || s.status === "in_progress");
+    const hasPendingChanges = plan2.steps.some((s) => s.status === "pending" || s.status === "failed");
     const ready = hasGit && (hasSnapshot || !hasPendingChanges);
     return {
       ready,
@@ -10145,6 +10145,14 @@ ${promptOverlay}
     "",
     '⚠️ 最终回复必须包含具体的分析过程、发现和结论，不要只说"分析完成"或"无需修改"就结束。',
     "",
+    "【修复指令格式】",
+    "如果发现可修复的配置漂移或参数错误，在分析报告末尾添加结构化修复指令：",
+    "  ##fix: <参数名> = <期望值>",
+    "每行一个参数。示例：",
+    "  ##fix: historyMaxEntries = 10",
+    "  ##fix: promptTrimMode = true",
+    "系统会自动执行这些修复。仅在确认需要修复时添加，不需要则不添加。",
+    "",
     "完成后停止。"
   ].join("\n");
 };
@@ -10167,15 +10175,15 @@ const PLAN_EXECUTE_PROMPT = (planCtx, stepDesc) => [
   "",
   "完成后用中文简要报告结果。如果步骤不需要代码修改，直接报告结论即可。"
 ].join("\n");
-function buildPlanInjection(plan, doneSteps, totalSteps, pendingSteps) {
+function buildPlanInjection(plan2, doneSteps, totalSteps, pendingSteps) {
   const nextStep = pendingSteps[0];
   const nextStepInfo = nextStep ? `
 下一步待办: ${nextStep.description}` : "";
   return [
     "",
     "【当前活跃计划】",
-    `计划名称: ${plan.title}`,
-    `计划描述: ${plan.description}`,
+    `计划名称: ${plan2.title}`,
+    `计划描述: ${plan2.description}`,
     `进度: ${doneSteps}/${totalSteps}`,
     `${nextStepInfo}`,
     "",
@@ -10368,11 +10376,11 @@ class EvolutionAnalyzer {
     return detectPlanMode(this.planManager);
   }
   getActivePlanProgress() {
-    const plan = this.planManager?.getActivePlan();
-    if (!plan) return { completed: 0, total: 0 };
+    const plan2 = this.planManager?.getActivePlan();
+    if (!plan2) return { completed: 0, total: 0 };
     return {
-      completed: plan.steps.filter((s) => s.status === "done").length,
-      total: plan.steps.length
+      completed: plan2.steps.filter((s) => s.status === "done").length,
+      total: plan2.steps.length
     };
   }
   /**
@@ -10380,10 +10388,10 @@ class EvolutionAnalyzer {
    * 卡住的计划允许 evolution 分析穿透，以便 LLM 发现并处理社交任务。
    */
   isActivePlanStale() {
-    const plan = this.planManager?.getActivePlan();
-    if (!plan) return true;
+    const plan2 = this.planManager?.getActivePlan();
+    if (!plan2) return true;
     const staleThreshold = Date.now() - 9e5;
-    const lastUpdated = plan.updatedAt || plan.createdAt;
+    const lastUpdated = plan2.updatedAt || plan2.createdAt;
     return lastUpdated < staleThreshold;
   }
   /**
@@ -11086,16 +11094,16 @@ class EvolutionExecutor {
   hasPendingStep() {
     const pm = this.planManager;
     if (!pm) return false;
-    const plan = pm.getActivePlan();
-    if (!plan) return false;
-    return plan.steps.some((s) => s.status === "pending" || s.status === "failed");
+    const plan2 = pm.getActivePlan();
+    if (!plan2) return false;
+    return plan2.steps.some((s) => s.status === "pending" || s.status === "failed");
   }
   getPlanProgress() {
-    const plan = this.planManager?.getActivePlan();
-    if (!plan) return { completed: 0, total: 0 };
+    const plan2 = this.planManager?.getActivePlan();
+    if (!plan2) return { completed: 0, total: 0 };
     return {
-      completed: plan.steps.filter((s) => s.status === "done").length,
-      total: plan.steps.length
+      completed: plan2.steps.filter((s) => s.status === "done").length,
+      total: plan2.steps.length
     };
   }
   // ==================== 步骤执行 ====================
@@ -11109,30 +11117,30 @@ class EvolutionExecutor {
     return this.executionLock.run(async () => {
       const allPlans = pm.listPlans();
       const activePlans = allPlans.filter((p) => p.status === "active").sort((a, b) => (b.priority || 0) - (a.priority || 0));
-      const plan = activePlans.length > 0 ? activePlans[0] : null;
-      if (!plan) return { success: false, stepIndex: input.stepIndex, error: "no active plan", planCompleted: false };
-      let nextStep = plan.steps.find((s) => s.status === "pending");
-      if (!nextStep) nextStep = plan.steps.find((s) => s.status === "failed");
+      const plan2 = activePlans.length > 0 ? activePlans[0] : null;
+      if (!plan2) return { success: false, stepIndex: input.stepIndex, error: "no active plan", planCompleted: false };
+      let nextStep = plan2.steps.find((s) => s.status === "pending");
+      if (!nextStep) nextStep = plan2.steps.find((s) => s.status === "failed");
       if (!nextStep) {
-        const inProgress = plan.steps.find((s) => s.status === "in_progress");
+        const inProgress = plan2.steps.find((s) => s.status === "in_progress");
         if (!inProgress) {
-          pm.completePlan(plan.id, "所有步骤已完成");
-          this.autoGitCommit(plan.title).catch(() => {
+          pm.completePlan(plan2.id, "所有步骤已完成");
+          this.autoGitCommit(plan2.title).catch(() => {
           });
           return { success: true, stepIndex: -1, planCompleted: true };
         }
         return { success: false, stepIndex: input.stepIndex, error: "step already in progress", planCompleted: false };
       }
-      const stepIdx = plan.steps.indexOf(nextStep);
-      return this.executeStep(plan, nextStep, stepIdx);
+      const stepIdx = plan2.steps.indexOf(nextStep);
+      return this.executeStep(plan2, nextStep, stepIdx);
     });
   }
-  async executeStep(plan, step, stepIdx) {
+  async executeStep(plan2, step, stepIdx) {
     const pm = this.planManager;
-    Logger.log("INFO", "plan_exec_step", { plan_id: plan.id, step: step.description });
-    pm.updateStep(plan.id, stepIdx, "in_progress");
+    Logger.log("INFO", "plan_exec_step", { plan_id: plan2.id, step: step.description });
+    pm.updateStep(plan2.id, stepIdx, "in_progress");
     if (this.gitOps && !this.currentSnapshotBranch) {
-      const tag = `${plan.id}_step_${stepIdx}`;
+      const tag = `${plan2.id}_step_${stepIdx}`;
       const branch = await this.gitOps.createSnapshot(tag);
       if (branch) {
         this.currentSnapshotBranch = branch;
@@ -11142,15 +11150,15 @@ class EvolutionExecutor {
     if (this.proposalValidator) {
       try {
         const vr = await this.proposalValidator.validate({
-          id: plan.id,
-          title: plan.title,
-          description: plan.description,
-          targetFiles: plan.steps?.map((s) => s.description) || [],
+          id: plan2.id,
+          title: plan2.title,
+          description: plan2.description,
+          targetFiles: plan2.steps?.map((s) => s.description) || [],
           expectedOutcome: "",
           risk: "medium",
           createdAt: Date.now()
         });
-        if (!vr.passed) Logger.log("WARN", "plan_exec_proposal_validation_failed", { planId: plan.id });
+        if (!vr.passed) Logger.log("WARN", "plan_exec_proposal_validation_failed", { planId: plan2.id });
       } catch (err) {
         Logger.log("WARN", "plan_exec_proposal_validation_error", { error: String(err) });
       }
@@ -11166,10 +11174,10 @@ class EvolutionExecutor {
           "plan_exec_timeout"
         );
         if (result.success) {
-          pm.updateStep(plan.id, stepIdx, "done", result.summary);
+          pm.updateStep(plan2.id, stepIdx, "done", result.summary);
           this.planExecConsecutiveErrors = 0;
           this.executeFailures = 0;
-          Logger.log("INFO", "plan_step_done", { plan_id: plan.id, step: step.description });
+          Logger.log("INFO", "plan_step_done", { plan_id: plan2.id, step: step.description });
           this.cleanupSnapshot();
           return { success: true, stepIndex: stepIdx, planCompleted: false };
         } else {
@@ -11177,7 +11185,7 @@ class EvolutionExecutor {
             const delay = Math.pow(2, attempt - 1) * this.stepRetryBaseMs;
             await new Promise((r) => setTimeout(r, delay));
           } else {
-            return this.handleStepFailure(plan, step, stepIdx, result.summary);
+            return this.handleStepFailure(plan2, step, stepIdx, result.summary);
           }
         }
       } catch (err) {
@@ -11185,15 +11193,15 @@ class EvolutionExecutor {
           const delay = Math.pow(2, attempt - 1) * this.stepRetryBaseMs;
           await new Promise((r) => setTimeout(r, delay));
         } else {
-          return this.handleStepFailure(plan, step, stepIdx, String(err));
+          return this.handleStepFailure(plan2, step, stepIdx, String(err));
         }
       }
     }
     return { success: false, stepIndex: stepIdx, error: "unreachable", planCompleted: false };
   }
-  async handleStepFailure(plan, step, stepIdx, error) {
+  async handleStepFailure(plan2, step, stepIdx, error) {
     const pm = this.planManager;
-    pm.updateStep(plan.id, stepIdx, "failed", error);
+    pm.updateStep(plan2.id, stepIdx, "failed", error);
     this.planExecConsecutiveErrors++;
     this.executeFailures++;
     if (this.currentSnapshotBranch && this.gitOps) {
@@ -11206,11 +11214,11 @@ class EvolutionExecutor {
       });
       this.currentSnapshotBranch = null;
     }
-    Logger.log("ERROR", "plan_step_error", { plan_id: plan.id, step: step.description, error });
+    Logger.log("ERROR", "plan_step_error", { plan_id: plan2.id, step: step.description, error });
     if (this.planExecConsecutiveErrors >= 3) {
-      pm.abandonPlan(plan.id, "自动放弃：连续步骤执行失败");
+      pm.abandonPlan(plan2.id, "自动放弃：连续步骤执行失败");
       this.planExecConsecutiveErrors = 0;
-      Logger.log("WARN", "plan_auto_abandoned", { plan_id: plan.id });
+      Logger.log("WARN", "plan_auto_abandoned", { plan_id: plan2.id });
     }
     return { success: false, stepIndex: stepIdx, error, planCompleted: false };
   }
@@ -12472,6 +12480,395 @@ class EvaluatorCalibrator {
 function formatWeights(w) {
   return Object.entries(w).map(([k, v]) => `${k}=${v.toFixed(2)}`).join(", ");
 }
+const EVOLUTION_STATE_PATH$1 = path$1.join(WORKSPACE.evolution, "living_plan", "evolution_state.json");
+const LIVING_PLAN_DIR$1 = path$1.join(WORKSPACE.evolution, "living_plan");
+const GOLDEN_CONFIG = {
+  promptTrimMode: true,
+  analysisStuckTimeoutMs: 3e4,
+  analysisTimeoutMs: 15e4,
+  historyMaxEntries: 10
+};
+const registry = /* @__PURE__ */ new Map();
+function register(action) {
+  registry.set(action.name, action);
+}
+function get(name2) {
+  return registry.get(name2);
+}
+function list() {
+  return Array.from(registry.values());
+}
+register({
+  name: "fix_config",
+  description: "修复 evolution_state.json 中的配置漂移",
+  category: "config_fix",
+  run: async (params) => {
+    const startedAt = Date.now();
+    try {
+      if (!fs.existsSync(EVOLUTION_STATE_PATH$1)) {
+        return { success: false, summary: `evolution_state.json 不存在`, durationMs: Date.now() - startedAt };
+      }
+      const raw = fs.readFileSync(EVOLUTION_STATE_PATH$1, "utf-8");
+      const state = JSON.parse(raw);
+      const oldValue = state[params.key];
+      if (oldValue === params.value) {
+        return {
+          success: true,
+          summary: `${params.key} 已经是期望值 ${JSON.stringify(params.value)}，无需修正`,
+          durationMs: Date.now() - startedAt
+        };
+      }
+      state[params.key] = params.value;
+      const driftHistory = Array.isArray(state.configDriftHistory) ? [...state.configDriftHistory] : [];
+      driftHistory.push({
+        timestamp: Date.now(),
+        key: params.key,
+        from: oldValue,
+        to: params.value,
+        reason: params.reason || "evolution_action"
+      });
+      if (driftHistory.length > 50) driftHistory.splice(0, driftHistory.length - 50);
+      state.configDriftHistory = driftHistory;
+      fs.writeFileSync(EVOLUTION_STATE_PATH$1, JSON.stringify(state, null, 2), "utf-8");
+      Logger.log("INFO", "action_fix_config", { key: params.key, from: oldValue, to: params.value });
+      return {
+        success: true,
+        summary: `${params.key}: ${JSON.stringify(oldValue)} → ${JSON.stringify(params.value)}`,
+        durationMs: Date.now() - startedAt,
+        details: { key: params.key, from: oldValue, to: params.value }
+      };
+    } catch (err) {
+      return { success: false, summary: `fix_config 失败: ${err.message}`, durationMs: Date.now() - startedAt };
+    }
+  }
+});
+register({
+  name: "run_script",
+  description: "执行 living_plan/ 目录下的工具脚本",
+  category: "script_run",
+  run: async (params) => {
+    const startedAt = Date.now();
+    const scriptPath = path$1.join(LIVING_PLAN_DIR$1, params.script);
+    try {
+      if (!fs.existsSync(scriptPath)) {
+        return { success: false, summary: `脚本不存在: ${params.script}`, durationMs: Date.now() - startedAt };
+      }
+      const mod = await import(
+        /* @vite-ignore */
+        scriptPath
+      );
+      if (params.exportName) {
+        const fn = mod[params.exportName];
+        if (typeof fn !== "function") {
+          return {
+            success: false,
+            summary: `脚本 ${params.script} 未导出函数 ${params.exportName}`,
+            durationMs: Date.now() - startedAt
+          };
+        }
+        const result = params.args ? await fn(params.args) : await fn();
+        Logger.log("INFO", "action_run_script", { script: params.script, exportName: params.exportName, success: true });
+        return {
+          success: true,
+          summary: `执行 ${params.script}#${params.exportName} 完成`,
+          durationMs: Date.now() - startedAt,
+          details: result
+        };
+      }
+      Logger.log("INFO", "action_run_script", { script: params.script, exportName: "(module loaded)", success: true });
+      return {
+        success: true,
+        summary: `加载 ${params.script} 完成`,
+        durationMs: Date.now() - startedAt
+      };
+    } catch (err) {
+      return { success: false, summary: `执行 ${params.script} 失败: ${err.message}`, durationMs: Date.now() - startedAt };
+    }
+  }
+});
+register({
+  name: "verify_state",
+  description: "验证 evolution_state.json 配置是否与黄金配置一致",
+  category: "verify",
+  run: async (params) => {
+    const startedAt = Date.now();
+    const expected = params?.expected || GOLDEN_CONFIG;
+    try {
+      if (!fs.existsSync(EVOLUTION_STATE_PATH$1)) {
+        return { success: false, summary: `evolution_state.json 不存在`, durationMs: Date.now() - startedAt };
+      }
+      const raw = fs.readFileSync(EVOLUTION_STATE_PATH$1, "utf-8");
+      const state = JSON.parse(raw);
+      const drifts = [];
+      for (const [key, expectedValue] of Object.entries(expected)) {
+        if (state[key] !== expectedValue) {
+          drifts.push({ key, expected: expectedValue, actual: state[key] });
+        }
+      }
+      if (drifts.length === 0) {
+        return { success: true, summary: "所有配置值与黄金配置一致", durationMs: Date.now() - startedAt, details: { drifted: false } };
+      }
+      return {
+        success: true,
+        summary: `检测到 ${drifts.length} 个配置漂移: ${drifts.map((d) => `${d.key}=${JSON.stringify(d.actual)}`).join(", ")}`,
+        durationMs: Date.now() - startedAt,
+        details: { drifted: true, drifts }
+      };
+    } catch (err) {
+      return { success: false, summary: `verify_state 失败: ${err.message}`, durationMs: Date.now() - startedAt };
+    }
+  }
+});
+register({
+  name: "emit_event",
+  description: "发送 EventBus 事件通知下游服务",
+  category: "git_op",
+  run: async (params) => {
+    const startedAt = Date.now();
+    try {
+      eventBus.emit(params.event, params.payload || {});
+      Logger.log("INFO", "action_emit_event", { event: params.event });
+      return { success: true, summary: `事件已发送: ${params.event}`, durationMs: Date.now() - startedAt };
+    } catch (err) {
+      return { success: false, summary: `emit_event 失败: ${err.message}`, durationMs: Date.now() - startedAt };
+    }
+  }
+});
+register({
+  name: "run_config_watchdog",
+  description: "运行 living_plan/config-watchdog.mjs 的全量配置漂移检测与修正",
+  category: "config_fix",
+  run: async () => {
+    const startedAt = Date.now();
+    const scriptPath = path$1.join(LIVING_PLAN_DIR$1, "config-watchdog.mjs");
+    try {
+      if (!fs.existsSync(scriptPath)) {
+        return { success: false, summary: "config-watchdog.mjs 不存在", durationMs: Date.now() - startedAt };
+      }
+      const mod = await import(
+        /* @vite-ignore */
+        scriptPath
+      );
+      if (typeof mod.runConfigWatchdog !== "function") {
+        return { success: false, summary: "config-watchdog.mjs 未导出 runConfigWatchdog", durationMs: Date.now() - startedAt };
+      }
+      const report = mod.runConfigWatchdog();
+      Logger.log("INFO", "action_run_config_watchdog", {
+        drifted: report.drifted,
+        corrections: report.corrections?.length || 0
+      });
+      if (report.drifted && report.changes && Object.keys(report.changes).length > 0) {
+        const raw = fs.readFileSync(EVOLUTION_STATE_PATH$1, "utf-8");
+        const state = JSON.parse(raw);
+        Object.assign(state, report.changes);
+        fs.writeFileSync(EVOLUTION_STATE_PATH$1, JSON.stringify(state, null, 2), "utf-8");
+        Logger.log("INFO", "action_config_watchdog_applied", { changes: Object.keys(report.changes).join(", ") });
+      }
+      return {
+        success: true,
+        summary: report.message || `配置检查完成，${report.corrections?.length || 0} 个修正`,
+        durationMs: Date.now() - startedAt,
+        details: report
+      };
+    } catch (err) {
+      return { success: false, summary: `run_config_watchdog 失败: ${err.message}`, durationMs: Date.now() - startedAt };
+    }
+  }
+});
+register({
+  name: "run_goal_tracker",
+  description: "运行 living_plan/goal-tracker.mjs 更新目标进度",
+  category: "script_run",
+  run: async () => {
+    const startedAt = Date.now();
+    const scriptPath = path$1.join(LIVING_PLAN_DIR$1, "goal-tracker.mjs");
+    try {
+      if (!fs.existsSync(scriptPath)) {
+        return { success: false, summary: "goal-tracker.mjs 不存在", durationMs: Date.now() - startedAt };
+      }
+      const mod = await import(
+        /* @vite-ignore */
+        scriptPath
+      );
+      if (typeof mod.updateAllGoalProgresses !== "function") {
+        return { success: false, summary: "goal-tracker.mjs 未导出 updateAllGoalProgresses", durationMs: Date.now() - startedAt };
+      }
+      const result = mod.updateAllGoalProgresses();
+      Logger.log("INFO", "action_goal_tracker", { result });
+      return {
+        success: true,
+        summary: result ? `目标进度已更新` : `目标进度更新完成（无可更新目标）`,
+        durationMs: Date.now() - startedAt,
+        details: result
+      };
+    } catch (err) {
+      return { success: false, summary: `run_goal_tracker 失败: ${err.message}`, durationMs: Date.now() - startedAt };
+    }
+  }
+});
+register({
+  name: "batch_fix_config",
+  description: "检测并批量修正 evolution_state.json 中所有已知的配置漂移",
+  category: "config_fix",
+  run: async () => {
+    const startedAt = Date.now();
+    try {
+      if (!fs.existsSync(EVOLUTION_STATE_PATH$1)) {
+        return { success: false, summary: `evolution_state.json 不存在`, durationMs: Date.now() - startedAt };
+      }
+      const raw = fs.readFileSync(EVOLUTION_STATE_PATH$1, "utf-8");
+      const state = JSON.parse(raw);
+      const corrections = [];
+      for (const [key, expectedValue] of Object.entries(GOLDEN_CONFIG)) {
+        if (state[key] !== expectedValue) {
+          corrections.push({ key, from: state[key], to: expectedValue });
+          state[key] = expectedValue;
+        }
+      }
+      if (corrections.length === 0) {
+        return {
+          success: true,
+          summary: "所有配置与黄金配置一致，无需修正",
+          durationMs: Date.now() - startedAt,
+          details: { corrected: 0 }
+        };
+      }
+      const driftHistory = Array.isArray(state.configDriftHistory) ? [...state.configDriftHistory] : [];
+      driftHistory.push({
+        timestamp: Date.now(),
+        corrections: corrections.map((c) => `${c.key}: ${JSON.stringify(c.from)} → ${JSON.stringify(c.to)}`),
+        source: "batch_fix_config"
+      });
+      state.configDriftHistory = driftHistory;
+      fs.writeFileSync(EVOLUTION_STATE_PATH$1, JSON.stringify(state, null, 2), "utf-8");
+      Logger.log("INFO", "action_batch_fix_config", { count: corrections.length, corrections });
+      return {
+        success: true,
+        summary: `修正 ${corrections.length} 个配置漂移: ${corrections.map((c) => `${c.key}: ${JSON.stringify(c.from)}→${JSON.stringify(c.to)}`).join(", ")}`,
+        durationMs: Date.now() - startedAt,
+        details: { corrected: corrections.length, corrections }
+      };
+    } catch (err) {
+      return { success: false, summary: `batch_fix_config 失败: ${err.message}`, durationMs: Date.now() - startedAt };
+    }
+  }
+});
+async function executeSequence(actions) {
+  const results = [];
+  for (const item of actions) {
+    const action = registry.get(item.name);
+    if (!action) {
+      results.push({ success: false, summary: `未知动作: ${item.name}`, durationMs: 0 });
+      break;
+    }
+    const result = await action.run(item.params);
+    results.push(result);
+    if (!result.success) break;
+  }
+  return results;
+}
+const ActionRegistry = {
+  get,
+  list,
+  executeSequence,
+  GOLDEN_CONFIG,
+  EVOLUTION_STATE_PATH: EVOLUTION_STATE_PATH$1,
+  LIVING_PLAN_DIR: LIVING_PLAN_DIR$1
+};
+const LIVING_PLAN_DIR = ActionRegistry.LIVING_PLAN_DIR;
+const EVOLUTION_STATE_PATH = ActionRegistry.EVOLUTION_STATE_PATH;
+const KNOWN_SCRIPTS = [
+  { file: "config-watchdog.mjs", exportName: "runConfigWatchdog", description: "全量配置漂移检测与修正", priority: 90 },
+  { file: "goal-tracker.mjs", exportName: "updateAllGoalProgresses", description: "更新目标进度", priority: 60 },
+  { file: "state-manager.mjs", exportName: "readState", description: "读取并验证状态文件完整性", priority: 50 }
+];
+function detectConfigDrifts() {
+  if (!fs.existsSync(EVOLUTION_STATE_PATH)) return [];
+  try {
+    const raw = fs.readFileSync(EVOLUTION_STATE_PATH, "utf-8");
+    const state = JSON.parse(raw);
+    const drifts = [];
+    for (const [key, expected] of Object.entries(ActionRegistry.GOLDEN_CONFIG)) {
+      if (state[key] !== expected) {
+        drifts.push({ key, expected, actual: state[key] });
+      }
+    }
+    return drifts;
+  } catch {
+    return [];
+  }
+}
+function listAvailableScripts() {
+  try {
+    if (!fs.existsSync(LIVING_PLAN_DIR)) return [];
+    return fs.readdirSync(LIVING_PLAN_DIR).filter((f) => f.endsWith(".mjs"));
+  } catch {
+    return [];
+  }
+}
+function extractFixInstructions(summary) {
+  if (!summary) return [];
+  const fixes = [];
+  const lines = summary.split("\n");
+  for (const line of lines) {
+    const match2 = line.match(/##fix:\s*(\w+)\s*=\s*(.+)/);
+    if (match2) {
+      const key = match2[1].trim();
+      const rawValue = match2[2].trim();
+      let value = rawValue;
+      if (/^\d+$/.test(rawValue)) value = parseInt(rawValue, 10);
+      else if (/^\d+\.\d+$/.test(rawValue)) value = parseFloat(rawValue);
+      else if (rawValue === "true") value = true;
+      else if (rawValue === "false") value = false;
+      fixes.push({ key, value });
+    }
+  }
+  return fixes;
+}
+function plan(analysisResult) {
+  const actions = [];
+  const drifts = detectConfigDrifts();
+  if (drifts.length > 0) {
+    actions.push({ name: "batch_fix_config" });
+  }
+  if (actions.length === 0 && analysisResult.success) {
+    const fixInstructions = extractFixInstructions(analysisResult.summary);
+    for (const fix of fixInstructions) {
+      if (actions.length >= 3) break;
+      actions.push({
+        name: "fix_config",
+        params: { key: fix.key, value: fix.value, reason: "analysis_fix_instruction" }
+      });
+    }
+  }
+  if (analysisResult.planCreated && actions.length === 0) {
+    actions.push({ name: "run_config_watchdog" });
+  }
+  if (actions.length === 0) {
+    const availableScripts = listAvailableScripts();
+    if (availableScripts.length > 0) {
+      for (const known of KNOWN_SCRIPTS) {
+        if (availableScripts.includes(known.file)) {
+          actions.push({ name: "run_script", params: { script: known.file, exportName: known.exportName } });
+          break;
+        }
+      }
+    }
+  }
+  const capped = actions.slice(0, 3);
+  return {
+    actions: capped.map((a) => ({
+      name: a.name,
+      description: ActionRegistry.get(a.name)?.description || a.name,
+      category: ActionRegistry.get(a.name)?.category || "script_run",
+      run: () => ActionRegistry.get(a.name).run(a.params)
+    })),
+    context: {
+      triggeredBy: `analysis: ${analysisResult.summary?.slice(0, 120)}`,
+      analysisTimestamp: Date.now()
+    }
+  };
+}
 function createMessageId() {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -13158,9 +13555,6 @@ class SelfEvolutionService {
           }
           this.transitionState("ANALYZING", `距上次分析 ${hoursSinceLastAnalysis.toFixed(1)}h`);
           await this.runAnalysisCycle();
-        } else if (this.safetyMode !== "review" && this.executor.hasPendingStep() && this.executeFailures < this.maxFailures) {
-          this.transitionState("EXECUTING", "有待执行步骤");
-          await this.runExecutionCycle();
         }
         break;
       }
@@ -13311,6 +13705,7 @@ ${failureSummary}`,
         ].join("\n") : void 0,
         promptMode: strategy.promptMode
       };
+      let result = null;
       try {
         const preCheck = this.analyzer.shouldAnalyze();
         if (!preCheck.shouldRun) {
@@ -13319,12 +13714,21 @@ ${failureSummary}`,
             success: true,
             summary: `预过滤跳过: ${preCheck.reason}`,
             timestamp: Date.now(),
-            durationMs: 0
+            durationMs: 0,
+            planCreated: false,
+            mode: effectiveMode,
+            safetyMode: effectiveSafety,
+            strategyName: strategy.name,
+            promptMode: strategy.promptMode,
+            historyCount: this.analyzer.getHistorySummary()?.length || 0,
+            failures: this.tryRunFailures,
+            degradedMode,
+            planMode: planDetection.mode
           });
           this.saveState();
           return;
         }
-        const result = await this.analyzer.analyze(input);
+        result = await this.analyzer.analyze(input);
         this.analyzer.recordFingerprint(result.summary);
         let selfEval = null;
         if (result.success) {
@@ -13476,7 +13880,17 @@ ${failureSummary}`,
           summary: result.summary,
           timestamp: Date.now(),
           durationMs: Date.now() - this.lastRun,
-          planCreated: result.planCreated
+          planCreated: result.planCreated,
+          mode: effectiveMode,
+          safetyMode: effectiveSafety,
+          strategyName: strategy.name,
+          promptMode: strategy.promptMode,
+          planTitle: result.planSummary?.title,
+          planProgress: result.planSummary ? `${result.planSummary.stepsComplete}/${result.planSummary.stepsTotal}` : void 0,
+          historyCount: this.analyzer.getHistorySummary()?.length || 0,
+          failures: this.tryRunFailures,
+          degradedMode,
+          planMode: planDetection.mode
         });
         this.eventBus.emit("evolution.plan.outcome", {
           success: result.success,
@@ -13509,7 +13923,15 @@ ${failureSummary}`,
           success: false,
           summary: `Error: ${err.message}`,
           timestamp: Date.now(),
-          durationMs: Date.now() - this.lastRun
+          durationMs: Date.now() - this.lastRun,
+          planCreated: false,
+          mode: effectiveMode,
+          safetyMode: effectiveSafety,
+          strategyName: strategy.name,
+          historyCount: this.analyzer.getHistorySummary()?.length || 0,
+          failures: this.tryRunFailures,
+          degradedMode,
+          planMode: planDetection.mode
         });
         this.strategizer.evaluate(strategy.name, {
           success: false,
@@ -13521,39 +13943,95 @@ ${failureSummary}`,
           promptTrimmed: strategy.trimMode
         });
       }
+      if (this.safetyMode !== "review" && result.success) {
+        const actionPlan = plan(result);
+        if (actionPlan.actions.length > 0) {
+          const actionName = actionPlan.actions.map((a) => a.name).join(", ");
+          Logger.log("INFO", "evolution_action_plan", { actions: actionName });
+          await this.runActionCycle(actionPlan);
+        } else {
+          Logger.log("INFO", "evolution_action_plan_empty");
+        }
+      }
     });
-    this.transitionState("IDLE", "分析循环结束");
-    if (this.planManager?.getActivePlan() && this.executor.hasPendingStep() && this.safetyMode !== "review") {
-      Logger.log("INFO", "evolution_auto_trigger_execution", { plan_title: this.planManager.getActivePlan()?.title });
-      await this.runExecutionCycle();
-    }
   }
-  // ==================== 执行循环 ====================
-  async runExecutionCycle() {
-    this.transitionState("EXECUTING", "开始执行步骤");
+  // ==================== 动作执行循环（替代旧的 executor 执行） ====================
+  async runActionCycle(actionPlan) {
+    this.transitionState("EXECUTING", `动作计划: ${actionPlan.actions.map((a) => a.name).join(" → ")}`);
     this.lastExecutionTime = Date.now();
     this.reviewer.startListen();
-    const result = await this.executor.executeNextStep({
-      planId: "",
-      stepIndex: 0,
-      stepDescription: "",
-      planCtx: this.planManager?.getFormattedContext() || "",
-      cognitiveCtx: this.cognitiveService?.getFormattedContext() || ""
-    });
-    if (result.success) {
+    const outcomes = [];
+    for (const action of actionPlan.actions) {
+      const outcome = await action.run({});
+      outcomes.push({ name: action.name, result: outcome });
+      if (outcome.success) {
+        Logger.log("INFO", "action_success", { action: action.name, summary: outcome.summary });
+      } else {
+        Logger.log("WARN", "action_failed", { action: action.name, error: outcome.summary });
+        this.executeFailures++;
+        if (this.executeFailures >= this.maxFailures && this.recoveryCooldownUntil === 0) {
+          this.recoveryCooldownUntil = Date.now() + Math.min(this.intervalMs, 30 * 60 * 1e3);
+        }
+        break;
+      }
+    }
+    const allSucceeded = outcomes.every((o) => o.result.success);
+    if (allSucceeded) {
       this.executeFailures = 0;
-      this.transitionState("VERIFYING", "步骤完成，开始验证");
+      this.transitionState("VERIFYING", `${outcomes.length} 个动作执行成功，开始验证`);
       const changedFiles = await this.collectChangedFiles();
       await this.reviewer.verify(changedFiles);
       await this.reviewer.detectRegression(changedFiles);
-    } else {
-      this.executeFailures++;
-      if (this.executeFailures >= this.maxFailures && this.recoveryCooldownUntil === 0)
-        this.recoveryCooldownUntil = Date.now() + Math.min(this.intervalMs, 30 * 60 * 1e3);
-      Logger.log("WARN", "evolution_execution_failure", { executeFailures: this.executeFailures });
     }
     this.reviewer.stopAndValidate("execute");
-    this.transitionState("IDLE", "执行循环结束");
+    this.transitionState(
+      "IDLE",
+      `动作循环结束 (${outcomes.filter((o) => o.result.success).length}/${outcomes.length} 成功)`
+    );
+    this.persistActionResult(actionPlan, outcomes);
+  }
+  /** 将动作执行结果持久化为 UI 消息 */
+  persistActionResult(actionPlan, outcomes) {
+    const allOk = outcomes.every((o) => o.result.success);
+    const totalMs = outcomes.reduce((s, o) => s + o.result.durationMs, 0);
+    const lines = outcomes.map((o) => `${o.result.success ? "✓" : "✗"} ${o.name}: ${o.result.summary} (${o.result.durationMs}ms)`);
+    const summary = [
+      `[自进化执行] ${allOk ? "✅ 成功" : "⚠️ 部分完成"} (${totalMs}ms)`,
+      "",
+      ...lines,
+      "",
+      `触发来源: ${actionPlan.context.triggeredBy.slice(0, 200)}`
+    ].join("\n");
+    try {
+      const msg = {
+        id: createMessageId(),
+        source: "electron",
+        role: "assistant",
+        content: summary,
+        category: "evolution",
+        sessionId: SelfEvolutionService.EVOLUTION_SESSION_ID,
+        createdAt: Date.now()
+      };
+      insertMessage(msg);
+      const win = getMainWindow();
+      if (win && !win.isDestroyed()) {
+        win.webContents.send("message:new", msg);
+      }
+      this.eventBus.emit("evolution.action.executed", {
+        text: summary,
+        allOk,
+        actionCount: outcomes.length,
+        durationMs: totalMs,
+        details: outcomes.map((o) => ({
+          name: o.name,
+          success: o.result.success,
+          summary: o.result.summary,
+          durationMs: o.result.durationMs
+        }))
+      });
+    } catch (err) {
+      Logger.log("WARN", "evolve_persist_action_failed", { error: String(err) });
+    }
   }
   // ==================== 首次预热 ====================
   async warmupFirstRun() {
@@ -19140,9 +19618,9 @@ class DecisionStore {
     if (failures.length === 0) return [];
     const byCategory = /* @__PURE__ */ new Map();
     for (const f of failures) {
-      const list = byCategory.get(f.category) || [];
-      list.push(f);
-      byCategory.set(f.category, list);
+      const list2 = byCategory.get(f.category) || [];
+      list2.push(f);
+      byCategory.set(f.category, list2);
     }
     const groups = [];
     for (const [category, records] of byCategory) {
@@ -20113,8 +20591,8 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef, 
   });
   electron.ipcMain.handle("agent:getActivePlan", async () => {
     try {
-      const plan = planManager.getActivePlan();
-      return plan ?? null;
+      const plan2 = planManager.getActivePlan();
+      return plan2 ?? null;
     } catch {
       return null;
     }
@@ -24083,16 +24561,16 @@ class SkillManager {
     Logger.log("INFO", "skill_manager_ready", { skills: this.skills.size });
   }
   getAllSkills() {
-    const list = [];
+    const list2 = [];
     for (const [, manifest] of this.skills) {
-      list.push({
+      list2.push({
         manifest,
         enabled: manifest.enabled !== false,
         promptModule: this.promptCache.get(manifest.name) ?? null,
         toolsLoaded: this.loadedTools.has(manifest.name)
       });
     }
-    return list;
+    return list2;
   }
   /** 返回所有已启用技能的 prompt（全量注入） */
   getEnabledPromptModules() {
@@ -25397,7 +25875,7 @@ const defaults = (def) => {
     defaults: (options) => orig.defaults(ext(def, options)),
     makeRe: (pattern, options = {}) => orig.makeRe(pattern, ext(def, options)),
     braceExpand: (pattern, options = {}) => orig.braceExpand(pattern, ext(def, options)),
-    match: (list, pattern, options = {}) => orig.match(list, pattern, ext(def, options)),
+    match: (list2, pattern, options = {}) => orig.match(list2, pattern, ext(def, options)),
     sep: orig.sep,
     GLOBSTAR
   });
@@ -25413,13 +25891,13 @@ const braceExpand = (pattern, options = {}) => {
 minimatch.braceExpand = braceExpand;
 const makeRe = (pattern, options = {}) => new Minimatch(pattern, options).makeRe();
 minimatch.makeRe = makeRe;
-const match = (list, pattern, options = {}) => {
+const match = (list2, pattern, options = {}) => {
   const mm = new Minimatch(pattern, options);
-  list = list.filter((f) => mm.match(f));
-  if (mm.options.nonull && !list.length) {
-    list.push(pattern);
+  list2 = list2.filter((f) => mm.match(f));
+  if (mm.options.nonull && !list2.length) {
+    list2.push(pattern);
   }
-  return list;
+  return list2;
 };
 minimatch.match = match;
 const globMagic = /[?*]|[+@!]\(.*?\)|\[|\]/;
@@ -30336,33 +30814,60 @@ class TelegramService {
       this.handlePushResponse(chatId, p.text, p.requestId);
     });
     eventBus.on("evolution.cycle.started", (p) => {
-      const lines = ["🧬 AI 自进化系统"];
-      lines.push(`━━━ 分析开始 ━━━`);
-      if (p.mode) lines.push(`状态: ${p.mode}`);
-      if (p.failures !== void 0 && p.failures > 0) lines.push(`连续失败: ${p.failures} 次`);
-      if (p.strategyName) lines.push(`策略: ${p.strategyName}`);
-      if (p.historyCount !== void 0) lines.push(`历史记录: ${p.historyCount} 条`);
-      lines.push(`
-📋 正在分析系统状态、检测退化、检查计划 Integrity...`);
+      const lines = ["🧬 秋山澪 - 自进化检查"];
+      lines.push(`系统正在进行每 ${p.historyCount > 0 ? "2 小时" : "首次"} 的例行自我检查`);
+      lines.push("");
+      lines.push("📋 检查项目：");
+      lines.push("  1. 系统配置是否正确（参数有没有被人改偏）");
+      lines.push("  2. 代码质量有没有退化（bug、坏味道）");
+      lines.push("  3. 运行状态是否健康（内存、超时、异常）");
+      lines.push("  4. 计划任务是否在正常推进");
+      if (p.failures > 0) lines.push(`
+⚠️ 注意：上次检查失败了 ${p.failures} 次，本次会更保守`);
+      if (p.strategyName === "conservative") lines.push("🔒 当前处于保守模式，只检查不修改");
       this.enqueueReply(chatId, lines.join("\n"), "evolution");
       Logger.log("INFO", "telegram_push_evolution_start");
     });
     eventBus.on("evolution.cycle.completed", (p) => {
-      const lines = ["🧬 AI 自进化系统"];
-      if (p.success) lines.push(`━━━ ✅ 分析完成 ━━━`);
-      else lines.push(`━━━ ❌ 分析失败 ━━━`);
+      if (p.success && p.summary?.startsWith("预过滤跳过")) {
+        const reasonMap = {
+          recent_cycles_all_idle: "最近几轮检查都没发现问题，系统状态稳定",
+          not_enough_time: "距离上次检查时间太短，没必要重复运行"
+        };
+        const reason = reasonMap[p.summary.replace("预过滤跳过: ", "")] || p.summary.replace("预过滤跳过: ", "");
+        const lines2 = ["🧬 秋山澪 - 自进化检查"];
+        lines2.push("━━━ ⏭ 跳过本轮 ━━━");
+        lines2.push("");
+        lines2.push(`原因：${reason}`);
+        lines2.push("");
+        if (p.failures > 0) lines2.push(`📊 连续失败次数：${p.failures}`);
+        if (p.historyCount > 0) lines2.push(`📊 历史检查次数：${p.historyCount}`);
+        lines2.push("");
+        lines2.push("✅ 系统运行正常，无需干预");
+        this.enqueueReply(chatId, lines2.join("\n"), "evolution");
+        return;
+      }
+      const lines = ["🧬 秋山澪 - 自进化检查"];
+      if (p.success) {
+        lines.push("━━━ ✅ 检查完成 ━━━");
+      } else {
+        lines.push("━━━ ❌ 检查出问题 ━━━");
+      }
+      lines.push("");
       if (p.durationMs) {
         const secs = Math.round(p.durationMs / 1e3);
         const mins = Math.floor(secs / 60);
-        lines.push(`耗时: ${mins > 0 ? `${mins}分` : ""}${secs % 60}秒`);
+        lines.push(`⏱ 耗时：${mins > 0 ? `${mins}分` : ""}${secs % 60}秒`);
       }
-      if (p.mode) lines.push(`状态: ${p.mode}`);
       if (p.planTitle) {
-        lines.push(`计划: ${p.planTitle}${p.planProgress ? ` (${p.planProgress})` : ""}`);
+        lines.push(`📋 当前计划：${p.planTitle}（进度 ${p.planProgress}）`);
       }
-      const summary = (p.summary || "").slice(0, 1500);
-      if (summary) lines.push(`
-📝 ${summary}`);
+      const summary = (p.summary || "").slice(0, 2e3);
+      if (summary && !summary.startsWith("预过滤跳过")) {
+        lines.push("");
+        lines.push("📝 分析报告：");
+        lines.push(summary);
+      }
       this.enqueueReply(chatId, lines.join("\n"), "evolution");
     });
     eventBus.on("evolution.snapshot.created", (p) => {
@@ -30374,6 +30879,32 @@ class TelegramService {
     eventBus.on("evolution.proposal.validated", (p) => {
       const icon = p.passed ? "✅" : "⚠️";
       this.enqueueReply(chatId, `🧬 提案验证: ${p.proposalId} ${icon} 风险:${p.regressionRisk}`, "evolution");
+    });
+    eventBus.on("evolution.action.executed", (p) => {
+      const lines = ["🧬 秋山澪 - 自动修正"];
+      if (p.allOk) {
+        lines.push("━━━ ✅ 配置修正成功 ━━━");
+      } else {
+        lines.push("━━━ ⚠️ 部分修正失败 ━━━");
+      }
+      lines.push("");
+      for (const d of p.details || []) {
+        if (!d.success) {
+          lines.push(`❌ ${d.name} 执行失败：${d.summary}`);
+          continue;
+        }
+        if (d.name === "batch_fix_config") {
+          const items = d.summary.replace("修正 ", "").replace(" 个配置漂移: ", "\n  ");
+          lines.push(`📝 修复了以下配置：`);
+          lines.push(`  ${items.replace(/, /g, "\n  ")}`);
+        } else {
+          lines.push(`📝 ${d.summary}`);
+        }
+      }
+      if (p.durationMs) {
+        lines.push(`⚡ 全部在 ${p.durationMs}ms 内完成，未使用 AI`);
+      }
+      this.enqueueReply(chatId, lines.join("\n"), "evolution");
     });
     eventBus.on("insight.analysis.started", () => {
       this.enqueueReply(chatId, `🔍 洞察分析开始...`, "insight");
@@ -32925,16 +33456,16 @@ class AppRuntime {
       },
       getPlanStatus: () => {
         const pm = agentService["planManager"];
-        const plan = pm.getActivePlan();
-        if (!plan) return null;
-        const done = plan.steps.filter((s) => s.status === "done").length;
+        const plan2 = pm.getActivePlan();
+        if (!plan2) return null;
+        const done = plan2.steps.filter((s) => s.status === "done").length;
         return {
-          id: plan.id,
-          title: plan.title || "",
-          total: plan.steps.length,
+          id: plan2.id,
+          title: plan2.title || "",
+          total: plan2.steps.length,
           done,
-          pending: plan.steps.filter((s) => s.status !== "done").map((s) => s.description),
-          status: plan.status
+          pending: plan2.steps.filter((s) => s.status !== "done").map((s) => s.description),
+          status: plan2.status
         };
       },
       getDefinition: (id2) => workflowStore2.getDefinition(id2)
@@ -33643,8 +34174,8 @@ class AppRuntime {
     try {
       const plans2 = pm.listPlans();
       if (plans2.length > 0) {
-        const plan = plans2[0];
-        sources.push({ name: `Plan:${plan.title}`, content: plan.description, type: "behavior", weight: 0.3 });
+        const plan2 = plans2[0];
+        sources.push({ name: `Plan:${plan2.title}`, content: plan2.description, type: "behavior", weight: 0.3 });
       }
     } catch {
     }

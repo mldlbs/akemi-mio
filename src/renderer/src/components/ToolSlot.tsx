@@ -1,12 +1,11 @@
 import type { ToolEvent } from '../slots/types'
+import { useAgentStore } from '../store/agentStore'
 
-interface ToolSlotProps {
-  running?: ToolEvent[]
-  completed?: ToolEvent[]
-}
+export function ToolSlot() {
+  const toolRunning = useAgentStore((s) => s.toolRunning)
+  const toolCompleted = useAgentStore((s) => s.toolCompleted)
 
-export function ToolSlot({ running = [], completed = [] }: ToolSlotProps) {
-  const allEmpty = running.length === 0 && completed.length === 0
+  const allEmpty = toolRunning.length === 0 && toolCompleted.length === 0
 
   if (allEmpty) {
     return (
@@ -21,10 +20,10 @@ export function ToolSlot({ running = [], completed = [] }: ToolSlotProps) {
 
   return (
     <div className="tool-slot tool-slot-content">
-      {running.length > 0 && (
+      {toolRunning.length > 0 && (
         <div className="tool-slot-section">
           <div className="tool-slot-heading">执行中</div>
-          {running.map((t) => (
+          {toolRunning.map((t) => (
             <div key={t.id} className="tool-item tool-item-running">
               <div className="tool-item-icon">
                 <i className="ri-loader-4-line ri-spin" />
@@ -37,10 +36,10 @@ export function ToolSlot({ running = [], completed = [] }: ToolSlotProps) {
           ))}
         </div>
       )}
-      {completed.length > 0 && (
+      {toolCompleted.length > 0 && (
         <div className="tool-slot-section">
           <div className="tool-slot-heading">已执行</div>
-          {completed.map((t) => (
+          {toolCompleted.map((t) => (
             <div key={t.id} className={`tool-item ${t.error ? 'tool-item-failed' : 'tool-item-done'}`}>
               <div className="tool-item-icon">
                 <i className={`ri-${t.error ? 'close-circle-line' : 'check-line'}`} />

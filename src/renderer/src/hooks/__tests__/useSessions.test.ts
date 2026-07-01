@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { useSessions } from '../useSessions'
 import { createMockIPC } from '../../__tests__/mockIPC'
+import { resetAllStores } from '../../store/reset'
 
 function mockSessions() {
   return [
@@ -50,6 +51,7 @@ function mockMessages(sessionId: string) {
 }
 
 beforeEach(() => {
+  resetAllStores()
   window.electronAPI = createMockIPC({
     getSessions: vi.fn().mockResolvedValue(mockSessions()),
     getMessagesBySession: vi.fn().mockImplementation((id: string) => Promise.resolve(mockMessages(id))),

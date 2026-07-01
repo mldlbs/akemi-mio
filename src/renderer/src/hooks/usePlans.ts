@@ -1,70 +1,37 @@
-import { useState, useEffect } from 'react'
+import { useEffect } from 'react'
 import { useIPCEvent } from './useIPCEvent'
+import { usePlansStore } from '../store/plansStore'
 
-export interface OtparEntry {
-  type: 'observe' | 'think' | 'reflect'
-  requestId: string
-  step: number
-  durationMs?: number
-  timestamp: number
-  detail: string
-}
-
-interface PlanStepData {
-  id: string
-  description: string
-  status: string
-  result?: string
-}
-
-interface PlanData {
-  id: string
-  title: string
-  description: string
-  steps: PlanStepData[]
-  status: string
-  createdAt: number
-  updatedAt: number
-}
+export type { OtparEntry } from '../store/plansStore'
 
 export function usePlans() {
-  const [activePlan, setActivePlan] = useState<PlanData | null>(null)
-  const [planHistory, setPlanHistory] = useState<PlanData[]>([])
-  const [otparStages, setOtparStages] = useState<OtparEntry[]>([])
+  const store = usePlansStore()
 
   // Load initial data
   useEffect(() => {
-    window.electronAPI.getActivePlan().then((plan) => setActivePlan(plan))
+    window.electronAPI.getActivePlan().then((plan) => store.setActivePlan(plan))
     window.electronAPI.listPlans().then((list) => {
-      setPlanHistory(list.filter((p) => p.status !== 'active'))
+      store.setPlanHistory(list.filter((p) => p.status !== 'active'))
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Subscribe to plan events
-  useIPCEvent(window.electronAPI.onPlanCreated, (_data: { planId: string; title: string }) => {
-    window.electronAPI.getActivePlan().then((plan) => setActivePlan(plan))
+  useIPCEvent(window.electronAPI.onPlanCreated, () => {
+    window.electronAPI.getActivePlan().then((plan) => store.setActivePlan(plan))
     window.electronAPI.listPlans().then((list) => {
-      setPlanHistory(list.filter((p) => p.status !== 'active'))
+      store.setPlanHistory(list.filter((p) => p.status !== 'active'))
     })
   })
 
   useIPCEvent(window.electronAPI.onPlanStep, (data: { planId: string; stepIndex: number; status: string }) => {
-    setActivePlan((prev) => {
-      if (!prev || prev.id !== data.planId) return prev
-      return {
-        ...prev,
-        steps: prev.steps.map((s, i) => (i === data.stepIndex ? { ...s, status: data.status } : s)),
-      }
-    })
+    store.updateActivePlanStep(data.stepIndex, data.status)
   })
 
-  useIPCEvent(window.electronAPI.onPlanCompleted, (data: { planId: string }) => {
-    setActivePlan((prev) => {
-      if (!prev || prev.id !== data.planId) return prev
-      return { ...prev, status: 'completed' }
-    })
+  useIPCEvent(window.electronAPI.onPlanCompleted, () => {
+    store.completeActivePlan()
     window.electronAPI.listPlans().then((list) => {
-      setPlanHistory(list.filter((p) => p.status !== 'active'))
+      store.setPlanHistory(list.filter((p) => p.status !== 'active'))
     })
   })
 
@@ -72,52 +39,47 @@ export function usePlans() {
   useIPCEvent(
     window.electronAPI.onAgentObserve,
     (data: { requestId: string; step: number; proceduresFound: number; patternsFound: number; durationMs: number }) => {
-      setOtparStages((prev) => [
-        ...prev.slice(-19),
-        {
-          type: 'observe' as const,
-          requestId: data.requestId,
-          step: data.step,
-          durationMs: data.durationMs,
-          timestamp: Date.now(),
-          detail: `流程 ${data.proceduresFound} · 模式 ${data.patternsFound}`,
-        },
-      ])
+      store.addOtparStage({
+        type: 'observe',
+        requestId: data.requestId,
+        step: data.step,
+        durationMs: data.durationMs,
+        timestamp: Date.now(),
+        detail: `流程 ${data.proceduresFound} · 模式 ${data.patternsFound}`,
+      })
     },
   )
 
   useIPCEvent(
     window.electronAPI.onAgentThink,
     (data: { requestId: string; step: number; toolCallCount: number; strategyPrompted: boolean }) => {
-      setOtparStages((prev) => [
-        ...prev.slice(-19),
-        {
-          type: 'think' as const,
-          requestId: data.requestId,
-          step: data.step,
-          timestamp: Date.now(),
-          detail: `${data.toolCallCount} 个工具` + (data.strategyPrompted ? ' · 策略提示' : ''),
-        },
-      ])
+      store.addOtparStage({
+        type: 'think',
+        requestId: data.requestId,
+        step: data.step,
+        timestamp: Date.now(),
+        detail: `${data.toolCallCount} 个工具` + (data.strategyPrompted ? ' · 策略提示' : ''),
+      })
     },
   )
 
   useIPCEvent(
     window.electronAPI.onAgentReflect,
     (data: { requestId: string; step: number; toolResults: number; successCount: number; summary: string; durationMs: number }) => {
-      setOtparStages((prev) => [
-        ...prev.slice(-19),
-        {
-          type: 'reflect' as const,
-          requestId: data.requestId,
-          step: data.step,
-          durationMs: data.durationMs,
-          timestamp: Date.now(),
-          detail: data.summary,
-        },
-      ])
+      store.addOtparStage({
+        type: 'reflect',
+        requestId: data.requestId,
+        step: data.step,
+        durationMs: data.durationMs,
+        timestamp: Date.now(),
+        detail: data.summary,
+      })
     },
   )
 
-  return { activePlan, planHistory, otparStages }
+  return {
+    activePlan: store.activePlan,
+    planHistory: store.planHistory,
+    otparStages: store.otparStages,
+  }
 }

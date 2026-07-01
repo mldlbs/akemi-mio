@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useTools } from '../useTools'
 import { createMockIPC } from '../../__tests__/mockIPC'
+import { resetAllStores } from '../../store/reset'
 
 beforeEach(() => {
+  resetAllStores()
   window.electronAPI = createMockIPC() as any
 })
 

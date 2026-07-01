@@ -1,53 +1,38 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useEffect } from 'react'
 import { playTTS, playTTSBuffer, onTTSStart, onTTSError } from '../components/audioShared'
 import { useIPCEvent } from './useIPCEvent'
 import { useTimerControl } from './useTimer'
+import { useAgentStore } from '../store/agentStore'
 
-export type AgentState = 'idle' | 'thinking' | 'tool_executing' | 'replying'
+export type { AgentState } from '../store/agentStore'
 
 export function useAIOutput(activeSessionId: string, voiceActive: boolean, onError?: (err: string | undefined) => void) {
-  const [pendingText, setPendingText] = useState('')
-  const [displayText, setDisplayText] = useState('')
-  const [transcribed, setTranscribed] = useState('')
-  const [toolStatus, setToolStatus] = useState<{ type: string; tool: string; message: string } | null>(null)
-  const [agentState, setAgentState] = useState<AgentState>('idle')
+  const store = useAgentStore()
 
   const fadeTimer = useTimerControl()
   const revealTimer = useTimerControl()
-  const textRef = useRef('')
 
   // 切换会话时立即清空所有 streaming 状态
-  const sessionRef = useRef(activeSessionId)
   useEffect(() => {
-    if (sessionRef.current !== activeSessionId) {
-      sessionRef.current = activeSessionId
-      setPendingText('')
-      setDisplayText('')
-      setTranscribed('')
-      setToolStatus(null)
-      setAgentState('idle')
-      revealTimer.clear()
-      fadeTimer.clear()
-    }
-  }, [activeSessionId, revealTimer, fadeTimer])
-
-  useEffect(() => {
-    textRef.current = pendingText
-  }, [pendingText])
+    store.resetAgent()
+    revealTimer.clear()
+    fadeTimer.clear()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId])
 
   // TTS display reveal (mount-only)
   useEffect(() => {
     const onStart = (duration: number) => {
-      const t = textRef.current
+      const t = store.pendingText
       if (!t) return
       revealTimer.clear()
-      setDisplayText('')
+      store.setDisplayText('')
       const totalMs = duration * 1000
       const intervalMs = Math.max(20, totalMs / t.length)
       let i = 0
       revealTimer.setInterval(() => {
         i++
-        setDisplayText(t.slice(0, i))
+        store.setDisplayText(t.slice(0, i))
         if (i >= t.length) revealTimer.clear()
       }, intervalMs)
     }
@@ -60,11 +45,11 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
       revealTimer.clear()
       fadeTimer.clear()
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useIPCEvent(window.electronAPI.onAIChunk, (chunk: string) => {
-    setPendingText((prev) => prev + chunk)
-    setAgentState((s) => (s === 'thinking' || s === 'idle' ? 'replying' : s))
+    store.appendPendingText(chunk)
     fadeTimer.clear()
   })
 
@@ -78,48 +63,39 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
   // 带 sessionId 的 message:new = 最终完整消息；无 sessionId 的（中间 tool 输出）不清除 streaming 状态
   useIPCEvent(window.electronAPI.onMessageNew, (msg: { id: string; role: string; sessionId?: string }) => {
     if (msg.sessionId && msg.role === 'assistant') {
-      setPendingText('')
-      setDisplayText('')
-      setTranscribed('')
-      setAgentState('idle')
+      store.resetAgent()
       revealTimer.clear()
     }
   })
 
   useIPCEvent(window.electronAPI.onToolStatus, (status: { type: string; tool: string; message: string }) => {
-    if (status.type === 'start') {
-      setToolStatus(status)
-      setAgentState('tool_executing')
-    } else {
-      setToolStatus(null)
-      setAgentState((s) => (s === 'tool_executing' ? 'replying' : s))
-    }
+    store.setToolStatus(status)
   })
 
-  const handleResult = useCallback(
-    async (t: string) => {
-      if (!t) return
-      setTranscribed(t)
-      setAgentState('thinking')
-      onError?.(undefined)
-      setPendingText('')
-      setDisplayText('')
-      setToolStatus(null)
-      revealTimer.clear()
-      try {
-        await window.electronAPI.chat(t, undefined, activeSessionId || undefined, !voiceActive)
-      } catch (err) {
-        onError?.(String(err))
-      }
-      fadeTimer.set(() => {
-        setPendingText('')
-        setDisplayText('')
-        setTranscribed('')
-        setAgentState('idle')
-      }, 10000)
-    },
-    [activeSessionId, voiceActive, onError],
-  ) // eslint-disable-line react-hooks/exhaustive-deps
+  const handleResult = async (t: string) => {
+    if (!t) return
+    store.setTranscribed(t)
+    store.setAgentState('thinking')
+    onError?.(undefined)
+    store.setPendingText('')
+    store.setDisplayText('')
+    revealTimer.clear()
+    try {
+      await window.electronAPI.chat(t, undefined, activeSessionId || undefined, !voiceActive)
+    } catch (err) {
+      onError?.(String(err))
+    }
+    fadeTimer.set(() => {
+      store.resetAgent()
+    }, 10000)
+  }
 
-  return { pendingText, displayText, transcribed, toolStatus, agentState, handleResult } as const
+  return {
+    pendingText: store.pendingText,
+    displayText: store.displayText,
+    transcribed: store.transcribed,
+    toolStatus: store.toolStatus,
+    agentState: store.agentState,
+    handleResult,
+  } as const
 }

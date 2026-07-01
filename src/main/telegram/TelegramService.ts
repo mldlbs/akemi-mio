@@ -403,31 +403,61 @@ export class TelegramService {
 
     // === 🧬 进化 ===
     eventBus.on('evolution.cycle.started', (p: any) => {
-      const lines = ['🧬 AI 自进化系统']
-      lines.push(`━━━ 分析开始 ━━━`)
-      if (p.mode) lines.push(`状态: ${p.mode}`)
-      if (p.failures !== undefined && p.failures > 0) lines.push(`连续失败: ${p.failures} 次`)
-      if (p.strategyName) lines.push(`策略: ${p.strategyName}`)
-      if (p.historyCount !== undefined) lines.push(`历史记录: ${p.historyCount} 条`)
-      lines.push(`\n📋 正在分析系统状态、检测退化、检查计划 Integrity...`)
+      const lines = ['🧬 秋山澪 - 自进化检查']
+      lines.push(`系统正在进行每 ${p.historyCount > 0 ? '2 小时' : '首次'} 的例行自我检查`)
+      lines.push('')
+      lines.push('📋 检查项目：')
+      lines.push('  1. 系统配置是否正确（参数有没有被人改偏）')
+      lines.push('  2. 代码质量有没有退化（bug、坏味道）')
+      lines.push('  3. 运行状态是否健康（内存、超时、异常）')
+      lines.push('  4. 计划任务是否在正常推进')
+      if (p.failures > 0) lines.push(`\n⚠️ 注意：上次检查失败了 ${p.failures} 次，本次会更保守`)
+      if (p.strategyName === 'conservative') lines.push('🔒 当前处于保守模式，只检查不修改')
       this.enqueueReply(chatId, lines.join('\n'), 'evolution')
       log('INFO', 'telegram_push_evolution_start')
     })
     eventBus.on('evolution.cycle.completed', (p: any) => {
-      const lines = ['🧬 AI 自进化系统']
-      if (p.success) lines.push(`━━━ ✅ 分析完成 ━━━`)
-      else lines.push(`━━━ ❌ 分析失败 ━━━`)
+      if (p.success && p.summary?.startsWith('预过滤跳过')) {
+        const reasonMap: Record<string, string> = {
+          recent_cycles_all_idle: '最近几轮检查都没发现问题，系统状态稳定',
+          not_enough_time: '距离上次检查时间太短，没必要重复运行',
+        }
+        const reason = reasonMap[p.summary.replace('预过滤跳过: ', '')] || p.summary.replace('预过滤跳过: ', '')
+        const lines = ['🧬 秋山澪 - 自进化检查']
+        lines.push('━━━ ⏭ 跳过本轮 ━━━')
+        lines.push('')
+        lines.push(`原因：${reason}`)
+        lines.push('')
+        if (p.failures > 0) lines.push(`📊 连续失败次数：${p.failures}`)
+        if (p.historyCount > 0) lines.push(`📊 历史检查次数：${p.historyCount}`)
+        lines.push('')
+        lines.push('✅ 系统运行正常，无需干预')
+        this.enqueueReply(chatId, lines.join('\n'), 'evolution')
+        return
+      }
+
+      const lines = ['🧬 秋山澪 - 自进化检查']
+      if (p.success) {
+        lines.push('━━━ ✅ 检查完成 ━━━')
+      } else {
+        lines.push('━━━ ❌ 检查出问题 ━━━')
+      }
+      lines.push('')
       if (p.durationMs) {
         const secs = Math.round(p.durationMs / 1000)
         const mins = Math.floor(secs / 60)
-        lines.push(`耗时: ${mins > 0 ? `${mins}分` : ''}${secs % 60}秒`)
+        lines.push(`⏱ 耗时：${mins > 0 ? `${mins}分` : ''}${secs % 60}秒`)
       }
-      if (p.mode) lines.push(`状态: ${p.mode}`)
       if (p.planTitle) {
-        lines.push(`计划: ${p.planTitle}${p.planProgress ? ` (${p.planProgress})` : ''}`)
+        lines.push(`📋 当前计划：${p.planTitle}（进度 ${p.planProgress}）`)
       }
-      const summary = (p.summary || '').slice(0, 1500)
-      if (summary) lines.push(`\n📝 ${summary}`)
+      const summary = (p.summary || '').slice(0, 2000)
+      if (summary && !summary.startsWith('预过滤跳过')) {
+        // LLM 分析摘要直接展示，这才是最有价值的信息
+        lines.push('')
+        lines.push('📝 分析报告：')
+        lines.push(summary)
+      }
       this.enqueueReply(chatId, lines.join('\n'), 'evolution')
     })
     eventBus.on('evolution.snapshot.created', (p: any) => {
@@ -439,6 +469,33 @@ export class TelegramService {
     eventBus.on('evolution.proposal.validated', (p: any) => {
       const icon = p.passed ? '✅' : '⚠️'
       this.enqueueReply(chatId, `🧬 提案验证: ${p.proposalId} ${icon} 风险:${p.regressionRisk}`, 'evolution')
+    })
+    eventBus.on('evolution.action.executed', (p: any) => {
+      const lines = ['🧬 秋山澪 - 自动修正']
+      if (p.allOk) {
+        lines.push('━━━ ✅ 配置修正成功 ━━━')
+      } else {
+        lines.push('━━━ ⚠️ 部分修正失败 ━━━')
+      }
+      lines.push('')
+      for (const d of p.details || []) {
+        if (!d.success) {
+          lines.push(`❌ ${d.name} 执行失败：${d.summary}`)
+          continue
+        }
+        if (d.name === 'batch_fix_config') {
+          // "修正 4 个配置漂移: xx, yy" → 更清晰
+          const items = d.summary.replace('修正 ', '').replace(' 个配置漂移: ', '\n  ')
+          lines.push(`📝 修复了以下配置：`)
+          lines.push(`  ${items.replace(/, /g, '\n  ')}`)
+        } else {
+          lines.push(`📝 ${d.summary}`)
+        }
+      }
+      if (p.durationMs) {
+        lines.push(`⚡ 全部在 ${p.durationMs}ms 内完成，未使用 AI`)
+      }
+      this.enqueueReply(chatId, lines.join('\n'), 'evolution')
     })
 
     // === 🔍 洞察 ===

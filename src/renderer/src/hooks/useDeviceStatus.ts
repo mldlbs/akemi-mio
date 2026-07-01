@@ -1,23 +1,28 @@
-import { useState } from 'react'
 import { useIPCEvent } from './useIPCEvent'
+import { useDeviceStore } from '../store/deviceStore'
 
 export function useDeviceStatus() {
-  const [active, setActive] = useState(false)
-  const [ttsPlaying, setTtsPlaying] = useState(false)
-  const [error, setError] = useState<string | undefined>()
-  const [sessionHealth, setSessionHealth] = useState('100:HEALTHY:RUNNING')
-  const [personaLevel, setPersonaLevel] = useState<string>('core')
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const store = useDeviceStore()
 
   useIPCEvent(window.electronAPI.onStateUpdate, (s: Record<string, unknown>) => {
-    if (s.error) setError(s.error as string)
-    if (s.ttsPlaying !== undefined) setTtsPlaying(s.ttsPlaying as boolean)
-    if (s.sessionHealth) setSessionHealth(s.sessionHealth as string)
+    if (s.error) store.setError(s.error as string)
+    if (s.ttsPlaying !== undefined) store.setTtsPlaying(s.ttsPlaying as boolean)
+    if (s.sessionHealth) store.setSessionHealth(s.sessionHealth as string)
   })
 
   useIPCEvent(window.electronAPI.onPersonaUpdated, (data: { level: string }) => {
-    setPersonaLevel(data.level)
+    store.setPersonaLevel(data.level)
   })
 
-  return { active, setActive, ttsPlaying, error, setError, sessionHealth, personaLevel, settingsOpen, setSettingsOpen } as const
+  return {
+    active: store.active,
+    setActive: store.setActive,
+    ttsPlaying: store.ttsPlaying,
+    error: store.error,
+    setError: store.setError,
+    sessionHealth: store.sessionHealth,
+    personaLevel: store.personaLevel,
+    settingsOpen: store.settingsOpen,
+    setSettingsOpen: store.setSettingsOpen,
+  } as const
 }

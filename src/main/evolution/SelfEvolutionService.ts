@@ -46,6 +46,7 @@ import { alignAll } from './TraceAligner'
 import { PatternMiner } from './PatternMiner'
 import { CapabilityCompiler } from './CapabilityCompiler'
 import { CapabilityRegistry } from './CapabilityRegistry'
+import { PreservationEngine } from './PreservationEngine'
 import type { ActionContext } from './ActionContext'
 import { insertMessage, createMessageId } from '../db/messages'
 import { getMainWindow } from '../core/Lifecycle'
@@ -135,6 +136,9 @@ export class SelfEvolutionService implements ISubsystem {
   readonly patternMiner: PatternMiner
   readonly capabilityCompiler: CapabilityCompiler
 
+  // ==================== Phase 4: PreservationEngine ==================
+  readonly preservationEngine: PreservationEngine
+
   // ==================== 状态持久化 ====================
   private stateFilePath: string
   private historyPath: string
@@ -210,6 +214,9 @@ export class SelfEvolutionService implements ISubsystem {
     const capabilityRegistry = new CapabilityRegistry()
     this.patternMiner = new PatternMiner()
     this.capabilityCompiler = new CapabilityCompiler(capabilityRegistry)
+
+    // Phase 4: PreservationEngine
+    this.preservationEngine = new PreservationEngine(capabilityRegistry)
 
     this.loadState()
 
@@ -827,6 +834,16 @@ export class SelfEvolutionService implements ISubsystem {
           }
         }
 
+        // Phase 4: 对所有能力执行 preservation 评估
+        const preservationSummary = this.preservationEngine.evaluateAll()
+        this.eventBus.emit('evolution.preservation.completed' as any, preservationSummary)
+        log('INFO', 'preservation_summary', {
+          total: preservationSummary.total,
+          passed: preservationSummary.passed,
+          failed: preservationSummary.failed,
+          avgScore: preservationSummary.avgScore,
+        })
+
         this.saveState()
         this.eventBus.emit('evolution.cycle.completed', {
           success: result.success,
@@ -856,6 +873,16 @@ export class SelfEvolutionService implements ISubsystem {
           hadRetry: result.hadRetry,
           durationMs: Date.now() - this.lastRun,
         })
+
+        // Phase 4: 执行 preservation 清理（归档/降级冷能力）
+        try {
+          const pruned = this.preservationEngine.prune()
+          if (pruned > 0) {
+            log('INFO', 'preservation_pruned', { count: pruned })
+          }
+        } catch (err: any) {
+          log('WARN', 'preservation_prune_skipped', { error: err.message })
+        }
       } catch (err: any) {
         this.tryRunFailures++
         this.analyzer.setAnalysisTimeout(Math.min(Math.round(this.analyzer.getAnalysisTimeout() * 1.25), 300000))
@@ -957,6 +984,17 @@ export class SelfEvolutionService implements ISubsystem {
             count: compiled.length,
             ids: compiled.map((c) => c.id),
           })
+          // Phase 4: 对新编译的能力执行 preservation 检查
+          for (const cap of compiled) {
+            const report = this.preservationEngine.evaluate(cap)
+            if (report.overallScore < 0.35) {
+              log('WARN', 'preservation_new_capability_failed', {
+                id: cap.id,
+                score: report.overallScore,
+                action: report.recommendedAction,
+              })
+            }
+          }
         }
       }
     })
