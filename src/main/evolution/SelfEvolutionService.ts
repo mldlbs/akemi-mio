@@ -38,6 +38,15 @@ import { PromptEvolutionManager, type PromptSlot } from './PromptEvolutionManage
 import { EvolutionSelfEvaluator } from './EvolutionSelfEvaluator'
 import { MetaLearner } from './MetaLearner'
 import { EvaluatorCalibrator } from './EvaluatorCalibrator'
+import { ActionRegistry } from './ActionRegistry'
+import { plan as planActions, formatActionPlan } from './ActionPlanner'
+import { ExecutionTracer } from './ExecutionTracer'
+import { IntentExtractor } from './IntentExtractor'
+import { alignAll } from './TraceAligner'
+import { PatternMiner } from './PatternMiner'
+import { CapabilityCompiler } from './CapabilityCompiler'
+import { CapabilityRegistry } from './CapabilityRegistry'
+import type { ActionContext } from './ActionContext'
 import { insertMessage, createMessageId } from '../db/messages'
 import { getMainWindow } from '../core/Lifecycle'
 
@@ -119,6 +128,13 @@ export class SelfEvolutionService implements ISubsystem {
   private consecutiveCleanCycles = 0
   private consecutiveDegenerateDetections = 0
 
+  // ==================== Phase 2: Intent Tracing ====================
+  readonly intentExtractor: IntentExtractor
+
+  // ==================== Phase 3: Capability Registry ================
+  readonly patternMiner: PatternMiner
+  readonly capabilityCompiler: CapabilityCompiler
+
   // ==================== 状态持久化 ====================
   private stateFilePath: string
   private historyPath: string
@@ -186,6 +202,14 @@ export class SelfEvolutionService implements ISubsystem {
     this.selfEvaluator = new EvolutionSelfEvaluator()
     this.metaLearner = new MetaLearner()
     this.evaluatorCalibrator = new EvaluatorCalibrator()
+
+    // Phase 2: 意图追踪
+    this.intentExtractor = new IntentExtractor()
+
+    // Phase 3: 能力编译
+    const capabilityRegistry = new CapabilityRegistry()
+    this.patternMiner = new PatternMiner()
+    this.capabilityCompiler = new CapabilityCompiler(capabilityRegistry)
 
     this.loadState()
 
@@ -434,9 +458,6 @@ export class SelfEvolutionService implements ISubsystem {
           }
           this.transitionState(EvolutionSchedulerState.ANALYZING, `距上次分析 ${hoursSinceLastAnalysis.toFixed(1)}h`)
           await this.runAnalysisCycle()
-        } else if (this.safetyMode !== 'review' && this.executor.hasPendingStep() && this.executeFailures < this.maxFailures) {
-          this.transitionState(EvolutionSchedulerState.EXECUTING, '有待执行步骤')
-          await this.runExecutionCycle()
         }
         break
       }
@@ -612,6 +633,8 @@ export class SelfEvolutionService implements ISubsystem {
         promptMode: strategy.promptMode,
       }
 
+      let result: Awaited<ReturnType<typeof this.analyzer.analyze>> | null = null
+
       try {
         // 廉价预过滤：检查是否有必要运行 LLM 分析
         const preCheck = this.analyzer.shouldAnalyze()
@@ -622,12 +645,21 @@ export class SelfEvolutionService implements ISubsystem {
             summary: `预过滤跳过: ${preCheck.reason}`,
             timestamp: Date.now(),
             durationMs: 0,
+            planCreated: false,
+            mode: effectiveMode,
+            safetyMode: effectiveSafety,
+            strategyName: strategy.name,
+            promptMode: strategy.promptMode,
+            historyCount: this.analyzer.getHistorySummary()?.length || 0,
+            failures: this.tryRunFailures,
+            degradedMode,
+            planMode: planDetection.mode,
           })
           this.saveState()
           return
         }
 
-        const result = await this.analyzer.analyze(input)
+        result = await this.analyzer.analyze(input)
         this.analyzer.recordFingerprint(result.summary)
 
         // Phase 3: 自评估结果（在多个 if 块中共享）
@@ -802,6 +834,16 @@ export class SelfEvolutionService implements ISubsystem {
           timestamp: Date.now(),
           durationMs: Date.now() - this.lastRun,
           planCreated: result.planCreated,
+          mode: effectiveMode,
+          safetyMode: effectiveSafety,
+          strategyName: strategy.name,
+          promptMode: strategy.promptMode,
+          planTitle: result.planSummary?.title,
+          planProgress: result.planSummary ? `${result.planSummary.stepsComplete}/${result.planSummary.stepsTotal}` : undefined,
+          historyCount: this.analyzer.getHistorySummary()?.length || 0,
+          failures: this.tryRunFailures,
+          degradedMode,
+          planMode: planDetection.mode,
         })
         // Phase 3: 通知创造力系统本次分析结果
         this.eventBus.emit('evolution.plan.outcome' as any, {
@@ -839,6 +881,14 @@ export class SelfEvolutionService implements ISubsystem {
           summary: `Error: ${err.message}`,
           timestamp: Date.now(),
           durationMs: Date.now() - this.lastRun,
+          planCreated: false,
+          mode: effectiveMode,
+          safetyMode: effectiveSafety,
+          strategyName: strategy.name,
+          historyCount: this.analyzer.getHistorySummary()?.length || 0,
+          failures: this.tryRunFailures,
+          degradedMode,
+          planMode: planDetection.mode,
         })
         this.strategizer.evaluate(strategy.name, {
           success: false,
@@ -850,47 +900,166 @@ export class SelfEvolutionService implements ISubsystem {
           promptTrimmed: strategy.trimMode,
         })
       }
+
+      // 分析完成后自动触发执行：从分析结果中提取动作并执行
+      if (this.safetyMode !== 'review' && result.success) {
+        // Phase 1: 创建 execution trace，作为 capability 编译的 IR
+        const tracer = new ExecutionTracer('evolution_self')
+        tracer.recordState(
+          'analysis_complete',
+          {
+            mode: effectiveMode,
+            strategy: strategy.name,
+            planMode: planDetection.mode,
+            planCreated: result.planCreated,
+          },
+          { success: result.success, summaryLen: result.summary?.length || 0 },
+        )
+
+        const actionPlan = planActions(result, tracer)
+        if (actionPlan.actions.length > 0) {
+          const actionName = actionPlan.actions.map((a) => a.name).join(', ')
+          log('INFO', 'evolution_action_plan', { actions: actionName })
+
+          const ctx: ActionContext = {
+            agentService: this.agentService,
+            eventBus: this.eventBus,
+            projectRoot: process.cwd(),
+            tracer,
+          }
+
+          await this.runActionCycle(actionPlan, ctx)
+        } else {
+          log('INFO', 'evolution_action_plan_empty')
+        }
+
+        // 持久化 trace
+        tracer.persist()
+
+        // Phase 2: 尝试将最近的 intent trace 与 execution trace 对齐
+        const completedIntents = this.intentExtractor.getCompletedTraces()
+        if (completedIntents.length > 0) {
+          const aligned = alignAll(completedIntents, [tracer.getTrace() as any])
+          if (aligned.length > 0) {
+            log('INFO', 'trace_aligned', {
+              intentGoal: aligned[0].intent.abstractGoal,
+              score: aligned[0].alignmentScore,
+              executionNodes: aligned[0].execution.nodes.length,
+            })
+          }
+        }
+
+        // Phase 3: 挖掘已有 trace 中的模式并编译
+        const patterns = this.patternMiner.mine()
+        const compiled = this.capabilityCompiler.compileAll(patterns)
+        if (compiled.length > 0) {
+          log('INFO', 'new_capabilities_compiled', {
+            count: compiled.length,
+            ids: compiled.map((c) => c.id),
+          })
+        }
+      }
     })
-
-    this.transitionState(EvolutionSchedulerState.IDLE, '分析循环结束')
-
-    // 分析完成后自动触发执行：如果分析创建了计划且有 pending 步骤，立即执行（不等下次心跳）
-    if (this.planManager?.getActivePlan() && this.executor.hasPendingStep() && this.safetyMode !== 'review') {
-      log('INFO', 'evolution_auto_trigger_execution', { plan_title: this.planManager.getActivePlan()?.title })
-      await this.runExecutionCycle()
-    }
   }
 
-  // ==================== 执行循环 ====================
+  // ==================== 动作执行循环（替代旧的 executor 执行） ====================
 
-  private async runExecutionCycle(): Promise<void> {
-    this.transitionState(EvolutionSchedulerState.EXECUTING, '开始执行步骤')
+  private async runActionCycle(actionPlan: import('./ActionPlanner').ActionSequence, ctx?: ActionContext): Promise<void> {
+    this.transitionState(EvolutionSchedulerState.EXECUTING, `动作计划: ${actionPlan.actions.map((a) => a.name).join(' → ')}`)
+    ctx?.tracer?.recordState('run_action_cycle', { actionCount: actionPlan.actions.length }, {})
     this.lastExecutionTime = Date.now()
     this.reviewer.startListen()
 
-    const result = await this.executor.executeNextStep({
-      planId: '',
-      stepIndex: 0,
-      stepDescription: '',
-      planCtx: this.planManager?.getFormattedContext() || '',
-      cognitiveCtx: this.cognitiveService?.getFormattedContext() || '',
-    })
+    const outcomes: { name: string; result: import('./ActionRegistry').ActionResult }[] = []
 
-    if (result.success) {
+    for (const action of actionPlan.actions) {
+      // 将 ActionContext 传递给 action.run()
+      const outcome = await action.run({}, ctx)
+      outcomes.push({ name: action.name, result: outcome })
+
+      // Trace: record each action outcome
+      ctx?.tracer?.recordTool(action.name, {}, outcome, { token: 0, latency: outcome.durationMs })
+
+      if (outcome.success) {
+        log('INFO', 'action_success', { action: action.name, summary: outcome.summary })
+      } else {
+        log('WARN', 'action_failed', { action: action.name, error: outcome.summary })
+        this.executeFailures++
+        if (this.executeFailures >= this.maxFailures && this.recoveryCooldownUntil === 0) {
+          this.recoveryCooldownUntil = Date.now() + Math.min(this.intervalMs, 30 * 60 * 1000)
+        }
+        break
+      }
+    }
+
+    // 成功后验证
+    const allSucceeded = outcomes.every((o) => o.result.success)
+    if (allSucceeded) {
       this.executeFailures = 0
-      this.transitionState(EvolutionSchedulerState.VERIFYING, '步骤完成，开始验证')
+      this.transitionState(EvolutionSchedulerState.VERIFYING, `${outcomes.length} 个动作执行成功，开始验证`)
       const changedFiles = await this.collectChangedFiles()
       await this.reviewer.verify(changedFiles)
       await this.reviewer.detectRegression(changedFiles)
-    } else {
-      this.executeFailures++
-      if (this.executeFailures >= this.maxFailures && this.recoveryCooldownUntil === 0)
-        this.recoveryCooldownUntil = Date.now() + Math.min(this.intervalMs, 30 * 60 * 1000)
-      log('WARN', 'evolution_execution_failure', { executeFailures: this.executeFailures })
     }
 
     this.reviewer.stopAndValidate('execute')
-    this.transitionState(EvolutionSchedulerState.IDLE, '执行循环结束')
+    this.transitionState(
+      EvolutionSchedulerState.IDLE,
+      `动作循环结束 (${outcomes.filter((o) => o.result.success).length}/${outcomes.length} 成功)`,
+    )
+
+    // 产出用户可见的消息
+    this.persistActionResult(actionPlan, outcomes)
+  }
+
+  /** 将动作执行结果持久化为 UI 消息 */
+  private persistActionResult(
+    actionPlan: import('./ActionPlanner').ActionSequence,
+    outcomes: { name: string; result: import('./ActionRegistry').ActionResult }[],
+  ): void {
+    const allOk = outcomes.every((o) => o.result.success)
+    const totalMs = outcomes.reduce((s, o) => s + o.result.durationMs, 0)
+    const lines = outcomes.map((o) => `${o.result.success ? '✓' : '✗'} ${o.name}: ${o.result.summary} (${o.result.durationMs}ms)`)
+    const summary = [
+      `[自进化执行] ${allOk ? '✅ 成功' : '⚠️ 部分完成'} (${totalMs}ms)`,
+      '',
+      ...lines,
+      '',
+      `触发来源: ${actionPlan.context.triggeredBy.slice(0, 200)}`,
+    ].join('\n')
+
+    try {
+      const msg = {
+        id: createMessageId(),
+        source: 'electron' as const,
+        role: 'assistant' as const,
+        content: summary,
+        category: 'evolution',
+        sessionId: SelfEvolutionService.EVOLUTION_SESSION_ID,
+        createdAt: Date.now(),
+      }
+      insertMessage(msg)
+      const win = getMainWindow()
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('message:new', msg)
+      }
+
+      // 通过 EventBus 通知 Telegram push（已订阅 evolution.action.executed）
+      this.eventBus.emit('evolution.action.executed' as any, {
+        text: summary,
+        allOk,
+        actionCount: outcomes.length,
+        durationMs: totalMs,
+        details: outcomes.map((o) => ({
+          name: o.name,
+          success: o.result.success,
+          summary: o.result.summary,
+          durationMs: o.result.durationMs,
+        })),
+      })
+    } catch (err) {
+      log('WARN', 'evolve_persist_action_failed', { error: String(err) })
+    }
   }
 
   // ==================== 首次预热 ====================
