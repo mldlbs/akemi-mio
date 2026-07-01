@@ -47,6 +47,8 @@ import { PatternMiner } from './PatternMiner'
 import { CapabilityCompiler } from './CapabilityCompiler'
 import { CapabilityRegistry } from './CapabilityRegistry'
 import { PreservationEngine } from './PreservationEngine'
+import { EvolutionController } from './EvolutionController'
+import { setCapabilityRegistry } from './ActionRegistry'
 import type { ActionContext } from './ActionContext'
 import { insertMessage, createMessageId } from '../db/messages'
 import { getMainWindow } from '../core/Lifecycle'
@@ -139,6 +141,9 @@ export class SelfEvolutionService implements ISubsystem {
   // ==================== Phase 4: PreservationEngine ==================
   readonly preservationEngine: PreservationEngine
 
+  // ==================== Phase 5: EvolutionController ==================
+  readonly evolutionController: EvolutionController
+
   // ==================== 状态持久化 ====================
   private stateFilePath: string
   private historyPath: string
@@ -215,8 +220,14 @@ export class SelfEvolutionService implements ISubsystem {
     this.patternMiner = new PatternMiner()
     this.capabilityCompiler = new CapabilityCompiler(capabilityRegistry)
 
+    // 将 CapabilityRegistry 注入到 ActionRegistry（无循环依赖）
+    setCapabilityRegistry(capabilityRegistry)
+
     // Phase 4: PreservationEngine
     this.preservationEngine = new PreservationEngine(capabilityRegistry)
+
+    // Phase 5: EvolutionController
+    this.evolutionController = new EvolutionController()
 
     this.loadState()
 
@@ -607,6 +618,22 @@ export class SelfEvolutionService implements ISubsystem {
         isDegenerate: this.analyzer.isDegenerate(),
       })
 
+      // Phase 5: EvolutionController 三角决策
+      const controllerDecision = this.evolutionController.decide({
+        patterns: this.patternMiner.mine(),
+        capabilities: this.capabilityCompiler.getRegistry().list(),
+        consecutiveFailures: this.tryRunFailures,
+        isDegenerate: this.analyzer.isDegenerate(),
+        selfEvalTrend: this.selfEvaluator?.getTrend(),
+      })
+      // 如果控制器不健康，强制切换到 preserve
+      const evolutionDirection = controllerDecision.direction
+      log('INFO', 'evolution_controller_direction', {
+        direction: evolutionDirection,
+        expandMode: controllerDecision.expandMode,
+        healthy: this.evolutionController.isHealthy(),
+      })
+
       this.analyzer.setAnalysisTimeout(strategy.timeoutMs)
       this.analyzer.setPromptTrimMode(strategy.trimMode)
       this.analyzer.setHistoryMaxEntries(strategy.maxHistoryEntries)
@@ -943,7 +970,7 @@ export class SelfEvolutionService implements ISubsystem {
           { success: result.success, summaryLen: result.summary?.length || 0 },
         )
 
-        const actionPlan = planActions(result, tracer)
+        const actionPlan = planActions(result, tracer, this.capabilityCompiler.getRegistry().list())
         if (actionPlan.actions.length > 0) {
           const actionName = actionPlan.actions.map((a) => a.name).join(', ')
           log('INFO', 'evolution_action_plan', { actions: actionName })

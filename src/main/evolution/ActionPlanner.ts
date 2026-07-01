@@ -103,11 +103,13 @@ function extractFixInstructions(summary: string): { key: string; value: any }[] 
  *
  * @param analysisResult  刚完成的分析结果
  * @param tracer          可选的 trace 记录器（Phase 1 插桩）
+ * @param capabilities    可选的能力列表（Phase 3+，用于调度能力执行）
  * @returns 动作序列（最多 3 个）
  */
 export function plan(
   analysisResult: { success: boolean; summary: string; planCreated: boolean },
   tracer?: ExecutionTracer,
+  capabilities?: { id: string; intent: string; metrics: { successRate: number } }[],
 ): ActionSequence {
   const actions: { name: string; params?: any }[] = []
 
@@ -155,6 +157,23 @@ export function plan(
           break
         }
       }
+    }
+  }
+
+  // ── 5. 检查是否有高置信度能力需要编排执行 ──────────────
+  if (actions.length === 0 && capabilities && capabilities.length > 0) {
+    // 筛选 experimental 层级中 successRate 较高的能力
+    const highConfidence = capabilities.filter((c) => c.metrics.successRate >= 0.7)
+    if (highConfidence.length > 0) {
+      // 选 successRate 最高的能力执行（每 cycle 最多 1 个）
+      const best = highConfidence.sort((a, b) => b.metrics.successRate - a.metrics.successRate)[0]
+      tracer?.recordPlan(
+        'schedule_capability',
+        { id: best.id, rate: best.metrics.successRate },
+        { decision: 'capability_execute' },
+        { token: 0, latency: 0 },
+      )
+      actions.push({ name: 'capability_execute', params: { capabilityId: best.id } })
     }
   }
 

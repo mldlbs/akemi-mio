@@ -1,5 +1,6 @@
 import { app, BrowserWindow, session } from 'electron'
 import { join } from 'path'
+import { existsSync } from 'fs'
 import { cpus, totalmem, freemem } from 'os'
 import { log } from '../logger/Logger'
 import { isWallpaperMode, onWallpaperEvent } from '../wallpaper/WallpaperService'
@@ -39,7 +40,9 @@ export function createWindow(stateManager: StateManager): BrowserWindow {
     height: 680,
     minWidth: 800,
     minHeight: 500,
-    icon: join(app.getAppPath(), 'icon.png'),
+    icon: existsSync(join(process.resourcesPath || '', 'icon.png'))
+      ? join(process.resourcesPath || '', 'icon.png')
+      : join(app.getAppPath(), 'icon.png'),
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',

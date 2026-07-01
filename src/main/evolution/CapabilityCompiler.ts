@@ -20,6 +20,11 @@ export class CapabilityCompiler {
     this.registry = registry
   }
 
+  /** 获取底层 registry（供外部读取能力列表） */
+  getRegistry(): CapabilityRegistry {
+    return this.registry
+  }
+
   /** 将 pattern candidate 编译为 capability 并注册 */
   compile(candidate: PatternCandidate): Capability | null {
     // 去重：已有相同 tool chain 的能力则跳过

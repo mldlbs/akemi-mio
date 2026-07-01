@@ -18,7 +18,7 @@ import { WORKSPACE } from '../config'
 export interface Action {
   name: string
   description: string
-  category: 'config_fix' | 'script_run' | 'file_edit' | 'git_op' | 'verify'
+  category: 'config_fix' | 'script_run' | 'file_edit' | 'git_op' | 'verify' | 'capability'
   run: (params: any, ctx?: ActionContext) => Promise<ActionResult>
 }
 
@@ -389,6 +389,48 @@ register({
   },
 })
 
+// ═════════════════════════════════════════════════════════════════
+// capability_execute — 执行一个已注册的能力
+// ═════════════════════════════════════════════════════════════════
+
+/** CapabilityRegistry 引用（通过 setCapabilityRegistry 惰性注入，避免循环依赖） */
+let _capabilityRegistry: { get: (id: string) => any; recordUsage: (id: string) => void; list: () => any[] } | null = null
+
+/**
+ * 注入 CapabilityRegistry 引用（由 SelfEvolutionService 初始化后调用）
+ * 使用惰性注入避免 ActionRegistry ↔ SelfEvolutionService 循环依赖
+ */
+export function setCapabilityRegistry(registry: typeof _capabilityRegistry): void {
+  _capabilityRegistry = registry
+}
+
+import { CapabilityExecutor } from './CapabilityExecutor'
+
+register({
+  name: 'capability_execute',
+  description: '执行一个已注册的能力（toolchain/workflow/code）',
+  category: 'capability',
+  run: async (params: { capabilityId: string }): Promise<ActionResult> => {
+    const startedAt = Date.now()
+    try {
+      if (!_capabilityRegistry) {
+        return { success: false, summary: 'CapabilityRegistry 未注入', durationMs: Date.now() - startedAt }
+      }
+
+      const capability = _capabilityRegistry.get(params.capabilityId)
+      if (!capability) {
+        return { success: false, summary: `能力不存在: ${params.capabilityId}`, durationMs: Date.now() - startedAt }
+      }
+
+      const executor = new CapabilityExecutor()
+      const result = await executor.execute(capability, (id) => _capabilityRegistry!.recordUsage(id))
+      return result
+    } catch (err: any) {
+      return { success: false, summary: `capability_execute 失败: ${err.message?.slice(0, 200)}`, durationMs: Date.now() - startedAt }
+    }
+  },
+})
+
 // ─── 批量执行 ────────────────────────────────────────────────────
 
 /**
@@ -432,6 +474,7 @@ export const ActionRegistry = {
   get,
   list,
   executeSequence,
+  setCapabilityRegistry,
   GOLDEN_CONFIG,
   EVOLUTION_STATE_PATH,
   LIVING_PLAN_DIR,

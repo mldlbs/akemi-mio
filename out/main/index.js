@@ -12480,6 +12480,93 @@ class EvaluatorCalibrator {
 function formatWeights(w) {
   return Object.entries(w).map(([k, v]) => `${k}=${v.toFixed(2)}`).join(", ");
 }
+class CapabilityExecutor {
+  /**
+   * 执行一个能力，返回 ActionResult
+   * @param capability 要执行的能力
+   * @param recordUsage 注册表的 usage 记录函数
+   */
+  async execute(capability, recordUsage) {
+    const startedAt = Date.now();
+    try {
+      switch (capability.executor.type) {
+        case "toolchain":
+          return await this.executeToolchain(capability, recordUsage, startedAt);
+        case "workflow":
+          return await this.executeWorkflow(capability, startedAt);
+        case "code":
+          return this.executeCode(capability, startedAt);
+        default:
+          return {
+            success: false,
+            summary: `未知 executor 类型: ${capability.executor.type}`,
+            durationMs: Date.now() - startedAt
+          };
+      }
+    } catch (err) {
+      Logger.log("WARN", "capability_execution_error", {
+        id: capability.id,
+        error: err.message?.slice(0, 200)
+      });
+      return {
+        success: false,
+        summary: `执行失败: ${err.message?.slice(0, 200)}`,
+        durationMs: Date.now() - startedAt
+      };
+    }
+  }
+  // —── 工具链执行（v0: 模拟执行，只解析与记录） ─────────
+  async executeToolchain(cap, recordUsage, startedAt) {
+    const steps2 = cap.executor.body.split("→").map((s) => s.trim()).filter(Boolean);
+    if (steps2.length === 0) {
+      return { success: false, summary: "空工具链", durationMs: Date.now() - startedAt };
+    }
+    const stepLogs = [];
+    for (let i = 0; i < steps2.length; i++) {
+      Logger.log("INFO", "capability_execute_step", {
+        id: cap.id,
+        step: i + 1,
+        total: steps2.length,
+        tool: steps2[i]
+      });
+      stepLogs.push(`${i + 1}/${steps2.length}: ${steps2[i]}`);
+    }
+    if (recordUsage) {
+      recordUsage(cap.id);
+    }
+    Logger.log("INFO", "capability_executed", {
+      id: cap.id,
+      steps: steps2.length,
+      intent: cap.intent.slice(0, 80)
+    });
+    return {
+      success: true,
+      summary: `能力执行完成: ${cap.intent.slice(0, 80)} (${steps2.length} 步)`,
+      durationMs: Date.now() - startedAt,
+      details: { steps: stepLogs, toolchain: steps2 }
+    };
+  }
+  // —── 工作流执行（v0 占位） ─────────────────────────────
+  async executeWorkflow(cap, startedAt) {
+    Logger.log("INFO", "capability_execute_workflow_placeholder", { id: cap.id });
+    return {
+      success: true,
+      summary: `工作流执行 (v0 占位): ${cap.intent.slice(0, 80)}`,
+      durationMs: Date.now() - startedAt,
+      details: { type: "workflow_placeholder", body: cap.executor.body }
+    };
+  }
+  // —── 代码执行（v0 占位） ───────────────────────────────
+  executeCode(cap, startedAt) {
+    Logger.log("INFO", "capability_execute_code_placeholder", { id: cap.id });
+    return {
+      success: true,
+      summary: `代码执行 (v0 占位): ${cap.intent.slice(0, 80)}`,
+      durationMs: Date.now() - startedAt,
+      details: { type: "code_placeholder", bodyLength: cap.executor.body.length }
+    };
+  }
+}
 const EVOLUTION_STATE_PATH$1 = path$1.join(WORKSPACE.evolution, "living_plan", "evolution_state.json");
 const LIVING_PLAN_DIR$1 = path$1.join(WORKSPACE.evolution, "living_plan");
 const GOLDEN_CONFIG = {
@@ -12753,7 +12840,33 @@ register({
     }
   }
 });
-async function executeSequence(actions) {
+let _capabilityRegistry = null;
+function setCapabilityRegistry(registry2) {
+  _capabilityRegistry = registry2;
+}
+register({
+  name: "capability_execute",
+  description: "执行一个已注册的能力（toolchain/workflow/code）",
+  category: "capability",
+  run: async (params) => {
+    const startedAt = Date.now();
+    try {
+      if (!_capabilityRegistry) {
+        return { success: false, summary: "CapabilityRegistry 未注入", durationMs: Date.now() - startedAt };
+      }
+      const capability = _capabilityRegistry.get(params.capabilityId);
+      if (!capability) {
+        return { success: false, summary: `能力不存在: ${params.capabilityId}`, durationMs: Date.now() - startedAt };
+      }
+      const executor = new CapabilityExecutor();
+      const result = await executor.execute(capability, (id2) => _capabilityRegistry.recordUsage(id2));
+      return result;
+    } catch (err) {
+      return { success: false, summary: `capability_execute 失败: ${err.message?.slice(0, 200)}`, durationMs: Date.now() - startedAt };
+    }
+  }
+});
+async function executeSequence(actions, ctx) {
   const results = [];
   for (const item of actions) {
     const action = registry.get(item.name);
@@ -12761,8 +12874,17 @@ async function executeSequence(actions) {
       results.push({ success: false, summary: `未知动作: ${item.name}`, durationMs: 0 });
       break;
     }
-    const result = await action.run(item.params);
+    const nodeId = ctx?.tracer?.recordTool(action.name, item.params || {}, null, { token: 0, latency: 0 });
+    const result = await action.run(item.params, ctx);
     results.push(result);
+    if (nodeId && ctx?.tracer) {
+      const trace = ctx.tracer.getTrace();
+      const node = trace.nodes.find((n) => n.id === nodeId);
+      if (node) {
+        node.output = result;
+        node.cost.latency = result.durationMs;
+      }
+    }
     if (!result.success) break;
   }
   return results;
@@ -12771,6 +12893,7 @@ const ActionRegistry = {
   get,
   list,
   executeSequence,
+  setCapabilityRegistry,
   GOLDEN_CONFIG,
   EVOLUTION_STATE_PATH: EVOLUTION_STATE_PATH$1,
   LIVING_PLAN_DIR: LIVING_PLAN_DIR$1
@@ -12825,14 +12948,23 @@ function extractFixInstructions(summary) {
   }
   return fixes;
 }
-function plan(analysisResult) {
+function plan(analysisResult, tracer, capabilities) {
   const actions = [];
   const drifts = detectConfigDrifts();
   if (drifts.length > 0) {
+    tracer?.recordPlan("detect_config_drift", { drifts }, { decision: "batch_fix_config" }, { token: 0, latency: 0 });
     actions.push({ name: "batch_fix_config" });
   }
   if (actions.length === 0 && analysisResult.success) {
     const fixInstructions = extractFixInstructions(analysisResult.summary);
+    if (fixInstructions.length > 0) {
+      tracer?.recordPlan(
+        "extract_fix_instructions",
+        { count: fixInstructions.length },
+        { decision: "fix_config" },
+        { token: 0, latency: 0 }
+      );
+    }
     for (const fix of fixInstructions) {
       if (actions.length >= 3) break;
       actions.push({
@@ -12842,6 +12974,7 @@ function plan(analysisResult) {
     }
   }
   if (analysisResult.planCreated && actions.length === 0) {
+    tracer?.recordPlan("plan_created_workflow", { planCreated: true }, { decision: "run_config_watchdog" }, { token: 0, latency: 0 });
     actions.push({ name: "run_config_watchdog" });
   }
   if (actions.length === 0) {
@@ -12849,10 +12982,24 @@ function plan(analysisResult) {
     if (availableScripts.length > 0) {
       for (const known of KNOWN_SCRIPTS) {
         if (availableScripts.includes(known.file)) {
+          tracer?.recordPlan("fallback_script", { script: known.file }, { decision: "run_script" }, { token: 0, latency: 0 });
           actions.push({ name: "run_script", params: { script: known.file, exportName: known.exportName } });
           break;
         }
       }
+    }
+  }
+  if (actions.length === 0 && capabilities && capabilities.length > 0) {
+    const highConfidence = capabilities.filter((c) => c.metrics.successRate >= 0.7);
+    if (highConfidence.length > 0) {
+      const best = highConfidence.sort((a, b) => b.metrics.successRate - a.metrics.successRate)[0];
+      tracer?.recordPlan(
+        "schedule_capability",
+        { id: best.id, rate: best.metrics.successRate },
+        { decision: "capability_execute" },
+        { token: 0, latency: 0 }
+      );
+      actions.push({ name: "capability_execute", params: { capabilityId: best.id } });
     }
   }
   const capped = actions.slice(0, 3);
@@ -12868,6 +13015,1362 @@ function plan(analysisResult) {
       analysisTimestamp: Date.now()
     }
   };
+}
+const TRACES_DIR$1 = path$1.join(WORKSPACE.evolution, "traces");
+function ensureTracesDir() {
+  if (!fs.existsSync(TRACES_DIR$1)) {
+    fs.mkdirSync(TRACES_DIR$1, { recursive: true });
+  }
+}
+class ExecutionTracer {
+  trace;
+  nodeSeq = 0;
+  lastNodeId = null;
+  constructor(sessionId) {
+    this.trace = {
+      traceId: `trace_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      sessionId,
+      timestamp: Date.now(),
+      nodes: [],
+      edges: []
+    };
+  }
+  /** 开始一个新阶段（重置 lastNodeId 以断开链路） */
+  startPhase() {
+    this.lastNodeId = null;
+  }
+  /** 记录一个 tool call 节点 */
+  recordTool(name2, input, output, cost) {
+    const id2 = `tool_${this.nodeSeq++}`;
+    this.trace.nodes.push({ id: id2, type: "tool", name: name2, input, output, cost, parentIds: [] });
+    if (this.lastNodeId) {
+      this.trace.edges.push({ from: this.lastNodeId, to: id2, type: "data" });
+    }
+    this.lastNodeId = id2;
+    return id2;
+  }
+  /** 记录一个 plan 决策节点 */
+  recordPlan(name2, input, output, cost) {
+    const id2 = `plan_${this.nodeSeq++}`;
+    this.trace.nodes.push({ id: id2, type: "plan", name: name2, input, output, cost, parentIds: [] });
+    if (this.lastNodeId) {
+      this.trace.edges.push({ from: this.lastNodeId, to: id2, type: "control" });
+    }
+    this.lastNodeId = id2;
+    return id2;
+  }
+  /** 记录一个 state transition 节点 */
+  recordState(name2, input, output) {
+    const id2 = `state_${this.nodeSeq++}`;
+    this.trace.nodes.push({
+      id: id2,
+      type: "state",
+      name: name2,
+      input,
+      output,
+      cost: { token: 0, latency: 0 },
+      parentIds: []
+    });
+    if (this.lastNodeId) {
+      this.trace.edges.push({ from: this.lastNodeId, to: id2, type: "data" });
+    }
+    this.lastNodeId = id2;
+    return id2;
+  }
+  /** 在两节点之间添加一条边（不自动连接 lastNodeId） */
+  addEdge(from, to, type = "data") {
+    this.trace.edges.push({ from, to, type });
+  }
+  /** 获取当前 trace 的完整 DAG */
+  getTrace() {
+    return this.trace;
+  }
+  /** 设置 intent hint（Phase 2 调用） */
+  setIntentHint(hint) {
+    this.trace.intentHint = hint;
+  }
+  /** 将 trace 持久化到 evolution_workspace/traces/ */
+  persist() {
+    ensureTracesDir();
+    const filePath = path$1.join(TRACES_DIR$1, `${this.trace.traceId}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(this.trace, null, 2), "utf-8");
+    Logger.log("INFO", "trace_persisted", { traceId: this.trace.traceId, nodes: this.trace.nodes.length, path: filePath });
+    return filePath;
+  }
+  /** 获取 trace ID */
+  getTraceId() {
+    return this.trace.traceId;
+  }
+  /** 列出所有已持久化的 trace 文件 */
+  static listTraces() {
+    if (!fs.existsSync(TRACES_DIR$1)) return [];
+    return fs.readdirSync(TRACES_DIR$1).filter((f) => f.endsWith(".json")).sort();
+  }
+}
+class IntentExtractor {
+  /** requestId → intent trace（进行中） */
+  pendingTraces = /* @__PURE__ */ new Map();
+  /** 已完成 intent trace 缓存 */
+  completedTraces = [];
+  disposed = false;
+  disposers = [];
+  constructor() {
+    this.subscribe();
+  }
+  subscribe() {
+    const onInput = eventBus.on("agent.input.received", (p) => {
+      if (this.disposed) return;
+      this.appendUserInput(p.requestId, p.text);
+    });
+    this.disposers.push(onInput);
+    const onResponse = eventBus.on("agent.response.generated", (p) => {
+      if (this.disposed) return;
+      this.appendResponse(p.requestId, p.text);
+    });
+    this.disposers.push(onResponse);
+    const onToolInvoked = eventBus.on("agent.tool.invoked", (p) => {
+      if (this.disposed) return;
+      this.appendToolCall(p.tool);
+    });
+    this.disposers.push(onToolInvoked);
+  }
+  /** 用户输入 → 创建新 trace 或追加到已有 trace */
+  appendUserInput(requestId2, text) {
+    let trace = this.pendingTraces.get(requestId2);
+    if (!trace) {
+      trace = {
+        traceId: `intent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        sessionId: requestId2,
+        timestamp: Date.now(),
+        abstractGoal: this.extractAbstractGoal(text),
+        subGoals: [],
+        constraints: this.extractConstraints(text),
+        confidence: 0.5,
+        segments: []
+      };
+      this.pendingTraces.set(requestId2, trace);
+    }
+    trace.segments.push({
+      type: "user_input",
+      text,
+      timestamp: Date.now()
+    });
+    trace.subGoals = this.updateSubGoals(trace);
+    this.scheduleAutoComplete(requestId2, trace);
+  }
+  /** 助手响应 → 追加到对应 trace */
+  appendResponse(requestId2, text) {
+    const trace = this.pendingTraces.get(requestId2);
+    if (!trace) return;
+    trace.segments.push({
+      type: "assistant_response",
+      text,
+      timestamp: Date.now()
+    });
+  }
+  /** 工具调用 → 追加到最近的 trace */
+  appendToolCall(toolName) {
+    let latestTrace = null;
+    let latestTs = 0;
+    for (const trace of this.pendingTraces.values()) {
+      const lastSeg = trace.segments[trace.segments.length - 1];
+      if (lastSeg && lastSeg.timestamp > latestTs) {
+        latestTs = lastSeg.timestamp;
+        latestTrace = trace;
+      }
+    }
+    if (!latestTrace) return;
+    latestTrace.segments.push({
+      type: "tool_call",
+      text: "",
+      toolName,
+      timestamp: Date.now()
+    });
+  }
+  /** 从用户消息提取抽象目标（简单规则，Phase 3 可用 LLM 升级） */
+  extractAbstractGoal(text) {
+    const cleaned = text.replace(/^(请|帮我|帮忙|可以|能不能|需要|想)\s*/i, "").trim();
+    const firstSentence = cleaned.split(/[。！？\n]/)[0]?.trim() || cleaned;
+    return firstSentence.slice(0, 120);
+  }
+  /** 提取约束条件（简单规则） */
+  extractConstraints(text) {
+    const constraints = [];
+    const toolMatch = text.match(/(?:用|使用|通过)\s*(\S+)/);
+    if (toolMatch) constraints.push(`tool:${toolMatch[1]}`);
+    return constraints;
+  }
+  /** 更新子目标列表 */
+  updateSubGoals(trace) {
+    const goals2 = [];
+    for (const seg of trace.segments) {
+      if (seg.type === "user_input") {
+        const text = seg.text;
+        const parts = text.split(/[和并然后,，]/).filter(Boolean);
+        for (const p of parts) {
+          const trimmed = p.trim();
+          if (trimmed && trimmed.length > 4) goals2.push(trimmed.slice(0, 80));
+        }
+      }
+    }
+    return [...new Set(goals2)];
+  }
+  /** 超时自动完成 trace */
+  scheduleAutoComplete(requestId2, trace) {
+    setTimeout(
+      () => {
+        if (this.disposed) return;
+        const t = this.pendingTraces.get(requestId2);
+        if (!t || t === trace) {
+          trace.confidence = Math.min(0.9, 0.5 + trace.segments.length * 0.1);
+          this.completedTraces.push(trace);
+          this.pendingTraces.delete(requestId2);
+          Logger.log("INFO", "intent_trace_completed", {
+            traceId: trace.traceId,
+            goal: trace.abstractGoal,
+            segments: trace.segments.length,
+            confidence: trace.confidence
+          });
+        }
+      },
+      10 * 60 * 1e3
+    ).unref();
+  }
+  /** 获取所有已完成的 intent trace */
+  getCompletedTraces() {
+    return [...this.completedTraces];
+  }
+  /** 获取所有进行中的 intent trace */
+  getPendingTraces() {
+    return new Map(this.pendingTraces);
+  }
+  /** 立即完成指定 requestId 的 trace */
+  completeTrace(requestId2) {
+    const trace = this.pendingTraces.get(requestId2);
+    if (!trace) return null;
+    trace.confidence = Math.min(0.95, 0.5 + trace.segments.length * 0.1);
+    this.completedTraces.push(trace);
+    this.pendingTraces.delete(requestId2);
+    return trace;
+  }
+  dispose() {
+    this.disposed = true;
+    for (const d of this.disposers) d();
+    this.disposers = [];
+  }
+}
+function alignTraces(intent, execution) {
+  if (intent.sessionId === execution.sessionId) {
+    return buildAlignedTrace(intent, execution, 0.9, []);
+  }
+  const timeDelta = Math.abs(execution.timestamp - intent.timestamp);
+  if (timeDelta < 1e4) {
+    return buildAlignedTrace(intent, execution, 0.7, ["time_window_match"]);
+  }
+  if (execution.intentHint && intent.abstractGoal) {
+    const goalNorm = intent.abstractGoal.toLowerCase();
+    const hintNorm = execution.intentHint.toLowerCase();
+    if (goalNorm.includes(hintNorm) || hintNorm.includes(goalNorm)) {
+      return buildAlignedTrace(intent, execution, 0.6, ["keyword_fuzzy_match"]);
+    }
+  }
+  return null;
+}
+function buildAlignedTrace(intent, execution, baseScore, gaps) {
+  const nodeBonus = Math.min(execution.nodes.length * 0.05, 0.2);
+  return {
+    intent,
+    execution,
+    alignmentScore: Math.min(baseScore + nodeBonus, 1),
+    gaps
+  };
+}
+function alignAll(intentTraces, executionTraces) {
+  const aligned = [];
+  const usedExecutions = /* @__PURE__ */ new Set();
+  const usedIntents = /* @__PURE__ */ new Set();
+  for (const intent of intentTraces) {
+    if (usedIntents.has(intent.traceId)) continue;
+    let best = null;
+    for (const execution of executionTraces) {
+      if (usedExecutions.has(execution.traceId)) continue;
+      const result = alignTraces(intent, execution);
+      if (result && (!best || result.alignmentScore > best.alignmentScore)) {
+        best = result;
+      }
+    }
+    if (best) {
+      aligned.push(best);
+      usedExecutions.add(best.execution.traceId);
+      usedIntents.add(best.intent.traceId);
+    }
+  }
+  return aligned;
+}
+const TRACES_DIR = path$1.join(WORKSPACE.evolution, "traces");
+class PatternMiner {
+  /** 从 traces/ 目录加载所有 trace 并挖掘模式 */
+  mine() {
+    const traces = this.loadTraces();
+    if (traces.length === 0) {
+      Logger.log("INFO", "pattern_miner_no_traces");
+      return [];
+    }
+    const candidates = [];
+    candidates.push(...this.detectFrequentChains(traces));
+    candidates.push(...this.detectHighCostChains(traces));
+    candidates.push(...this.detectFailureRecovery(traces));
+    Logger.log("INFO", "pattern_miner_complete", {
+      traces: traces.length,
+      candidates: candidates.length
+    });
+    return candidates;
+  }
+  /** 加载 traces/ 目录中的 execution trace */
+  loadTraces() {
+    if (!fs.existsSync(TRACES_DIR)) return [];
+    const files = fs.readdirSync(TRACES_DIR).filter((f) => f.endsWith(".json"));
+    const traces = [];
+    for (const file of files) {
+      try {
+        const raw = fs.readFileSync(path$1.join(TRACES_DIR, file), "utf-8");
+        traces.push(JSON.parse(raw));
+      } catch {
+      }
+    }
+    return traces;
+  }
+  /** 从 trace 中提取 tool 序列 */
+  extractToolSequence(trace) {
+    return trace.nodes.filter((n) => n.type === "tool").map((n) => n.name);
+  }
+  /**
+   * n-gram 检测：寻找跨 trace 重复出现的 tool 序列
+   * n=2 (pair)、n=3 (triple)
+   */
+  detectFrequentChains(traces) {
+    const pairCounts = /* @__PURE__ */ new Map();
+    const tripleCounts = /* @__PURE__ */ new Map();
+    for (const trace of traces) {
+      const tools = this.extractToolSequence(trace);
+      const toolNodes = trace.nodes.filter((n) => n.type === "tool");
+      for (let i = 0; i < tools.length - 1; i++) {
+        const key = `${tools[i]}→${tools[i + 1]}`;
+        const entry = pairCounts.get(key) || { count: 0, traces: [], latency: [] };
+        entry.count++;
+        if (!entry.traces.includes(trace.traceId)) entry.traces.push(trace.traceId);
+        const lat = (toolNodes[i]?.cost.latency || 0) + (toolNodes[i + 1]?.cost.latency || 0);
+        entry.latency.push(lat);
+        pairCounts.set(key, entry);
+      }
+      for (let i = 0; i < tools.length - 2; i++) {
+        const key = `${tools[i]}→${tools[i + 1]}→${tools[i + 2]}`;
+        const entry = tripleCounts.get(key) || { count: 0, traces: [], latency: [] };
+        entry.count++;
+        if (!entry.traces.includes(trace.traceId)) entry.traces.push(trace.traceId);
+        const lat = (toolNodes[i]?.cost.latency || 0) + (toolNodes[i + 1]?.cost.latency || 0) + (toolNodes[i + 2]?.cost.latency || 0);
+        entry.latency.push(lat);
+        tripleCounts.set(key, entry);
+      }
+    }
+    const candidates = [];
+    for (const [key, entry] of pairCounts) {
+      if (entry.count >= 2 && entry.traces.length >= 2) {
+        const tools = key.split("→");
+        const avgLat = entry.latency.reduce((s, v) => s + v, 0) / entry.latency.length;
+        candidates.push({
+          id: `freq_pair_${tools[0]}_${tools[1]}`,
+          type: "frequent_chain",
+          toolChain: tools,
+          frequency: entry.count,
+          avgLatency: Math.round(avgLat),
+          avgTokenCost: 0,
+          sampleTraceIds: entry.traces.slice(0, 5),
+          confidence: Math.min(0.9, 0.4 + entry.traces.length * 0.1),
+          description: `高频调用链: ${tools[0]} → ${tools[1]} (出现 ${entry.count} 次，${entry.traces.length} 条 trace)`
+        });
+      }
+    }
+    for (const [key, entry] of tripleCounts) {
+      if (entry.count >= 2 && entry.traces.length >= 2) {
+        const tools = key.split("→");
+        const avgLat = entry.latency.reduce((s, v) => s + v, 0) / entry.latency.length;
+        candidates.push({
+          id: `freq_triple_${tools[0]}_${tools[1]}_${tools[2]}`,
+          type: "frequent_chain",
+          toolChain: tools,
+          frequency: entry.count,
+          avgLatency: Math.round(avgLat),
+          avgTokenCost: 0,
+          sampleTraceIds: entry.traces.slice(0, 5),
+          confidence: Math.min(0.95, 0.5 + entry.traces.length * 0.1),
+          description: `高频三步链: ${tools.join(" → ")} (出现 ${entry.count} 次，${entry.traces.length} 条 trace)`
+        });
+      }
+    }
+    return candidates;
+  }
+  /** 检测高成本链：latency 或 token 显著高于平均的 tool 序列 */
+  detectHighCostChains(traces) {
+    const candidates = [];
+    for (const trace of traces) {
+      const toolNodes = trace.nodes.filter((n) => n.type === "tool");
+      if (toolNodes.length === 0) continue;
+      const totalLatency = toolNodes.reduce((s, n) => s + n.cost.latency, 0);
+      const avgLat = totalLatency / toolNodes.length;
+      for (const node of toolNodes) {
+        if (node.cost.latency > avgLat * 3 && node.cost.latency > 1e3) {
+          candidates.push({
+            id: `high_cost_${node.name}_${trace.traceId}`,
+            type: "high_cost_chain",
+            toolChain: [node.name],
+            frequency: 1,
+            avgLatency: node.cost.latency,
+            avgTokenCost: node.cost.token || 0,
+            sampleTraceIds: [trace.traceId],
+            confidence: 0.6,
+            description: `高成本调用: ${node.name} (${node.cost.latency}ms，平均 ${Math.round(avgLat)}ms)`
+          });
+        }
+      }
+    }
+    return candidates;
+  }
+  /** 检测失败恢复模式：tool fail → retry → eventually success */
+  detectFailureRecovery(traces) {
+    const candidates = [];
+    for (const trace of traces) {
+      const planNodes = trace.nodes.filter((n) => n.type === "plan");
+      if (planNodes.length > 0) {
+        const tools = this.extractToolSequence(trace);
+        if (tools.length >= 2) {
+          candidates.push({
+            id: `planned_workflow_${trace.traceId}`,
+            type: "compound_workflow",
+            toolChain: tools,
+            frequency: 1,
+            avgLatency: Math.round(
+              trace.nodes.filter((n) => n.type === "tool").reduce((s, n) => s + n.cost.latency, 0) / Math.max(1, trace.nodes.filter((n) => n.type === "tool").length)
+            ),
+            avgTokenCost: 0,
+            sampleTraceIds: [trace.traceId],
+            confidence: 0.7,
+            description: `计划驱动工作流: ${tools.join(" → ")}`
+          });
+        }
+      }
+    }
+    return candidates;
+  }
+}
+class CapabilityCompiler {
+  registry;
+  constructor(registry2) {
+    this.registry = registry2;
+  }
+  /** 获取底层 registry（供外部读取能力列表） */
+  getRegistry() {
+    return this.registry;
+  }
+  /** 将 pattern candidate 编译为 capability 并注册 */
+  compile(candidate) {
+    const existing = this.registry.findByIntent(candidate.description);
+    if (existing.some((c) => arraysEqual(c.executor.body.split("→"), candidate.toolChain))) {
+      Logger.log("INFO", "capability_compile_skip_duplicate", { id: candidate.id });
+      return null;
+    }
+    const cap = {
+      id: candidate.id,
+      intent: candidate.description,
+      inputSchema: { type: "object", properties: {} },
+      outputSchema: { type: "object", properties: {} },
+      executor: {
+        type: "toolchain",
+        body: candidate.toolChain.join("→")
+      },
+      dependencies: candidate.toolChain,
+      preconditions: [],
+      evaluator: {
+        type: "heuristic",
+        spec: `verify each tool ${candidate.toolChain.length > 1 ? `chain step` : "call"} succeeds`
+      },
+      metrics: {
+        successRate: candidate.confidence,
+        latency: candidate.avgLatency,
+        cost: candidate.avgTokenCost
+      },
+      tier: "experimental",
+      // 新能力默认 experimental
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usageCount: 0,
+      lastUsedAt: 0
+    };
+    this.registry.register(cap);
+    Logger.log("INFO", "capability_compiled", {
+      id: cap.id,
+      chain: cap.executor.body,
+      confidence: candidate.confidence,
+      tier: cap.tier
+    });
+    return cap;
+  }
+  /** 批量编译多个 candidates */
+  compileAll(candidates) {
+    const compiled = [];
+    for (const c of candidates) {
+      const cap = this.compile(c);
+      if (cap) compiled.push(cap);
+    }
+    Logger.log("INFO", "capability_compile_batch", {
+      candidates: candidates.length,
+      compiled: compiled.length
+    });
+    return compiled;
+  }
+}
+function arraysEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+const CAPABILITIES_DIR = path$1.join(WORKSPACE.evolution, "capabilities");
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+class CapabilityRegistry {
+  capabilities = /* @__PURE__ */ new Map();
+  constructor() {
+    this.loadAll();
+  }
+  /** 注册一个能力（同 id 覆盖） */
+  register(cap) {
+    cap.updatedAt = Date.now();
+    this.capabilities.set(cap.id, cap);
+    this.persist(cap);
+    Logger.log("INFO", "capability_registered", { id: cap.id, tier: cap.tier, intent: cap.intent.slice(0, 80) });
+  }
+  /** 按 id 获取能力 */
+  get(id2) {
+    return this.capabilities.get(id2);
+  }
+  /** 按 tier 列出能力 */
+  list(tier) {
+    const all = Array.from(this.capabilities.values());
+    if (tier) return all.filter((c) => c.tier === tier);
+    return all;
+  }
+  /** 根据意图查找匹配的能力 */
+  findByIntent(intent) {
+    const lowered = intent.toLowerCase();
+    return Array.from(this.capabilities.values()).filter(
+      (c) => c.intent.toLowerCase().includes(lowered) || lowered.includes(c.intent.toLowerCase())
+    );
+  }
+  /** 删除一个能力（core 不可删除） */
+  remove(id2) {
+    const cap = this.capabilities.get(id2);
+    if (!cap) return false;
+    if (cap.tier === "core") {
+      Logger.log("WARN", "capability_remove_core_denied", { id: id2 });
+      return false;
+    }
+    this.capabilities.delete(id2);
+    this.removeFile(id2);
+    Logger.log("INFO", "capability_removed", { id: id2, tier: cap.tier });
+    return true;
+  }
+  /** 使用计数 +1 */
+  recordUsage(id2) {
+    const cap = this.capabilities.get(id2);
+    if (!cap) return;
+    cap.usageCount++;
+    cap.lastUsedAt = Date.now();
+    cap.updatedAt = Date.now();
+    this.persist(cap);
+  }
+  /** 归档未使用的衍生能力（usageCount=0 且超过 7 天） */
+  archiveUnused() {
+    const now = Date.now();
+    const cutoff = now - 7 * 24 * 60 * 60 * 1e3;
+    let archived = 0;
+    for (const [id2, cap] of this.capabilities) {
+      if (cap.tier === "derived" && cap.usageCount === 0 && cap.createdAt < cutoff) {
+        this.capabilities.delete(id2);
+        this.removeFile(id2);
+        Logger.log("INFO", "capability_archived", { id: id2, intent: cap.intent.slice(0, 80) });
+        archived++;
+      }
+    }
+    return archived;
+  }
+  /** 降级低成功率的能力 */
+  degradeLowSuccess(threshold = 0.4) {
+    let degraded = 0;
+    for (const cap of this.capabilities.values()) {
+      if (cap.tier === "core") continue;
+      if (cap.metrics.successRate < threshold && cap.tier !== "experimental") {
+        cap.tier = "experimental";
+        cap.updatedAt = Date.now();
+        this.persist(cap);
+        Logger.log("INFO", "capability_degraded", { id: cap.id, rate: cap.metrics.successRate });
+        degraded++;
+      }
+    }
+    return degraded;
+  }
+  /** 获取统计信息 */
+  getStats() {
+    const stats = { total: 0, core: 0, derived: 0, experimental: 0 };
+    for (const cap of this.capabilities.values()) {
+      stats.total++;
+      stats[cap.tier]++;
+    }
+    return stats;
+  }
+  // ─── 持久化 ──────────────────────────────────────────────────
+  capPath(id2) {
+    const tier = this.capabilities.get(id2)?.tier || "experimental";
+    return path$1.join(CAPABILITIES_DIR, tier, `${id2}.json`);
+  }
+  persist(cap) {
+    const dir = path$1.join(CAPABILITIES_DIR, cap.tier);
+    ensureDir(dir);
+    fs.writeFileSync(path$1.join(dir, `${cap.id}.json`), JSON.stringify(cap, null, 2), "utf-8");
+  }
+  removeFile(id2) {
+    try {
+      const f = this.capPath(id2);
+      if (fs.existsSync(f)) {
+        const { unlinkSync } = require("fs");
+        unlinkSync(f);
+      }
+    } catch {
+    }
+  }
+  /** 启动时从磁盘加载所有能力 */
+  loadAll() {
+    for (const tier of ["core", "derived", "experimental"]) {
+      const dir = path$1.join(CAPABILITIES_DIR, tier);
+      if (!fs.existsSync(dir)) continue;
+      try {
+        const { readdirSync } = require("fs");
+        const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+        for (const file of files) {
+          try {
+            const raw = fs.readFileSync(path$1.join(dir, file), "utf-8");
+            const cap = JSON.parse(raw);
+            this.capabilities.set(cap.id, cap);
+          } catch {
+          }
+        }
+      } catch {
+      }
+    }
+  }
+}
+const OBSERVATIONS_DIR = path$1.join(WORKSPACE.evolution, "cpp", "regressor");
+const SHIFT_THRESHOLD = 0.15;
+const DEFAULT_WINDOW_SIZE = 5;
+class BehavioralRegressor {
+  windowSize;
+  observations = /* @__PURE__ */ new Map();
+  constructor(windowSize) {
+    this.windowSize = windowSize ?? DEFAULT_WINDOW_SIZE;
+    this.loadObservations();
+  }
+  /** 评估单个能力的回归状态 */
+  evaluate(capability) {
+    const obs = this.observations.get(capability.id) || [];
+    if (obs.length < this.windowSize || capability.usageCount < this.windowSize) {
+      return { passed: true, shift: 0, trend: "stable", detail: "数据不足，跳过回归检测" };
+    }
+    const recent = obs.slice(-this.windowSize);
+    const recentAvg = recent.reduce((s, o) => s + o.successRate, 0) / recent.length;
+    const overall = capability.metrics.successRate;
+    const shift = Math.max(0, overall - recentAvg);
+    const slope = this.estimateSlope(recent);
+    let trend = "stable";
+    if (slope < -0.02) trend = "declining";
+    else if (slope > 0.02) trend = "improving";
+    const passed = shift < SHIFT_THRESHOLD;
+    return {
+      passed,
+      shift: Math.round(shift * 100) / 100,
+      trend,
+      detail: passed ? `偏移量 ${(shift * 100).toFixed(1)}% (阈值 ${SHIFT_THRESHOLD * 100}%)，${trend}` : `检测到回归：最近 ${this.windowSize} 次平均 ${(recentAvg * 100).toFixed(1)}% vs 整体 ${(overall * 100).toFixed(1)}%，偏移 ${(shift * 100).toFixed(1)}%`
+    };
+  }
+  /** 记录一次执行观测 */
+  recordObservation(capabilityId, successRate, latency) {
+    if (!this.observations.has(capabilityId)) {
+      this.observations.set(capabilityId, []);
+    }
+    const list2 = this.observations.get(capabilityId);
+    list2.push({ successRate, latency, timestamp: Date.now() });
+    this.persist(capabilityId, list2);
+  }
+  // —── 内部方法 ─────────────────────────────────────
+  estimateSlope(obs) {
+    if (obs.length < 2) return 0;
+    const n = obs.length;
+    const indices = obs.map((_, i) => i);
+    const rates = obs.map((o) => o.successRate);
+    const meanX = indices.reduce((s, x) => s + x, 0) / n;
+    const meanY = rates.reduce((s, y) => s + y, 0) / n;
+    let num = 0, den = 0;
+    for (let i = 0; i < n; i++) {
+      num += (indices[i] - meanX) * (rates[i] - meanY);
+      den += (indices[i] - meanX) ** 2;
+    }
+    return den === 0 ? 0 : num / den;
+  }
+  obsPath(id2) {
+    return path$1.join(OBSERVATIONS_DIR, `${id2}.json`);
+  }
+  persist(id2, obs) {
+    if (!fs.existsSync(OBSERVATIONS_DIR)) fs.mkdirSync(OBSERVATIONS_DIR, { recursive: true });
+    fs.writeFileSync(this.obsPath(id2), JSON.stringify(obs.slice(-100)), "utf-8");
+  }
+  loadObservations() {
+    if (!fs.existsSync(OBSERVATIONS_DIR)) return;
+    try {
+      const { readdirSync } = require("fs");
+      const files = readdirSync(OBSERVATIONS_DIR).filter((f) => f.endsWith(".json"));
+      for (const file of files) {
+        try {
+          const id2 = file.replace(/\.json$/, "");
+          const raw = fs.readFileSync(this.obsPath(id2), "utf-8");
+          this.observations.set(id2, JSON.parse(raw));
+        } catch {
+        }
+      }
+      Logger.log("INFO", "behavioral_regressor_loaded", { count: this.observations.size });
+    } catch {
+      Logger.log("INFO", "behavioral_regressor_load_skip");
+    }
+  }
+}
+class ContaminationDetector {
+  evaluate(capability) {
+    const hasDeps = capability.dependencies.length > 0;
+    const hasPreconditions = capability.preconditions.length > 0;
+    const isToolchain = capability.executor.type === "toolchain";
+    const isCode = capability.executor.type === "code";
+    const isExperimental = capability.tier === "experimental";
+    const isDerived = capability.tier === "derived";
+    const suspiciousPaths = [];
+    if (!hasDeps && isToolchain) {
+      const toolCount = capability.executor.body.split("→").filter((s) => s.trim()).length;
+      if (toolCount > 3) {
+        suspiciousPaths.push("executor.body (多步骤工具链，无依赖声明)");
+        Logger.log("WARN", "contamination_medium_risk", {
+          id: capability.id,
+          reason: "toolchain with no deps",
+          toolCount
+        });
+        return {
+          passed: true,
+          risk: "medium",
+          suspiciousPaths,
+          detail: `多步骤工具链 (${toolCount} 步) 无依赖声明，存在副作用泄露风险`
+        };
+      }
+    }
+    if (!hasDeps && !hasPreconditions && isExperimental) {
+      suspiciousPaths.push("declared scope (无任何边界声明)");
+      Logger.log("WARN", "contamination_high_risk", {
+        id: capability.id,
+        reason: "experimental with no boundaries"
+      });
+      return {
+        passed: false,
+        risk: "high",
+        suspiciousPaths,
+        detail: "Experimental 能力无任何依赖/前置条件声明，无法保证边界安全"
+      };
+    }
+    if (!hasDeps && isCode) {
+      suspiciousPaths.push("executor.body (代码执行器，无依赖声明)");
+      return {
+        passed: true,
+        risk: "medium",
+        suspiciousPaths,
+        detail: "代码执行器无依赖声明，无法确认无副作用"
+      };
+    }
+    if (!hasPreconditions && isDerived) {
+      return {
+        passed: true,
+        risk: "low",
+        suspiciousPaths: [],
+        detail: "Derived 能力无前置条件，建议补充"
+      };
+    }
+    return {
+      passed: true,
+      risk: "low",
+      suspiciousPaths: [],
+      detail: "能力有完整的依赖和前置条件声明，无污染风险"
+    };
+  }
+}
+class CapabilityGC {
+  registry;
+  constructor(registry2) {
+    this.registry = registry2;
+  }
+  /** 执行垃圾回收，返回回收统计 */
+  collect() {
+    const allCaps = this.registry.list();
+    const details = [];
+    let freedBytes = 0;
+    let archived = 0;
+    let degraded = 0;
+    const now = Date.now();
+    for (const cap of allCaps) {
+      if (cap.tier === "core") {
+        details.push({ id: cap.id, action: "kept", reason: "core 能力不可回收" });
+        continue;
+      }
+      const coldness = this.computeColdness(cap, now);
+      if (coldness > 0.85 && cap.tier === "experimental") {
+        archived++;
+        freedBytes += this.estimateSize(cap);
+        details.push({ id: cap.id, action: "archived", reason: `冷度 ${coldness.toFixed(2)}，experimental 直接归档` });
+        Logger.log("INFO", "capability_gc_archived", { id: cap.id, coldness: coldness.toFixed(2) });
+        continue;
+      }
+      if (coldness > 0.7 && cap.tier !== "core") {
+        archived++;
+        freedBytes += this.estimateSize(cap);
+        details.push({ id: cap.id, action: "archived", reason: `冷度 ${coldness.toFixed(2)} > 0.70` });
+        Logger.log("INFO", "capability_gc_archived", { id: cap.id, coldness: coldness.toFixed(2) });
+        continue;
+      }
+      if (coldness > 0.45 && cap.tier === "derived") {
+        degraded++;
+        details.push({ id: cap.id, action: "degraded", reason: `冷度 ${coldness.toFixed(2)} > 0.45，降级到 experimental` });
+        Logger.log("INFO", "capability_gc_degraded", { id: cap.id, coldness: coldness.toFixed(2) });
+        continue;
+      }
+      details.push({ id: cap.id, action: "kept", reason: `冷度 ${coldness.toFixed(2)}，保留` });
+    }
+    const actualArchived = this.registry.archiveUnused();
+    archived = Math.max(archived, actualArchived);
+    Logger.log("INFO", "capability_gc_complete", { archived, degraded, freedBytes, total: allCaps.length });
+    return { archived, degraded, freedBytes, details };
+  }
+  // —── 内部方法 ─────────────────────────────────────
+  computeColdness(cap, now) {
+    const daysSinceLastUse = cap.lastUsedAt > 0 ? (now - cap.lastUsedAt) / (1e3 * 60 * 60 * 24) : (now - cap.createdAt) / (1e3 * 60 * 60 * 24);
+    const staleness = Math.min(1, Math.max(0, daysSinceLastUse / 30));
+    const failurePenalty = 1 - cap.metrics.successRate;
+    const costInefficiency = Math.min(1, cap.metrics.cost / 1e3);
+    const dependencyBonus = Math.min(1, cap.dependencies.length * 0.15);
+    return Math.max(0, Math.min(1, staleness * 0.4 + failurePenalty * 0.3 + costInefficiency * 0.2 - dependencyBonus * 0.1));
+  }
+  estimateSize(cap) {
+    const path2 = path$1.join(WORKSPACE.evolution, "capabilities", cap.tier, `${cap.id}.json`);
+    try {
+      if (fs.existsSync(path2)) return fs.statSync(path2).size;
+    } catch {
+    }
+    return Buffer.byteLength(JSON.stringify(cap), "utf-8");
+  }
+}
+class PreservationEngine {
+  registry;
+  regressor;
+  contaminationDetector;
+  gc;
+  weights;
+  constructor(registry2) {
+    this.registry = registry2;
+    this.regressor = new BehavioralRegressor();
+    this.contaminationDetector = new ContaminationDetector();
+    this.gc = new CapabilityGC(registry2);
+    this.weights = this.defaultWeights();
+  }
+  // ==================== 公开 API ====================
+  /** 评估单个能力 */
+  evaluate(capability) {
+    const dims = this.evaluateAllDimensions(capability);
+    const overallScore = this.computeScore(dims);
+    const recommendedAction = this.determineAction(capability, overallScore, dims);
+    Logger.log("INFO", "preservation_evaluate", {
+      id: capability.id,
+      score: overallScore.toFixed(2),
+      action: recommendedAction,
+      dims: dims.filter((d) => !d.passed).map((d) => `D${d.dimension}`).join(",")
+    });
+    return {
+      capabilityId: capability.id,
+      overallScore: Math.round(overallScore * 100) / 100,
+      dimensions: dims,
+      recommendedAction,
+      timestamp: Date.now()
+    };
+  }
+  /** 评估所有能力 */
+  evaluateAll() {
+    const all = this.registry.list();
+    if (all.length === 0) {
+      return { total: 0, passed: 0, failed: 0, actions: { archived: 0, degraded: 0, blocked: 0 }, avgScore: 0, timestamp: Date.now() };
+    }
+    let passedCount = 0;
+    let totalScore = 0;
+    let archived = 0;
+    let degraded = 0;
+    let blocked = 0;
+    for (const cap of all) {
+      const report = this.evaluate(cap);
+      totalScore += report.overallScore;
+      if (report.overallScore >= 0.6) passedCount++;
+      if (report.recommendedAction === "archive") archived++;
+      else if (report.recommendedAction === "degrade") degraded++;
+      else if (report.recommendedAction === "block") blocked++;
+    }
+    return {
+      total: all.length,
+      passed: passedCount,
+      failed: all.length - passedCount,
+      actions: { archived, degraded, blocked },
+      avgScore: Math.round(totalScore / all.length * 100) / 100,
+      timestamp: Date.now()
+    };
+  }
+  /** 执行推荐动作（归档/降级/屏蔽） */
+  prune() {
+    let count = 0;
+    const all = this.registry.list();
+    for (const cap of all) {
+      if (cap.tier === "core") continue;
+      const report = this.evaluate(cap);
+      switch (report.recommendedAction) {
+        case "archive":
+          this.registry.remove(cap.id);
+          Logger.log("INFO", "preservation_pruned_archived", { id: cap.id, score: report.overallScore });
+          count++;
+          break;
+        case "degrade": {
+          const updated = { ...cap, tier: "experimental", updatedAt: Date.now() };
+          this.registry.register(updated);
+          Logger.log("INFO", "preservation_pruned_degraded", { id: cap.id, score: report.overallScore });
+          count++;
+          break;
+        }
+        case "block":
+          this.registry.remove(cap.id);
+          Logger.log("WARN", "preservation_pruned_blocked", { id: cap.id, score: report.overallScore });
+          count++;
+          break;
+      }
+    }
+    const gcResult = this.gc.collect();
+    if (gcResult.archived > 0 || gcResult.degraded > 0) {
+      Logger.log("INFO", "preservation_gc_complement", { archived: gcResult.archived, degraded: gcResult.degraded });
+      count += gcResult.archived + gcResult.degraded;
+    }
+    return count;
+  }
+  // ==================== 9 维评估器 ====================
+  evaluateAllDimensions(cap) {
+    return [
+      this.evaluateCompilation(cap),
+      this.evaluateTests(cap),
+      this.evaluateUsage(cap),
+      this.evaluateLatency(cap),
+      this.evaluateCost(cap),
+      this.evaluateBehavioralRegression(cap),
+      this.evaluateContamination(cap),
+      this.evaluateDependencies(cap),
+      this.evaluatePreconditions(cap)
+    ];
+  }
+  /** D1: 编译/类型安全 */
+  evaluateCompilation(cap) {
+    if (cap.executor.type === "toolchain") {
+      const tools = cap.executor.body.split("→").map((s) => s.trim()).filter(Boolean);
+      if (tools.length === 0) {
+        return { dimension: 1, name: "compilation", passed: false, score: 0, detail: "空工具链" };
+      }
+      return { dimension: 1, name: "compilation", passed: true, score: 1, detail: `工具链格式有效 (${tools.length} 步)` };
+    }
+    try {
+      JSON.parse(cap.executor.body);
+      return { dimension: 1, name: "compilation", passed: true, score: 1, detail: "body 解析通过" };
+    } catch {
+      return { dimension: 1, name: "compilation", passed: false, score: 0, detail: "body 不是有效 JSON" };
+    }
+  }
+  /** D2: 测试通过率 */
+  evaluateTests(cap) {
+    const rate = cap.metrics.successRate;
+    const passed = rate >= 0.7;
+    return {
+      dimension: 2,
+      name: "tests",
+      passed,
+      score: rate,
+      detail: passed ? `通过率 ${(rate * 100).toFixed(0)}%` : `通过率 ${(rate * 100).toFixed(0)}% < 70%`
+    };
+  }
+  /** D3: 使用热度 / 冷度 */
+  evaluateUsage(cap) {
+    const now = Date.now();
+    const daysSinceLastUse = cap.lastUsedAt > 0 ? (now - cap.lastUsedAt) / (1e3 * 60 * 60 * 24) : (now - cap.createdAt) / (1e3 * 60 * 60 * 24);
+    const staleness = Math.min(1, Math.max(0, daysSinceLastUse / 30));
+    const coldness = staleness * 0.4 + (1 - cap.metrics.successRate) * 0.3 + Math.min(1, cap.metrics.cost / 1e3) * 0.2 - Math.min(1, cap.dependencies.length * 0.15) * 0.1;
+    const score = Math.max(0, Math.min(1, 1 - coldness));
+    const passed = coldness < 0.45;
+    return {
+      dimension: 3,
+      name: "usage",
+      passed,
+      score,
+      detail: passed ? `冷度 ${coldness.toFixed(2)}，正常` : `冷度 ${coldness.toFixed(2)} > 0.45，需要关注`
+    };
+  }
+  /** D4: 延迟效率 */
+  evaluateLatency(cap) {
+    const thresholds = { core: 5e3, derived: 1e4, experimental: 3e4 };
+    const threshold = thresholds[cap.tier] || 3e4;
+    const latency = cap.metrics.latency;
+    const score = Math.max(0, Math.min(1, 1 - latency / threshold));
+    const passed = score >= 0.3;
+    return {
+      dimension: 4,
+      name: "latency",
+      passed,
+      score,
+      detail: passed ? `延迟 ${latency}ms < ${threshold}ms (${cap.tier} 阈值)` : `延迟 ${latency}ms > ${threshold}ms (${cap.tier} 阈值)`
+    };
+  }
+  /** D5: 成本效率 */
+  evaluateCost(cap) {
+    const costEfficiency = cap.metrics.cost > 0 ? cap.metrics.successRate / cap.metrics.cost : 1;
+    const score = Math.min(1, Math.max(0, costEfficiency * 100));
+    const passed = score >= 0.3;
+    return {
+      dimension: 5,
+      name: "cost",
+      passed,
+      score,
+      detail: passed ? `成本效率 ${(score * 100).toFixed(0)}%` : `成本效率 ${(score * 100).toFixed(0)}% < 30%`
+    };
+  }
+  /** D6: 行为回归（委托给 BehavioralRegressor） */
+  evaluateBehavioralRegression(cap) {
+    const result = this.regressor.evaluate(cap);
+    return {
+      dimension: 6,
+      name: "regression",
+      passed: result.passed,
+      score: 1 - result.shift,
+      detail: result.detail
+    };
+  }
+  /** D7: 污染检测（委托给 ContaminationDetector） */
+  evaluateContamination(cap) {
+    const result = this.contaminationDetector.evaluate(cap);
+    return {
+      dimension: 7,
+      name: "contamination",
+      passed: result.passed,
+      score: result.risk === "low" ? 1 : result.risk === "medium" ? 0.7 : 0.3,
+      detail: result.detail
+    };
+  }
+  /** D8: 依赖完整性 */
+  evaluateDependencies(cap) {
+    if (cap.dependencies.length === 0) {
+      return { dimension: 8, name: "dependencies", passed: true, score: 1, detail: "无依赖声明" };
+    }
+    let healthy = 0;
+    for (const depId of cap.dependencies) {
+      const dep = this.registry.get(depId);
+      if (dep && dep.metrics.successRate >= 0.4) healthy++;
+    }
+    const ratio = healthy / cap.dependencies.length;
+    const passed = ratio >= 0.8;
+    return {
+      dimension: 8,
+      name: "dependencies",
+      passed,
+      score: ratio,
+      detail: passed ? `依赖健康 ${healthy}/${cap.dependencies.length}` : `依赖失效 ${cap.dependencies.length - healthy} 个`
+    };
+  }
+  /** D9: 前置条件有效性 */
+  evaluatePreconditions(cap) {
+    if (cap.preconditions.length === 0) {
+      return { dimension: 9, name: "preconditions", passed: true, score: 1, detail: "无前置条件" };
+    }
+    let valid = 0;
+    for (const cond of cap.preconditions) {
+      const matched = this.registry.list().some((c) => cond.includes(c.id) || c.intent.includes(cond));
+      if (matched) valid++;
+    }
+    const ratio = valid / cap.preconditions.length;
+    const passed = ratio >= 0.8;
+    return {
+      dimension: 9,
+      name: "preconditions",
+      passed,
+      score: ratio,
+      detail: passed ? `前置条件有效 ${valid}/${cap.preconditions.length}` : `前置条件失效 ${cap.preconditions.length - valid} 个`
+    };
+  }
+  // ==================== 决策逻辑 ====================
+  computeScore(dimensions) {
+    if (dimensions.length !== this.weights.length) return 0;
+    let total = 0;
+    for (let i = 0; i < dimensions.length; i++) {
+      total += dimensions[i].score * this.weights[i];
+    }
+    return total;
+  }
+  determineAction(cap, score, dims) {
+    const failedDims = dims.filter((d) => !d.passed).map((d) => d.dimension);
+    const failedContamination = failedDims.includes(7);
+    if (failedContamination && cap.tier !== "core") return "block";
+    if (score >= 0.6) return "keep";
+    if (score >= 0.35) return "degrade";
+    return "archive";
+  }
+  defaultWeights() {
+    return [0.1, 0.15, 0.1, 0.1, 0.1, 0.15, 0.15, 0.075, 0.075];
+  }
+}
+class EvolutionDecider {
+  lastDecision = null;
+  expandCooldownUntil = 0;
+  preserveCount = 0;
+  optimizeCount = 0;
+  /** 根据输入决定进化方向 */
+  decide(input) {
+    if (input.isDegenerate || input.consecutiveFailures >= 2) {
+      Logger.log("INFO", "evolution_decider_preserve_degraded", {
+        degenerate: input.isDegenerate,
+        failures: input.consecutiveFailures
+      });
+      return this.makeDecision("preserve", "系统退化/失败中，进入保护模式");
+    }
+    if (input.selfEvalTrend === "downward" && input.consecutiveFailures > 0) {
+      return this.makeDecision("preserve", "自评估下行且存在失败，保护优先");
+    }
+    if (this.expandCooldownUntil > Date.now()) {
+      if (this.optimizeCount < 2) {
+        return this.makeDecision("optimize", "expand 冷却中，切到优化");
+      }
+      return this.makeDecision("preserve", "expand 冷却中，优化已执行，进入保护");
+    }
+    const expandDecision = this.checkExpandTriggers(input);
+    if (expandDecision) {
+      this.expandCooldownUntil = Date.now() + 2 * 60 * 60 * 1e3;
+      this.optimizeCount = 0;
+      return expandDecision;
+    }
+    if (this.shouldOptimize(input)) {
+      this.optimizeCount++;
+      return this.makeDecision("optimize", "有可优化的能力");
+    }
+    this.preserveCount++;
+    return this.makeDecision("preserve", "无触发条件，执行常规保护");
+  }
+  /** 重置状态 */
+  reset() {
+    this.lastDecision = null;
+    this.expandCooldownUntil = 0;
+    this.preserveCount = 0;
+    this.optimizeCount = 0;
+  }
+  /** 获取上次决策 */
+  getLastDecision() {
+    return this.lastDecision;
+  }
+  // —── 内部方法 ─────────────────────────────────────
+  checkExpandTriggers(input) {
+    const { patterns, capabilities } = input;
+    const frequentChains = patterns.filter((p) => p.type === "frequent_chain" && p.frequency >= 3);
+    if (frequentChains.length > 0) {
+      const existing = capabilities.some((c) => frequentChains.some((fc) => fc.toolChain.some((t) => c.executor.body.includes(t))));
+      const best = frequentChains.reduce((a, b) => a.frequency > b.frequency ? a : b);
+      if (!existing) {
+        return this.makeDecision(
+          "expand",
+          `高频工具链 "${best.toolChain.slice(0, 3).join("→")}" 出现 ${best.frequency} 次，扩展新能力`,
+          "horizontal",
+          `【进化方向】系统检测到高频工具链模式，建议关注 "${best.toolChain.slice(0, 3).join("→")}" 相关能力的扩展`
+        );
+      }
+      return this.makeDecision("expand", `高频工具链 "${best.toolChain.slice(0, 3).join("→")}" 已存在，尝试更深优化`, "vertical");
+    }
+    const highCostChains = patterns.filter((p) => p.type === "high_cost_chain");
+    if (highCostChains.length > 0) {
+      const avgCost = highCostChains.reduce((s, c) => s + c.avgTokenCost, 0) / highCostChains.length;
+      if (avgCost > 500) {
+        return this.makeDecision(
+          "expand",
+          `高成本链 ${highCostChains.length} 条 (avg ${avgCost} tokens)，尝试压缩`,
+          "compression",
+          `【进化方向】检测到高 token 消耗模式，建议压缩冗余步骤以降低成本`
+        );
+      }
+    }
+    const failureRecoveries = patterns.filter((p) => p.type === "failure_recovery");
+    if (failureRecoveries.length >= 2) {
+      return this.makeDecision(
+        "expand",
+        `错误修复模式 ${failureRecoveries.length} 次，深入优化稳定性`,
+        "vertical",
+        `【进化方向】重复错误模式检测，建议深挖根因并添加防御性检查`
+      );
+    }
+    return null;
+  }
+  shouldOptimize(input) {
+    const highCost = input.patterns.filter((p) => p.type === "high_cost_chain");
+    if (highCost.length > 0) return true;
+    const failures = input.patterns.filter((p) => p.type === "failure_recovery");
+    if (failures.length > 0) return true;
+    return false;
+  }
+  makeDecision(direction, reason, expandMode, contextHint) {
+    const decision = {
+      direction,
+      reason,
+      expandMode,
+      confidence: direction === "preserve" ? 0.8 : 0.6,
+      contextHint
+    };
+    this.lastDecision = decision;
+    Logger.log("INFO", "evolution_decider", {
+      direction,
+      expandMode,
+      reason
+    });
+    return decision;
+  }
+}
+class EvolutionController {
+  decider;
+  state;
+  constructor() {
+    this.decider = new EvolutionDecider();
+    this.state = this.freshState();
+  }
+  /** 执行一个决策周期（在每次 runAnalysisCycle 开始时调用） */
+  decide(input) {
+    const deciderInput = {
+      patterns: input.patterns,
+      capabilities: input.capabilities,
+      consecutiveFailures: input.consecutiveFailures,
+      isDegenerate: input.isDegenerate,
+      selfEvalTrend: input.selfEvalTrend,
+      afterPreservation: input.afterPreservation
+    };
+    const decision = this.decider.decide(deciderInput);
+    this.recordDecision(decision);
+    return decision;
+  }
+  /** 获取控制器当前状态 */
+  getState() {
+    return { ...this.state };
+  }
+  /** 重置控制器（新 epoch 开始时） */
+  reset() {
+    this.decider.reset();
+    this.state = this.freshState();
+    Logger.log("INFO", "evolution_controller_reset");
+  }
+  /** 健康检查 */
+  isHealthy() {
+    const recent = this.state.directionHistory.slice(-5);
+    const unique = new Set(recent.map((d) => d.direction));
+    if (unique.size === 1 && recent[0]?.direction === "preserve" && recent.length >= 5) {
+      return false;
+    }
+    if (this.state.directionHistory.length >= 10) {
+      const last10 = this.state.directionHistory.slice(-10);
+      const preserveRatio = last10.filter((d) => d.direction === "preserve").length / 10;
+      if (preserveRatio >= 0.8) return false;
+    }
+    return true;
+  }
+  /** 获取可注入到分析 prompt 的进化上下文 */
+  getContextHint() {
+    const decision = this.decider.getLastDecision();
+    if (!decision) return void 0;
+    const parts = [`当前方向: ${this.directionLabel(decision)}`];
+    parts.push(`置信度: ${(decision.confidence * 100).toFixed(0)}%`);
+    if (decision.contextHint) {
+      parts.push(decision.contextHint);
+    } else {
+      parts.push(`原因: ${decision.reason}`);
+    }
+    return parts.join("\n");
+  }
+  /** 生成文本摘要 */
+  getFormattedContext() {
+    const s = this.state;
+    const lines = [
+      "=== EvolutionController 状态 ===",
+      `方向: ${s.currentDirection}${s.currentExpandMode ? ` (${s.currentExpandMode})` : ""}`,
+      `总周期: ${s.totalCycles} | E:${s.expandCount} O:${s.optimizeCount} P:${s.preserveCount}`,
+      `健康: ${this.isHealthy() ? "正常" : "停滞"}`,
+      `最近决策: ${s.directionHistory.slice(-3).map((d) => `${d.direction}(${d.reason.slice(0, 20)})`).join(" → ")}`
+    ];
+    return lines.join("\n");
+  }
+  // —── 内部方法 ─────────────────────────────────────
+  freshState() {
+    return {
+      currentDirection: "preserve",
+      directionHistory: [],
+      lastDecision: null,
+      totalCycles: 0,
+      expandCount: 0,
+      optimizeCount: 0,
+      preserveCount: 0
+    };
+  }
+  recordDecision(decision) {
+    this.state.totalCycles++;
+    this.state.currentDirection = decision.direction;
+    this.state.currentExpandMode = decision.expandMode;
+    this.state.lastDecision = decision;
+    switch (decision.direction) {
+      case "expand":
+        this.state.expandCount++;
+        break;
+      case "optimize":
+        this.state.optimizeCount++;
+        break;
+      case "preserve":
+        this.state.preserveCount++;
+        break;
+    }
+    this.state.directionHistory.push({
+      direction: decision.direction,
+      timestamp: Date.now(),
+      reason: decision.reason
+    });
+    if (this.state.directionHistory.length > 100) {
+      this.state.directionHistory = this.state.directionHistory.slice(-100);
+    }
+  }
+  directionLabel(decision) {
+    if (decision.direction === "expand" && decision.expandMode) {
+      return `expand (${decision.expandMode})`;
+    }
+    return decision.direction;
+  }
 }
 function createMessageId() {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -13098,7 +14601,7 @@ function createWindow(stateManager) {
     height: 680,
     minWidth: 800,
     minHeight: 500,
-    icon: path$1.join(electron.app.getAppPath(), "icon.png"),
+    icon: fs.existsSync(path$1.join(process.resourcesPath || "", "icon.png")) ? path$1.join(process.resourcesPath || "", "icon.png") : path$1.join(electron.app.getAppPath(), "icon.png"),
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
@@ -13310,6 +14813,15 @@ class SelfEvolutionService {
   evaluatorCalibrator;
   consecutiveCleanCycles = 0;
   consecutiveDegenerateDetections = 0;
+  // ==================== Phase 2: Intent Tracing ====================
+  intentExtractor;
+  // ==================== Phase 3: Capability Registry ================
+  patternMiner;
+  capabilityCompiler;
+  // ==================== Phase 4: PreservationEngine ==================
+  preservationEngine;
+  // ==================== Phase 5: EvolutionController ==================
+  evolutionController;
   // ==================== 状态持久化 ====================
   stateFilePath;
   historyPath;
@@ -13346,6 +14858,13 @@ class SelfEvolutionService {
     this.selfEvaluator = new EvolutionSelfEvaluator();
     this.metaLearner = new MetaLearner();
     this.evaluatorCalibrator = new EvaluatorCalibrator();
+    this.intentExtractor = new IntentExtractor();
+    const capabilityRegistry = new CapabilityRegistry();
+    this.patternMiner = new PatternMiner();
+    this.capabilityCompiler = new CapabilityCompiler(capabilityRegistry);
+    setCapabilityRegistry(capabilityRegistry);
+    this.preservationEngine = new PreservationEngine(capabilityRegistry);
+    this.evolutionController = new EvolutionController();
     this.loadState();
     this.eventBus.on("agent.input.received", () => {
       this.lastUserInputTime = Date.now();
@@ -13677,6 +15196,19 @@ ${failureSummary}`,
         hoursSinceLastRun: this.lastRun > 0 ? (Date.now() - this.lastRun) / (1e3 * 60 * 60) : 0,
         isDegenerate: this.analyzer.isDegenerate()
       });
+      const controllerDecision = this.evolutionController.decide({
+        patterns: this.patternMiner.mine(),
+        capabilities: this.capabilityCompiler.getRegistry().list(),
+        consecutiveFailures: this.tryRunFailures,
+        isDegenerate: this.analyzer.isDegenerate(),
+        selfEvalTrend: this.selfEvaluator?.getTrend()
+      });
+      const evolutionDirection = controllerDecision.direction;
+      Logger.log("INFO", "evolution_controller_direction", {
+        direction: evolutionDirection,
+        expandMode: controllerDecision.expandMode,
+        healthy: this.evolutionController.isHealthy()
+      });
       this.analyzer.setAnalysisTimeout(strategy.timeoutMs);
       this.analyzer.setPromptTrimMode(strategy.trimMode);
       this.analyzer.setHistoryMaxEntries(strategy.maxHistoryEntries);
@@ -13874,6 +15406,14 @@ ${failureSummary}`,
             }
           }
         }
+        const preservationSummary = this.preservationEngine.evaluateAll();
+        this.eventBus.emit("evolution.preservation.completed", preservationSummary);
+        Logger.log("INFO", "preservation_summary", {
+          total: preservationSummary.total,
+          passed: preservationSummary.passed,
+          failed: preservationSummary.failed,
+          avgScore: preservationSummary.avgScore
+        });
         this.saveState();
         this.eventBus.emit("evolution.cycle.completed", {
           success: result.success,
@@ -13902,6 +15442,14 @@ ${failureSummary}`,
           hadRetry: result.hadRetry,
           durationMs: Date.now() - this.lastRun
         });
+        try {
+          const pruned = this.preservationEngine.prune();
+          if (pruned > 0) {
+            Logger.log("INFO", "preservation_pruned", { count: pruned });
+          }
+        } catch (err) {
+          Logger.log("WARN", "preservation_prune_skipped", { error: err.message });
+        }
       } catch (err) {
         this.tryRunFailures++;
         this.analyzer.setAnalysisTimeout(Math.min(Math.round(this.analyzer.getAnalysisTimeout() * 1.25), 3e5));
@@ -13944,26 +15492,75 @@ ${failureSummary}`,
         });
       }
       if (this.safetyMode !== "review" && result.success) {
-        const actionPlan = plan(result);
+        const tracer = new ExecutionTracer("evolution_self");
+        tracer.recordState(
+          "analysis_complete",
+          {
+            mode: effectiveMode,
+            strategy: strategy.name,
+            planMode: planDetection.mode,
+            planCreated: result.planCreated
+          },
+          { success: result.success, summaryLen: result.summary?.length || 0 }
+        );
+        const actionPlan = plan(result, tracer, this.capabilityCompiler.getRegistry().list());
         if (actionPlan.actions.length > 0) {
           const actionName = actionPlan.actions.map((a) => a.name).join(", ");
           Logger.log("INFO", "evolution_action_plan", { actions: actionName });
-          await this.runActionCycle(actionPlan);
+          const ctx = {
+            agentService: this.agentService,
+            eventBus: this.eventBus,
+            projectRoot: process.cwd(),
+            tracer
+          };
+          await this.runActionCycle(actionPlan, ctx);
         } else {
           Logger.log("INFO", "evolution_action_plan_empty");
+        }
+        tracer.persist();
+        const completedIntents = this.intentExtractor.getCompletedTraces();
+        if (completedIntents.length > 0) {
+          const aligned = alignAll(completedIntents, [tracer.getTrace()]);
+          if (aligned.length > 0) {
+            Logger.log("INFO", "trace_aligned", {
+              intentGoal: aligned[0].intent.abstractGoal,
+              score: aligned[0].alignmentScore,
+              executionNodes: aligned[0].execution.nodes.length
+            });
+          }
+        }
+        const patterns = this.patternMiner.mine();
+        const compiled = this.capabilityCompiler.compileAll(patterns);
+        if (compiled.length > 0) {
+          Logger.log("INFO", "new_capabilities_compiled", {
+            count: compiled.length,
+            ids: compiled.map((c) => c.id)
+          });
+          for (const cap of compiled) {
+            const report = this.preservationEngine.evaluate(cap);
+            if (report.overallScore < 0.35) {
+              Logger.log("WARN", "preservation_new_capability_failed", {
+                id: cap.id,
+                score: report.overallScore,
+                action: report.recommendedAction
+              });
+            }
+          }
         }
       }
     });
   }
   // ==================== 动作执行循环（替代旧的 executor 执行） ====================
-  async runActionCycle(actionPlan) {
+  async runActionCycle(actionPlan, ctx) {
     this.transitionState("EXECUTING", `动作计划: ${actionPlan.actions.map((a) => a.name).join(" → ")}`);
+    ctx?.tracer?.recordState("run_action_cycle", { actionCount: actionPlan.actions.length }, {});
     this.lastExecutionTime = Date.now();
     this.reviewer.startListen();
     const outcomes = [];
     for (const action of actionPlan.actions) {
-      const outcome = await action.run({});
+      const outcome = await action.run({}, ctx);
       outcomes.push({ name: action.name, result: outcome });
+      ctx?.tracer?.recordTool(action.name, {}, outcome, { token: 0, latency: outcome.durationMs });
       if (outcome.success) {
         Logger.log("INFO", "action_success", { action: action.name, summary: outcome.summary });
       } else {
@@ -24742,7 +26339,7 @@ function setupTransformers() {
     Logger.log("WARN", "gpu_config_failed", { error: String(err) });
   }
 }
-const TRAY_ICON_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAADGElEQVR4nNWX60uTYRjG94dpmVqKdninbnMz52FrirpRZi6VsANFRRRU1If6EkHQp/4Nbc0OzhyZrCzpXBRhBMEVv+d9J1tlWCTPeuGGZ/fhup778Dx7X5/vf3v8VVNqqZ5W66bbZYIO24aQOlVThiRQk1Foyx2112YVrssq4glrdNjwwdf5V5sBLFiTUbg2q476GXVuvauuhnvqbrivnkZXWKPDhg++QW8jf01MOQObMyaz3fUuaW/jA8WbZpVozqlvOzLnSc7osOGDLzHEgvHHrfFXT5sMKG90m0u8pzmn/h1zGtj5UEPOvJL+vFKesEaHDR98iSEWDLDAXHfmLvmMySTWNGuyHNw1b8j2tT7S/rYFjQQe60DQFdbosOGDLzHEggGW2cR6KkHJ2DWBlJSMko5LDFE6tKixcEHjkYImIk+MsEaHDR98iSE2vroJtx2/JWdo6BulixXJ/XkNty1oNLSo8XBBhzqearJzSUeiz3S0yxXW6LDhgy8xxIIBFphgrzmYjld6hof+UUKyAIjMyBSSY93PdaJ3WSdjL3Qq7gprdNjwwTdd3ISTN1hggg3HL48oO+P4UC6GiD5SylGP/HB0Scd7lg3hmcQrne17rXP9b4ywRocNH3yJIRYMsMAEO7xWFbhAOMPslLIxTPSTkpIVwKfjLw3Z+YG3ujj0XpeSrrBGhw0ffIkhFoyU1wqw4YDrp8nnFuMiYWg4TuycMtJXSkt2EFwYfKfLqQ+6svejrg5/MsIaHTZ88CWG2LRXBTDBhgOushPBPd7ulZ8LhTPNsRrzsqe/lJgsIYL02shnXR9dMcIaHTZ88CWGWDDAAjPhtQGultJ7wfS/LmuuVG61ZLH8kYKZcIaMzCg12UJ44+AX3Zz4aoQ1Omz44EsMsWCABSbYcMBVNgf84JxyrzOx9IwLhkHimFFSho1+kylZQ3xr8psR1uiw4YMvMcSCAVbK754GOCIVuQGrLbA+hNaPofWLqCKuYut/Rj7bf8ers2DzhcRXCa9kPtsvpaWVsPZaXvpY+zApfax+mv34WPk43cjnO0s9T+ZGIpj7AAAAAElFTkSuQmCC";
+const TRAY_ICON_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAAsTAAALEwEAmpwYAAAFYUlEQVR4nO1XfUwURxQ/OK3Waqo1FUXkbmb3dmf2Dq2Fgpx3O7N3qFRAqXZjCsS0JcXamrRGlGKKSxRrGkwrikRoDFAV9QxaabU2qaI1jZGatIm0SS2N/YjxEwWsIhx30+x94Nn+U77+afwl87k77/3ee7NvZg2GxxgUVKPBwKKCfS06WAz6ODQ3sojqbwkZ9eijfjIjB55PHyPaSBKw0qVQICs5rBQi5BZiYuY9FUFuZEioqmoUZ7qXcpjUASS3mQW5ByLiB6J8D4jyLbMgHzJZ7M+F3jYOo2otYJGUmO6AmLYAUfZCRBgQZQZEZ6glfk5y6e19EybZkeuGDTyiRzmsK3F6gSj7gCj7I4tZkHshogyK9DYU5YTQsqGSUAOuhJi8yUlKWLmuMGS5zMzCwz4QnF4OK8yMaFNIwJC+jCi9ioub8yRA9EeIKTMLTp/J4ohQ7mSizdXHY/oIKYiIjxMV+xBDoQasB0ieF455vMXxQFVf77XNnh8Yx4JU/+bSTT3J9iz/lPgUXbFOyhvYD4h8GBQz2A1Jgt85h0khL7nZNHOqb/3a9XdPfnag0+5c7H966vMsOTWr+8rFs73VFdv+SkzJ6J7BOxhEcp8eBijKZ//pzYEiSq9QQtp2IFLmJIt6SorWdpSuL7q+dXPZndycgp6ykg2d28s/6Cp8953OrWUb7znJS/5Yc6ovQESUb8VJc54ZJAEtELcXHNkCFMkZweZieXnL76cvXFw5/lnh3Nsr3uqr3lb+oK5q20+zk0nd2EmwqyD/jctOmuXNzVnRnZdT4I2JT/HjmfNSIuUNmIAtKZ1ATNv1nT5/QTb7psnTuCq/9tLm97f4zny+n33VuLt1U9G+xjUr69qPHaxtE2yENe6p7S0uLO6bPD2ZSbPm5wbE/Stt/0cCCUkL0ixW1+561hNsxLd3V8Xd00c8N89/fbSn72rrg6P7Puk6dcRzreXEsdsbiovvmyzOvozM3D6LRH1mi9PLY5of1D9gAoaocO7nJWU1b3XdjAWO3mXL8r2/XjjF/HfaWNcfP3i9HW3+q63fstazx3tzXinojgV233RurhdiF+MwPQltJCnSoEEhMbFgtAXRDB7THdNhalVGVm7pFq3MU1+18/zuyspzn+7aWZOXW1BjkZQ/zaJ8nsf0OyA6jyObO1XThpyOVaMo2ieEBtGMRRzHBsNEvc3MvDIOTMmPiTHNMoviogkmExkbcRgNMhOqQQEcJtkQEwYl8lrwQfoYvUYz094TEtzdcQjZGney2rry3tX6fHX1hdGSpD6hkxhM3PsRXgytdB2QaBcnKXc4iawKzElKCSfRDijRzhmifVHWQu3VzPRidxw3J523Kj8DTC8CRPTU3QIkV3JQ4gBDQUIEACalAMlfQonoR3E7L9FmXqLXRKtih4i0AIm8HC+kNpoE+ybemvYFh+lG/SQ0WWXMWV0NELv2BiUOMB2TEAEzIiUAk9MByzF1AyT/ErYKYPkiRPISKNGDUFLKgESPQyy/GJYBES2CWDkUGg7OA7wtTeNtrubgbOAiGhSkqkbe6m61WNOW8Fb3YV5yaZyk7IfYdQJiug6IdA1ndX0PsbIj/P6ACBhCMdOt5pBcEGFF/+0XiHPXAOQQzEhebkYOwlsVDmC5ASDi4STlMES0yiSRqaG1Q7sxezzMWF/fOXlfVcckT+X18R7VY2SMRUeUKMZYwEq9bxg2aME7f0XFpTEHqu8qDdX3Uhp2dSQ1NbFxNduvgobKWyn1VTdm7/noxrS6ynZrTflv4GPt8sSIMA4fGVX1GDWNRTONRWuh0tzcPCrsAY8n4JWR/DlhUQ//iB7jf4K/AT09F6/5lgHaAAAAAElFTkSuQmCC";
 let tray = null;
 function initTray(mainWindow2) {
   if (tray) return;

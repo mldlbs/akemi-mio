@@ -49,6 +49,10 @@ nsis:
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
   installerHeaderIcon: build/icon.ico
+extraResources:
+  - from: "."
+    filter:
+      - "icon.png"
 npmRebuild: false
 electronDist: node_modules/electron/dist
 publish:

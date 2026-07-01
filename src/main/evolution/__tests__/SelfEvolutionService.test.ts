@@ -816,4 +816,124 @@ describe('SelfEvolutionService — 集成测试', () => {
       expect(typeof summary).toBe('string')
     })
   })
+
+  describe('Creativity ↔ Evolution 集成', () => {
+    it('收到 creativity.hypothesis.selected 后应缓存假设', async () => {
+      const mockAgent = createMockAgentService()
+      const mockPlan = createMockPlanManager(null)
+      // 通过构造函数传入本地 EventEmitter
+      const bus = new (require('events').EventEmitter)()
+      const service = new SelfEvolutionService(mockAgent as any, undefined as any, bus as any, mockPlan as any, {
+        historyPath: paths.historyPath,
+        stateFilePath: paths.stateFilePath,
+      })
+
+      const hypothesis = {
+        id: 'hyp_001',
+        title: '优化语音唤醒延迟',
+        idea: '采用 VAD 预检测减少唤醒词模型调用频次',
+        novelty: 85,
+        feasibility: 72,
+        impact: 90,
+        expectedBenefit: '唤醒响应时间降低 40%',
+        risk: '可能增加误唤醒率',
+      }
+
+      bus.emit('creativity.hypothesis.selected', hypothesis)
+      const cached = (service as any).creativityHypothesis
+      expect(cached).not.toBeNull()
+      expect(cached.title).toBe('优化语音唤醒延迟')
+      expect(cached.novelty).toBe(85)
+      expect(cached.feasibility).toBe(72)
+      expect(cached.impact).toBe(90)
+      expect(cached.expectedBenefit).toContain('40%')
+    })
+
+    it('缓存假设应注入到分析 prompt 的 creativityCtx', async () => {
+      const mockAgent = createMockAgentService()
+      const mockPlan = createMockPlanManager(null)
+      const bus = new (require('events').EventEmitter)()
+      const service = new SelfEvolutionService(mockAgent as any, undefined as any, bus as any, mockPlan as any, {
+        historyPath: paths.historyPath,
+        stateFilePath: paths.stateFilePath,
+      })
+      warmupReady(service)
+
+      // 屏蔽 shouldAnalyze() 预过滤
+      const analyzer = (service as any).analyzer
+      vi.spyOn(analyzer, 'shouldAnalyze').mockReturnValue({ shouldRun: true, reason: '' })
+
+      bus.emit('creativity.hypothesis.selected', {
+        id: 'hyp_002',
+        title: '上下文压缩策略优化',
+        idea: '根据 Token 使用率动态调整压缩阈值',
+        novelty: 78,
+        feasibility: 88,
+        impact: 75,
+        expectedBenefit: '上下文窗口利用率提升 25%',
+        risk: '可能丢失边缘案例信息',
+      })
+
+      await (service as any).runAnalysisCycle()
+
+      const prompt = mockAgent._lastPrompt()
+      expect(prompt).toContain('【创造力系统建议】')
+      expect(prompt).toContain('上下文压缩策略优化')
+      expect(prompt).toContain('新颖=78')
+      expect(prompt).toContain('可行=88')
+      expect(prompt).toContain('影响=75')
+      expect(prompt).toContain('预期收益: 上下文窗口利用率提升 25%')
+      expect(prompt).toContain('风险: 可能丢失边缘案例信息')
+    })
+
+    it('无创造力假设时 creativityCtx 不应出现在 prompt 中', async () => {
+      const mockAgent = createMockAgentService()
+      const mockPlan = createMockPlanManager(null)
+      const bus = new (require('events').EventEmitter)()
+      const service = new SelfEvolutionService(mockAgent as any, undefined as any, bus as any, mockPlan as any, {
+        historyPath: paths.historyPath,
+        stateFilePath: paths.stateFilePath,
+      })
+      warmupReady(service)
+
+      const analyzer = (service as any).analyzer
+      vi.spyOn(analyzer, 'shouldAnalyze').mockReturnValue({ shouldRun: true, reason: '' })
+
+      // 不发送任何 creativity 事件，直接运行
+      await (service as any).runAnalysisCycle()
+
+      const prompt = mockAgent._lastPrompt()
+      expect(prompt).not.toContain('【创造力系统建议】')
+    })
+
+    it('缓存假设在注入后应持续保留（不会自动清除）', async () => {
+      const mockAgent = createMockAgentService()
+      const mockPlan = createMockPlanManager(null)
+      const bus = new (require('events').EventEmitter)()
+      const service = new SelfEvolutionService(mockAgent as any, undefined as any, bus as any, mockPlan as any, {
+        historyPath: paths.historyPath,
+        stateFilePath: paths.stateFilePath,
+      })
+      warmupReady(service)
+
+      const analyzer = (service as any).analyzer
+      vi.spyOn(analyzer, 'shouldAnalyze').mockReturnValue({ shouldRun: true, reason: '' })
+
+      bus.emit('creativity.hypothesis.selected', {
+        id: 'hyp_003',
+        title: '持久假设验证',
+        idea: '验证假设跨 cycle 保持',
+        novelty: 60,
+        feasibility: 80,
+        impact: 60,
+        expectedBenefit: '持续可见',
+        risk: '低',
+      })
+
+      await (service as any).runAnalysisCycle()
+      const cachedAfter = (service as any).creativityHypothesis
+      expect(cachedAfter).not.toBeNull()
+      expect(cachedAfter.title).toBe('持久假设验证')
+    })
+  })
 })
