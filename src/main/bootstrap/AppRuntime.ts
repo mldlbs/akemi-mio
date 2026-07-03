@@ -15,18 +15,8 @@ import { AgentService } from '../agent/AgentService'
 import { MemoryService } from '../memory/MemoryService'
 import { registerHandlers, createServiceRef } from '../ipc/handlers'
 import { credentialsManager } from '../credentials/CredentialsManager'
-import {
-  initEvolution,
-  evolutionService,
-  planManager,
-  SelfEvolutionService,
-  ProposalValidator,
-  EvolutionGitOps,
-  RollbackLevel,
-  setSandboxRoot,
-} from '../evolution'
-import { VerificationRunner } from '../evolution/VerificationRunner'
-import { RegressionDetector } from '../evolution/RegressionDetector'
+import { initEvolution, evolutionService, planManager, SelfEvolutionService } from '../evolution'
+import { PipelineOrchestrator } from '../evolution/automation'
 import { initInsight, insightService, insightStore } from '../insight'
 import { initCreativity, creativityService } from '../creativity'
 import { initInspiration } from '../inspiration'
@@ -89,8 +79,8 @@ export class AppRuntime {
   private resourceBudget?: ResourceBudget
   private metricsCollector?: MetricsCollector
   private stabilityScore?: SystemStabilityScore
-  private proposalValidator?: ProposalValidator
-  private gitOps?: EvolutionGitOps
+  private proposalValidator?: any
+  private gitOps?: any
   private syscallBus?: SyscallBus
   private healthChecker?: HealthChecker
   private capabilityEngine?: CapabilityEngine
@@ -156,6 +146,8 @@ export class AppRuntime {
     this.resourceBudget = new ResourceBudget()
     this.stabilityScore = new SystemStabilityScore()
     this.metricsCollector = new MetricsCollector()
+    const { ProposalValidator } = await import('../evolution/ProposalValidator')
+    const { EvolutionGitOps } = await import('../evolution/EvolutionGitOps')
     this.proposalValidator = new ProposalValidator()
     this.gitOps = new EvolutionGitOps()
 
@@ -227,6 +219,9 @@ export class AppRuntime {
     credentialsManager.migrate()
     log('INFO', 'credential_migration_done')
     setCredentialsManager(credentialsManager)
+    // 从凭据存储覆盖 env 配置，让设置界面填入的 LLM 参数生效
+    llmService.refreshFromCredentials((key) => credentialsManager.get(key))
+    log('INFO', 'llm_config_loaded_from_credentials')
 
     const win = createWindow(stateManager)
     agentService.setMainWindow(win)
@@ -562,6 +557,10 @@ export class AppRuntime {
       credentialsManager.get('telegram_server_url') || process.env.TELEGRAM_SERVER_URL || 'https://skills.crlkcloud.cyou/telegram'
     const outboxWorker = new OutboxWorker(outboxUrl)
     this.taskRunner.register('telegram.outbox', () => outboxWorker.tick(), 2000, { cooldownMs: 10000 })
+    // 当 TelegramService 写入新 outbox 消息时，自动恢复被禁用的 outbox 任务
+    telegramService.setReactivateOutbox(() => {
+      this.taskRunner?.reactivate('telegram.outbox')
+    })
 
     // 社交平台自动发布（每分钟检查 content_calendar.yaml）
     const socialDir = join(WORKSPACE.evolution, 'social')
@@ -729,7 +728,7 @@ export class AppRuntime {
     stateManager: StateManager,
     planManager: any,
     cognitiveService: CognitiveService,
-    evolutionRef?: ServiceRef<SelfEvolutionService>,
+    evolutionRef?: { current: SelfEvolutionService | null },
   ): void {
     // 进化服务
     this.lazyInit!.add({
@@ -738,22 +737,23 @@ export class AppRuntime {
       delayMs: 200,
       fn: async () => {
         const evolution = initEvolution(agentService)
-        const verifier = new VerificationRunner()
-        verifier.setWorkerPool(this.workerPool!)
-        evolution.setVerificationRunner(verifier, true)
-        evolution.setRegressionDetector(new RegressionDetector())
-        evolution.setCognitiveService(cognitiveService)
         evolution.setSafetyMode('auto')
-        evolution.setGitOps(this.gitOps)
-        evolution.setProposalValidator(this.proposalValidator)
-        // 设置 sandbox 产物验证根目录
-        setSandboxRoot(join(WORKSPACE.evolution, 'sandbox'))
         // 注册 Evolution 内核模块
         const evolutionModule = new EvolutionModule(evolution)
         const kernel = Kernel.getInstance()
         await kernel.registerModule(evolutionModule)
+        // 初始化自动化管道（Collectors → ProblemQueue → Claude Code CLI）
+        const pipeline = new PipelineOrchestrator({
+          projectRoot: process.cwd(),
+          persistDir: join(WORKSPACE.evolution, 'pipeline_data'),
+          maxFixesPerCycle: 3,
+        })
+        // 注册基础 collector 和 executor（先不传 mcpManager，备用执行器延迟注入）
+        pipeline.initDefaults()
+        // 附加到进化系统（SelfEvolutionService 将消费管道指标）
+        evolution.setPipeline(pipeline)
         evolution.scheduleEvolution(2)
-        evolutionRef.current = evolution
+        if (evolutionRef) evolutionRef.current = evolution
         log('INFO', 'evolution_service_started', { interval_hours: 2 })
       },
     })
@@ -1066,8 +1066,8 @@ export class AppRuntime {
     stateManager.update({ asr: 'loading', model: 'whisper_gpu (Vulkan)' })
     this.gpuInitTimeout = setTimeout(() => {
       log('WARN', 'gpu_asr_init_timeout')
-      const baiduKey = process.env.BAIDU_ASR_API_KEY
-      const baiduSecret = process.env.BAIDU_ASR_SECRET_KEY
+      const baiduKey = credentialsManager.get('baidu_asr_api_key') || process.env.BAIDU_ASR_API_KEY
+      const baiduSecret = credentialsManager.get('baidu_asr_secret_key') || process.env.BAIDU_ASR_SECRET_KEY
       if (baiduKey && baiduSecret) {
         asrService.setBaiduCredentials(baiduKey, baiduSecret)
         log('INFO', 'baidu_asr_ready_timeout_fallback')
@@ -1093,8 +1093,8 @@ export class AppRuntime {
           this.gpuInitTimeout = null
         }
         log('WARN', 'gpu_asr_fallback', { error: String(err) })
-        const baiduKey = process.env.BAIDU_ASR_API_KEY
-        const baiduSecret = process.env.BAIDU_ASR_SECRET_KEY
+        const baiduKey = credentialsManager.get('baidu_asr_api_key') || process.env.BAIDU_ASR_API_KEY
+        const baiduSecret = credentialsManager.get('baidu_asr_secret_key') || process.env.BAIDU_ASR_SECRET_KEY
         if (baiduKey && baiduSecret) {
           asrService.setBaiduCredentials(baiduKey, baiduSecret)
           log('INFO', 'baidu_asr_ready')

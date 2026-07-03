@@ -1,5 +1,5 @@
 import { buildTool, formatToolResult, formatToolError } from '../types'
-import { getSubAgentPool } from '../deps'
+import { getSubAgentPool } from './SkillAgentTools'
 
 export const spawnAgentTool = buildTool({
   name: 'spawn_agent',

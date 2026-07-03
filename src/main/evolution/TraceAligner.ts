@@ -10,8 +10,20 @@
  * - ExecutionTrace.intentHint 由 IntentTrace.abstractGoal 补充
  */
 
-import type { IntentTrace } from './IntentExtractor'
-import type { ExecutionTrace } from './ExecutionTracer'
+export interface IntentTrace {
+  traceId: string
+  sessionId: string
+  timestamp: number
+  abstractGoal: string
+}
+
+export interface ExecutionTrace {
+  traceId: string
+  sessionId: string
+  timestamp: number
+  intentHint: string
+  nodes: unknown[]
+}
 
 export interface AlignedTrace {
   intent: IntentTrace

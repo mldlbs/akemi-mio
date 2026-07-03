@@ -4,6 +4,8 @@ import type { CredentialsManager } from '../credentials/CredentialsManager'
 import type { MemoryService } from '../memory/MemoryService'
 import type { SkillManager } from '../skill/SkillManager'
 import type { ProceduralMemory } from '../agent/ProceduralMemory'
+import type { CreativityService } from '../creativity/CreativityService'
+import { creativityService } from '../creativity'
 
 let _planManager: PlanManagerLike | null = null
 let _credentialsManager: CredentialsManager | null = null
@@ -41,4 +43,8 @@ export function getSkillManager(): SkillManager | null {
 }
 export function getProceduralMemory(): ProceduralMemory | null {
   return _proceduralMemory
+}
+
+export function getCreativityService(): CreativityService | null {
+  return creativityService
 }

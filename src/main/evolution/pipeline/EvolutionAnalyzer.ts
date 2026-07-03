@@ -274,7 +274,8 @@ export class EvolutionAnalyzer implements ISubsystem {
     // 2. 近期空闲周期：最近 3 次分析都成功但未创建计划
     const history = this.loadHistory()
     const recent = history.cycles.slice(-3)
-    if (recent.length >= 3 && recent.every((c) => c.success && !c.planCreated)) {
+    const lastCycleTime = recent.length > 0 ? recent[recent.length - 1].timestamp : 0
+    if (recent.length >= 3 && recent.every((c) => c.success && !c.planCreated) && Date.now() - lastCycleTime < 24 * 60 * 60 * 1000) {
       return { shouldRun: false, reason: 'recent_cycles_all_idle' }
     }
 

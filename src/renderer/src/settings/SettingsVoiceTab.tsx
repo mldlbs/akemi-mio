@@ -47,6 +47,26 @@ export function SettingsVoiceTab({ values, onSetCredential }: SettingsTabProps) 
       <div className="settings-section">
         <span className="settings-section-title">语音识别</span>
         <label className="settings-field">
+          <span className="settings-label">百度 ASR API Key</span>
+          <input
+            className="settings-input"
+            type="password"
+            value={values[CRED_KEYS.BAIDU_ASR_API_KEY] ?? ''}
+            onChange={(e) => onSetCredential(CRED_KEYS.BAIDU_ASR_API_KEY, e.target.value)}
+            placeholder="GPU ASR 加载失败时的备用方案"
+          />
+        </label>
+        <label className="settings-field">
+          <span className="settings-label">百度 ASR Secret Key</span>
+          <input
+            className="settings-input"
+            type="password"
+            value={values[CRED_KEYS.BAIDU_ASR_SECRET_KEY] ?? ''}
+            onChange={(e) => onSetCredential(CRED_KEYS.BAIDU_ASR_SECRET_KEY, e.target.value)}
+            placeholder="留空则使用环境变量 BAIDU_ASR_SECRET_KEY"
+          />
+        </label>
+        <label className="settings-field">
           <span className="settings-label">ASR 热词（逗号分隔）</span>
           <input
             className="settings-input"

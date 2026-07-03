@@ -289,6 +289,10 @@ export class AgentService {
     return this.memoryService
   }
 
+  getSubAgentPool(): SubAgentPool {
+    return this.subAgentPool
+  }
+
   private async executeIntentCommand(intent: IntentResult, requestId: string): Promise<ChatResult> {
     const handler = this.intentHandlers.get(intent.intent)
     if (!handler) return { error: 'UNKNOWN_INTENT' }

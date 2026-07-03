@@ -204,6 +204,16 @@ export function registerHandlers(
 
   ipcMain.handle('credentials:set', async (_event, name: string, value: string) => {
     credentialsManager.set(name, value)
+    // LLM 配置变更时实时同步到运行时的 LlmService
+    if (name.startsWith('llm_')) {
+      try {
+        const llm = agentService.getLlmService()
+        llm.refreshFromCredentials((k) => credentialsManager.get(k))
+        log('INFO', 'llm_config_refreshed_from_ui', { changed: name })
+      } catch (err) {
+        log('WARN', 'llm_config_refresh_failed', { error: String(err) })
+      }
+    }
     return true
   })
 
@@ -491,13 +501,14 @@ export function registerHandlers(
   // ── Writing API status ──
 
   ipcMain.handle('writing:getStatus', async () => {
+    const writingApi = credentialsManager.get('writing_api_url') || process.env.WRITING_API_URL || 'https://www.crlkcloud.cyou/writing/api'
     try {
-      const res = await fetch('https://www.crlkcloud.cyou/writing/api/stories')
+      const res = await fetch(`${writingApi}/stories`)
       const stories: any[] = await res.json()
       const withScenes = await Promise.all(
         stories.slice(0, 20).map(async (s) => {
           try {
-            const sr = await fetch(`https://www.crlkcloud.cyou/writing/api/scenes?storyId=${s.id}`)
+            const sr = await fetch(`${writingApi}/scenes?storyId=${s.id}`)
             const scenes = await sr.json()
             return {
               id: s.id,

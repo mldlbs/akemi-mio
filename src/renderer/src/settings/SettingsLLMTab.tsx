@@ -18,6 +18,31 @@ const LLM_SECTIONS: {
     fields: [
       { key: CRED_KEYS.LLM_CODE_API_URL, label: 'API URL', placeholder: 'https://api.deepseek.com/v1' },
       { key: CRED_KEYS.LLM_CODE_MODEL, label: '模型', placeholder: 'deepseek-v4-flash' },
+      { key: CRED_KEYS.LLM_CODE_KEY, label: 'API Key', type: 'password', placeholder: '留空则使用对话模型 Key' },
+    ],
+  },
+  {
+    title: '视觉模型（图片理解）',
+    fields: [
+      { key: CRED_KEYS.LLM_VISION_API_URL, label: 'API URL', placeholder: '留空则使用对话模型 URL' },
+      { key: CRED_KEYS.LLM_VISION_MODEL, label: '模型', placeholder: 'gpt-4o' },
+      { key: CRED_KEYS.LLM_VISION_KEY, label: 'API Key', type: 'password', placeholder: '留空则使用对话模型 Key' },
+    ],
+  },
+  {
+    title: '文本处理模型（摘要/提取）',
+    fields: [
+      { key: CRED_KEYS.LLM_TEXT_API_URL, label: 'API URL', placeholder: '留空则使用对话模型 URL' },
+      { key: CRED_KEYS.LLM_TEXT_MODEL, label: '模型', placeholder: 'gpt-4o-mini' },
+      { key: CRED_KEYS.LLM_TEXT_KEY, label: 'API Key', type: 'password', placeholder: '留空则使用对话模型 Key' },
+    ],
+  },
+  {
+    title: '图片生成（CogView fallback）',
+    fields: [
+      { key: CRED_KEYS.LLM_IMAGE_API_URL, label: 'API URL', placeholder: 'https://open.bigmodel.cn/api/paas/v4/images/generations' },
+      { key: CRED_KEYS.LLM_IMAGE_MODEL, label: '模型', placeholder: 'cogview-3-flash' },
+      { key: CRED_KEYS.LLM_IMAGE_KEY, label: 'API Key', type: 'password', placeholder: 'sk-...' },
     ],
   },
 ]

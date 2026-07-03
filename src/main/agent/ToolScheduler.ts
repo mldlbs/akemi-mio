@@ -1,6 +1,7 @@
 import { log } from '../logger/Logger'
 import type { ToolCallInfo } from '../llm/LlmService'
 import { ServerManager } from '../mcp/ServerManager'
+import { classifyToolError, ToolErrorType } from '../tool/ToolErrorType'
 import { toolAvailabilityCache } from '../tool/ToolAvailabilityCache'
 
 /** 单个工具执行结果 */

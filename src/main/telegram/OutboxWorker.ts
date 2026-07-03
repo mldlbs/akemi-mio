@@ -59,20 +59,22 @@ export class OutboxWorker {
     targetMessageId?: number | null
   }): Promise<void> {
     const bot = msg.bot || 'chat'
+    // Telegram 单条消息上限 4096 字符，超出截断
+    const truncated = msg.message.length > 4096 ? msg.message.slice(0, 4050) + '\n\n... [消息已截断]' : msg.message
     switch (msg.msgType) {
       case 'reply':
-        await this.fetch('/reply', { chatId: Number(msg.chatId), text: msg.message, bot })
+        await this.fetch('/reply', { chatId: Number(msg.chatId), text: truncated, bot })
         break
       case 'edit':
         await this.fetch('/edit', {
           chatId: Number(msg.chatId),
           messageId: msg.targetMessageId,
-          text: msg.message,
+          text: truncated,
           bot,
         })
         break
       case 'send':
-        await this.fetch('/send', { chatId: Number(msg.chatId), text: msg.message, bot })
+        await this.fetch('/send', { chatId: Number(msg.chatId), text: truncated, bot })
         break
       case 'action':
         await this.fetch('/action', { chatId: Number(msg.chatId), action: msg.message, bot })

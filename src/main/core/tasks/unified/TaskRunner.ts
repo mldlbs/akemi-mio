@@ -119,6 +119,25 @@ export class TaskRunner {
     return this.store.get(type)
   }
 
+  /** 重新启用一个被 disabled 的任务（重置失败计数 + 恢复定时器） */
+  reactivate(type: BackgroundTaskType): boolean {
+    if (!this.tasks.has(type)) return false
+    if (this.timers.has(type)) return true // 已启用
+    this.store.update(type, { status: 'idle', consecutiveFailures: 0, cooldownUntil: 0 })
+    this.startTimer(type)
+    log('INFO', 'task_runner_reactivated', { type })
+    return true
+  }
+
+  /** 检查任务是否被 disabled（BEST_EFFORT 且失败次数超限导致定时器停止） */
+  isDisabled(type: BackgroundTaskType): boolean {
+    const task = this.tasks.get(type)
+    if (!task) return false
+    if (task.tier !== TaskTier.BEST_EFFORT) return false
+    const state = this.store.get(type)
+    return !this.timers.has(type) && state.consecutiveFailures >= task.maxFailures
+  }
+
   has(type: BackgroundTaskType): boolean {
     return this.tasks.has(type)
   }

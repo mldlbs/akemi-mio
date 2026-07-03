@@ -1,9 +1,15 @@
 import { buildTool, formatToolResult, formatToolError } from '../types'
+import { getCredentialsManager } from '../deps'
 
-const WRITING_API = 'https://www.crlkcloud.cyou/writing/api'
+const DEFAULT_WRITING_API = 'https://www.crlkcloud.cyou/writing/api'
+
+function getWritingApiUrl(): string {
+  const creds = getCredentialsManager()
+  return creds?.get('writing_api_url') || process.env.WRITING_API_URL || DEFAULT_WRITING_API
+}
 
 async function writingFetch(method: string, path: string, body?: any) {
-  const url = `${WRITING_API}${path}`
+  const url = `${getWritingApiUrl()}${path}`
   const res = await fetch(url, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,

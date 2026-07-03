@@ -16180,8 +16180,18 @@ const CRED_KEYS = {
   LLM_KEY: "llm_key",
   LLM_API_URL: "llm_api_url",
   LLM_CHAT_MODEL: "llm_chat_model",
+  LLM_CODE_KEY: "llm_code_api_key",
   LLM_CODE_API_URL: "llm_code_api_url",
   LLM_CODE_MODEL: "llm_code_model",
+  LLM_VISION_API_URL: "llm_vision_api_url",
+  LLM_VISION_MODEL: "llm_vision_model",
+  LLM_VISION_KEY: "llm_vision_key",
+  LLM_TEXT_API_URL: "llm_text_api_url",
+  LLM_TEXT_MODEL: "llm_text_model",
+  LLM_TEXT_KEY: "llm_text_key",
+  LLM_IMAGE_API_URL: "llm_image_api_url",
+  LLM_IMAGE_MODEL: "llm_image_model",
+  LLM_IMAGE_KEY: "llm_image_key",
   TTS_MODE: "tts_mode",
   THEME: "theme",
   WAKE_WORDS: "wake_words",
@@ -16243,7 +16253,32 @@ const LLM_SECTIONS = [
     title: "代码模型",
     fields: [
       { key: CRED_KEYS.LLM_CODE_API_URL, label: "API URL", placeholder: "https://api.deepseek.com/v1" },
-      { key: CRED_KEYS.LLM_CODE_MODEL, label: "模型", placeholder: "deepseek-v4-flash" }
+      { key: CRED_KEYS.LLM_CODE_MODEL, label: "模型", placeholder: "deepseek-v4-flash" },
+      { key: CRED_KEYS.LLM_CODE_KEY, label: "API Key", type: "password", placeholder: "留空则使用对话模型 Key" }
+    ]
+  },
+  {
+    title: "视觉模型（图片理解）",
+    fields: [
+      { key: CRED_KEYS.LLM_VISION_API_URL, label: "API URL", placeholder: "留空则使用对话模型 URL" },
+      { key: CRED_KEYS.LLM_VISION_MODEL, label: "模型", placeholder: "gpt-4o" },
+      { key: CRED_KEYS.LLM_VISION_KEY, label: "API Key", type: "password", placeholder: "留空则使用对话模型 Key" }
+    ]
+  },
+  {
+    title: "文本处理模型（摘要/提取）",
+    fields: [
+      { key: CRED_KEYS.LLM_TEXT_API_URL, label: "API URL", placeholder: "留空则使用对话模型 URL" },
+      { key: CRED_KEYS.LLM_TEXT_MODEL, label: "模型", placeholder: "gpt-4o-mini" },
+      { key: CRED_KEYS.LLM_TEXT_KEY, label: "API Key", type: "password", placeholder: "留空则使用对话模型 Key" }
+    ]
+  },
+  {
+    title: "图片生成（CogView fallback）",
+    fields: [
+      { key: CRED_KEYS.LLM_IMAGE_API_URL, label: "API URL", placeholder: "https://open.bigmodel.cn/api/paas/v4/images/generations" },
+      { key: CRED_KEYS.LLM_IMAGE_MODEL, label: "模型", placeholder: "cogview-3-flash" },
+      { key: CRED_KEYS.LLM_IMAGE_KEY, label: "API Key", type: "password", placeholder: "sk-..." }
     ]
   }
 ];

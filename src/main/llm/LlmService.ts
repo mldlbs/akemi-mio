@@ -34,6 +34,10 @@ export class LlmService {
   private codeModel = LLM_CODE_MODEL
   private textModel = LLM_TEXT_MODEL
   private visionModel = LLM_VISION_MODEL
+  private chatApiUrl = LLM_API_URL
+  private codeApiUrl = LLM_CODE_API_URL
+  private textApiUrl = LLM_TEXT_API_URL
+  private visionApiUrl = LLM_VISION_API_URL
   private mcpManager: ServerManager
 
   constructor(mcpManager?: ServerManager) {
@@ -44,12 +48,46 @@ export class LlmService {
     this.mcpManager = manager
   }
 
-  setConfig(chatKey: string, codeKey?: string, chatModel?: string, codeModel?: string): void {
+  /** 从外部凭据存储（CredentialsManager）读取并刷新全部 LLM 配置 */
+  refreshFromCredentials(getter: (key: string) => string | null): void {
+    const key = getter('llm_key')
+    const codeKey = getter('llm_code_api_key') || key
+    if (key) this.chatApiKey = key
+    if (codeKey) this.codeApiKey = codeKey
+    this.textApiKey = getter('llm_text_key') || LLM_TEXT_KEY || key || ''
+    this.visionKey = getter('llm_vision_key') || LLM_VISION_KEY || key || ''
+
+    const url = getter('llm_api_url')
+    const codeUrl = getter('llm_code_api_url')
+    if (url) this.chatApiUrl = url
+    if (codeUrl) this.codeApiUrl = codeUrl
+
+    const visionUrl = getter('llm_vision_api_url')
+    if (visionUrl) this.visionApiUrl = visionUrl
+
+    const textUrl = getter('llm_text_api_url')
+    if (textUrl) this.textApiUrl = textUrl
+
+    const model = getter('llm_chat_model')
+    const codeModel = getter('llm_code_model')
+    if (model) this.apiModel = model
+    if (codeModel) this.codeModel = codeModel
+
+    const visionModel = getter('llm_vision_model')
+    if (visionModel) this.visionModel = visionModel
+
+    const textModel = getter('llm_text_model')
+    if (textModel) this.textModel = textModel
+  }
+
+  setConfig(chatKey: string, codeKey?: string, chatModel?: string, codeModel?: string, chatUrl?: string, codeUrl?: string): void {
     this.chatApiKey = chatKey
     this.codeApiKey = codeKey || chatKey
     this.textApiKey = LLM_TEXT_KEY || chatKey
     if (chatModel) this.apiModel = chatModel
     if (codeModel) this.codeModel = codeModel
+    if (chatUrl) this.chatApiUrl = chatUrl
+    if (codeUrl) this.codeApiUrl = codeUrl
     // 如果有 vision key 环境变量则使用之
     this.visionKey = LLM_VISION_KEY || chatKey
   }
@@ -71,7 +109,7 @@ export class LlmService {
 
     try {
       // 用 code 模型的 URL 和 key，但不带 tools 参数（避免模型返回工具调用而非文本）
-      const baseUrl = this.codeApiKey ? LLM_CODE_API_URL : LLM_API_URL
+      const baseUrl = this.codeApiKey ? this.codeApiUrl : this.chatApiUrl
       const res = await fetch(baseUrl, {
         method: 'POST',
         headers: {
@@ -204,7 +242,7 @@ export class LlmService {
     allowedToolNames?: string[],
   ): Promise<Response> {
     const isCode = !!model
-    const baseUrl = isCode ? LLM_CODE_API_URL : LLM_API_URL
+    const baseUrl = isCode ? this.codeApiUrl : this.chatApiUrl
     const key = isCode ? this.codeApiKey! : this.chatApiKey!
     const tools = this._getFilteredSchemas(allowedToolNames)
     return fetch(baseUrl, {
@@ -459,7 +497,7 @@ export class LlmService {
     trimOrphanedToolCallsFrom(messages)
     // 流式请求中同时携带 tools 声明，让 LLM 仍可选工具调用
     const tools = this._getFilteredSchemas(allowedToolNames)
-    const res = await fetch(LLM_CODE_API_URL, {
+    const res = await fetch(this.codeApiUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.codeApiKey!}`,
@@ -687,7 +725,7 @@ export class LlmService {
     const t0 = Date.now()
 
     try {
-      const res = await fetch(LLM_TEXT_API_URL, {
+      const res = await fetch(this.textApiUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${key}`,
@@ -768,7 +806,7 @@ export class LlmService {
     const t0 = Date.now()
 
     try {
-      const res = await fetch(LLM_CODE_API_URL, {
+      const res = await fetch(this.codeApiUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${key}`,
@@ -851,7 +889,7 @@ export class LlmService {
     log('INFO', 'text_llm_request', { request_id: requestId, model })
 
     try {
-      const res = await fetch(LLM_TEXT_API_URL, {
+      const res = await fetch(this.textApiUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${key}`,
@@ -922,7 +960,7 @@ export class LlmService {
     log('INFO', 'vision_llm_request', { request_id: requestId, model })
 
     try {
-      const res = await fetch(LLM_VISION_API_URL, {
+      const res = await fetch(this.visionApiUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${key}`,

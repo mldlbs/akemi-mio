@@ -120,6 +120,8 @@ export class TelegramService {
     }
   >()
   private pushChatId: number | null = null
+  /** 当 outbox 任务被禁用时，通过此回调重新激活 */
+  private reactivateOutbox: (() => void) | null = null
   // ★ 修复：Map<requestId, session> 通过 EventBus requestId 精确匹配输入/回复
   private pushSessions = new Map<
     string,
@@ -136,6 +138,21 @@ export class TelegramService {
 
   constructor(agentService: AgentService) {
     this.agentService = agentService
+  }
+
+  /** 注册 outbox 任务重新激活回调，当 outbox 被 TaskRunner disable 后自动恢复 */
+  setReactivateOutbox(cb: () => void): void {
+    this.reactivateOutbox = cb
+  }
+
+  private tryReactivateOutbox(): void {
+    if (this.reactivateOutbox) {
+      try {
+        this.reactivateOutbox()
+      } catch {
+        /* 静默 */
+      }
+    }
   }
 
   async initialize(): Promise<void> {
@@ -498,6 +515,77 @@ export class TelegramService {
       this.enqueueReply(chatId, lines.join('\n'), 'evolution')
     })
 
+    // === 🤖 自动修复管道 ===
+    eventBus.on('pipeline.started', (p: any) => {
+      const lines = ['🤖 秋山澪 - 自动修复管道']
+      lines.push('━━━ ⏳ 开始检查 ━━━')
+      lines.push('')
+      lines.push('运行项目自动化检查项，查找可修复的问题...')
+      if (p.timestamp) {
+        const time = new Date(p.timestamp).toLocaleString('zh-CN', { hour12: false })
+        lines.push(`🕐 ${time}`)
+      }
+      this.enqueueReply(chatId, lines.join('\n'), 'evolution')
+    })
+
+    eventBus.on('pipeline.completed', (p: any) => {
+      const lines = ['🤖 秋山澪 - 自动修复管道']
+      if (p.fixed > 0 || p.failed > 0) {
+        lines.push('━━━ ✅ 本轮执行完成 ━━━')
+      } else {
+        lines.push('━━━ ⏭ 本轮无需修复 ━━━')
+      }
+      lines.push('')
+
+      // 概览
+      const totalRun = (p.fixed || 0) + (p.failed || 0)
+      lines.push(`📊 采集 ${p.collected || 0} 个问题，本轮处理 ${totalRun} 个`)
+      if (p.fixed > 0) lines.push(`✅  修复成功：${p.fixed} 个`)
+      if (p.failed > 0) lines.push(`❌  修复失败：${p.failed} 个`)
+      if (p.queueRemaining > 0) lines.push(`⏳  队列剩余：${p.queueRemaining} 个待处理`)
+      lines.push('')
+
+      // 每个修复详情
+      const details = p.details || []
+      for (const d of details) {
+        const icon = d.success ? '✅' : '❌'
+        const loc = d.file ? d.file.split('/').pop() + (d.line ? `:${d.line}` : '') : '未知'
+        const dur = d.durationMs ? ` (${(d.durationMs / 1000).toFixed(0)}s)` : ''
+        if (d.success) {
+          lines.push(`${icon} [${d.source}] ${loc}${dur}`)
+          if (d.summary && d.summary !== '修复完成') {
+            lines.push(`   └ ${d.summary.slice(0, 200)}`)
+          }
+        } else {
+          lines.push(`${icon} [${d.source}] ${d.title?.slice(0, 80) || loc}${dur}`)
+          const reason = d.error || d.summary
+          if (reason) lines.push(`   └ ${reason.slice(0, 200)}`)
+        }
+      }
+
+      // 队列头部预览
+      if (p.queueRemaining > 0 && details.length > 0) {
+        lines.push('')
+        lines.push(`📋 待处理列表：`)
+      }
+      lines.push('')
+
+      lines.push(`⚡ 耗时：${p.durationMs ? (p.durationMs / 1000).toFixed(0) : '?'}s`)
+      this.enqueueReply(chatId, lines.join('\n'), 'evolution')
+    })
+
+    eventBus.on('pipeline.errored', (p: any) => {
+      const lines = ['🤖 秋山澪 - 自动修复管道']
+      lines.push('━━━ ❌ 执行异常 ━━━')
+      lines.push('')
+      lines.push('管道在执行过程中抛出了异常：')
+      lines.push('')
+      lines.push(`⚠️ ${p.error || '未知错误'}`)
+      lines.push('')
+      lines.push('⏳ 将在下一周期自动重试')
+      this.enqueueReply(chatId, lines.join('\n'), 'evolution')
+    })
+
     // === 🔍 洞察 ===
     eventBus.on('insight.analysis.started', () => {
       this.enqueueReply(chatId, `🔍 洞察分析开始...`, 'insight')
@@ -732,15 +820,18 @@ export class TelegramService {
       category,
       message: text,
     })
+    this.tryReactivateOutbox()
   }
 
   private enqueueEdit(chatId: number, targetMessageId: number, text: string, bot: string = 'chat'): void {
     const inserted = insertOutbox({ chatId: String(chatId), bot: bot as any, msgType: 'edit', message: text, targetMessageId })
     log('DEBUG', 'telegram_enqueue_edit', { chatId, targetMessageId, inserted, textLen: text.length })
+    this.tryReactivateOutbox()
   }
 
   private enqueueAction(chatId: number, action: string, bot: string = 'chat'): void {
     insertOutbox({ chatId: String(chatId), bot: bot as any, msgType: 'action', message: action })
+    this.tryReactivateOutbox()
   }
 
   /** sendMessage 需要同步拿到 messageId，因此直接 HTTP 调用 */

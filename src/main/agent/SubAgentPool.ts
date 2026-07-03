@@ -223,6 +223,12 @@ export class SubAgentPool {
     this.codeKey = codeKey || ''
   }
 
+  /** 更新转发给新子 Agent 的凭据 */
+  setKeys(chatKey: string, codeKey: string): void {
+    this.chatKey = chatKey
+    this.codeKey = codeKey
+  }
+
   /** 派发一个子任务，立即返回 id */
   spawn(goal: string, parentGoal?: string, options?: SpawnTaskOptions): string {
     const id = `sub_${++this.counter}_${Date.now().toString(36)}`
