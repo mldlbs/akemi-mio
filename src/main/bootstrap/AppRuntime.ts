@@ -67,6 +67,12 @@ import { SessionRecoveryManager } from '../agent/SessionRecoveryManager'
 import { UIBridge } from '../agent/UIBridge'
 import { EventStore } from '../core/event-sourcing/EventStore'
 import { RuntimeHealthManager } from '../health/RuntimeHealthManager'
+import { EvaluationStore } from '../core/evaluation/EvaluationStore'
+import { EvaluationEmitter } from '../core/evaluation/EvaluationEmitter'
+import { RepositoryEventIterator } from '../core/evaluation/RepositoryEventIterator'
+import { MetricsEngineImpl } from '../core/evaluation/MetricsEngine'
+import { ToolEventBridge } from '../core/evaluation/ToolEventBridge'
+import type { MetricSnapshot, TimeWindow } from '../core/evaluation/types'
 
 /**
  * AppRuntime — 应用启动生命周期编排器。
@@ -95,6 +101,10 @@ export class AppRuntime {
   private sessionGovernor?: SessionGovernor
   private checkpointV2?: CheckpointV2
   private runtimeHealthManager?: RuntimeHealthManager
+  private evaluationStore?: EvaluationStore
+  private evaluationEmitter?: EvaluationEmitter
+  private toolEventBridge?: ToolEventBridge
+  private metricsEngine?: MetricsEngineImpl
   private comfyUI?: ComfyUIManager
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
@@ -177,6 +187,15 @@ export class AppRuntime {
     credentialsManager.migrate()
     log('INFO', 'credential_migration_done')
     setCredentialsManager(credentialsManager)
+
+    // Evaluation 子系统：Store → Emitter → Bridge
+    this.evaluationStore = new EvaluationStore()
+    await this.evaluationStore.init()
+    this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, 'runtime')
+    llmService.setEvaluationEmitter(this.evaluationEmitter)
+    this.toolEventBridge = new ToolEventBridge(this.evaluationEmitter, eventBus)
+    this.toolEventBridge.start()
+    log('INFO', 'evaluation_ready')
 
     const win = createWindow(stateManager)
     agentService.setMainWindow(win)
@@ -571,6 +590,8 @@ export class AppRuntime {
     }
     this.taskRunner?.stop()
     await this.comfyUI?.stop().catch(() => {})
+    this.toolEventBridge?.stop()
+    await this.evaluationStore?.shutdown().catch(() => {})
     this.memoryService?.shutdown()
     this.memoryIndexer?.stop()
     evolutionService?.stop()
@@ -898,6 +919,25 @@ export class AppRuntime {
           (p: any) => log('INFO', 'creativity_dream_end', { count: p.count, top_novelty: p.topNovelty }),
           this.subs,
           'runtime:creativity_dream',
+        )
+
+        // MetricsEngine 定时计算（10 分钟窗口）
+        this.metricsEngine = new MetricsEngineImpl(new RepositoryEventIterator(this.evaluationStore!))
+        this.taskRunner!.register(
+          'evaluation.metrics',
+          async () => {
+            const until = Date.now()
+            const since = until - 600_000
+            const snapshot = await this.metricsEngine!.compute({ since, until })
+            log('INFO', 'eval_metrics', {
+              calls: snapshot.traffic.totalCalls,
+              rate: Math.round(snapshot.quality.completionRate * 100),
+              avgMs: Math.round(snapshot.latency.avgMs),
+              tokens: snapshot.cost.totalTokens,
+            })
+            return { success: true }
+          },
+          600_000,
         )
       },
     })
