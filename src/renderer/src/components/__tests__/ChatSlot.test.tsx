@@ -67,7 +67,14 @@ describe('ChatSlot', () => {
   })
 
   it('shows running tools from store', () => {
-    useAgentStore.getState().addToolRunning({ id: 't1', tool: 'read_file', args: { path: '/src/index.ts' } })
+    const now = Date.now()
+    useAgentStore.getState().addTool({
+      type: 'tool.started',
+      id: 't1',
+      tool: 'read_file',
+      args: { path: '/src/index.ts' },
+      timestamp: now,
+    })
     render(<ChatSlot />)
     expect(screen.getAllByText('读取文件').length).toBeGreaterThanOrEqual(1)
   })

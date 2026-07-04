@@ -1,22 +1,19 @@
-import { useEffect, useState, type MouseEvent } from 'react'
-import type { ToolEvent } from '../slots/types'
+import { useState, type MouseEvent } from 'react'
 import { useAgentStore } from '../store/agentStore'
+import { useClockStore } from '../store/clockStore'
+import { isToolActive } from '../tool/toolTypes'
+import type { ToolState } from '../tool/toolTypes'
+
+function useNow(): number {
+  return useClockStore((s) => s.now)
+}
 
 function ElapsedTimer({ startedAt }: { startedAt: number }) {
-  const [elapsed, setElapsed] = useState('00:00')
-  useEffect(() => {
-    let frame: number
-    const tick = () => {
-      const sec = Math.floor((Date.now() - startedAt) / 1000)
-      const m = Math.floor(sec / 60)
-      const s = sec % 60
-      setElapsed(`${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`)
-      frame = requestAnimationFrame(tick)
-    }
-    frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
-  }, [startedAt])
-  return <span className="tool-elapsed">{elapsed}</span>
+  const now = useNow()
+  const sec = Math.floor((now - startedAt) / 1000)
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return <span className="tool-elapsed">{`${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`}</span>
 }
 
 function CollapsibleJson({ data, max = 80 }: { data: Record<string, any>; max?: number }) {
@@ -33,21 +30,28 @@ function CollapsibleJson({ data, max = 80 }: { data: Record<string, any>; max?: 
   )
 }
 
-function ToolIcon({ status, error, timeout, cancelled }: { status: string; error?: string; timeout?: boolean; cancelled?: boolean }) {
-  if (status === 'running') {
-    return <i className="ri-loader-4-line ri-spin" />
+function ToolIcon({ state }: { state: ToolState }) {
+  switch (state.status) {
+    case 'pending':
+    case 'running':
+      return <i className="ri-loader-4-line ri-spin" />
+    case 'timeout':
+      return <i className="ri-time-line" />
+    case 'cancelled':
+      return <i className="ri-stop-circle-line" />
+    case 'error':
+      return <i className="ri-close-circle-line" />
+    case 'success':
+      return <i className="ri-check-line" />
   }
-  if (timeout) return <i className="ri-time-line" />
-  if (cancelled) return <i className="ri-stop-circle-line" />
-  if (error) return <i className="ri-close-circle-line" />
-  return <i className="ri-check-line" />
 }
 
 export function ToolSlot() {
-  const toolRunning = useAgentStore((s) => s.toolRunning)
-  const toolCompleted = useAgentStore((s) => s.toolCompleted)
+  const tools = useAgentStore((s) => s.tools)
 
-  const allEmpty = toolRunning.length === 0 && toolCompleted.length === 0
+  const activeTools = tools.filter(isToolActive)
+  const completedTools = tools.filter((t) => !isToolActive(t))
+  const allEmpty = tools.length === 0
 
   if (allEmpty) {
     return (
@@ -67,22 +71,23 @@ export function ToolSlot() {
 
   return (
     <div className="tool-slot tool-slot-content">
-      {toolRunning.length > 0 && (
+      {activeTools.length > 0 && (
         <div className="tool-slot-section">
           <div className="tool-slot-heading">
             <span>执行中</span>
-            <span className="tool-count-badge">{toolRunning.length}</span>
+            <span className="tool-count-badge">{activeTools.length}</span>
           </div>
-          {toolRunning.map((t) => (
+          {activeTools.map((t) => (
             <div key={t.id} className="tool-item tool-item-running">
               <div className="tool-item-icon">
-                <ToolIcon status="running" />
+                <ToolIcon state={t} />
               </div>
               <div className="tool-item-body">
                 <div className="tool-item-name">{t.tool}</div>
                 {t.args && Object.keys(t.args).length > 0 && <CollapsibleJson data={t.args} />}
                 <div className="tool-item-meta">
-                  <ElapsedTimer startedAt={t.startedAt ?? Date.now()} />
+                  {t.status === 'running' && <ElapsedTimer startedAt={t.startedAt} />}
+                  {t.status === 'pending' && <span>等待中</span>}
                 </div>
               </div>
               <button className="tool-cancel-btn" onClick={handleCancel} title="取消此工具">
@@ -93,36 +98,31 @@ export function ToolSlot() {
         </div>
       )}
 
-      {toolCompleted.length > 0 && (
+      {completedTools.length > 0 && (
         <div className="tool-slot-section">
           <div className="tool-slot-heading">
             <span>已执行</span>
-            <span className="tool-count-badge">{toolCompleted.length}</span>
+            <span className="tool-count-badge">{completedTools.length}</span>
           </div>
-          {toolCompleted.map((t) => {
-            const isTimeout = t.timeout ?? false
-            const isCancelled = t.cancelled ?? false
-            const isError = !!t.error && !isTimeout && !isCancelled
-            const cssClass = isTimeout
-              ? 'tool-item-timedout'
-              : isCancelled
-                ? 'tool-item-cancelled'
-                : isError
-                  ? 'tool-item-failed'
-                  : 'tool-item-done'
+          {completedTools.map((t) => {
+            const cssClass =
+              t.status === 'timeout' ? 'tool-item-timedout' :
+              t.status === 'cancelled' ? 'tool-item-cancelled' :
+              t.status === 'error' ? 'tool-item-failed' :
+              'tool-item-done'
 
             return (
               <div key={t.id} className={`tool-item ${cssClass}`}>
                 <div className="tool-item-icon">
-                  <ToolIcon status="done" error={t.error} timeout={isTimeout} cancelled={isCancelled} />
+                  <ToolIcon state={t} />
                 </div>
                 <div className="tool-item-body">
                   <div className="tool-item-name">{t.tool}</div>
                   <div className="tool-item-meta">
-                    {t.latencyMs !== undefined && <span className="tool-latency">{(t.latencyMs / 1000).toFixed(1)}s</span>}
-                    {isTimeout && <span className="tool-error-text">超时</span>}
-                    {isCancelled && <span className="tool-cancelled-text">已取消</span>}
-                    {isError && <span className="tool-error-text">{t.error}</span>}
+                    <span className="tool-latency">{(t.latencyMs / 1000).toFixed(1)}s</span>
+                    {t.status === 'timeout' && <span className="tool-error-text">超时</span>}
+                    {t.status === 'cancelled' && <span className="tool-cancelled-text">已取消</span>}
+                    {t.status === 'error' && <span className="tool-error-text">{t.error}</span>}
                   </div>
                 </div>
               </div>

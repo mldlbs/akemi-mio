@@ -25,13 +25,11 @@ export interface SessionItem {
   createdAt: number
 }
 
-export interface ToolEvent {
+export interface ToolIPCEvent {
   id: string
   tool: string
   args?: Record<string, any>
   result?: string
   error?: string
   latencyMs?: number
-  timeout?: boolean
-  cancelled?: boolean
 }

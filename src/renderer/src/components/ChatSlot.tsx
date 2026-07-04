@@ -1,8 +1,8 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
-import type { ToolEvent } from '../slots/types'
 import { useSessionStore } from '../store/sessionStore'
 import { useAgentStore } from '../store/agentStore'
 import type { AgentState } from '../store/agentStore'
+import { isToolActive } from '../tool/toolTypes'
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -31,8 +31,8 @@ const AGENT_LABELS: Record<AgentState, string | null> = {
   replying: null,
 }
 
-function humanToolName(t: ToolEvent): string {
-  const n = t.tool
+function humanToolName(tool: string): string {
+  const n = tool
   if (n === 'read_file') return '读取文件'
   if (n === 'edit_file') return '编辑文件'
   if (n === 'write_file') return '写入文件'
@@ -79,8 +79,10 @@ export function ChatSlot() {
   const displayText = useAgentStore((s) => s.displayText)
   const transcribed = useAgentStore((s) => s.transcribed)
   const agentState = useAgentStore((s) => s.agentState)
-  const toolRunning = useAgentStore((s) => s.toolRunning)
-  const toolCompleted = useAgentStore((s) => s.toolCompleted)
+  const tools = useAgentStore((s) => s.tools)
+
+  const toolRunning = useMemo(() => tools.filter(isToolActive), [tools])
+  const toolCompleted = useMemo(() => tools.filter((t) => !isToolActive(t)), [tools])
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const [toolsCollapsed, setToolsCollapsed] = useState(false)
@@ -96,7 +98,7 @@ export function ChatSlot() {
 
   const toolSummary = useMemo(() => {
     const allTools = [...toolRunning, ...toolCompleted]
-    const names = [...new Set(allTools.map((t) => humanToolName(t)))]
+    const names = [...new Set(allTools.map((t) => humanToolName(t.tool)))]
     if (names.length === 0) return ''
     if (names.length <= 2) return names.join('、')
     return `${names[0]} 等 ${names.length} 个工具`
@@ -174,7 +176,7 @@ export function ChatSlot() {
               {toolRunning.map((t) => (
                 <div key={t.id} className="tool-inline tool-inline-running">
                   <i className="ri-loader-4-line ri-spin" />
-                  <span className="tool-inline-name">{humanToolName(t)}</span>
+                  <span className="tool-inline-name">{humanToolName(t.tool)}</span>
                   {t.args && <span className="tool-inline-args">{summarizeArgs(t.tool, t.args)}</span>}
                 </div>
               ))}
@@ -190,14 +192,17 @@ export function ChatSlot() {
             <span className="tool-group-summary">完成 {toolCompleted.length} 个工具</span>
           </div>
           <div className="tool-inline-items">
-            {toolCompleted.map((t) => (
-              <div key={t.id} className={`tool-inline ${t.error ? 'tool-inline-failed' : 'tool-inline-done'}`}>
-                <i className={`ri-${t.error ? 'close-circle-line' : 'check-line'}`} />
-                <span className="tool-inline-name">{humanToolName(t)}</span>
-                {t.latencyMs !== undefined && <span className="tool-inline-meta">{(t.latencyMs / 1000).toFixed(1)}s</span>}
-                {t.error && <span className="tool-inline-error">{t.error}</span>}
-              </div>
-            ))}
+            {toolCompleted.map((t) => {
+              const isError = t.status === 'error'
+              return (
+                <div key={t.id} className={`tool-inline ${isError ? 'tool-inline-failed' : 'tool-inline-done'}`}>
+                  <i className={`ri-${isError ? 'close-circle-line' : 'check-line'}`} />
+                  <span className="tool-inline-name">{humanToolName(t.tool)}</span>
+                  <span className="tool-inline-meta">{(t.latencyMs / 1000).toFixed(1)}s</span>
+                  {isError && <span className="tool-inline-error">{t.error}</span>}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

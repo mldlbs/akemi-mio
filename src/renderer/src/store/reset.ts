@@ -11,8 +11,7 @@ export function resetAllStores() {
     displayText: '',
     transcribed: '',
     toolStatus: null,
-    toolRunning: [],
-    toolCompleted: [],
+    tools: [],
   })
   useDeviceStore.setState({
     active: false,
