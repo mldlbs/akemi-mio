@@ -9,6 +9,9 @@ interface ToolEventData {
   result?: string
   error?: string
   latencyMs?: number
+  startedAt?: number
+  timeout?: boolean
+  cancelled?: boolean
 }
 
 interface AgentStateData {

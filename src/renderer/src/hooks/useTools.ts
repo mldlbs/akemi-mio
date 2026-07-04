@@ -15,7 +15,7 @@ export function useTools() {
 
   useIPCEvent(window.electronAPI.onToolInvoked, (data: ToolEvent) => {
     const id = data.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    store.addToolRunning({ id, tool: data.tool, args: data.args })
+    store.addToolRunning({ id, tool: data.tool, args: data.args, startedAt: Date.now() })
   })
 
   useIPCEvent(window.electronAPI.onToolCompleted, (data: ToolEvent) => {

@@ -32,4 +32,6 @@ export interface ToolEvent {
   result?: string
   error?: string
   latencyMs?: number
+  timeout?: boolean
+  cancelled?: boolean
 }
