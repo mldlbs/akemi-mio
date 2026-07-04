@@ -1,5 +1,6 @@
 import { buildTool, formatToolResult, formatToolError } from '../types'
 import { getHealthManager } from '../deps'
+import { getHealthLevel } from '../../governance/SessionGovernorTypes'
 
 export const getSystemHealthTool = buildTool({
   name: 'get_system_health',
@@ -19,7 +20,7 @@ export const getSystemHealthTool = buildTool({
       lines.push(`  会话: ${snapshot.session.score} (${snapshot.session.level})`)
       lines.push(`  能力: ${snapshot.capability.score} (${snapshot.capability.level})`)
       lines.push(`  任务: ${snapshot.task.score} (${snapshot.task.level})`)
-      lines.push(`  模型: ${snapshot.model.score} (${snapshot.model.level}) | 失败: ${snapshot.model.failureCount}`)
+      lines.push(`  模型: ${snapshot.model.score} (${getHealthLevel(snapshot.model.score)}) | 失败: ${snapshot.model.failureCount}`)
       if (snapshot.recommendedActions?.length) {
         lines.push('')
         lines.push('建议操作:')

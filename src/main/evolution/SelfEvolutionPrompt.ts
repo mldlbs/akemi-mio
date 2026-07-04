@@ -9,7 +9,7 @@
  * - emoji/颜文字规则
  * - 口语化要求（进化分析产生书面报告）
  *
- * 上下文体积减少约 60-70%，降低 LLM 在无关上下文中迷失导致超时的风险。
+ * 上下文体积减少约 35-50%，降低 LLM 在无关上下文中迷失导致超时的风险。
  */
 
 const EVOLUTION_IDENTITY = `你是秋山澪的自进化系统。
@@ -85,7 +85,7 @@ CLI 可用命令:
   stats <platform>               查统计
   mode <safe|assisted|autopilot> 安全模式
   policy                         查看策略
-  cred set/list                  凭据管理
+  cred set/list                  平台凭据
   adapters                       列出适配器
   accounts                       列出账号
 

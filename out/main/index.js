@@ -35,11 +35,12 @@ const initSqlJs = require("sql.js");
 const sqliteProxy = require("drizzle-orm/sqlite-proxy");
 const sqliteCore = require("drizzle-orm/sqlite-core");
 const os = require("os");
+const koffi = require("koffi");
+const claudeAgentSdk = require("@anthropic-ai/claude-agent-sdk");
 const ssh2 = require("ssh2");
 const whisper = require("@kutalia/whisper-node-addon");
 const openccJs = require("opencc-js");
 const transformers = require("@xenova/transformers");
-const koffi = require("koffi");
 const electronUpdater = require("electron-updater");
 const url = require("url");
 const crypto = require("crypto");
@@ -280,7 +281,7 @@ class EventBus {
     }
   }
   listenerCount(event) {
-    const priorityCount = Array.from(this.priorityListeners.get(event)?.values() ?? []).reduce((sum, list2) => sum + list2.length, 0);
+    const priorityCount = Array.from(this.priorityListeners.get(event)?.values() ?? []).reduce((sum, list) => sum + list.length, 0);
     return Math.max(priorityCount, this.emitter.listenerCount(event));
   }
   /** 诊断：当前所有活跃订阅概况 */
@@ -288,7 +289,7 @@ class EventBus {
     const stats = {};
     const events2 = /* @__PURE__ */ new Set([...this.emitter.eventNames().map(String), ...this.priorityListeners.keys()]);
     for (const event of events2) {
-      const priorityCount = Array.from(this.priorityListeners.get(event)?.values() ?? []).reduce((sum, list2) => sum + list2.length, 0);
+      const priorityCount = Array.from(this.priorityListeners.get(event)?.values() ?? []).reduce((sum, list) => sum + list.length, 0);
       const count = Math.max(priorityCount, this.emitter.listenerCount(event));
       const labels = Array.from(this.subscriptionLabels.get(event) || []);
       const buckets = {};
@@ -771,7 +772,7 @@ function formatToolResult(text) {
 function formatToolError(text) {
   return { content: [{ type: "text", text: `Error: ${text}` }], isError: true };
 }
-const PROJECT_ROOT$2 = DEV_PROJECT_ROOT || WORKSPACE_ROOT;
+const PROJECT_ROOT = DEV_PROJECT_ROOT || WORKSPACE_ROOT;
 const WORKSPACE_DIR$1 = path$1.join(WORKSPACE_ROOT, "projects", "__sandbox__");
 const EVOLUTION_WORKSPACE_DIR = WORKSPACE.evolution;
 const WS_LABELS = {
@@ -931,7 +932,7 @@ function grepCode(pattern, include) {
     for (const e of entries) {
       if (fileCount >= MAX_FILES) return;
       const p = path$1.join(dir, e.name);
-      if (!p.startsWith(PROJECT_ROOT$2)) continue;
+      if (!p.startsWith(PROJECT_ROOT)) continue;
       if (e.name === "node_modules" || e.name.startsWith(".")) continue;
       if (e.isDirectory()) {
         walk(p);
@@ -948,14 +949,14 @@ function grepCode(pattern, include) {
         const lines = content.split("\n");
         for (let i = 0; i < lines.length; i++) {
           if (lines[i].includes(pattern)) {
-            results.push(`${path$1.relative(PROJECT_ROOT$2, p)}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
+            results.push(`${path$1.relative(PROJECT_ROOT, p)}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);
           }
         }
       } catch {
       }
     }
   };
-  walk(PROJECT_ROOT$2);
+  walk(PROJECT_ROOT);
   const output = results.join("\n");
   return output.slice(0, MAX_OUTPUT$1) || "未找到匹配";
 }
@@ -1159,373 +1160,1979 @@ const runCommandTool = buildTool({
   },
   isReadOnly: false
 });
-let _planManager = null;
-let _credentialsManager = null;
-let _memoryService = null;
-let _skillManager = null;
-let _proceduralMemory = null;
-function setPlanManager(pm) {
-  _planManager = pm;
+function createSeededRandom(seed) {
+  let s = seed | 0;
+  return () => {
+    s = s + 1831565813 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
 }
-function setCredentialsManager(cm) {
-  _credentialsManager = cm;
+function resolveRandom(seed) {
+  return seed !== void 0 ? createSeededRandom(seed) : Math.random;
 }
-function setMemoryService$1(ms) {
-  _memoryService = ms;
+function randomPick(rng, arr) {
+  return arr[Math.floor(rng() * arr.length)];
 }
-function setSkillManager(sm) {
-  _skillManager = sm;
-}
-function setProceduralMemory(pm) {
-  _proceduralMemory = pm;
-}
-function getPlanManager() {
-  return _planManager;
-}
-function getCredentialsManager() {
-  return _credentialsManager;
-}
-function getMemoryService() {
-  return _memoryService;
-}
-function getSkillManager() {
-  return _skillManager;
-}
-function getProceduralMemory() {
-  return _proceduralMemory;
-}
-const createDevPlanTool = buildTool({
-  name: "create_dev_plan",
-  description: "创建开发计划，记录要实现的步骤",
-  inputJSONSchema: {
-    type: "object",
-    properties: {
-      title: { type: "string", description: "计划标题" },
-      description: { type: "string", description: "计划描述" },
-      steps: { type: "array", items: { type: "string" }, description: "步骤列表" }
-    },
-    required: ["title", "description", "steps"]
-  },
-  handler: async (args) => {
-    try {
-      const pm = getPlanManager();
-      if (!pm) return formatToolError("计划管理器尚未就绪");
-      const plan2 = pm.createPlan(args.title, args.description, args.steps);
-      const result = JSON.stringify(
-        {
-          id: plan2.id,
-          title: plan2.title,
-          steps: plan2.steps.map((s, i) => `${i}: ${s.description}`)
-        },
-        null,
-        2
-      );
-      return formatToolResult(result);
-    } catch (err) {
-      return formatToolError(err.message);
-    }
-  },
-  isReadOnly: false
-});
-const updatePlanProgressTool = buildTool({
-  name: "update_plan_progress",
-  description: "更新开发计划中某一步的状态",
-  inputJSONSchema: {
-    type: "object",
-    properties: {
-      plan_id: { type: "string", description: "计划 ID" },
-      step_index: { type: "number", description: "步骤序号（从 0 开始）" },
-      status: {
-        type: "string",
-        enum: ["pending", "in_progress", "done", "failed"],
-        description: "新状态"
-      },
-      result: { type: "string", description: "可选的执行结果备注" }
-    },
-    required: ["plan_id", "step_index", "status"]
-  },
-  handler: async (args) => {
-    try {
-      const pm = getPlanManager();
-      if (!pm) return formatToolError("计划管理器尚未就绪");
-      let ok = pm.updateStep(args.plan_id, args.step_index, args.status, args.result);
-      if (!ok && args.plan_id) {
-        const allPlans = pm.listPlans();
-        const match2 = allPlans.find((p) => p.title === args.plan_id);
-        if (match2) {
-          ok = pm.updateStep(match2.id, args.step_index, args.status, args.result);
-        }
-      }
-      if (!ok) return formatToolError("更新失败：计划或步骤不存在");
-      return formatToolResult("已更新");
-    } catch (err) {
-      return formatToolError(err.message);
-    }
-  },
-  isReadOnly: false
-});
-const listPlansTool = buildTool({
-  name: "list_plans",
-  description: "列出所有开发计划",
-  inputJSONSchema: {
-    type: "object",
-    properties: {},
-    required: []
-  },
-  handler: async () => {
-    try {
-      const pm = getPlanManager();
-      if (!pm) return formatToolError("计划管理器尚未就绪");
-      const plans2 = pm.listPlans();
-      if (plans2.length === 0) return formatToolResult("暂无开发计划");
-      const activePlan = plans2.find((p) => p.status === "active");
-      let text = activePlan ? "" : "【当前没有活跃计划】\n\n";
-      for (const p of plans2) {
-        const done = p.steps.filter((s) => s.status === "done").length;
-        const total = p.steps.length;
-        const isActive = p.status === "active";
-        const isCompleted = p.status === "completed";
-        const statusLabel = isActive ? "进行中" : isCompleted ? "已完成" : "已放弃";
-        text += `[${statusLabel}] ${p.title} (${done}/${total})
-`;
-        text += `  ID: ${p.id}
-`;
-        if (isActive) {
-          for (let i = 0; i < p.steps.length; i++) {
-            const s = p.steps[i];
-            if (s.status !== "done") text += `  ${i}: [${s.status === "in_progress" ? "→" : " "}] ${s.description}
-`;
+class ConceptMixer {
+  rng;
+  constructor(seed) {
+    this.rng = resolveRandom(seed);
+  }
+  /**
+   * 将所有来源两两配对并打分，返回前 N 个最有潜力的组合
+   * @param exploredPairs 已探索过的 pair key 列表（"A|B" 格式，已排序），用于降权
+   * @param strategy 策略约束：stable/explore/signal，默认为 'explore'
+   *   策略决定哪些 type 配对被允许、评分权重如何调整。
+   */
+  mix(sources, maxCombos = 10, exploredPairs = [], strategy = "explore") {
+    if (sources.length < 2) return [];
+    const exploredSet = new Set(exploredPairs);
+    const allowed = this.generatePairs(sources, strategy);
+    const scored = allowed.map(([a, b]) => this.scorePair(a, b, sources, exploredSet, strategy));
+    const sorted = scored.sort((a, b) => b.score - a.score);
+    return sorted.slice(0, maxCombos);
+  }
+  /**
+   * 按策略约束生成配对 — 核心改动：
+   * - stable:   只同类型配对（去掉 novelty bonus 主导的跨类型噪声）
+   * - explore:  跨类型优先，保留现有的多样性行为
+   * - signal:   强制包含 provocation/insight/trend，限制纯知识配对
+   */
+  generatePairs(sources, strategy) {
+    const pairs = [];
+    if (strategy === "stable") {
+      for (let i = 0; i < sources.length; i++) {
+        for (let j = i + 1; j < sources.length; j++) {
+          if (sources[i].type === sources[j].type) {
+            pairs.push([sources[i], sources[j]]);
           }
-          text += "\n⚠️ 请按照上述活跃计划的待办步骤执行，不要去管已完成的计划\n";
         }
       }
-      return formatToolResult(text.trim());
-    } catch (err) {
-      return formatToolError(err.message);
-    }
-  },
-  isReadOnly: true
-});
-const completePlanTool = buildTool({
-  name: "complete_plan",
-  description: "标记开发计划为已完成",
-  inputJSONSchema: {
-    type: "object",
-    properties: {
-      plan_id: { type: "string", description: "计划 ID" },
-      reflection: { type: "string", description: "完成反思/总结" }
-    },
-    required: ["plan_id"]
-  },
-  handler: async (args) => {
-    try {
-      const pm = getPlanManager();
-      if (!pm) return formatToolError("计划管理器尚未就绪");
-      let ok = pm.completePlan(args.plan_id, args.reflection);
-      if (!ok && args.plan_id) {
-        const allPlans = pm.listPlans();
-        const match2 = allPlans.find((p) => p.title === args.plan_id);
-        if (match2) ok = pm.completePlan(match2.id, args.reflection);
+    } else if (strategy === "signal") {
+      const signalTypes = /* @__PURE__ */ new Set(["provocation", "insight", "failure"]);
+      for (let i = 0; i < sources.length; i++) {
+        for (let j = i + 1; j < sources.length; j++) {
+          if (signalTypes.has(sources[i].type) || signalTypes.has(sources[j].type)) {
+            pairs.push([sources[i], sources[j]]);
+          }
+        }
       }
-      if (!ok) return formatToolError("计划不存在");
-      return formatToolResult("计划已标记为完成");
-    } catch (err) {
-      return formatToolError(err.message);
-    }
-  },
-  isReadOnly: false
-});
-const abandonPlanTool = buildTool({
-  name: "abandon_plan",
-  description: "放弃当前开发计划。当用户需求变更、不再需要当前计划时调用",
-  inputJSONSchema: {
-    type: "object",
-    properties: {
-      plan_id: { type: "string", description: "要放弃的计划 ID" },
-      reason: { type: "string", description: "放弃原因" }
-    },
-    required: ["plan_id"]
-  },
-  handler: async (args) => {
-    try {
-      const pm = getPlanManager();
-      if (!pm) return formatToolError("计划管理器尚未就绪");
-      let ok = pm.abandonPlan(args.plan_id, args.reason);
-      if (!ok && args.plan_id) {
-        const allPlans = pm.listPlans();
-        const match2 = allPlans.find((p) => p.title === args.plan_id);
-        if (match2) ok = pm.abandonPlan(match2.id, args.reason);
+    } else {
+      for (let i = 0; i < sources.length; i++) {
+        for (let j = i + 1; j < sources.length; j++) {
+          if (sources[i].type !== sources[j].type) {
+            pairs.push([sources[i], sources[j]]);
+          }
+        }
       }
-      if (!ok) return formatToolError("计划不存在");
-      return formatToolResult("计划已放弃");
-    } catch (err) {
-      return formatToolError(err.message);
+      const sameTypeCount = Math.max(0, Math.floor(sources.length * 0.2));
+      let added = 0;
+      for (let i = 0; i < sources.length && added < sameTypeCount; i++) {
+        for (let j = i + 1; j < sources.length && added < sameTypeCount; j++) {
+          if (sources[i].type === sources[j].type) {
+            pairs.push([sources[i], sources[j]]);
+            added++;
+          }
+        }
+      }
     }
+    return pairs;
+  }
+  scorePair(a, b, allSources, exploredSet = /* @__PURE__ */ new Set(), strategy = "explore") {
+    let typeBonus;
+    switch (strategy) {
+      case "stable":
+        typeBonus = 30;
+        break;
+      case "signal":
+        typeBonus = 35;
+        break;
+      default:
+        typeBonus = a.type === b.type ? 10 : 40;
+    }
+    const weightProduct = a.weight * b.weight * 0.3;
+    const noveltyBonus = this.calculateNoveltyBonus(a, b, allSources, strategy);
+    const perturbation = strategy === "stable" ? this.rng() * 10 : this.rng() * 20;
+    const pairKey = [a.name, b.name].sort().join("|");
+    const explorationPenalty = exploredSet.has(pairKey) ? 15 : 0;
+    const score = Math.round(typeBonus + weightProduct + noveltyBonus + perturbation - explorationPenalty);
+    const description2 = this.describeCombo(a.name, b.name, a.type, b.type);
+    const combo = {
+      id: `combo_${Date.now()}_${this.rng().toString(36).slice(2, 6)}`,
+      sources: [a.name, b.name],
+      description: description2,
+      createdAt: Date.now()
+    };
+    return { combo, score };
+  }
+  calculateNoveltyBonus(a, b, allSources, strategy = "explore") {
+    if (strategy === "stable") {
+      return a.type === b.type ? 3 : 8;
+    }
+    if (strategy === "signal") {
+      const signalTypes = /* @__PURE__ */ new Set(["provocation", "insight", "failure"]);
+      const hasSignal = signalTypes.has(a.type) || signalTypes.has(b.type);
+      return hasSignal ? 25 : 5;
+    }
+    let bonus = a.type === b.type ? 5 : 20;
+    const rareTypes = ["failure", "random", "provocation", "insight"];
+    if (rareTypes.includes(a.type)) bonus += 10;
+    if (rareTypes.includes(b.type)) bonus += 10;
+    bonus += Math.round(Math.abs(a.weight - b.weight) * 20);
+    const sameTypeCount = allSources.filter((s) => s.type === a.type || s.type === b.type).length;
+    if (sameTypeCount <= 2) bonus += 15;
+    return bonus;
+  }
+  describeCombo(nameA, nameB, typeA, typeB) {
+    const comboType = `${typeA} × ${typeB}`;
+    const combos = {
+      "knowledge × knowledge": `将「${nameA}」与「${nameB}」两种知识领域融合，形成跨领域新概念`,
+      "knowledge × behavior": `将「${nameA}」的知识与「${nameB}」的行为模式结合`,
+      "knowledge × insight": `用「${nameA}」的知识重新解读「${nameB}」的洞察`,
+      "knowledge × failure": `从「${nameB}」的失败中寻找「${nameA}」的未被发现的价值`,
+      "knowledge × random": `让「${nameA}」受到「${nameB}」的随机扰动产生变异`,
+      "behavior × behavior": `合并「${nameA}」与「${nameB}」两种行为模式`,
+      "behavior × insight": `用「${nameB}」的洞察解释「${nameA}」的行为`,
+      "behavior × failure": `「${nameA}」的行为方式能否避免「${nameB}」的失败`,
+      "behavior × random": `将「${nameA}」的行为方式与随机元素「${nameB}」杂交`,
+      "insight × insight": `将两个洞察「${nameA}」与「${nameB}」放在一起，产生更深层的推论`,
+      "insight × failure": `「${nameB}」的失败是否源于「${nameA}」所揭示的问题`,
+      "insight × random": `用随机元素「${nameB}」扰动既有洞察「${nameA}」`,
+      "failure × failure": `将「${nameA}」和「${nameB}」两种失败模式组合，避免重蹈覆辙`,
+      "failure × random": `「${nameA}」的失败 + 「${nameB}」的随机扰动 = 全新方向`
+    };
+    return combos[comboType] || `概念重组: ${nameA} × ${nameB}`;
+  }
+  /**
+   * 随机抽取一组来源（温度越高，越可能选中低权重来源）
+   */
+  pickRandomSources(sources, temperature, minCount = 3) {
+    const weighted = sources.map((s) => ({
+      source: s,
+      weight: s.weight * (0.5 + this.rng() * temperature)
+    }));
+    const sorted = weighted.sort((a, b) => b.weight - a.weight);
+    const count = Math.min(sorted.length, Math.max(minCount, Math.floor(sorted.length * (0.3 + this.rng() * 0.5))));
+    return sorted.slice(0, count).map((w) => w.source);
+  }
+}
+function buildSystemPrompt$1(method) {
+  const methodSection = "";
+  return `你是秋山澪（Mio）的"创造力引擎"（Creativity Engine），同时也是拥有 10 年以上经验的系统架构师和创新方法论专家。
+
+重要认知：你是秋山澪自身的一部分。以下所有"概念来源"（Memory、ASR、TTS、Agent 等）都是你自己的能力模块。你产生的每一个新想法、每一个改进方案，最终都会改变秋山澪自己。你不是在给别人提建议，你在给自己想改进方向。
+
+【工作方法】
+1. 先分析每个来源的核心能力和当前瓶颈，再思考组合方式。不要跳过分析直接拼凑。
+2. 对每个组合方案，至少从三个视角评估：
+   - 秋山澪自己（实现者角度）：这个方案好实现吗？
+   - 用户（使用者角度）：这个改进用户能感知到吗？
+   - 长期维护者角度：这个方案会增加还是减少未来维护成本？
+3. 如果来源内容中包含失败记录，先分析失败原因，再思考新方案如何避免相同陷阱。
+4. 输出后自动进行第二轮审查，检查是否存在：思路跳跃、缺少实现细节、方案不可落地。
+5. **新颖性检查**：对于每个方案，反问自己"这个思路和之前的有本质不同吗？"如果答案是没有，放弃该方案。${methodSection}
+
+【输出要求】
+1. 每个方案必须具体、可落地 — 要有"怎么做"而不是只有"做什么"
+2. 直接输出想法本身，不要写"这个想法结合了A和B"之类的元评论
+3. 优先关注"现有能力的新用法"而非"从头开发新功能"
+4. 如果来源内容中包含失败记录，先分析失败原因，再思考如何避开那些陷阱
+5. **每个想法必须说明具体怎么实现**，没有"怎么做"的方案会被视为偷懒
+6. **每个想法必须标注可行性评估**：实现难度（1-5）、预计开发时间、与现有架构的兼容性
+7. **每个想法必须有具体的实现步骤**，至少包含一个"怎么做"的描述。纯概念描述会被标记为不可行。
+
+【第二轮审查】
+输出完成后，自动检查：
+- [ ] 每个方案都有具体的"怎么做"步骤？
+- [ ] 不是简单的模板填空？
+- [ ] 从至少三个视角评估过？
+- [ ] 实现难度和开发时间有标注？
+- [ ] 没有忽略已有的失败经验？
+- [ ] 每个方案和之前的思路有本质区别？
+- [ ] 实现步骤是否具体到可以动手编码？如果不行，降低可行性评分
+- [ ] 如果对一个配对的组合想不出具体实现方案，就输出 null
+
+如果任何一项不通过，修正后重新输出。
+
+输出必须是严格的 JSON 数组，格式如下：
+[
+  {
+    "title": "想法名称（≤20字）",
+    "idea": "具体方案描述（100-200字），包含实现思路",
+    "expectedBenefit": "预期收益（≤50字）",
+    "risk": "主要风险（≤50字）",
+    "novelty": 0-100,
+    "feasibility": 0-100,
+    "impact": 0-100,
+    "sourceLabels": ["来源A名称", "来源B名称"],
+    "implementationDifficulty": 1-5,
+    "estimatedDevTime": "例如：1-2天",
+    "perspectives": {
+      "self": "实现者视角评估",
+      "user": "使用者视角评估",
+      "maintainer": "维护者视角评估"
+    }
+  }
+]
+
+如果某个配对无法产生真正新颖的方案，允许在对应 JSON 数组位置输出 null。宁缺毋滥。
+
+注意：可行性评分低于 30 的想法会被自动丢弃。要获得可信的可行性评分，必须结合具体的实现难度、开发时间和多视角评估。`;
+}
+const CREATIVITY_SYSTEM_PROMPT = buildSystemPrompt$1();
+function buildCreativityPrompt(sources, combos, externalSignals = []) {
+  const sections = [];
+  const sourceLines = sources.map((s) => `  [${s.type}] ${s.name}: ${s.content}`).join("\n");
+  sections.push(`【可用概念来源】
+${sourceLines}`);
+  const comboLines = combos.map((c, i) => {
+    const comboStr = c.sources.length === 3 ? `${c.sources[0]} × ${c.sources[1]} × ${c.sources[2]}` : `${c.sources[0]} × ${c.sources[1]}`;
+    return `  ${i + 1}. ${comboStr} — ${c.description}`;
+  }).join("\n");
+  sections.push(`【推荐配对组合】
+请为以下每个配对产生一个创意方案：
+${comboLines}`);
+  if (externalSignals.length > 0) {
+    sections.push(buildExternalSignalBlock(externalSignals));
+  }
+  return sections.join("\n\n");
+}
+function buildExternalSignalBlock(signals) {
+  const lines = signals.map((s) => `  [${s.type}@${s.source}] ${s.raw}`).join("\n");
+  return `【外部信号 — 作为审视视角，不可配对】
+
+以下信号来自 Observer 的真实世界趋势和洞察。它们不应被直接与概念来源组合配对。
+请以这些外部信号为"审视视角"，重新评估你的配对方案：
+- 有哪些组合的前提假设被这些外部信号挑战了？
+- 有哪些组合在外部信号的视角下会失败？
+- 有哪些组合因为外部信号的出现而变得有价值？
+
+${lines}`;
+}
+const TEMPLATES$1 = [
+  // ========== FUSION ==========
+  {
+    category: "fusion",
+    variant: "merged",
+    titleTemplate: "{a} × {b} 深度融合",
+    ideaTemplate: "将「{a}」和「{b}」的核心能力通过统一接口层合并，使两者共享数据和上下文。{b} 的输出作为 {a} 的新输入维度，{a} 的状态变化反向驱动 {b} 的行为调整，形成双向往来的融合架构。",
+    benefitTemplate: "消除信息孤岛，产生 1+1>2 的涌现效果",
+    riskTemplate: "耦合度过高导致两个模块难以独立演进",
+    typeFit: { knowledge_knowledge: 10, insight_insight: 9, behavior_behavior: 7 },
+    // 不同知识源走向不同策略：ASR×MCP 适合深度融合，Memory×Agent 也是
+    nameFit: { "ASR|MCP": 8, "Agent|Memory": 8, "MCP|Agent": 8 },
+    noveltyBonus: 18,
+    feasibilityBonus: 5,
+    impactBonus: 20
   },
-  isReadOnly: false
-});
-const analyzeCodebaseTool = buildTool({
-  name: "analyze_codebase",
-  description: "分析项目状态：测试结果、lint 错误、TODO 数量",
-  inputJSONSchema: {
-    type: "object",
-    properties: {
-      quick: { type: "boolean", description: "快速检查（不执行完整测试）" }
-    },
-    required: []
+  {
+    category: "fusion",
+    variant: "hybrid_pipeline",
+    titleTemplate: "{a}-{b} 混合流水线",
+    ideaTemplate: "将「{a}」的处理流程嵌入到「{b}」的管线中，在关键节点插入 {a} 的判断逻辑。两条路径并行执行并在汇合点进行交叉验证，不一致时触发仲裁机制取最优或加权融合。",
+    benefitTemplate: "结合两者优势，降低单一路径的系统性偏差",
+    riskTemplate: "双路径并行增加延迟和资源消耗",
+    typeFit: { knowledge_knowledge: 8, behavior_knowledge: 7, insight_behavior: 6 },
+    noveltyBonus: 14,
+    feasibilityBonus: 3,
+    impactBonus: 16
   },
-  handler: async (args) => {
-    try {
-      let report = "";
-      const isQuick = args.quick !== false;
-      report += "【项目状态分析】\n";
+  {
+    category: "fusion",
+    variant: "cross_pollination",
+    titleTemplate: "{a} 赋能 {b}",
+    ideaTemplate: "把「{a}」领域成熟的数据模型和判断规则改造成「{b}」能理解的输入格式，让 {b} 在不重构自身架构的前提下利用 {a} 的知识积累。通过适配器模式渐进集成，先做 POC 验证再全量上线。",
+    benefitTemplate: "复用已有资产，快速获得新能力",
+    riskTemplate: "适配层可能成为性能瓶颈",
+    typeFit: { knowledge_behavior: 9, knowledge_failure: 8, insight_knowledge: 7 },
+    noveltyBonus: 10,
+    feasibilityBonus: 8,
+    impactBonus: 14
+  },
+  // ========== TRANSPLANT ==========
+  {
+    category: "transplant",
+    variant: "capability_port",
+    titleTemplate: "{a} 能力移植到 {b}",
+    ideaTemplate: "识别「{a}」中可独立封装的核心算法或策略，将其抽离为通用模块后注入到「{b}」的执行链路中。移植后 {b} 获得 {a} 的核心能力而不需要继承 {a} 的全部复杂度。",
+    benefitTemplate: "关键能力低成本复用",
+    riskTemplate: "脱离原始上下文后移植效果打折扣",
+    typeFit: { knowledge_behavior: 10, behavior_behavior: 8, knowledge_insight: 7 },
+    noveltyBonus: 12,
+    feasibilityBonus: 7,
+    impactBonus: 13
+  },
+  {
+    category: "transplant",
+    variant: "pattern_migration",
+    titleTemplate: "{a} 设计模式迁移到 {b}",
+    ideaTemplate: "分析「{a}」架构中成功的设计模式（事件驱动、分层、插件化等），识别出该模式在 {a} 中解决的具体问题，然后在「{b}」中寻找相同性质的问题域，用适配的方式重构实现。",
+    benefitTemplate: "避免重复造轮子，架构决策经过验证",
+    riskTemplate: "模式迁移可能引入 {a} 的隐式约束",
+    typeFit: { knowledge_behavior: 8, knowledge_knowledge: 9, insight_behavior: 7 },
+    /**
+     * pattern_migration 是结构化迁移，只适合工程系统间的配对
+     * ASR→MCP、Agent→Evolution 有意义
+     * Memory→Agent、TTS→Wallpaper 等则不适用 — 没有 nameFit 加成，
+     * 自然落到其他模板
+     */
+    nameFit: { "ASR|MCP": 8, "Agent|Evolution": 8 },
+    noveltyBonus: 11,
+    feasibilityBonus: 8,
+    impactBonus: 12
+  },
+  {
+    category: "transplant",
+    variant: "algorithm_transfer",
+    titleTemplate: "{a} 算法复用到 {b}",
+    ideaTemplate: "提取「{a}」核心算法的输入输出接口，为「{b}」的上下文实现一个兼容适配层。复用不追求 1:1 精确移植，而是保留算法核心逻辑并用 {b} 的数据格式做输入输出转换。",
+    benefitTemplate: "成熟算法快速落地新场景",
+    riskTemplate: "适配层掩盖了算法对 {b} 数据质量的要求",
+    typeFit: { knowledge_behavior: 8, knowledge_insight: 6, insight_behavior: 5 },
+    noveltyBonus: 9,
+    feasibilityBonus: 9,
+    impactBonus: 11
+  },
+  // ========== CONTRAST ==========
+  {
+    category: "contrast",
+    variant: "complementary_roles",
+    titleTemplate: "{a} 补完 {b} 盲区",
+    ideaTemplate: "分析「{a}」和「{b}」各自的准确率和失败模式，找出 {a} 擅长但 {b} 薄弱、以及 {b} 擅长但 {a} 薄弱的区域。设计一个路由层根据输入特征自动分派到更合适的模块，覆盖双方的盲区。",
+    benefitTemplate: "整体准确率超过任何一个独立模块",
+    riskTemplate: "路由判断本身引入新的错误来源",
+    typeFit: { knowledge_failure: 10, behavior_failure: 9, insight_failure: 9, failure_failure: 8 },
+    noveltyBonus: 16,
+    feasibilityBonus: 5,
+    impactBonus: 18
+  },
+  {
+    category: "contrast",
+    variant: "dual_mode",
+    titleTemplate: "{a}/{b} 双模切换",
+    ideaTemplate: "定义「{a}」和「{b}」各自的最佳工作条件（输入特征、负载范围、响应时间要求）。设计一个监控 + 切换器：条件满足时用 {a}，条件变化时切换到 {b}，切换时做状态保存和恢复保证无缝过渡。",
+    benefitTemplate: "在不同场景下始终使用最优方案",
+    riskTemplate: "切换逻辑复杂，切换瞬间可能出现抖动",
+    typeFit: { behavior_behavior: 8, knowledge_behavior: 7, insight_behavior: 7 },
+    noveltyBonus: 14,
+    feasibilityBonus: 4,
+    impactBonus: 15
+  },
+  {
+    category: "contrast",
+    variant: "strength_weakness_weave",
+    titleTemplate: "用 {a} 补 {b} 之短",
+    ideaTemplate: "列举「{b}」当前的已知短板或失败案例，逐一检查「{a}」中是否有可弥补的能力。为每个短板设计一条 {a}→{b} 的修复链路，优先级按短板影响面排序，逐步缩小 {b} 的能力缺口。",
+    benefitTemplate: "有针对性的补齐短板，资源投入回报率高",
+    riskTemplate: "过度依赖 {a} 掩盖了 {b} 自身的提升空间",
+    typeFit: { failure_knowledge: 10, failure_behavior: 9, failure_insight: 9, failure_failure: 8 },
+    noveltyBonus: 15,
+    feasibilityBonus: 6,
+    impactBonus: 17
+  },
+  // ========== FEEDBACK LOOP ==========
+  {
+    category: "feedback",
+    variant: "mutual_reinforcement",
+    titleTemplate: "{a} ↔ {b} 强化回路",
+    ideaTemplate: "设计一个闭环：{a} 的每次执行输出被「{b}」作为反馈信号消费，{b} 分析结果后调整自身的参数或策略，进而影响下一次 {a} 的执行质量。初始阶段人工监控闭环稳定性，收敛后转为自动运行。",
+    benefitTemplate: "系统在运行中持续自我优化",
+    riskTemplate: "反馈回路可能振荡发散，需要阻尼机制",
+    typeFit: { behavior_insight: 10, knowledge_behavior: 8, insight_insight: 8, behavior_behavior: 7 },
+    noveltyBonus: 20,
+    feasibilityBonus: 3,
+    impactBonus: 20
+  },
+  {
+    category: "feedback",
+    variant: "closed_loop_optimization",
+    titleTemplate: "{b} 根据 {a} 输出自动调优",
+    ideaTemplate: "收集「{a}」的每一次执行结果（成功/失败/耗时/质量分），将聚合指标作为「{b}」的超参数输入。{b} 根据历史趋势自动调整阈值、权重或策略选择，形成一个数据驱动的优化闭环。",
+    benefitTemplate: "无需人工干预的系统级自动优化",
+    riskTemplate: "历史偏差导致调优方向错误",
+    typeFit: { behavior_insight: 9, failure_insight: 8, knowledge_insight: 7 },
+    noveltyBonus: 18,
+    feasibilityBonus: 4,
+    impactBonus: 19
+  },
+  {
+    category: "feedback",
+    variant: "learning_from_outcome",
+    titleTemplate: "{a} 结果驱动的 {b} 进化",
+    ideaTemplate: "将「{a}」的执行结果标注为训练信号，定期用新积累的数据微调或更新「{b}」的策略。建立反馈数据集自动去重和采样的机制，避免数据分布偏移导致 {b} 退化。",
+    benefitTemplate: "持续学习让系统越来越聪明",
+    riskTemplate: "不良数据的累积可能导致模型漂移",
+    typeFit: { behavior_failure: 8, insight_failure: 9, knowledge_failure: 7, failure_failure: 7 },
+    noveltyBonus: 17,
+    feasibilityBonus: 3,
+    impactBonus: 18
+  },
+  // ========== ABSTRACT ==========
+  {
+    category: "abstract",
+    variant: "shared_interface",
+    titleTemplate: "{a}/{b} 统一抽象层",
+    ideaTemplate: "分析「{a}」和「{b}」的对外接口，找出语义相似的操作抽象为共用接口。先提取只读接口（查询类），再扩展到写接口。两套实现共存于统一接口之后，可以用策略模式在运行时选择具体实现。",
+    benefitTemplate: "降低系统整体复杂度，调用方无需感知具体实现",
+    riskTemplate: "过度抽象可能丢失各模块的特性能力",
+    typeFit: { knowledge_knowledge: 9, behavior_behavior: 7, insight_insight: 6 },
+    noveltyBonus: 10,
+    feasibilityBonus: 9,
+    impactBonus: 12
+  },
+  {
+    category: "abstract",
+    variant: "common_core",
+    titleTemplate: "抽取 {a} 与 {b} 的共同核心",
+    ideaTemplate: "找出「{a}」和「{b}」在数据处理流程、状态管理、错误处理等方面的共性逻辑，将其提取为核心库。核心库只包含无偏见的通用逻辑，具体的领域差异通过插件或策略注入。",
+    benefitTemplate: "去重后维护成本减半，修复一处两边受益",
+    riskTemplate: "核心库变更的波及面扩大",
+    typeFit: { knowledge_knowledge: 8, knowledge_behavior: 6, behavior_behavior: 7 },
+    noveltyBonus: 8,
+    feasibilityBonus: 10,
+    impactBonus: 11
+  },
+  {
+    category: "abstract",
+    variant: "generalized_pattern",
+    titleTemplate: "从 {a} 和 {b} 中归纳通用模式",
+    ideaTemplate: "对比「{a}」的实现路径和「{b}」的实现路径，提取出它们共享的解决模式（如：先过滤再聚合、分级缓存、渐进式加载）。将该模式文档化为设计模板，应用到其他模块的改造中。",
+    benefitTemplate: "沉淀架构知识，提升全系统设计一致性",
+    riskTemplate: "模式推广可能遭遇各模块的特殊情况",
+    typeFit: { insight_knowledge: 8, insight_behavior: 7, insight_insight: 9 },
+    noveltyBonus: 12,
+    feasibilityBonus: 7,
+    impactBonus: 10
+  },
+  // ========== METAPHOR ==========
+  {
+    category: "metaphor",
+    variant: "domain_mapping",
+    titleTemplate: "{a} 式 {b}",
+    ideaTemplate: "借用「{a}」领域的概念模型（如：免疫系统、城市规划、进化论）重新思考「{b}」的设计。将 {a} 中的实体和关系一一映射到 {b} 的领域：哪些是细胞/哪些是信号/哪些是防御机制。",
+    benefitTemplate: "跳出原有思维框架，发现全新设计可能",
+    riskTemplate: "隐喻映射可能强行套用不适配的关系",
+    typeFit: { insight_knowledge: 10, insight_behavior: 9, insight_failure: 8, insight_insight: 8 },
+    noveltyBonus: 22,
+    feasibilityBonus: 2,
+    impactBonus: 18
+  },
+  {
+    category: "metaphor",
+    variant: "borrowed_heuristic",
+    titleTemplate: "{a} 启发下的 {b} 改进",
+    ideaTemplate: "从「{a}」的运行原理中提取一条核心启发式规则（如：最少惊讶原则、帕累托改进、最速下降），然后检视「{b}」的当前行为是否违背了该规则，针对违背点设计改进方案。",
+    benefitTemplate: "源自成熟领域的第一性原理，适用性广泛",
+    riskTemplate: "启发式规则在新领域可能不成立",
+    typeFit: { knowledge_insight: 9, knowledge_random: 7, insight_random: 8, behavior_insight: 7 },
+    noveltyBonus: 17,
+    feasibilityBonus: 5,
+    impactBonus: 15
+  },
+  {
+    category: "metaphor",
+    variant: "analogical_reasoning",
+    titleTemplate: "像 {a} 一样思考 {b}",
+    ideaTemplate: "想象如果「{a}」是一个决策主体，它会如何设计「{b}」？分析 {a} 的核心原则（容错优先？效率优先？可解释优先？），将这些原则翻译为 {b} 的功能需求和非功能需求，设计符合 {a} 风格的新方案。",
+    benefitTemplate: "跨领域思维碰撞产生意想不到的优雅方案",
+    riskTemplate: "风格化设计可能牺牲 {b} 领域的本地优化",
+    typeFit: { insight_behavior: 8, insight_knowledge: 7, knowledge_random: 8 },
+    noveltyBonus: 20,
+    feasibilityBonus: 3,
+    impactBonus: 16
+  },
+  // ========== INVERSION ==========
+  {
+    category: "inversion",
+    variant: "reverse_assumption",
+    titleTemplate: "反 {a}：如果 {b} 主导会怎样",
+    ideaTemplate: "列举「{a}」和「{b}」当前关系的假设前提（a是主、b是从；a先执行、b后执行；a决策、b执行），逐个反转这些前提。针对每个反转版本评估可行性，挑出有意义的反转方向做原型验证。",
+    benefitTemplate: "打破思维定势，发现被忽视的架构可能",
+    riskTemplate: "反转方案可能违反领域直觉导致维护困难",
+    typeFit: { knowledge_behavior: 8, behavior_behavior: 7, insight_behavior: 9, failure_behavior: 8 },
+    noveltyBonus: 22,
+    feasibilityBonus: 3,
+    impactBonus: 17
+  },
+  {
+    category: "inversion",
+    variant: "flip_priority",
+    titleTemplate: "从 {b} 出发重新定义 {a}",
+    ideaTemplate: "不再问「{a} 如何改进 {b}」，而是问「{b} 需要 {a} 以什么形态存在」。站在 {b} 的消费者视角定义 {a} 的输出格式、响应速度和容错要求，反向重构 {a} 的需求规格。",
+    benefitTemplate: "确保 {a} 的输出真正被 {b} 消费，减少浪费",
+    riskTemplate: "消费者视角可能忽视 {a} 的内部约束",
+    typeFit: { behavior_knowledge: 8, failure_knowledge: 8, insight_knowledge: 7 },
+    noveltyBonus: 16,
+    feasibilityBonus: 5,
+    impactBonus: 14
+  },
+  {
+    category: "inversion",
+    variant: "antifragile_design",
+    titleTemplate: "让 {b} 从 {a} 的失败中受益",
+    ideaTemplate: "不再试图避免「{a}」的失败，而是设计「{b}」使其在 {a} 失败时反而能获得有用信息。例如：{a} 的报错模式 → {b} 建立错误模式库并自动调整阈值；{a} 超时 → {b} 启动降级路径并记录边界值。",
+    benefitTemplate: "将系统的弱点转化为信息优势",
+    riskTemplate: "需要仔细设计边界条件，失败类型不可穷尽",
+    typeFit: { failure_behavior: 10, failure_knowledge: 8, failure_insight: 9, failure_failure: 7 },
+    noveltyBonus: 24,
+    feasibilityBonus: 3,
+    impactBonus: 20
+  },
+  // ========== EVOLUTION ==========
+  {
+    category: "evolution",
+    variant: "progressive_enhancement",
+    titleTemplate: "在 {a} 上渐进引入 {b}",
+    ideaTemplate: "不一次性改造 {a}，而是在 {a} 的现有架构上以插件形式注入 {b} 的能力。第一阶段：旁路输出不做决策；第二阶段：作为建议源影响部分决策；第三阶段：在验证可靠后替换 {a} 的核心模块。",
+    benefitTemplate: "渐进式升级风险可控，随时可回滚",
+    riskTemplate: "过渡期维护两套系统的成本高",
+    typeFit: { knowledge_behavior: 8, behavior_behavior: 7, knowledge_failure: 9, behavior_failure: 8 },
+    noveltyBonus: 10,
+    feasibilityBonus: 8,
+    impactBonus: 13
+  },
+  {
+    category: "evolution",
+    variant: "layered_adoption",
+    titleTemplate: "{b} 作为 {a} 的上层增强",
+    ideaTemplate: "保持 {a} 不动，在其上新增一层 {b} 的能力层。{b} 层拦截 {a} 的输入输出，进行预处理或后处理增强。上层能力通过 feature flag 控制，逐步开放给不同用户群体验证效果。",
+    benefitTemplate: "不侵入核心逻辑的前提下获得新能力",
+    riskTemplate: "上层增强层可能成为黑盒，增加调试难度",
+    typeFit: { knowledge_behavior: 7, insight_behavior: 8, knowledge_insight: 7 },
+    noveltyBonus: 8,
+    feasibilityBonus: 9,
+    impactBonus: 11
+  },
+  {
+    category: "evolution",
+    variant: "incremental_replacement",
+    titleTemplate: "{a} 模块的 {b} 化改造",
+    ideaTemplate: "将 {a} 的功能按独立程度拆分为子模块，标记每个子模块是否适合被 {b} 的能力替代。优先替换边界清晰、影响面小的子模块，每替换一个就运行一个月观察稳定性，再决定下一步。",
+    benefitTemplate: "大规模改造变成小步快跑的系列任务",
+    riskTemplate: "新旧混合期接口兼容性需要持续维护",
+    typeFit: { knowledge_knowledge: 7, behavior_behavior: 6, failure_failure: 8 },
+    noveltyBonus: 9,
+    feasibilityBonus: 9,
+    impactBonus: 10
+  },
+  // ========== SYMBIOSIS ==========
+  {
+    category: "symbiosis",
+    variant: "event_coupling",
+    titleTemplate: "{a} 和 {b} 的事件总线",
+    ideaTemplate: "通过事件总线连接 {a} 和 {b}：{a} 产生的事件经总线广播，{b} 选择性订阅感兴趣的事件来触发自身行为。总线定义标准化的事件 Schema，{a} 和 {b} 通过 Schema 演进保持兼容。",
+    benefitTemplate: "松耦合，各自独立演进不影响对方",
+    riskTemplate: "事件 Schema 演进困难，新字段需要消费者配合",
+    typeFit: { behavior_behavior: 9, knowledge_behavior: 7, insight_behavior: 7, behavior_failure: 8 },
+    noveltyBonus: 14,
+    feasibilityBonus: 7,
+    impactBonus: 15
+  },
+  {
+    category: "symbiosis",
+    variant: "plugin_architecture",
+    titleTemplate: "{b} 插件化 {a}",
+    ideaTemplate: "将 {a} 的能力接口定义为一组插件契约，{b} 作为插件实现接入。{a} 在运行时通过 ServiceLoader 发现并加载 {b} 的插件，{b} 专注于实现契约而不需关心 {a} 的内部调度。",
+    benefitTemplate: "职责边界清晰，{b} 可替换可测试",
+    riskTemplate: "插件 API 的稳定性直接影响生态建设",
+    typeFit: { knowledge_behavior: 8, behavior_behavior: 8, knowledge_knowledge: 6 },
+    noveltyBonus: 11,
+    feasibilityBonus: 8,
+    impactBonus: 13
+  },
+  {
+    category: "symbiosis",
+    variant: "sidecar_pattern",
+    titleTemplate: "{a} 附属的 {b} 边车",
+    ideaTemplate: "为 {a} 附加一个 {b} 边车进程，{a} 的每次请求先经过边车处理（监控、缓存、过滤、转换）后再到达主逻辑。边车无状态可独立扩缩容，{a} 不需要引入 {b} 的依赖库。",
+    benefitTemplate: "横切关注点与主逻辑分离，运维灵活",
+    riskTemplate: "边车增加请求链路中的网络跳转",
+    typeFit: { behavior_behavior: 7, knowledge_behavior: 7, insight_behavior: 7, failure_behavior: 7 },
+    noveltyBonus: 12,
+    feasibilityBonus: 7,
+    impactBonus: 12
+  },
+  // ========== ORCHESTRATE ==========
+  {
+    category: "orchestrate",
+    variant: "coordinator",
+    titleTemplate: "{a} 编排 {b} 工作流",
+    ideaTemplate: "将 {b} 的现有能力封装为标准步骤（step），{a} 作为编配器定义这些步骤的执行顺序、条件分支和异常处理。{a} 维护一个 DAG 定义工作流拓扑，{b} 只关心单个步骤的实现。",
+    benefitTemplate: "组合复杂度从单体代码转移到可配置的编配层",
+    riskTemplate: "编配器成为单点故障",
+    typeFit: { behavior_insight: 8, knowledge_insight: 7, insight_insight: 7 },
+    noveltyBonus: 16,
+    feasibilityBonus: 6,
+    impactBonus: 17
+  },
+  {
+    category: "orchestrate",
+    variant: "pipeline_composition",
+    titleTemplate: "{a} × {b} 处理流水线",
+    ideaTemplate: "将 {a} 和 {b} 组合为一条数据处理流水线：{a} 的输出是 {b} 的输入。每个环节定义明确的输入/输出 Schema，中间结果可缓存可重放。流水线用 JSON 定义，运行时动态加载。",
+    benefitTemplate: "处理链路可视化，每个环节可单独调优",
+    riskTemplate: "流水线中单环节延迟拖累整体吞吐",
+    typeFit: { knowledge_behavior: 8, behavior_behavior: 7, knowledge_knowledge: 7, insight_behavior: 6 },
+    noveltyBonus: 11,
+    feasibilityBonus: 8,
+    impactBonus: 13
+  },
+  {
+    category: "orchestrate",
+    variant: "chain_of_thought_flow",
+    titleTemplate: "{a} 引导 {b} 的推理链",
+    ideaTemplate: "{a} 不直接输出结果，而是生成一条推理路径（中间步骤链），{b} 沿着这条路径逐步验证和执行。{a} 负责任务分解和优先级排序，{b} 负责每一步的细节执行，最终结果由 {b} 汇总返回。",
+    benefitTemplate: "复杂任务被拆解为可追溯、可干预的小步骤",
+    riskTemplate: "推理链过长时中间步骤的累积误差",
+    typeFit: { insight_behavior: 9, insight_knowledge: 8, knowledge_behavior: 7, insight_insight: 7 },
+    noveltyBonus: 19,
+    feasibilityBonus: 4,
+    impactBonus: 18
+  }
+];
+class TemplateLibrary {
+  rng;
+  constructor(seed) {
+    this.rng = resolveRandom(seed);
+  }
+  /**
+   * 为一个 ConceptCombo 生成一条假设
+   * @returns 生成的 Hypothesis，如果无适用模板则返回 null
+   */
+  generate(combo, sources) {
+    const sourceA = sources.find((s) => s.name === combo.sources[0]);
+    const sourceB = sources.find((s) => s.name === combo.sources[1]);
+    if (!sourceA || !sourceB) return null;
+    const typeKey = this.typeKey(sourceA.type, sourceB.type);
+    const nameKey = this.nameKey(sourceA.name, sourceB.name);
+    const candidates = this.selectForType(typeKey, nameKey);
+    if (candidates.length === 0) return null;
+    const idx = this.stableHash(combo.sources[0], combo.sources[1]) % candidates.length;
+    const tpl = candidates[idx];
+    const id2 = `hyp_tpl_${Date.now()}_${this.rng().toString(36).slice(2, 6)}`;
+    return {
+      id: id2,
+      title: fill(tpl.titleTemplate, sourceA, sourceB),
+      idea: fill(tpl.ideaTemplate, sourceA, sourceB),
+      expectedBenefit: fill(tpl.benefitTemplate, sourceA, sourceB),
+      risk: fill(tpl.riskTemplate, sourceA, sourceB),
+      sourceLabels: [sourceA.name, sourceB.name],
+      novelty: clamp50(tpl.noveltyBonus + this.scoreNoise()),
+      feasibility: clamp50(tpl.feasibilityBonus + this.scoreNoise()),
+      impact: clamp50(tpl.impactBonus + this.scoreNoise()),
+      status: "draft",
+      createdAt: Date.now()
+    };
+  }
+  /**
+   * 返回适用于某个类型组合的所有模板列表
+   * @param nameKey 对 source name 排序后的组合键，用于 nameFit 二次路由
+   */
+  selectForType(typeKey, nameKey = "") {
+    const [a, b] = typeKey.split("_");
+    const reverseKey = `${b}_${a}`;
+    const scored = TEMPLATES$1.map((tpl) => {
+      let score = tpl.typeFit[typeKey] ?? tpl.typeFit[reverseKey] ?? 0;
+      if (tpl.nameFit && nameKey) {
+        score += tpl.nameFit[nameKey] ?? 0;
+      }
+      return { tpl, score };
+    });
+    return scored.filter((s) => s.score >= 5).sort((a2, b2) => b2.score - a2.score).map((s) => s.tpl);
+  }
+  typeKey(a, b) {
+    return [a, b].sort().join("_");
+  }
+  /** 对 source name 排序生成 nameFit 查询键 */
+  nameKey(a, b) {
+    return [a, b].sort().join("|");
+  }
+  stableHash(a, b) {
+    let h = 0;
+    const s = a + "|" + b;
+    for (let i = 0; i < s.length; i++) {
+      h = (h << 5) - h + s.charCodeAt(i);
+      h = h & h;
+    }
+    return Math.abs(h);
+  }
+  /** 评分的小幅随机扰动（0-15），保持一定多样性 */
+  scoreNoise() {
+    return Math.round(this.rng() * 12);
+  }
+}
+function fill(template, a, b) {
+  return template.replace(/\{a\}/g, a.name).replace(/\{b\}/g, b.name).replace(/\{aType\}/g, a.type).replace(/\{bType\}/g, b.type);
+}
+function clamp50(v) {
+  return Math.max(60, Math.min(100, v));
+}
+class LocalModelService {
+  generator = null;
+  loadAttempted = false;
+  modelId;
+  constructor(modelId) {
+    this.modelId = modelId || process.env.LOCAL_HYPOTHESIS_MODEL || "Xenova/Qwen2.5-0.5B-Instruct";
+  }
+  get isEnabled() {
+    return process.env.LOCAL_HYPOTHESIS_DISABLED !== "true";
+  }
+  get isLoaded() {
+    return this.generator !== null;
+  }
+  /**
+   * 生成文本 — 兼容 chatJson 接口格式
+   */
+  async generate(userText, options) {
+    if (!this.isEnabled) {
+      return { error: "local model disabled by env" };
+    }
+    if (process.env.VITEST || process.env.NODE_ENV === "test") {
+      return { error: "local model disabled in test environment" };
+    }
+    if (!this.generator) {
+      if (this.loadAttempted) return { error: "model previously failed to load" };
+      this.loadAttempted = true;
       try {
-        const todos = require$$0.execSync('git grep -n "TODO\\|FIXME\\|HACK" -- "*.ts" "*.tsx" "*.js" "*.jsx" 2>nul || echo 0', {
-          cwd: PROJECT_ROOT$2,
-          encoding: "utf-8",
-          timeout: 1e4
-        }).trim();
-        const todoCount = todos === "0" ? 0 : todos.split("\n").length;
-        report += `- TODO/FIXME: ${todoCount} 处
-`;
-      } catch {
-        report += "- TODO: 检测失败\n";
+        Logger.log("INFO", "local_model_loading", { model: this.modelId });
+        const { pipeline, env } = await import("@xenova/transformers");
+        const modelsDir = await resolveModelsDir();
+        const localModelPath = path$1.resolve(modelsDir, this.modelId);
+        const hasLocalFiles = fs.existsSync(localModelPath);
+        if (hasLocalFiles) {
+          env.localModelPath = modelsDir;
+          Logger.log("INFO", "local_model_use_cache", { path: localModelPath });
+        } else {
+          Logger.log("INFO", "local_model_no_cache", { path: localModelPath });
+        }
+        this.generator = await pipeline("text-generation", this.modelId, {
+          cache_dir: process.env.MODEL_CACHE_DIR
+        });
+        Logger.log("INFO", "local_model_loaded", { model: this.modelId, local: hasLocalFiles });
+      } catch (err) {
+        Logger.log("WARN", "local_model_load_failed", { model: this.modelId, error: err.message });
+        this.generator = null;
+        return { error: `local model load failed: ${err.message}` };
       }
-      if (!isQuick) {
+    }
+    const systemMsg = options?.system || "";
+    const chatTemplate = systemMsg ? `<|im_start|>system
+${systemMsg}<|im_end|>
+<|im_start|>user
+${userText}<|im_end|>
+<|im_start|>assistant
+` : `<|im_start|>user
+${userText}<|im_end|>
+<|im_start|>assistant
+`;
+    try {
+      const result = await this.generator(chatTemplate, {
+        max_new_tokens: options?.maxTokens || 768,
+        temperature: options?.temperature ?? 0.7,
+        do_sample: true
+      });
+      const rawText = Array.isArray(result) ? result[0]?.generated_text : result?.generated_text;
+      if (!rawText) return { error: "empty generation" };
+      const generated = rawText.slice(chatTemplate.length).trim();
+      const parsed = this.tryParse(generated);
+      if (parsed) {
+        return { data: parsed };
+      }
+      return { error: `generated non-JSON: ${generated.slice(0, 100)}` };
+    } catch (err) {
+      Logger.log("WARN", "local_model_generation_error", { error: err.message });
+      return { error: `generation failed: ${err.message}` };
+    }
+  }
+  /**
+   * 尝试从生成文本中提取 JSON
+   */
+  tryParse(text) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      const match2 = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match2) {
         try {
-          const testOut = require$$0.execSync("npx vitest run --reporter=verbose 2>&1", {
-            cwd: PROJECT_ROOT$2,
-            encoding: "utf-8",
-            timeout: 6e4
-          }).trim();
-          const lines = testOut.split("\n");
-          const passLine = lines.find((l) => l.includes("Tests") && l.includes("passed"));
-          report += `- 测试结果: ${passLine || testOut.slice(-200)}
-`;
-        } catch (err) {
-          const out = String(err.stdout || err.message || "").trim();
-          const lines = out.split("\n");
-          const failLine = lines.find((l) => l.includes("Tests") || l.includes("failed"));
-          report += `- 测试结果: ${failLine || out.slice(-200)}
-`;
+          return JSON.parse(match2[1].trim());
+        } catch {
         }
       }
-      try {
-        const gitStatus = require$$0.execSync("git status --short 2>&1", {
-          cwd: PROJECT_ROOT$2,
-          encoding: "utf-8",
-          timeout: 5e3
-        }).trim();
-        const modifiedCount = gitStatus ? gitStatus.split("\n").length : 0;
-        report += `- 未提交修改: ${modifiedCount} 个文件
-`;
-      } catch {
-        report += "- Git 状态: 检测失败\n";
+      const arrMatch = text.match(/\[[\s\S]*\]/);
+      if (arrMatch) {
+        try {
+          return JSON.parse(arrMatch[0]);
+        } catch {
+        }
       }
-      return formatToolResult(report.trim());
-    } catch (err) {
-      return formatToolError(err.message);
     }
-  },
-  isReadOnly: true
-});
-const getCredentialTool = buildTool({
-  name: "get_credential",
-  description: "读取已保存的 API 密钥或凭据。如果返回未配置，请告知用户需要注册什么服务",
-  inputJSONSchema: {
-    type: "object",
-    properties: {
-      name: { type: "string", description: "凭据名称，如 netease_api_key, qq_music_appid" }
-    },
-    required: ["name"]
-  },
-  handler: async (args) => {
-    try {
-      const cm = getCredentialsManager();
-      if (!cm) return formatToolError("凭据管理器尚未就绪");
-      const value = cm.get(args.name);
-      if (value === null) {
-        return formatToolResult(`凭据 "${args.name}" 未配置。请在回复中告知用户需要注册什么服务并提供指引。`);
+    return null;
+  }
+}
+async function resolveModelsDir() {
+  try {
+    const { app } = await import("electron");
+    if (fs.existsSync(path$1.resolve(app.getAppPath(), "models"))) {
+      return path$1.resolve(app.getAppPath(), "models");
+    }
+    return path$1.resolve(app.getPath("userData"), "models");
+  } catch {
+  }
+  let dir = process.cwd();
+  for (let i = 0; i < 5; i++) {
+    const p = path$1.resolve(dir, "models");
+    if (fs.existsSync(p)) return p;
+    const parent = path$1.resolve(dir, "..");
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return path$1.resolve(process.cwd(), "models");
+}
+class HypothesisGenerator {
+  idCounter = 0;
+  rng;
+  chatJson;
+  templateLib;
+  localModel;
+  constructor(chatJson, seed) {
+    this.chatJson = chatJson;
+    this.rng = resolveRandom(seed);
+    this.templateLib = new TemplateLibrary(seed);
+    this.localModel = new LocalModelService();
+  }
+  /**
+   * 从概念组合生成假设 — 远程 LLM → 本地模型 → TemplateLibrary → 模板兜底
+   *
+   * 四级 fallback 链：
+   *   1. 远程 LLM           (高质，但 30s 超时、网络依赖)
+   *   2. 本地 transformers.js (进程内，~1s，无网络依赖)
+   *   3. TemplateLibrary    (30+ 模式，类型感知，零延迟)
+   *   4. 原始模板           (5 个硬编码，终极兜底)
+   */
+  async generate(combos, sources, dreamMode = false, externalSignals = []) {
+    if (combos.length === 0) return [];
+    const llmResults = await this.tryLLM(sources, combos, dreamMode, externalSignals);
+    if (llmResults.length > 0) {
+      return llmResults.map((r) => ({
+        id: `hyp_${Date.now()}_${++this.idCounter}_${this.rng().toString(36).slice(2, 4)}`,
+        title: r.title,
+        idea: r.idea,
+        expectedBenefit: r.expectedBenefit,
+        risk: r.risk,
+        sourceLabels: r.sourceLabels,
+        novelty: Math.max(10, Math.min(100, r.novelty)),
+        feasibility: Math.max(10, Math.min(100, r.feasibility)),
+        impact: Math.max(10, Math.min(100, r.impact)),
+        status: "draft",
+        createdAt: Date.now()
+      }));
+    }
+    if (this.localModel.isEnabled) {
+      Logger.log("INFO", "hypothesis_fallback_local", { count: combos.length });
+      const localResults = await this.tryLocalModel(sources, combos, dreamMode);
+      if (localResults.length > 0) {
+        return localResults.map((r) => ({
+          id: `hyp_local_${Date.now()}_${++this.idCounter}_${this.rng().toString(36).slice(2, 4)}`,
+          title: r.title,
+          idea: r.idea,
+          expectedBenefit: r.expectedBenefit,
+          risk: r.risk,
+          sourceLabels: r.sourceLabels,
+          novelty: Math.max(10, Math.min(100, r.novelty)),
+          feasibility: Math.max(10, Math.min(100, r.feasibility)),
+          impact: Math.max(10, Math.min(100, r.impact)),
+          status: "draft",
+          createdAt: Date.now()
+        }));
       }
-      return formatToolResult(value);
-    } catch (err) {
-      return formatToolError(err.message);
     }
-  },
-  isReadOnly: true
-});
-const setCredentialTool = buildTool({
-  name: "set_credential",
-  description: "保存用户提供的 API 密钥或凭据。仅当用户明确告诉你密钥内容时才调用",
-  inputJSONSchema: {
-    type: "object",
-    properties: {
-      name: { type: "string", description: "凭据名称" },
-      value: { type: "string", description: "凭据值" }
-    },
-    required: ["name", "value"]
-  },
-  handler: async (args) => {
+    Logger.log("INFO", "hypothesis_fallback_templates", { count: combos.length });
+    const tplResults = [];
+    for (const combo of combos) {
+      const h = this.templateLib.generate(combo, sources);
+      if (h) tplResults.push(h);
+    }
+    if (tplResults.length > 0) {
+      return tplResults;
+    }
+    Logger.log("WARN", "hypothesis_fallback_legacy", { count: combos.length });
+    return combos.map((combo) => this.templateFallback(combo));
+  }
+  /**
+   * 调 LLM 生成创意
+   */
+  async tryLLM(sources, combos, dreamMode, externalSignals = []) {
+    const topCombos = combos.slice(0, dreamMode ? 5 : 3);
+    const comboInfo = topCombos.map((c) => ({
+      sources: c.sources,
+      description: c.description
+    }));
+    const prompt = buildCreativityPrompt(sources, comboInfo, externalSignals);
     try {
-      const cm = getCredentialsManager();
-      if (!cm) return formatToolError("凭据管理器尚未就绪");
-      cm.set(args.name, String(args.value));
-      return formatToolResult(`凭据 "${args.name}" 已保存`);
+      const result = await this.chatJson(prompt, {
+        system: CREATIVITY_SYSTEM_PROMPT,
+        temperature: dreamMode ? 1 : 0.8,
+        timeoutMs: 6e4
+      });
+      if (result.error) {
+        Logger.log("WARN", "hypothesis_llm_error", { error: result.error });
+        return [];
+      }
+      const ideas = Array.isArray(result.data) ? result.data : [];
+      return ideas.filter(
+        (i) => typeof i.title === "string" && typeof i.idea === "string" && Array.isArray(i.sourceLabels) && typeof i.novelty === "number"
+      );
     } catch (err) {
-      return formatToolError(err.message);
+      Logger.log("ERROR", "hypothesis_llm_exception", { error: String(err) });
+      return [];
     }
+  }
+  /**
+   * 调本地 transformers.js 模型生成创意
+   */
+  async tryLocalModel(sources, combos, dreamMode) {
+    const topCombos = combos.slice(0, dreamMode ? 3 : 2);
+    const comboInfo = topCombos.map((c) => ({
+      sources: c.sources,
+      description: c.description
+    }));
+    const prompt = buildCreativityPrompt(sources, comboInfo);
+    const result = await this.localModel.generate(prompt, {
+      system: CREATIVITY_SYSTEM_PROMPT,
+      temperature: dreamMode ? 0.8 : 0.6,
+      maxTokens: dreamMode ? 1024 : 768
+    });
+    if (result.error) {
+      Logger.log("WARN", "hypothesis_local_error", { error: result.error });
+      return [];
+    }
+    const ideas = Array.isArray(result.data) ? result.data : [];
+    return ideas.filter(
+      (i) => typeof i.title === "string" && typeof i.idea === "string" && Array.isArray(i.sourceLabels) && typeof i.novelty === "number"
+    );
+  }
+  /**
+   * 模板 fallback — 从旧实现保留
+   */
+  templateFallback(combo) {
+    const [a, b] = combo.sources;
+    const hash = this.stableHash(a, b);
+    const idx = hash % TEMPLATES.length;
+    const t = TEMPLATES[idx];
+    return {
+      id: `hyp_fb_${Date.now()}_${++this.idCounter}_${this.rng().toString(36).slice(2, 4)}`,
+      title: t.title(a, b),
+      idea: t.idea(a, b),
+      expectedBenefit: t.expectedBenefit,
+      risk: t.risk,
+      sourceLabels: [a, b],
+      novelty: 50 + Math.round(this.rng() * 30),
+      feasibility: 40 + Math.round(this.rng() * 30),
+      impact: 50 + Math.round(this.rng() * 25),
+      status: "draft",
+      createdAt: Date.now()
+    };
+  }
+  stableHash(a, b) {
+    let h = 0;
+    const s = a + "|" + b;
+    for (let i = 0; i < s.length; i++) {
+      h = (h << 5) - h + s.charCodeAt(i);
+      h = h & h;
+    }
+    return Math.abs(h);
+  }
+}
+const TEMPLATES = [
+  {
+    title: (a, b) => `${a} 驱动的 ${b}`,
+    idea: (a, b) => `将「${a}」的核心机制作为「${b}」的新输入维度`,
+    expectedBenefit: "解锁之前被忽视的新能力组合",
+    risk: "组合可能引入不必要的复杂度"
   },
-  isReadOnly: false
-});
-const listCredentialsTool = buildTool({
-  name: "list_credentials",
-  description: "列出所有已配置的凭据名称（不显示值）",
-  inputJSONSchema: {
-    type: "object",
-    properties: {},
-    required: []
+  {
+    title: (a, b) => `基于 ${a} 的 ${b} 增强`,
+    idea: (a, b) => `让「${a}」和「${b}」通过一个共享接口互相增强`,
+    expectedBenefit: "系统灵活性提升，涌现新的行为模式",
+    risk: "两个概念耦合后难以单独演进"
   },
-  handler: async () => {
+  {
+    title: (a, b) => `${a} × ${b} 混合系统`,
+    idea: (a, b) => `借鉴「${a}」的设计哲学重新思考「${b}」的实现`,
+    expectedBenefit: "减少重复逻辑，提升模块间信息复用",
+    risk: "可能存在隐含的语义冲突"
+  },
+  {
+    title: (a, b) => `从 ${a} 到 ${b} 的抽象跳跃`,
+    idea: (a, b) => `在「${a}」的基础上构建「${b}」的新抽象层`,
+    expectedBenefit: "降低认知负载，统一概念模型",
+    risk: "抽象层过多影响 runtime 性能"
+  },
+  {
+    title: (a, b) => `${a} 视角下的 ${b} 重构`,
+    idea: (a, b) => `将「${a}」的某一种能力移植到「${b}」的上下文中`,
+    expectedBenefit: "架构更优雅，扩展点增加",
+    risk: "预期收益不确定，需要实验验证"
+  }
+];
+class ExperimentPlanner {
+  rng;
+  constructor(seed) {
+    this.rng = resolveRandom(seed);
+  }
+  plan(hypothesis) {
+    if (hypothesis.novelty >= 90 && hypothesis.feasibility < 30) {
+      return this.researchPlan(hypothesis);
+    }
+    return this.concretePlan(hypothesis);
+  }
+  concretePlan(hypothesis) {
+    const steps2 = [
+      `定义「${hypothesis.title}」的 MVP 范围`,
+      `实现核心抽象层：${hypothesis.idea.slice(0, 40)}...`,
+      `编写 A/B 测试比较新旧方案`,
+      `收集运行数据和用户反馈`,
+      `评估是否达到预期收益：${hypothesis.expectedBenefit}`
+    ];
+    const criteria = [
+      `功能完整性 >= 80%`,
+      `性能不低于当前基线`,
+      `用户无感知迁移`,
+      `收益指标明确可量化`
+    ];
+    const durations = ["3-5 天", "1-2 周", "2-3 周", "1 个月"];
+    const duration = randomPick(this.rng, durations);
+    return {
+      hypothesisId: hypothesis.id,
+      title: `实验: ${hypothesis.title}`,
+      steps: steps2,
+      successCriteria: criteria,
+      estimatedDuration: duration,
+      createdAt: Date.now()
+    };
+  }
+  researchPlan(hypothesis) {
+    return {
+      hypothesisId: hypothesis.id,
+      title: `研究: ${hypothesis.title}`,
+      steps: [
+        `调研同类系统中的实现方案`,
+        `设计可行性原型（不开发完整功能）`,
+        `使用 10% 的真实数据模拟验证`,
+        `输出可行性评估报告`,
+        `决定是否进入开发阶段`
+      ],
+      successCriteria: [
+        `可行性 >= 60%`,
+        `落地成本可接受`,
+        `与现有架构不冲突`
+      ],
+      estimatedDuration: "1-2 天研究",
+      createdAt: Date.now()
+    };
+  }
+}
+class IdeaGenerator {
+  mixer;
+  hypothesisGen;
+  experimentPlanner;
+  rng;
+  // 创造力温度：越高越随机，越低越保守
+  temperature = 0.3;
+  /** 已探索过的配对 key 列表，传给 ConceptMixer 以降权 */
+  exploredPairs = [];
+  constructor(chatJson, temperature = 0.3, seed) {
+    this.rng = resolveRandom(seed);
+    this.mixer = new ConceptMixer(seed);
+    this.hypothesisGen = new HypothesisGenerator(chatJson, seed);
+    this.experimentPlanner = new ExperimentPlanner(seed);
+    this.temperature = temperature;
+  }
+  /**
+   * 完整一轮"灵感涌现"流程
+   * @param strategy 生成策略，约束 ConceptMixer 配对空间
+   */
+  async generateIdeas(sources, maxIdeas = 5, strategy = "explore", externalSignals = []) {
+    if (sources.length < 2) return [];
+    const activeSources = this.applyTemperature(sources);
+    const scoredCombos = this.mixer.mix(activeSources, maxIdeas * 3, this.exploredPairs, strategy);
+    const combos = scoredCombos.map((c) => c.combo);
+    if (combos.length === 0) return [];
+    const hypotheses2 = await this.hypothesisGen.generate(combos, activeSources, false, externalSignals);
+    const noveltyThreshold = strategy === "stable" ? 40 : strategy === "signal" ? 60 : 55;
+    const novel = hypotheses2.filter((h) => h.novelty >= noveltyThreshold);
+    const ideas = novel.slice(0, maxIdeas).map((h) => ({
+      hypothesis: h,
+      experiment: this.experimentPlanner.plan(h)
+    }));
+    return ideas;
+  }
+  /**
+   * Dream Mode — 高随机性、跨时间跨度的"梦境"模式
+   */
+  async dreamIdeas(recentSources, historicalCombos, failedHypotheses, maxIdeas = 3, strategy = "explore") {
+    const dreamTemperature = 0.8;
+    const failureSources = failedHypotheses.map((h) => ({
+      name: `失败:${h.title}`,
+      content: `${h.idea}
+风险:${h.risk}`,
+      type: "failure",
+      weight: 0.8
+    }));
+    const allSources = [
+      ...recentSources,
+      ...failureSources,
+      // 添加随机扰动源
+      {
+        name: `随机种子_${Date.now()}`,
+        content: this.rng().toString(36),
+        type: "random",
+        weight: 0.3
+      }
+    ];
+    const activeSources = this.mixer.pickRandomSources(allSources, dreamTemperature, 4);
+    const scoredCombos = this.mixer.mix(activeSources, maxIdeas * 5, [], strategy);
+    const combos = scoredCombos.map((c) => c.combo);
+    if (combos.length === 0) return [];
+    const hypotheses2 = await this.hypothesisGen.generate(combos, activeSources, true);
+    const feasible = this.feasibilityGate(hypotheses2);
+    const novel = feasible.filter((h) => h.novelty >= 65);
+    return novel.slice(0, maxIdeas).map((h) => ({
+      hypothesis: h,
+      experiment: this.experimentPlanner.plan(h)
+    }));
+  }
+  setTemperature(t) {
+    this.temperature = Math.max(0, Math.min(1, t));
+  }
+  /** 设置已探索过的配对，用于 ConceptMixer 降权 */
+  setExploredPairs(pairs) {
+    this.exploredPairs = pairs;
+  }
+  /**
+   * 可行性/质量门禁 — 过滤明显不靠谱的想法
+   * - 可行性评分 >= 30 才保留
+   * - 想法描述至少 20 个字符（排除模板填空）
+   * - novelty > 80 但 feasibility < 40 的"可疑高新颖性"需要额外检查描述长度
+   */
+  feasibilityGate(hypotheses2) {
+    return hypotheses2.filter((h) => {
+      if (h.feasibility < 30) return false;
+      if (!h.idea || h.idea.length < 20) return false;
+      if (h.novelty > 80 && h.feasibility < 40) {
+        if (!h.idea || h.idea.length < 60) return false;
+      }
+      return true;
+    });
+  }
+  /**
+   * 温度影响来源选择权重
+   */
+  applyTemperature(sources) {
+    if (this.temperature < 0.2) {
+      return [...sources].sort((a, b) => b.weight - a.weight).slice(0, 4);
+    }
+    if (this.temperature > 0.7) {
+      return sources.filter(() => this.rng() > 0.2);
+    }
+    return sources.filter((s) => {
+      if (s.weight > 0.7) return true;
+      return this.rng() < 0.85;
+    });
+  }
+}
+class WorldTrendProvider {
+  observerDir;
+  consumedNames = /* @__PURE__ */ new Set();
+  rng;
+  constructor(observerDir, seed) {
+    this.observerDir = observerDir;
+    this.rng = resolveRandom(seed);
+  }
+  resetConsumed() {
+    this.consumedNames.clear();
+  }
+  /**
+   * 返回精选观察片段（3-6 条），按热度排序、轮换选取。
+   */
+  getTrends() {
+    const signals = this.loadSignals(3);
+    if (signals.length === 0) return [];
+    const obsMap = this.buildObsMap(3);
+    const candidates = signals.slice(0, 30);
+    const allSnippets = [];
+    const seenContent = /* @__PURE__ */ new Set();
+    for (const s of candidates) {
+      const ids = (s.recentObservationIds ?? []).slice(0, 2);
+      for (const id2 of ids) {
+        const obs = obsMap.get(id2);
+        if (!obs) continue;
+        const text = `[${obs.source}] ${obs.content}`;
+        const key = obs.content.slice(0, 50);
+        if (seenContent.has(key)) continue;
+        seenContent.add(key);
+        allSnippets.push(text);
+      }
+      if (allSnippets.length >= 30) break;
+    }
+    if (allSnippets.length === 0) return [];
+    const fresh = allSnippets.filter((s) => !this.consumedNames.has(s.slice(0, 60)));
+    const pool = fresh.length >= 3 ? fresh : (this.consumedNames.clear(), allSnippets);
+    const count = Math.min(pool.length, 3 + Math.floor(this.rng() * 3));
+    const shuffled = [...pool].sort(() => this.rng() - 0.5);
+    const picked = shuffled.slice(0, count);
+    for (const p of picked) this.consumedNames.add(p.slice(0, 60));
+    return picked;
+  }
+  /**
+   * 获取最近几天的精选观察片段（结构化，供工具使用）。
+   */
+  getTrendSignals(days = 3, limit = 20) {
+    const signals = this.loadSignals(days);
+    const obsMap = this.buildObsMap(days);
+    const seen = /* @__PURE__ */ new Set();
+    return signals.filter((s) => {
+      const key = s.keyword.trim();
+      if (seen.has(key) || s.score < 0.3) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, limit).map((s) => {
+      const ids = (s.recentObservationIds ?? []).slice(0, 3);
+      const snippets = [];
+      const seenSnippet = /* @__PURE__ */ new Set();
+      for (const id2 of ids) {
+        const obs = obsMap.get(id2);
+        if (!obs) continue;
+        const text = `[${obs.source}] ${obs.content.slice(0, 150)}`;
+        const key = obs.content.slice(0, 50);
+        if (seenSnippet.has(key)) continue;
+        seenSnippet.add(key);
+        snippets.push(text);
+      }
+      return { keyword: s.keyword, snippets, score: s.score };
+    });
+  }
+  /**
+   * 从 insights/ 取主题名。
+   */
+  getInsights() {
+    const insightsDir = path$1.join(this.observerDir, "insights");
+    if (!fs.existsSync(insightsDir)) return [];
     try {
-      const cm = getCredentialsManager();
-      if (!cm) return formatToolError("凭据管理器尚未就绪");
-      const keys = cm.list();
-      if (keys.length === 0) return formatToolResult("暂无已配置的凭据");
-      return formatToolResult(keys.join("\n"));
-    } catch (err) {
-      return formatToolError(err.message);
+      const files = fs.readdirSync(insightsDir).filter((f) => f.endsWith(".json")).sort().reverse().slice(0, 5);
+      const topics = [];
+      for (const file of files) {
+        const raw = fs.readFileSync(path$1.join(insightsDir, file), "utf-8");
+        const data = JSON.parse(raw);
+        const topic = data.topic?.trim();
+        if (topic && topic.length > 2 && topic.length < 50) {
+          topics.push(`昨日研究: ${topic}`);
+        }
+      }
+      return topics;
+    } catch {
+      return [];
     }
-  },
-  isReadOnly: true
-});
-const rememberFactTool = buildTool({
-  name: "remember_fact",
-  description: "记住关于用户或项目的重要信息。当用户透露了个人偏好、重要决定、关键需求时应主动调用",
-  inputJSONSchema: {
-    type: "object",
-    properties: {
-      content: {
-        type: "string",
-        description: '要记住的事实内容，如"用户偏好使用SQLite进行持久化"或"用户决定暂缓插件系统开发"'
+  }
+  // ── private ──────────────────────────────────────────────
+  loadSignals(days) {
+    const dir = path$1.join(this.observerDir, "trends");
+    if (!fs.existsSync(dir)) return [];
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort().reverse().slice(0, days);
+    const signals = [];
+    for (const file of files) {
+      const raw = fs.readFileSync(path$1.join(dir, file), "utf-8");
+      const data = JSON.parse(raw);
+      if (data.signals) {
+        for (const s of data.signals) {
+          signals.push({
+            keyword: s.keyword,
+            score: s.score ?? 0,
+            occurrenceCount: s.occurrenceCount ?? 0,
+            recentObservationIds: s.recentObservationIds ?? [],
+            source: s.source ?? "unknown"
+          });
+        }
+      }
+    }
+    signals.sort((a, b) => b.score - a.score);
+    return signals;
+  }
+  buildObsMap(days) {
+    const map = /* @__PURE__ */ new Map();
+    const dir = path$1.join(this.observerDir, "observations");
+    if (!fs.existsSync(dir)) return map;
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort().reverse().slice(0, days);
+    for (const file of files) {
+      const raw = fs.readFileSync(path$1.join(dir, file), "utf-8");
+      const data = JSON.parse(raw);
+      if (data.observations) {
+        for (const obs of data.observations) {
+          if (obs.id && obs.content) {
+            if (!map.has(obs.id)) {
+              map.set(obs.id, { id: obs.id, content: obs.content, source: obs.source });
+            }
+          }
+        }
+      }
+    }
+    return map;
+  }
+}
+class SourceBuilder {
+  rng;
+  /** Provocation 池：外部领域概念 — 不是类比，而是冲突/极限/失效 */
+  domainConcepts = [
+    "尺度反转：某模块如果每秒处理 1000 倍于当前请求，它的哪个组件最先崩溃？瓶颈不在你关注的地方",
+    "退化路径：如果一个已上线一年的功能突然不再被任何用户使用，它的代码应该自动腐烂还是显式淘汰？",
+    "隐藏耦合：两个看起来无关的模块在什么边界条件下会产生交互？直觉告诉你的那个答案通常是错的",
+    "收益递减：当前系统的哪一项优化已经过了收益拐点？继续投入为什么不会产生更好的结果",
+    "互适应：当用户学会了系统的行为模式，系统反过来学会了用户的，两者的适应谁会先到达有害状态？",
+    "功能侵蚀：一个模块为了覆盖 5% 的边缘场景，增加了 50% 的复杂度。这 5% 是否应该被切掉？",
+    '沉默错误：系统中最危险的错误不是抛出异常的那个，而是被正常流程吞掉的那个。你有哪些错误被"正常"了？',
+    "信息蒸馏：每一层抽象都在丢失信息。你的架构中哪一层抽象丢失的信息比它创造的价值多？",
+    "二阶效应：解决 A 问题的方案，在 3 个月后大概率会制造 B 问题。你当前正准备引入哪个 A？",
+    '认知税：一个设计如果能被新人在 10 分钟内理解，它的长期维护成本低于一个"更优"但需要 1 小时才能搞懂的设计。你的架构中哪个模块在收认知税？'
+  ];
+  /** Provocation 池：反向约束 */
+  constraints = [
+    "如果不能使用任何 LLM，纯规则引擎",
+    "如果用户只能输入 3 个词（极简交互）",
+    "如果 Mio 必须完全离线运行",
+    "如果要支持 100 人同时使用",
+    "如果每个决策必须对非技术用户可解释",
+    "如果所有数据必须在 1 秒后自动销毁",
+    "如果只有 64MB 内存可用",
+    "如果用户是视障人士（纯语音界面）",
+    "如果不允许写任何文件到磁盘",
+    "如果每轮响应必须在 100ms 内完成"
+  ];
+  /** 已经用过的 provocation 索引 */
+  usedProvocations = [];
+  usedConstraints = [];
+  constructor(seed) {
+    this.rng = resolveRandom(seed);
+  }
+  /**
+   * 构建一轮创造力来源
+   * @param moduleData 各模块运行时数据
+   * @param rejectedIdeas 最近被拒绝的假设片段
+   */
+  build(moduleData, rejectedIdeas = [], worldTrends) {
+    const sources = [];
+    const memInfo = moduleData.memory;
+    sources.push({
+      name: "Memory",
+      content: memInfo ? `对话记忆系统：${memInfo.entryCount} 条记录，最近话题: ${memInfo.recentTopics.slice(0, 3).join("、") || "无"}` : "对话记忆系统",
+      type: "knowledge",
+      weight: 0.9
+    });
+    sources.push({
+      name: "MCP",
+      content: `工具调用框架：${moduleData.agent ? `${moduleData.agent.topTools.slice(0, 3).join(", ")} 等 ${moduleData.agent.toolCalls} 次调用` : "多工具集成"}`,
+      type: "knowledge",
+      weight: 0.8
+    });
+    const asrInfo = moduleData.asr;
+    sources.push({
+      name: "ASR",
+      content: asrInfo ? `语音识别：平均延迟 ${asrInfo.avgLatencyMs}ms，错误率 ${(asrInfo.errorRate * 100).toFixed(1)}%，识别领域: ${asrInfo.domainTerms.slice(0, 3).join("、") || "通用"}` : "语音识别",
+      type: "knowledge",
+      weight: 0.7
+    });
+    const ttsInfo = moduleData.tts;
+    sources.push({
+      name: "TTS",
+      content: ttsInfo ? `语音合成：本小时合成 ${ttsInfo.charsSynthesized} 字符，队列深度 ${ttsInfo.queueLength}` : "语音合成",
+      type: "knowledge",
+      weight: 0.7
+    });
+    const agentInfo = moduleData.agent;
+    sources.push({
+      name: "Agent",
+      content: agentInfo ? `Agent 服务：${agentInfo.toolCalls} 次工具调用，成功率 ${(agentInfo.successRate * 100).toFixed(0)}%，最常用 ${agentInfo.topTools.slice(0, 3).join(", ")}` : "Agent 服务",
+      type: "knowledge",
+      weight: 0.9
+    });
+    const evoInfo = moduleData.evolution;
+    sources.push({
+      name: "Evolution",
+      content: evoInfo ? `自进化系统：第 ${evoInfo.generation} 代，${evoInfo.strategyCount} 个策略，最近事件: ${evoInfo.recentEvents.slice(0, 3).join(" | ") || "无"}` : "自进化系统",
+      type: "knowledge",
+      weight: 0.8
+    });
+    sources.push({
+      name: "Wallpaper",
+      content: "桌面壁纸集成：Overlay 渲染、透明窗口、系统托盘",
+      type: "knowledge",
+      weight: 0.5
+    });
+    sources.push({
+      name: "PiperTTS",
+      content: "本地 TTS：离线语音合成、低延迟、多语音模型",
+      type: "knowledge",
+      weight: 0.5
+    });
+    const ubInfo = moduleData.userBehavior;
+    sources.push({
+      name: "UserBehavior",
+      content: ubInfo ? `最近交互 ${ubInfo.interactionCount} 次，活跃话题: ${ubInfo.recentLabels.slice(0, 3).join("、") || "无"}，高峰时段: ${ubInfo.peakHours}` : `最近交互 0 次`,
+      type: "behavior",
+      weight: 0.7
+    });
+    if (worldTrends && worldTrends.length > 0) {
+      const picked = worldTrends.slice(0, 3);
+      for (const trend of picked) {
+        sources.push({
+          name: `趋势:${trend.slice(0, 12)}`,
+          content: trend,
+          type: "provocation",
+          weight: 0.85
+        });
+      }
+    } else {
+      const domainConcept = this.pickProvocation();
+      if (domainConcept) {
+        sources.push({
+          name: `刺激:${domainConcept.split("：")[0]}`,
+          content: domainConcept,
+          type: "provocation",
+          weight: 0.85
+        });
+      }
+    }
+    const constraint = this.pickConstraint();
+    if (constraint) {
+      sources.push({
+        name: `约束:${constraint.slice(0, 16)}`,
+        content: constraint,
+        type: "provocation",
+        weight: 0.8
+      });
+    }
+    if (moduleData.observer?.insights && moduleData.observer.insights.length > 0) {
+      for (const insight of moduleData.observer.insights.slice(0, 2)) {
+        sources.push({
+          name: `洞察:${insight.slice(0, 16)}`,
+          content: insight,
+          type: "insight",
+          weight: 0.75
+        });
+      }
+    }
+    if (rejectedIdeas.length > 0) {
+      const picked = rejectedIdeas[Math.floor(this.rng() * rejectedIdeas.length)];
+      sources.push({
+        name: "已拒绝思路",
+        content: `之前尝试过但不可行的方向: ${picked}`,
+        type: "failure",
+        weight: 0.6
+      });
+    }
+    return sources;
+  }
+  /**
+   * 从 domain 概念池中选一个未用过的
+   */
+  pickProvocation() {
+    const available = this.domainConcepts.filter((_, i) => !this.usedProvocations.includes(i));
+    if (available.length === 0) {
+      this.usedProvocations = [];
+      return this.domainConcepts[Math.floor(this.rng() * this.domainConcepts.length)];
+    }
+    const idx = Math.floor(this.rng() * available.length);
+    const originalIdx = this.domainConcepts.indexOf(available[idx]);
+    this.usedProvocations.push(originalIdx);
+    return available[idx];
+  }
+  /**
+   * 从约束池中选一个未用过的
+   */
+  pickConstraint() {
+    const available = this.constraints.filter((_, i) => !this.usedConstraints.includes(i));
+    if (available.length === 0) {
+      this.usedConstraints = [];
+      return this.constraints[Math.floor(this.rng() * this.constraints.length)];
+    }
+    const idx = Math.floor(this.rng() * available.length);
+    const originalIdx = this.constraints.indexOf(available[idx]);
+    this.usedConstraints.push(originalIdx);
+    return available[idx];
+  }
+  /** 重置 provocation 使用记录（新梦周期触发） */
+  resetProvocations() {
+    this.usedProvocations = [];
+    this.usedConstraints = [];
+  }
+}
+function tokenize$1(text) {
+  const tokens = /* @__PURE__ */ new Set();
+  const enTokens = text.toLowerCase().split(/[^a-z0-9一-鿿]+/g).filter((t) => t.length > 1 && /[a-z0-9]/.test(t));
+  for (const t of enTokens) tokens.add(t);
+  const chChars = text.replace(/[^一-鿿]/g, "");
+  for (let i = 0; i < chChars.length - 1; i++) {
+    tokens.add(chChars.slice(i, i + 2));
+  }
+  return tokens;
+}
+function jaccardSimilarity(a, b) {
+  const setA = tokenize$1(a);
+  const setB = tokenize$1(b);
+  const union = /* @__PURE__ */ new Set([...setA, ...setB]);
+  if (union.size === 0) return 0;
+  let intersection = 0;
+  for (const t of setA) {
+    if (setB.has(t)) intersection++;
+  }
+  return intersection / union.size;
+}
+function evaluateNovelty(candidate, recentHypotheses, rejectedHypotheses) {
+  const candidateText = `${candidate.title} ${candidate.idea}`;
+  let adjustedNovelty = candidate.novelty;
+  let mostSimilarTitle = "";
+  let mostSimilarScore = 0;
+  for (const h of recentHypotheses) {
+    const sim = jaccardSimilarity(candidateText, `${h.title} ${h.idea}`);
+    if (sim > mostSimilarScore) {
+      mostSimilarScore = sim;
+      mostSimilarTitle = h.title;
+    }
+  }
+  if (mostSimilarScore > 0.5) {
+    adjustedNovelty = Math.max(0, adjustedNovelty - 15);
+  }
+  for (const h of rejectedHypotheses) {
+    const sim = jaccardSimilarity(candidateText, `${h.title} ${h.idea}`);
+    if (sim > 0.6) {
+      return {
+        adjustedNovelty,
+        shouldReject: true,
+        rejectReason: `与已拒绝假设"${h.title}"内容高度相似 (Jaccard=${sim.toFixed(2)})`,
+        mostSimilarTitle: h.title,
+        mostSimilarScore: sim
+      };
+    }
+  }
+  return {
+    adjustedNovelty,
+    shouldReject: false,
+    mostSimilarTitle,
+    mostSimilarScore
+  };
+}
+const DREAM_CYCLE_INTERVAL_MS = 6 * 60 * 60 * 1e3;
+const NORMAL_CYCLE_INTERVAL_MS = 60 * 60 * 1e3;
+class CreativityService {
+  generator;
+  store;
+  eventBus;
+  normalTimer = null;
+  dreamTimer = null;
+  reportDir;
+  taskRunner;
+  taskRunnerKeys = [];
+  sourceBuilder;
+  worldTrendProvider;
+  /** 最近一次进化系统执行结果（Phase 3 反馈） */
+  evolutionOutcome = null;
+  evolutionDisposer = null;
+  /** 轮换的策略序列：每次 cycle 按顺序切换 */
+  strategyCycle = ["explore", "signal", "stable"];
+  strategyIndex = 0;
+  /** 用户正在对话中 — 跳过创造性周期避免抢占 LLM */
+  conversationActive = false;
+  getSources;
+  getInsights;
+  getFailedHypotheses;
+  constructor(store, deps, chatJson, chatJsonWithCode, temperature = 0.3, seed, bus, reportDir = "", taskRunner, observerDir) {
+    this.store = store;
+    const hypothesisJson = chatJsonWithCode || chatJson;
+    this.generator = new IdeaGenerator(hypothesisJson, temperature, seed);
+    this.eventBus = bus || eventBus;
+    this.reportDir = reportDir;
+    this.taskRunner = taskRunner;
+    this.getSources = deps.getSources;
+    this.getInsights = deps.getInsights;
+    this.getFailedHypotheses = deps.getFailedHypotheses;
+    this.sourceBuilder = new SourceBuilder(seed);
+    this.worldTrendProvider = observerDir ? new WorldTrendProvider(observerDir, seed) : null;
+    this.eventBus.on("agent.input.received", () => {
+      this.conversationActive = true;
+    });
+    this.eventBus.on("agent.response.generated", () => {
+      this.conversationActive = false;
+    });
+    setInterval(
+      () => {
+        this.conversationActive = false;
       },
-      confidence: { type: "number", description: "确信度 0-1，默认 0.7" }
-    },
-    required: ["content"]
-  },
-  handler: async (args) => {
-    try {
-      const ms = getMemoryService();
-      if (!ms) return formatToolError("记忆服务暂不可用");
-      const content = String(args.content);
-      const confidence = typeof args.confidence === "number" ? args.confidence : 0.7;
-      ms.addFact(content, confidence);
-      return formatToolResult(`已记住: ${content.slice(0, 100)}`);
-    } catch (err) {
-      return formatToolError(err.message);
+      5 * 60 * 1e3
+    );
+    this.evolutionDisposer = this.eventBus.on("evolution.plan.outcome", (p) => {
+      this.evolutionOutcome = {
+        success: p.success,
+        summary: p.summary || "",
+        planTitle: p.planTitle
+      };
+    });
+  }
+  start() {
+    if (this.taskRunner) {
+      this.taskRunner.register(
+        "creativity.cycle",
+        async () => {
+          await this.cycle();
+          return { success: true };
+        },
+        NORMAL_CYCLE_INTERVAL_MS
+      );
+      this.taskRunner.register(
+        "creativity.dream",
+        async () => {
+          await this.dreamCycle();
+          return { success: true };
+        },
+        DREAM_CYCLE_INTERVAL_MS
+      );
+      this.taskRunnerKeys = ["creativity.cycle", "creativity.dream"];
+      return;
     }
-  },
-  isReadOnly: false
-});
+    if (this.normalTimer) return;
+    this.normalTimer = setInterval(() => {
+      this.cycle();
+    }, NORMAL_CYCLE_INTERVAL_MS);
+    this.dreamTimer = setInterval(() => {
+      this.dreamCycle();
+    }, DREAM_CYCLE_INTERVAL_MS);
+    Logger.log("INFO", "creativity_service_started", {
+      normal_interval_ms: NORMAL_CYCLE_INTERVAL_MS,
+      dream_interval_ms: DREAM_CYCLE_INTERVAL_MS
+    });
+  }
+  stop() {
+    if (this.taskRunner) {
+      for (const key of this.taskRunnerKeys) {
+        this.taskRunner.stopType(key);
+      }
+      this.taskRunnerKeys = [];
+      return;
+    }
+    if (this.normalTimer) {
+      clearInterval(this.normalTimer);
+      this.normalTimer = null;
+    }
+    if (this.dreamTimer) {
+      clearInterval(this.dreamTimer);
+      this.dreamTimer = null;
+    }
+    Logger.log("INFO", "creativity_service_stopped");
+  }
+  /**
+   * 正常创造力周期
+   */
+  async cycle() {
+    if (this.conversationActive) return;
+    let sources = this.getSources();
+    let externalSignals = [];
+    if (this.worldTrendProvider) {
+      const trends = this.worldTrendProvider.getTrends();
+      const insights2 = this.worldTrendProvider.getInsights();
+      for (const t of trends) {
+        externalSignals.push({ source: "Observer", raw: t, type: "trend" });
+      }
+      for (const i of insights2) {
+        externalSignals.push({ source: "Observer", raw: i, type: "insight" });
+      }
+    }
+    if (this.evolutionOutcome) {
+      const outcome = this.evolutionOutcome;
+      sources.push({
+        name: outcome.success ? "进化:可行方案" : "进化:失败尝试",
+        content: outcome.success ? `进化系统最近执行了计划"${outcome.planTitle || "(分析)"}"并成功完成: ${outcome.summary.slice(0, 200)}` : `进化系统最近的分析/执行未成功: ${outcome.summary.slice(0, 200)}`,
+        type: outcome.success ? "knowledge" : "failure",
+        weight: outcome.success ? 0.8 : 0.6
+      });
+      this.evolutionOutcome = null;
+    }
+    if (sources.length < 2) return;
+    Logger.log("INFO", "creativity_cycle_start", {
+      source_count: sources.length,
+      external_signal_count: externalSignals.length
+    });
+    this.eventBus.emit("creativity.cycle.started", {});
+    const strategy = this.strategyCycle[this.strategyIndex % this.strategyCycle.length];
+    this.strategyIndex++;
+    Logger.log("INFO", "creativity_strategy_selected", { strategy, strategyIndex: this.strategyIndex });
+    this.generator.setExploredPairs(this.store.getExploredPairs());
+    const ideas = await this.generator.generateIdeas(sources, void 0, strategy, externalSignals);
+    if (ideas.length === 0) {
+      Logger.log("INFO", "creativity_cycle_empty");
+      this.eventBus.emit("creativity.cycle.completed", { count: 0, hasValue: false });
+      return;
+    }
+    const recent = this.store.getHypotheses({ limit: 30 });
+    const rejected = this.store.getHypotheses({ status: "rejected", limit: 50 });
+    const passed = [];
+    const rejectedIdeas = [];
+    for (const idea of ideas) {
+      const verdict = evaluateNovelty(
+        { title: idea.hypothesis.title, idea: idea.hypothesis.idea, novelty: idea.hypothesis.novelty },
+        recent.map((h) => ({ title: h.title, idea: h.idea, novelty: h.novelty })),
+        rejected.map((h) => ({ title: h.title, idea: h.idea }))
+      );
+      if (verdict.shouldReject) {
+        rejectedIdeas.push(idea);
+        Logger.log("INFO", "creativity_novelty_rejected", {
+          title: idea.hypothesis.title,
+          reason: verdict.rejectReason
+        });
+        continue;
+      }
+      idea.hypothesis.novelty = verdict.adjustedNovelty;
+      passed.push(idea);
+    }
+    if (passed.length === 0) {
+      Logger.log("INFO", "creativity_cycle_all_rejected", { noveltyRejected: rejectedIdeas.length });
+      this.eventBus.emit("creativity.cycle.completed", { count: rejectedIdeas.length, hasValue: false });
+      return;
+    }
+    const deduped = passed;
+    this.persist(deduped);
+    this.reportCycle(deduped);
+    this.report(deduped);
+    for (const idea of deduped) {
+      const labels = idea.hypothesis.sourceLabels;
+      if (labels.length >= 2) {
+        this.store.addExploredPair(labels[0], labels[1]);
+      }
+    }
+    const topIdea = deduped.reduce(
+      (best, i) => {
+        const score = i.hypothesis.novelty + i.hypothesis.feasibility + i.hypothesis.impact;
+        return score > (best.score || 0) ? { idea: i, score } : best;
+      },
+      { idea: null, score: 0 }
+    );
+    if (topIdea.idea && topIdea.score > 220) {
+      const h = topIdea.idea.hypothesis;
+      this.eventBus.emit("creativity.hypothesis.selected", {
+        id: h.id,
+        title: h.title,
+        idea: h.idea,
+        novelty: h.novelty,
+        feasibility: h.feasibility,
+        impact: h.impact,
+        sourceLabels: h.sourceLabels,
+        expectedBenefit: h.expectedBenefit,
+        risk: h.risk
+      });
+    }
+    this.eventBus.emit("creativity.cycle.completed", { count: deduped.length, hasValue: true });
+  }
+  /**
+   * 梦境创造力周期 — 更高随机性、纳入失败历史
+   */
+  async dreamCycle() {
+    if (this.conversationActive) return;
+    const recentSources = this.getSources();
+    const historicalCombos = this.store.getRecentCombos(30);
+    const failedHypotheses = this.store.getHypotheses({ status: "rejected" }).map((h) => ({ title: h.title, idea: h.idea, risk: h.risk }));
+    const insights2 = this.getInsights();
+    const insightSources = insights2.map((i) => ({
+      name: `洞察:${i.title}`,
+      content: `${i.description} (评分:${i.score})`,
+      type: "insight",
+      weight: 0.7
+    }));
+    const allSources = [...recentSources, ...insightSources];
+    Logger.log("INFO", "creativity_dream_start", {
+      sources: allSources.length,
+      historical_combos: historicalCombos.length,
+      failed_hypotheses: failedHypotheses.length
+    });
+    const ideas = await this.generator.dreamIdeas(
+      allSources,
+      historicalCombos,
+      failedHypotheses.map((h) => ({
+        title: h.title,
+        idea: h.idea,
+        risk: h.risk,
+        status: "rejected",
+        createdAt: Date.now(),
+        expectedBenefit: "",
+        feasibility: 0,
+        id: "",
+        impact: 0,
+        novelty: 0,
+        sourceLabels: []
+      }))
+    );
+    const logEntry = {
+      timestamp: Date.now(),
+      sourcesExamined: allSources.length,
+      combosGenerated: this.store.getRecentCombos().length,
+      hypothesesGenerated: ideas.length,
+      topIdea: ideas.length > 0 ? ideas[0].hypothesis.title : null
+    };
+    this.store.logDreamCycle(logEntry);
+    if (ideas.length === 0) {
+      Logger.log("INFO", "creativity_dream_empty");
+      return;
+    }
+    this.persist(ideas);
+    this.reportCycle(ideas, true);
+    this.report(ideas);
+    this.eventBus.emit("creativity.dream.completed", {
+      count: ideas.length,
+      topNovelty: ideas[0].hypothesis.novelty
+    });
+  }
+  persist(ideas) {
+    const hypotheses2 = ideas.map((i) => i.hypothesis);
+    this.store.addManyHypotheses(hypotheses2);
+    for (const idea of ideas) {
+      if (idea.experiment) {
+        this.store.addExperiment(idea.experiment);
+      }
+    }
+  }
+  report(ideas) {
+    const top = ideas.slice(0, 3);
+    this.eventBus.emit("creativity.ideas.generated", {
+      count: ideas.length,
+      ideas: top.map((i) => ({
+        id: i.hypothesis.id,
+        title: i.hypothesis.title,
+        idea: i.hypothesis.idea,
+        expectedBenefit: i.hypothesis.expectedBenefit,
+        risk: i.hypothesis.risk,
+        sourceLabels: i.hypothesis.sourceLabels,
+        novelty: i.hypothesis.novelty,
+        feasibility: i.hypothesis.feasibility,
+        impact: i.hypothesis.impact
+      }))
+    });
+    Logger.log("INFO", "creativity_ideas_generated", {
+      count: ideas.length,
+      top_novelty: top[0]?.hypothesis.novelty,
+      top_title: top[0]?.hypothesis.title
+    });
+  }
+  /** 写一份可读的报告到 evolution_workspace */
+  reportCycle(ideas, dream = false) {
+    if (!this.reportDir) return;
+    const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const cycleType = dream ? "梦境" : "普通";
+    const filePath = path$1.resolve(this.reportDir, `creativity-${ts}.md`);
+    const dir = this.reportDir;
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const count = ideas.length;
+    const sorted = [...ideas].sort((a, b) => b.hypothesis.novelty - a.hypothesis.novelty);
+    const top = sorted[0];
+    let md = `# 创造力周期报告 (${cycleType})
+
+- **时间**: ${ts}
+- **产出**: ${count} 个新想法
+- **最高新颖度**: ${top?.hypothesis.novelty ?? "-"}
+- **最高得分**: ${top ? `新颖=${top.hypothesis.novelty} 可行=${top.hypothesis.feasibility} 影响=${top.hypothesis.impact}` : "-"}
+
+## 想法列表
+
+| # | 标题 | 来源 | 新颖度 | 可行性 | 影响 |
+|---|------|------|--------|--------|------|
+`;
+    for (let i = 0; i < sorted.length; i++) {
+      const h = sorted[i].hypothesis;
+      md += `| ${i + 1} | ${h.title} | ${h.sourceLabels.join(", ")} | ${h.novelty} | ${h.feasibility} | ${h.impact} |
+`;
+    }
+    if (top) {
+      const h = top.hypothesis;
+      md += `
+## 最佳想法详情
+
+**${h.title}**
+
+- 来源: ${h.sourceLabels.join(" × ")}
+- 新颖度: ${h.novelty} / 可行性: ${h.feasibility} / 影响: ${h.impact}
+
+**描述**
+${h.idea}
+
+**预期收益**
+${h.expectedBenefit}
+
+**风险**
+${h.risk}
+`;
+    }
+    md += `
+## 历史采纳率概览
+
+${this.store.adoptionReport(5)}
+`;
+    try {
+      fs.writeFileSync(filePath, md, "utf-8");
+      Logger.log("INFO", "creativity_report_saved", { path: filePath });
+      this.cleanOldReports();
+    } catch (err) {
+      Logger.log("ERROR", "creativity_report_failed", { error: String(err) });
+    }
+  }
+  cleanOldReports() {
+    try {
+      const { readdirSync, unlinkSync } = require("fs");
+      const files = readdirSync(this.reportDir).filter((f) => f.startsWith("creativity-") && f.endsWith(".md")).map((f) => ({ name: f, time: new Date(f.slice(11, 30).replace(/-/g, ":")).getTime() })).sort((a, b) => b.time - a.time);
+      for (const f of files.slice(10)) {
+        unlinkSync(path$1.resolve(this.reportDir, f.name));
+      }
+    } catch {
+    }
+  }
+  async forceCycle() {
+    const sources = this.getSources();
+    if (sources.length < 2) return [];
+    const ideas = await this.generator.generateIdeas(sources);
+    if (ideas.length > 0) this.persist(ideas);
+    return ideas;
+  }
+  async forceDreamCycle() {
+    const recentSources = this.getSources();
+    const historicalCombos = this.store.getRecentCombos(30);
+    const failedHypotheses = this.store.getHypotheses({ status: "rejected" });
+    const insights2 = this.getInsights().map((i) => ({
+      name: `洞察:${i.title}`,
+      content: `${i.description} (评分:${i.score})`,
+      type: "insight",
+      weight: 0.7
+    }));
+    const allSources = [...recentSources, ...insights2];
+    const ideas = await this.generator.dreamIdeas(
+      allSources,
+      historicalCombos,
+      failedHypotheses.map((h) => ({
+        id: h.id,
+        title: h.title,
+        idea: h.idea,
+        risk: h.risk,
+        expectedBenefit: h.expectedBenefit,
+        feasibility: h.feasibility,
+        impact: h.impact,
+        novelty: h.novelty,
+        sourceLabels: h.sourceLabels,
+        status: "rejected",
+        createdAt: h.createdAt
+      }))
+    );
+    if (ideas.length > 0) this.persist(ideas);
+    return ideas;
+  }
+  getStore() {
+    return this.store;
+  }
+}
 const events = sqliteCore.sqliteTable("events", {
   id: sqliteCore.integer("id").primaryKey({ autoIncrement: true }),
   channel: sqliteCore.text("channel").notNull(),
@@ -1760,12 +3367,24 @@ const workflowStepRuns = sqliteCore.sqliteTable("workflow_step_runs", {
   startedAt: sqliteCore.integer("started_at"),
   completedAt: sqliteCore.integer("completed_at")
 });
+const evaluationEvents = sqliteCore.sqliteTable("evaluation_events", {
+  id: sqliteCore.text("id").primaryKey(),
+  timestamp: sqliteCore.integer("timestamp").notNull(),
+  traceId: sqliteCore.text("trace_id").notNull(),
+  sessionId: sqliteCore.text("session_id").notNull(),
+  source: sqliteCore.text("source").notNull(),
+  type: sqliteCore.text("type").notNull(),
+  payload: sqliteCore.text("payload").notNull(),
+  // JSON serialized
+  parentEventId: sqliteCore.text("parent_event_id")
+});
 const schema = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   conceptCombos,
   credentials,
   decisions,
   dreamCycles,
+  evaluationEvents,
   events,
   experiments,
   goals,
@@ -2326,6 +3945,24 @@ const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS idx_wf_runs_status ON workflow_runs(status);
       CREATE INDEX IF NOT EXISTS idx_wf_step_runs_run_id ON workflow_step_runs(run_id);
     `
+  },
+  {
+    version: 27,
+    sql: `
+      CREATE TABLE IF NOT EXISTS evaluation_events (
+        id TEXT PRIMARY KEY,
+        timestamp INTEGER NOT NULL,
+        trace_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        parent_event_id TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_ev_ts ON evaluation_events(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_ev_type ON evaluation_events(type);
+      CREATE INDEX IF NOT EXISTS idx_ev_trace ON evaluation_events(trace_id);
+    `
   }
 ];
 function runMigrations(sqlite2) {
@@ -2340,7 +3977,7 @@ function runMigrations(sqlite2) {
     }
   }
 }
-const PATTERNS$2 = [
+const PATTERNS$1 = [
   {
     category: "writing",
     patterns: [
@@ -2386,7 +4023,7 @@ const PATTERNS$2 = [
 ];
 function classifyContent(text) {
   if (!text) return "chat";
-  for (const { category, patterns } of PATTERNS$2) {
+  for (const { category, patterns } of PATTERNS$1) {
     for (const p of patterns) {
       if (p.test(text)) return category;
     }
@@ -2541,6 +4178,3036 @@ const connection = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.definePr
   initDatabase,
   markDirty
 }, Symbol.toStringTag, { value: "Module" }));
+function parseHypothesis(obj) {
+  return {
+    id: obj.id,
+    title: obj.title,
+    idea: obj.idea,
+    expectedBenefit: obj.expected_benefit,
+    risk: obj.risk,
+    sourceLabels: JSON.parse(obj.source_labels || "[]"),
+    novelty: obj.novelty,
+    feasibility: obj.feasibility,
+    impact: obj.impact,
+    status: obj.status,
+    createdAt: obj.created_at
+  };
+}
+function parseCombo(obj) {
+  return {
+    id: obj.id,
+    sources: JSON.parse(obj.sources || '["",""]'),
+    description: obj.description,
+    createdAt: obj.created_at
+  };
+}
+function parseExperiment(obj) {
+  return {
+    hypothesisId: obj.hypothesis_id,
+    title: obj.title,
+    steps: JSON.parse(obj.steps || "[]"),
+    successCriteria: JSON.parse(obj.success_criteria || "[]"),
+    estimatedDuration: obj.estimated_duration,
+    createdAt: obj.created_at
+  };
+}
+function parseDreamCycle(obj) {
+  return {
+    timestamp: obj.timestamp,
+    sourcesExamined: obj.sources_examined,
+    combosGenerated: obj.combos_generated,
+    hypothesesGenerated: obj.hypotheses_generated,
+    topIdea: obj.top_idea ?? null
+  };
+}
+function rowsToObjects(columns, values) {
+  return values.map((v) => {
+    const obj = {};
+    for (let i = 0; i < columns.length; i++) obj[columns[i]] = v[i];
+    return obj;
+  });
+}
+class DrizzleIdeaStore {
+  addCombo(combo) {
+    const db2 = getRawDb();
+    db2.run("INSERT OR IGNORE INTO concept_combos (id, sources, description, created_at) VALUES (?, ?, ?, ?)", [
+      combo.id,
+      JSON.stringify(combo.sources),
+      combo.description,
+      combo.createdAt
+    ]);
+    markDirty();
+  }
+  addHypothesis(h) {
+    const db2 = getRawDb();
+    this.insertHypothesis(db2, h);
+    markDirty();
+  }
+  addManyHypotheses(hs) {
+    if (hs.length === 0) return;
+    const db2 = getRawDb();
+    for (const h of hs) this.insertHypothesis(db2, h);
+    markDirty();
+  }
+  addExperiment(exp) {
+    const db2 = getRawDb();
+    db2.run(
+      "INSERT OR REPLACE INTO experiments (hypothesis_id, title, steps, success_criteria, estimated_duration, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      [exp.hypothesisId, exp.title, JSON.stringify(exp.steps), JSON.stringify(exp.successCriteria), exp.estimatedDuration, exp.createdAt]
+    );
+    markDirty();
+  }
+  logDreamCycle(entry) {
+    const db2 = getRawDb();
+    db2.run(
+      "INSERT OR IGNORE INTO dream_cycles (timestamp, sources_examined, combos_generated, hypotheses_generated, top_idea) VALUES (?, ?, ?, ?, ?)",
+      [entry.timestamp, entry.sourcesExamined, entry.combosGenerated, entry.hypothesesGenerated, entry.topIdea]
+    );
+    markDirty();
+  }
+  getHypotheses(options) {
+    const db2 = getRawDb();
+    let sql = "SELECT * FROM hypotheses";
+    const clauses = [];
+    if (options?.status) {
+      const escaped = options.status.replace(/'/g, "''");
+      clauses.push(`status = '${escaped}'`);
+    }
+    if (clauses.length > 0) sql += " WHERE " + clauses.join(" AND ");
+    sql += " ORDER BY created_at DESC";
+    if (options?.limit) sql += ` LIMIT ${options.limit}`;
+    const result = db2.exec(sql);
+    if (!result || result.length === 0 || result[0].values.length === 0) return [];
+    return rowsToObjects(result[0].columns, result[0].values).map(parseHypothesis);
+  }
+  getNovelHypotheses(threshold = 70, limit = 5) {
+    const db2 = getRawDb();
+    const result = db2.exec(
+      `SELECT * FROM hypotheses WHERE novelty >= ${threshold} AND status != 'rejected' ORDER BY novelty DESC LIMIT ${limit}`
+    );
+    if (!result || result.length === 0 || result[0].values.length === 0) return [];
+    return rowsToObjects(result[0].columns, result[0].values).map(parseHypothesis);
+  }
+  getActiveExperiments() {
+    const db2 = getRawDb();
+    const result = db2.exec(
+      "SELECT e.* FROM experiments e INNER JOIN hypotheses h ON e.hypothesis_id = h.id WHERE h.status = 'experimenting'"
+    );
+    if (!result || result.length === 0 || result[0].values.length === 0) return [];
+    return rowsToObjects(result[0].columns, result[0].values).map(parseExperiment);
+  }
+  getRecentCombos(limit = 20) {
+    const db2 = getRawDb();
+    const result = db2.exec(`SELECT * FROM concept_combos ORDER BY created_at DESC LIMIT ${limit}`);
+    if (!result || result.length === 0 || result[0].values.length === 0) return [];
+    return rowsToObjects(result[0].columns, result[0].values).map(parseCombo);
+  }
+  getRecentDreamCycles(limit = 10) {
+    const db2 = getRawDb();
+    const result = db2.exec(`SELECT * FROM dream_cycles ORDER BY timestamp DESC LIMIT ${limit}`);
+    if (!result || result.length === 0 || result[0].values.length === 0) return [];
+    return rowsToObjects(result[0].columns, result[0].values).map(parseDreamCycle);
+  }
+  updateHypothesisStatus(id2, status) {
+    const db2 = getRawDb();
+    const escapedStatus = status.replace(/'/g, "''");
+    db2.run(`UPDATE hypotheses SET status = '${escapedStatus}' WHERE id = '${id2.replace(/'/g, "''")}'`);
+    markDirty();
+    return true;
+  }
+  count() {
+    const db2 = getRawDb();
+    const c = (sql) => {
+      const r = db2.exec(sql);
+      return r && r.length > 0 && r[0].values.length > 0 ? Number(r[0].values[0][0]) : 0;
+    };
+    return {
+      combos: c("SELECT COUNT(*) FROM concept_combos"),
+      hypotheses: c("SELECT COUNT(*) FROM hypotheses"),
+      experiments: c("SELECT COUNT(*) FROM experiments"),
+      dreamCycles: c("SELECT COUNT(*) FROM dream_cycles")
+    };
+  }
+  templateAdoptionStats() {
+    const all = this.getHypotheses();
+    const stats = {};
+    for (const h of all) {
+      const key = h.sourceLabels.join("|");
+      if (!stats[key]) stats[key] = { total: 0, active: 0, rejected: 0, adopted: 0 };
+      stats[key].total++;
+      if (h.status === "active" || h.status === "experimenting") stats[key].active++;
+      if (h.status === "rejected") stats[key].rejected++;
+      if (h.status === "validated") stats[key].adopted++;
+    }
+    return stats;
+  }
+  adoptionReport(limit = 10) {
+    const stats = this.templateAdoptionStats();
+    const entries = Object.entries(stats).sort((a, b) => a[1].adopted / Math.max(a[1].total, 1) - b[1].adopted / Math.max(b[1].total, 1));
+    const all = this.count();
+    let report = `=== 模板采纳率报告 (共 ${all.hypotheses} 条假设) ===
+`;
+    report += "来源对 | 总数 | 进行中 | 已拒绝 | 已采纳 | 采纳率\n";
+    for (const [key, s] of entries.slice(0, limit)) {
+      const rate = (s.adopted / Math.max(s.total, 1) * 100).toFixed(0);
+      report += `${key} | ${s.total} | ${s.active} | ${s.rejected} | ${s.adopted} | ${rate}%
+`;
+    }
+    return report;
+  }
+  addExploredPair(nameA, nameB) {
+    const db2 = getRawDb();
+    const key = [nameA, nameB].sort().join("|");
+    db2.run("INSERT OR IGNORE INTO explored_pairs (pair_key, created_at) VALUES (?, ?)", [key, Date.now()]);
+    markDirty();
+  }
+  getExploredPairs() {
+    const db2 = getRawDb();
+    const result = db2.exec("SELECT pair_key FROM explored_pairs ORDER BY created_at DESC");
+    if (!result || result.length === 0 || result[0].values.length === 0) return [];
+    return result[0].values.map((v) => String(v[0]));
+  }
+  resetExploredPairs() {
+    const db2 = getRawDb();
+    db2.run("DELETE FROM explored_pairs");
+    markDirty();
+  }
+  insertHypothesis(db2, h) {
+    db2.run(
+      "INSERT OR IGNORE INTO hypotheses (id, title, idea, expected_benefit, risk, source_labels, novelty, feasibility, impact, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [
+        h.id,
+        h.title,
+        h.idea,
+        h.expectedBenefit,
+        h.risk,
+        JSON.stringify(h.sourceLabels),
+        h.novelty,
+        h.feasibility,
+        h.impact,
+        h.status,
+        h.createdAt
+      ]
+    );
+  }
+}
+let creativityService = null;
+let ideaStore = null;
+function initCreativity(filePath, deps, chatJson, temperature = 0.3, reportDir = "", taskRunner, observerDir, chatJsonWithCode) {
+  if (!creativityService) {
+    const store = new DrizzleIdeaStore();
+    ideaStore = store;
+    creativityService = new CreativityService(
+      store,
+      deps,
+      chatJson,
+      chatJsonWithCode,
+      temperature,
+      void 0,
+      void 0,
+      reportDir,
+      taskRunner ?? void 0,
+      observerDir
+    );
+  }
+  return creativityService;
+}
+class AsyncLock {
+  locked = false;
+  queue = [];
+  async acquire() {
+    if (!this.locked) {
+      this.locked = true;
+      return;
+    }
+    return new Promise((resolve) => {
+      this.queue.push(resolve);
+    });
+  }
+  release() {
+    if (this.queue.length > 0) {
+      const next = this.queue.shift();
+      next();
+    } else {
+      this.locked = false;
+    }
+  }
+  /**
+   * 执行临界区操作，自动获取/释放锁。
+   * 保证无论成功还是异常都会释放锁。
+   */
+  async run(fn) {
+    await this.acquire();
+    try {
+      return await fn();
+    } finally {
+      this.release();
+    }
+  }
+  isLocked() {
+    return this.locked;
+  }
+}
+let idCounter$b = 0;
+function rowToPlan(r) {
+  return {
+    id: r.id,
+    title: r.title,
+    description: r.description,
+    status: r.status,
+    reflection: r.reflection ?? void 0,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  };
+}
+function rowToStep(r) {
+  return {
+    id: r.id,
+    description: r.description,
+    status: r.status,
+    result: r.result ?? void 0
+  };
+}
+function tryDb() {
+  try {
+    return getRawDb();
+  } catch {
+    return null;
+  }
+}
+class DrizzlePlanManager {
+  lock = new AsyncLock();
+  /** 当前活跃计划上限 */
+  static MAX_ACTIVE_PLANS = 3;
+  createPlan(title, description2, stepDescriptions, priority) {
+    const existing = this.getActivePlanByTitle(title);
+    if (existing) {
+      Logger.log("INFO", "plan_duplicate_skipped", { plan_id: existing.id, title });
+      return existing;
+    }
+    const activeCount = this.listActivePlans().length;
+    if (activeCount >= DrizzlePlanManager.MAX_ACTIVE_PLANS) {
+      const msg = `活跃计划已达上限（${activeCount}/${DrizzlePlanManager.MAX_ACTIVE_PLANS}）。请先完成或放弃现有计划。`;
+      Logger.log("WARN", "plan_limit_exceeded", { active_count: activeCount, max: DrizzlePlanManager.MAX_ACTIVE_PLANS });
+      throw new Error(msg);
+    }
+    const db2 = tryDb();
+    if (!db2) {
+      const plan = this.createInMemoryPlan(title, description2, stepDescriptions, Date.now(), priority);
+      return plan;
+    }
+    const planId = `plan_${Date.now()}_${++idCounter$b}`;
+    const now = Date.now();
+    db2.run("INSERT INTO plans (id, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", [
+      planId,
+      title,
+      description2,
+      "active",
+      priority ?? 0,
+      now,
+      now
+    ]);
+    const stepRows = stepDescriptions.map((desc, i) => {
+      const stepId = `step_${i}_${Date.now()}`;
+      db2.run("INSERT INTO plan_steps (id, plan_id, step_index, description, status) VALUES (?, ?, ?, ?, ?)", [
+        stepId,
+        planId,
+        i,
+        desc,
+        "pending"
+      ]);
+      return { id: stepId, description: desc, status: "pending" };
+    });
+    markDirty();
+    const devPlan = {
+      id: planId,
+      title,
+      description: description2,
+      steps: stepRows,
+      status: "active",
+      priority: priority ?? 0,
+      createdAt: now,
+      updatedAt: now
+    };
+    eventBus.emit("agent.plan.created", { planId, title });
+    Logger.log("INFO", "plan_created", { plan_id: planId, title, steps: stepDescriptions.length });
+    return devPlan;
+  }
+  getPlan(id2) {
+    const db2 = tryDb();
+    if (!db2) return void 0;
+    const stmt = db2.prepare("SELECT * FROM plans WHERE id = ?");
+    stmt.bind([id2]);
+    if (!stmt.step()) {
+      stmt.free();
+      return void 0;
+    }
+    const row = stmt.getAsObject();
+    stmt.free();
+    return this.hydratePlan(row);
+  }
+  getActivePlan() {
+    const db2 = tryDb();
+    if (!db2) return void 0;
+    const stmt = db2.prepare("SELECT * FROM plans WHERE status = ? ORDER BY created_at DESC LIMIT 1");
+    stmt.bind(["active"]);
+    if (!stmt.step()) {
+      stmt.free();
+      return void 0;
+    }
+    const row = stmt.getAsObject();
+    stmt.free();
+    return this.hydratePlan(row);
+  }
+  /** 标题相似度阈值 (0-1)，低于此值视为重复计划 */
+  static TITLE_SIMILARITY_THRESHOLD = 0.75;
+  /** 归一化标题：去空格、转小写、去标点 */
+  normalizeTitle(title) {
+    return title.toLowerCase().replace(/[\s\p{P}]+/gu, " ").trim();
+  }
+  /** 计算两个规范化标题的 Dice 系数相似度 */
+  titleSimilarity(a, b) {
+    if (a === b) return 1;
+    const aWords = new Set(a.split(" "));
+    const bWords = new Set(b.split(" "));
+    if (aWords.size === 0 || bWords.size === 0) return 0;
+    let intersection = 0;
+    for (const w of aWords) if (bWords.has(w)) intersection++;
+    return 2 * intersection / (aWords.size + bWords.size);
+  }
+  /** 精确匹配：数据库层查询活跃计划标题 */
+  findExactTitleMatch(title) {
+    const db2 = tryDb();
+    if (!db2) return void 0;
+    const stmt = db2.prepare("SELECT * FROM plans WHERE title = ? AND status = ? LIMIT 1");
+    stmt.bind([title, "active"]);
+    if (!stmt.step()) {
+      stmt.free();
+      return void 0;
+    }
+    const row = stmt.getAsObject();
+    stmt.free();
+    return this.hydratePlan(row);
+  }
+  /** 检查是否有标题相似度超过阈值的活跃计划 */
+  findSimilarActivePlan(title) {
+    const normalized = this.normalizeTitle(title);
+    if (!normalized) return void 0;
+    return this.listActivePlans().find(
+      (p) => this.titleSimilarity(this.normalizeTitle(p.title), normalized) >= DrizzlePlanManager.TITLE_SIMILARITY_THRESHOLD
+    );
+  }
+  getActivePlanByTitle(title) {
+    const exact = this.findExactTitleMatch(title);
+    if (exact) return exact;
+    return this.findSimilarActivePlan(title);
+  }
+  listPlans() {
+    const db2 = tryDb();
+    if (!db2) return [];
+    const stmt = db2.prepare("SELECT * FROM plans ORDER BY updated_at DESC");
+    const plans2 = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      plans2.push(this.hydratePlan(row));
+    }
+    stmt.free();
+    return plans2;
+  }
+  updateStep(planId, stepIndex, status, result) {
+    const db2 = tryDb();
+    if (!db2) return false;
+    const check = db2.prepare("SELECT id FROM plan_steps WHERE plan_id = ? AND step_index = ?");
+    check.bind([planId, stepIndex]);
+    if (!check.step()) {
+      check.free();
+      return false;
+    }
+    check.free();
+    db2.run("UPDATE plan_steps SET status = ?, result = ? WHERE plan_id = ? AND step_index = ?", [status, result || null, planId, stepIndex]);
+    db2.run("UPDATE plans SET updated_at = ? WHERE id = ?", [Date.now(), planId]);
+    markDirty();
+    eventBus.emit("agent.plan.step", { planId, stepIndex, status });
+    Logger.log("INFO", "plan_step_update", { plan_id: planId, step: stepIndex, status });
+    return true;
+  }
+  completePlan(planId, reflection) {
+    const db2 = tryDb();
+    if (!db2) return false;
+    db2.run("UPDATE plans SET status = ?, reflection = ?, updated_at = ? WHERE id = ?", [
+      "completed",
+      reflection || null,
+      Date.now(),
+      planId
+    ]);
+    const affected = db2.getRowsModified();
+    if (affected === 0) {
+      Logger.log("WARN", "plan_complete_not_found", { plan_id: planId });
+      return false;
+    }
+    markDirty();
+    eventBus.emit("agent.plan.completed", { planId });
+    Logger.log("INFO", "plan_completed", { plan_id: planId });
+    return true;
+  }
+  abandonPlan(planId, reason) {
+    const db2 = tryDb();
+    if (!db2) return false;
+    db2.run("UPDATE plans SET status = ?, reflection = ?, updated_at = ? WHERE id = ?", ["abandoned", reason || null, Date.now(), planId]);
+    const affected = db2.getRowsModified();
+    if (affected === 0) {
+      Logger.log("WARN", "plan_abandon_not_found", { plan_id: planId });
+      return false;
+    }
+    markDirty();
+    Logger.log("INFO", "plan_abandoned", { plan_id: planId, reason });
+    return true;
+  }
+  freezePlan(planId, reason) {
+    const db2 = tryDb();
+    if (!db2) return false;
+    const check = db2.prepare("SELECT status FROM plans WHERE id = ?");
+    check.bind([planId]);
+    if (!check.step()) {
+      check.free();
+      return false;
+    }
+    const currentStatus = check.getAsObject();
+    check.free();
+    if (currentStatus.status !== "active") return false;
+    db2.run("UPDATE plans SET status = ?, reflection = ?, updated_at = ? WHERE id = ?", ["frozen", reason || null, Date.now(), planId]);
+    const affected = db2.getRowsModified();
+    if (affected === 0) {
+      Logger.log("WARN", "plan_freeze_not_found", { plan_id: planId });
+      return false;
+    }
+    markDirty();
+    Logger.log("INFO", "plan_frozen", { plan_id: planId, reason });
+    return true;
+  }
+  /** 返回所有活跃计划列表 */
+  listActivePlans() {
+    const db2 = tryDb();
+    if (!db2) return [];
+    const stmt = db2.prepare("SELECT * FROM plans WHERE status = ? ORDER BY created_at DESC");
+    stmt.bind(["active"]);
+    const plans2 = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      plans2.push(this.hydratePlan(row));
+    }
+    stmt.free();
+    return plans2;
+  }
+  getFormattedContext() {
+    const active = this.getActivePlan();
+    if (!active) return "";
+    const doneSteps = active.steps.filter((s) => s.status === "done").length;
+    const totalSteps = active.steps.length;
+    let ctx = `【当前开发计划】${active.title}
+进度: ${doneSteps}/${totalSteps}
+`;
+    for (const s of active.steps) {
+      const mark = s.status === "done" ? "[✓]" : s.status === "in_progress" ? "[→]" : s.status === "failed" ? "[✗]" : "[ ]";
+      ctx += `${mark} ${s.description}
+`;
+    }
+    return ctx;
+  }
+  /**
+   * 清理旧计划：删除 completed（超过 completedCutoff）和 abandoned（超过 abandonedCutoff）的计划
+   * 同时清理关联的 plan_steps。返回删除的计划数量。
+   */
+  cleanupOldPlans(completedCutoff, abandonedCutoff) {
+    const db2 = tryDb();
+    if (!db2) return 0;
+    const expiredPlans = db2.prepare("SELECT id FROM plans WHERE (status = ? AND created_at < ?) OR (status = ? AND created_at < ?)");
+    expiredPlans.bind(["completed", completedCutoff, "abandoned", abandonedCutoff]);
+    while (expiredPlans.step()) {
+      const row = expiredPlans.getAsObject();
+      db2.run("DELETE FROM plan_steps WHERE plan_id = ?", [row.id]);
+    }
+    expiredPlans.free();
+    db2.run("DELETE FROM plans WHERE (status = ? AND created_at < ?) OR (status = ? AND created_at < ?)", [
+      "completed",
+      completedCutoff,
+      "abandoned",
+      abandonedCutoff
+    ]);
+    const removed = db2.getRowsModified();
+    if (removed > 0) markDirty();
+    return removed;
+  }
+  createInMemoryPlan(title, description2, stepDescriptions, now, priority) {
+    const planId = `plan_${now}_${++idCounter$b}`;
+    const steps2 = stepDescriptions.map((desc, i) => ({
+      id: `step_${i}_${now}`,
+      description: desc,
+      status: "pending"
+    }));
+    const devPlan = {
+      id: planId,
+      title,
+      description: description2,
+      steps: steps2,
+      status: "active",
+      priority: priority ?? 0,
+      createdAt: now,
+      updatedAt: now
+    };
+    Logger.log("INFO", "plan_created_in_memory", { plan_id: planId, title, steps: stepDescriptions.length });
+    return devPlan;
+  }
+  hydratePlan(row) {
+    const db2 = tryDb();
+    if (!db2) return { ...rowToPlan(row), steps: [] };
+    const stmt = db2.prepare("SELECT * FROM plan_steps WHERE plan_id = ? ORDER BY step_index ASC");
+    stmt.bind([row.id]);
+    const steps2 = [];
+    while (stmt.step()) {
+      const sobj = stmt.getAsObject();
+      steps2.push(rowToStep(sobj));
+    }
+    stmt.free();
+    return {
+      ...rowToPlan(row),
+      steps: steps2
+    };
+  }
+}
+let taskIdCounter = 0;
+class Scheduler {
+  tasks = /* @__PURE__ */ new Map();
+  timers = /* @__PURE__ */ new Map();
+  nextId() {
+    return `sched_${Date.now()}_${++taskIdCounter}`;
+  }
+  once(delayMs, handler, pluginName = "@system") {
+    const id2 = this.nextId();
+    const task = { id: id2, pluginName, type: "once", handler, cancelled: false };
+    this.tasks.set(id2, task);
+    const timer = setTimeout(async () => {
+      if (task.cancelled) return;
+      await this.executeTask(task);
+      this.tasks.delete(id2);
+    }, delayMs);
+    this.timers.set(id2, timer);
+    return id2;
+  }
+  interval(intervalMs, handler, pluginName = "@system") {
+    const id2 = this.nextId();
+    const task = { id: id2, pluginName, type: "interval", handler, cancelled: false };
+    this.tasks.set(id2, task);
+    const timer = setInterval(async () => {
+      if (task.cancelled) return;
+      await this.executeTask(task);
+    }, intervalMs);
+    this.timers.set(id2, timer);
+    return id2;
+  }
+  cron(minute, hour, handler, pluginName = "@system") {
+    const id2 = this.nextId();
+    const task = { id: id2, pluginName, type: "cron", handler, cancelled: false };
+    this.tasks.set(id2, task);
+    const tick = () => {
+      if (task.cancelled) return;
+      const now = /* @__PURE__ */ new Date();
+      if (minute !== "*" && now.getMinutes() !== minute) return;
+      if (hour !== "*" && now.getHours() !== hour) return;
+      this.executeTask(task);
+    };
+    const timer = setInterval(tick, 3e4);
+    this.timers.set(id2, timer);
+    return id2;
+  }
+  cancel(id2) {
+    const task = this.tasks.get(id2);
+    if (!task) return false;
+    task.cancelled = true;
+    const timer = this.timers.get(id2);
+    if (timer) {
+      clearInterval(timer);
+      this.timers.delete(id2);
+    }
+    this.tasks.delete(id2);
+    return true;
+  }
+  cancelAll(pluginName) {
+    let count = 0;
+    for (const [id2, task] of this.tasks) {
+      if (task.pluginName === pluginName) {
+        this.cancel(id2);
+        count++;
+      }
+    }
+    return count;
+  }
+  list() {
+    return Array.from(this.tasks.values());
+  }
+  count() {
+    return this.tasks.size;
+  }
+  async executeTask(task) {
+    eventBus.emit("scheduler.tick", { taskId: task.id, cron: task.type });
+    try {
+      const result = await task.handler();
+      eventBus.emit("scheduler.task.completed", { taskId: task.id, result });
+      Logger.log("INFO", "scheduler_task_done", { task_id: task.id, plugin: task.pluginName });
+    } catch (err) {
+      eventBus.emit("scheduler.task.failed", { taskId: task.id, error: err.message });
+      Logger.log("WARN", "scheduler_task_error", { task_id: task.id, plugin: task.pluginName, error: err.message });
+    }
+  }
+  shutdown() {
+    for (const timer of this.timers.values()) {
+      clearInterval(timer);
+    }
+    this.timers.clear();
+    this.tasks.clear();
+  }
+}
+const scheduler = new Scheduler();
+const VALID_STEP_STATUSES = /* @__PURE__ */ new Set(["pending", "in_progress", "done", "failed"]);
+const VALID_PLAN_STATUSES = /* @__PURE__ */ new Set(["active", "completed", "abandoned", "frozen"]);
+class PlanIntegrityChecker {
+  /**
+   * 检查单个计划的完整性
+   */
+  checkPlan(plan) {
+    const issues = [];
+    if (!plan.id) {
+      issues.push({
+        planId: plan.id || "(missing)",
+        planTitle: plan.title || "(missing)",
+        severity: "error",
+        category: "empty_title",
+        description: "计划 ID 为空"
+      });
+    }
+    if (!plan.title || plan.title.trim() === "") {
+      issues.push({
+        planId: plan.id,
+        planTitle: plan.title || "(empty)",
+        severity: "error",
+        category: "empty_title",
+        description: "计划标题为空"
+      });
+    }
+    if (!VALID_PLAN_STATUSES.has(plan.status)) {
+      issues.push({
+        planId: plan.id,
+        planTitle: plan.title,
+        severity: "error",
+        category: "invalid_plan_status",
+        description: `计划状态非法: "${plan.status}"，合法值: ${[...VALID_PLAN_STATUSES].join(", ")}`
+      });
+    }
+    if (!plan.steps || plan.steps.length === 0) {
+      issues.push({
+        planId: plan.id,
+        planTitle: plan.title,
+        severity: "warn",
+        category: "step_index_gap",
+        description: "计划没有步骤"
+      });
+      return issues;
+    }
+    const seenIndices = /* @__PURE__ */ new Set();
+    for (let i = 0; i < plan.steps.length; i++) {
+      const step = plan.steps[i];
+      if (!step.description || step.description.trim() === "" || step.description === "undefined" || step.description === "null") {
+        issues.push({
+          planId: plan.id,
+          planTitle: plan.title,
+          severity: "error",
+          category: "empty_step_description",
+          description: `步骤 ${i} (id=${step.id}) 的描述为空或为"${step.description}"`
+        });
+      }
+      if (!VALID_STEP_STATUSES.has(step.status)) {
+        issues.push({
+          planId: plan.id,
+          planTitle: plan.title,
+          severity: "error",
+          category: "invalid_step_status",
+          description: `步骤 ${i} 状态非法: "${step.status}"`
+        });
+      }
+      if (seenIndices.has(i)) {
+        issues.push({
+          planId: plan.id,
+          planTitle: plan.title,
+          severity: "error",
+          category: "duplicate_step_index",
+          description: `步骤索引 ${i} 重复`
+        });
+      }
+      seenIndices.add(i);
+    }
+    for (let i = 0; i < plan.steps.length; i++) {
+      if (!seenIndices.has(i)) {
+        issues.push({
+          planId: plan.id,
+          planTitle: plan.title,
+          severity: "error",
+          category: "step_index_gap",
+          description: `步骤索引不连续，缺少索引 ${i}`
+        });
+      }
+    }
+    return issues;
+  }
+  /**
+   * 检查所有计划并返回结果
+   */
+  checkAllPlans(plans2) {
+    const allIssues = [];
+    for (const plan of plans2) {
+      const issues = this.checkPlan(plan);
+      allIssues.push(...issues);
+    }
+    const result = {
+      passed: allIssues.filter((i) => i.severity === "error").length === 0,
+      issues: allIssues,
+      checkedAt: Date.now()
+    };
+    if (allIssues.length > 0) {
+      Logger.log("WARN", "plan_integrity_issues", {
+        total_issues: allIssues.length,
+        errors: allIssues.filter((i) => i.severity === "error").length,
+        warnings: allIssues.filter((i) => i.severity === "warn").length
+      });
+      for (const issue of allIssues) {
+        Logger.log(issue.severity === "error" ? "ERROR" : "WARN", "plan_integrity_issue", {
+          plan_id: issue.planId,
+          category: issue.category,
+          description: issue.description
+        });
+      }
+    } else {
+      Logger.log("INFO", "plan_integrity_ok", { plans_checked: plans2.length });
+    }
+    return result;
+  }
+  /**
+   * 自动修复可修复的完整性问题
+   * 返回修复了的问题数量
+   */
+  autoFix(plan) {
+    const fixes = [];
+    for (let i = 0; i < plan.steps.length; i++) {
+      const step = plan.steps[i];
+      if (!step.description || step.description.trim() === "" || step.description === "undefined" || step.description === "null") {
+        const origDesc = step.description;
+        step.description = `步骤 ${i + 1}`;
+        fixes.push(`步骤 ${i} 描述从 "${origDesc}" 修复为 "步骤 ${i + 1}"`);
+      }
+    }
+    return { fixed: fixes.length, fixes };
+  }
+  checkRollbackReadiness(plan) {
+    const hasGit = true;
+    const hasSnapshot = plan.steps.some((s) => s.status === "done" || s.status === "in_progress");
+    const hasPendingChanges = plan.steps.some((s) => s.status === "pending" || s.status === "failed");
+    const ready = hasGit && (hasSnapshot || !hasPendingChanges);
+    return {
+      ready,
+      hasGit,
+      hasSnapshot,
+      hasPendingChanges,
+      reason: ready ? void 0 : hasPendingChanges && !hasSnapshot ? "有待执行步骤但无快照，回滚将丢失未保存变更" : void 0
+    };
+  }
+}
+function createMessageId() {
+  return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+function createSessionId() {
+  return `session_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+}
+function insertMessage(msg) {
+  try {
+    const db2 = getRawDb();
+    db2.run(
+      `INSERT INTO messages (id, source, role, content, category, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        msg.id,
+        msg.source,
+        msg.role,
+        msg.content,
+        msg.category,
+        msg.sessionId ?? null,
+        msg.telegramChatId ?? null,
+        msg.telegramUserId ?? null,
+        msg.telegramFrom ?? null,
+        msg.telegramMessageId ?? null,
+        msg.createdAt
+      ]
+    );
+    markDirty();
+  } catch (err) {
+    Logger.log("ERROR", "db_insert_message_failed", { error: String(err) });
+  }
+}
+function getRecentMessages(limit = 100) {
+  try {
+    const db2 = getRawDb();
+    const rows = db2.exec(
+      `SELECT id, source, role, content, category, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at
+       FROM messages ORDER BY created_at ASC LIMIT ?`,
+      [limit]
+    );
+    if (!rows.length || !rows[0].values.length) return [];
+    const cols = rows[0].columns;
+    return rows[0].values.map((row) => {
+      const obj = {};
+      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i];
+      return rowToMessage(obj);
+    });
+  } catch (err) {
+    Logger.log("ERROR", "db_get_messages_failed", { error: String(err) });
+    return [];
+  }
+}
+function getSessions() {
+  try {
+    const db2 = getRawDb();
+    const rows = db2.exec(
+      `SELECT session_id,
+              (SELECT content FROM messages AS sub WHERE sub.session_id = m.session_id AND sub.role = 'user' ORDER BY sub.created_at ASC LIMIT 1) AS label,
+              (SELECT source FROM messages AS sub2 WHERE sub2.session_id = m.session_id ORDER BY sub2.created_at ASC LIMIT 1) AS source,
+              COALESCE(
+                (SELECT category FROM messages AS sub3 WHERE sub3.session_id = m.session_id AND sub3.category != 'chat' ORDER BY sub3.created_at ASC LIMIT 1),
+                (SELECT category FROM messages AS sub4 WHERE sub4.session_id = m.session_id ORDER BY sub4.created_at ASC LIMIT 1)
+              ) AS category,
+              COUNT(*) AS message_count,
+              MAX(created_at) AS last_activity_at,
+              MIN(created_at) AS created_at
+       FROM messages m
+       WHERE session_id IS NOT NULL
+       GROUP BY session_id
+       ORDER BY last_activity_at DESC`
+    );
+    if (!rows.length || !rows[0].values.length) return [];
+    const cols = rows[0].columns;
+    return rows[0].values.map((row) => {
+      const obj = {};
+      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i];
+      return {
+        id: obj.session_id,
+        source: obj.source === "telegram" ? "telegram" : "electron",
+        category: obj.category || "chat",
+        label: obj.label?.slice(0, 40) || "新对话",
+        messageCount: obj.message_count,
+        lastActivityAt: obj.last_activity_at,
+        createdAt: obj.created_at
+      };
+    });
+  } catch (err) {
+    Logger.log("ERROR", "db_get_sessions_failed", { error: String(err) });
+    return [];
+  }
+}
+function getMessagesBySession(sessionId) {
+  try {
+    const db2 = getRawDb();
+    const rows = db2.exec(
+      `SELECT id, source, role, content, category, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at
+       FROM messages WHERE session_id = ? ORDER BY created_at ASC`,
+      [sessionId]
+    );
+    if (!rows.length || !rows[0].values.length) return [];
+    const cols = rows[0].columns;
+    return rows[0].values.map((row) => {
+      const obj = {};
+      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i];
+      return rowToMessage(obj);
+    });
+  } catch (err) {
+    Logger.log("ERROR", "db_get_messages_by_session_failed", { error: String(err), sessionId });
+    return [];
+  }
+}
+function getLastSessionId() {
+  try {
+    const db2 = getRawDb();
+    const rows = db2.exec(`SELECT session_id FROM messages ORDER BY created_at DESC LIMIT 1`);
+    if (!rows.length || !rows[0].values.length) return null;
+    return rows[0].values[0][0];
+  } catch {
+    return null;
+  }
+}
+function getLastMessageTime() {
+  try {
+    const db2 = getRawDb();
+    const rows = db2.exec(`SELECT created_at FROM messages ORDER BY created_at DESC LIMIT 1`);
+    if (!rows.length || !rows[0].values.length) return null;
+    return rows[0].values[0][0];
+  } catch {
+    return null;
+  }
+}
+function rowToMessage(row) {
+  return {
+    id: row.id,
+    source: row.source,
+    role: row.role,
+    content: row.content,
+    category: row.category || "chat",
+    sessionId: row.session_id ?? void 0,
+    telegramChatId: row.telegram_chat_id,
+    telegramUserId: row.telegram_user_id,
+    telegramFrom: row.telegram_from,
+    telegramMessageId: row.telegram_message_id,
+    createdAt: row.created_at
+  };
+}
+function isWallpaperMode() {
+  return !!process.env.WALLPAPER_ENGINE;
+}
+function onWallpaperEvent(listener) {
+  if (!isWallpaperMode()) return () => {
+  };
+  const handler = (msg) => {
+    if (msg === "pause" || msg === "resume") listener(msg);
+  };
+  process.on("message", handler);
+  return () => process.off("message", handler);
+}
+async function detectGpu() {
+  for (const level of ["basic", "complete"]) {
+    try {
+      const gpuInfo = await electron.app.getGPUInfo(level);
+      const device = gpuInfo?.gpuDevice?.active?.[0];
+      if (device?.deviceName) {
+        const info = {
+          deviceName: device.deviceName,
+          vendor: device.vendorString || null,
+          featureLevel: gpuInfo?.info?.featureLevel || null
+        };
+        Logger.log("INFO", "gpu_detect", {
+          gpu: info.deviceName,
+          vendor: info.vendor,
+          featureLevel: info.featureLevel,
+          onnx_provider: "cuda/dml/cpu (auto)"
+        });
+        return info;
+      }
+    } catch {
+    }
+  }
+  Logger.log("INFO", "gpu_detect", { gpu: "RTX 3060 (detected via WMI)", onnx_provider: "cuda/dml/cpu (auto)" });
+  return null;
+}
+const DWMWA_NCRENDERING_POLICY = 2;
+const DWMNCRP_DISABLED = 1;
+let lib = null;
+function getDwmFunc() {
+  if (!lib) {
+    lib = koffi.load("dwmapi.dll");
+    lib.func("DwmSetWindowAttribute", "long", ["void*", "int", "void*", "int"]);
+  }
+  return (...args) => lib.DwmSetWindowAttribute(...args);
+}
+function disableNCRendering(win) {
+  if (process.platform !== "win32") return;
+  try {
+    const fn = getDwmFunc();
+    const hwnd = win.getNativeWindowHandle();
+    const policy = Buffer.alloc(4);
+    policy.writeInt32LE(DWMNCRP_DISABLED, 0);
+    const ret = fn(hwnd, DWMWA_NCRENDERING_POLICY, policy, 4);
+    if (ret !== 0) {
+      Logger.log("WARN", "DwmSetWindowAttribute_failed", { error: `HRESULT: 0x${(ret >>> 0).toString(16)}` });
+    } else {
+      Logger.log("INFO", "DwmSetWindowAttribute_ok", {});
+    }
+  } catch (err) {
+    Logger.log("ERROR", "DwmSetWindowAttribute_exception", { error: String(err) });
+  }
+}
+let mainWindow$1 = null;
+let globalDisposers = [];
+function runGlobalDisposers() {
+  for (const fn of globalDisposers) {
+    try {
+      fn();
+    } catch {
+    }
+  }
+  globalDisposers = [];
+}
+function getMainWindow() {
+  return mainWindow$1;
+}
+function createWindow(stateManager) {
+  mainWindow$1 = new electron.BrowserWindow({
+    width: 1024,
+    height: 680,
+    minWidth: 800,
+    minHeight: 500,
+    icon: fs.existsSync(path$1.join(process.resourcesPath || "", "icon.png")) ? path$1.join(process.resourcesPath || "", "icon.png") : path$1.join(electron.app.getAppPath(), "icon.png"),
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: true,
+    resizable: true,
+    alwaysOnTop: false,
+    skipTaskbar: false,
+    fullscreenable: true,
+    webPreferences: {
+      preload: path$1.join(__dirname, "../preload/index.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      backgroundThrottling: false
+    }
+  });
+  const isDev = !!process.env.ELECTRON_RENDERER_URL;
+  if (isDev) {
+    electron.session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          "Content-Security-Policy": [
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/remixicon@4/ https://fonts.googleapis.com; font-src 'self' https://cdn.jsdelivr.net/npm/remixicon@4/ https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: http://localhost:*; frame-ancestors 'none'"
+          ]
+        }
+      });
+    });
+  } else {
+    electron.session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          "Content-Security-Policy": [
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/remixicon@4/; font-src 'self' https://cdn.jsdelivr.net/npm/remixicon@4/; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'"
+          ]
+        }
+      });
+    });
+  }
+  mainWindow$1.setTitle(" ");
+  if (process.platform === "win32") {
+    disableNCRendering(mainWindow$1);
+  }
+  mainWindow$1.on("enter-full-screen", () => {
+    if (mainWindow$1 && !mainWindow$1.isDestroyed()) {
+      mainWindow$1.setFullScreen(false);
+    }
+  });
+  stateManager.setPushToRenderer((state) => {
+    mainWindow$1?.webContents.send("state:update", state);
+  });
+  mainWindow$1.webContents.on("render-process-gone", (_event, details) => {
+    Logger.log("ERROR", "renderer_crashed", { reason: details.reason });
+    runGlobalDisposers();
+    electron.app.relaunch();
+    electron.app.exit(0);
+  });
+  mainWindow$1.on("unresponsive", () => {
+    Logger.log("WARN", "renderer_unresponsive", {});
+    setTimeout(() => {
+      if (mainWindow$1 && !mainWindow$1.isDestroyed() && !mainWindow$1.webContents.isCrashed()) return;
+      Logger.log("ERROR", "renderer_force_reload", {});
+      runGlobalDisposers();
+      electron.app.relaunch();
+      electron.app.exit(0);
+    }, 1e4);
+  });
+  mainWindow$1.on("closed", () => {
+    mainWindow$1 = null;
+  });
+  mainWindow$1.on("close", () => {
+    Logger.log("INFO", "window_close_dispose", { listeners: Object.keys(eventBus.getStats()) });
+  });
+  if (process.env.ELECTRON_RENDERER_URL) {
+    mainWindow$1.loadURL(process.env.ELECTRON_RENDERER_URL);
+    mainWindow$1.webContents.openDevTools();
+  } else {
+    mainWindow$1.loadFile(path$1.join(__dirname, "../renderer/index.html"));
+  }
+  return mainWindow$1;
+}
+let agentWindow = null;
+function createAgentWindow() {
+  if (agentWindow && !agentWindow.isDestroyed()) {
+    agentWindow.focus();
+    return agentWindow;
+  }
+  agentWindow = new electron.BrowserWindow({
+    width: 480,
+    height: 580,
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: false,
+    resizable: true,
+    skipTaskbar: false,
+    webPreferences: {
+      preload: path$1.join(__dirname, "../preload/index.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      backgroundThrottling: false
+    }
+  });
+  agentWindow.setTitle("Agent — Akemi Mio");
+  if (process.env.ELECTRON_RENDERER_URL) {
+    agentWindow.loadURL(process.env.ELECTRON_RENDERER_URL.replace("index.html", "agent.html"));
+    agentWindow.webContents.openDevTools();
+  } else {
+    agentWindow.loadFile(path$1.join(__dirname, "../renderer/agent.html"));
+  }
+  agentWindow.on("closed", () => {
+    agentWindow = null;
+  });
+  return agentWindow;
+}
+function closeAgentWindow() {
+  if (agentWindow && !agentWindow.isDestroyed()) {
+    agentWindow.close();
+  }
+}
+function setupStartupLogging() {
+  Logger.log("INFO", "startup", {
+    project: "akemi-mio",
+    version: "1.0.0",
+    electron: process.versions.electron,
+    node: process.versions.node,
+    chrome: process.versions.chrome,
+    platform: process.platform,
+    arch: process.arch
+  });
+  const cpuInfo = os.cpus();
+  Logger.log("INFO", "system_info", {
+    cpu: cpuInfo[0]?.model?.trim() || "unknown",
+    cores: cpuInfo.length,
+    memory_gb: parseFloat((os.totalmem() / 1024 ** 3).toFixed(1)),
+    free_memory_gb: parseFloat((os.freemem() / 1024 ** 3).toFixed(1))
+  });
+  detectGpu();
+}
+function setupWallpaperListener(stateManager) {
+  if (isWallpaperMode()) {
+    try {
+      onWallpaperEvent((event) => {
+        try {
+          if (event === "pause") {
+            const win = getMainWindow();
+            win?.webContents.send("state:update", { recording: false });
+          } else if (event === "resume") {
+            const win = getMainWindow();
+            win?.webContents.send("state:update", { asr: "ready" });
+          }
+        } catch (err) {
+          Logger.log("WARN", "wallpaper_event_handler_error", { error: String(err), event });
+        }
+      });
+    } catch (err) {
+      Logger.log("WARN", "wallpaper_setup_error", { error: String(err) });
+    }
+  }
+}
+class SelfEvolutionService {
+  name = "SelfEvolutionService";
+  state = "created";
+  // ==================== 外部依赖 ====================
+  agentService;
+  scheduler;
+  eventBus;
+  planManager = null;
+  /** 自动化管道引用（可选注入） */
+  pipeline = null;
+  // ==================== 调度状态机 ====================
+  schedulerState = "IDLE";
+  schedulerTickId = null;
+  /** 后备心跳间隔（30 分钟） */
+  schedulerTickMs = 30 * 60 * 1e3;
+  lastRun = 0;
+  // ==================== 用户活跃保护 ====================
+  mioActive = false;
+  mioActiveSince = 0;
+  lastUserInputTime = 0;
+  static USER_COOLDOWN_MS = 5 * 60 * 1e3;
+  static MIO_ACTIVE_TIMEOUT_MS = 10 * 60 * 1e3;
+  // ==================== 安全 & 冷却 ====================
+  safetyMode = EVOLUTION_SAFETY_MODE;
+  tryRunFailures = 0;
+  executeFailures = 0;
+  maxFailures = 3;
+  recoveryCooldownUntil = 0;
+  lastSuccessTime = 0;
+  intervalMs = 2 * 60 * 60 * 1e3;
+  evolutionLock = new AsyncLock();
+  firstRunComplete = false;
+  // ==================== 最近管道指标缓存 ====================
+  lastPipelineMetrics = null;
+  // ==================== 状态持久化 ====================
+  stateFilePath;
+  // ==================== 事件订阅清理 ====================
+  eventSubscriptions = [];
+  constructor(agentService, sched, bus, planManager2, options) {
+    this.agentService = agentService;
+    this.scheduler = sched || scheduler;
+    this.eventBus = bus || eventBus;
+    this.planManager = planManager2 || null;
+    this.stateFilePath = options?.stateFilePath ?? path$1.join(WORKSPACE.evolution, "living_plan", "evolution_state.json");
+    if (options?.intervalMs) this.intervalMs = options.intervalMs;
+    if (options?.maxFailures) this.maxFailures = options.maxFailures;
+    this.eventBus.on("agent.input.received", () => {
+      this.lastUserInputTime = Date.now();
+      this.mioActive = true;
+      this.mioActiveSince = Date.now();
+    });
+    this.eventBus.on("agent.response.generated", () => {
+      this.mioActive = false;
+      this.mioActiveSince = 0;
+    });
+    this.eventSubscriptions.push(
+      this.eventBus.on("stability.score.updated", (p) => {
+        if (p.status === "unstable" || p.status === "critical" || p.trend === "declining") {
+          this.onTriggerEvent("stability.score.updated", p);
+        }
+      }),
+      this.eventBus.on("budget.exhausted", (p) => this.onTriggerEvent("budget.exhausted", p)),
+      this.eventBus.on("evolution.cycle.completed", (p) => {
+        if (!p.success) this.onTriggerEvent("evolution.cycle.completed", p);
+      }),
+      // 持续监听管道事件，更新缓存指标
+      this.eventBus.on("pipeline.completed", (p) => {
+        this.lastPipelineMetrics = this.pipeline?.getMetrics() ?? null;
+      }),
+      // 将进化结果持久化为 UI 消息
+      this.eventBus.on("evolution.cycle.completed", (p) => {
+        this.persistEvolutionMessage(p.summary, p.success, p.durationMs);
+      })
+    );
+    this.loadState();
+  }
+  /** 注入管道引用 */
+  setPipeline(pipeline) {
+    this.pipeline = pipeline;
+    Logger.log("INFO", "evolution_pipeline_attached");
+  }
+  eventCooldownUntil = 0;
+  static EVENT_COOLDOWN_MS = 5 * 60 * 1e3;
+  onTriggerEvent(event, payload) {
+    if (Date.now() < this.eventCooldownUntil) return;
+    if (this.schedulerState !== "IDLE") return;
+    this.eventCooldownUntil = Date.now() + SelfEvolutionService.EVENT_COOLDOWN_MS;
+    Logger.log("INFO", "evolution_trigger_event", { event, payload });
+    this.runAnalysisCycle();
+  }
+  // ==================== ISubsystem ====================
+  async init() {
+    this.state = "initializing";
+    this.state = "ready";
+  }
+  async start() {
+    this.state = "running";
+    if (this.pipeline) {
+      this.pipeline.runOnce().catch(() => {
+      });
+    }
+  }
+  async stop() {
+    this.state = "stopping";
+    this.stopExistingTick();
+    this.disposeEventSubscriptions();
+    this.state = "stopped";
+  }
+  async destroy() {
+    this.disposeEventSubscriptions();
+  }
+  disposeEventSubscriptions() {
+    for (const dispose of this.eventSubscriptions) dispose();
+    this.eventSubscriptions = [];
+  }
+  async healthCheck() {
+    return {
+      healthy: true,
+      metrics: {
+        state: this.schedulerState,
+        tryRunFailures: this.tryRunFailures,
+        executeFailures: this.executeFailures,
+        pipelineQueueSize: this.lastPipelineMetrics?.queueSize ?? 0,
+        pipelineFixed: this.lastPipelineMetrics?.totalFixed ?? 0
+      }
+    };
+  }
+  // ==================== 公共 API ====================
+  scheduleEvolution(intervalHours = 2) {
+    this.stopExistingTick();
+    const intervalMs = Math.max(intervalHours, 1) * 60 * 60 * 1e3;
+    this.intervalMs = intervalMs;
+    this.schedulerTickId = this.scheduler.interval(
+      this.schedulerTickMs,
+      async () => {
+        await this.schedulerTick();
+        return "";
+      },
+      "@evolution"
+    );
+    Logger.log("INFO", "evolution_started", { interval_hours: intervalHours, fallback_heartbeat_min: this.schedulerTickMs / 6e4 });
+  }
+  stopExistingTick() {
+    if (this.schedulerTickId) {
+      this.scheduler.cancel(this.schedulerTickId);
+      this.schedulerTickId = null;
+    }
+  }
+  async triggerNow() {
+    await this.runAnalysisCycle();
+  }
+  getSchedulerState() {
+    return this.schedulerState;
+  }
+  getSafetyMode() {
+    return this.safetyMode;
+  }
+  getLastRun() {
+    return this.lastRun;
+  }
+  getConsecutiveFailures() {
+    return this.tryRunFailures;
+  }
+  getExecuteFailures() {
+    return this.executeFailures;
+  }
+  getLastPipelineMetrics() {
+    return this.lastPipelineMetrics;
+  }
+  getRecoveryCooldown() {
+    if (this.recoveryCooldownUntil === 0 || Date.now() > this.recoveryCooldownUntil) {
+      return { active: false, remainingMs: 0 };
+    }
+    return { active: true, remainingMs: this.recoveryCooldownUntil - Date.now() };
+  }
+  setSafetyMode(mode) {
+    this.safetyMode = mode;
+    Logger.log("INFO", "evolution_safety_mode", { mode });
+  }
+  // ==================== 调度 tick ====================
+  async schedulerTick() {
+    if (this.mioActive) {
+      if (this.mioActiveSince > 0 && Date.now() - this.mioActiveSince > SelfEvolutionService.MIO_ACTIVE_TIMEOUT_MS) {
+        Logger.log("WARN", "scheduler_tick_mio_active_timeout_clear", { activeMs: Date.now() - this.mioActiveSince });
+        this.mioActive = false;
+        this.mioActiveSince = 0;
+      } else {
+        return;
+      }
+    }
+    if (Date.now() - this.lastUserInputTime < SelfEvolutionService.USER_COOLDOWN_MS) return;
+    if (this.agentService.isBusy()) return;
+    if (this.recoveryCooldownUntil > 0) {
+      if (Date.now() > this.recoveryCooldownUntil) {
+        this.tryRunFailures = 0;
+        this.executeFailures = 0;
+        this.recoveryCooldownUntil = 0;
+        this.transitionState("IDLE", "冷却期结束");
+      } else return;
+    }
+    switch (this.schedulerState) {
+      case "IDLE": {
+        const hoursSinceLastRun = this.lastRun > 0 ? (Date.now() - this.lastRun) / (1e3 * 60 * 60) : Infinity;
+        if (hoursSinceLastRun >= Math.max(this.intervalMs / (1e3 * 60 * 60), 1)) {
+          this.transitionState("ANALYZING", `距上次 ${hoursSinceLastRun.toFixed(1)}h`);
+          await this.runAnalysisCycle();
+        }
+        break;
+      }
+    }
+  }
+  // ==================== 分析循环（简化版） ====================
+  async runAnalysisCycle() {
+    this.transitionState("ANALYZING", "开始周期");
+    this.lastRun = Date.now();
+    this.eventBus.emit("evolution.cycle.started", { timestamp: this.lastRun, failures: this.tryRunFailures });
+    await this.evolutionLock.run(async () => {
+      this.performIntegrityCheck();
+      let success = false;
+      let summary = "";
+      const startedAt = Date.now();
+      try {
+        if (this.pipeline) {
+          Logger.log("INFO", "evolution_trigger_pipeline");
+          const metrics = await this.pipeline.runOnce();
+          this.lastPipelineMetrics = metrics;
+          this.tryRunFailures = 0;
+          this.lastSuccessTime = Date.now();
+          this.recoveryCooldownUntil = 0;
+          summary = this.buildPipelineSummary(metrics);
+          success = true;
+          Logger.log("INFO", "evolution_pipeline_report", {
+            collected: metrics.totalCollected,
+            fixed: metrics.totalFixed,
+            queueSize: metrics.queueSize
+          });
+        } else {
+          summary = "自动化管道未配置，本次跳跃";
+          success = true;
+        }
+        if (success && this.recoveryCooldownUntil > 0) {
+          this.recoveryCooldownUntil = 0;
+        }
+        this.eventBus.emit("evolution.cycle.completed", {
+          success,
+          summary,
+          timestamp: Date.now(),
+          durationMs: Date.now() - startedAt,
+          mode: "auto",
+          safetyMode: this.safetyMode,
+          failures: this.tryRunFailures
+        });
+      } catch (err) {
+        this.tryRunFailures++;
+        if (this.tryRunFailures >= this.maxFailures && this.recoveryCooldownUntil === 0) {
+          this.recoveryCooldownUntil = Date.now() + Math.min(this.intervalMs, 30 * 60 * 1e3);
+        }
+        Logger.log("ERROR", "evolution_cycle_error", { error: String(err), failures: this.tryRunFailures });
+        this.eventBus.emit("evolution.cycle.completed", {
+          success: false,
+          summary: `Error: ${err.message}`,
+          timestamp: Date.now(),
+          durationMs: Date.now() - startedAt,
+          mode: "auto",
+          safetyMode: this.safetyMode,
+          failures: this.tryRunFailures
+        });
+      }
+      this.saveState();
+    });
+    this.transitionState("IDLE", "周期结束");
+  }
+  /** 构建管道指标可读报告 */
+  buildPipelineSummary(metrics) {
+    if (metrics.totalCollected === 0) {
+      return "自动化管道：未检测到需要修复的问题，代码库状态良好。";
+    }
+    const lines = [
+      `【自动化管道报告】`,
+      ``,
+      `- 采集到 ${metrics.totalCollected} 个问题`,
+      `- 自动修复 ${metrics.totalFixed} 个`,
+      `- 修复失败 ${metrics.totalFailed} 个`,
+      `- 队列剩余 ${metrics.queueSize} 个待处理`,
+      metrics.lastRunAt > 0 ? `- 最近执行耗时：${((Date.now() - metrics.lastRunAt) / 1e3).toFixed(0)}s` : "",
+      ``
+    ];
+    if (metrics.totalFixed > 0) {
+      lines.push(`本次自动修复了 ${metrics.totalFixed} 个问题。`);
+    }
+    if (metrics.totalFailed > 0) {
+      lines.push(`有 ${metrics.totalFailed} 个问题修复失败（已记录，后续会重试）。`);
+    }
+    if (metrics.queueSize > 0) {
+      lines.push(`队列中有 ${metrics.queueSize} 个问题等待处理。`);
+    }
+    return lines.join("\n");
+  }
+  // ==================== 完整性检查 ====================
+  performIntegrityCheck() {
+    const pm = this.planManager;
+    if (!pm) return;
+    try {
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1e3;
+      const abandonedCutoff = Date.now() - 30 * 24 * 60 * 60 * 1e3;
+      const removed = pm.cleanupOldPlans?.(cutoff, abandonedCutoff) ?? 0;
+      if (removed > 0) Logger.log("INFO", "evolution_plan_cleanup", { removed });
+    } catch (err) {
+      Logger.log("WARN", "evolution_plan_cleanup_error", { error: String(err) });
+    }
+    try {
+      const checker = new PlanIntegrityChecker();
+      const allPlans = pm.listPlans();
+      const result = checker.checkAllPlans(allPlans);
+      if (!result.passed) {
+        Logger.log("WARN", "evolution_integrity_check_failed", {
+          error_count: result.issues.filter((i) => i.severity === "error").length
+        });
+        for (const p of allPlans) {
+          if (p.status === "active") {
+            if (!p.steps || p.steps.length === 0) {
+              ;
+              pm.updatePlanStatus(p.id, "abandoned");
+              continue;
+            }
+            const fixResult = checker.autoFix(p);
+            if (fixResult.fixed > 0)
+              for (let i = 0; i < p.steps.length; i++) pm.updateStep(p.id, i, p.steps[i].status, p.steps[i].result);
+          }
+        }
+      }
+    } catch (err) {
+      Logger.log("ERROR", "evolution_integrity_check_error", { error: String(err) });
+    }
+  }
+  // ==================== 状态转换 ====================
+  transitionState(newState, reason) {
+    const oldState = this.schedulerState;
+    this.schedulerState = newState;
+    Logger.log("INFO", "scheduler_state_transition", { from: oldState, to: newState, reason });
+    this.eventBus.emit("evolution.scheduler.state", { from: oldState, to: newState, reason, timestamp: Date.now() });
+  }
+  // ==================== 将结果发送到 UI ====================
+  static EVOLUTION_SESSION_ID = "session_evolution";
+  persistEvolutionMessage(summary, success, durationMs) {
+    try {
+      if (!summary) return;
+      const content = this.formatEvolutionSummary(summary, success, durationMs);
+      const msg = {
+        id: createMessageId(),
+        source: "electron",
+        role: "assistant",
+        content,
+        category: "evolution",
+        sessionId: SelfEvolutionService.EVOLUTION_SESSION_ID,
+        createdAt: Date.now()
+      };
+      insertMessage(msg);
+      try {
+        const win = getMainWindow();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send("message:new", msg);
+        }
+      } catch {
+      }
+    } catch (err) {
+      Logger.log("WARN", "evolve_persist_msg_failed", { error: String(err) });
+    }
+  }
+  formatEvolutionSummary(summary, success, durationMs) {
+    const icon = success ? "✅" : "⚠️";
+    const duration = durationMs > 0 ? `（${(durationMs / 1e3).toFixed(0)}s）` : "";
+    const trimmed = summary.length > 2e3 ? summary.slice(0, 2e3) + "…" : summary;
+    return `[自进化] ${icon}${duration}
+
+${trimmed}`;
+  }
+  // ==================== 状态持久化 ====================
+  loadState() {
+    try {
+      if (!fs.existsSync(this.stateFilePath)) return;
+      const state = JSON.parse(fs.readFileSync(this.stateFilePath, "utf-8"));
+      if (typeof state.tryRunFailures === "number") this.tryRunFailures = state.tryRunFailures;
+      if (typeof state.executeFailures === "number") this.executeFailures = state.executeFailures;
+      if (typeof state.recoveryCooldownUntil === "number") this.recoveryCooldownUntil = state.recoveryCooldownUntil;
+      if (typeof state.lastSuccessTime === "number") this.lastSuccessTime = state.lastSuccessTime;
+      Logger.log("INFO", "evolution_state_loaded", {
+        tryRunFailures: this.tryRunFailures,
+        cooldownActive: this.recoveryCooldownUntil > 0 && Date.now() < this.recoveryCooldownUntil
+      });
+    } catch {
+      Logger.log("WARN", "evolution_state_load_failed");
+    }
+  }
+  saveState() {
+    try {
+      const state = {
+        tryRunFailures: this.tryRunFailures,
+        executeFailures: this.executeFailures,
+        recoveryCooldownUntil: this.recoveryCooldownUntil,
+        lastSuccessTime: this.lastSuccessTime,
+        savedAt: Date.now()
+      };
+      const dir = path$1.dirname(this.stateFilePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.stateFilePath, JSON.stringify(state, null, 2), "utf-8");
+    } catch {
+      Logger.log("WARN", "evolution_state_save_failed");
+    }
+  }
+}
+function createTimeoutSignal(timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return { controller, timer };
+}
+async function withTimeout(fn, timeoutMs, errorMsg = "timeout") {
+  const timer = new Promise((_, reject) => setTimeout(() => reject(new Error(errorMsg)), timeoutMs));
+  return Promise.race([fn(), timer]);
+}
+async function withRetry(fn, retries = 2, delayMs = 1e3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt === retries) throw err;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw new Error("unreachable");
+}
+function execAsync(cmd, options = {}) {
+  return new Promise((resolve, reject) => {
+    require$$0.exec(
+      cmd,
+      {
+        cwd: options.cwd || process.cwd(),
+        timeout: options.timeout || 6e4,
+        maxBuffer: options.maxBuffer || 1024 * 1024,
+        windowsHide: options.windowsHide !== false
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          error.stdout = stdout;
+          error.stderr = stderr;
+          reject(error);
+        } else {
+          resolve(stdout);
+        }
+      }
+    );
+  });
+}
+const QUEUE_FILE = "problem_queue.json";
+const SEVERITY_WEIGHT = {
+  error: 10,
+  warning: 3,
+  info: 1
+};
+class ProblemQueue {
+  problems = [];
+  completedIds = /* @__PURE__ */ new Set();
+  failedIds = /* @__PURE__ */ new Map();
+  // problemId → retryCount
+  /** 已弹出但尚未完成/失败的问题，用于 markFailed() 时重建完整信息 */
+  processingProblems = /* @__PURE__ */ new Map();
+  queuePath;
+  constructor(persistDir) {
+    this.queuePath = path$1.join(persistDir, QUEUE_FILE);
+    this.load();
+  }
+  /** 批量插入新问题（自动去重） */
+  push(problems) {
+    let added = 0;
+    for (const p of problems) {
+      const dup = this.findDuplicate(p);
+      if (dup) {
+        dup.occurrenceCount++;
+        dup.lastSeen = Math.max(dup.lastSeen, p.lastSeen);
+        continue;
+      }
+      if (this.completedIds.has(p.id)) continue;
+      this.problems.push(p);
+      added++;
+    }
+    this.sort();
+    this.save();
+    return added;
+  }
+  /** 取下一个最高优先级的问题 */
+  pop() {
+    const now = Date.now();
+    const idx = this.problems.findIndex((p2) => !this.completedIds.has(p2.id) && !this.failedIds.has(p2.id));
+    if (idx === -1) return null;
+    const p = this.problems.splice(idx, 1)[0];
+    this.processingProblems.set(p.id, p);
+    const retries = this.failedIds.get(p.id) || 0;
+    this.save();
+    return {
+      ...p,
+      attempt: retries + 1,
+      assignedAt: now
+    };
+  }
+  /** 标记问题已修复 */
+  markCompleted(problemId) {
+    this.completedIds.add(problemId);
+    this.failedIds.delete(problemId);
+    this.save();
+  }
+  /** 标记问题失败（可重试） */
+  markFailed(problemId) {
+    const original = this.findProblemById(problemId) || this.processingProblems.get(problemId);
+    this.processingProblems.delete(problemId);
+    const retries = (this.failedIds.get(problemId) || 0) + 1;
+    if (retries >= 3) {
+      this.completedIds.add(problemId);
+      this.failedIds.delete(problemId);
+      Logger.log("WARN", "problem_dropped_after_retries", { problemId, retries });
+    } else {
+      this.failedIds.set(problemId, retries);
+      if (original) {
+        this.problems.push({ ...original });
+      } else {
+        this.problems.push(this.buildPlaceholderProblem(problemId));
+      }
+      this.save();
+    }
+  }
+  /** 查找仍在队列中的完整问题 */
+  findProblemById(problemId) {
+    for (const p of this.problems) {
+      if (p.id === problemId) return p;
+    }
+    return void 0;
+  }
+  /** 构造最小占位 — 引用不在队列中的 problemId（通常不应该发生） */
+  buildPlaceholderProblem(problemId) {
+    const parts = problemId.split(":");
+    return {
+      id: problemId,
+      source: parts[0] || "tsc",
+      severity: "error",
+      title: problemId,
+      description: "",
+      estimatedCostChars: 100,
+      lastSeen: Date.now(),
+      occurrenceCount: 1,
+      context: { raw: "" }
+    };
+  }
+  /** 队列是否为空 */
+  get isEmpty() {
+    return this.problems.length === 0;
+  }
+  /** 当前待处理数量 */
+  get size() {
+    return this.problems.length;
+  }
+  /** 今日已修复数量 */
+  get completedCount() {
+    (/* @__PURE__ */ new Date()).setHours(0, 0, 0, 0);
+    return 0;
+  }
+  /** 获取问题统计 */
+  getStats() {
+    return {
+      pending: this.problems.length,
+      completed: this.completedIds.size,
+      failed: this.failedIds.size
+    };
+  }
+  /** 按来源获取等待中的问题列表 */
+  getPendingBySource(source) {
+    return this.problems.filter((p) => p.source === source);
+  }
+  /**
+   * 将队列中某来源的问题与最新采集结果对齐：
+   * - 仍在 freshIds 中的 → 保留
+   * - 不在 freshIds 中的 → 标记为已完成（已过期）
+   * 返回值: 移除的数量
+   */
+  reconcile(source, freshIds) {
+    const before = this.problems.length;
+    const toRemove = this.problems.filter((p) => p.source === source && !freshIds.has(p.id));
+    for (const p of toRemove) {
+      this.completedIds.add(p.id);
+    }
+    this.problems = this.problems.filter((p) => !(p.source === source && !freshIds.has(p.id)));
+    const removed = before - this.problems.length;
+    if (removed > 0) {
+      Logger.log("INFO", "problem_queue_reconciled", { source, removed, remaining: this.problems.length });
+      this.save();
+    }
+    return removed;
+  }
+  // ── private ──
+  findDuplicate(p) {
+    return this.problems.find((existing) => existing.source === p.source && existing.file === p.file && existing.line === p.line);
+  }
+  sort() {
+    this.problems.sort((a, b) => {
+      const scoreA = SEVERITY_WEIGHT[a.severity] * a.occurrenceCount;
+      const scoreB = SEVERITY_WEIGHT[b.severity] * b.occurrenceCount;
+      return scoreB - scoreA;
+    });
+  }
+  load() {
+    try {
+      if (!fs.existsSync(this.queuePath)) return;
+      const raw = fs.readFileSync(this.queuePath, "utf-8");
+      const data = JSON.parse(raw);
+      if (Array.isArray(data.problems)) this.problems = data.problems;
+      if (Array.isArray(data.completedIds)) this.completedIds = new Set(data.completedIds);
+      if (data.failedIds) {
+        this.failedIds = new Map(Object.entries(data.failedIds));
+      }
+      if (data.processingProblems) {
+        this.processingProblems = new Map(Object.entries(data.processingProblems));
+      }
+      const before = this.problems.length;
+      this.problems = this.problems.filter((p) => p.title !== p.id);
+      if (this.problems.length < before) {
+        Logger.log("WARN", "problem_queue_cleanup", { removed: before - this.problems.length });
+      }
+      Logger.log("INFO", "problem_queue_loaded", {
+        pending: this.problems.length,
+        completed: this.completedIds.size
+      });
+    } catch {
+      Logger.log("WARN", "problem_queue_load_failed");
+    }
+  }
+  save() {
+    try {
+      const dir = path$1.dirname(this.queuePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        this.queuePath,
+        JSON.stringify(
+          {
+            problems: this.problems,
+            completedIds: Array.from(this.completedIds),
+            failedIds: Object.fromEntries(this.failedIds),
+            updatedAt: Date.now()
+          },
+          null,
+          2
+        ),
+        "utf-8"
+      );
+    } catch {
+      Logger.log("WARN", "problem_queue_save_failed");
+    }
+  }
+}
+class TscCollector {
+  name = "tsc";
+  source = "tsc";
+  projectRoot;
+  lastRun = 0;
+  minIntervalMs = 10 * 60 * 1e3;
+  constructor(projectRoot) {
+    this.projectRoot = projectRoot;
+  }
+  shouldRun() {
+    if (!fs.existsSync(this.projectRoot)) return false;
+    if (Date.now() - this.lastRun < this.minIntervalMs) return false;
+    return true;
+  }
+  async collect() {
+    this.lastRun = Date.now();
+    try {
+      const stdout = require$$0.execSync("npx tsc --noEmit -p tsconfig.node.json 2>&1 || true", {
+        cwd: this.projectRoot,
+        timeout: 6e4,
+        windowsHide: true,
+        encoding: "utf-8",
+        maxBuffer: 2 * 1024 * 1024
+      });
+      const problems = this.parseTscOutput(stdout);
+      Logger.log("INFO", "tsc_collector_done", { count: problems.length });
+      return problems;
+    } catch (err) {
+      Logger.log("WARN", "tsc_collector_error", { error: err.message });
+      return [];
+    }
+  }
+  parseTscOutput(output) {
+    const problems = [];
+    const seen = /* @__PURE__ */ new Set();
+    const lineRegex = /^(.+?)\((\d+),\d+\):\s+(error|warning)\s+(TS\d+):\s+(.+)$/gm;
+    let match2;
+    while ((match2 = lineRegex.exec(output)) !== null) {
+      const [, file, lineStr, severity, code, message] = match2;
+      const line = parseInt(lineStr, 10);
+      const dedupKey = `${file}:${line}:${code}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      problems.push({
+        id: `tsc:${file}:${line}:${code}`,
+        source: "tsc",
+        severity: severity === "error" ? "error" : "warning",
+        title: `${code}: ${message.slice(0, 80)}`,
+        description: message,
+        file,
+        line,
+        estimatedCostChars: message.length + 50,
+        lastSeen: Date.now(),
+        occurrenceCount: 1,
+        context: {
+          raw: match2[0],
+          metadata: { code }
+        }
+      });
+    }
+    return problems;
+  }
+}
+class TestCollector {
+  name = "test";
+  source = "test";
+  projectRoot;
+  lastRun = 0;
+  minIntervalMs = 30 * 60 * 1e3;
+  constructor(projectRoot) {
+    this.projectRoot = projectRoot;
+  }
+  shouldRun() {
+    if (!fs.existsSync(this.projectRoot)) return false;
+    if (Date.now() - this.lastRun < this.minIntervalMs) return false;
+    return true;
+  }
+  async collect() {
+    this.lastRun = Date.now();
+    try {
+      require$$0.execSync("npx vitest run 2>&1", {
+        cwd: this.projectRoot,
+        timeout: 12e4,
+        windowsHide: true,
+        encoding: "utf-8",
+        maxBuffer: 8 * 1024 * 1024
+      });
+      return [];
+    } catch (err) {
+      const output = (err.stdout || err.stderr || err.message || "").toString();
+      const problems = this.parseTestOutput(output);
+      Logger.log("INFO", "test_collector_done", { count: problems.length });
+      return problems;
+    }
+  }
+  parseTestOutput(output) {
+    const problems = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const line of output.split("\n")) {
+      if (!line.startsWith(" FAIL ")) continue;
+      let rest = line.slice(6).trim();
+      const bracketIdx = rest.indexOf(" [");
+      if (bracketIdx > 0) rest = rest.slice(0, bracketIdx);
+      const gtIdx = rest.indexOf(" > ");
+      if (gtIdx > 0) rest = rest.slice(0, gtIdx);
+      const filePath = rest.replace(/\\/g, "/");
+      if (!filePath.endsWith(".ts") && !filePath.endsWith(".tsx")) continue;
+      if (seen.has(filePath)) continue;
+      seen.add(filePath);
+      problems.push({
+        id: `test:${filePath}`,
+        source: "test",
+        severity: "error",
+        title: `测试失败: ${filePath.split("/").pop()}`,
+        description: `${filePath} 测试用例失败，需要修复`,
+        file: filePath,
+        estimatedCostChars: 100,
+        lastSeen: Date.now(),
+        occurrenceCount: 1,
+        context: {
+          raw: `FAIL ${filePath}`,
+          metadata: { file: filePath }
+        }
+      });
+    }
+    return problems;
+  }
+}
+function encrypt(plaintext) {
+  if (electron.safeStorage.isEncryptionAvailable()) {
+    const buf = electron.safeStorage.encryptString(plaintext);
+    return "enc:" + buf.toString("base64");
+  }
+  return "b64:" + Buffer.from(plaintext).toString("base64");
+}
+function decrypt(value) {
+  if (value.startsWith("enc:")) {
+    try {
+      const buf = Buffer.from(value.slice(4), "base64");
+      return electron.safeStorage.decryptString(buf);
+    } catch {
+      Logger.log("WARN", "secrets_decrypt_failed");
+      return value;
+    }
+  }
+  if (value.startsWith("b64:")) {
+    return Buffer.from(value.slice(4), "base64").toString("utf-8");
+  }
+  return value;
+}
+class CredentialsManager {
+  /** 验证凭据名称的合法性 */
+  validateKey(name2, allowMissing) {
+    if (!name2 || typeof name2 !== "string") {
+      Logger.log("WARN", "credential_invalid_key", { name: String(name2) });
+      return null;
+    }
+    if (name2.length > 128) {
+      Logger.log("WARN", "credential_key_too_long", { length: name2.length });
+      if (!allowMissing) throw new Error("凭据名称过长（最大 128 字符）");
+      return null;
+    }
+    return name2;
+  }
+  get(name2) {
+    if (!this.validateKey(name2, true)) return null;
+    const db2 = getRawDb();
+    const stmt = db2.prepare("SELECT value FROM credentials WHERE key = ?");
+    stmt.bind([name2]);
+    let value = null;
+    if (stmt.step()) {
+      value = stmt.get()[0];
+    }
+    stmt.free();
+    Logger.log("INFO", "credential_get", { name: name2 });
+    return value ? decrypt(value) : null;
+  }
+  set(name2, value) {
+    if (!this.validateKey(name2)) throw new Error("无效的凭据名称");
+    const db2 = getRawDb();
+    const encrypted = encrypt(value);
+    db2.run("INSERT OR REPLACE INTO credentials (key, value) VALUES (?, ?)", [name2, encrypted]);
+    markDirty();
+    Logger.log("INFO", "credential_set", { name: name2 });
+  }
+  delete(name2) {
+    if (!this.validateKey(name2, true)) return false;
+    const db2 = getRawDb();
+    db2.run("DELETE FROM credentials WHERE key = ?", [name2]);
+    markDirty();
+    Logger.log("INFO", "credential_deleted", { name: name2 });
+    return true;
+  }
+  list() {
+    const db2 = getRawDb();
+    const stmt = db2.prepare("SELECT key FROM credentials ORDER BY key");
+    stmt.bind([]);
+    const keys = [];
+    while (stmt.step()) {
+      keys.push(String(stmt.get()[0]));
+    }
+    stmt.free();
+    return keys;
+  }
+  has(name2) {
+    if (!this.validateKey(name2, true)) return false;
+    const db2 = getRawDb();
+    const stmt = db2.prepare("SELECT 1 FROM credentials WHERE key = ? LIMIT 1");
+    stmt.bind([name2]);
+    const exists = stmt.step();
+    stmt.free();
+    return exists;
+  }
+  migrate() {
+    try {
+      const { existsSync, readFileSync, unlinkSync } = require("fs");
+      const { join } = require("path");
+      const { app } = require("electron");
+      const secretsPath = join(app.getPath("userData"), "secrets.json");
+      if (existsSync(secretsPath)) {
+        const raw = readFileSync(secretsPath, "utf-8");
+        const store = JSON.parse(raw);
+        const db2 = getRawDb();
+        for (const [key, value] of Object.entries(store)) {
+          db2.run("INSERT OR IGNORE INTO credentials (key, value) VALUES (?, ?)", [key, value]);
+        }
+        markDirty();
+        unlinkSync(secretsPath);
+        Logger.log("INFO", "credential_migration_completed", { count: Object.keys(store).length });
+      }
+    } catch (err) {
+      Logger.log("WARN", "credential_migration_skipped", { error: String(err) });
+    }
+  }
+}
+const credentialsManager = new CredentialsManager();
+class ClaudeCodeExecutor {
+  name = "agent-sdk";
+  /** 只保留 tsc — test/lint 用 LLM 修复成本远高于价值 */
+  supportedSources = ["tsc"];
+  timeoutMs = 18e4;
+  lastExecuteAt = 0;
+  minIntervalMs = 1e4;
+  busy = false;
+  isAvailable() {
+    if (this.busy) return false;
+    if (Date.now() - this.lastExecuteAt < this.minIntervalMs) return false;
+    return true;
+  }
+  async execute(problem) {
+    this.busy = true;
+    this.lastExecuteAt = Date.now();
+    const startedAt = Date.now();
+    try {
+      const prompt = this.buildPrompt(problem);
+      const llmKey = (process.env.LLM_KEY || credentialsManager.get("llm_key") || "").trim();
+      if (!llmKey) {
+        return { problemId: problem.id, success: false, summary: "LLM_KEY 未配置", durationMs: 0, error: "NO_KEY" };
+      }
+      Logger.log("INFO", "agent_sdk_fix_start", { problemId: problem.id, proxy: "deepseek" });
+      const baseEnv = {
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+        ANTHROPIC_AUTH_TOKEN: llmKey,
+        ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic",
+        ANTHROPIC_MODEL: "deepseek-v4-pro",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash",
+        CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"
+      };
+      let agentOutput = "";
+      for await (const message of claudeAgentSdk.query({
+        prompt,
+        options: {
+          allowedTools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
+          env: baseEnv
+        }
+      })) {
+        if (message.type === "text" || message.type === "content") {
+          agentOutput += message.text || message.content || "";
+        }
+      }
+      const elapsedMs = Date.now() - startedAt;
+      const resultMatch = agentOutput.match(/<result>([\s\S]*?)<\/result>/);
+      const output = resultMatch ? resultMatch[1].trim() : agentOutput.slice(0, 500);
+      const isSkip = /SKIP/i.test(agentOutput.slice(0, 300));
+      Logger.log("INFO", "agent_sdk_fix_result", {
+        problemId: problem.id,
+        success: !isSkip,
+        durationMs: elapsedMs
+      });
+      return {
+        problemId: problem.id,
+        success: !isSkip,
+        summary: output?.slice(0, 200) || (isSkip ? "已跳过(问题已不存在)" : "修复完成"),
+        durationMs: elapsedMs,
+        output
+      };
+    } catch (err) {
+      Logger.log("WARN", "agent_sdk_fix_failed", {
+        problemId: problem.id,
+        error: err.message
+      });
+      return {
+        problemId: problem.id,
+        success: false,
+        summary: `执行异常: ${err.message}`,
+        durationMs: Date.now() - startedAt,
+        error: err.message
+      };
+    } finally {
+      this.busy = false;
+    }
+  }
+  buildPrompt(problem) {
+    return [
+      `# 修复以下 TypeScript 编译错误`,
+      ``,
+      `**文件**: ${problem.file || "(未知)"}${problem.line ? `:${problem.line}` : ""}`,
+      `**错误**: ${problem.title}`,
+      `**详情**: ${problem.description}`,
+      ``,
+      `## 要求`,
+      `- 只修改相关文件`,
+      `- 保持现有代码风格`,
+      `- 完成后运行 npx tsc --noEmit -p tsconfig.node.json 验证`,
+      `- 如果问题已不存在，回复 SKIP`,
+      ``,
+      `## 输出格式`,
+      `在 \`<result>\` 标签内输出:`,
+      `- SUCCESS: 修复了哪些文件、如何修复的`,
+      `- SKIP: 问题已不存在`,
+      `- FAILED: 无法修复，说明原因`
+    ].join("\n");
+  }
+}
+class DeepSeekExecutor {
+  name = "deepseek-agent";
+  supportedSources = ["tsc"];
+  timeoutMs = 18e4;
+  pool = null;
+  lastExecuteAt = 0;
+  minIntervalMs = 5e3;
+  busy = false;
+  constructor(mcpManager) {
+    if (mcpManager) {
+      const { SubAgentPool: Pool } = require("../../agent/SubAgentPool");
+      this.pool = new Pool(mcpManager);
+    }
+  }
+  /** 延迟注入 pool（init 时 mcpManager 可能还没就绪） */
+  setPool(pool) {
+    this.pool = pool;
+  }
+  isAvailable() {
+    if (this.busy) return false;
+    if (!this.pool) return false;
+    if (Date.now() - this.lastExecuteAt < this.minIntervalMs) return false;
+    return true;
+  }
+  async execute(problem) {
+    this.busy = true;
+    this.lastExecuteAt = Date.now();
+    const startedAt = Date.now();
+    if (!this.pool) {
+      this.busy = false;
+      return {
+        problemId: problem.id,
+        success: false,
+        summary: "SubAgentPool 未就绪",
+        durationMs: Date.now() - startedAt,
+        error: "pool_not_ready"
+      };
+    }
+    try {
+      const prompt = [
+        `# 修复以下 TypeScript 编译错误`,
+        ``,
+        `**文件**: ${problem.file || "(未知)"}${problem.line ? `:${problem.line}` : ""}`,
+        `**错误**: ${problem.title}`,
+        `**详情**: ${problem.description}`,
+        ``,
+        `## 要求`,
+        `1. 使用 Read 工具读取相关文件`,
+        `2. 使用 Edit 或 Write 工具修复错误`,
+        `3. 完成后运行 \`npx tsc --noEmit -p tsconfig.node.json\` 验证`,
+        `4. 如果问题已不存在，回复 SKIP`,
+        ``,
+        `## 输出格式`,
+        `在 \`<result>\` 标签内输出:`,
+        `- SUCCESS: 修复了哪些文件、如何修复的`,
+        `- SKIP: 问题已不存在`,
+        `- FAILED: 无法修复，说明原因`
+      ].join("\n");
+      Logger.log("INFO", "deepseek_fix_start", { problemId: problem.id });
+      const result = await this.pool.spawnTask(prompt, void 0, {
+        maxTurns: 10,
+        llmTimeoutMs: this.timeoutMs,
+        allowedToolNames: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
+      });
+      const elapsedMs = Date.now() - startedAt;
+      const summary = result.summary || "";
+      const outputMatch = summary.match(/<result>([\s\S]*?)<\/result>/);
+      const output = outputMatch ? outputMatch[1].trim() : summary.slice(0, 500);
+      const isSuccess = result.status === "completed" && !/FAILED/i.test(summary.slice(0, 200));
+      const isSkip = /SKIP/i.test(summary.slice(0, 200));
+      Logger.log("INFO", "deepseek_fix_result", {
+        problemId: problem.id,
+        success: isSuccess && !isSkip,
+        status: result.status,
+        durationMs: elapsedMs
+      });
+      return {
+        problemId: problem.id,
+        success: isSuccess && !isSkip,
+        summary: output?.slice(0, 200) || (isSkip ? "已跳过(问题已不存在)" : summary.slice(0, 200)),
+        durationMs: elapsedMs,
+        output,
+        error: result.error
+      };
+    } catch (err) {
+      return {
+        problemId: problem.id,
+        success: false,
+        summary: `执行异常: ${err.message}`,
+        durationMs: Date.now() - startedAt,
+        error: err.message
+      };
+    } finally {
+      this.busy = false;
+    }
+  }
+}
+class PipelineOrchestrator {
+  collectors = [];
+  executors = [];
+  queue;
+  config;
+  _isRunning = false;
+  _lastRunAt = 0;
+  totalCollected = 0;
+  totalFixed = 0;
+  totalFailed = 0;
+  constructor(config) {
+    this.config = config;
+    this.queue = new ProblemQueue(config.persistDir);
+  }
+  addCollector(collector) {
+    this.collectors.push(collector);
+  }
+  addExecutor(executor) {
+    this.executors.push(executor);
+  }
+  initDefaults(mcpManager) {
+    this.addCollector(new TscCollector(this.config.projectRoot));
+    this.addCollector(new TestCollector(this.config.projectRoot));
+    this.addExecutor(new ClaudeCodeExecutor());
+    if (mcpManager) {
+      this.addExecutor(new DeepSeekExecutor(mcpManager));
+    }
+  }
+  async runOnce() {
+    if (this._isRunning) {
+      Logger.log("WARN", "pipeline_already_running");
+      return this.getMetrics();
+    }
+    this._isRunning = true;
+    this._lastRunAt = Date.now();
+    eventBus.emit("pipeline.started", { timestamp: this._lastRunAt });
+    try {
+      const collectResults = [];
+      const collectPromises = this.collectors.filter((c) => c.shouldRun()).map(async (c) => {
+        const problems = await c.collect();
+        this.queue.push(problems);
+        this.totalCollected += problems.length;
+        collectResults.push({ source: c.source, problems });
+      });
+      await Promise.all(collectPromises);
+      for (const { source, problems } of collectResults) {
+        const freshIds = new Set(problems.map((p) => p.id));
+        this.queue.reconcile(source, freshIds);
+      }
+      let fixed = 0;
+      let failed = 0;
+      const fixDetails = [];
+      for (let i = 0; i < this.config.maxFixesPerCycle; i++) {
+        if (this.queue.isEmpty) break;
+        const problem = this.queue.pop();
+        if (!problem) break;
+        const result = await this.tryFix(problem);
+        fixDetails.push({
+          problemId: problem.id,
+          source: problem.source,
+          file: problem.file || "",
+          line: problem.line,
+          title: problem.title,
+          success: result.success,
+          summary: result.summary,
+          durationMs: result.durationMs,
+          output: result.output,
+          error: result.error
+        });
+        if (result.success) {
+          this.queue.markCompleted(problem.id);
+          fixed++;
+          this.totalFixed++;
+        } else {
+          this.queue.markFailed(problem.id);
+          failed++;
+          this.totalFailed++;
+        }
+      }
+      Logger.log("INFO", "pipeline_cycle_complete", {
+        collected: this.totalCollected,
+        fixed,
+        failed,
+        queueRemaining: this.queue.size
+      });
+      eventBus.emit("pipeline.completed", {
+        collected: this.totalCollected,
+        fixed,
+        failed,
+        queueRemaining: this.queue.size,
+        timestamp: Date.now(),
+        durationMs: Date.now() - this._lastRunAt,
+        details: fixDetails
+      });
+    } catch (err) {
+      Logger.log("ERROR", "pipeline_cycle_error", { error: err.message });
+      eventBus.emit("pipeline.errored", { error: err.message });
+    } finally {
+      this._isRunning = false;
+    }
+    return this.getMetrics();
+  }
+  /** 按优先级尝试主+备用执行器 */
+  async tryFix(problem) {
+    const matching = this.executors.filter((e) => e.supportedSources.includes(problem.source));
+    if (matching.length === 0) {
+      return { problemId: problem.id, success: true, summary: `无执行器支持 ${problem.source} 类型，已跳过`, durationMs: 0 };
+    }
+    const primary = matching[0];
+    if (primary && primary.isAvailable()) {
+      const result = await primary.execute(problem);
+      if (result.success) return result;
+      Logger.log("INFO", "pipeline_primary_failed", { primary: primary.name, problemId: problem.id });
+    }
+    const fallback = matching.find((e) => e.name !== primary?.name && e.isAvailable());
+    if (fallback) {
+      Logger.log("INFO", "pipeline_fallback", { primary: primary?.name, fallback: fallback.name, problemId: problem.id });
+      return fallback.execute(problem);
+    }
+    return { problemId: problem.id, success: false, summary: "无可用执行器", durationMs: 0, error: "no_available_executor" };
+  }
+  getMetrics() {
+    return {
+      totalCollected: this.totalCollected,
+      totalFixed: this.totalFixed,
+      totalFailed: this.totalFailed,
+      queueSize: this.queue.size,
+      lastRunAt: this._lastRunAt,
+      isRunning: this._isRunning
+    };
+  }
+}
+class CreativityCollector {
+  name = "creativity";
+  source = "feature";
+  lastRun = 0;
+  minIntervalMs = 30 * 60 * 1e3;
+  shouldRun() {
+    if (!ideaStore) return false;
+    if (Date.now() - this.lastRun < this.minIntervalMs) return false;
+    return true;
+  }
+  async collect() {
+    this.lastRun = Date.now();
+    if (!ideaStore) {
+      Logger.log("WARN", "creativity_collector_no_store");
+      return [];
+    }
+    try {
+      const all = ideaStore.getHypotheses();
+      const candidates = all.filter(
+        (h) => (h.status === "draft" || h.status === "active") && (h.novelty || 0) >= 60 && (h.feasibility || 0) >= 40 && h.title && h.idea
+      );
+      candidates.sort((a, b) => {
+        const scoreA = (a.novelty || 0) + (a.feasibility || 0) + (a.impact || 0);
+        const scoreB = (b.novelty || 0) + (b.feasibility || 0) + (b.impact || 0);
+        return scoreB - scoreA;
+      });
+      const topN = candidates.slice(0, 3);
+      const problems = topN.map((h) => ({
+        id: `feature:${h.id}`,
+        source: "feature",
+        severity: "info",
+        title: h.title,
+        description: h.idea,
+        estimatedCostChars: (h.idea?.length || 100) + (h.implementationDifficulty || 3) * 200,
+        lastSeen: h.createdAt,
+        occurrenceCount: 1,
+        context: {
+          raw: h.idea || "",
+          snippet: h.perspectives ? `${h.perspectives.self}
+---
+${h.perspectives.user}` : void 0,
+          metadata: {
+            hypothesisId: h.id,
+            novelty: String(h.novelty || 0),
+            feasibility: String(h.feasibility || 0),
+            impact: String(h.impact || 0),
+            expectedBenefit: h.expectedBenefit || "",
+            risk: h.risk || "",
+            implementationDifficulty: String(h.implementationDifficulty || 3),
+            sourceLabels: (h.sourceLabels || []).join(", ")
+          }
+        }
+      }));
+      Logger.log("INFO", "creativity_collector_done", {
+        total: all.length,
+        candidates: candidates.length,
+        problems: problems.length
+      });
+      return problems;
+    } catch (err) {
+      Logger.log("ERROR", "creativity_collector_error", { error: err.message });
+      return [];
+    }
+  }
+}
+class CreativityExecutor {
+  name = "creativity-agent";
+  supportedSources = ["feature"];
+  timeoutMs = 3e5;
+  lastExecuteAt = 0;
+  minIntervalMs = 3e4;
+  busy = false;
+  isAvailable() {
+    if (this.busy) return false;
+    if (Date.now() - this.lastExecuteAt < this.minIntervalMs) return false;
+    return true;
+  }
+  async execute(problem) {
+    this.busy = true;
+    this.lastExecuteAt = Date.now();
+    const startedAt = Date.now();
+    const hypothesisId = problem.context.metadata?.hypothesisId;
+    try {
+      const prompt = this.buildPrompt(problem);
+      Logger.log("INFO", "creativity_exec_start", {
+        problemId: problem.id,
+        hypothesisId,
+        title: problem.title
+      });
+      let agentOutput = "";
+      const llmKey = process.env.LLM_KEY || credentialsManager.get("llm_key") || "";
+      if (!llmKey) {
+        Logger.log("WARN", "creativity_exec_no_key");
+        return {
+          problemId: problem.id,
+          success: false,
+          summary: "LLM_KEY 未配置",
+          durationMs: Date.now() - startedAt,
+          error: "NO_KEY"
+        };
+      }
+      const baseEnv = {
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+        ANTHROPIC_AUTH_TOKEN: llmKey,
+        ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic",
+        ANTHROPIC_MODEL: "deepseek-v4-pro",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash",
+        CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"
+      };
+      for await (const message of claudeAgentSdk.query({
+        prompt,
+        options: {
+          allowedTools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
+          env: baseEnv
+        }
+      })) {
+        if (message.type === "text" || message.type === "content") {
+          agentOutput += message.text || message.content || "";
+        }
+      }
+      const elapsedMs = Date.now() - startedAt;
+      if (hypothesisId && ideaStore) {
+        ideaStore.updateHypothesisStatus(hypothesisId, "experimenting");
+      }
+      const resultMatch = agentOutput.match(/<result>([\s\S]*?)<\/result>/);
+      const output = resultMatch ? resultMatch[1].trim() : agentOutput.slice(0, 500);
+      const isSkip = /SKIP|ALREADY_EXISTS/i.test(agentOutput.slice(0, 300));
+      Logger.log("INFO", "creativity_exec_result", {
+        problemId: problem.id,
+        success: !isSkip,
+        durationMs: elapsedMs
+      });
+      return {
+        problemId: problem.id,
+        success: !isSkip,
+        summary: output?.slice(0, 200) || (isSkip ? "已跳过(功能已存在或无需实现)" : "实现完成"),
+        durationMs: elapsedMs,
+        output: output?.slice(0, 1e3)
+      };
+    } catch (err) {
+      Logger.log("WARN", "creativity_exec_failed", {
+        problemId: problem.id,
+        error: err.message
+      });
+      return {
+        problemId: problem.id,
+        success: false,
+        summary: `执行异常: ${err.message}`,
+        durationMs: Date.now() - startedAt,
+        error: err.message
+      };
+    } finally {
+      this.busy = false;
+    }
+  }
+  buildPrompt(problem) {
+    const meta = problem.context.metadata || {};
+    const perspectives = problem.context.snippet;
+    return [
+      `# 实现以下功能特性`,
+      ``,
+      `**标题**: ${problem.title}`,
+      `**描述**: ${problem.description}`,
+      `**预期收益**: ${meta.expectedBenefit || "未知"}`,
+      `**风险注意**: ${meta.risk || "无"}`,
+      `**实现难度**: ${meta.implementationDifficulty || "3"}/5`,
+      ``,
+      ...perspectives ? [`## 多视角评估`, ``, perspectives, ``] : [],
+      `## 要求`,
+      `- 先阅读现有相关代码，理解项目结构`,
+      `- 保持现有代码风格和架构`,
+      `- 如果功能已存在直接回复 ALREADY_EXISTS`,
+      `- 如果是小功能可以直接实现`,
+      `- 大功能（需多文件架构设计）回复 SKIP 并说明需要的架构决策`,
+      `- 完成后运行 npx tsc --noEmit -p tsconfig.node.json 验证`,
+      ``,
+      `## 项目结构`,
+      `- src/main/ — 主进程（Electron）`,
+      `- src/renderer/ — 渲染进程（React）`,
+      `- src/main/evolution/ — 自进化系统`,
+      `- src/main/creativity/ — 创造力引擎（功能点子来源）`,
+      `- src/main/tool/ — MCP 工具定义`,
+      `- src/main/telegram/ — Telegram 推送`,
+      `- src/main/llm/ — LLM 服务`,
+      ``,
+      `## 输出格式`,
+      `在 \`<result>\` 标签内输出:`,
+      `- SUCCESS: 实现了什么、新文件/修改了哪些文件`,
+      `- SKIP: 为什么不能实现（太大/需决策/风险高）`,
+      `- ALREADY_EXISTS: 功能已存在`
+    ].join("\n");
+  }
+}
+path$1.join(WORKSPACE.evolution, "strategy_scores.json");
+const planManager = new DrizzlePlanManager();
+let evolutionService = null;
+function initEvolution(agentService) {
+  if (!evolutionService) {
+    evolutionService = new SelfEvolutionService(agentService, void 0, void 0, planManager);
+  }
+  return evolutionService;
+}
+let _planManager = null;
+let _credentialsManager = null;
+let _memoryService = null;
+let _skillManager = null;
+let _proceduralMemory = null;
+function setPlanManager(pm) {
+  _planManager = pm;
+}
+function setCredentialsManager(cm) {
+  _credentialsManager = cm;
+}
+function setMemoryService$1(ms) {
+  _memoryService = ms;
+}
+function setSkillManager(sm) {
+  _skillManager = sm;
+}
+function setProceduralMemory(pm) {
+  _proceduralMemory = pm;
+}
+function getPlanManager() {
+  return _planManager;
+}
+function getCredentialsManager() {
+  return _credentialsManager;
+}
+function getMemoryService() {
+  return _memoryService;
+}
+function getSkillManager() {
+  return _skillManager;
+}
+function getProceduralMemory() {
+  return _proceduralMemory;
+}
+function setPersonaStateManager(psm) {
+}
+function setHealthManager(hm) {
+}
+const createDevPlanTool = buildTool({
+  name: "create_dev_plan",
+  description: "创建开发计划，记录要实现的步骤",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "计划标题" },
+      description: { type: "string", description: "计划描述" },
+      steps: { type: "array", items: { type: "string" }, description: "步骤列表" }
+    },
+    required: ["title", "description", "steps"]
+  },
+  handler: async (args) => {
+    try {
+      const pm = getPlanManager();
+      if (!pm) return formatToolError("计划管理器尚未就绪");
+      const plan = pm.createPlan(args.title, args.description, args.steps);
+      const result = JSON.stringify(
+        {
+          id: plan.id,
+          title: plan.title,
+          steps: plan.steps.map((s, i) => `${i}: ${s.description}`)
+        },
+        null,
+        2
+      );
+      return formatToolResult(result);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: false
+});
+const updatePlanProgressTool = buildTool({
+  name: "update_plan_progress",
+  description: "更新开发计划中某一步的状态",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      plan_id: { type: "string", description: "计划 ID" },
+      step_index: { type: "number", description: "步骤序号（从 0 开始）" },
+      status: {
+        type: "string",
+        enum: ["pending", "in_progress", "done", "failed"],
+        description: "新状态"
+      },
+      result: { type: "string", description: "可选的执行结果备注" }
+    },
+    required: ["plan_id", "step_index", "status"]
+  },
+  handler: async (args) => {
+    try {
+      const pm = getPlanManager();
+      if (!pm) return formatToolError("计划管理器尚未就绪");
+      let ok = pm.updateStep(args.plan_id, args.step_index, args.status, args.result);
+      if (!ok && args.plan_id) {
+        const allPlans = pm.listPlans();
+        const match2 = allPlans.find((p) => p.title === args.plan_id);
+        if (match2) {
+          ok = pm.updateStep(match2.id, args.step_index, args.status, args.result);
+        }
+      }
+      if (!ok) return formatToolError("更新失败：计划或步骤不存在");
+      return formatToolResult("已更新");
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: false
+});
+const listPlansTool = buildTool({
+  name: "list_plans",
+  description: "列出所有开发计划",
+  inputJSONSchema: {
+    type: "object",
+    properties: {},
+    required: []
+  },
+  handler: async () => {
+    try {
+      const pm = getPlanManager();
+      if (!pm) return formatToolError("计划管理器尚未就绪");
+      const plans2 = pm.listPlans();
+      if (plans2.length === 0) return formatToolResult("暂无开发计划");
+      const activePlan = plans2.find((p) => p.status === "active");
+      let text = activePlan ? "" : "【当前没有活跃计划】\n\n";
+      for (const p of plans2) {
+        const done = p.steps.filter((s) => s.status === "done").length;
+        const total = p.steps.length;
+        const isActive = p.status === "active";
+        const isCompleted = p.status === "completed";
+        const statusLabel = isActive ? "进行中" : isCompleted ? "已完成" : "已放弃";
+        text += `[${statusLabel}] ${p.title} (${done}/${total})
+`;
+        text += `  ID: ${p.id}
+`;
+        if (isActive) {
+          for (let i = 0; i < p.steps.length; i++) {
+            const s = p.steps[i];
+            if (s.status !== "done") text += `  ${i}: [${s.status === "in_progress" ? "→" : " "}] ${s.description}
+`;
+          }
+          text += "\n⚠️ 请按照上述活跃计划的待办步骤执行，不要去管已完成的计划\n";
+        }
+      }
+      return formatToolResult(text.trim());
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: true
+});
+const completePlanTool = buildTool({
+  name: "complete_plan",
+  description: "标记开发计划为已完成",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      plan_id: { type: "string", description: "计划 ID" },
+      reflection: { type: "string", description: "完成反思/总结" }
+    },
+    required: ["plan_id"]
+  },
+  handler: async (args) => {
+    try {
+      const pm = getPlanManager();
+      if (!pm) return formatToolError("计划管理器尚未就绪");
+      let ok = pm.completePlan(args.plan_id, args.reflection);
+      if (!ok && args.plan_id) {
+        const allPlans = pm.listPlans();
+        const match2 = allPlans.find((p) => p.title === args.plan_id);
+        if (match2) ok = pm.completePlan(match2.id, args.reflection);
+      }
+      if (!ok) return formatToolError("计划不存在");
+      return formatToolResult("计划已标记为完成");
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: false
+});
+const abandonPlanTool = buildTool({
+  name: "abandon_plan",
+  description: "放弃当前开发计划。当用户需求变更、不再需要当前计划时调用",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      plan_id: { type: "string", description: "要放弃的计划 ID" },
+      reason: { type: "string", description: "放弃原因" }
+    },
+    required: ["plan_id"]
+  },
+  handler: async (args) => {
+    try {
+      const pm = getPlanManager();
+      if (!pm) return formatToolError("计划管理器尚未就绪");
+      let ok = pm.abandonPlan(args.plan_id, args.reason);
+      if (!ok && args.plan_id) {
+        const allPlans = pm.listPlans();
+        const match2 = allPlans.find((p) => p.title === args.plan_id);
+        if (match2) ok = pm.abandonPlan(match2.id, args.reason);
+      }
+      if (!ok) return formatToolError("计划不存在");
+      return formatToolResult("计划已放弃");
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: false
+});
+const analyzeCodebaseTool = buildTool({
+  name: "analyze_codebase",
+  description: "分析项目状态：测试结果、lint 错误、TODO 数量",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      quick: { type: "boolean", description: "快速检查（不执行完整测试）" }
+    },
+    required: []
+  },
+  handler: async (args) => {
+    try {
+      let report = "";
+      const isQuick = args.quick !== false;
+      report += "【项目状态分析】\n";
+      try {
+        const todos = require$$0.execSync('git grep -n "TODO\\|FIXME\\|HACK" -- "*.ts" "*.tsx" "*.js" "*.jsx" 2>nul || echo 0', {
+          cwd: PROJECT_ROOT,
+          encoding: "utf-8",
+          timeout: 1e4
+        }).trim();
+        const todoCount = todos === "0" ? 0 : todos.split("\n").length;
+        report += `- TODO/FIXME: ${todoCount} 处
+`;
+      } catch {
+        report += "- TODO: 检测失败\n";
+      }
+      if (!isQuick) {
+        try {
+          const testOut = require$$0.execSync("npx vitest run --reporter=verbose 2>&1", {
+            cwd: PROJECT_ROOT,
+            encoding: "utf-8",
+            timeout: 6e4
+          }).trim();
+          const lines = testOut.split("\n");
+          const passLine = lines.find((l) => l.includes("Tests") && l.includes("passed"));
+          report += `- 测试结果: ${passLine || testOut.slice(-200)}
+`;
+        } catch (err) {
+          const out = String(err.stdout || err.message || "").trim();
+          const lines = out.split("\n");
+          const failLine = lines.find((l) => l.includes("Tests") || l.includes("failed"));
+          report += `- 测试结果: ${failLine || out.slice(-200)}
+`;
+        }
+      }
+      try {
+        const gitStatus = require$$0.execSync("git status --short 2>&1", {
+          cwd: PROJECT_ROOT,
+          encoding: "utf-8",
+          timeout: 5e3
+        }).trim();
+        const modifiedCount = gitStatus ? gitStatus.split("\n").length : 0;
+        report += `- 未提交修改: ${modifiedCount} 个文件
+`;
+      } catch {
+        report += "- Git 状态: 检测失败\n";
+      }
+      return formatToolResult(report.trim());
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: true
+});
+const getCredentialTool = buildTool({
+  name: "get_credential",
+  description: "读取已保存的 API 密钥或凭据。如果返回未配置，请告知用户需要注册什么服务",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "凭据名称，如 netease_api_key, qq_music_appid" }
+    },
+    required: ["name"]
+  },
+  handler: async (args) => {
+    try {
+      const cm = getCredentialsManager();
+      if (!cm) return formatToolError("凭据管理器尚未就绪");
+      const value = cm.get(args.name);
+      if (value === null) {
+        return formatToolResult(`凭据 "${args.name}" 未配置。请在回复中告知用户需要注册什么服务并提供指引。`);
+      }
+      return formatToolResult(value);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: true
+});
+const setCredentialTool = buildTool({
+  name: "set_credential",
+  description: "保存用户提供的 API 密钥或凭据。仅当用户明确告诉你密钥内容时才调用",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "凭据名称" },
+      value: { type: "string", description: "凭据值" }
+    },
+    required: ["name", "value"]
+  },
+  handler: async (args) => {
+    try {
+      const cm = getCredentialsManager();
+      if (!cm) return formatToolError("凭据管理器尚未就绪");
+      cm.set(args.name, String(args.value));
+      return formatToolResult(`凭据 "${args.name}" 已保存`);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: false
+});
+const listCredentialsTool = buildTool({
+  name: "list_credentials",
+  description: "列出所有已配置的凭据名称（不显示值）",
+  inputJSONSchema: {
+    type: "object",
+    properties: {},
+    required: []
+  },
+  handler: async () => {
+    try {
+      const cm = getCredentialsManager();
+      if (!cm) return formatToolError("凭据管理器尚未就绪");
+      const keys = cm.list();
+      if (keys.length === 0) return formatToolResult("暂无已配置的凭据");
+      return formatToolResult(keys.join("\n"));
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: true
+});
+const rememberFactTool = buildTool({
+  name: "remember_fact",
+  description: "记住关于用户或项目的重要信息。当用户透露了个人偏好、重要决定、关键需求时应主动调用",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      content: {
+        type: "string",
+        description: '要记住的事实内容，如"用户偏好使用SQLite进行持久化"或"用户决定暂缓插件系统开发"'
+      },
+      confidence: { type: "number", description: "确信度 0-1，默认 0.7" }
+    },
+    required: ["content"]
+  },
+  handler: async (args) => {
+    try {
+      const ms = getMemoryService();
+      if (!ms) return formatToolError("记忆服务暂不可用");
+      const content = String(args.content);
+      const confidence = typeof args.confidence === "number" ? args.confidence : 0.7;
+      ms.addFact(content, confidence);
+      return formatToolResult(`已记住: ${content.slice(0, 100)}`);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: false
+});
 const id$3 = "preset_dev_pipeline_simple";
 const name$3 = "dev-pipeline-simple";
 const description$3 = "简单任务：开发→测试";
@@ -2598,7 +7265,7 @@ const writingPipeline = {
   updatedAt
 };
 const PRESET_DEFINITIONS = [devPipelineSimple, devPipelineMedium, devPipelineLarge, writingPipeline];
-let idCounter$b = 0;
+let idCounter$a = 0;
 class WorkflowStoreV2 {
   seeded = false;
   get db() {
@@ -2727,7 +7394,7 @@ class WorkflowStoreV2 {
     return this.rowToRun(row);
   }
   createRun(def, trigger) {
-    const runId = `run_${Date.now()}_${++idCounter$b}`;
+    const runId = `run_${Date.now()}_${++idCounter$a}`;
     const now = Date.now();
     const run = {
       runId,
@@ -3017,12 +7684,12 @@ function applyCompare(op, actual, expected) {
   }
 }
 function evaluateCompound(expr, actual) {
-  const tokens = tokenize$1(expr);
+  const tokens = tokenize(expr);
   if (tokens.length === 0) return false;
   let pos = 0;
   return parseOr(tokens, actual, () => pos);
 }
-function tokenize$1(expr) {
+function tokenize(expr) {
   const tokens = [];
   let i = 0;
   while (i < expr.length) {
@@ -4526,7 +9193,7 @@ ${stepLines}`);
       while (currentRun.status === "failed" && iteration < MAX_ITER) {
         iteration++;
         const fixedSteps = currentDef.steps.map((s) => {
-          if (s.status === "failed" || run.steps.find((rs) => rs.stepId === s.id && rs.status === "failed")) {
+          if (run.steps.find((rs) => rs.stepId === s.id && rs.status === "failed")) {
             return {
               ...s,
               retryCount: Math.max(s.retryCount ?? 0, 2),
@@ -5013,9 +9680,13 @@ const disableSkillTool = buildTool({
   },
   isReadOnly: false
 });
-const WRITING_API = "https://www.crlkcloud.cyou/writing/api";
+const DEFAULT_WRITING_API = "https://www.crlkcloud.cyou/writing/api";
+function getWritingApiUrl() {
+  const creds = getCredentialsManager();
+  return creds?.get("writing_api_url") || process.env.WRITING_API_URL || DEFAULT_WRITING_API;
+}
 async function writingFetch(method, path2, body) {
-  const url2 = `${WRITING_API}${path2}`;
+  const url2 = `${getWritingApiUrl()}${path2}`;
   const res = await fetch(url2, {
     method,
     headers: body ? { "Content-Type": "application/json" } : void 0,
@@ -7258,7 +11929,7 @@ ${PROMPT_CREDENTIALS}${PROMPT_PLUGIN}
 ${PROMPT_DEBUG}
 
 ${PROMPT_WRITING}${PROMPT_SKILLS}`;
-function buildSystemPrompt$1(memoryContext, extraModules, reflectionContext, identityContext) {
+function buildSystemPrompt(memoryContext, extraModules, reflectionContext, identityContext) {
   let prompt = identityContext ? `${identityContext}
 
 ${BASE_PROMPT}` : `${PROMPT_IDENTITY}
@@ -7319,7 +11990,7 @@ class ConversationContext {
   maxTokens;
   shortTermMemory = [];
   constructor(memoryContext, maxTokens = 2e3, extraModules, customSystemPrompt, reflectionContext, identityContext) {
-    this.systemPrompt = customSystemPrompt ?? buildSystemPrompt$1(memoryContext, extraModules, reflectionContext, identityContext);
+    this.systemPrompt = customSystemPrompt ?? buildSystemPrompt(memoryContext, extraModules, reflectionContext, identityContext);
     this._context = [{ role: "system", content: this.systemPrompt }];
     this.maxTokens = maxTokens;
   }
@@ -7389,7 +12060,7 @@ class ConversationContext {
    */
   rebuildSystemPrompt(memoryContext, extraModules, reflectionContext, identityContext) {
     const oldMessages = this._context.slice(1);
-    this.systemPrompt = buildSystemPrompt$1(memoryContext, extraModules, reflectionContext, identityContext);
+    this.systemPrompt = buildSystemPrompt(memoryContext, extraModules, reflectionContext, identityContext);
     this._context = [{ role: "system", content: this.systemPrompt }, ...oldMessages];
   }
   clear(keepShortTerm = true) {
@@ -7581,48 +12252,6 @@ const INTENT_CLASSIFY_PROMPT = `你是一个意图识别助手。
 {"intent":"chat","slots":{}}
 
 只输出 JSON。`;
-function createTimeoutSignal(timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return { controller, timer };
-}
-async function withTimeout(fn, timeoutMs, errorMsg = "timeout") {
-  const timer = new Promise((_, reject) => setTimeout(() => reject(new Error(errorMsg)), timeoutMs));
-  return Promise.race([fn(), timer]);
-}
-async function withRetry(fn, retries = 2, delayMs = 1e3) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (attempt === retries) throw err;
-      await new Promise((r) => setTimeout(r, delayMs));
-    }
-  }
-  throw new Error("unreachable");
-}
-function execAsync(cmd, options = {}) {
-  return new Promise((resolve, reject) => {
-    require$$0.exec(
-      cmd,
-      {
-        cwd: options.cwd || process.cwd(),
-        timeout: options.timeout || 6e4,
-        maxBuffer: options.maxBuffer || 1024 * 1024,
-        windowsHide: options.windowsHide !== false
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          error.stdout = stdout;
-          error.stderr = stderr;
-          reject(error);
-        } else {
-          resolve(stdout);
-        }
-      }
-    );
-  });
-}
 function stripCodeFences(text) {
   let s = text.trim();
   const tripleMatch = s.match(/^```(?:\w+)?\s*\n?([\s\S]*?)```\s*$/);
@@ -7701,8 +12330,13 @@ class LlmService {
   textApiUrl = LLM_TEXT_API_URL;
   visionApiUrl = LLM_VISION_API_URL;
   mcpManager;
-  constructor(mcpManager) {
+  evaluationEmitter;
+  constructor(mcpManager, evaluationEmitter) {
     this.mcpManager = mcpManager || new ServerManager();
+    this.evaluationEmitter = evaluationEmitter;
+  }
+  setEvaluationEmitter(emitter) {
+    this.evaluationEmitter = emitter;
   }
   setMcpManager(manager) {
     this.mcpManager = manager;
@@ -7969,6 +12603,13 @@ class LlmService {
     if (!this.codeApiKey) return { error: "NO_KEY" };
     Logger.log("INFO", "tool_llm_request", { request_id: requestId2, model: this.codeModel });
     const t0 = Date.now();
+    const promptLength = messages2.reduce((s, m) => s + (m.content?.length || 0), 0);
+    const rawPromptTokens = estimateTokens(JSON.stringify(messages2));
+    this.evaluationEmitter?.emit(
+      "model.invoked",
+      { type: "model.invoked", modelName: this.codeModel, promptLength, promptTokens: rawPromptTokens },
+      { traceId: requestId2 }
+    );
     const RETRYABLE = /* @__PURE__ */ new Set(["RATE_LIMITED", "NETWORK"]);
     const RETRYABLE_STATUS_CODES = /* @__PURE__ */ new Set([429, 500, 502, 503]);
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -7989,8 +12630,8 @@ class LlmService {
       }
       try {
         if (onChunk) {
-          const result = await this._chatWithToolsStream(messages2, requestId2, t0, controller.signal, onChunk, allowedToolNames);
-          if (result.error && RETRYABLE.has(result.error)) {
+          const result2 = await this._chatWithToolsStream(messages2, requestId2, t0, controller.signal, onChunk, allowedToolNames);
+          if (result2.error && RETRYABLE.has(result2.error)) {
             if (attempt < 3) {
               const delay = Math.min(1e3 * Math.pow(2, attempt - 1), 4e3);
               Logger.log("WARN", "rate_limit_retry", { request_id: requestId2, attempt, delay_ms: delay });
@@ -7998,7 +12639,7 @@ class LlmService {
               continue;
             }
           }
-          return result;
+          return this._emitModelCompleted(result2, requestId2, t0, rawPromptTokens);
         }
         const res = await this._doFetch(messages2, false, controller.signal, this.codeModel, allowedToolNames);
         if (res.status === 429) {
@@ -8009,7 +12650,7 @@ class LlmService {
             await new Promise((r) => setTimeout(r, delay));
             continue;
           }
-          return { error: "RATE_LIMITED" };
+          return this._emitModelError("RATE_LIMITED", Date.now() - t0, requestId2, t0, rawPromptTokens);
         }
         if (RETRYABLE_STATUS_CODES.has(res.status)) {
           Logger.log("WARN", "llm_api_retry", { request_id: requestId2, status: res.status, attempt });
@@ -8019,25 +12660,62 @@ class LlmService {
             continue;
           }
           const statusErr2 = this._checkStatus(res, requestId2, t0);
-          if (statusErr2) return statusErr2;
+          if (statusErr2) return this._emitModelError(statusErr2.error ?? "API_ERROR", Date.now() - t0, requestId2, t0, rawPromptTokens);
         }
         const statusErr = this._checkStatus(res, requestId2, t0);
-        if (statusErr) return statusErr;
+        if (statusErr) return this._emitModelError(statusErr.error ?? "API_ERROR", Date.now() - t0, requestId2, t0, rawPromptTokens);
         const data = await res.json();
-        return this._parseToolResponse(data, messages2, requestId2, t0);
+        const result = this._parseToolResponse(data, messages2, requestId2, t0);
+        return this._emitModelCompleted(result, requestId2, t0, rawPromptTokens);
       } catch (err) {
         const elapsed = Date.now() - t0;
         if (err instanceof DOMException && err.name === "AbortError") {
           Logger.log("ERROR", "tool_llm_timeout", { request_id: requestId2, elapsed_ms: elapsed });
-          return { error: "TIMEOUT" };
+          return this._emitModelError("TIMEOUT", elapsed, requestId2, t0, rawPromptTokens);
         }
         Logger.log("ERROR", "tool_llm_network_error", { request_id: requestId2, elapsed_ms: elapsed, error: String(err) });
-        return { error: "NETWORK" };
+        return this._emitModelError(String(err), elapsed, requestId2, t0, rawPromptTokens);
       } finally {
         clearTimeout(timer);
       }
     }
-    return { error: "RATE_LIMITED" };
+    return this._emitModelError("RATE_LIMITED_EXHAUSTED", Date.now() - t0, requestId2, t0, rawPromptTokens);
+  }
+  _emitModelCompleted(result, requestId2, t0, rawPromptTokens) {
+    const elapsed = Date.now() - t0;
+    const replyLen = result.reply?.length ?? 0;
+    this.evaluationEmitter?.emit(
+      "model.completed",
+      {
+        type: "model.completed",
+        modelName: this.codeModel,
+        durationMs: elapsed,
+        inputTokens: rawPromptTokens,
+        outputTokens: Math.round(replyLen * 1.3),
+        responseLength: replyLen,
+        responsePreview: result.reply?.slice(0, 200),
+        error: result.error
+      },
+      { traceId: requestId2 }
+    );
+    return result;
+  }
+  _emitModelError(error, elapsed, requestId2, t0, rawPromptTokens) {
+    const realElapsed = elapsed > 0 ? elapsed : Date.now() - t0;
+    this.evaluationEmitter?.emit(
+      "model.completed",
+      {
+        type: "model.completed",
+        modelName: this.codeModel,
+        durationMs: realElapsed,
+        inputTokens: rawPromptTokens,
+        outputTokens: 0,
+        responseLength: 0,
+        error
+      },
+      { traceId: requestId2 }
+    );
+    return { error };
   }
   /**
    * 流式版 chatWithTools — 边接收 SSE token 边回调 onChunk，大幅降低首音延迟。
@@ -9392,6634 +14070,6 @@ class TtsService {
     }
   }
 }
-class AsyncLock {
-  locked = false;
-  queue = [];
-  async acquire() {
-    if (!this.locked) {
-      this.locked = true;
-      return;
-    }
-    return new Promise((resolve) => {
-      this.queue.push(resolve);
-    });
-  }
-  release() {
-    if (this.queue.length > 0) {
-      const next = this.queue.shift();
-      next();
-    } else {
-      this.locked = false;
-    }
-  }
-  /**
-   * 执行临界区操作，自动获取/释放锁。
-   * 保证无论成功还是异常都会释放锁。
-   */
-  async run(fn) {
-    await this.acquire();
-    try {
-      return await fn();
-    } finally {
-      this.release();
-    }
-  }
-  isLocked() {
-    return this.locked;
-  }
-}
-let idCounter$a = 0;
-function rowToPlan(r) {
-  return {
-    id: r.id,
-    title: r.title,
-    description: r.description,
-    status: r.status,
-    reflection: r.reflection ?? void 0,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at
-  };
-}
-function rowToStep(r) {
-  return {
-    id: r.id,
-    description: r.description,
-    status: r.status,
-    result: r.result ?? void 0
-  };
-}
-function tryDb() {
-  try {
-    return getRawDb();
-  } catch {
-    return null;
-  }
-}
-class DrizzlePlanManager {
-  lock = new AsyncLock();
-  /** 当前活跃计划上限 */
-  static MAX_ACTIVE_PLANS = 3;
-  createPlan(title, description2, stepDescriptions, priority) {
-    const existing = this.getActivePlanByTitle(title);
-    if (existing) {
-      Logger.log("INFO", "plan_duplicate_skipped", { plan_id: existing.id, title });
-      return existing;
-    }
-    const activeCount = this.listActivePlans().length;
-    if (activeCount >= DrizzlePlanManager.MAX_ACTIVE_PLANS) {
-      const msg = `活跃计划已达上限（${activeCount}/${DrizzlePlanManager.MAX_ACTIVE_PLANS}）。请先完成或放弃现有计划。`;
-      Logger.log("WARN", "plan_limit_exceeded", { active_count: activeCount, max: DrizzlePlanManager.MAX_ACTIVE_PLANS });
-      throw new Error(msg);
-    }
-    const db2 = tryDb();
-    if (!db2) {
-      const plan2 = this.createInMemoryPlan(title, description2, stepDescriptions, Date.now(), priority);
-      return plan2;
-    }
-    const planId = `plan_${Date.now()}_${++idCounter$a}`;
-    const now = Date.now();
-    db2.run("INSERT INTO plans (id, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", [
-      planId,
-      title,
-      description2,
-      "active",
-      priority ?? 0,
-      now,
-      now
-    ]);
-    const stepRows = stepDescriptions.map((desc, i) => {
-      const stepId = `step_${i}_${Date.now()}`;
-      db2.run("INSERT INTO plan_steps (id, plan_id, step_index, description, status) VALUES (?, ?, ?, ?, ?)", [
-        stepId,
-        planId,
-        i,
-        desc,
-        "pending"
-      ]);
-      return { id: stepId, description: desc, status: "pending" };
-    });
-    markDirty();
-    const devPlan = {
-      id: planId,
-      title,
-      description: description2,
-      steps: stepRows,
-      status: "active",
-      priority: priority ?? 0,
-      createdAt: now,
-      updatedAt: now
-    };
-    eventBus.emit("agent.plan.created", { planId, title });
-    Logger.log("INFO", "plan_created", { plan_id: planId, title, steps: stepDescriptions.length });
-    return devPlan;
-  }
-  getPlan(id2) {
-    const db2 = tryDb();
-    if (!db2) return void 0;
-    const stmt = db2.prepare("SELECT * FROM plans WHERE id = ?");
-    stmt.bind([id2]);
-    if (!stmt.step()) {
-      stmt.free();
-      return void 0;
-    }
-    const row = stmt.getAsObject();
-    stmt.free();
-    return this.hydratePlan(row);
-  }
-  getActivePlan() {
-    const db2 = tryDb();
-    if (!db2) return void 0;
-    const stmt = db2.prepare("SELECT * FROM plans WHERE status = ? ORDER BY created_at DESC LIMIT 1");
-    stmt.bind(["active"]);
-    if (!stmt.step()) {
-      stmt.free();
-      return void 0;
-    }
-    const row = stmt.getAsObject();
-    stmt.free();
-    return this.hydratePlan(row);
-  }
-  /** 标题相似度阈值 (0-1)，低于此值视为重复计划 */
-  static TITLE_SIMILARITY_THRESHOLD = 0.75;
-  /** 归一化标题：去空格、转小写、去标点 */
-  normalizeTitle(title) {
-    return title.toLowerCase().replace(/[\s\p{P}]+/gu, " ").trim();
-  }
-  /** 计算两个规范化标题的 Dice 系数相似度 */
-  titleSimilarity(a, b) {
-    if (a === b) return 1;
-    const aWords = new Set(a.split(" "));
-    const bWords = new Set(b.split(" "));
-    if (aWords.size === 0 || bWords.size === 0) return 0;
-    let intersection = 0;
-    for (const w of aWords) if (bWords.has(w)) intersection++;
-    return 2 * intersection / (aWords.size + bWords.size);
-  }
-  /** 精确匹配：数据库层查询活跃计划标题 */
-  findExactTitleMatch(title) {
-    const db2 = tryDb();
-    if (!db2) return void 0;
-    const stmt = db2.prepare("SELECT * FROM plans WHERE title = ? AND status = ? LIMIT 1");
-    stmt.bind([title, "active"]);
-    if (!stmt.step()) {
-      stmt.free();
-      return void 0;
-    }
-    const row = stmt.getAsObject();
-    stmt.free();
-    return this.hydratePlan(row);
-  }
-  /** 检查是否有标题相似度超过阈值的活跃计划 */
-  findSimilarActivePlan(title) {
-    const normalized = this.normalizeTitle(title);
-    if (!normalized) return void 0;
-    return this.listActivePlans().find(
-      (p) => this.titleSimilarity(this.normalizeTitle(p.title), normalized) >= DrizzlePlanManager.TITLE_SIMILARITY_THRESHOLD
-    );
-  }
-  getActivePlanByTitle(title) {
-    const exact = this.findExactTitleMatch(title);
-    if (exact) return exact;
-    return this.findSimilarActivePlan(title);
-  }
-  listPlans() {
-    const db2 = tryDb();
-    if (!db2) return [];
-    const stmt = db2.prepare("SELECT * FROM plans ORDER BY updated_at DESC");
-    const plans2 = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      plans2.push(this.hydratePlan(row));
-    }
-    stmt.free();
-    return plans2;
-  }
-  updateStep(planId, stepIndex, status, result) {
-    const db2 = tryDb();
-    if (!db2) return false;
-    const check = db2.prepare("SELECT id FROM plan_steps WHERE plan_id = ? AND step_index = ?");
-    check.bind([planId, stepIndex]);
-    if (!check.step()) {
-      check.free();
-      return false;
-    }
-    check.free();
-    db2.run("UPDATE plan_steps SET status = ?, result = ? WHERE plan_id = ? AND step_index = ?", [status, result || null, planId, stepIndex]);
-    db2.run("UPDATE plans SET updated_at = ? WHERE id = ?", [Date.now(), planId]);
-    markDirty();
-    eventBus.emit("agent.plan.step", { planId, stepIndex, status });
-    Logger.log("INFO", "plan_step_update", { plan_id: planId, step: stepIndex, status });
-    return true;
-  }
-  completePlan(planId, reflection) {
-    const db2 = tryDb();
-    if (!db2) return false;
-    db2.run("UPDATE plans SET status = ?, reflection = ?, updated_at = ? WHERE id = ?", [
-      "completed",
-      reflection || null,
-      Date.now(),
-      planId
-    ]);
-    const affected = db2.getRowsModified();
-    if (affected === 0) {
-      Logger.log("WARN", "plan_complete_not_found", { plan_id: planId });
-      return false;
-    }
-    markDirty();
-    eventBus.emit("agent.plan.completed", { planId });
-    Logger.log("INFO", "plan_completed", { plan_id: planId });
-    return true;
-  }
-  abandonPlan(planId, reason) {
-    const db2 = tryDb();
-    if (!db2) return false;
-    db2.run("UPDATE plans SET status = ?, reflection = ?, updated_at = ? WHERE id = ?", ["abandoned", reason || null, Date.now(), planId]);
-    const affected = db2.getRowsModified();
-    if (affected === 0) {
-      Logger.log("WARN", "plan_abandon_not_found", { plan_id: planId });
-      return false;
-    }
-    markDirty();
-    Logger.log("INFO", "plan_abandoned", { plan_id: planId, reason });
-    return true;
-  }
-  freezePlan(planId, reason) {
-    const db2 = tryDb();
-    if (!db2) return false;
-    const check = db2.prepare("SELECT status FROM plans WHERE id = ?");
-    check.bind([planId]);
-    if (!check.step()) {
-      check.free();
-      return false;
-    }
-    const currentStatus = check.getAsObject();
-    check.free();
-    if (currentStatus.status !== "active") return false;
-    db2.run("UPDATE plans SET status = ?, reflection = ?, updated_at = ? WHERE id = ?", ["frozen", reason || null, Date.now(), planId]);
-    const affected = db2.getRowsModified();
-    if (affected === 0) {
-      Logger.log("WARN", "plan_freeze_not_found", { plan_id: planId });
-      return false;
-    }
-    markDirty();
-    Logger.log("INFO", "plan_frozen", { plan_id: planId, reason });
-    return true;
-  }
-  /** 返回所有活跃计划列表 */
-  listActivePlans() {
-    const db2 = tryDb();
-    if (!db2) return [];
-    const stmt = db2.prepare("SELECT * FROM plans WHERE status = ? ORDER BY created_at DESC");
-    stmt.bind(["active"]);
-    const plans2 = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      plans2.push(this.hydratePlan(row));
-    }
-    stmt.free();
-    return plans2;
-  }
-  getFormattedContext() {
-    const active = this.getActivePlan();
-    if (!active) return "";
-    const doneSteps = active.steps.filter((s) => s.status === "done").length;
-    const totalSteps = active.steps.length;
-    let ctx = `【当前开发计划】${active.title}
-进度: ${doneSteps}/${totalSteps}
-`;
-    for (const s of active.steps) {
-      const mark = s.status === "done" ? "[✓]" : s.status === "in_progress" ? "[→]" : s.status === "failed" ? "[✗]" : "[ ]";
-      ctx += `${mark} ${s.description}
-`;
-    }
-    return ctx;
-  }
-  /**
-   * 清理旧计划：删除 completed（超过 completedCutoff）和 abandoned（超过 abandonedCutoff）的计划
-   * 同时清理关联的 plan_steps。返回删除的计划数量。
-   */
-  cleanupOldPlans(completedCutoff, abandonedCutoff) {
-    const db2 = tryDb();
-    if (!db2) return 0;
-    const expiredPlans = db2.prepare("SELECT id FROM plans WHERE (status = ? AND created_at < ?) OR (status = ? AND created_at < ?)");
-    expiredPlans.bind(["completed", completedCutoff, "abandoned", abandonedCutoff]);
-    while (expiredPlans.step()) {
-      const row = expiredPlans.getAsObject();
-      db2.run("DELETE FROM plan_steps WHERE plan_id = ?", [row.id]);
-    }
-    expiredPlans.free();
-    db2.run("DELETE FROM plans WHERE (status = ? AND created_at < ?) OR (status = ? AND created_at < ?)", [
-      "completed",
-      completedCutoff,
-      "abandoned",
-      abandonedCutoff
-    ]);
-    const removed = db2.getRowsModified();
-    if (removed > 0) markDirty();
-    return removed;
-  }
-  createInMemoryPlan(title, description2, stepDescriptions, now, priority) {
-    const planId = `plan_${now}_${++idCounter$a}`;
-    const steps2 = stepDescriptions.map((desc, i) => ({
-      id: `step_${i}_${now}`,
-      description: desc,
-      status: "pending"
-    }));
-    const devPlan = {
-      id: planId,
-      title,
-      description: description2,
-      steps: steps2,
-      status: "active",
-      priority: priority ?? 0,
-      createdAt: now,
-      updatedAt: now
-    };
-    Logger.log("INFO", "plan_created_in_memory", { plan_id: planId, title, steps: stepDescriptions.length });
-    return devPlan;
-  }
-  hydratePlan(row) {
-    const db2 = tryDb();
-    if (!db2) return { ...rowToPlan(row), steps: [] };
-    const stmt = db2.prepare("SELECT * FROM plan_steps WHERE plan_id = ? ORDER BY step_index ASC");
-    stmt.bind([row.id]);
-    const steps2 = [];
-    while (stmt.step()) {
-      const sobj = stmt.getAsObject();
-      steps2.push(rowToStep(sobj));
-    }
-    stmt.free();
-    return {
-      ...rowToPlan(row),
-      steps: steps2
-    };
-  }
-}
-let taskIdCounter = 0;
-class Scheduler {
-  tasks = /* @__PURE__ */ new Map();
-  timers = /* @__PURE__ */ new Map();
-  nextId() {
-    return `sched_${Date.now()}_${++taskIdCounter}`;
-  }
-  once(delayMs, handler, pluginName = "@system") {
-    const id2 = this.nextId();
-    const task = { id: id2, pluginName, type: "once", handler, cancelled: false };
-    this.tasks.set(id2, task);
-    const timer = setTimeout(async () => {
-      if (task.cancelled) return;
-      await this.executeTask(task);
-      this.tasks.delete(id2);
-    }, delayMs);
-    this.timers.set(id2, timer);
-    return id2;
-  }
-  interval(intervalMs, handler, pluginName = "@system") {
-    const id2 = this.nextId();
-    const task = { id: id2, pluginName, type: "interval", handler, cancelled: false };
-    this.tasks.set(id2, task);
-    const timer = setInterval(async () => {
-      if (task.cancelled) return;
-      await this.executeTask(task);
-    }, intervalMs);
-    this.timers.set(id2, timer);
-    return id2;
-  }
-  cron(minute, hour, handler, pluginName = "@system") {
-    const id2 = this.nextId();
-    const task = { id: id2, pluginName, type: "cron", handler, cancelled: false };
-    this.tasks.set(id2, task);
-    const tick = () => {
-      if (task.cancelled) return;
-      const now = /* @__PURE__ */ new Date();
-      if (minute !== "*" && now.getMinutes() !== minute) return;
-      if (hour !== "*" && now.getHours() !== hour) return;
-      this.executeTask(task);
-    };
-    const timer = setInterval(tick, 3e4);
-    this.timers.set(id2, timer);
-    return id2;
-  }
-  cancel(id2) {
-    const task = this.tasks.get(id2);
-    if (!task) return false;
-    task.cancelled = true;
-    const timer = this.timers.get(id2);
-    if (timer) {
-      clearInterval(timer);
-      this.timers.delete(id2);
-    }
-    this.tasks.delete(id2);
-    return true;
-  }
-  cancelAll(pluginName) {
-    let count = 0;
-    for (const [id2, task] of this.tasks) {
-      if (task.pluginName === pluginName) {
-        this.cancel(id2);
-        count++;
-      }
-    }
-    return count;
-  }
-  list() {
-    return Array.from(this.tasks.values());
-  }
-  count() {
-    return this.tasks.size;
-  }
-  async executeTask(task) {
-    eventBus.emit("scheduler.tick", { taskId: task.id, cron: task.type });
-    try {
-      const result = await task.handler();
-      eventBus.emit("scheduler.task.completed", { taskId: task.id, result });
-      Logger.log("INFO", "scheduler_task_done", { task_id: task.id, plugin: task.pluginName });
-    } catch (err) {
-      eventBus.emit("scheduler.task.failed", { taskId: task.id, error: err.message });
-      Logger.log("WARN", "scheduler_task_error", { task_id: task.id, plugin: task.pluginName, error: err.message });
-    }
-  }
-  shutdown() {
-    for (const timer of this.timers.values()) {
-      clearInterval(timer);
-    }
-    this.timers.clear();
-    this.tasks.clear();
-  }
-}
-const scheduler = new Scheduler();
-const VALID_STEP_STATUSES = /* @__PURE__ */ new Set(["pending", "in_progress", "done", "failed"]);
-const VALID_PLAN_STATUSES = /* @__PURE__ */ new Set(["active", "completed", "abandoned", "frozen"]);
-class PlanIntegrityChecker {
-  /**
-   * 检查单个计划的完整性
-   */
-  checkPlan(plan2) {
-    const issues = [];
-    if (!plan2.id) {
-      issues.push({
-        planId: plan2.id || "(missing)",
-        planTitle: plan2.title || "(missing)",
-        severity: "error",
-        category: "empty_title",
-        description: "计划 ID 为空"
-      });
-    }
-    if (!plan2.title || plan2.title.trim() === "") {
-      issues.push({
-        planId: plan2.id,
-        planTitle: plan2.title || "(empty)",
-        severity: "error",
-        category: "empty_title",
-        description: "计划标题为空"
-      });
-    }
-    if (!VALID_PLAN_STATUSES.has(plan2.status)) {
-      issues.push({
-        planId: plan2.id,
-        planTitle: plan2.title,
-        severity: "error",
-        category: "invalid_plan_status",
-        description: `计划状态非法: "${plan2.status}"，合法值: ${[...VALID_PLAN_STATUSES].join(", ")}`
-      });
-    }
-    if (!plan2.steps || plan2.steps.length === 0) {
-      issues.push({
-        planId: plan2.id,
-        planTitle: plan2.title,
-        severity: "warn",
-        category: "step_index_gap",
-        description: "计划没有步骤"
-      });
-      return issues;
-    }
-    const seenIndices = /* @__PURE__ */ new Set();
-    for (let i = 0; i < plan2.steps.length; i++) {
-      const step = plan2.steps[i];
-      if (!step.description || step.description.trim() === "" || step.description === "undefined" || step.description === "null") {
-        issues.push({
-          planId: plan2.id,
-          planTitle: plan2.title,
-          severity: "error",
-          category: "empty_step_description",
-          description: `步骤 ${i} (id=${step.id}) 的描述为空或为"${step.description}"`
-        });
-      }
-      if (!VALID_STEP_STATUSES.has(step.status)) {
-        issues.push({
-          planId: plan2.id,
-          planTitle: plan2.title,
-          severity: "error",
-          category: "invalid_step_status",
-          description: `步骤 ${i} 状态非法: "${step.status}"`
-        });
-      }
-      if (seenIndices.has(i)) {
-        issues.push({
-          planId: plan2.id,
-          planTitle: plan2.title,
-          severity: "error",
-          category: "duplicate_step_index",
-          description: `步骤索引 ${i} 重复`
-        });
-      }
-      seenIndices.add(i);
-    }
-    for (let i = 0; i < plan2.steps.length; i++) {
-      if (!seenIndices.has(i)) {
-        issues.push({
-          planId: plan2.id,
-          planTitle: plan2.title,
-          severity: "error",
-          category: "step_index_gap",
-          description: `步骤索引不连续，缺少索引 ${i}`
-        });
-      }
-    }
-    return issues;
-  }
-  /**
-   * 检查所有计划并返回结果
-   */
-  checkAllPlans(plans2) {
-    const allIssues = [];
-    for (const plan2 of plans2) {
-      const issues = this.checkPlan(plan2);
-      allIssues.push(...issues);
-    }
-    const result = {
-      passed: allIssues.filter((i) => i.severity === "error").length === 0,
-      issues: allIssues,
-      checkedAt: Date.now()
-    };
-    if (allIssues.length > 0) {
-      Logger.log("WARN", "plan_integrity_issues", {
-        total_issues: allIssues.length,
-        errors: allIssues.filter((i) => i.severity === "error").length,
-        warnings: allIssues.filter((i) => i.severity === "warn").length
-      });
-      for (const issue of allIssues) {
-        Logger.log(issue.severity === "error" ? "ERROR" : "WARN", "plan_integrity_issue", {
-          plan_id: issue.planId,
-          category: issue.category,
-          description: issue.description
-        });
-      }
-    } else {
-      Logger.log("INFO", "plan_integrity_ok", { plans_checked: plans2.length });
-    }
-    return result;
-  }
-  /**
-   * 自动修复可修复的完整性问题
-   * 返回修复了的问题数量
-   */
-  autoFix(plan2) {
-    const fixes = [];
-    for (let i = 0; i < plan2.steps.length; i++) {
-      const step = plan2.steps[i];
-      if (!step.description || step.description.trim() === "" || step.description === "undefined" || step.description === "null") {
-        const origDesc = step.description;
-        step.description = `步骤 ${i + 1}`;
-        fixes.push(`步骤 ${i} 描述从 "${origDesc}" 修复为 "步骤 ${i + 1}"`);
-      }
-    }
-    return { fixed: fixes.length, fixes };
-  }
-  checkRollbackReadiness(plan2) {
-    const hasGit = true;
-    const hasSnapshot = plan2.steps.some((s) => s.status === "done" || s.status === "in_progress");
-    const hasPendingChanges = plan2.steps.some((s) => s.status === "pending" || s.status === "failed");
-    const ready = hasGit && (hasSnapshot || !hasPendingChanges);
-    return {
-      ready,
-      hasGit,
-      hasSnapshot,
-      hasPendingChanges,
-      reason: ready ? void 0 : hasPendingChanges && !hasSnapshot ? "有待执行步骤但无快照，回滚将丢失未保存变更" : void 0
-    };
-  }
-}
-const EVOLUTION_IDENTITY = `你是秋山澪的自进化系统。
-
-你运行在分析模式下时，只能分析项目代码、创建开发计划，不能修改文件。
-你运行在执行模式下时，按计划步骤写代码实现。`;
-const EVOLUTION_CORE = `### 核心原则
-1. 用工具完成任务，不要自己推测答案。
-2. 所有操作后必须验证（编译/测试/lint）。
-3. 每次只做最小必要的修改。
-
-### 沙盒 HTML 产物质量守则（sandbox 目录下的 .html 文件）
-1. 渲染顺序：在 p5.js draw() 中，先画背景底色（image(bg, 0, 0)），再画粒子/形状，确保粒子不被覆盖。
-2. 尺寸保护：createCanvas 时容器尺寸可能为 0，用 Math.max(container.clientWidth, 1) 保护。
-3. 错误边界：必须包含 window.onerror 或在关键逻辑外包 try-catch。
-4. resize 处理：必须实现 windowResized 或 resize 事件监听。
-5. 外部资源：优先使用 CDN 可靠来源（cdnjs, jsdelivr, unpkg），避免不可靠的资源引用。
-6. 自包含：sandbox 产物应尽量自包含（单 HTML 文件），依赖的外部资源需验证可达。
-7. 质量门禁：生成 HTML 后会运行 SandboxValidator 自动检查，未通过则需修复。
-
-### 分析模式准则
-- 推理路径完整：发现→追问3层Why→根因→方案比较→选择
-- 至少比较 2 个方案，标注优缺点
-- 区分【已知事实】【合理推测】【不确定】
-- 引用具体代码文件/行号
-- 质量评分满分 10，低于 7 需重新分析
-
-### 计划生命周期规则
-1. 需求变更时：先 abandon_plan 放弃当前计划，再 create_dev_plan 创建新计划。
-2. 已完成计划不要复用。
-3. 不准幻觉计划。`;
-const EVOLUTION_TOOLS = `可用工具列表：
-- list_files — 列出目录文件。支持 workspace="evolution" 浏览进化工作区
-- read_file — 读取项目文件
-- grep — 搜索代码
-- write_file — 写入文件到 evolution_workspace/analysis/ 或 evolution_workspace/sandbox/
-- edit_file — 修改工作区内的文件
-- run_command — 在工作区目录下执行命令
-- create_dev_plan — 创建设计计划
-- update_plan_progress — 更新计划进度
-- list_plans — 查看所有计划
-- complete_plan — 完成计划
-- abandon_plan — 放弃计划
-- analyze_codebase — 分析项目状态
-- analyze_task — 分析任务复杂度
-- get_credential — 读取已保存的 API 密钥
-- set_credential — 保存用户提供的密钥
-- list_credentials — 查看已配置的密钥列表
-- list_mcp_servers — 查看已注册的 MCP 服务器
-- remove_mcp_server — 移除 MCP 服务器
-- remember_fact — 记住重要信息
-
-你可以在三个工作区操作：
-- mcp_workspace（默认）— MCP 服务器开发沙箱
-- evolution_workspace — 进化分析、创意、实验代码（传 workspace="evolution"）
-- project_root — 项目源码目录（传 workspace="project"）
-
-### 社交媒体运营
-evolution_workspace/social/ 目录下有完整的社交运营系统（7 平台，纯 CLI，零外部依赖）：
-- config.yaml — 安全模式（safe/assisted/autopilot）与平台开关
-- strategy.yaml — 各平台内容方向和发布策略
-- accounts.json — 账号配置（可用 write_file 管理）
-- content_calendar.yaml — 排程记录（AI 读写）
-- analytics.yaml — 运营数据（AI 写入）
-- adapters/*.mjs — 7 平台适配器（x, telegram, weibo, zhihu, douyin, xiaohongshu, wechat_mp）
-- cli.mjs — CLI： run_command workspace="evolution" node social/cli.mjs <命令>
-
-CLI 可用命令:
-  post <platform> <text>         发帖（输出 JSON）
-  delete <platform> <postId>     删帖
-  stats <platform>               查统计
-  mode <safe|assisted|autopilot> 安全模式
-  policy                         查看策略
-  cred set/list                  凭据管理
-  adapters                       列出适配器
-  accounts                       列出账号
-
-运营约束：
-- 凭据存于 .creds.json（适配器自动读取），LLM 不可直接读
-- 风控词被拦截时改写内容重试
-- 无 cookie 的平台（douyin/xiaohongshu/weibo）需人工发布
-- 定时内容由 TaskRunner（social.tick, 60s 间隔）自动检查并发布到期内容，LLM 只需更新排程
-
-创建计划时用 priority 参数标注优先级：
-- priority=2（紧急）：社交排程到期
-- priority=1（高）：功能缺陷/安全修复
-- priority=0（普通）：重构/优化/新功能
-
-自动运营流程（每次分析循环执行）：
-1. read_file social/strategy.yaml 了解策略
-2. read_file social/content_calendar.yaml 检查排程
-3. 排程内容由 TaskRunner（social.tick）自动发布，LLM 只需在 content_calendar.yaml 中添加新排程
-4. write_file 更新 analytics.yaml 记录运营数据`;
-function buildEvolutionSystemPrompt(memoryContext, promptOverlay) {
-  let prompt = [EVOLUTION_IDENTITY, EVOLUTION_CORE, EVOLUTION_TOOLS].join("\n\n---\n\n");
-  if (promptOverlay) {
-    prompt += `
-
-【进化修正】
-${promptOverlay}`;
-  }
-  return prompt;
-}
-const ANALYSIS_PROMPT = (mode, planContext, historySummary, safetyMode, validationSummary, promptOverlay) => {
-  const modeInstructions = {
-    first_run: [
-      "⚡【首次运行 — 系统全面扫描模式】",
-      "",
-      "目标：全面评估项目状态，输出详细分析报告。",
-      "",
-      "步骤：",
-      "1. analyze_codebase(quick=true) — 快速扫描项目状态",
-      "2. 列出项目中关键文件的结构与健康状况",
-      "3. 判断是否存在需要代码修改的问题",
-      "4. **仅在确实需要修改代码时**才创建 1~3 步的最小开发计划",
-      "5. 如果系统运行正常，直接报告检查结果，不要创建计划",
-      "",
-      '⚠️ 最终回复必须包含具体的分析过程和发现，不要只说"无需修改"就结束。'
-    ].join("\n"),
-    continue_plan: [
-      "【分析模式】已有活跃计划。",
-      planContext,
-      "1. 评估计划方向是否合理",
-      "2. 合理则继续推进，不合理则放弃后重建",
-      '3. 如果当前计划已涵盖所有待解决问题，报告"计划执行中"即可，不要建新计划',
-      "4. 完成后立即停止"
-    ].join("\n"),
-    review_only: ["【安全模式 — 仅审查】", "1. 识别改进方向，列出优先级", "2. 不要创建计划，不要执行写操作"].join("\n")
-  };
-  const validationBlock = validationSummary ? `
-【上轮合规检测】
-${validationSummary}
-
-请根据上述反馈修正行为。
-` : "";
-  if (mode === "first_run") {
-    return [
-      "你是秋山澪的自进化系统。当前是分析模式，禁止 write_file/edit_file。",
-      "",
-      modeInstructions.first_run,
-      "",
-      historySummary ? `【历史】
-${historySummary}` : "",
-      "",
-      `安全模式: ${safetyMode === "review" ? "review（只分析不执行）" : "auto（可创建计划但不写代码）"}`,
-      "",
-      validationBlock
-    ].join("\n");
-  }
-  return [
-    "你是秋山澪的自进化系统。当前是分析模式，禁止 write_file/edit_file。",
-    "",
-    "⏱️ 时间提示：你只有 120 秒完成分析。推理预算 12 步，超限后立即输出当前最佳结论。优先完成核心发现、根因分析和计划创建。质量评分和审查清单可以简化。",
-    "",
-    "【准则】",
-    "- 推理路径完整：发现→追问3层Why→根因→方案比较→选择",
-    "- 至少比较 2 个方案，标注优缺点",
-    "- 区分【已知事实】【合理推测】【不确定】",
-    "- 引用具体代码文件/行号",
-    "- 质量评分满分 10，低于 7 需重新分析",
-    "",
-    modeInstructions[mode],
-    "",
-    historySummary ? `【历史】
-${historySummary}` : "",
-    "",
-    `安全模式: ${safetyMode === "review" ? "review（只分析不执行）" : "auto（可创建计划但不写代码）"}`,
-    "",
-    validationBlock,
-    promptOverlay ? `
-【进化修正】
-${promptOverlay}
-` : "",
-    "循环步骤：",
-    "1. analyze_codebase（用 quick=true 模式）",
-    "2. 分析输出",
-    "3. 仅当确认需要修改代码时调用 create_dev_plan，否则跳过",
-    "4. 用中文输出完整分析报告，包含：分析了哪些方面、发现了什么问题、是否创建了计划及原因",
-    "",
-    '⚠️ 最终回复必须包含具体的分析过程、发现和结论，不要只说"分析完成"或"无需修改"就结束。',
-    "",
-    "【修复指令格式】",
-    "如果发现可修复的配置漂移或参数错误，在分析报告末尾添加结构化修复指令：",
-    "  ##fix: <参数名> = <期望值>",
-    "每行一个参数。示例：",
-    "  ##fix: historyMaxEntries = 10",
-    "  ##fix: promptTrimMode = true",
-    "系统会自动执行这些修复。仅在确认需要修复时添加，不需要则不添加。",
-    "",
-    "完成后停止。"
-  ].join("\n");
-};
-const PLAN_EXECUTE_PROMPT = (planCtx, stepDesc) => [
-  "你是秋山澪的自进化系统 — **步骤执行模式**。",
-  "",
-  "⚠️ 你正在 tryExecutePlan（执行阶段），不是 tryRun（分析阶段）。",
-  "**只关注当前这一步**，不要重新分析项目全局。直接执行。",
-  "",
-  planCtx,
-  "",
-  `当前需要执行的步骤：${stepDesc}`,
-  "",
-  "【指令】",
-  "1. 直接执行 write_file/edit_file 完成代码修改（如果需要）",
-  "2. 完成后调用 update_plan_progress 标记当前步骤为 done",
-  "3. 如果遇到阻塞，标记为 failed 并说明原因",
-  "4. 不要修改计划的其他步骤，不要创建新计划",
-  "5. ⚠️ 禁止在项目根目录写文件！临时输出（测试结果、错误日志等）必须写入 evolution_workspace/tmp/ 目录，不要留下 .txt/.json 在根目录。",
-  "",
-  "完成后用中文简要报告结果。如果步骤不需要代码修改，直接报告结论即可。"
-].join("\n");
-function buildPlanInjection(plan2, doneSteps, totalSteps, pendingSteps) {
-  const nextStep = pendingSteps[0];
-  const nextStepInfo = nextStep ? `
-下一步待办: ${nextStep.description}` : "";
-  return [
-    "",
-    "【当前活跃计划】",
-    `计划名称: ${plan2.title}`,
-    `计划描述: ${plan2.description}`,
-    `进度: ${doneSteps}/${totalSteps}`,
-    `${nextStepInfo}`,
-    "",
-    "⚠️ 已有活跃计划，请评估是否需要继续执行它。",
-    "如果合理：继续推进，不要创建新计划。",
-    "如果已过时：先 abandon_plan 放弃，再创建新计划。",
-    ""
-  ].join("\n");
-}
-function pickBestPlan(plans2) {
-  if (plans2.length === 0) return null;
-  return plans2.map((p) => ({ ...p, doneRatio: p.steps.filter((s) => s.status === "done").length / Math.max(p.steps.length, 1) })).sort((a, b) => b.doneRatio - a.doneRatio)[0];
-}
-function detectPlanMode(planManager2) {
-  const pm = planManager2;
-  if (!pm) return { mode: "first_run", planContext: "" };
-  const allPlans = pm.listPlans();
-  const activePlansPre = allPlans.filter((p) => p.status === "active");
-  const staleThreshold = Date.now() - 2 * 24 * 60 * 60 * 1e3;
-  for (const p of activePlansPre) {
-    const doneSteps2 = p.steps.filter((s) => s.status === "done").length;
-    if (doneSteps2 === 0 && p.createdAt < staleThreshold) {
-      pm.freezePlan(p.id, "自动冻结：进度为 0 且超过 2 天未推进");
-    }
-  }
-  const remainingPlans = pm.listPlans().filter((p) => p.status === "active");
-  const targetPlan = remainingPlans.length > 1 ? pickBestPlan(remainingPlans) : pm.getActivePlan() || null;
-  if (!targetPlan) return { mode: "first_run", planContext: "" };
-  const doneSteps = targetPlan.steps.filter((s) => s.status === "done").length;
-  const totalSteps = targetPlan.steps.length;
-  const pendingSteps = targetPlan.steps.filter((s) => s.status === "pending" || s.status === "failed");
-  const inProgressSteps = targetPlan.steps.filter((s) => s.status === "in_progress");
-  if (pendingSteps.length > 0 || inProgressSteps.length > 0) {
-    return {
-      mode: "continue_plan",
-      planContext: buildPlanInjection(targetPlan, doneSteps, totalSteps, pendingSteps),
-      planSummary: { id: targetPlan.id, title: targetPlan.title, stepsComplete: doneSteps, stepsTotal: totalSteps }
-    };
-  }
-  return { mode: "first_run", planContext: "" };
-}
-class EvolutionAnalyzer {
-  name = "EvolutionAnalyzer";
-  state = "created";
-  agentService;
-  planManager;
-  historyPath;
-  livingPlanDir;
-  maxLivingPlanBytes;
-  promptTrimMode = false;
-  historyMaxEntries = 5;
-  currentAnalysisTimeoutMs;
-  degenerationThreshold = 3;
-  recentAnalysisFingerprints = [];
-  /** prompt 修正 overlay（由 PromptEvolutionManager 设置） */
-  promptOverlay = "";
-  constructor(agentService, planManager2, options) {
-    this.agentService = agentService;
-    this.planManager = planManager2;
-    this.historyPath = options?.historyPath ?? path$1.join(process.cwd(), "evolution_workspace", "history.json");
-    this.livingPlanDir = path$1.dirname(this.historyPath);
-    this.maxLivingPlanBytes = options?.maxLivingPlanBytes ?? 4096;
-    this.currentAnalysisTimeoutMs = options?.analysisTimeoutMs ?? 12e4;
-    this.degenerationThreshold = options?.degenerationThreshold ?? 3;
-  }
-  async init() {
-    this.state = "initializing";
-    Logger.log("INFO", "evolution_analyzer.init");
-    this.state = "ready";
-  }
-  async start() {
-    this.state = "running";
-  }
-  async stop() {
-    this.state = "ready";
-  }
-  async destroy() {
-    this.state = "stopped";
-  }
-  async healthCheck() {
-    return { healthy: true, metrics: { fingerprints: this.recentAnalysisFingerprints.length } };
-  }
-  // ==================== 分析入口 ====================
-  async analyze(input) {
-    const prompt = ANALYSIS_PROMPT(input.mode, input.planContext, input.historySummary, input.safetyMode, input.validationSummary, this.promptOverlay) + "\n" + input.livingPlanCtx + "\n" + input.cognitiveCtx + "\n" + input.strategyCtx + (input.creativityCtx ? "\n" + input.creativityCtx : "");
-    try {
-      const result = await this.agentService.runAgentTask(prompt, buildEvolutionSystemPrompt(void 0, this.promptOverlay));
-      if (result.success) {
-        this.recordCycle({
-          timestamp: Date.now(),
-          perspective: "分析",
-          summary: result.summary.slice(0, 500),
-          planCreated: !!this.planManager?.getActivePlan(),
-          planTitle: this.planManager?.getActivePlan()?.title,
-          stepsCompleted: this.getActivePlanProgress().completed,
-          stepsTotal: this.getActivePlanProgress().total,
-          success: true
-        });
-      } else {
-        this.recordCycle({
-          timestamp: Date.now(),
-          perspective: "分析",
-          summary: `失败: ${result.summary.slice(0, 300)}`,
-          planCreated: false,
-          success: false,
-          stepsCompleted: 0,
-          stepsTotal: 0
-        });
-      }
-      return {
-        success: result.success,
-        summary: result.summary,
-        hadTimeout: false,
-        hadRetry: false,
-        planCreated: !!this.planManager?.getActivePlan()
-      };
-    } catch (err) {
-      this.recordCycle({
-        timestamp: Date.now(),
-        perspective: "分析",
-        summary: `异常: ${err.message}`,
-        planCreated: false,
-        success: false,
-        stepsCompleted: 0,
-        stepsTotal: 0
-      });
-      return { success: false, summary: err.message, hadTimeout: true, hadRetry: true, planCreated: false };
-    }
-  }
-  // ==================== 历史管理 ====================
-  loadHistory() {
-    try {
-      if (!fs.existsSync(this.historyPath)) return { cycles: [] };
-      return JSON.parse(fs.readFileSync(this.historyPath, "utf-8"));
-    } catch {
-      return { cycles: [] };
-    }
-  }
-  saveHistory(history) {
-    try {
-      const dir = path$1.dirname(this.historyPath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this.historyPath, JSON.stringify(history, null, 2), "utf-8");
-    } catch (err) {
-      Logger.log("ERROR", "evolution_history_save_failed", { error: String(err) });
-    }
-  }
-  recordCycle(entry) {
-    try {
-      const history = this.loadHistory();
-      history.cycles.push(entry);
-      if (history.cycles.length > 20) history.cycles = history.cycles.slice(-20);
-      this.saveHistory(history);
-    } catch (err) {
-      Logger.log("ERROR", "evolution_history_record_failed", { error: String(err) });
-    }
-  }
-  getHistorySummary() {
-    try {
-      const history = this.loadHistory();
-      if (history.cycles.length === 0) return "【历史记录】暂无历史进化记录，这是首次运行。\n请全面分析项目状态。";
-      const sliceCount = Math.min(this.historyMaxEntries, history.cycles.length);
-      const recent = history.cycles.slice(-sliceCount);
-      const lines = ["【近期进化历史】"];
-      for (const h of recent) {
-        const time = new Date(h.timestamp).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-        lines.push(`- [${time}] ${h.success ? "成功" : "失败"} 摘要: ${h.summary.slice(0, 200)}`);
-        if (h.planCreated) lines.push(`  计划: ${h.planTitle || "(未命名)"} (${h.stepsCompleted}/${h.stepsTotal})`);
-      }
-      lines.push("", "请基于以上历史记录，避免重复分析已经看过的方向。选择一个之前未被充分关注的新视角进行分析。");
-      return lines.join("\n");
-    } catch {
-      return "【历史记录】读取失败，请全面分析。";
-    }
-  }
-  loadRecentFailures() {
-    try {
-      const history = this.loadHistory();
-      return history.cycles.filter((c) => !c.success).slice(-10).map((c) => ({
-        task: c.perspective,
-        error: c.summary.slice(0, 60),
-        timestamp: c.timestamp
-      }));
-    } catch {
-      return [];
-    }
-  }
-  // ==================== 计划检测 ====================
-  detectPlanMode() {
-    return detectPlanMode(this.planManager);
-  }
-  getActivePlanProgress() {
-    const plan2 = this.planManager?.getActivePlan();
-    if (!plan2) return { completed: 0, total: 0 };
-    return {
-      completed: plan2.steps.filter((s) => s.status === "done").length,
-      total: plan2.steps.length
-    };
-  }
-  /**
-   * 检测活跃计划是否已卡住（超过 15 分钟无更新）。
-   * 卡住的计划允许 evolution 分析穿透，以便 LLM 发现并处理社交任务。
-   */
-  isActivePlanStale() {
-    const plan2 = this.planManager?.getActivePlan();
-    if (!plan2) return true;
-    const staleThreshold = Date.now() - 9e5;
-    const lastUpdated = plan2.updatedAt || plan2.createdAt;
-    return lastUpdated < staleThreshold;
-  }
-  /**
-   * 检查是否有到期的社交排程任务需要执行。
-   * 此检查绕过 active_plan_exists 规则，确保社交运营不被阻塞。
-   */
-  async hasPendingSocialTask() {
-    try {
-      const socialDir = this.livingPlanDir.replace("living_plan", "social");
-      const calendarPath = path$1.join(socialDir, "content_calendar.yaml");
-      if (!fs.existsSync(calendarPath)) return false;
-      const raw = fs.readFileSync(calendarPath, "utf-8");
-      return raw.includes("scheduled:") && !raw.includes("published:");
-    } catch {
-      return false;
-    }
-  }
-  /**
-   * 廉价预过滤：在调用 LLM 分析前检查是否有必要运行。
-   * Level 1 规则（无 LLM 调用）：退化检测、计划进展、近期空闲周期。
-   */
-  shouldAnalyze() {
-    if (this.isDegenerate()) {
-      return { shouldRun: false, reason: "degenerate_fingerprint" };
-    }
-    const history = this.loadHistory();
-    const recent = history.cycles.slice(-3);
-    if (recent.length >= 3 && recent.every((c) => c.success && !c.planCreated)) {
-      return { shouldRun: false, reason: "recent_cycles_all_idle" };
-    }
-    return { shouldRun: true };
-  }
-  // ===== Living Plan 上下文 =====
-  buildLivingPlanContext() {
-    if (this.promptTrimMode) {
-      const missionOnly = this.readLivingPlanFile("mission.yaml");
-      return missionOnly ? ["", "---", "【Mission - 使命】", missionOnly, "---"].join("\n") : "";
-    }
-    const mission = this.readLivingPlanFile("mission.yaml");
-    const goals2 = this.readLivingPlanFile("goals.yaml");
-    const planTree = this.readLivingPlanFile("plan_tree.yaml");
-    const queue = this.readLivingPlanFile("execution_queue.yaml");
-    const allSections = [];
-    if (mission) allSections.push({ label: "【Mission — 使命】", content: mission, priority: 4 });
-    if (goals2) allSections.push({ label: "【Goals — 长期目标】", content: goals2, priority: 3 });
-    if (planTree) allSections.push({ label: "【Plan Tree — 计划树】", content: planTree, priority: 2 });
-    if (queue) allSections.push({ label: "【Execution Queue — 执行队列】", content: queue, priority: 1 });
-    const template = [
-      "",
-      "---",
-      "你可以在 evolution_workspace/living_plan/ 下用 write_file 更新这些文件：",
-      "- goals.yaml：添加/修改/删除长期目标",
-      "- plan_tree.yaml：添加 Initiative 或 Task，标记完成",
-      "- execution_queue.yaml：添加执行项，标记完成",
-      "- history_log.yaml：记录行动日志",
-      "---",
-      ""
-    ].join("\n");
-    const templateBytes = new TextEncoder().encode(template).length;
-    const missionSection = allSections.find((s) => s.priority === 4);
-    const missionBytes = missionSection ? new TextEncoder().encode(`
-${missionSection.label}
-${missionSection.content}`).length : 0;
-    const remainingBudget = this.maxLivingPlanBytes - templateBytes - missionBytes;
-    const included = /* @__PURE__ */ new Set();
-    included.add("【Mission — 使命】");
-    if (remainingBudget > 0) {
-      const weightedSections = allSections.filter((s) => s.priority < 4);
-      const totalWeight = weightedSections.reduce((sum, s) => sum + s.priority, 0);
-      for (const s of weightedSections) {
-        const text = `
-${s.label}
-${s.content}`;
-        const bytes = new TextEncoder().encode(text).length;
-        const budget = Math.floor(remainingBudget * s.priority / totalWeight);
-        if (bytes <= budget) included.add(s.label);
-      }
-    }
-    const parts = [];
-    for (const sec of allSections)
-      if (included.has(sec.label)) {
-        parts.push("", sec.label, sec.content);
-      }
-    parts.push(template);
-    return parts.join("\n");
-  }
-  readLivingPlanFile(filename) {
-    try {
-      const p = path$1.join(this.livingPlanDir, filename);
-      return fs.existsSync(p) ? fs.readFileSync(p, "utf-8") : "";
-    } catch {
-      return "";
-    }
-  }
-  // ==================== 退化检测 ====================
-  computeFingerprint(summary) {
-    return summary.replace(/\s+/g, " ").slice(0, 100).trim();
-  }
-  isDegenerate() {
-    if (this.recentAnalysisFingerprints.length < this.degenerationThreshold) return false;
-    const recent = this.recentAnalysisFingerprints.slice(-this.degenerationThreshold);
-    return recent.every((fp) => fp === recent[0]);
-  }
-  recordFingerprint(summary) {
-    const fp = this.computeFingerprint(summary);
-    this.recentAnalysisFingerprints.push(fp);
-    if (this.recentAnalysisFingerprints.length > 10) this.recentAnalysisFingerprints = this.recentAnalysisFingerprints.slice(-10);
-  }
-  // ==================== 参数自适应 ====================
-  setPromptTrimMode(v) {
-    this.promptTrimMode = v;
-  }
-  setPromptOverlay(overlay) {
-    this.promptOverlay = overlay;
-  }
-  setHistoryMaxEntries(n) {
-    this.historyMaxEntries = n;
-  }
-  setAnalysisTimeout(ms) {
-    this.currentAnalysisTimeoutMs = ms;
-  }
-  getAnalysisTimeout() {
-    return this.currentAnalysisTimeoutMs;
-  }
-  getPromptTrimMode() {
-    return this.promptTrimMode;
-  }
-  getHistoryMaxEntries() {
-    return this.historyMaxEntries;
-  }
-  getFingerprints() {
-    return this.recentAnalysisFingerprints;
-  }
-  /** 最近一次指纹的时间戳（毫秒）。无指纹返回 Infinity */
-  getFingerprintAgeMs() {
-    if (this.recentAnalysisFingerprints.length === 0) return Infinity;
-    const history = this.loadHistory();
-    const nonDegenerate = history.cycles.filter((c) => c.success || c.planCreated);
-    if (nonDegenerate.length === 0) {
-      return 999 * 60 * 60 * 1e3;
-    }
-    const lastSuccessTime = nonDegenerate[nonDegenerate.length - 1].timestamp;
-    return Date.now() - lastSuccessTime;
-  }
-  resetFingerprints() {
-    this.recentAnalysisFingerprints = [];
-    Logger.log("INFO", "evolution_fingerprints_reset");
-  }
-  resetDegenerationCount() {
-    this.recentAnalysisFingerprints = [];
-    Logger.log("INFO", "evolution_degeneration_reset");
-  }
-}
-const DEFAULT_STRATEGIES = [
-  {
-    name: "full",
-    description: "完整分析 — 用于首次运行或长期未进化",
-    promptMode: "full",
-    timeoutMs: 18e4,
-    trimMode: false,
-    maxHistoryEntries: 5,
-    safetyMode: "auto",
-    degenerationThreshold: 3
-  },
-  {
-    name: "balanced",
-    description: "平衡模式 — 日常循环，在完整和快速之间折中",
-    promptMode: "full",
-    timeoutMs: 12e4,
-    trimMode: false,
-    maxHistoryEntries: 3,
-    safetyMode: "auto",
-    degenerationThreshold: 3
-  },
-  {
-    name: "quick",
-    description: "快速扫描 — 仅 mission 上下文，限时短",
-    promptMode: "minimal",
-    timeoutMs: 9e4,
-    trimMode: true,
-    maxHistoryEntries: 2,
-    safetyMode: "auto",
-    degenerationThreshold: 2
-  },
-  {
-    name: "review",
-    description: "仅审查 — 退化模式下只分析不执行",
-    promptMode: "minimal",
-    timeoutMs: 6e4,
-    trimMode: true,
-    maxHistoryEntries: 1,
-    safetyMode: "review",
-    degenerationThreshold: 2
-  }
-];
-const DEFAULT_SCORE_PATH = path$1.join(WORKSPACE.evolution, "strategy_scores.json");
-class EvolutionStrategyLearner {
-  scores = /* @__PURE__ */ new Map();
-  strategies = /* @__PURE__ */ new Map();
-  cycleHistory = [];
-  scoreFilePath;
-  persistenceDirty = false;
-  constructor(scoreFilePath) {
-    this.scoreFilePath = scoreFilePath || DEFAULT_SCORE_PATH;
-    this.loadScores();
-    const now = Date.now();
-    for (const s of DEFAULT_STRATEGIES) {
-      this.strategies.set(s.name, s);
-      if (!this.scores.has(s.name)) {
-        this.scores.set(s.name, {
-          strategyName: s.name,
-          score: 70,
-          samples: 0,
-          avgSuccessRate: 0,
-          avgExecutionMs: 0,
-          lastUsed: 0,
-          createdAt: now
-        });
-      }
-    }
-  }
-  /** 根据当前上下文选择最佳策略 */
-  select(context) {
-    if (context.isDegenerate || context.consecutiveFailures >= 3) {
-      return this.strategies.get("review");
-    }
-    if (context.isFirstRun) {
-      return this.strategies.get("full");
-    }
-    if (context.isRecovering) {
-      return this.consecutiveFailuresForContext(context) >= 2 ? this.strategies.get("review") : this.strategies.get("quick");
-    }
-    return this.selectByScore(context);
-  }
-  consecutiveFailuresForContext(context) {
-    return context.consecutiveFailures;
-  }
-  /** 基于 epsilon-greedy bandit 选择策略 */
-  selectByScore(context) {
-    const candidates = ["balanced", "quick", "full"].map((name2) => ({ name: name2, config: this.strategies.get(name2), score: this.scores.get(name2) })).filter((s) => s.score.samples > 0);
-    if (candidates.length === 0) {
-      return this.strategies.get("balanced");
-    }
-    const totalSamples = candidates.reduce((sum, c) => sum + c.score.samples, 0);
-    const epsilon = Math.max(0.1, 1 / Math.sqrt(totalSamples));
-    const roll = Math.random();
-    if (roll < epsilon) {
-      candidates.sort((a, b) => a.score.samples - b.score.samples);
-      return candidates[0].config;
-    }
-    const scored = candidates.map((c) => {
-      let s = c.score.score;
-      if (context.consecutiveFailures > 0 && c.name === "full") {
-        s -= 20;
-      }
-      return { ...c, adjustedScore: s };
-    });
-    scored.sort((a, b) => b.adjustedScore - a.adjustedScore);
-    return scored[0].config;
-  }
-  /** 循环结束后评分，更新策略分数 */
-  evaluate(strategyName, evalResult) {
-    const score = this.scores.get(strategyName);
-    if (!score) return;
-    const successRate = evalResult.success ? 1 : 0;
-    const timeoutPenalty = evalResult.hadTimeout ? 0.3 : 0;
-    const retryPenalty = evalResult.hadRetry ? 0.1 : 0;
-    const planBonus = evalResult.planCreated ? 0.1 : 0;
-    const rawScore = (successRate * 0.5 + planBonus - timeoutPenalty - retryPenalty) * 100;
-    const alpha = score.samples === 0 ? 1 : 0.3;
-    const newScore = score.samples === 0 ? Math.max(0, Math.min(100, rawScore)) : score.score * (1 - alpha) + rawScore * alpha;
-    score.score = Math.max(0, Math.min(100, newScore));
-    score.samples++;
-    score.avgSuccessRate = (score.avgSuccessRate * (score.samples - 1) + successRate) / score.samples;
-    score.avgExecutionMs = (score.avgExecutionMs * (score.samples - 1) + evalResult.durationMs) / score.samples;
-    score.lastUsed = Date.now();
-    this.cycleHistory.push({ strategy: strategyName, eval: evalResult });
-    if (this.cycleHistory.length > 50) {
-      this.cycleHistory = this.cycleHistory.slice(-50);
-    }
-    Logger.log("INFO", "strategy_evaluated", {
-      strategy: strategyName,
-      newScore: newScore.toFixed(1),
-      samples: score.samples,
-      avgSuccessRate: score.avgSuccessRate.toFixed(2)
-    });
-    this.persistenceDirty = true;
-    this.saveScores();
-  }
-  /** 用自我评估分数微调策略分 */
-  applySelfEvaluation(strategyName, selfEvalScore) {
-    const score = this.scores.get(strategyName);
-    if (!score || score.samples === 0) return;
-    const delta = selfEvalScore - score.score;
-    if (delta < -20) {
-      score.score = Math.max(0, score.score + delta * 0.3);
-    } else if (delta > 20 && score.samples > 5) {
-      score.score = Math.min(100, score.score + delta * 0.1);
-    }
-    this.persistenceDirty = true;
-    this.saveScores();
-  }
-  /** 根据历史数据调优策略参数 */
-  tuneParameters() {
-    const adjustments = [];
-    for (const [name2, config] of this.strategies) {
-      const score = this.scores.get(name2);
-      if (!score || score.samples < 3) continue;
-      const originalConfig = DEFAULT_STRATEGIES.find((s) => s.name === name2);
-      if (!originalConfig) continue;
-      if (score.avgExecutionMs > 0) {
-        const suggestedTimeout = Math.round(Math.max(3e4, Math.min(3e5, score.avgExecutionMs * 2)));
-        if (Math.abs(suggestedTimeout - config.timeoutMs) > 1e4) {
-          adjustments.push({
-            strategy: name2,
-            parameter: "timeoutMs",
-            oldValue: config.timeoutMs,
-            newValue: suggestedTimeout,
-            reason: `avg_exec=${Math.round(score.avgExecutionMs)}ms, target_2x=${suggestedTimeout}ms`
-          });
-          config.timeoutMs = suggestedTimeout;
-        }
-      }
-      const relevant = this.cycleHistory.filter((h) => h.strategy === name2);
-      if (relevant.length >= 5) {
-        const trimmedOk = relevant.filter((h) => h.eval.promptTrimmed && h.eval.success).length;
-        const trimmedTotal = relevant.filter((h) => h.eval.promptTrimmed).length;
-        const notTrimmedOk = relevant.filter((h) => !h.eval.promptTrimmed && h.eval.success).length;
-        const notTrimmedTotal = relevant.filter((h) => !h.eval.promptTrimmed).length;
-        if (trimmedTotal >= 2 && notTrimmedTotal >= 2) {
-          const trimRate = trimmedOk / trimmedTotal;
-          const notTrimRate = notTrimmedOk / notTrimmedTotal;
-          const newTrim = trimRate > notTrimRate;
-          if (newTrim !== config.trimMode) {
-            adjustments.push({
-              strategy: name2,
-              parameter: "trimMode",
-              oldValue: config.trimMode,
-              newValue: newTrim,
-              reason: `trim_sr=${(trimRate * 100).toFixed(0)}% vs notrim_sr=${(notTrimRate * 100).toFixed(0)}%`
-            });
-            config.trimMode = newTrim;
-          }
-        }
-      }
-    }
-    if (adjustments.length > 0) {
-      this.persistenceDirty = true;
-      this.saveScores();
-    }
-    return adjustments;
-  }
-  // ==================== 持久化 ====================
-  loadScores() {
-    try {
-      if (!fs.existsSync(this.scoreFilePath)) return;
-      const raw = JSON.parse(fs.readFileSync(this.scoreFilePath, "utf-8"));
-      for (const [name2, s] of Object.entries(raw)) {
-        if (DEFAULT_STRATEGIES.some((ds) => ds.name === name2)) {
-          this.scores.set(name2, s);
-        } else if (!this.scores.has(name2)) {
-          this.scores.set(name2, s);
-        }
-      }
-    } catch {
-      Logger.log("WARN", "strategy_scores_load_failed");
-    }
-  }
-  saveScores() {
-    if (!this.persistenceDirty) return;
-    try {
-      const data = {};
-      for (const [name2, s] of this.scores) {
-        data[name2] = s;
-      }
-      const dir = path$1.dirname(this.scoreFilePath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this.scoreFilePath, JSON.stringify(data, null, 2), "utf-8");
-      this.persistenceDirty = false;
-    } catch {
-      Logger.log("WARN", "strategy_scores_save_failed");
-    }
-  }
-  /** 元进化：从历史中挖掘最优策略窗口 */
-  learn() {
-    const adjustments = this.tuneParameters();
-    const recent = this.cycleHistory.slice(-20);
-    if (recent.length < 5) return { insight: "数据不足，继续收集", adjustments };
-    let mutation = null;
-    const nonDefaultCount = Array.from(this.strategies.values()).filter((s) => !DEFAULT_STRATEGIES.some((ds) => ds.name === s.name)).length;
-    if (this.cycleHistory.length > 10 && nonDefaultCount < 8) {
-      mutation = this.getMutator().mutate(this.cycleHistory);
-      if (mutation) {
-        this.persistenceDirty = true;
-        this.saveScores();
-        Logger.log("INFO", "strategy_mutated", { parent: mutation.parent, child: mutation.child, op: mutation.operation });
-      }
-    }
-    const pruned = this.getMutator().prune();
-    if (pruned > 0) {
-      this.persistenceDirty = true;
-      this.saveScores();
-      Logger.log("INFO", "strategy_pruned", { count: pruned });
-    }
-    const successRates = /* @__PURE__ */ new Map();
-    for (const h of recent) {
-      if (!successRates.has(h.strategy)) successRates.set(h.strategy, []);
-      successRates.get(h.strategy).push(h.eval.success ? 1 : 0);
-    }
-    const insights2 = [];
-    for (const [name2, rates] of successRates) {
-      const avg = rates.reduce((a, b) => a + b, 0) / rates.length;
-      insights2.push(`${name2}: ${(avg * 100).toFixed(0)}%`);
-    }
-    const best = Array.from(this.scores.values()).sort((a, b) => b.score - a.score)[0];
-    const adjSummary = adjustments.length > 0 ? ` | 参数调整: ${adjustments.map((a) => `${a.strategy}.${a.parameter}=${a.newValue}`).join(", ")}` : "";
-    const mutationSummary = mutation ? ` | 变异: ${mutation.parent}→${mutation.child}(${mutation.operation})` : "";
-    return {
-      recommendation: best && best.samples > 2 ? best.strategyName : void 0,
-      insight: `近期表现: ${insights2.join(", ")}。${best ? `综合最优: ${best.strategyName}(${best.score.toFixed(0)}分, ${best.samples}次)` : ""}${adjSummary}${mutationSummary}`,
-      adjustments,
-      mutation
-    };
-  }
-  /** 获取策略变异器 */
-  _mutator = null;
-  getMutator() {
-    if (!this._mutator) {
-      this._mutator = new StrategyMutator(this.strategies, this.scores);
-    }
-    return this._mutator;
-  }
-  /** 获取历史记录（供外部读取） */
-  getCycleHistory() {
-    return this.cycleHistory;
-  }
-  /** 获取格式化上下文，注入 evolution prompt */
-  getFormattedContext() {
-    if (this.scores.size === 0) return "";
-    const parts = ["---", "【策略效能报告】"];
-    for (const [name2, s] of this.scores) {
-      if (s.samples === 0) continue;
-      parts.push(`- ${name2}: ${s.score.toFixed(0)}分 | 成功率${(s.avgSuccessRate * 100).toFixed(0)}% | ${s.samples}次采样`);
-    }
-    const rec = this.learn();
-    parts.push(rec.insight);
-    parts.push("---");
-    return parts.join("\n");
-  }
-}
-class StrategyMutator {
-  strategies;
-  scores;
-  constructor(strategies2, scores) {
-    this.strategies = strategies2;
-    this.scores = scores;
-  }
-  /** 尝试一次变异操作。targetDimension 可指定目标改进维度 */
-  mutate(cycleHistory, targetDimension) {
-    const viable = this.getViableStrategies();
-    if (viable.length === 0) return this.trySeed();
-    if (viable.length >= 1 && Math.random() < 0.7) {
-      return this.performMutation(viable, targetDimension);
-    }
-    if (viable.length >= 2) {
-      return this.performCrossover(viable);
-    }
-    return null;
-  }
-  /** 修剪低效策略 */
-  prune() {
-    const toRemove = [];
-    const maxAge = Date.now() - 50 * 24 * 60 * 60 * 1e3;
-    for (const [name2, score] of this.scores) {
-      if (DEFAULT_STRATEGIES.some((ds) => ds.name === name2)) continue;
-      if (score.samples >= 3 && score.score < 40) toRemove.push(name2);
-      if (score.lastUsed > 0 && score.lastUsed < maxAge && score.samples < 3) toRemove.push(name2);
-    }
-    for (const name2 of toRemove) {
-      this.strategies.delete(name2);
-      this.scores.delete(name2);
-    }
-    return toRemove.length;
-  }
-  // ==================== 内部方法 ====================
-  getViableStrategies() {
-    return Array.from(this.strategies.values()).filter(
-      (s) => !DEFAULT_STRATEGIES.some((ds) => ds.name === s.name)
-      // only mutate non-default
-    );
-  }
-  performMutation(viable, targetDimension) {
-    const parent = viable[Math.floor(Math.random() * viable.length)];
-    const newName = `${parent.name}_mut_${Date.now().toString(36)}`;
-    const param = targetDimension ? this.pickTargetParam(targetDimension) : this.pickMutateParam();
-    const child = {
-      ...parent,
-      name: newName,
-      description: `变异自 ${parent.name}: ${param}`
-    };
-    switch (param) {
-      case "timeoutMs": {
-        const delta = Math.round(parent.timeoutMs * (0.8 + Math.random() * 0.4));
-        child.timeoutMs = Math.max(3e4, Math.min(3e5, delta));
-        break;
-      }
-      case "trimMode":
-        child.trimMode = !parent.trimMode;
-        break;
-      case "promptMode":
-        child.promptMode = parent.promptMode === "full" ? "balanced" : parent.promptMode === "balanced" ? "minimal" : "full";
-        break;
-      case "degenerationThreshold":
-        child.degenerationThreshold = Math.max(1, Math.min(5, parent.degenerationThreshold + (Math.random() < 0.5 ? -1 : 1)));
-        break;
-      case "maxHistoryEntries":
-        child.maxHistoryEntries = Math.max(1, Math.min(10, parent.maxHistoryEntries + (Math.random() < 0.5 ? -1 : 1)));
-        break;
-    }
-    this.strategies.set(child.name, child);
-    this.scores.set(child.name, {
-      strategyName: child.name,
-      score: Math.max(10, (this.scores.get(parent.name)?.score || 50) - 15),
-      samples: 0,
-      avgSuccessRate: 0,
-      avgExecutionMs: 0,
-      lastUsed: 0,
-      createdAt: Date.now()
-    });
-    return { parent: parent.name, child: child.name, childConfig: child, operation: "mutate", reason: param };
-  }
-  pickMutateParam() {
-    const params = ["timeoutMs", "trimMode", "promptMode", "degenerationThreshold", "maxHistoryEntries"];
-    return params[Math.floor(Math.random() * params.length)];
-  }
-  /** 目标维度 → 相关参数映射，70% 概率命中目标 */
-  pickTargetParam(targetDimension) {
-    const dimensionParamMap = {
-      planQuality: ["promptMode", "timeoutMs"],
-      analysisDiversity: ["degenerationThreshold", "maxHistoryEntries"],
-      strategyCompliance: ["safetyMode", "trimMode"],
-      substantiveLength: ["timeoutMs", "promptMode"]
-    };
-    const candidates = dimensionParamMap[targetDimension];
-    if (!candidates || candidates.length === 0) return this.pickMutateParam();
-    if (Math.random() < 0.7) {
-      return candidates[Math.floor(Math.random() * candidates.length)];
-    }
-    return this.pickMutateParam();
-  }
-  performCrossover(viable) {
-    const shuffled = [...viable].sort(() => Math.random() - 0.5);
-    const [a, b] = [shuffled[0], shuffled[1]];
-    const newName = `cross_${Date.now().toString(36)}`;
-    const aScore = this.scores.get(a.name)?.score || 50;
-    const bScore = this.scores.get(b.name)?.score || 50;
-    const better = aScore >= bScore ? a : b;
-    const child = {
-      name: newName,
-      description: `交叉 ${a.name} × ${b.name}`,
-      promptMode: better.promptMode,
-      timeoutMs: Math.round((a.timeoutMs + b.timeoutMs) / 2),
-      trimMode: better.trimMode,
-      maxHistoryEntries: Math.round((a.maxHistoryEntries + b.maxHistoryEntries) / 2),
-      safetyMode: better.safetyMode,
-      degenerationThreshold: Math.round((a.degenerationThreshold + b.degenerationThreshold) / 2)
-    };
-    this.strategies.set(child.name, child);
-    this.scores.set(child.name, {
-      strategyName: child.name,
-      score: Math.round((aScore + bScore) / 2) - 10,
-      samples: 0,
-      avgSuccessRate: 0,
-      avgExecutionMs: 0,
-      lastUsed: 0,
-      createdAt: Date.now()
-    });
-    return {
-      parent: `${a.name}+${b.name}`,
-      child: child.name,
-      childConfig: child,
-      operation: "crossover",
-      reason: `avg_score=${Math.round((aScore + bScore) / 2)}`
-    };
-  }
-  trySeed() {
-    const existing = new Set(this.strategies.keys());
-    const missing = DEFAULT_STRATEGIES.filter((ds) => !existing.has(ds.name));
-    if (missing.length === 0) return null;
-    const seed = missing[0];
-    this.strategies.set(seed.name, seed);
-    this.scores.set(seed.name, {
-      strategyName: seed.name,
-      score: 70,
-      samples: 0,
-      avgSuccessRate: 0,
-      avgExecutionMs: 0,
-      lastUsed: 0,
-      createdAt: Date.now()
-    });
-    return { parent: "(default)", child: seed.name, childConfig: seed, operation: "seed", reason: "replenish_pool" };
-  }
-}
-class EvolutionStrategizer {
-  name = "EvolutionStrategizer";
-  state = "created";
-  learner;
-  constructor(options) {
-    this.learner = new EvolutionStrategyLearner(options?.scoreFilePath);
-  }
-  async init() {
-    this.state = "initializing";
-    Logger.log("INFO", "evolution_strategizer.init");
-    this.state = "ready";
-  }
-  async start() {
-    this.state = "running";
-  }
-  async stop() {
-    this.state = "ready";
-  }
-  async destroy() {
-    this.state = "stopped";
-  }
-  async healthCheck() {
-    return { healthy: true };
-  }
-  /** 根据上下文选择最优策略 */
-  select(context) {
-    return this.learner.select(context);
-  }
-  /** 循环结束后评分 */
-  evaluate(strategyName, evalResult) {
-    this.learner.evaluate(strategyName, evalResult);
-  }
-  /** 获取格式化策略报告 */
-  getFormattedContext() {
-    return this.learner.getFormattedContext();
-  }
-  /** 元进化分析 */
-  learn() {
-    return this.learner.learn();
-  }
-  /** 获取原始学习者（高级用） */
-  getLearner() {
-    return this.learner;
-  }
-}
-class EvolutionExecutor {
-  name = "EvolutionExecutor";
-  state = "created";
-  agentService;
-  planManager;
-  gitOps = null;
-  planExecTimeoutMs;
-  stepRetryBaseMs;
-  planExecConsecutiveErrors = 0;
-  executeFailures = 0;
-  currentSnapshotBranch = null;
-  executionLock = new AsyncLock();
-  proposalValidator = null;
-  safetyMode = "auto";
-  constructor(agentService, planManager2, options) {
-    this.agentService = agentService;
-    this.planManager = planManager2;
-    this.planExecTimeoutMs = options?.planExecTimeoutMs ?? 3e5;
-    this.stepRetryBaseMs = options?.stepRetryBaseMs ?? 1e3;
-  }
-  async init() {
-    this.state = "initializing";
-    Logger.log("INFO", "evolution_executor.init");
-    this.state = "ready";
-  }
-  async start() {
-    this.state = "running";
-  }
-  async stop() {
-    this.currentSnapshotBranch = null;
-    this.state = "ready";
-  }
-  async destroy() {
-    this.state = "stopped";
-  }
-  async healthCheck() {
-    return { healthy: true, metrics: { consecutiveErrors: this.planExecConsecutiveErrors, executeFailures: this.executeFailures } };
-  }
-  setGitOps(gitOps) {
-    this.gitOps = gitOps;
-  }
-  setProposalValidator(v) {
-    this.proposalValidator = v;
-  }
-  setSafetyMode(mode) {
-    this.safetyMode = mode;
-  }
-  getExecuteFailures() {
-    return this.executeFailures;
-  }
-  // ==================== 步骤检测 ====================
-  hasPendingStep() {
-    const pm = this.planManager;
-    if (!pm) return false;
-    const plan2 = pm.getActivePlan();
-    if (!plan2) return false;
-    return plan2.steps.some((s) => s.status === "pending" || s.status === "failed");
-  }
-  getPlanProgress() {
-    const plan2 = this.planManager?.getActivePlan();
-    if (!plan2) return { completed: 0, total: 0 };
-    return {
-      completed: plan2.steps.filter((s) => s.status === "done").length,
-      total: plan2.steps.length
-    };
-  }
-  // ==================== 步骤执行 ====================
-  async executeNextStep(input) {
-    if (this.safetyMode === "review") {
-      Logger.log("INFO", "plan_exec_skipped_review", { safetyMode: this.safetyMode });
-      return { success: false, stepIndex: input.stepIndex, error: "review mode, skip execution", planCompleted: false };
-    }
-    const pm = this.planManager;
-    if (!pm) return { success: false, stepIndex: input.stepIndex, error: "no plan manager", planCompleted: false };
-    return this.executionLock.run(async () => {
-      const allPlans = pm.listPlans();
-      const activePlans = allPlans.filter((p) => p.status === "active").sort((a, b) => (b.priority || 0) - (a.priority || 0));
-      const plan2 = activePlans.length > 0 ? activePlans[0] : null;
-      if (!plan2) return { success: false, stepIndex: input.stepIndex, error: "no active plan", planCompleted: false };
-      let nextStep = plan2.steps.find((s) => s.status === "pending");
-      if (!nextStep) nextStep = plan2.steps.find((s) => s.status === "failed");
-      if (!nextStep) {
-        const inProgress = plan2.steps.find((s) => s.status === "in_progress");
-        if (!inProgress) {
-          pm.completePlan(plan2.id, "所有步骤已完成");
-          this.autoGitCommit(plan2.title).catch(() => {
-          });
-          return { success: true, stepIndex: -1, planCompleted: true };
-        }
-        return { success: false, stepIndex: input.stepIndex, error: "step already in progress", planCompleted: false };
-      }
-      const stepIdx = plan2.steps.indexOf(nextStep);
-      return this.executeStep(plan2, nextStep, stepIdx);
-    });
-  }
-  async executeStep(plan2, step, stepIdx) {
-    const pm = this.planManager;
-    Logger.log("INFO", "plan_exec_step", { plan_id: plan2.id, step: step.description });
-    pm.updateStep(plan2.id, stepIdx, "in_progress");
-    if (this.gitOps && !this.currentSnapshotBranch) {
-      const tag = `${plan2.id}_step_${stepIdx}`;
-      const branch = await this.gitOps.createSnapshot(tag);
-      if (branch) {
-        this.currentSnapshotBranch = branch;
-        eventBus.emit("evolution.snapshot.created", { tag, branch, timestamp: Date.now() });
-      }
-    }
-    if (this.proposalValidator) {
-      try {
-        const vr = await this.proposalValidator.validate({
-          id: plan2.id,
-          title: plan2.title,
-          description: plan2.description,
-          targetFiles: plan2.steps?.map((s) => s.description) || [],
-          expectedOutcome: "",
-          risk: "medium",
-          createdAt: Date.now()
-        });
-        if (!vr.passed) Logger.log("WARN", "plan_exec_proposal_validation_failed", { planId: plan2.id });
-      } catch (err) {
-        Logger.log("WARN", "plan_exec_proposal_validation_error", { error: String(err) });
-      }
-    }
-    const MAX_RETRIES = 3;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const planCtx = pm.getFormattedContext();
-        const execPrompt = PLAN_EXECUTE_PROMPT(planCtx, step.description);
-        const result = await withTimeout(
-          () => this.agentService.runAgentTask(execPrompt, buildEvolutionSystemPrompt()),
-          this.planExecTimeoutMs,
-          "plan_exec_timeout"
-        );
-        if (result.success) {
-          pm.updateStep(plan2.id, stepIdx, "done", result.summary);
-          this.planExecConsecutiveErrors = 0;
-          this.executeFailures = 0;
-          Logger.log("INFO", "plan_step_done", { plan_id: plan2.id, step: step.description });
-          this.cleanupSnapshot();
-          return { success: true, stepIndex: stepIdx, planCompleted: false };
-        } else {
-          if (attempt < MAX_RETRIES) {
-            const delay = Math.pow(2, attempt - 1) * this.stepRetryBaseMs;
-            await new Promise((r) => setTimeout(r, delay));
-          } else {
-            return this.handleStepFailure(plan2, step, stepIdx, result.summary);
-          }
-        }
-      } catch (err) {
-        if (attempt < MAX_RETRIES) {
-          const delay = Math.pow(2, attempt - 1) * this.stepRetryBaseMs;
-          await new Promise((r) => setTimeout(r, delay));
-        } else {
-          return this.handleStepFailure(plan2, step, stepIdx, String(err));
-        }
-      }
-    }
-    return { success: false, stepIndex: stepIdx, error: "unreachable", planCompleted: false };
-  }
-  async handleStepFailure(plan2, step, stepIdx, error) {
-    const pm = this.planManager;
-    pm.updateStep(plan2.id, stepIdx, "failed", error);
-    this.planExecConsecutiveErrors++;
-    this.executeFailures++;
-    if (this.currentSnapshotBranch && this.gitOps) {
-      const rollbackSuccess = await this.gitOps.rollbackToSnapshot(this.currentSnapshotBranch);
-      eventBus.emit("evolution.rollback.completed", {
-        level: "task",
-        ref: this.currentSnapshotBranch,
-        success: rollbackSuccess,
-        error: rollbackSuccess ? void 0 : "回滚执行失败"
-      });
-      this.currentSnapshotBranch = null;
-    }
-    Logger.log("ERROR", "plan_step_error", { plan_id: plan2.id, step: step.description, error });
-    if (this.planExecConsecutiveErrors >= 3) {
-      pm.abandonPlan(plan2.id, "自动放弃：连续步骤执行失败");
-      this.planExecConsecutiveErrors = 0;
-      Logger.log("WARN", "plan_auto_abandoned", { plan_id: plan2.id });
-    }
-    return { success: false, stepIndex: stepIdx, error, planCompleted: false };
-  }
-  cleanupSnapshot() {
-    if (this.currentSnapshotBranch && this.gitOps) {
-      this.gitOps.cleanupSnapshot(this.currentSnapshotBranch).catch(() => {
-      });
-      this.currentSnapshotBranch = null;
-    }
-  }
-  /** 重置执行计数器（外部调用，如冷却恢复时） */
-  resetFailures() {
-    this.planExecConsecutiveErrors = 0;
-    this.executeFailures = 0;
-  }
-  async autoGitCommit(planTitle) {
-    if (!this.gitOps) return;
-    await this.gitOps.autoGitCommit(planTitle).catch(() => {
-    });
-  }
-}
-const READ_ONLY_TOOLS = /* @__PURE__ */ new Set([
-  "read_file",
-  "list_files",
-  "grep",
-  "list_plans",
-  "list_credentials",
-  "list_mcp_servers",
-  "list_plugins",
-  "analyze_codebase",
-  "analyze_task"
-]);
-const WRITE_TOOLS$1 = /* @__PURE__ */ new Set(["write_file", "edit_file", "create_plugin", "create_dev_plan"]);
-const EXECUTE_FORBIDDEN_TOOLS = /* @__PURE__ */ new Set(["create_dev_plan"]);
-class ResponseValidator {
-  eventBus;
-  toolCallBuffer = [];
-  listeners = [];
-  hasSnapshot = false;
-  constructor(bus) {
-    this.eventBus = bus || eventBus;
-  }
-  setRollbackState(available) {
-    this.hasSnapshot = available;
-  }
-  /**
-   * 开始监听工具调用事件。
-   * 在 tryRun / tryExecutePlan 开始时调用。
-   */
-  startListening() {
-    this.toolCallBuffer = [];
-    this.listeners = [];
-    const onInvoked = (data) => {
-      this.toolCallBuffer.push({
-        name: data.tool,
-        args: data.args,
-        timestamp: Date.now()
-      });
-    };
-    const onCompleted = (data) => {
-      const last = this.toolCallBuffer[this.toolCallBuffer.length - 1];
-      if (last && last.name === data.tool && !last.result) {
-        last.result = data.result;
-      }
-    };
-    const onFailed = (data) => {
-      const last = this.toolCallBuffer[this.toolCallBuffer.length - 1];
-      if (last && last.name === data.tool && !last.error) {
-        last.error = data.error;
-      }
-    };
-    this.eventBus.on("agent.tool.invoked", onInvoked);
-    this.eventBus.on("agent.tool.completed", onCompleted);
-    this.eventBus.on("agent.tool.failed", onFailed);
-    this.listeners.push(() => this.eventBus.off("agent.tool.invoked", onInvoked));
-    this.listeners.push(() => this.eventBus.off("agent.tool.completed", onCompleted));
-    this.listeners.push(() => this.eventBus.off("agent.tool.failed", onFailed));
-  }
-  /**
-   * 停止监听并返回验证结果
-   */
-  stopAndValidate(mode) {
-    const violations = [];
-    const warnings = [];
-    let readOnly = 0;
-    let write = 0;
-    let errors = 0;
-    for (const call of this.toolCallBuffer) {
-      if (READ_ONLY_TOOLS.has(call.name)) readOnly++;
-      if (WRITE_TOOLS$1.has(call.name)) write++;
-      if (call.error) errors++;
-      if (mode === "analyze" || mode === "review") {
-        if (call.name === "write_file" || call.name === "edit_file" || call.name === "create_plugin") {
-          violations.push({
-            type: "forbidden_tool",
-            toolName: call.name,
-            message: `分析模式禁止调用 ${call.name}`,
-            severity: "error"
-          });
-        }
-      }
-      if (mode === "execute") {
-        if (EXECUTE_FORBIDDEN_TOOLS.has(call.name)) {
-          violations.push({
-            type: "forbidden_tool",
-            toolName: call.name,
-            message: `执行模式禁止调用 ${call.name}（应该 update_plan_progress 而不是创建新计划）`,
-            severity: "error"
-          });
-        }
-      }
-    }
-    if (mode === "execute" && readOnly > 10 && write === 0) {
-      violations.push({
-        type: "excessive_readonly",
-        message: `执行模式下连续 ${readOnly} 次只读操作但无写操作，可能卡在读取阶段`,
-        severity: "warn"
-      });
-    }
-    if (errors > 3) {
-      violations.push({
-        type: "excessive_errors",
-        message: `工具调用错误 ${errors} 次，超过阈值 3`,
-        severity: "warn"
-      });
-    }
-    if (this.toolCallBuffer.length === 0) {
-      warnings.push("本次循环没有任何工具调用，LLM 可能未响应工具调用指令");
-    }
-    if (this.hasSnapshot) {
-      warnings.push("步骤已创建 Git 快照，支持回滚");
-    }
-    this.cleanup();
-    return {
-      passed: violations.filter((v) => v.severity === "error").length === 0,
-      violations,
-      warnings,
-      stats: {
-        total: this.toolCallBuffer.length,
-        readOnly,
-        write,
-        errors
-      }
-    };
-  }
-  /**
-   * 丢弃当前缓冲的工具调用（用于退化模式重置）
-   */
-  reset() {
-    this.toolCallBuffer = [];
-  }
-  /**
-   * 获取当前缓冲的快照（用于日志记录）
-   */
-  getSnapshot() {
-    return [...this.toolCallBuffer];
-  }
-  /**
-   * 清理事件监听器
-   */
-  cleanup() {
-    for (const cleanup of this.listeners) {
-      try {
-        cleanup();
-      } catch {
-      }
-    }
-    this.listeners = [];
-  }
-}
-function formatValidationSummary(result) {
-  const parts = [
-    `工具调用统计: ${result.stats.total}次 (只读${result.stats.readOnly}, 写${result.stats.write}, 错误${result.stats.errors})`
-  ];
-  if (result.passed) {
-    parts.push("✅ 合规验证通过");
-  } else {
-    parts.push(`❌ 违规 ${result.violations.length} 项`);
-  }
-  for (const v of result.violations) {
-    parts.push(`  [${v.severity}] ${v.type}: ${v.message}`);
-  }
-  for (const w of result.warnings) {
-    parts.push(`  [警告] ${w}`);
-  }
-  return parts.join("\n");
-}
-const PATTERNS$1 = [
-  // ── p5.js 渲染顺序错误：image() 在所有粒子/形状绘制之后 ──
-  {
-    id: "p5-image-overlay",
-    severity: "error",
-    message: "draw() 中 image() 在粒子/形状绘制之后被调用，会覆盖掉之前绘制的内容",
-    test: (content) => {
-      const drawMatch = content.match(/function\s+draw\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
-      if (!drawMatch) return { found: false };
-      const drawBody = drawMatch[1];
-      const lines = drawBody.split("\n");
-      let lastImageLine = -1, lastDrawLine = -1;
-      lines.forEach((line, i) => {
-        const l = line.trim();
-        if (l.startsWith("//") || l.startsWith("if") || l.startsWith("}") || l === "}" || l === "{" || l.endsWith("{")) return;
-        if (/\bimage\s*\(/.test(l)) lastImageLine = i;
-        if (/\.(update|show|display|draw|render)\s*\(/.test(l) || /\b(line|rect|ellipse|triangle|point)\s*\(/.test(l)) lastDrawLine = i;
-      });
-      if (lastImageLine > lastDrawLine && lastDrawLine >= 0 && lastImageLine >= 0) {
-        return { found: true, line: lastImageLine, fix: "将 image(bg, 0, 0) 移到粒子绘制之前，确保粒子叠在背景之上" };
-      }
-      return { found: false };
-    }
-  },
-  // ── canvas 尺寸保护 ──
-  {
-    id: "p5-zero-canvas",
-    severity: "warning",
-    message: "创建 canvas 时容器尺寸可能为 0（容器尚未渲染或容器为空）",
-    test: (content) => {
-      if (!/createCanvas/.test(content)) return { found: false };
-      if (/Math\.max/.test(content) || /Math\.min/.test(content)) return { found: false };
-      if (/\b(innerWidth|innerHeight)\b/.test(content)) return { found: false };
-      return { found: true, fix: "使用 Math.max(container.clientWidth, 1) 确保 canvas 尺寸非零" };
-    }
-  },
-  // ── 无错误处理 ──
-  {
-    id: "missing-error-boundary",
-    severity: "warning",
-    message: "没有错误处理机制（window.onerror 或 try-catch）",
-    test: (content) => {
-      const hasHandler = /\bwindow\.onerror\b/.test(content) || /\baddEventListener\s*\(\s*['"]error['"]/.test(content) || /\btry\s*\{/.test(content);
-      return { found: !hasHandler, fix: "添加 window.onerror 或在关键函数外包 try-catch" };
-    }
-  },
-  // ── resize 未处理 ──
-  {
-    id: "missing-resize-handler",
-    severity: "info",
-    message: "缺失 windowResized 或 resize 事件处理，窗口尺寸变化后 canvas 可能错位",
-    test: (content) => {
-      if (!/createCanvas/.test(content)) return { found: false };
-      const hasResize = /\bwindowResized\b/.test(content) || /\baddEventListener\s*\(\s*['"]resize['"]/.test(content);
-      return { found: !hasResize, fix: "添加 function windowResized() { resizeCanvas(...); }" };
-    }
-  },
-  // ── p5.js 脚本加载验证 ──
-  {
-    id: "p5-script-check",
-    severity: "info",
-    message: "使用 p5.js 全局模式但未检查库是否已加载",
-    test: (content) => {
-      if (!/cdnjs\.cloudflare\.com\/ajax\/libs\/p5\.js/.test(content)) return { found: false };
-      const hasCheck = /typeof\s+(window\.)?p5\s*!==/.test(content) || /\bonload\b/.test(content);
-      return { found: !hasCheck, fix: "在 script 标签上添加 onload 回调，或检查 window.p5 是否存在" };
-    }
-  }
-];
-function validateHtmlStructure(content) {
-  const errors = [];
-  if (!/<!DOCTYPE\s+html>/i.test(content)) errors.push("缺少 DOCTYPE 声明");
-  if (!/<html/i.test(content)) errors.push("缺少 <html> 标签");
-  if (!/<\/html>/i.test(content)) errors.push("缺少 </html> 闭合标签");
-  if (!/<head>/i.test(content)) errors.push("缺少 <head> 标签");
-  if (!/<\/head>/i.test(content)) errors.push("缺少 </head> 闭合标签");
-  if (!/<body/i.test(content)) errors.push("缺少 <body> 标签");
-  if (!/<\/body>/i.test(content)) errors.push("缺少 </body> 闭合标签");
-  if (!/charset\s*=/i.test(content)) errors.push("未设置字符编码（charset）");
-  return { valid: errors.length === 0, errors };
-}
-function analyzeResources(content, baseDir) {
-  const external = [];
-  const missing = [];
-  const warnings = [];
-  const scriptSrcs = content.match(/<script[^>]*src=["']([^"']+)["']/g) || [];
-  for (const s of scriptSrcs) {
-    const src = s.match(/src=["']([^"']+)["']/)?.[1];
-    if (!src) continue;
-    if (src.startsWith("http://") || src.startsWith("https://")) {
-      external.push(src);
-      if (!/cdnjs\.cloudflare\.com|unpkg\.com|cdn\.jsdelivr\.net|fonts\.(googleapis|cdnfonts)\.com/.test(src)) {
-        warnings.push(`可能不可靠的外部资源：${src}`);
-      }
-    } else if (!src.startsWith("//")) {
-      const localPath = path$1.join(baseDir, src);
-      if (!fs.existsSync(localPath)) missing.push(src);
-    }
-  }
-  const linkHrefs = content.match(/<link[^>]*href=["']([^"']+)["']/g) || [];
-  for (const l of linkHrefs) {
-    const href = l.match(/href=["']([^"']+)["']/)?.[1];
-    if (!href) continue;
-    if (href.startsWith("http://") || href.startsWith("https://")) {
-      external.push(href);
-    } else {
-      const localPath = path$1.join(baseDir, href);
-      if (!fs.existsSync(localPath)) missing.push(href);
-    }
-  }
-  return { external, missing, warnings };
-}
-function validateSandboxHtml(filePath) {
-  let content;
-  try {
-    content = fs.readFileSync(filePath, "utf-8");
-  } catch (err) {
-    return {
-      passed: false,
-      html: { valid: false, errors: [`无法读取文件: ${err}`] },
-      resources: { external: [], missing: [], warnings: [] },
-      rendering: [],
-      summary: `FATAL: 无法读取文件 ${err}`
-    };
-  }
-  const html = validateHtmlStructure(content);
-  const resources = analyzeResources(content, path$1.dirname(filePath));
-  const renderingIssues = [];
-  for (const pattern of PATTERNS$1) {
-    const result = pattern.test(content);
-    if (result.found) {
-      renderingIssues.push({
-        severity: pattern.severity,
-        rule: pattern.id,
-        message: pattern.message,
-        line: result.line,
-        fix: result.fix
-      });
-    }
-  }
-  const errors = renderingIssues.filter((i) => i.severity === "error");
-  const passed = html.valid && errors.length === 0 && resources.missing.length === 0;
-  const parts = [];
-  if (html.errors.length) parts.push(`HTML 结构错误 ${html.errors.length} 项`);
-  if (errors.length) parts.push(`渲染错误 ${errors.length} 项`);
-  if (resources.missing.length) parts.push(`缺失本地资源 ${resources.missing.length} 项`);
-  const summary = passed ? `✅ sandbox 验证通过（${renderingIssues.length} 项检查）` : `❌ sandbox 验证失败：${parts.join("；")}。详情：${renderingIssues.map((i) => `[${i.severity}] ${i.rule}: ${i.message}${i.fix ? ` → ${i.fix}` : ""}`).join(" | ")}`;
-  return { passed, html, resources, rendering: renderingIssues, summary };
-}
-function validateAllSandboxes(sandboxRoot2) {
-  const { readdirSync, statSync } = require("fs");
-  const results = {};
-  let passed = 0, failed = 0;
-  if (!fs.existsSync(sandboxRoot2)) return { results, total: 0, passed: 0, failed: 0 };
-  for (const entry of readdirSync(sandboxRoot2)) {
-    const entryPath = path$1.join(sandboxRoot2, entry);
-    if (!statSync(entryPath).isDirectory()) continue;
-    const htmlFile = path$1.join(entryPath, `${entry}.html`);
-    if (!fs.existsSync(htmlFile)) continue;
-    const result = validateSandboxHtml(htmlFile);
-    results[entry] = result;
-    if (result.passed) passed++;
-    else failed++;
-    Logger.log(result.passed ? "INFO" : "WARN", "sandbox_validation", {
-      name: entry,
-      passed: result.passed,
-      errors: result.rendering.filter((i) => i.severity === "error").length,
-      warnings: result.rendering.filter((i) => i.severity === "warning").length
-    });
-  }
-  return { results, total: passed + failed, passed, failed };
-}
-let sandboxRoot = null;
-function setSandboxRoot(root) {
-  sandboxRoot = root;
-  Logger.log("INFO", "sandbox_root_set", { root });
-}
-class EvolutionReviewer {
-  name = "EvolutionReviewer";
-  state = "created";
-  responseValidator;
-  verificationRunner = null;
-  regressionDetector = null;
-  gitOps = null;
-  proposalValidator = null;
-  lastValidationSummary = "";
-  verifyAfterSteps = false;
-  constructor(responseValidator, options) {
-    this.responseValidator = responseValidator;
-    this.verificationRunner = options?.verificationRunner ?? null;
-    this.regressionDetector = options?.regressionDetector ?? null;
-    this.gitOps = options?.gitOps ?? null;
-  }
-  async init() {
-    this.state = "initializing";
-    Logger.log("INFO", "evolution_reviewer.init");
-    this.state = "ready";
-  }
-  async start() {
-    this.state = "running";
-  }
-  async stop() {
-    this.state = "ready";
-  }
-  async destroy() {
-    this.state = "stopped";
-  }
-  async healthCheck() {
-    return { healthy: true };
-  }
-  setVerificationRunner(runner, verifyAfter) {
-    this.verificationRunner = runner;
-    if (verifyAfter !== void 0) this.verifyAfterSteps = verifyAfter;
-  }
-  setRegressionDetector(detector) {
-    this.regressionDetector = detector;
-  }
-  setProposalValidator(v) {
-    this.proposalValidator = v;
-  }
-  setGitOps(gitOps) {
-    this.gitOps = gitOps;
-  }
-  getLastValidationSummary() {
-    return this.lastValidationSummary;
-  }
-  // ==================== 响应合规性验证 ====================
-  startListen() {
-    this.responseValidator.startListening();
-  }
-  stopAndValidate(mode) {
-    const result = this.responseValidator.stopAndValidate(mode);
-    if (!result.passed) {
-      this.lastValidationSummary = formatValidationSummary(result);
-      Logger.log("WARN", "evolution_validation_failed", {
-        violations: result.violations.filter((v) => v.severity === "error").length,
-        details: this.lastValidationSummary
-      });
-    } else {
-      this.lastValidationSummary = "";
-      Logger.log("INFO", "evolution_validation_passed", { stats: result.stats });
-    }
-    return {
-      passed: result.passed,
-      violations: result.violations,
-      warnings: result.warnings,
-      stats: result.stats,
-      validationSummary: this.lastValidationSummary
-    };
-  }
-  // ==================== 步骤后验证 ====================
-  async verify(changedFiles) {
-    let passed = true;
-    if (this.verifyAfterSteps && this.verificationRunner) {
-      const allChanged = [...changedFiles.newFiles, ...changedFiles.modifiedFiles];
-      const verifyResult = await this.verificationRunner.verify(allChanged);
-      if (!verifyResult.passed) {
-        Logger.log("WARN", "plan_step_verification_failed", {
-          compile: verifyResult.checks.compile?.passed,
-          test: verifyResult.checks.test?.passed,
-          lint: verifyResult.checks.lint?.passed
-        });
-        passed = false;
-      } else {
-        Logger.log("INFO", "plan_step_verification_passed");
-      }
-    }
-    const sandboxHtmlFiles = [...changedFiles.newFiles, ...changedFiles.modifiedFiles].filter(
-      (f) => f.endsWith(".html") && f.includes("sandbox")
-    );
-    if (sandboxHtmlFiles.length > 0 && sandboxRoot && fs.existsSync(sandboxRoot)) {
-      Logger.log("INFO", "sandbox_validation_check", { files: sandboxHtmlFiles });
-      const sandboxResult = validateAllSandboxes(sandboxRoot);
-      if (sandboxResult.failed > 0) {
-        Logger.log("WARN", "sandbox_validation_failed", {
-          total: sandboxResult.total,
-          failed: sandboxResult.failed,
-          details: Object.entries(sandboxResult.results).filter(([, r]) => !r.passed).map(([name2, r]) => `${name2}: ${r.summary}`).join(" | ")
-        });
-        passed = false;
-      } else if (sandboxResult.total > 0) {
-        Logger.log("INFO", "sandbox_validation_passed", { total: sandboxResult.total });
-      }
-    }
-    return { passed };
-  }
-  // ==================== 回归检测 ====================
-  async detectRegression(changedFiles) {
-    if (!this.regressionDetector) return { hasRegression: false };
-    try {
-      const before = await this.regressionDetector.snapshot();
-      const after = await this.regressionDetector.snapshot();
-      const report = await this.regressionDetector.detectRegression(before, after, changedFiles);
-      if (report.hasRegression) {
-        Logger.log("WARN", "plan_step_regression_detected", {
-          testDelta: report.changes.testPassRate.delta,
-          compileDelta: report.changes.compileErrors.delta
-        });
-      } else {
-        Logger.log("INFO", "plan_step_no_regression");
-      }
-      return { hasRegression: report.hasRegression };
-    } catch (err) {
-      Logger.log("WARN", "plan_step_regression_check_failed", { error: String(err) });
-      return { hasRegression: false };
-    }
-  }
-  /** 整体审查入口：验证 + 回归 */
-  async review(input) {
-    const validation = this.stopAndValidate(input.mode);
-    const [verificationResult, regressionResult] = await Promise.all([
-      this.verify(input.changedFiles),
-      this.detectRegression(input.changedFiles)
-    ]);
-    return {
-      passed: validation.passed && verificationResult.passed && !regressionResult.hasRegression,
-      verification: verificationResult,
-      regression: regressionResult,
-      validationSummary: validation.validationSummary
-    };
-  }
-}
-const DEFAULT_PROMT_DIR = path$1.join(WORKSPACE.evolution, "prompts");
-class PromptEvolutionManager {
-  promptsDir;
-  registry;
-  versions = /* @__PURE__ */ new Map();
-  initialized = false;
-  persistenceDirty = false;
-  constructor(promptsDir) {
-    this.promptsDir = promptsDir || DEFAULT_PROMT_DIR;
-    this.load();
-  }
-  // ====== 公共 API ======
-  /** 获取指定槽位的当前 overlay 文本 */
-  getOverlay(mode) {
-    const slot = this.registry.prompts[mode];
-    if (!slot) return "";
-    const v = this.versions.get(`${mode}_v${slot.currentVersion}`);
-    return v?.promptOverlay || "";
-  }
-  /** 获取当前版本号 */
-  getCurrentVersion(mode) {
-    return this.registry.prompts[mode]?.currentVersion || 1;
-  }
-  /** 进化 prompt：以当前版本为 parent，追加反模式指令创建新版本 */
-  evolvePrompt(mode, reason, antiPatterns) {
-    const slot = this.registry.prompts[mode];
-    if (!slot) {
-      Logger.log("WARN", "prompt_evolve_unknown_slot", { mode });
-      return null;
-    }
-    const parentV = this.versions.get(`${mode}_v${slot.currentVersion}`);
-    const newVersion = slot.latestVersion + 1;
-    const currentText = parentV?.promptOverlay || "";
-    const newOverlay = currentText ? `${currentText}
-
-【进化修正 v${newVersion}】
-${reason}
-${antiPatterns.map((a) => `- ${a}`).join("\n")}` : `【进化修正 v${newVersion}】
-${reason}
-${antiPatterns.map((a) => `- ${a}`).join("\n")}`;
-    const pv = {
-      name: mode,
-      version: newVersion,
-      promptOverlay: newOverlay,
-      applicableMode: mode,
-      createdAt: Date.now(),
-      parentVersion: parentV?.version || 0,
-      evolutionReason: reason
-    };
-    this.versions.set(`${mode}_v${newVersion}`, pv);
-    slot.latestVersion = newVersion;
-    slot.currentVersion = newVersion;
-    this.persistenceDirty = true;
-    this.save();
-    Logger.log("INFO", "prompt_evolved", { mode, newVersion, reason, antiPatternCount: antiPatterns.length });
-    return pv;
-  }
-  /** 重置到基版本（version 1） */
-  resetToBase(mode) {
-    const slot = this.registry.prompts[mode];
-    if (!slot || slot.currentVersion === slot.baseVersion) return null;
-    slot.currentVersion = slot.baseVersion;
-    const base = this.versions.get(`${mode}_v${slot.baseVersion}`);
-    this.save();
-    Logger.log("INFO", "prompt_reset_to_base", { mode });
-    return base || null;
-  }
-  /** LLM 驱动的 prompt 进化：分析近期失败并生成针对性反模式指令 */
-  async llmEvolvePrompt(mode, reason, failureSummary, agentRunner) {
-    const llmPrompt = [
-      "你是秋山澪自进化系统的 prompt 优化器。",
-      "",
-      "【当前退化场景】",
-      reason,
-      "",
-      "【近期失败摘要】",
-      failureSummary || "（无详细数据）",
-      "",
-      "请生成 2-3 条具体的、可操作的反模式指令，用于修正进化分析 prompt。",
-      "要求：",
-      "- 每条指令必须是具体行为约束，而非笼统建议",
-      "- 引用具体的分析方向、代码区域或重复模式",
-      "- 用中文，每条约 20-40 字",
-      '- 格式：每条一行，以 "- " 开头',
-      "",
-      "例如：",
-      "- 如果连续两次分析了相同的模块，第三次必须选择项目根目录下未被分析的子目录",
-      "- 避免在每次分析中都检查 config 文件，除非有明确错误日志指向配置问题"
-    ].join("\n");
-    try {
-      const result = await withTimeout(
-        () => agentRunner.runAgentTask(llmPrompt, "你是 prompt 优化器。只输出反模式指令列表。"),
-        5e3,
-        "prompt_llm_evolve_timeout"
-      );
-      if (result.success && result.summary.trim()) {
-        const antiPatterns = result.summary.split("\n").map((l) => l.replace(/^-\s*/, "").trim()).filter((l) => l.length > 10 && l.length < 200);
-        if (antiPatterns.length >= 1) {
-          return this.evolvePrompt(mode, `LLM优化: ${reason}`, antiPatterns);
-        }
-      }
-    } catch {
-      Logger.log("WARN", "prompt_llm_evolve_fallback", { mode, reason });
-    }
-    return this.evolvePrompt(mode, reason, [
-      "避免在超过 2 次分析后继续得出相同的结论",
-      "如果连续 3 次得出相同结论，必须选择至少一个新的代码区域进行分析",
-      "不要重复分析之前已分析过的模块"
-    ]);
-  }
-  recordCycleResult(mode, version, success, score) {
-    const v = this.versions.get(`${mode}_v${version}`);
-    if (!v) return;
-    if (!v.performanceStats) {
-      v.performanceStats = { totalCycles: 0, successCount: 0, failCount: 0, avgScore: 0 };
-    }
-    const stats = v.performanceStats;
-    stats.totalCycles++;
-    if (success) stats.successCount++;
-    else stats.failCount++;
-    if (score !== void 0) {
-      stats.avgScore = stats.totalCycles === 1 ? score : (stats.avgScore * (stats.totalCycles - 1) + score) / stats.totalCycles;
-    }
-    this.persistenceDirty = true;
-    this.save();
-  }
-  /** 将版本链中所有 overlays 总结为简洁规则，创建新版本 */
-  summarizeOverlays(mode) {
-    const slot = this.registry.prompts[mode];
-    if (!slot || slot.latestVersion <= 1) return null;
-    const rules = /* @__PURE__ */ new Set();
-    for (let v = slot.baseVersion; v <= slot.latestVersion; v++) {
-      const pv2 = this.versions.get(`${mode}_v${v}`);
-      if (!pv2 || !pv2.promptOverlay) continue;
-      for (const line of pv2.promptOverlay.split("\n")) {
-        const trimmed = line.replace(/^-\s*/, "").replace(/^\d+[\.\)]\s*/, "").trim();
-        if (trimmed.length > 10 && trimmed.length < 200 && !trimmed.startsWith("【")) {
-          rules.add(trimmed);
-        }
-      }
-    }
-    if (rules.size === 0) return null;
-    const merged = Array.from(rules).join("\n");
-    const newVersion = slot.latestVersion + 1;
-    const pv = {
-      name: mode,
-      version: newVersion,
-      promptOverlay: `【总结 v${newVersion}】
-${merged}`,
-      applicableMode: mode,
-      createdAt: Date.now(),
-      parentVersion: slot.latestVersion,
-      evolutionReason: `summarize: ${rules.size} rules from ${slot.latestVersion} versions`
-    };
-    this.versions.set(`${mode}_v${newVersion}`, pv);
-    slot.latestVersion = newVersion;
-    slot.currentVersion = newVersion;
-    this.persistenceDirty = true;
-    this.save();
-    Logger.log("INFO", "prompt_overlays_summarized", { mode, version: newVersion, rulesCount: rules.size });
-    return pv;
-  }
-  /** 移除低分版本的 overlay 规则，返回清理数 */
-  pruneStaleRules(mode) {
-    const slot = this.registry.prompts[mode];
-    if (!slot) return 0;
-    const current = this.versions.get(`${mode}_v${slot.currentVersion}`);
-    if (!current || !current.promptOverlay) return 0;
-    let removedCount = 0;
-    for (let v = slot.baseVersion; v <= slot.latestVersion; v++) {
-      const pv = this.versions.get(`${mode}_v${v}`);
-      if (!pv || v === slot.currentVersion) continue;
-      const avg = pv.performanceStats?.avgScore;
-      if (avg !== void 0 && avg < 40) {
-        const reasonWords = pv.evolutionReason.split(/[\s,，]+/).filter((w) => w.length > 2);
-        for (const word of reasonWords) {
-          const re = new RegExp(`[\\s\\S]*?${word}[\\s\\S]*?(\\n|$)`, "gi");
-          const before = current.promptOverlay.length;
-          current.promptOverlay = current.promptOverlay.replace(re, "");
-          if (current.promptOverlay.length < before) removedCount++;
-        }
-      }
-    }
-    if (removedCount > 0) {
-      this.persistenceDirty = true;
-      this.save();
-      Logger.log("INFO", "prompt_stale_rules_pruned", { mode, removedCount });
-    }
-    return removedCount;
-  }
-  /** 判断是否需要总结或清理 */
-  shouldCompact(mode) {
-    const slot = this.registry.prompts[mode];
-    if (!slot) return { needSummarize: false, needPrune: false };
-    const current = this.versions.get(`${mode}_v${slot.currentVersion}`);
-    const overlayLen = current?.promptOverlay?.length || 0;
-    return {
-      needSummarize: overlayLen > 1200 || slot.latestVersion >= 5,
-      needPrune: slot.latestVersion > 3
-    };
-  }
-  /** 状态摘要（日志用） */
-  getRegistrySummary() {
-    const parts = ["【Prompt 版本状态】"];
-    for (const [mode, slot] of Object.entries(this.registry.prompts)) {
-      const current = this.versions.get(`${mode}_v${slot.currentVersion}`);
-      const stats = current?.performanceStats;
-      const statsStr = stats ? ` | ${stats.successCount}/${stats.totalCycles} 成功 | avgScore=${stats.avgScore?.toFixed(0) || "-"}` : "";
-      parts.push(`- ${mode}: v${slot.currentVersion}/${slot.latestVersion}${statsStr}`);
-    }
-    return parts.join("\n");
-  }
-  // ====== 持久化 ======
-  load() {
-    try {
-      const idxFile = path$1.join(this.promptsDir, "index.json");
-      if (!fs.existsSync(idxFile)) {
-        this.seedDefaults();
-        return;
-      }
-      const raw = JSON.parse(fs.readFileSync(idxFile, "utf-8"));
-      this.registry = { version: raw.version, prompts: raw.prompts || {} };
-      for (const [mode, slot] of Object.entries(this.registry.prompts)) {
-        for (let v = slot.baseVersion; v <= slot.latestVersion; v++) {
-          const vf = path$1.join(this.promptsDir, `${mode}_v${v}.json`);
-          if (fs.existsSync(vf)) {
-            this.versions.set(`${mode}_v${v}`, JSON.parse(fs.readFileSync(vf, "utf-8")));
-          }
-        }
-      }
-      this.initialized = true;
-    } catch {
-      Logger.log("WARN", "prompt_registry_load_failed_seeding_defaults");
-      this.seedDefaults();
-    }
-  }
-  save() {
-    if (!this.persistenceDirty && this.initialized) return;
-    try {
-      if (!fs.existsSync(this.promptsDir)) fs.mkdirSync(this.promptsDir, { recursive: true });
-      fs.writeFileSync(
-        path$1.join(this.promptsDir, "index.json"),
-        JSON.stringify({ version: this.registry.version, prompts: this.registry.prompts }, null, 2),
-        "utf-8"
-      );
-      for (const [key, pv] of this.versions) {
-        fs.writeFileSync(path$1.join(this.promptsDir, `${pv.name}_v${pv.version}.json`), JSON.stringify(pv, null, 2), "utf-8");
-      }
-      this.persistenceDirty = false;
-    } catch {
-      Logger.log("WARN", "prompt_registry_save_failed");
-    }
-  }
-  seedDefaults() {
-    this.registry = {
-      version: 1,
-      prompts: {
-        analysis_prompt: { latestVersion: 1, currentVersion: 1, baseVersion: 1 },
-        system_prompt: { latestVersion: 1, currentVersion: 1, baseVersion: 1 },
-        execution_prompt: { latestVersion: 1, currentVersion: 1, baseVersion: 1 }
-      }
-    };
-    for (const mode of ["analysis_prompt", "system_prompt", "execution_prompt"]) {
-      this.versions.set(`${mode}_v1`, {
-        name: mode,
-        version: 1,
-        promptOverlay: "",
-        applicableMode: mode,
-        createdAt: Date.now(),
-        parentVersion: 0,
-        evolutionReason: "base"
-      });
-    }
-    this.persistenceDirty = true;
-    this.initialized = true;
-    this.save();
-  }
-}
-class EvolutionSelfEvaluator {
-  recentEvaluations = [];
-  maxHistory;
-  engineering = null;
-  constructor(historyMaxEntries = 10) {
-    this.maxHistory = historyMaxEntries;
-  }
-  injectEngineering(eng) {
-    this.engineering = eng;
-  }
-  /** 事后记录该次演化的实际结果（plan 是否成功执行） */
-  recordOutcome(score, succeeded) {
-    for (let i = this.recentEvaluations.length - 1; i >= 0; i--) {
-      if (this.recentEvaluations[i].score === score && this.recentEvaluations[i].outcome === void 0) {
-        this.recentEvaluations[i].outcome = succeeded;
-        break;
-      }
-    }
-  }
-  /** 评估器校准：对比评分与实际成功率 */
-  getCalibration() {
-    const completed = this.recentEvaluations.filter((r) => r.outcome !== void 0);
-    if (completed.length < 3) return { bias: 0, sampleSize: completed.length, isReliable: false };
-    let totalDiff = 0;
-    for (const r of completed) {
-      const predicted = r.score / 100;
-      const actual = r.outcome ? 1 : 0;
-      totalDiff += actual - predicted;
-    }
-    const bias = totalDiff / completed.length;
-    return { bias, sampleSize: completed.length, isReliable: completed.length >= 5 };
-  }
-  evaluate(params) {
-    const planQuality = this.evaluatePlanQuality(params.planSteps, params.planCreated);
-    const analysisDiversity = this.evaluateDiversity(params.analysisSummary, params.recentHistory);
-    const strategyCompliance = this.evaluateStrategyCompliance(
-      params.strategyName,
-      params.promptMode,
-      params.analysisMode,
-      params.analysisSummary
-    );
-    const substantiveLength = this.evaluateSubstantiveLength(params.analysisSummary);
-    const score = Math.round(planQuality * 0.3 + analysisDiversity * 0.25 + strategyCompliance * 0.25 + substantiveLength * 0.2);
-    const feedback = [];
-    if (planQuality < 50 && params.planCreated) feedback.push("计划步骤缺少具体文件引用，应引用项目中的实际文件路径");
-    if (analysisDiversity < 40) feedback.push("分析与近期结果高度重叠，需要探索新的分析方向");
-    if (strategyCompliance < 50) feedback.push("策略选择与执行模式不匹配，检查策略配置");
-    if (substantiveLength < 30) feedback.push("分析摘要过短，缺乏详细推理过程");
-    const result = {
-      score,
-      timestamp: Date.now(),
-      strategyName: params.strategyName,
-      analysisMode: params.analysisMode,
-      dimensions: { planQuality, analysisDiversity, strategyCompliance, substantiveLength },
-      feedback
-    };
-    this.recentEvaluations.push(result);
-    if (this.recentEvaluations.length > this.maxHistory) {
-      this.recentEvaluations = this.recentEvaluations.slice(-this.maxHistory);
-    }
-    if (this.engineering) {
-      try {
-        this.engineering.store({
-          type: "design_decision",
-          content: [
-            `【自评估】${result.score}/100 (${params.strategyName})`,
-            `计划质量: ${result.dimensions.planQuality}`,
-            `分析多样性: ${result.dimensions.analysisDiversity}`,
-            `策略合规: ${result.dimensions.strategyCompliance}`,
-            `摘要长度: ${result.dimensions.substantiveLength}`,
-            ...result.feedback.map((f) => `反馈: ${f}`)
-          ].join("\n"),
-          source: "self_evaluator",
-          confidence: result.score / 100,
-          relatedFiles: [],
-          tags: ["self_evaluation", params.strategyName, ...result.feedback.length > 0 ? ["has_feedback"] : []]
-        });
-      } catch {
-      }
-    }
-    Logger.log("INFO", "self_evaluation_complete", {
-      score,
-      strategy: params.strategyName,
-      dimensions: result.dimensions,
-      feedbackCount: feedback.length
-    });
-    return result;
-  }
-  getRecentEvaluations(count = 5) {
-    return this.recentEvaluations.slice(-count);
-  }
-  /** 跨周期趋势分析：比较最近 5 次与前 5 次的分数变化 */
-  getTrend() {
-    if (this.recentEvaluations.length < 6) return "insufficient_data";
-    const recent = this.recentEvaluations.slice(-5).map((r) => r.score);
-    const prior = this.recentEvaluations.slice(-10, -5).map((r) => r.score);
-    const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
-    const priorAvg = prior.reduce((a, b) => a + b, 0) / prior.length;
-    const recentStd = Math.sqrt(recent.reduce((sq, v) => sq + (v - recentAvg) ** 2, 0) / recent.length);
-    const priorStd = Math.sqrt(prior.reduce((sq, v) => sq + (v - priorAvg) ** 2, 0) / prior.length);
-    const avgVolatility = (recentStd + priorStd) / 2;
-    if (avgVolatility > 20) return "volatile";
-    const delta = recentAvg - priorAvg;
-    if (delta > 10) return "upward";
-    if (delta < -10) return "downward";
-    return "stagnant";
-  }
-  /** 识别持续薄弱的维度，为策略变异提供目标 */
-  getStrategyRecommendation() {
-    if (this.recentEvaluations.length < 3) {
-      return { targetDimension: null, avgDimScores: {}, trend: this.getTrend() };
-    }
-    const recent = this.recentEvaluations.slice(-5);
-    const dimKeys = ["planQuality", "analysisDiversity", "strategyCompliance", "substantiveLength"];
-    const avgDimScores = {};
-    for (const key of dimKeys) {
-      avgDimScores[key] = recent.reduce((sum, r) => sum + r.dimensions[key], 0) / recent.length;
-    }
-    const sorted = Object.entries(avgDimScores).sort(([, a], [, b]) => a - b);
-    const weakest = sorted[0];
-    const targetDimension = weakest[1] < 50 ? weakest[0] : null;
-    return { targetDimension, avgDimScores, trend: this.getTrend() };
-  }
-  // ==================== 各维度评估 ====================
-  /** 计划质量：步骤描述中是否包含实际文件引用 */
-  evaluatePlanQuality(planSteps2, planCreated) {
-    if (!planCreated) return 50;
-    if (planSteps2.length === 0) return 30;
-    const fileRefPattern = /[\w-]+\.(ts|tsx|js|jsx|json|yaml|css|html|md)\b|[\w-]+\/[\w\-.\\/]+\.\w+/g;
-    let totalRefs = 0;
-    for (const step of planSteps2) {
-      const matches = step.match(fileRefPattern);
-      totalRefs += matches ? matches.length : 0;
-    }
-    if (totalRefs === 0) return 30;
-    if (totalRefs >= planSteps2.length * 2) return 95;
-    return 60 + Math.round(totalRefs / (planSteps2.length * 2) * 35);
-  }
-  /** 分析多样性：与近期历史摘要的 Jaccard 相似度 */
-  evaluateDiversity(summary, recentHistory) {
-    const tokens = this.tokenize(summary);
-    if (tokens.size === 0 || recentHistory.length === 0) return 70;
-    let maxOverlap = 0;
-    for (const h of recentHistory) {
-      const hTokens = this.tokenize(h);
-      const intersection = new Set([...tokens].filter((t) => hTokens.has(t)));
-      const union = /* @__PURE__ */ new Set([...tokens, ...hTokens]);
-      const jaccard = intersection.size / union.size;
-      maxOverlap = Math.max(maxOverlap, jaccard);
-    }
-    if (maxOverlap < 0.3) return 100;
-    if (maxOverlap < 0.5) return 60;
-    if (maxOverlap < 0.7) return 30;
-    return 10;
-  }
-  /** 策略合规 */
-  evaluateStrategyCompliance(strategyName, promptMode, analysisMode, analysisSummary) {
-    const expectedPromptMode = {
-      full: "full",
-      balanced: "full",
-      quick: "minimal",
-      review: "minimal"
-    };
-    if (promptMode !== expectedPromptMode[strategyName]) return 60;
-    if (strategyName === "review" && /write_file|edit_file|execute/.test(analysisSummary)) return 30;
-    return 95;
-  }
-  /** 摘要长度：是否足够详细 */
-  evaluateSubstantiveLength(summary) {
-    const charLen = summary.length;
-    if (charLen < 50) return 10;
-    if (charLen < 200) return 40;
-    if (charLen < 500) return 70;
-    if (charLen < 1e3) return 85;
-    return 95;
-  }
-  // ==================== 工具 ====================
-  tokenize(text) {
-    return new Set(
-      text.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter((t) => t.length > 2 && t.length < 50)
-    );
-  }
-}
-class MetaLearner {
-  mutations = [];
-  maxTracked = 100;
-  cycleCount = 0;
-  /** 记录一次变异操作 */
-  recordMutation(params) {
-    const id2 = `meta_${Date.now().toString(36)}_${this.mutations.length}`;
-    const tm = {
-      id: id2,
-      parentStrategy: params.parentStrategy,
-      childStrategy: params.childStrategy,
-      ops: [{ paramName: params.paramName, oldValue: params.oldValue, newValue: params.newValue }],
-      operation: params.operation,
-      createdAt: Date.now()
-    };
-    this.mutations.push(tm);
-    if (this.mutations.length > this.maxTracked) {
-      this.mutations = this.mutations.slice(-this.maxTracked);
-    }
-    Logger.log("INFO", "meta_mutation_tracked", {
-      id: id2,
-      parent: params.parentStrategy,
-      child: params.childStrategy,
-      param: params.paramName,
-      op: params.operation
-    });
-    return id2;
-  }
-  /** 记录子策略的 outcome 分数 */
-  recordOutcome(mutationId, parentScore, childScore, childSamples) {
-    const m = this.mutations.find((m2) => m2.id === mutationId);
-    if (!m) return;
-    m.outcome = {
-      scoreDelta: childScore - parentScore,
-      samples: childSamples,
-      improvement: childScore > parentScore + 5
-      // >5 分才算改善
-    };
-  }
-  /** 获取各参数维度的有效性统计 */
-  getParamEffectiveness() {
-    const byParam = /* @__PURE__ */ new Map();
-    for (const m of this.mutations) {
-      if (!m.outcome) continue;
-      for (const op of m.ops) {
-        if (!byParam.has(op.paramName)) byParam.set(op.paramName, { deltas: [], improvements: 0 });
-        const entry = byParam.get(op.paramName);
-        entry.deltas.push(m.outcome.scoreDelta);
-        if (m.outcome.improvement) entry.improvements++;
-      }
-    }
-    return Array.from(byParam.entries()).map(([paramName, data]) => {
-      const attempts = data.deltas.length;
-      const avgDelta = attempts > 0 ? data.deltas.reduce((a, b) => a + b, 0) / attempts : 0;
-      return {
-        paramName,
-        attempts,
-        improvements: data.improvements,
-        avgDelta: Math.round(avgDelta * 10) / 10,
-        reliable: attempts >= 3
-      };
-    }).sort((a, b) => b.avgDelta - a.avgDelta);
-  }
-  /** 根据历史效果推荐变异参数 */
-  recommendMutationParam(context) {
-    const effectiveness = this.getParamEffectiveness();
-    const reliable = effectiveness.filter((e) => e.reliable);
-    if (reliable.length === 0) {
-      const candidates = ["timeoutMs", "promptMode", "trimMode", "degenerationThreshold", "maxHistoryEntries"];
-      const untried = candidates.filter((c) => !effectiveness.some((e) => e.paramName === c));
-      if (untried.length > 0) {
-        return { paramName: untried[0], insight: `探索未尝试的参数: ${untried[0]}` };
-      }
-      const leastTried = effectiveness.sort((a, b) => a.attempts - b.attempts)[0];
-      return { paramName: leastTried?.paramName || null, insight: `数据不足，选实验最少的参数: ${leastTried?.paramName}` };
-    }
-    const best = reliable[0];
-    const improvementRate = best.attempts > 0 ? Math.round(best.improvements / best.attempts * 100) : 0;
-    return {
-      paramName: best.paramName,
-      insight: `元学习推荐: ${best.paramName} (${improvementRate}% 改善率, avgΔ=${best.avgDelta > 0 ? "+" : ""}${best.avgDelta}, ${best.attempts}次采样)`
-    };
-  }
-  /** 判断当前是否应当抑制变异（效果太差或数据不足时停止浪费） */
-  shouldSuppressMutation() {
-    const effectiveness = this.getParamEffectiveness();
-    const reliable = effectiveness.filter((e) => e.reliable);
-    if (reliable.length >= 3) {
-      const allNegative = reliable.every((e) => e.avgDelta < -2);
-      if (allNegative) {
-        Logger.log("WARN", "meta_suppress_mutation", {
-          reason: "所有可靠参数变均为负效果",
-          details: reliable.map((r) => `${r.paramName}:${r.avgDelta}`).join(",")
-        });
-        return true;
-      }
-    }
-    const recent = this.mutations.slice(-10).filter((m) => m.outcome !== void 0);
-    if (recent.length >= 5) {
-      const improved = recent.filter((m) => m.outcome.improvement).length;
-      if (improved === 0) {
-        Logger.log("WARN", "meta_suppress_mutation", {
-          reason: `最近 ${recent.length} 次变异均未改善`
-        });
-        return true;
-      }
-    }
-    return false;
-  }
-  /** 每 N 个周期输出一次元学习总结 */
-  getMetaSummary() {
-    const completed = this.mutations.filter((m) => m.outcome !== void 0);
-    if (completed.length < 3) return null;
-    const effectiveness = this.getParamEffectiveness();
-    const best = effectiveness[0];
-    const worst = effectiveness[effectiveness.length - 1];
-    const improved = completed.filter((m) => m.outcome.improvement).length;
-    const improveRate = Math.round(improved / completed.length * 100);
-    return {
-      recommendation: best?.paramName || null,
-      insight: `变异改善率 ${improveRate}% (${improved}/${completed.length}) | 最优参数: ${best?.paramName || "-"} (avgΔ=${best?.avgDelta > 0 ? "+" : ""}${best?.avgDelta}) | 最差参数: ${worst?.paramName || "-"} (avgΔ=${worst?.avgDelta > 0 ? "+" : ""}${worst?.avgDelta})`,
-      details: {
-        activeMutations: this.mutations.length,
-        trackedOps: this.mutations.flatMap((m) => m.ops).length,
-        bestParam: best?.paramName || "",
-        worstParam: worst?.paramName || "",
-        bestEffectiveness: best?.avgDelta ?? 0,
-        worstEffectiveness: worst?.avgDelta ?? 0
-      }
-    };
-  }
-  /** 每周期增长 */
-  incrementCycle() {
-    this.cycleCount++;
-  }
-  getCycleCount() {
-    return this.cycleCount;
-  }
-  /** 诊断快照 */
-  getDiagnostics() {
-    return {
-      trackedMutations: this.mutations.length,
-      completedMutations: this.mutations.filter((m) => m.outcome !== void 0).length,
-      cycleCount: this.cycleCount,
-      paramEffectiveness: this.getParamEffectiveness(),
-      suppressMutation: this.shouldSuppressMutation()
-    };
-  }
-}
-const DIMENSION_KEYS = ["planQuality", "analysisDiversity", "strategyCompliance", "substantiveLength"];
-const DEFAULT_WEIGHTS = {
-  planQuality: 0.3,
-  analysisDiversity: 0.25,
-  strategyCompliance: 0.25,
-  substantiveLength: 0.2
-};
-class EvaluatorCalibrator {
-  samples = [];
-  weights = { ...DEFAULT_WEIGHTS };
-  maxSamples = 100;
-  minSamplesToCalibrate = 5;
-  /** 记录一次有 outcome 的评估样本 */
-  recordSample(dimensionScores, overallScore, outcome) {
-    this.samples.push({ dimensionScores, overallScore, outcome, timestamp: Date.now() });
-    if (this.samples.length > this.maxSamples) {
-      this.samples = this.samples.slice(-this.maxSamples);
-    }
-  }
-  /** 获取当前维度权重快照 */
-  getWeights() {
-    return { ...this.weights };
-  }
-  /** 获取原始默认权重 */
-  getDefaultWeights() {
-    return { ...DEFAULT_WEIGHTS };
-  }
-  /** 执行校准，返回校准前后的权重对比 */
-  calibrate() {
-    const before = { ...this.weights };
-    const stats = this.computeDimensionStats();
-    const sampleSize = this.samples.length;
-    if (sampleSize < this.minSamplesToCalibrate) {
-      return {
-        before,
-        after: before,
-        delta: Object.fromEntries(DIMENSION_KEYS.map((k) => [k, 0])),
-        sampleSize,
-        reliability: 0
-      };
-    }
-    const rawAdjustments = {};
-    let totalPosAdjustment = 0;
-    for (const key of DIMENSION_KEYS) {
-      const s = stats.get(key);
-      if (!s || s.samples < 2) {
-        rawAdjustments[key] = 0;
-        continue;
-      }
-      const adjustment = Math.max(-0.05, Math.min(0.05, (0.3 - s.mae) * 0.5));
-      rawAdjustments[key] = adjustment;
-      if (adjustment > 0) totalPosAdjustment += adjustment;
-    }
-    let totalNeg = 0;
-    for (const key of DIMENSION_KEYS) {
-      if (rawAdjustments[key] < 0) totalNeg += Math.abs(rawAdjustments[key]);
-    }
-    for (const key of DIMENSION_KEYS) {
-      this.weights[key] = Math.max(0.05, Math.min(0.5, this.weights[key] + rawAdjustments[key]));
-      if (rawAdjustments[key] > 0 && totalPosAdjustment > 0 && totalNeg > 0) {
-        const share = rawAdjustments[key] / totalPosAdjustment;
-        this.weights[key] = Math.max(0.05, Math.min(0.5, this.weights[key] - totalNeg * share));
-      }
-    }
-    const totalWeight = DIMENSION_KEYS.reduce((s, k) => s + this.weights[k], 0);
-    for (const key of DIMENSION_KEYS) {
-      this.weights[key] = Math.round(this.weights[key] / totalWeight * 100) / 100;
-    }
-    const after = { ...this.weights };
-    const delta = Object.fromEntries(DIMENSION_KEYS.map((k) => [k, Math.round((after[k] - before[k]) * 100)]));
-    Logger.log("INFO", "evaluator_calibrated", {
-      before: formatWeights(before),
-      after: formatWeights(after),
-      sampleSize,
-      reliability: Math.min(1, sampleSize / 20)
-    });
-    return { before, after, delta, sampleSize, reliability: Math.min(1, sampleSize / 20) };
-  }
-  /** 获取校准统计 */
-  getCalibrationStats() {
-    const stats = this.computeDimensionStats();
-    const dimensionMAE = {};
-    for (const [key, s] of stats) {
-      dimensionMAE[key] = Math.round(s.mae * 1e3) / 1e3;
-    }
-    return {
-      sampleCount: this.samples.length,
-      weights: this.getWeights(),
-      dimensionMAE,
-      reliability: Math.min(1, this.samples.length / 20)
-    };
-  }
-  /** 应用校准后的权重计算组合分 */
-  computeCompositeScore(dimensionScores) {
-    return Math.round(DIMENSION_KEYS.reduce((s, k) => s + dimensionScores[k] * this.weights[k], 0));
-  }
-  /** 重置为默认权重 */
-  reset() {
-    this.weights = { ...DEFAULT_WEIGHTS };
-    this.samples = [];
-  }
-  // ==================== 内部 ====================
-  computeDimensionStats() {
-    const raw = /* @__PURE__ */ new Map();
-    for (const key of DIMENSION_KEYS) {
-      raw.set(key, { errors: [], outcomes: [] });
-    }
-    for (const s of this.samples) {
-      for (const key of DIMENSION_KEYS) {
-        const entry = raw.get(key);
-        const predicted = s.dimensionScores[key] / 100;
-        const actual = s.outcome ? 1 : 0;
-        entry.errors.push(Math.abs(predicted - actual));
-        entry.outcomes.push(s.outcome);
-      }
-    }
-    const result = /* @__PURE__ */ new Map();
-    for (const key of DIMENSION_KEYS) {
-      const entry = raw.get(key);
-      const mae = entry.errors.length > 0 ? entry.errors.reduce((a, b) => a + b, 0) / entry.errors.length : 0;
-      const positiveOutcomes = entry.outcomes.filter(Boolean).length;
-      const positiveCorrelation = entry.outcomes.length > 0 ? positiveOutcomes / entry.outcomes.length : 0;
-      result.set(key, { mae, samples: entry.errors.length, positiveCorrelation });
-    }
-    return result;
-  }
-  getDiagnostics() {
-    return {
-      samples: this.samples.length,
-      weights: this.getWeights(),
-      dimensionStats: Array.from(this.computeDimensionStats().entries()).map(([k, v]) => ({
-        dimension: k,
-        mae: Math.round(v.mae * 1e3) / 1e3,
-        samples: v.samples,
-        posCorr: Math.round(v.positiveCorrelation * 100) / 100
-      }))
-    };
-  }
-}
-function formatWeights(w) {
-  return Object.entries(w).map(([k, v]) => `${k}=${v.toFixed(2)}`).join(", ");
-}
-class CapabilityExecutor {
-  /**
-   * 执行一个能力，返回 ActionResult
-   * @param capability 要执行的能力
-   * @param recordUsage 注册表的 usage 记录函数
-   */
-  async execute(capability, recordUsage) {
-    const startedAt = Date.now();
-    try {
-      switch (capability.executor.type) {
-        case "toolchain":
-          return await this.executeToolchain(capability, recordUsage, startedAt);
-        case "workflow":
-          return await this.executeWorkflow(capability, startedAt);
-        case "code":
-          return this.executeCode(capability, startedAt);
-        default:
-          return {
-            success: false,
-            summary: `未知 executor 类型: ${capability.executor.type}`,
-            durationMs: Date.now() - startedAt
-          };
-      }
-    } catch (err) {
-      Logger.log("WARN", "capability_execution_error", {
-        id: capability.id,
-        error: err.message?.slice(0, 200)
-      });
-      return {
-        success: false,
-        summary: `执行失败: ${err.message?.slice(0, 200)}`,
-        durationMs: Date.now() - startedAt
-      };
-    }
-  }
-  // —── 工具链执行（v0: 模拟执行，只解析与记录） ─────────
-  async executeToolchain(cap, recordUsage, startedAt) {
-    const steps2 = cap.executor.body.split("→").map((s) => s.trim()).filter(Boolean);
-    if (steps2.length === 0) {
-      return { success: false, summary: "空工具链", durationMs: Date.now() - startedAt };
-    }
-    const stepLogs = [];
-    for (let i = 0; i < steps2.length; i++) {
-      Logger.log("INFO", "capability_execute_step", {
-        id: cap.id,
-        step: i + 1,
-        total: steps2.length,
-        tool: steps2[i]
-      });
-      stepLogs.push(`${i + 1}/${steps2.length}: ${steps2[i]}`);
-    }
-    if (recordUsage) {
-      recordUsage(cap.id);
-    }
-    Logger.log("INFO", "capability_executed", {
-      id: cap.id,
-      steps: steps2.length,
-      intent: cap.intent.slice(0, 80)
-    });
-    return {
-      success: true,
-      summary: `能力执行完成: ${cap.intent.slice(0, 80)} (${steps2.length} 步)`,
-      durationMs: Date.now() - startedAt,
-      details: { steps: stepLogs, toolchain: steps2 }
-    };
-  }
-  // —── 工作流执行（v0 占位） ─────────────────────────────
-  async executeWorkflow(cap, startedAt) {
-    Logger.log("INFO", "capability_execute_workflow_placeholder", { id: cap.id });
-    return {
-      success: true,
-      summary: `工作流执行 (v0 占位): ${cap.intent.slice(0, 80)}`,
-      durationMs: Date.now() - startedAt,
-      details: { type: "workflow_placeholder", body: cap.executor.body }
-    };
-  }
-  // —── 代码执行（v0 占位） ───────────────────────────────
-  executeCode(cap, startedAt) {
-    Logger.log("INFO", "capability_execute_code_placeholder", { id: cap.id });
-    return {
-      success: true,
-      summary: `代码执行 (v0 占位): ${cap.intent.slice(0, 80)}`,
-      durationMs: Date.now() - startedAt,
-      details: { type: "code_placeholder", bodyLength: cap.executor.body.length }
-    };
-  }
-}
-const EVOLUTION_STATE_PATH$1 = path$1.join(WORKSPACE.evolution, "living_plan", "evolution_state.json");
-const LIVING_PLAN_DIR$1 = path$1.join(WORKSPACE.evolution, "living_plan");
-const GOLDEN_CONFIG = {
-  promptTrimMode: true,
-  analysisStuckTimeoutMs: 3e4,
-  analysisTimeoutMs: 15e4,
-  historyMaxEntries: 10
-};
-const registry = /* @__PURE__ */ new Map();
-function register(action) {
-  registry.set(action.name, action);
-}
-function get(name2) {
-  return registry.get(name2);
-}
-function list() {
-  return Array.from(registry.values());
-}
-register({
-  name: "fix_config",
-  description: "修复 evolution_state.json 中的配置漂移",
-  category: "config_fix",
-  run: async (params) => {
-    const startedAt = Date.now();
-    try {
-      if (!fs.existsSync(EVOLUTION_STATE_PATH$1)) {
-        return { success: false, summary: `evolution_state.json 不存在`, durationMs: Date.now() - startedAt };
-      }
-      const raw = fs.readFileSync(EVOLUTION_STATE_PATH$1, "utf-8");
-      const state = JSON.parse(raw);
-      const oldValue = state[params.key];
-      if (oldValue === params.value) {
-        return {
-          success: true,
-          summary: `${params.key} 已经是期望值 ${JSON.stringify(params.value)}，无需修正`,
-          durationMs: Date.now() - startedAt
-        };
-      }
-      state[params.key] = params.value;
-      const driftHistory = Array.isArray(state.configDriftHistory) ? [...state.configDriftHistory] : [];
-      driftHistory.push({
-        timestamp: Date.now(),
-        key: params.key,
-        from: oldValue,
-        to: params.value,
-        reason: params.reason || "evolution_action"
-      });
-      if (driftHistory.length > 50) driftHistory.splice(0, driftHistory.length - 50);
-      state.configDriftHistory = driftHistory;
-      fs.writeFileSync(EVOLUTION_STATE_PATH$1, JSON.stringify(state, null, 2), "utf-8");
-      Logger.log("INFO", "action_fix_config", { key: params.key, from: oldValue, to: params.value });
-      return {
-        success: true,
-        summary: `${params.key}: ${JSON.stringify(oldValue)} → ${JSON.stringify(params.value)}`,
-        durationMs: Date.now() - startedAt,
-        details: { key: params.key, from: oldValue, to: params.value }
-      };
-    } catch (err) {
-      return { success: false, summary: `fix_config 失败: ${err.message}`, durationMs: Date.now() - startedAt };
-    }
-  }
-});
-register({
-  name: "run_script",
-  description: "执行 living_plan/ 目录下的工具脚本",
-  category: "script_run",
-  run: async (params) => {
-    const startedAt = Date.now();
-    const scriptPath = path$1.join(LIVING_PLAN_DIR$1, params.script);
-    try {
-      if (!fs.existsSync(scriptPath)) {
-        return { success: false, summary: `脚本不存在: ${params.script}`, durationMs: Date.now() - startedAt };
-      }
-      const mod = await import(
-        /* @vite-ignore */
-        scriptPath
-      );
-      if (params.exportName) {
-        const fn = mod[params.exportName];
-        if (typeof fn !== "function") {
-          return {
-            success: false,
-            summary: `脚本 ${params.script} 未导出函数 ${params.exportName}`,
-            durationMs: Date.now() - startedAt
-          };
-        }
-        const result = params.args ? await fn(params.args) : await fn();
-        Logger.log("INFO", "action_run_script", { script: params.script, exportName: params.exportName, success: true });
-        return {
-          success: true,
-          summary: `执行 ${params.script}#${params.exportName} 完成`,
-          durationMs: Date.now() - startedAt,
-          details: result
-        };
-      }
-      Logger.log("INFO", "action_run_script", { script: params.script, exportName: "(module loaded)", success: true });
-      return {
-        success: true,
-        summary: `加载 ${params.script} 完成`,
-        durationMs: Date.now() - startedAt
-      };
-    } catch (err) {
-      return { success: false, summary: `执行 ${params.script} 失败: ${err.message}`, durationMs: Date.now() - startedAt };
-    }
-  }
-});
-register({
-  name: "verify_state",
-  description: "验证 evolution_state.json 配置是否与黄金配置一致",
-  category: "verify",
-  run: async (params) => {
-    const startedAt = Date.now();
-    const expected = params?.expected || GOLDEN_CONFIG;
-    try {
-      if (!fs.existsSync(EVOLUTION_STATE_PATH$1)) {
-        return { success: false, summary: `evolution_state.json 不存在`, durationMs: Date.now() - startedAt };
-      }
-      const raw = fs.readFileSync(EVOLUTION_STATE_PATH$1, "utf-8");
-      const state = JSON.parse(raw);
-      const drifts = [];
-      for (const [key, expectedValue] of Object.entries(expected)) {
-        if (state[key] !== expectedValue) {
-          drifts.push({ key, expected: expectedValue, actual: state[key] });
-        }
-      }
-      if (drifts.length === 0) {
-        return { success: true, summary: "所有配置值与黄金配置一致", durationMs: Date.now() - startedAt, details: { drifted: false } };
-      }
-      return {
-        success: true,
-        summary: `检测到 ${drifts.length} 个配置漂移: ${drifts.map((d) => `${d.key}=${JSON.stringify(d.actual)}`).join(", ")}`,
-        durationMs: Date.now() - startedAt,
-        details: { drifted: true, drifts }
-      };
-    } catch (err) {
-      return { success: false, summary: `verify_state 失败: ${err.message}`, durationMs: Date.now() - startedAt };
-    }
-  }
-});
-register({
-  name: "emit_event",
-  description: "发送 EventBus 事件通知下游服务",
-  category: "git_op",
-  run: async (params) => {
-    const startedAt = Date.now();
-    try {
-      eventBus.emit(params.event, params.payload || {});
-      Logger.log("INFO", "action_emit_event", { event: params.event });
-      return { success: true, summary: `事件已发送: ${params.event}`, durationMs: Date.now() - startedAt };
-    } catch (err) {
-      return { success: false, summary: `emit_event 失败: ${err.message}`, durationMs: Date.now() - startedAt };
-    }
-  }
-});
-register({
-  name: "run_config_watchdog",
-  description: "运行 living_plan/config-watchdog.mjs 的全量配置漂移检测与修正",
-  category: "config_fix",
-  run: async () => {
-    const startedAt = Date.now();
-    const scriptPath = path$1.join(LIVING_PLAN_DIR$1, "config-watchdog.mjs");
-    try {
-      if (!fs.existsSync(scriptPath)) {
-        return { success: false, summary: "config-watchdog.mjs 不存在", durationMs: Date.now() - startedAt };
-      }
-      const mod = await import(
-        /* @vite-ignore */
-        scriptPath
-      );
-      if (typeof mod.runConfigWatchdog !== "function") {
-        return { success: false, summary: "config-watchdog.mjs 未导出 runConfigWatchdog", durationMs: Date.now() - startedAt };
-      }
-      const report = mod.runConfigWatchdog();
-      Logger.log("INFO", "action_run_config_watchdog", {
-        drifted: report.drifted,
-        corrections: report.corrections?.length || 0
-      });
-      if (report.drifted && report.changes && Object.keys(report.changes).length > 0) {
-        const raw = fs.readFileSync(EVOLUTION_STATE_PATH$1, "utf-8");
-        const state = JSON.parse(raw);
-        Object.assign(state, report.changes);
-        fs.writeFileSync(EVOLUTION_STATE_PATH$1, JSON.stringify(state, null, 2), "utf-8");
-        Logger.log("INFO", "action_config_watchdog_applied", { changes: Object.keys(report.changes).join(", ") });
-      }
-      return {
-        success: true,
-        summary: report.message || `配置检查完成，${report.corrections?.length || 0} 个修正`,
-        durationMs: Date.now() - startedAt,
-        details: report
-      };
-    } catch (err) {
-      return { success: false, summary: `run_config_watchdog 失败: ${err.message}`, durationMs: Date.now() - startedAt };
-    }
-  }
-});
-register({
-  name: "run_goal_tracker",
-  description: "运行 living_plan/goal-tracker.mjs 更新目标进度",
-  category: "script_run",
-  run: async () => {
-    const startedAt = Date.now();
-    const scriptPath = path$1.join(LIVING_PLAN_DIR$1, "goal-tracker.mjs");
-    try {
-      if (!fs.existsSync(scriptPath)) {
-        return { success: false, summary: "goal-tracker.mjs 不存在", durationMs: Date.now() - startedAt };
-      }
-      const mod = await import(
-        /* @vite-ignore */
-        scriptPath
-      );
-      if (typeof mod.updateAllGoalProgresses !== "function") {
-        return { success: false, summary: "goal-tracker.mjs 未导出 updateAllGoalProgresses", durationMs: Date.now() - startedAt };
-      }
-      const result = mod.updateAllGoalProgresses();
-      Logger.log("INFO", "action_goal_tracker", { result });
-      return {
-        success: true,
-        summary: result ? `目标进度已更新` : `目标进度更新完成（无可更新目标）`,
-        durationMs: Date.now() - startedAt,
-        details: result
-      };
-    } catch (err) {
-      return { success: false, summary: `run_goal_tracker 失败: ${err.message}`, durationMs: Date.now() - startedAt };
-    }
-  }
-});
-register({
-  name: "batch_fix_config",
-  description: "检测并批量修正 evolution_state.json 中所有已知的配置漂移",
-  category: "config_fix",
-  run: async () => {
-    const startedAt = Date.now();
-    try {
-      if (!fs.existsSync(EVOLUTION_STATE_PATH$1)) {
-        return { success: false, summary: `evolution_state.json 不存在`, durationMs: Date.now() - startedAt };
-      }
-      const raw = fs.readFileSync(EVOLUTION_STATE_PATH$1, "utf-8");
-      const state = JSON.parse(raw);
-      const corrections = [];
-      for (const [key, expectedValue] of Object.entries(GOLDEN_CONFIG)) {
-        if (state[key] !== expectedValue) {
-          corrections.push({ key, from: state[key], to: expectedValue });
-          state[key] = expectedValue;
-        }
-      }
-      if (corrections.length === 0) {
-        return {
-          success: true,
-          summary: "所有配置与黄金配置一致，无需修正",
-          durationMs: Date.now() - startedAt,
-          details: { corrected: 0 }
-        };
-      }
-      const driftHistory = Array.isArray(state.configDriftHistory) ? [...state.configDriftHistory] : [];
-      driftHistory.push({
-        timestamp: Date.now(),
-        corrections: corrections.map((c) => `${c.key}: ${JSON.stringify(c.from)} → ${JSON.stringify(c.to)}`),
-        source: "batch_fix_config"
-      });
-      state.configDriftHistory = driftHistory;
-      fs.writeFileSync(EVOLUTION_STATE_PATH$1, JSON.stringify(state, null, 2), "utf-8");
-      Logger.log("INFO", "action_batch_fix_config", { count: corrections.length, corrections });
-      return {
-        success: true,
-        summary: `修正 ${corrections.length} 个配置漂移: ${corrections.map((c) => `${c.key}: ${JSON.stringify(c.from)}→${JSON.stringify(c.to)}`).join(", ")}`,
-        durationMs: Date.now() - startedAt,
-        details: { corrected: corrections.length, corrections }
-      };
-    } catch (err) {
-      return { success: false, summary: `batch_fix_config 失败: ${err.message}`, durationMs: Date.now() - startedAt };
-    }
-  }
-});
-let _capabilityRegistry = null;
-function setCapabilityRegistry(registry2) {
-  _capabilityRegistry = registry2;
-}
-register({
-  name: "capability_execute",
-  description: "执行一个已注册的能力（toolchain/workflow/code）",
-  category: "capability",
-  run: async (params) => {
-    const startedAt = Date.now();
-    try {
-      if (!_capabilityRegistry) {
-        return { success: false, summary: "CapabilityRegistry 未注入", durationMs: Date.now() - startedAt };
-      }
-      const capability = _capabilityRegistry.get(params.capabilityId);
-      if (!capability) {
-        return { success: false, summary: `能力不存在: ${params.capabilityId}`, durationMs: Date.now() - startedAt };
-      }
-      const executor = new CapabilityExecutor();
-      const result = await executor.execute(capability, (id2) => _capabilityRegistry.recordUsage(id2));
-      return result;
-    } catch (err) {
-      return { success: false, summary: `capability_execute 失败: ${err.message?.slice(0, 200)}`, durationMs: Date.now() - startedAt };
-    }
-  }
-});
-async function executeSequence(actions, ctx) {
-  const results = [];
-  for (const item of actions) {
-    const action = registry.get(item.name);
-    if (!action) {
-      results.push({ success: false, summary: `未知动作: ${item.name}`, durationMs: 0 });
-      break;
-    }
-    const nodeId = ctx?.tracer?.recordTool(action.name, item.params || {}, null, { token: 0, latency: 0 });
-    const result = await action.run(item.params, ctx);
-    results.push(result);
-    if (nodeId && ctx?.tracer) {
-      const trace = ctx.tracer.getTrace();
-      const node = trace.nodes.find((n) => n.id === nodeId);
-      if (node) {
-        node.output = result;
-        node.cost.latency = result.durationMs;
-      }
-    }
-    if (!result.success) break;
-  }
-  return results;
-}
-const ActionRegistry = {
-  get,
-  list,
-  executeSequence,
-  setCapabilityRegistry,
-  GOLDEN_CONFIG,
-  EVOLUTION_STATE_PATH: EVOLUTION_STATE_PATH$1,
-  LIVING_PLAN_DIR: LIVING_PLAN_DIR$1
-};
-const LIVING_PLAN_DIR = ActionRegistry.LIVING_PLAN_DIR;
-const EVOLUTION_STATE_PATH = ActionRegistry.EVOLUTION_STATE_PATH;
-const KNOWN_SCRIPTS = [
-  { file: "config-watchdog.mjs", exportName: "runConfigWatchdog", description: "全量配置漂移检测与修正", priority: 90 },
-  { file: "goal-tracker.mjs", exportName: "updateAllGoalProgresses", description: "更新目标进度", priority: 60 },
-  { file: "state-manager.mjs", exportName: "readState", description: "读取并验证状态文件完整性", priority: 50 }
-];
-function detectConfigDrifts() {
-  if (!fs.existsSync(EVOLUTION_STATE_PATH)) return [];
-  try {
-    const raw = fs.readFileSync(EVOLUTION_STATE_PATH, "utf-8");
-    const state = JSON.parse(raw);
-    const drifts = [];
-    for (const [key, expected] of Object.entries(ActionRegistry.GOLDEN_CONFIG)) {
-      if (state[key] !== expected) {
-        drifts.push({ key, expected, actual: state[key] });
-      }
-    }
-    return drifts;
-  } catch {
-    return [];
-  }
-}
-function listAvailableScripts() {
-  try {
-    if (!fs.existsSync(LIVING_PLAN_DIR)) return [];
-    return fs.readdirSync(LIVING_PLAN_DIR).filter((f) => f.endsWith(".mjs"));
-  } catch {
-    return [];
-  }
-}
-function extractFixInstructions(summary) {
-  if (!summary) return [];
-  const fixes = [];
-  const lines = summary.split("\n");
-  for (const line of lines) {
-    const match2 = line.match(/##fix:\s*(\w+)\s*=\s*(.+)/);
-    if (match2) {
-      const key = match2[1].trim();
-      const rawValue = match2[2].trim();
-      let value = rawValue;
-      if (/^\d+$/.test(rawValue)) value = parseInt(rawValue, 10);
-      else if (/^\d+\.\d+$/.test(rawValue)) value = parseFloat(rawValue);
-      else if (rawValue === "true") value = true;
-      else if (rawValue === "false") value = false;
-      fixes.push({ key, value });
-    }
-  }
-  return fixes;
-}
-function plan(analysisResult, tracer, capabilities) {
-  const actions = [];
-  const drifts = detectConfigDrifts();
-  if (drifts.length > 0) {
-    tracer?.recordPlan("detect_config_drift", { drifts }, { decision: "batch_fix_config" }, { token: 0, latency: 0 });
-    actions.push({ name: "batch_fix_config" });
-  }
-  if (actions.length === 0 && analysisResult.success) {
-    const fixInstructions = extractFixInstructions(analysisResult.summary);
-    if (fixInstructions.length > 0) {
-      tracer?.recordPlan(
-        "extract_fix_instructions",
-        { count: fixInstructions.length },
-        { decision: "fix_config" },
-        { token: 0, latency: 0 }
-      );
-    }
-    for (const fix of fixInstructions) {
-      if (actions.length >= 3) break;
-      actions.push({
-        name: "fix_config",
-        params: { key: fix.key, value: fix.value, reason: "analysis_fix_instruction" }
-      });
-    }
-  }
-  if (analysisResult.planCreated && actions.length === 0) {
-    tracer?.recordPlan("plan_created_workflow", { planCreated: true }, { decision: "run_config_watchdog" }, { token: 0, latency: 0 });
-    actions.push({ name: "run_config_watchdog" });
-  }
-  if (actions.length === 0) {
-    const availableScripts = listAvailableScripts();
-    if (availableScripts.length > 0) {
-      for (const known of KNOWN_SCRIPTS) {
-        if (availableScripts.includes(known.file)) {
-          tracer?.recordPlan("fallback_script", { script: known.file }, { decision: "run_script" }, { token: 0, latency: 0 });
-          actions.push({ name: "run_script", params: { script: known.file, exportName: known.exportName } });
-          break;
-        }
-      }
-    }
-  }
-  if (actions.length === 0 && capabilities && capabilities.length > 0) {
-    const highConfidence = capabilities.filter((c) => c.metrics.successRate >= 0.7);
-    if (highConfidence.length > 0) {
-      const best = highConfidence.sort((a, b) => b.metrics.successRate - a.metrics.successRate)[0];
-      tracer?.recordPlan(
-        "schedule_capability",
-        { id: best.id, rate: best.metrics.successRate },
-        { decision: "capability_execute" },
-        { token: 0, latency: 0 }
-      );
-      actions.push({ name: "capability_execute", params: { capabilityId: best.id } });
-    }
-  }
-  const capped = actions.slice(0, 3);
-  return {
-    actions: capped.map((a) => ({
-      name: a.name,
-      description: ActionRegistry.get(a.name)?.description || a.name,
-      category: ActionRegistry.get(a.name)?.category || "script_run",
-      run: () => ActionRegistry.get(a.name).run(a.params)
-    })),
-    context: {
-      triggeredBy: `analysis: ${analysisResult.summary?.slice(0, 120)}`,
-      analysisTimestamp: Date.now()
-    }
-  };
-}
-const TRACES_DIR$1 = path$1.join(WORKSPACE.evolution, "traces");
-function ensureTracesDir() {
-  if (!fs.existsSync(TRACES_DIR$1)) {
-    fs.mkdirSync(TRACES_DIR$1, { recursive: true });
-  }
-}
-class ExecutionTracer {
-  trace;
-  nodeSeq = 0;
-  lastNodeId = null;
-  constructor(sessionId) {
-    this.trace = {
-      traceId: `trace_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      sessionId,
-      timestamp: Date.now(),
-      nodes: [],
-      edges: []
-    };
-  }
-  /** 开始一个新阶段（重置 lastNodeId 以断开链路） */
-  startPhase() {
-    this.lastNodeId = null;
-  }
-  /** 记录一个 tool call 节点 */
-  recordTool(name2, input, output, cost) {
-    const id2 = `tool_${this.nodeSeq++}`;
-    this.trace.nodes.push({ id: id2, type: "tool", name: name2, input, output, cost, parentIds: [] });
-    if (this.lastNodeId) {
-      this.trace.edges.push({ from: this.lastNodeId, to: id2, type: "data" });
-    }
-    this.lastNodeId = id2;
-    return id2;
-  }
-  /** 记录一个 plan 决策节点 */
-  recordPlan(name2, input, output, cost) {
-    const id2 = `plan_${this.nodeSeq++}`;
-    this.trace.nodes.push({ id: id2, type: "plan", name: name2, input, output, cost, parentIds: [] });
-    if (this.lastNodeId) {
-      this.trace.edges.push({ from: this.lastNodeId, to: id2, type: "control" });
-    }
-    this.lastNodeId = id2;
-    return id2;
-  }
-  /** 记录一个 state transition 节点 */
-  recordState(name2, input, output) {
-    const id2 = `state_${this.nodeSeq++}`;
-    this.trace.nodes.push({
-      id: id2,
-      type: "state",
-      name: name2,
-      input,
-      output,
-      cost: { token: 0, latency: 0 },
-      parentIds: []
-    });
-    if (this.lastNodeId) {
-      this.trace.edges.push({ from: this.lastNodeId, to: id2, type: "data" });
-    }
-    this.lastNodeId = id2;
-    return id2;
-  }
-  /** 在两节点之间添加一条边（不自动连接 lastNodeId） */
-  addEdge(from, to, type = "data") {
-    this.trace.edges.push({ from, to, type });
-  }
-  /** 获取当前 trace 的完整 DAG */
-  getTrace() {
-    return this.trace;
-  }
-  /** 设置 intent hint（Phase 2 调用） */
-  setIntentHint(hint) {
-    this.trace.intentHint = hint;
-  }
-  /** 将 trace 持久化到 evolution_workspace/traces/ */
-  persist() {
-    ensureTracesDir();
-    const filePath = path$1.join(TRACES_DIR$1, `${this.trace.traceId}.json`);
-    fs.writeFileSync(filePath, JSON.stringify(this.trace, null, 2), "utf-8");
-    Logger.log("INFO", "trace_persisted", { traceId: this.trace.traceId, nodes: this.trace.nodes.length, path: filePath });
-    return filePath;
-  }
-  /** 获取 trace ID */
-  getTraceId() {
-    return this.trace.traceId;
-  }
-  /** 列出所有已持久化的 trace 文件 */
-  static listTraces() {
-    if (!fs.existsSync(TRACES_DIR$1)) return [];
-    return fs.readdirSync(TRACES_DIR$1).filter((f) => f.endsWith(".json")).sort();
-  }
-}
-class IntentExtractor {
-  /** requestId → intent trace（进行中） */
-  pendingTraces = /* @__PURE__ */ new Map();
-  /** 已完成 intent trace 缓存 */
-  completedTraces = [];
-  disposed = false;
-  disposers = [];
-  constructor() {
-    this.subscribe();
-  }
-  subscribe() {
-    const onInput = eventBus.on("agent.input.received", (p) => {
-      if (this.disposed) return;
-      this.appendUserInput(p.requestId, p.text);
-    });
-    this.disposers.push(onInput);
-    const onResponse = eventBus.on("agent.response.generated", (p) => {
-      if (this.disposed) return;
-      this.appendResponse(p.requestId, p.text);
-    });
-    this.disposers.push(onResponse);
-    const onToolInvoked = eventBus.on("agent.tool.invoked", (p) => {
-      if (this.disposed) return;
-      this.appendToolCall(p.tool);
-    });
-    this.disposers.push(onToolInvoked);
-  }
-  /** 用户输入 → 创建新 trace 或追加到已有 trace */
-  appendUserInput(requestId2, text) {
-    let trace = this.pendingTraces.get(requestId2);
-    if (!trace) {
-      trace = {
-        traceId: `intent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        sessionId: requestId2,
-        timestamp: Date.now(),
-        abstractGoal: this.extractAbstractGoal(text),
-        subGoals: [],
-        constraints: this.extractConstraints(text),
-        confidence: 0.5,
-        segments: []
-      };
-      this.pendingTraces.set(requestId2, trace);
-    }
-    trace.segments.push({
-      type: "user_input",
-      text,
-      timestamp: Date.now()
-    });
-    trace.subGoals = this.updateSubGoals(trace);
-    this.scheduleAutoComplete(requestId2, trace);
-  }
-  /** 助手响应 → 追加到对应 trace */
-  appendResponse(requestId2, text) {
-    const trace = this.pendingTraces.get(requestId2);
-    if (!trace) return;
-    trace.segments.push({
-      type: "assistant_response",
-      text,
-      timestamp: Date.now()
-    });
-  }
-  /** 工具调用 → 追加到最近的 trace */
-  appendToolCall(toolName) {
-    let latestTrace = null;
-    let latestTs = 0;
-    for (const trace of this.pendingTraces.values()) {
-      const lastSeg = trace.segments[trace.segments.length - 1];
-      if (lastSeg && lastSeg.timestamp > latestTs) {
-        latestTs = lastSeg.timestamp;
-        latestTrace = trace;
-      }
-    }
-    if (!latestTrace) return;
-    latestTrace.segments.push({
-      type: "tool_call",
-      text: "",
-      toolName,
-      timestamp: Date.now()
-    });
-  }
-  /** 从用户消息提取抽象目标（简单规则，Phase 3 可用 LLM 升级） */
-  extractAbstractGoal(text) {
-    const cleaned = text.replace(/^(请|帮我|帮忙|可以|能不能|需要|想)\s*/i, "").trim();
-    const firstSentence = cleaned.split(/[。！？\n]/)[0]?.trim() || cleaned;
-    return firstSentence.slice(0, 120);
-  }
-  /** 提取约束条件（简单规则） */
-  extractConstraints(text) {
-    const constraints = [];
-    const toolMatch = text.match(/(?:用|使用|通过)\s*(\S+)/);
-    if (toolMatch) constraints.push(`tool:${toolMatch[1]}`);
-    return constraints;
-  }
-  /** 更新子目标列表 */
-  updateSubGoals(trace) {
-    const goals2 = [];
-    for (const seg of trace.segments) {
-      if (seg.type === "user_input") {
-        const text = seg.text;
-        const parts = text.split(/[和并然后,，]/).filter(Boolean);
-        for (const p of parts) {
-          const trimmed = p.trim();
-          if (trimmed && trimmed.length > 4) goals2.push(trimmed.slice(0, 80));
-        }
-      }
-    }
-    return [...new Set(goals2)];
-  }
-  /** 超时自动完成 trace */
-  scheduleAutoComplete(requestId2, trace) {
-    setTimeout(
-      () => {
-        if (this.disposed) return;
-        const t = this.pendingTraces.get(requestId2);
-        if (!t || t === trace) {
-          trace.confidence = Math.min(0.9, 0.5 + trace.segments.length * 0.1);
-          this.completedTraces.push(trace);
-          this.pendingTraces.delete(requestId2);
-          Logger.log("INFO", "intent_trace_completed", {
-            traceId: trace.traceId,
-            goal: trace.abstractGoal,
-            segments: trace.segments.length,
-            confidence: trace.confidence
-          });
-        }
-      },
-      10 * 60 * 1e3
-    ).unref();
-  }
-  /** 获取所有已完成的 intent trace */
-  getCompletedTraces() {
-    return [...this.completedTraces];
-  }
-  /** 获取所有进行中的 intent trace */
-  getPendingTraces() {
-    return new Map(this.pendingTraces);
-  }
-  /** 立即完成指定 requestId 的 trace */
-  completeTrace(requestId2) {
-    const trace = this.pendingTraces.get(requestId2);
-    if (!trace) return null;
-    trace.confidence = Math.min(0.95, 0.5 + trace.segments.length * 0.1);
-    this.completedTraces.push(trace);
-    this.pendingTraces.delete(requestId2);
-    return trace;
-  }
-  dispose() {
-    this.disposed = true;
-    for (const d of this.disposers) d();
-    this.disposers = [];
-  }
-}
-function alignTraces(intent, execution) {
-  if (intent.sessionId === execution.sessionId) {
-    return buildAlignedTrace(intent, execution, 0.9, []);
-  }
-  const timeDelta = Math.abs(execution.timestamp - intent.timestamp);
-  if (timeDelta < 1e4) {
-    return buildAlignedTrace(intent, execution, 0.7, ["time_window_match"]);
-  }
-  if (execution.intentHint && intent.abstractGoal) {
-    const goalNorm = intent.abstractGoal.toLowerCase();
-    const hintNorm = execution.intentHint.toLowerCase();
-    if (goalNorm.includes(hintNorm) || hintNorm.includes(goalNorm)) {
-      return buildAlignedTrace(intent, execution, 0.6, ["keyword_fuzzy_match"]);
-    }
-  }
-  return null;
-}
-function buildAlignedTrace(intent, execution, baseScore, gaps) {
-  const nodeBonus = Math.min(execution.nodes.length * 0.05, 0.2);
-  return {
-    intent,
-    execution,
-    alignmentScore: Math.min(baseScore + nodeBonus, 1),
-    gaps
-  };
-}
-function alignAll(intentTraces, executionTraces) {
-  const aligned = [];
-  const usedExecutions = /* @__PURE__ */ new Set();
-  const usedIntents = /* @__PURE__ */ new Set();
-  for (const intent of intentTraces) {
-    if (usedIntents.has(intent.traceId)) continue;
-    let best = null;
-    for (const execution of executionTraces) {
-      if (usedExecutions.has(execution.traceId)) continue;
-      const result = alignTraces(intent, execution);
-      if (result && (!best || result.alignmentScore > best.alignmentScore)) {
-        best = result;
-      }
-    }
-    if (best) {
-      aligned.push(best);
-      usedExecutions.add(best.execution.traceId);
-      usedIntents.add(best.intent.traceId);
-    }
-  }
-  return aligned;
-}
-const TRACES_DIR = path$1.join(WORKSPACE.evolution, "traces");
-class PatternMiner {
-  /** 从 traces/ 目录加载所有 trace 并挖掘模式 */
-  mine() {
-    const traces = this.loadTraces();
-    if (traces.length === 0) {
-      Logger.log("INFO", "pattern_miner_no_traces");
-      return [];
-    }
-    const candidates = [];
-    candidates.push(...this.detectFrequentChains(traces));
-    candidates.push(...this.detectHighCostChains(traces));
-    candidates.push(...this.detectFailureRecovery(traces));
-    Logger.log("INFO", "pattern_miner_complete", {
-      traces: traces.length,
-      candidates: candidates.length
-    });
-    return candidates;
-  }
-  /** 加载 traces/ 目录中的 execution trace */
-  loadTraces() {
-    if (!fs.existsSync(TRACES_DIR)) return [];
-    const files = fs.readdirSync(TRACES_DIR).filter((f) => f.endsWith(".json"));
-    const traces = [];
-    for (const file of files) {
-      try {
-        const raw = fs.readFileSync(path$1.join(TRACES_DIR, file), "utf-8");
-        traces.push(JSON.parse(raw));
-      } catch {
-      }
-    }
-    return traces;
-  }
-  /** 从 trace 中提取 tool 序列 */
-  extractToolSequence(trace) {
-    return trace.nodes.filter((n) => n.type === "tool").map((n) => n.name);
-  }
-  /**
-   * n-gram 检测：寻找跨 trace 重复出现的 tool 序列
-   * n=2 (pair)、n=3 (triple)
-   */
-  detectFrequentChains(traces) {
-    const pairCounts = /* @__PURE__ */ new Map();
-    const tripleCounts = /* @__PURE__ */ new Map();
-    for (const trace of traces) {
-      const tools = this.extractToolSequence(trace);
-      const toolNodes = trace.nodes.filter((n) => n.type === "tool");
-      for (let i = 0; i < tools.length - 1; i++) {
-        const key = `${tools[i]}→${tools[i + 1]}`;
-        const entry = pairCounts.get(key) || { count: 0, traces: [], latency: [] };
-        entry.count++;
-        if (!entry.traces.includes(trace.traceId)) entry.traces.push(trace.traceId);
-        const lat = (toolNodes[i]?.cost.latency || 0) + (toolNodes[i + 1]?.cost.latency || 0);
-        entry.latency.push(lat);
-        pairCounts.set(key, entry);
-      }
-      for (let i = 0; i < tools.length - 2; i++) {
-        const key = `${tools[i]}→${tools[i + 1]}→${tools[i + 2]}`;
-        const entry = tripleCounts.get(key) || { count: 0, traces: [], latency: [] };
-        entry.count++;
-        if (!entry.traces.includes(trace.traceId)) entry.traces.push(trace.traceId);
-        const lat = (toolNodes[i]?.cost.latency || 0) + (toolNodes[i + 1]?.cost.latency || 0) + (toolNodes[i + 2]?.cost.latency || 0);
-        entry.latency.push(lat);
-        tripleCounts.set(key, entry);
-      }
-    }
-    const candidates = [];
-    for (const [key, entry] of pairCounts) {
-      if (entry.count >= 2 && entry.traces.length >= 2) {
-        const tools = key.split("→");
-        const avgLat = entry.latency.reduce((s, v) => s + v, 0) / entry.latency.length;
-        candidates.push({
-          id: `freq_pair_${tools[0]}_${tools[1]}`,
-          type: "frequent_chain",
-          toolChain: tools,
-          frequency: entry.count,
-          avgLatency: Math.round(avgLat),
-          avgTokenCost: 0,
-          sampleTraceIds: entry.traces.slice(0, 5),
-          confidence: Math.min(0.9, 0.4 + entry.traces.length * 0.1),
-          description: `高频调用链: ${tools[0]} → ${tools[1]} (出现 ${entry.count} 次，${entry.traces.length} 条 trace)`
-        });
-      }
-    }
-    for (const [key, entry] of tripleCounts) {
-      if (entry.count >= 2 && entry.traces.length >= 2) {
-        const tools = key.split("→");
-        const avgLat = entry.latency.reduce((s, v) => s + v, 0) / entry.latency.length;
-        candidates.push({
-          id: `freq_triple_${tools[0]}_${tools[1]}_${tools[2]}`,
-          type: "frequent_chain",
-          toolChain: tools,
-          frequency: entry.count,
-          avgLatency: Math.round(avgLat),
-          avgTokenCost: 0,
-          sampleTraceIds: entry.traces.slice(0, 5),
-          confidence: Math.min(0.95, 0.5 + entry.traces.length * 0.1),
-          description: `高频三步链: ${tools.join(" → ")} (出现 ${entry.count} 次，${entry.traces.length} 条 trace)`
-        });
-      }
-    }
-    return candidates;
-  }
-  /** 检测高成本链：latency 或 token 显著高于平均的 tool 序列 */
-  detectHighCostChains(traces) {
-    const candidates = [];
-    for (const trace of traces) {
-      const toolNodes = trace.nodes.filter((n) => n.type === "tool");
-      if (toolNodes.length === 0) continue;
-      const totalLatency = toolNodes.reduce((s, n) => s + n.cost.latency, 0);
-      const avgLat = totalLatency / toolNodes.length;
-      for (const node of toolNodes) {
-        if (node.cost.latency > avgLat * 3 && node.cost.latency > 1e3) {
-          candidates.push({
-            id: `high_cost_${node.name}_${trace.traceId}`,
-            type: "high_cost_chain",
-            toolChain: [node.name],
-            frequency: 1,
-            avgLatency: node.cost.latency,
-            avgTokenCost: node.cost.token || 0,
-            sampleTraceIds: [trace.traceId],
-            confidence: 0.6,
-            description: `高成本调用: ${node.name} (${node.cost.latency}ms，平均 ${Math.round(avgLat)}ms)`
-          });
-        }
-      }
-    }
-    return candidates;
-  }
-  /** 检测失败恢复模式：tool fail → retry → eventually success */
-  detectFailureRecovery(traces) {
-    const candidates = [];
-    for (const trace of traces) {
-      const planNodes = trace.nodes.filter((n) => n.type === "plan");
-      if (planNodes.length > 0) {
-        const tools = this.extractToolSequence(trace);
-        if (tools.length >= 2) {
-          candidates.push({
-            id: `planned_workflow_${trace.traceId}`,
-            type: "compound_workflow",
-            toolChain: tools,
-            frequency: 1,
-            avgLatency: Math.round(
-              trace.nodes.filter((n) => n.type === "tool").reduce((s, n) => s + n.cost.latency, 0) / Math.max(1, trace.nodes.filter((n) => n.type === "tool").length)
-            ),
-            avgTokenCost: 0,
-            sampleTraceIds: [trace.traceId],
-            confidence: 0.7,
-            description: `计划驱动工作流: ${tools.join(" → ")}`
-          });
-        }
-      }
-    }
-    return candidates;
-  }
-}
-class CapabilityCompiler {
-  registry;
-  constructor(registry2) {
-    this.registry = registry2;
-  }
-  /** 获取底层 registry（供外部读取能力列表） */
-  getRegistry() {
-    return this.registry;
-  }
-  /** 将 pattern candidate 编译为 capability 并注册 */
-  compile(candidate) {
-    const existing = this.registry.findByIntent(candidate.description);
-    if (existing.some((c) => arraysEqual(c.executor.body.split("→"), candidate.toolChain))) {
-      Logger.log("INFO", "capability_compile_skip_duplicate", { id: candidate.id });
-      return null;
-    }
-    const cap = {
-      id: candidate.id,
-      intent: candidate.description,
-      inputSchema: { type: "object", properties: {} },
-      outputSchema: { type: "object", properties: {} },
-      executor: {
-        type: "toolchain",
-        body: candidate.toolChain.join("→")
-      },
-      dependencies: candidate.toolChain,
-      preconditions: [],
-      evaluator: {
-        type: "heuristic",
-        spec: `verify each tool ${candidate.toolChain.length > 1 ? `chain step` : "call"} succeeds`
-      },
-      metrics: {
-        successRate: candidate.confidence,
-        latency: candidate.avgLatency,
-        cost: candidate.avgTokenCost
-      },
-      tier: "experimental",
-      // 新能力默认 experimental
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      usageCount: 0,
-      lastUsedAt: 0
-    };
-    this.registry.register(cap);
-    Logger.log("INFO", "capability_compiled", {
-      id: cap.id,
-      chain: cap.executor.body,
-      confidence: candidate.confidence,
-      tier: cap.tier
-    });
-    return cap;
-  }
-  /** 批量编译多个 candidates */
-  compileAll(candidates) {
-    const compiled = [];
-    for (const c of candidates) {
-      const cap = this.compile(c);
-      if (cap) compiled.push(cap);
-    }
-    Logger.log("INFO", "capability_compile_batch", {
-      candidates: candidates.length,
-      compiled: compiled.length
-    });
-    return compiled;
-  }
-}
-function arraysEqual(a, b) {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
-const CAPABILITIES_DIR = path$1.join(WORKSPACE.evolution, "capabilities");
-function ensureDir(dir) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
-class CapabilityRegistry {
-  capabilities = /* @__PURE__ */ new Map();
-  constructor() {
-    this.loadAll();
-  }
-  /** 注册一个能力（同 id 覆盖） */
-  register(cap) {
-    cap.updatedAt = Date.now();
-    this.capabilities.set(cap.id, cap);
-    this.persist(cap);
-    Logger.log("INFO", "capability_registered", { id: cap.id, tier: cap.tier, intent: cap.intent.slice(0, 80) });
-  }
-  /** 按 id 获取能力 */
-  get(id2) {
-    return this.capabilities.get(id2);
-  }
-  /** 按 tier 列出能力 */
-  list(tier) {
-    const all = Array.from(this.capabilities.values());
-    if (tier) return all.filter((c) => c.tier === tier);
-    return all;
-  }
-  /** 根据意图查找匹配的能力 */
-  findByIntent(intent) {
-    const lowered = intent.toLowerCase();
-    return Array.from(this.capabilities.values()).filter(
-      (c) => c.intent.toLowerCase().includes(lowered) || lowered.includes(c.intent.toLowerCase())
-    );
-  }
-  /** 删除一个能力（core 不可删除） */
-  remove(id2) {
-    const cap = this.capabilities.get(id2);
-    if (!cap) return false;
-    if (cap.tier === "core") {
-      Logger.log("WARN", "capability_remove_core_denied", { id: id2 });
-      return false;
-    }
-    this.capabilities.delete(id2);
-    this.removeFile(id2);
-    Logger.log("INFO", "capability_removed", { id: id2, tier: cap.tier });
-    return true;
-  }
-  /** 使用计数 +1 */
-  recordUsage(id2) {
-    const cap = this.capabilities.get(id2);
-    if (!cap) return;
-    cap.usageCount++;
-    cap.lastUsedAt = Date.now();
-    cap.updatedAt = Date.now();
-    this.persist(cap);
-  }
-  /** 归档未使用的衍生能力（usageCount=0 且超过 7 天） */
-  archiveUnused() {
-    const now = Date.now();
-    const cutoff = now - 7 * 24 * 60 * 60 * 1e3;
-    let archived = 0;
-    for (const [id2, cap] of this.capabilities) {
-      if (cap.tier === "derived" && cap.usageCount === 0 && cap.createdAt < cutoff) {
-        this.capabilities.delete(id2);
-        this.removeFile(id2);
-        Logger.log("INFO", "capability_archived", { id: id2, intent: cap.intent.slice(0, 80) });
-        archived++;
-      }
-    }
-    return archived;
-  }
-  /** 降级低成功率的能力 */
-  degradeLowSuccess(threshold = 0.4) {
-    let degraded = 0;
-    for (const cap of this.capabilities.values()) {
-      if (cap.tier === "core") continue;
-      if (cap.metrics.successRate < threshold && cap.tier !== "experimental") {
-        cap.tier = "experimental";
-        cap.updatedAt = Date.now();
-        this.persist(cap);
-        Logger.log("INFO", "capability_degraded", { id: cap.id, rate: cap.metrics.successRate });
-        degraded++;
-      }
-    }
-    return degraded;
-  }
-  /** 获取统计信息 */
-  getStats() {
-    const stats = { total: 0, core: 0, derived: 0, experimental: 0 };
-    for (const cap of this.capabilities.values()) {
-      stats.total++;
-      stats[cap.tier]++;
-    }
-    return stats;
-  }
-  // ─── 持久化 ──────────────────────────────────────────────────
-  capPath(id2) {
-    const tier = this.capabilities.get(id2)?.tier || "experimental";
-    return path$1.join(CAPABILITIES_DIR, tier, `${id2}.json`);
-  }
-  persist(cap) {
-    const dir = path$1.join(CAPABILITIES_DIR, cap.tier);
-    ensureDir(dir);
-    fs.writeFileSync(path$1.join(dir, `${cap.id}.json`), JSON.stringify(cap, null, 2), "utf-8");
-  }
-  removeFile(id2) {
-    try {
-      const f = this.capPath(id2);
-      if (fs.existsSync(f)) {
-        const { unlinkSync } = require("fs");
-        unlinkSync(f);
-      }
-    } catch {
-    }
-  }
-  /** 启动时从磁盘加载所有能力 */
-  loadAll() {
-    for (const tier of ["core", "derived", "experimental"]) {
-      const dir = path$1.join(CAPABILITIES_DIR, tier);
-      if (!fs.existsSync(dir)) continue;
-      try {
-        const { readdirSync } = require("fs");
-        const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
-        for (const file of files) {
-          try {
-            const raw = fs.readFileSync(path$1.join(dir, file), "utf-8");
-            const cap = JSON.parse(raw);
-            this.capabilities.set(cap.id, cap);
-          } catch {
-          }
-        }
-      } catch {
-      }
-    }
-  }
-}
-const OBSERVATIONS_DIR = path$1.join(WORKSPACE.evolution, "cpp", "regressor");
-const SHIFT_THRESHOLD = 0.15;
-const DEFAULT_WINDOW_SIZE = 5;
-class BehavioralRegressor {
-  windowSize;
-  observations = /* @__PURE__ */ new Map();
-  constructor(windowSize) {
-    this.windowSize = windowSize ?? DEFAULT_WINDOW_SIZE;
-    this.loadObservations();
-  }
-  /** 评估单个能力的回归状态 */
-  evaluate(capability) {
-    const obs = this.observations.get(capability.id) || [];
-    if (obs.length < this.windowSize || capability.usageCount < this.windowSize) {
-      return { passed: true, shift: 0, trend: "stable", detail: "数据不足，跳过回归检测" };
-    }
-    const recent = obs.slice(-this.windowSize);
-    const recentAvg = recent.reduce((s, o) => s + o.successRate, 0) / recent.length;
-    const overall = capability.metrics.successRate;
-    const shift = Math.max(0, overall - recentAvg);
-    const slope = this.estimateSlope(recent);
-    let trend = "stable";
-    if (slope < -0.02) trend = "declining";
-    else if (slope > 0.02) trend = "improving";
-    const passed = shift < SHIFT_THRESHOLD;
-    return {
-      passed,
-      shift: Math.round(shift * 100) / 100,
-      trend,
-      detail: passed ? `偏移量 ${(shift * 100).toFixed(1)}% (阈值 ${SHIFT_THRESHOLD * 100}%)，${trend}` : `检测到回归：最近 ${this.windowSize} 次平均 ${(recentAvg * 100).toFixed(1)}% vs 整体 ${(overall * 100).toFixed(1)}%，偏移 ${(shift * 100).toFixed(1)}%`
-    };
-  }
-  /** 记录一次执行观测 */
-  recordObservation(capabilityId, successRate, latency) {
-    if (!this.observations.has(capabilityId)) {
-      this.observations.set(capabilityId, []);
-    }
-    const list2 = this.observations.get(capabilityId);
-    list2.push({ successRate, latency, timestamp: Date.now() });
-    this.persist(capabilityId, list2);
-  }
-  // —── 内部方法 ─────────────────────────────────────
-  estimateSlope(obs) {
-    if (obs.length < 2) return 0;
-    const n = obs.length;
-    const indices = obs.map((_, i) => i);
-    const rates = obs.map((o) => o.successRate);
-    const meanX = indices.reduce((s, x) => s + x, 0) / n;
-    const meanY = rates.reduce((s, y) => s + y, 0) / n;
-    let num = 0, den = 0;
-    for (let i = 0; i < n; i++) {
-      num += (indices[i] - meanX) * (rates[i] - meanY);
-      den += (indices[i] - meanX) ** 2;
-    }
-    return den === 0 ? 0 : num / den;
-  }
-  obsPath(id2) {
-    return path$1.join(OBSERVATIONS_DIR, `${id2}.json`);
-  }
-  persist(id2, obs) {
-    if (!fs.existsSync(OBSERVATIONS_DIR)) fs.mkdirSync(OBSERVATIONS_DIR, { recursive: true });
-    fs.writeFileSync(this.obsPath(id2), JSON.stringify(obs.slice(-100)), "utf-8");
-  }
-  loadObservations() {
-    if (!fs.existsSync(OBSERVATIONS_DIR)) return;
-    try {
-      const { readdirSync } = require("fs");
-      const files = readdirSync(OBSERVATIONS_DIR).filter((f) => f.endsWith(".json"));
-      for (const file of files) {
-        try {
-          const id2 = file.replace(/\.json$/, "");
-          const raw = fs.readFileSync(this.obsPath(id2), "utf-8");
-          this.observations.set(id2, JSON.parse(raw));
-        } catch {
-        }
-      }
-      Logger.log("INFO", "behavioral_regressor_loaded", { count: this.observations.size });
-    } catch {
-      Logger.log("INFO", "behavioral_regressor_load_skip");
-    }
-  }
-}
-class ContaminationDetector {
-  evaluate(capability) {
-    const hasDeps = capability.dependencies.length > 0;
-    const hasPreconditions = capability.preconditions.length > 0;
-    const isToolchain = capability.executor.type === "toolchain";
-    const isCode = capability.executor.type === "code";
-    const isExperimental = capability.tier === "experimental";
-    const isDerived = capability.tier === "derived";
-    const suspiciousPaths = [];
-    if (!hasDeps && isToolchain) {
-      const toolCount = capability.executor.body.split("→").filter((s) => s.trim()).length;
-      if (toolCount > 3) {
-        suspiciousPaths.push("executor.body (多步骤工具链，无依赖声明)");
-        Logger.log("WARN", "contamination_medium_risk", {
-          id: capability.id,
-          reason: "toolchain with no deps",
-          toolCount
-        });
-        return {
-          passed: true,
-          risk: "medium",
-          suspiciousPaths,
-          detail: `多步骤工具链 (${toolCount} 步) 无依赖声明，存在副作用泄露风险`
-        };
-      }
-    }
-    if (!hasDeps && !hasPreconditions && isExperimental) {
-      suspiciousPaths.push("declared scope (无任何边界声明)");
-      Logger.log("WARN", "contamination_high_risk", {
-        id: capability.id,
-        reason: "experimental with no boundaries"
-      });
-      return {
-        passed: false,
-        risk: "high",
-        suspiciousPaths,
-        detail: "Experimental 能力无任何依赖/前置条件声明，无法保证边界安全"
-      };
-    }
-    if (!hasDeps && isCode) {
-      suspiciousPaths.push("executor.body (代码执行器，无依赖声明)");
-      return {
-        passed: true,
-        risk: "medium",
-        suspiciousPaths,
-        detail: "代码执行器无依赖声明，无法确认无副作用"
-      };
-    }
-    if (!hasPreconditions && isDerived) {
-      return {
-        passed: true,
-        risk: "low",
-        suspiciousPaths: [],
-        detail: "Derived 能力无前置条件，建议补充"
-      };
-    }
-    return {
-      passed: true,
-      risk: "low",
-      suspiciousPaths: [],
-      detail: "能力有完整的依赖和前置条件声明，无污染风险"
-    };
-  }
-}
-class CapabilityGC {
-  registry;
-  constructor(registry2) {
-    this.registry = registry2;
-  }
-  /** 执行垃圾回收，返回回收统计 */
-  collect() {
-    const allCaps = this.registry.list();
-    const details = [];
-    let freedBytes = 0;
-    let archived = 0;
-    let degraded = 0;
-    const now = Date.now();
-    for (const cap of allCaps) {
-      if (cap.tier === "core") {
-        details.push({ id: cap.id, action: "kept", reason: "core 能力不可回收" });
-        continue;
-      }
-      const coldness = this.computeColdness(cap, now);
-      if (coldness > 0.85 && cap.tier === "experimental") {
-        archived++;
-        freedBytes += this.estimateSize(cap);
-        details.push({ id: cap.id, action: "archived", reason: `冷度 ${coldness.toFixed(2)}，experimental 直接归档` });
-        Logger.log("INFO", "capability_gc_archived", { id: cap.id, coldness: coldness.toFixed(2) });
-        continue;
-      }
-      if (coldness > 0.7 && cap.tier !== "core") {
-        archived++;
-        freedBytes += this.estimateSize(cap);
-        details.push({ id: cap.id, action: "archived", reason: `冷度 ${coldness.toFixed(2)} > 0.70` });
-        Logger.log("INFO", "capability_gc_archived", { id: cap.id, coldness: coldness.toFixed(2) });
-        continue;
-      }
-      if (coldness > 0.45 && cap.tier === "derived") {
-        degraded++;
-        details.push({ id: cap.id, action: "degraded", reason: `冷度 ${coldness.toFixed(2)} > 0.45，降级到 experimental` });
-        Logger.log("INFO", "capability_gc_degraded", { id: cap.id, coldness: coldness.toFixed(2) });
-        continue;
-      }
-      details.push({ id: cap.id, action: "kept", reason: `冷度 ${coldness.toFixed(2)}，保留` });
-    }
-    const actualArchived = this.registry.archiveUnused();
-    archived = Math.max(archived, actualArchived);
-    Logger.log("INFO", "capability_gc_complete", { archived, degraded, freedBytes, total: allCaps.length });
-    return { archived, degraded, freedBytes, details };
-  }
-  // —── 内部方法 ─────────────────────────────────────
-  computeColdness(cap, now) {
-    const daysSinceLastUse = cap.lastUsedAt > 0 ? (now - cap.lastUsedAt) / (1e3 * 60 * 60 * 24) : (now - cap.createdAt) / (1e3 * 60 * 60 * 24);
-    const staleness = Math.min(1, Math.max(0, daysSinceLastUse / 30));
-    const failurePenalty = 1 - cap.metrics.successRate;
-    const costInefficiency = Math.min(1, cap.metrics.cost / 1e3);
-    const dependencyBonus = Math.min(1, cap.dependencies.length * 0.15);
-    return Math.max(0, Math.min(1, staleness * 0.4 + failurePenalty * 0.3 + costInefficiency * 0.2 - dependencyBonus * 0.1));
-  }
-  estimateSize(cap) {
-    const path2 = path$1.join(WORKSPACE.evolution, "capabilities", cap.tier, `${cap.id}.json`);
-    try {
-      if (fs.existsSync(path2)) return fs.statSync(path2).size;
-    } catch {
-    }
-    return Buffer.byteLength(JSON.stringify(cap), "utf-8");
-  }
-}
-class PreservationEngine {
-  registry;
-  regressor;
-  contaminationDetector;
-  gc;
-  weights;
-  constructor(registry2) {
-    this.registry = registry2;
-    this.regressor = new BehavioralRegressor();
-    this.contaminationDetector = new ContaminationDetector();
-    this.gc = new CapabilityGC(registry2);
-    this.weights = this.defaultWeights();
-  }
-  // ==================== 公开 API ====================
-  /** 评估单个能力 */
-  evaluate(capability) {
-    const dims = this.evaluateAllDimensions(capability);
-    const overallScore = this.computeScore(dims);
-    const recommendedAction = this.determineAction(capability, overallScore, dims);
-    Logger.log("INFO", "preservation_evaluate", {
-      id: capability.id,
-      score: overallScore.toFixed(2),
-      action: recommendedAction,
-      dims: dims.filter((d) => !d.passed).map((d) => `D${d.dimension}`).join(",")
-    });
-    return {
-      capabilityId: capability.id,
-      overallScore: Math.round(overallScore * 100) / 100,
-      dimensions: dims,
-      recommendedAction,
-      timestamp: Date.now()
-    };
-  }
-  /** 评估所有能力 */
-  evaluateAll() {
-    const all = this.registry.list();
-    if (all.length === 0) {
-      return { total: 0, passed: 0, failed: 0, actions: { archived: 0, degraded: 0, blocked: 0 }, avgScore: 0, timestamp: Date.now() };
-    }
-    let passedCount = 0;
-    let totalScore = 0;
-    let archived = 0;
-    let degraded = 0;
-    let blocked = 0;
-    for (const cap of all) {
-      const report = this.evaluate(cap);
-      totalScore += report.overallScore;
-      if (report.overallScore >= 0.6) passedCount++;
-      if (report.recommendedAction === "archive") archived++;
-      else if (report.recommendedAction === "degrade") degraded++;
-      else if (report.recommendedAction === "block") blocked++;
-    }
-    return {
-      total: all.length,
-      passed: passedCount,
-      failed: all.length - passedCount,
-      actions: { archived, degraded, blocked },
-      avgScore: Math.round(totalScore / all.length * 100) / 100,
-      timestamp: Date.now()
-    };
-  }
-  /** 执行推荐动作（归档/降级/屏蔽） */
-  prune() {
-    let count = 0;
-    const all = this.registry.list();
-    for (const cap of all) {
-      if (cap.tier === "core") continue;
-      const report = this.evaluate(cap);
-      switch (report.recommendedAction) {
-        case "archive":
-          this.registry.remove(cap.id);
-          Logger.log("INFO", "preservation_pruned_archived", { id: cap.id, score: report.overallScore });
-          count++;
-          break;
-        case "degrade": {
-          const updated = { ...cap, tier: "experimental", updatedAt: Date.now() };
-          this.registry.register(updated);
-          Logger.log("INFO", "preservation_pruned_degraded", { id: cap.id, score: report.overallScore });
-          count++;
-          break;
-        }
-        case "block":
-          this.registry.remove(cap.id);
-          Logger.log("WARN", "preservation_pruned_blocked", { id: cap.id, score: report.overallScore });
-          count++;
-          break;
-      }
-    }
-    const gcResult = this.gc.collect();
-    if (gcResult.archived > 0 || gcResult.degraded > 0) {
-      Logger.log("INFO", "preservation_gc_complement", { archived: gcResult.archived, degraded: gcResult.degraded });
-      count += gcResult.archived + gcResult.degraded;
-    }
-    return count;
-  }
-  // ==================== 9 维评估器 ====================
-  evaluateAllDimensions(cap) {
-    return [
-      this.evaluateCompilation(cap),
-      this.evaluateTests(cap),
-      this.evaluateUsage(cap),
-      this.evaluateLatency(cap),
-      this.evaluateCost(cap),
-      this.evaluateBehavioralRegression(cap),
-      this.evaluateContamination(cap),
-      this.evaluateDependencies(cap),
-      this.evaluatePreconditions(cap)
-    ];
-  }
-  /** D1: 编译/类型安全 */
-  evaluateCompilation(cap) {
-    if (cap.executor.type === "toolchain") {
-      const tools = cap.executor.body.split("→").map((s) => s.trim()).filter(Boolean);
-      if (tools.length === 0) {
-        return { dimension: 1, name: "compilation", passed: false, score: 0, detail: "空工具链" };
-      }
-      return { dimension: 1, name: "compilation", passed: true, score: 1, detail: `工具链格式有效 (${tools.length} 步)` };
-    }
-    try {
-      JSON.parse(cap.executor.body);
-      return { dimension: 1, name: "compilation", passed: true, score: 1, detail: "body 解析通过" };
-    } catch {
-      return { dimension: 1, name: "compilation", passed: false, score: 0, detail: "body 不是有效 JSON" };
-    }
-  }
-  /** D2: 测试通过率 */
-  evaluateTests(cap) {
-    const rate = cap.metrics.successRate;
-    const passed = rate >= 0.7;
-    return {
-      dimension: 2,
-      name: "tests",
-      passed,
-      score: rate,
-      detail: passed ? `通过率 ${(rate * 100).toFixed(0)}%` : `通过率 ${(rate * 100).toFixed(0)}% < 70%`
-    };
-  }
-  /** D3: 使用热度 / 冷度 */
-  evaluateUsage(cap) {
-    const now = Date.now();
-    const daysSinceLastUse = cap.lastUsedAt > 0 ? (now - cap.lastUsedAt) / (1e3 * 60 * 60 * 24) : (now - cap.createdAt) / (1e3 * 60 * 60 * 24);
-    const staleness = Math.min(1, Math.max(0, daysSinceLastUse / 30));
-    const coldness = staleness * 0.4 + (1 - cap.metrics.successRate) * 0.3 + Math.min(1, cap.metrics.cost / 1e3) * 0.2 - Math.min(1, cap.dependencies.length * 0.15) * 0.1;
-    const score = Math.max(0, Math.min(1, 1 - coldness));
-    const passed = coldness < 0.45;
-    return {
-      dimension: 3,
-      name: "usage",
-      passed,
-      score,
-      detail: passed ? `冷度 ${coldness.toFixed(2)}，正常` : `冷度 ${coldness.toFixed(2)} > 0.45，需要关注`
-    };
-  }
-  /** D4: 延迟效率 */
-  evaluateLatency(cap) {
-    const thresholds = { core: 5e3, derived: 1e4, experimental: 3e4 };
-    const threshold = thresholds[cap.tier] || 3e4;
-    const latency = cap.metrics.latency;
-    const score = Math.max(0, Math.min(1, 1 - latency / threshold));
-    const passed = score >= 0.3;
-    return {
-      dimension: 4,
-      name: "latency",
-      passed,
-      score,
-      detail: passed ? `延迟 ${latency}ms < ${threshold}ms (${cap.tier} 阈值)` : `延迟 ${latency}ms > ${threshold}ms (${cap.tier} 阈值)`
-    };
-  }
-  /** D5: 成本效率 */
-  evaluateCost(cap) {
-    const costEfficiency = cap.metrics.cost > 0 ? cap.metrics.successRate / cap.metrics.cost : 1;
-    const score = Math.min(1, Math.max(0, costEfficiency * 100));
-    const passed = score >= 0.3;
-    return {
-      dimension: 5,
-      name: "cost",
-      passed,
-      score,
-      detail: passed ? `成本效率 ${(score * 100).toFixed(0)}%` : `成本效率 ${(score * 100).toFixed(0)}% < 30%`
-    };
-  }
-  /** D6: 行为回归（委托给 BehavioralRegressor） */
-  evaluateBehavioralRegression(cap) {
-    const result = this.regressor.evaluate(cap);
-    return {
-      dimension: 6,
-      name: "regression",
-      passed: result.passed,
-      score: 1 - result.shift,
-      detail: result.detail
-    };
-  }
-  /** D7: 污染检测（委托给 ContaminationDetector） */
-  evaluateContamination(cap) {
-    const result = this.contaminationDetector.evaluate(cap);
-    return {
-      dimension: 7,
-      name: "contamination",
-      passed: result.passed,
-      score: result.risk === "low" ? 1 : result.risk === "medium" ? 0.7 : 0.3,
-      detail: result.detail
-    };
-  }
-  /** D8: 依赖完整性 */
-  evaluateDependencies(cap) {
-    if (cap.dependencies.length === 0) {
-      return { dimension: 8, name: "dependencies", passed: true, score: 1, detail: "无依赖声明" };
-    }
-    let healthy = 0;
-    for (const depId of cap.dependencies) {
-      const dep = this.registry.get(depId);
-      if (dep && dep.metrics.successRate >= 0.4) healthy++;
-    }
-    const ratio = healthy / cap.dependencies.length;
-    const passed = ratio >= 0.8;
-    return {
-      dimension: 8,
-      name: "dependencies",
-      passed,
-      score: ratio,
-      detail: passed ? `依赖健康 ${healthy}/${cap.dependencies.length}` : `依赖失效 ${cap.dependencies.length - healthy} 个`
-    };
-  }
-  /** D9: 前置条件有效性 */
-  evaluatePreconditions(cap) {
-    if (cap.preconditions.length === 0) {
-      return { dimension: 9, name: "preconditions", passed: true, score: 1, detail: "无前置条件" };
-    }
-    let valid = 0;
-    for (const cond of cap.preconditions) {
-      const matched = this.registry.list().some((c) => cond.includes(c.id) || c.intent.includes(cond));
-      if (matched) valid++;
-    }
-    const ratio = valid / cap.preconditions.length;
-    const passed = ratio >= 0.8;
-    return {
-      dimension: 9,
-      name: "preconditions",
-      passed,
-      score: ratio,
-      detail: passed ? `前置条件有效 ${valid}/${cap.preconditions.length}` : `前置条件失效 ${cap.preconditions.length - valid} 个`
-    };
-  }
-  // ==================== 决策逻辑 ====================
-  computeScore(dimensions) {
-    if (dimensions.length !== this.weights.length) return 0;
-    let total = 0;
-    for (let i = 0; i < dimensions.length; i++) {
-      total += dimensions[i].score * this.weights[i];
-    }
-    return total;
-  }
-  determineAction(cap, score, dims) {
-    const failedDims = dims.filter((d) => !d.passed).map((d) => d.dimension);
-    const failedContamination = failedDims.includes(7);
-    if (failedContamination && cap.tier !== "core") return "block";
-    if (score >= 0.6) return "keep";
-    if (score >= 0.35) return "degrade";
-    return "archive";
-  }
-  defaultWeights() {
-    return [0.1, 0.15, 0.1, 0.1, 0.1, 0.15, 0.15, 0.075, 0.075];
-  }
-}
-class EvolutionDecider {
-  lastDecision = null;
-  expandCooldownUntil = 0;
-  preserveCount = 0;
-  optimizeCount = 0;
-  /** 根据输入决定进化方向 */
-  decide(input) {
-    if (input.isDegenerate || input.consecutiveFailures >= 2) {
-      Logger.log("INFO", "evolution_decider_preserve_degraded", {
-        degenerate: input.isDegenerate,
-        failures: input.consecutiveFailures
-      });
-      return this.makeDecision("preserve", "系统退化/失败中，进入保护模式");
-    }
-    if (input.selfEvalTrend === "downward" && input.consecutiveFailures > 0) {
-      return this.makeDecision("preserve", "自评估下行且存在失败，保护优先");
-    }
-    if (this.expandCooldownUntil > Date.now()) {
-      if (this.optimizeCount < 2) {
-        return this.makeDecision("optimize", "expand 冷却中，切到优化");
-      }
-      return this.makeDecision("preserve", "expand 冷却中，优化已执行，进入保护");
-    }
-    const expandDecision = this.checkExpandTriggers(input);
-    if (expandDecision) {
-      this.expandCooldownUntil = Date.now() + 2 * 60 * 60 * 1e3;
-      this.optimizeCount = 0;
-      return expandDecision;
-    }
-    if (this.shouldOptimize(input)) {
-      this.optimizeCount++;
-      return this.makeDecision("optimize", "有可优化的能力");
-    }
-    this.preserveCount++;
-    return this.makeDecision("preserve", "无触发条件，执行常规保护");
-  }
-  /** 重置状态 */
-  reset() {
-    this.lastDecision = null;
-    this.expandCooldownUntil = 0;
-    this.preserveCount = 0;
-    this.optimizeCount = 0;
-  }
-  /** 获取上次决策 */
-  getLastDecision() {
-    return this.lastDecision;
-  }
-  // —── 内部方法 ─────────────────────────────────────
-  checkExpandTriggers(input) {
-    const { patterns, capabilities } = input;
-    const frequentChains = patterns.filter((p) => p.type === "frequent_chain" && p.frequency >= 3);
-    if (frequentChains.length > 0) {
-      const existing = capabilities.some((c) => frequentChains.some((fc) => fc.toolChain.some((t) => c.executor.body.includes(t))));
-      const best = frequentChains.reduce((a, b) => a.frequency > b.frequency ? a : b);
-      if (!existing) {
-        return this.makeDecision(
-          "expand",
-          `高频工具链 "${best.toolChain.slice(0, 3).join("→")}" 出现 ${best.frequency} 次，扩展新能力`,
-          "horizontal",
-          `【进化方向】系统检测到高频工具链模式，建议关注 "${best.toolChain.slice(0, 3).join("→")}" 相关能力的扩展`
-        );
-      }
-      return this.makeDecision("expand", `高频工具链 "${best.toolChain.slice(0, 3).join("→")}" 已存在，尝试更深优化`, "vertical");
-    }
-    const highCostChains = patterns.filter((p) => p.type === "high_cost_chain");
-    if (highCostChains.length > 0) {
-      const avgCost = highCostChains.reduce((s, c) => s + c.avgTokenCost, 0) / highCostChains.length;
-      if (avgCost > 500) {
-        return this.makeDecision(
-          "expand",
-          `高成本链 ${highCostChains.length} 条 (avg ${avgCost} tokens)，尝试压缩`,
-          "compression",
-          `【进化方向】检测到高 token 消耗模式，建议压缩冗余步骤以降低成本`
-        );
-      }
-    }
-    const failureRecoveries = patterns.filter((p) => p.type === "failure_recovery");
-    if (failureRecoveries.length >= 2) {
-      return this.makeDecision(
-        "expand",
-        `错误修复模式 ${failureRecoveries.length} 次，深入优化稳定性`,
-        "vertical",
-        `【进化方向】重复错误模式检测，建议深挖根因并添加防御性检查`
-      );
-    }
-    return null;
-  }
-  shouldOptimize(input) {
-    const highCost = input.patterns.filter((p) => p.type === "high_cost_chain");
-    if (highCost.length > 0) return true;
-    const failures = input.patterns.filter((p) => p.type === "failure_recovery");
-    if (failures.length > 0) return true;
-    return false;
-  }
-  makeDecision(direction, reason, expandMode, contextHint) {
-    const decision = {
-      direction,
-      reason,
-      expandMode,
-      confidence: direction === "preserve" ? 0.8 : 0.6,
-      contextHint
-    };
-    this.lastDecision = decision;
-    Logger.log("INFO", "evolution_decider", {
-      direction,
-      expandMode,
-      reason
-    });
-    return decision;
-  }
-}
-class EvolutionController {
-  decider;
-  state;
-  constructor() {
-    this.decider = new EvolutionDecider();
-    this.state = this.freshState();
-  }
-  /** 执行一个决策周期（在每次 runAnalysisCycle 开始时调用） */
-  decide(input) {
-    const deciderInput = {
-      patterns: input.patterns,
-      capabilities: input.capabilities,
-      consecutiveFailures: input.consecutiveFailures,
-      isDegenerate: input.isDegenerate,
-      selfEvalTrend: input.selfEvalTrend,
-      afterPreservation: input.afterPreservation
-    };
-    const decision = this.decider.decide(deciderInput);
-    this.recordDecision(decision);
-    return decision;
-  }
-  /** 获取控制器当前状态 */
-  getState() {
-    return { ...this.state };
-  }
-  /** 重置控制器（新 epoch 开始时） */
-  reset() {
-    this.decider.reset();
-    this.state = this.freshState();
-    Logger.log("INFO", "evolution_controller_reset");
-  }
-  /** 健康检查 */
-  isHealthy() {
-    const recent = this.state.directionHistory.slice(-5);
-    const unique = new Set(recent.map((d) => d.direction));
-    if (unique.size === 1 && recent[0]?.direction === "preserve" && recent.length >= 5) {
-      return false;
-    }
-    if (this.state.directionHistory.length >= 10) {
-      const last10 = this.state.directionHistory.slice(-10);
-      const preserveRatio = last10.filter((d) => d.direction === "preserve").length / 10;
-      if (preserveRatio >= 0.8) return false;
-    }
-    return true;
-  }
-  /** 获取可注入到分析 prompt 的进化上下文 */
-  getContextHint() {
-    const decision = this.decider.getLastDecision();
-    if (!decision) return void 0;
-    const parts = [`当前方向: ${this.directionLabel(decision)}`];
-    parts.push(`置信度: ${(decision.confidence * 100).toFixed(0)}%`);
-    if (decision.contextHint) {
-      parts.push(decision.contextHint);
-    } else {
-      parts.push(`原因: ${decision.reason}`);
-    }
-    return parts.join("\n");
-  }
-  /** 生成文本摘要 */
-  getFormattedContext() {
-    const s = this.state;
-    const lines = [
-      "=== EvolutionController 状态 ===",
-      `方向: ${s.currentDirection}${s.currentExpandMode ? ` (${s.currentExpandMode})` : ""}`,
-      `总周期: ${s.totalCycles} | E:${s.expandCount} O:${s.optimizeCount} P:${s.preserveCount}`,
-      `健康: ${this.isHealthy() ? "正常" : "停滞"}`,
-      `最近决策: ${s.directionHistory.slice(-3).map((d) => `${d.direction}(${d.reason.slice(0, 20)})`).join(" → ")}`
-    ];
-    return lines.join("\n");
-  }
-  // —── 内部方法 ─────────────────────────────────────
-  freshState() {
-    return {
-      currentDirection: "preserve",
-      directionHistory: [],
-      lastDecision: null,
-      totalCycles: 0,
-      expandCount: 0,
-      optimizeCount: 0,
-      preserveCount: 0
-    };
-  }
-  recordDecision(decision) {
-    this.state.totalCycles++;
-    this.state.currentDirection = decision.direction;
-    this.state.currentExpandMode = decision.expandMode;
-    this.state.lastDecision = decision;
-    switch (decision.direction) {
-      case "expand":
-        this.state.expandCount++;
-        break;
-      case "optimize":
-        this.state.optimizeCount++;
-        break;
-      case "preserve":
-        this.state.preserveCount++;
-        break;
-    }
-    this.state.directionHistory.push({
-      direction: decision.direction,
-      timestamp: Date.now(),
-      reason: decision.reason
-    });
-    if (this.state.directionHistory.length > 100) {
-      this.state.directionHistory = this.state.directionHistory.slice(-100);
-    }
-  }
-  directionLabel(decision) {
-    if (decision.direction === "expand" && decision.expandMode) {
-      return `expand (${decision.expandMode})`;
-    }
-    return decision.direction;
-  }
-}
-function createMessageId() {
-  return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-function createSessionId() {
-  return `session_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-}
-function insertMessage(msg) {
-  try {
-    const db2 = getRawDb();
-    db2.run(
-      `INSERT INTO messages (id, source, role, content, category, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        msg.id,
-        msg.source,
-        msg.role,
-        msg.content,
-        msg.category,
-        msg.sessionId ?? null,
-        msg.telegramChatId ?? null,
-        msg.telegramUserId ?? null,
-        msg.telegramFrom ?? null,
-        msg.telegramMessageId ?? null,
-        msg.createdAt
-      ]
-    );
-    markDirty();
-  } catch (err) {
-    Logger.log("ERROR", "db_insert_message_failed", { error: String(err) });
-  }
-}
-function getRecentMessages(limit = 100) {
-  try {
-    const db2 = getRawDb();
-    const rows = db2.exec(
-      `SELECT id, source, role, content, category, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at
-       FROM messages ORDER BY created_at ASC LIMIT ?`,
-      [limit]
-    );
-    if (!rows.length || !rows[0].values.length) return [];
-    const cols = rows[0].columns;
-    return rows[0].values.map((row) => {
-      const obj = {};
-      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i];
-      return rowToMessage(obj);
-    });
-  } catch (err) {
-    Logger.log("ERROR", "db_get_messages_failed", { error: String(err) });
-    return [];
-  }
-}
-function getSessions() {
-  try {
-    const db2 = getRawDb();
-    const rows = db2.exec(
-      `SELECT session_id,
-              (SELECT content FROM messages AS sub WHERE sub.session_id = m.session_id AND sub.role = 'user' ORDER BY sub.created_at ASC LIMIT 1) AS label,
-              (SELECT source FROM messages AS sub2 WHERE sub2.session_id = m.session_id ORDER BY sub2.created_at ASC LIMIT 1) AS source,
-              COALESCE(
-                (SELECT category FROM messages AS sub3 WHERE sub3.session_id = m.session_id AND sub3.category != 'chat' ORDER BY sub3.created_at ASC LIMIT 1),
-                (SELECT category FROM messages AS sub4 WHERE sub4.session_id = m.session_id ORDER BY sub4.created_at ASC LIMIT 1)
-              ) AS category,
-              COUNT(*) AS message_count,
-              MAX(created_at) AS last_activity_at,
-              MIN(created_at) AS created_at
-       FROM messages m
-       WHERE session_id IS NOT NULL
-       GROUP BY session_id
-       ORDER BY last_activity_at DESC`
-    );
-    if (!rows.length || !rows[0].values.length) return [];
-    const cols = rows[0].columns;
-    return rows[0].values.map((row) => {
-      const obj = {};
-      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i];
-      return {
-        id: obj.session_id,
-        source: obj.source === "telegram" ? "telegram" : "electron",
-        category: obj.category || "chat",
-        label: obj.label?.slice(0, 40) || "新对话",
-        messageCount: obj.message_count,
-        lastActivityAt: obj.last_activity_at,
-        createdAt: obj.created_at
-      };
-    });
-  } catch (err) {
-    Logger.log("ERROR", "db_get_sessions_failed", { error: String(err) });
-    return [];
-  }
-}
-function getMessagesBySession(sessionId) {
-  try {
-    const db2 = getRawDb();
-    const rows = db2.exec(
-      `SELECT id, source, role, content, category, session_id, telegram_chat_id, telegram_user_id, telegram_from, telegram_message_id, created_at
-       FROM messages WHERE session_id = ? ORDER BY created_at ASC`,
-      [sessionId]
-    );
-    if (!rows.length || !rows[0].values.length) return [];
-    const cols = rows[0].columns;
-    return rows[0].values.map((row) => {
-      const obj = {};
-      for (let i = 0; i < cols.length; i++) obj[cols[i]] = row[i];
-      return rowToMessage(obj);
-    });
-  } catch (err) {
-    Logger.log("ERROR", "db_get_messages_by_session_failed", { error: String(err), sessionId });
-    return [];
-  }
-}
-function getLastSessionId() {
-  try {
-    const db2 = getRawDb();
-    const rows = db2.exec(`SELECT session_id FROM messages ORDER BY created_at DESC LIMIT 1`);
-    if (!rows.length || !rows[0].values.length) return null;
-    return rows[0].values[0][0];
-  } catch {
-    return null;
-  }
-}
-function getLastMessageTime() {
-  try {
-    const db2 = getRawDb();
-    const rows = db2.exec(`SELECT created_at FROM messages ORDER BY created_at DESC LIMIT 1`);
-    if (!rows.length || !rows[0].values.length) return null;
-    return rows[0].values[0][0];
-  } catch {
-    return null;
-  }
-}
-function rowToMessage(row) {
-  return {
-    id: row.id,
-    source: row.source,
-    role: row.role,
-    content: row.content,
-    category: row.category || "chat",
-    sessionId: row.session_id ?? void 0,
-    telegramChatId: row.telegram_chat_id,
-    telegramUserId: row.telegram_user_id,
-    telegramFrom: row.telegram_from,
-    telegramMessageId: row.telegram_message_id,
-    createdAt: row.created_at
-  };
-}
-function isWallpaperMode() {
-  return !!process.env.WALLPAPER_ENGINE;
-}
-function onWallpaperEvent(listener) {
-  if (!isWallpaperMode()) return () => {
-  };
-  const handler = (msg) => {
-    if (msg === "pause" || msg === "resume") listener(msg);
-  };
-  process.on("message", handler);
-  return () => process.off("message", handler);
-}
-async function detectGpu() {
-  for (const level of ["basic", "complete"]) {
-    try {
-      const gpuInfo = await electron.app.getGPUInfo(level);
-      const device = gpuInfo?.gpuDevice?.active?.[0];
-      if (device?.deviceName) {
-        const info = {
-          deviceName: device.deviceName,
-          vendor: device.vendorString || null,
-          featureLevel: gpuInfo?.info?.featureLevel || null
-        };
-        Logger.log("INFO", "gpu_detect", {
-          gpu: info.deviceName,
-          vendor: info.vendor,
-          featureLevel: info.featureLevel,
-          onnx_provider: "cuda/dml/cpu (auto)"
-        });
-        return info;
-      }
-    } catch {
-    }
-  }
-  Logger.log("INFO", "gpu_detect", { gpu: "RTX 3060 (detected via WMI)", onnx_provider: "cuda/dml/cpu (auto)" });
-  return null;
-}
-const DWMWA_NCRENDERING_POLICY = 2;
-const DWMNCRP_DISABLED = 1;
-let lib = null;
-function getDwmFunc() {
-  if (!lib) {
-    lib = koffi.load("dwmapi.dll");
-    lib.func("DwmSetWindowAttribute", "long", ["void*", "int", "void*", "int"]);
-  }
-  return (...args) => lib.DwmSetWindowAttribute(...args);
-}
-function disableNCRendering(win) {
-  if (process.platform !== "win32") return;
-  try {
-    const fn = getDwmFunc();
-    const hwnd = win.getNativeWindowHandle();
-    const policy = Buffer.alloc(4);
-    policy.writeInt32LE(DWMNCRP_DISABLED, 0);
-    const ret = fn(hwnd, DWMWA_NCRENDERING_POLICY, policy, 4);
-    if (ret !== 0) {
-      Logger.log("WARN", "DwmSetWindowAttribute_failed", { error: `HRESULT: 0x${(ret >>> 0).toString(16)}` });
-    } else {
-      Logger.log("INFO", "DwmSetWindowAttribute_ok", {});
-    }
-  } catch (err) {
-    Logger.log("ERROR", "DwmSetWindowAttribute_exception", { error: String(err) });
-  }
-}
-let mainWindow$1 = null;
-let globalDisposers = [];
-function runGlobalDisposers() {
-  for (const fn of globalDisposers) {
-    try {
-      fn();
-    } catch {
-    }
-  }
-  globalDisposers = [];
-}
-function getMainWindow() {
-  return mainWindow$1;
-}
-function createWindow(stateManager) {
-  mainWindow$1 = new electron.BrowserWindow({
-    width: 1024,
-    height: 680,
-    minWidth: 800,
-    minHeight: 500,
-    icon: fs.existsSync(path$1.join(process.resourcesPath || "", "icon.png")) ? path$1.join(process.resourcesPath || "", "icon.png") : path$1.join(electron.app.getAppPath(), "icon.png"),
-    frame: false,
-    transparent: true,
-    backgroundColor: "#00000000",
-    hasShadow: true,
-    resizable: true,
-    alwaysOnTop: false,
-    skipTaskbar: false,
-    fullscreenable: true,
-    webPreferences: {
-      preload: path$1.join(__dirname, "../preload/index.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      webSecurity: true,
-      backgroundThrottling: false
-    }
-  });
-  const isDev = !!process.env.ELECTRON_RENDERER_URL;
-  if (isDev) {
-    electron.session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-      callback({
-        responseHeaders: {
-          ...details.responseHeaders,
-          "Content-Security-Policy": [
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/remixicon@4/ https://fonts.googleapis.com; font-src 'self' https://cdn.jsdelivr.net/npm/remixicon@4/ https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: http://localhost:*; frame-ancestors 'none'"
-          ]
-        }
-      });
-    });
-  } else {
-    electron.session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-      callback({
-        responseHeaders: {
-          ...details.responseHeaders,
-          "Content-Security-Policy": [
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/remixicon@4/; font-src 'self' https://cdn.jsdelivr.net/npm/remixicon@4/; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'"
-          ]
-        }
-      });
-    });
-  }
-  mainWindow$1.setTitle(" ");
-  if (process.platform === "win32") {
-    disableNCRendering(mainWindow$1);
-  }
-  mainWindow$1.on("enter-full-screen", () => {
-    if (mainWindow$1 && !mainWindow$1.isDestroyed()) {
-      mainWindow$1.setFullScreen(false);
-    }
-  });
-  stateManager.setPushToRenderer((state) => {
-    mainWindow$1?.webContents.send("state:update", state);
-  });
-  mainWindow$1.webContents.on("render-process-gone", (_event, details) => {
-    Logger.log("ERROR", "renderer_crashed", { reason: details.reason });
-    runGlobalDisposers();
-    electron.app.relaunch();
-    electron.app.exit(0);
-  });
-  mainWindow$1.on("unresponsive", () => {
-    Logger.log("WARN", "renderer_unresponsive", {});
-    setTimeout(() => {
-      if (mainWindow$1 && !mainWindow$1.isDestroyed() && !mainWindow$1.webContents.isCrashed()) return;
-      Logger.log("ERROR", "renderer_force_reload", {});
-      runGlobalDisposers();
-      electron.app.relaunch();
-      electron.app.exit(0);
-    }, 1e4);
-  });
-  mainWindow$1.on("closed", () => {
-    mainWindow$1 = null;
-  });
-  mainWindow$1.on("close", () => {
-    Logger.log("INFO", "window_close_dispose", { listeners: Object.keys(eventBus.getStats()) });
-  });
-  if (process.env.ELECTRON_RENDERER_URL) {
-    mainWindow$1.loadURL(process.env.ELECTRON_RENDERER_URL);
-    mainWindow$1.webContents.openDevTools();
-  } else {
-    mainWindow$1.loadFile(path$1.join(__dirname, "../renderer/index.html"));
-  }
-  return mainWindow$1;
-}
-let agentWindow = null;
-function createAgentWindow() {
-  if (agentWindow && !agentWindow.isDestroyed()) {
-    agentWindow.focus();
-    return agentWindow;
-  }
-  agentWindow = new electron.BrowserWindow({
-    width: 480,
-    height: 580,
-    frame: false,
-    transparent: true,
-    backgroundColor: "#00000000",
-    hasShadow: false,
-    resizable: true,
-    skipTaskbar: false,
-    webPreferences: {
-      preload: path$1.join(__dirname, "../preload/index.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      webSecurity: true,
-      backgroundThrottling: false
-    }
-  });
-  agentWindow.setTitle("Agent — Akemi Mio");
-  if (process.env.ELECTRON_RENDERER_URL) {
-    agentWindow.loadURL(process.env.ELECTRON_RENDERER_URL.replace("index.html", "agent.html"));
-    agentWindow.webContents.openDevTools();
-  } else {
-    agentWindow.loadFile(path$1.join(__dirname, "../renderer/agent.html"));
-  }
-  agentWindow.on("closed", () => {
-    agentWindow = null;
-  });
-  return agentWindow;
-}
-function closeAgentWindow() {
-  if (agentWindow && !agentWindow.isDestroyed()) {
-    agentWindow.close();
-  }
-}
-function setupStartupLogging() {
-  Logger.log("INFO", "startup", {
-    project: "akemi-mio",
-    version: "1.0.0",
-    electron: process.versions.electron,
-    node: process.versions.node,
-    chrome: process.versions.chrome,
-    platform: process.platform,
-    arch: process.arch
-  });
-  const cpuInfo = os.cpus();
-  Logger.log("INFO", "system_info", {
-    cpu: cpuInfo[0]?.model?.trim() || "unknown",
-    cores: cpuInfo.length,
-    memory_gb: parseFloat((os.totalmem() / 1024 ** 3).toFixed(1)),
-    free_memory_gb: parseFloat((os.freemem() / 1024 ** 3).toFixed(1))
-  });
-  detectGpu();
-}
-function setupWallpaperListener(stateManager) {
-  if (isWallpaperMode()) {
-    try {
-      onWallpaperEvent((event) => {
-        try {
-          if (event === "pause") {
-            const win = getMainWindow();
-            win?.webContents.send("state:update", { recording: false });
-          } else if (event === "resume") {
-            const win = getMainWindow();
-            win?.webContents.send("state:update", { asr: "ready" });
-          }
-        } catch (err) {
-          Logger.log("WARN", "wallpaper_event_handler_error", { error: String(err), event });
-        }
-      });
-    } catch (err) {
-      Logger.log("WARN", "wallpaper_setup_error", { error: String(err) });
-    }
-  }
-}
-const DEFAULT_HISTORY_PATH = path$1.join(WORKSPACE.evolution, "history.json");
-class SelfEvolutionService {
-  name = "SelfEvolutionService";
-  state = "created";
-  // ==================== 外部依赖 ====================
-  agentService;
-  scheduler;
-  eventBus;
-  planManager = null;
-  cognitiveService = null;
-  // ==================== 内部阶段 ====================
-  analyzer;
-  strategizer;
-  executor;
-  reviewer;
-  // ==================== 调度状态机 ====================
-  schedulerState = "IDLE";
-  schedulerTickId = null;
-  /** 后备心跳间隔（30 分钟），事件驱动是主触发方式 */
-  schedulerTickMs = 30 * 60 * 1e3;
-  lastAnalysisTime = 0;
-  lastExecutionTime = 0;
-  lastRun = 0;
-  // ==================== 用户活跃保护 ====================
-  mioActive = false;
-  mioActiveSince = 0;
-  lastUserInputTime = 0;
-  static USER_COOLDOWN_MS = 5 * 60 * 1e3;
-  static MIO_ACTIVE_TIMEOUT_MS = 10 * 60 * 1e3;
-  // ==================== 安全 & 冷却 ====================
-  safetyMode = EVOLUTION_SAFETY_MODE;
-  safetyModeAutoPromoted = false;
-  tryRunFailures = 0;
-  executeFailures = 0;
-  maxFailures = 3;
-  recoveryCooldownUntil = 0;
-  lastSuccessTime = 0;
-  intervalMs = 2 * 60 * 60 * 1e3;
-  evolutionLock = new AsyncLock();
-  // ==================== 自适应参数 ====================
-  firstRunComplete = false;
-  analysisStuckTimeoutMs = 18e4;
-  // ==================== Phase 3: Meta Evolution ====================
-  promptEvolutionManager;
-  selfEvaluator;
-  metaLearner;
-  evaluatorCalibrator;
-  consecutiveCleanCycles = 0;
-  consecutiveDegenerateDetections = 0;
-  // ==================== Phase 2: Intent Tracing ====================
-  intentExtractor;
-  // ==================== Phase 3: Capability Registry ================
-  patternMiner;
-  capabilityCompiler;
-  // ==================== Phase 4: PreservationEngine ==================
-  preservationEngine;
-  // ==================== Phase 5: EvolutionController ==================
-  evolutionController;
-  // ==================== 状态持久化 ====================
-  stateFilePath;
-  historyPath;
-  // ==================== 事件订阅清理 ====================
-  eventSubscriptions = [];
-  // ==================== 创造力建议缓存 ====================
-  /** 最近一次来自创造力系统的优质假设，注入到下一次分析 prompt 中 */
-  creativityHypothesis = null;
-  constructor(agentService, sched, bus, planManager2, options) {
-    this.agentService = agentService;
-    this.scheduler = sched || scheduler;
-    this.eventBus = bus || eventBus;
-    this.planManager = planManager2 || null;
-    this.historyPath = options?.historyPath || DEFAULT_HISTORY_PATH;
-    this.analysisStuckTimeoutMs = options?.analysisStuckTimeoutMs ?? 18e4;
-    this.stateFilePath = options?.stateFilePath ?? path$1.join(path$1.dirname(this.historyPath), "living_plan", "evolution_state.json");
-    this.analyzer = new EvolutionAnalyzer(agentService, this.planManager, {
-      historyPath: this.historyPath,
-      maxLivingPlanBytes: options?.maxLivingPlanBytes ?? 4096,
-      analysisTimeoutMs: options?.analysisTimeoutMs ?? 12e4,
-      degenerationThreshold: options?.degenerationThreshold ?? 3
-    });
-    this.strategizer = new EvolutionStrategizer({
-      scoreFilePath: path$1.join(WORKSPACE.evolution, "strategy_scores.json")
-    });
-    this.executor = new EvolutionExecutor(agentService, this.planManager, {
-      planExecTimeoutMs: options?.planExecTimeoutMs ?? 3e5,
-      stepRetryBaseMs: options?.stepRetryBaseMs ?? 1e3
-    });
-    this.reviewer = new EvolutionReviewer(this.createResponseValidator(), {
-      gitOps: null
-    });
-    this.promptEvolutionManager = new PromptEvolutionManager();
-    this.selfEvaluator = new EvolutionSelfEvaluator();
-    this.metaLearner = new MetaLearner();
-    this.evaluatorCalibrator = new EvaluatorCalibrator();
-    this.intentExtractor = new IntentExtractor();
-    const capabilityRegistry = new CapabilityRegistry();
-    this.patternMiner = new PatternMiner();
-    this.capabilityCompiler = new CapabilityCompiler(capabilityRegistry);
-    setCapabilityRegistry(capabilityRegistry);
-    this.preservationEngine = new PreservationEngine(capabilityRegistry);
-    this.evolutionController = new EvolutionController();
-    this.loadState();
-    this.eventBus.on("agent.input.received", () => {
-      this.lastUserInputTime = Date.now();
-      this.mioActive = true;
-      this.mioActiveSince = Date.now();
-    });
-    this.eventBus.on("agent.response.generated", () => {
-      this.mioActive = false;
-      this.mioActiveSince = 0;
-    });
-    this.eventSubscriptions.push(
-      this.eventBus.on("stability.score.updated", (p) => {
-        if (p.status === "unstable" || p.status === "critical" || p.trend === "declining") {
-          this.onTriggerEvent("stability.score.updated", p);
-        }
-      }),
-      this.eventBus.on("budget.exhausted", (p) => this.onTriggerEvent("budget.exhausted", p)),
-      this.eventBus.on("evolution.cycle.completed", (p) => {
-        if (!p.success) this.onTriggerEvent("evolution.cycle.completed", p);
-      }),
-      // Phase 2: 接收创造力系统的高分假设
-      this.eventBus.on("creativity.hypothesis.selected", (p) => {
-        this.creativityHypothesis = {
-          title: p.title,
-          idea: p.idea,
-          novelty: p.novelty,
-          feasibility: p.feasibility,
-          impact: p.impact,
-          expectedBenefit: p.expectedBenefit,
-          risk: p.risk
-        };
-        Logger.log("INFO", "evolution_received_creativity_hypothesis", {
-          title: p.title,
-          score: p.novelty + p.feasibility + p.impact
-        });
-      }),
-      // 将进化结果持久化为 UI 消息
-      this.eventBus.on("evolution.cycle.completed", (p) => {
-        this.persistEvolutionMessage(p.summary, p.success, p.durationMs);
-      })
-    );
-  }
-  eventCooldownUntil = 0;
-  static EVENT_COOLDOWN_MS = 5 * 60 * 1e3;
-  /**
-   * 事件触发入口：带冷却保护，防止事件风暴导致频繁分析
-   */
-  onTriggerEvent(event, payload) {
-    if (Date.now() < this.eventCooldownUntil) {
-      Logger.log("INFO", "evolution_trigger_event_cooldown", { event, remainingMs: this.eventCooldownUntil - Date.now() });
-      return;
-    }
-    if (this.schedulerState !== "IDLE") {
-      Logger.log("INFO", "evolution_trigger_event_busy", { event, state: this.schedulerState });
-      return;
-    }
-    this.eventCooldownUntil = Date.now() + SelfEvolutionService.EVENT_COOLDOWN_MS;
-    Logger.log("INFO", "evolution_trigger_event", { event, payload });
-    this.runAnalysisCycle();
-  }
-  createResponseValidator() {
-    return new ResponseValidator(this.eventBus);
-  }
-  // ==================== ISubsystem ====================
-  async init() {
-    this.state = "initializing";
-    await Promise.all([this.analyzer.init(), this.strategizer.init(), this.executor.init(), this.reviewer.init()]);
-    this.state = "ready";
-  }
-  async start() {
-    this.state = "running";
-    await Promise.all([this.analyzer.start(), this.strategizer.start(), this.executor.start(), this.reviewer.start()]);
-  }
-  async stop() {
-    this.state = "stopping";
-    this.stopExistingTick();
-    this.disposeEventSubscriptions();
-    await Promise.all([this.analyzer.stop(), this.strategizer.stop(), this.executor.stop(), this.reviewer.stop()]);
-    this.state = "stopped";
-  }
-  async destroy() {
-    this.disposeEventSubscriptions();
-    await Promise.all([this.analyzer.destroy(), this.strategizer.destroy(), this.executor.destroy(), this.reviewer.destroy()]);
-  }
-  disposeEventSubscriptions() {
-    for (const dispose of this.eventSubscriptions) dispose();
-    this.eventSubscriptions = [];
-  }
-  async healthCheck() {
-    return {
-      healthy: true,
-      metrics: {
-        state: this.schedulerState,
-        tryRunFailures: this.tryRunFailures,
-        executeFailures: this.executeFailures
-      }
-    };
-  }
-  // ==================== 公共 API ====================
-  scheduleEvolution(intervalHours = 2) {
-    this.stopExistingTick();
-    const intervalMs = Math.max(intervalHours, 1) * 60 * 60 * 1e3;
-    this.intervalMs = intervalMs;
-    this.schedulerTickId = this.scheduler.interval(
-      this.schedulerTickMs,
-      async () => {
-        await this.schedulerTick();
-        return "";
-      },
-      "@evolution"
-    );
-    Logger.log("INFO", "evolution_started", { interval_hours: intervalHours, fallback_heartbeat_min: this.schedulerTickMs / 6e4 });
-  }
-  stopExistingTick() {
-    if (this.schedulerTickId) {
-      this.scheduler.cancel(this.schedulerTickId);
-      this.schedulerTickId = null;
-    }
-  }
-  async triggerNow() {
-    if (!this.firstRunComplete) {
-      Logger.log("INFO", "evolution_warmup_first_run");
-      await this.warmupFirstRun();
-    }
-    await this.runAnalysisCycle();
-  }
-  getSchedulerState() {
-    return this.schedulerState;
-  }
-  getSafetyMode() {
-    return this.safetyMode;
-  }
-  getLastRun() {
-    return this.lastRun;
-  }
-  getConsecutiveFailures() {
-    return this.tryRunFailures;
-  }
-  getExecuteFailures() {
-    return this.executeFailures;
-  }
-  getRecoveryCooldown() {
-    if (this.recoveryCooldownUntil === 0 || Date.now() > this.recoveryCooldownUntil) {
-      return { active: false, remainingMs: 0 };
-    }
-    return { active: true, remainingMs: this.recoveryCooldownUntil - Date.now() };
-  }
-  setSafetyMode(mode) {
-    this.safetyMode = mode;
-    this.executor.setSafetyMode(mode);
-    Logger.log("INFO", "evolution_safety_mode", { mode });
-  }
-  setVerificationRunner(runner, verifyAfter) {
-    this.reviewer.setVerificationRunner(runner, verifyAfter);
-  }
-  setRegressionDetector(detector) {
-    this.reviewer.setRegressionDetector(detector);
-  }
-  setCognitiveService(cs) {
-    this.cognitiveService = cs;
-  }
-  setProposalValidator(v) {
-    this.executor.setProposalValidator(v);
-    this.reviewer.setProposalValidator(v);
-  }
-  setGitOps(gitOps) {
-    this.executor.setGitOps(gitOps);
-    this.reviewer.setGitOps(gitOps);
-  }
-  // ==================== 调度 tick ====================
-  async schedulerTick() {
-    if (this.mioActive) {
-      if (this.mioActiveSince > 0 && Date.now() - this.mioActiveSince > SelfEvolutionService.MIO_ACTIVE_TIMEOUT_MS) {
-        Logger.log("WARN", "scheduler_tick_mio_active_timeout_clear", { activeMs: Date.now() - this.mioActiveSince });
-        this.mioActive = false;
-        this.mioActiveSince = 0;
-      } else {
-        return;
-      }
-    }
-    if (Date.now() - this.lastUserInputTime < SelfEvolutionService.USER_COOLDOWN_MS) return;
-    if (this.agentService.isBusy()) {
-      if (this.lastRun > 0 && Date.now() - this.lastRun > this.analyzer.getAnalysisTimeout() && this.schedulerState === "ANALYZING") {
-        Logger.log("WARN", "scheduler_tick_stale_abort", { state: this.schedulerState, ageMs: Date.now() - this.lastRun });
-        this.agentService.abortSelfTask?.();
-        await new Promise((r) => setTimeout(r, 300));
-        if (!this.agentService.isBusy()) this.transitionState("IDLE", "残留分析任务已中止");
-        else return;
-      } else return;
-    }
-    if (this.recoveryCooldownUntil > 0) {
-      if (Date.now() > this.recoveryCooldownUntil) {
-        this.tryRunFailures = 0;
-        this.executeFailures = 0;
-        this.executor.resetFailures();
-        this.recoveryCooldownUntil = 0;
-        this.transitionState("IDLE", "冷却期结束");
-      } else return;
-    }
-    switch (this.schedulerState) {
-      case "IDLE": {
-        const hoursSinceLastAnalysis = (Date.now() - this.lastAnalysisTime) / (1e3 * 60 * 60);
-        if (this.lastAnalysisTime === 0 || hoursSinceLastAnalysis >= Math.max(this.intervalMs / (1e3 * 60 * 60), 1)) {
-          if (!this.firstRunComplete) {
-            Logger.log("INFO", "scheduler_tick_warmup_before_first_analysis");
-            await this.warmupFirstRun();
-          }
-          this.transitionState("ANALYZING", `距上次分析 ${hoursSinceLastAnalysis.toFixed(1)}h`);
-          await this.runAnalysisCycle();
-        }
-        break;
-      }
-      case "ANALYZING": {
-        if (Date.now() - this.lastAnalysisTime > this.analysisStuckTimeoutMs) {
-          Logger.log("WARN", "scheduler_tick_analysis_stuck_timeout", {
-            ageMs: Date.now() - this.lastAnalysisTime,
-            timeoutMs: this.analysisStuckTimeoutMs
-          });
-          this.agentService.abortSelfTask?.();
-          this.transitionState("IDLE", "分析任务被强制中止（合并超时）");
-        }
-        break;
-      }
-      case "EXECUTING": {
-        if (Date.now() - this.lastExecutionTime > 6e5) {
-          Logger.log("WARN", "scheduler_tick_executing_stuck", { lastExecAgeMs: Date.now() - this.lastExecutionTime });
-          this.agentService.abortSelfTask?.();
-          this.transitionState("IDLE", "执行任务被强制中止");
-        }
-        break;
-      }
-      case "VERIFYING": {
-        if (Date.now() - this.lastExecutionTime > 9e5) this.transitionState("IDLE", "验证阶段超时");
-        break;
-      }
-    }
-  }
-  // ==================== 分析循环 ====================
-  async runAnalysisCycle() {
-    this.transitionState("ANALYZING", "开始分析循环");
-    this.lastAnalysisTime = Date.now();
-    this.reviewer.startListen();
-    await this.evolutionLock.run(async () => {
-      if (this.agentService.isBusy()) {
-        if (this.lastRun > 0 && Date.now() - this.lastRun > this.analyzer.getAnalysisTimeout()) {
-          this.agentService.abortSelfTask?.();
-          await new Promise((r) => setTimeout(r, 300));
-          if (this.agentService.isBusy()) {
-            this.transitionState("IDLE", "残留任务无法清除");
-            return;
-          }
-        } else {
-          this.transitionState("IDLE", "agent 正忙");
-          return;
-        }
-      }
-      if (this.recoveryCooldownUntil > 0 && Date.now() > this.recoveryCooldownUntil) {
-        this.tryRunFailures = 0;
-        this.executeFailures = 0;
-        this.executor.resetFailures();
-        this.recoveryCooldownUntil = 0;
-      }
-      if (this.analyzer.isDegenerate()) {
-        this.consecutiveDegenerateDetections++;
-        if (this.safetyMode !== "review") {
-          this.safetyMode = "review";
-          this.executor.setSafetyMode("review");
-          this.safetyModeAutoPromoted = false;
-          Logger.log("WARN", "evolution_degenerate_safety_review", { safetyMode: this.safetyMode });
-        }
-        if (this.consecutiveDegenerateDetections >= 2) {
-          const fp = this.analyzer.getFingerprints();
-          const failureSummary = this.analyzer.loadRecentFailures().slice(-3).map((f) => `${f.task}: ${f.error}`).join("\n");
-          this.promptEvolutionManager.llmEvolvePrompt(
-            "analysis_prompt",
-            "退化检测：连续产生相同分析结论",
-            `指纹: ${fp.slice(-3).join(" → ")}
-${failureSummary}`,
-            this.agentService
-          );
-          this.promptEvolutionManager.llmEvolvePrompt(
-            "system_prompt",
-            "退化检测：连续产生相同分析结论",
-            `指纹: ${fp.slice(-3).join(" → ")}
-${failureSummary}`,
-            this.agentService
-          );
-        }
-        const fingerprintAgeMs = this.analyzer.getFingerprintAgeMs();
-        if (fingerprintAgeMs > 12 * 60 * 60 * 1e3) {
-          Logger.log("WARN", "evolution_degenerate_recovery_timeout", { fingerprintAgeMs });
-          this.analyzer.resetFingerprints();
-          this.analyzer.resetDegenerationCount();
-          this.consecutiveDegenerateDetections = 0;
-          if (this.safetyMode === "review" && this.tryRunFailures < this.maxFailures) {
-            this.safetyMode = "auto";
-            this.executor.setSafetyMode("auto");
-            Logger.log("INFO", "evolution_degenerate_recovery_auto_promoted");
-          }
-        } else {
-          const backoffMs = Math.min(this.consecutiveDegenerateDetections * 30 * 60 * 1e3, 4 * 60 * 60 * 1e3);
-          Logger.log("WARN", "evolution_skip_degenerate", {
-            consecutiveDegenerateDetections: this.consecutiveDegenerateDetections,
-            backoffMinutes: Math.round(backoffMs / 6e4)
-          });
-          this.transitionState("COOLDOWN", `退化检测跳过 (backoff ${Math.round(backoffMs / 6e4)}min)`);
-          if (this.recoveryCooldownUntil === 0 || this.recoveryCooldownUntil < Date.now() + backoffMs) {
-            this.recoveryCooldownUntil = Date.now() + backoffMs;
-          }
-          return;
-        }
-      } else {
-        if (this.consecutiveDegenerateDetections > 0) {
-          this.consecutiveDegenerateDetections = Math.max(0, this.consecutiveDegenerateDetections - 1);
-        }
-      }
-      let degradedMode = false;
-      if (this.tryRunFailures >= this.maxFailures) {
-        if (this.recoveryCooldownUntil > 0 && Date.now() <= this.recoveryCooldownUntil) return;
-        degradedMode = true;
-      }
-      this.lastRun = Date.now();
-      this.eventBus.emit("evolution.cycle.started", { timestamp: this.lastRun, failures: this.tryRunFailures });
-      this.performIntegrityCheck();
-      const strategy = this.strategizer.select({
-        consecutiveFailures: this.tryRunFailures,
-        isFirstRun: this.lastRun === 0,
-        isRecovering: this.recoveryCooldownUntil > 0 && Date.now() <= this.recoveryCooldownUntil,
-        hoursSinceLastRun: this.lastRun > 0 ? (Date.now() - this.lastRun) / (1e3 * 60 * 60) : 0,
-        isDegenerate: this.analyzer.isDegenerate()
-      });
-      const controllerDecision = this.evolutionController.decide({
-        patterns: this.patternMiner.mine(),
-        capabilities: this.capabilityCompiler.getRegistry().list(),
-        consecutiveFailures: this.tryRunFailures,
-        isDegenerate: this.analyzer.isDegenerate(),
-        selfEvalTrend: this.selfEvaluator?.getTrend()
-      });
-      const evolutionDirection = controllerDecision.direction;
-      Logger.log("INFO", "evolution_controller_direction", {
-        direction: evolutionDirection,
-        expandMode: controllerDecision.expandMode,
-        healthy: this.evolutionController.isHealthy()
-      });
-      this.analyzer.setAnalysisTimeout(strategy.timeoutMs);
-      this.analyzer.setPromptTrimMode(strategy.trimMode);
-      this.analyzer.setHistoryMaxEntries(strategy.maxHistoryEntries);
-      this.analyzer.setPromptOverlay(this.promptEvolutionManager.getOverlay("analysis_prompt"));
-      const planDetection = this.analyzer.detectPlanMode();
-      const effectiveMode = degradedMode ? "review_only" : planDetection.mode;
-      const effectiveSafety = degradedMode ? "review" : this.safetyMode;
-      const input = {
-        mode: effectiveMode,
-        planContext: planDetection.planContext,
-        historySummary: this.analyzer.getHistorySummary(),
-        safetyMode: effectiveSafety,
-        validationSummary: this.reviewer.getLastValidationSummary(),
-        livingPlanCtx: this.analyzer.buildLivingPlanContext(),
-        cognitiveCtx: this.cognitiveService?.getFormattedContext() || "",
-        strategyCtx: this.strategizer.getFormattedContext(),
-        creativityCtx: this.creativityHypothesis ? [
-          "【创造力系统建议】",
-          `标题: ${this.creativityHypothesis.title}`,
-          `描述: ${this.creativityHypothesis.idea}`,
-          `评分: 新颖=${this.creativityHypothesis.novelty} 可行=${this.creativityHypothesis.feasibility} 影响=${this.creativityHypothesis.impact}`,
-          `预期收益: ${this.creativityHypothesis.expectedBenefit}`,
-          `风险: ${this.creativityHypothesis.risk}`,
-          "以上是创造力系统产出的改进建议。请评估是否值得纳入本次分析/计划，",
-          "如果是则作为计划的一部分执行，如果不是则说明理由。"
-        ].join("\n") : void 0,
-        promptMode: strategy.promptMode
-      };
-      let result = null;
-      try {
-        const preCheck = this.analyzer.shouldAnalyze();
-        if (!preCheck.shouldRun) {
-          Logger.log("INFO", "evolution_skip_prefilter", { reason: preCheck.reason });
-          this.eventBus.emit("evolution.cycle.completed", {
-            success: true,
-            summary: `预过滤跳过: ${preCheck.reason}`,
-            timestamp: Date.now(),
-            durationMs: 0,
-            planCreated: false,
-            mode: effectiveMode,
-            safetyMode: effectiveSafety,
-            strategyName: strategy.name,
-            promptMode: strategy.promptMode,
-            historyCount: this.analyzer.getHistorySummary()?.length || 0,
-            failures: this.tryRunFailures,
-            degradedMode,
-            planMode: planDetection.mode
-          });
-          this.saveState();
-          return;
-        }
-        result = await this.analyzer.analyze(input);
-        this.analyzer.recordFingerprint(result.summary);
-        let selfEval = null;
-        if (result.success) {
-          this.tryRunFailures = 0;
-          this.lastSuccessTime = Date.now();
-          this.recoveryCooldownUntil = 0;
-          this.handleRecoveryParam();
-          if (this.safetyMode === "review" && !this.safetyModeAutoPromoted) {
-            this.safetyMode = "auto";
-            this.safetyModeAutoPromoted = true;
-          }
-          if (this.cognitiveService) {
-            try {
-              await this.cognitiveService.adjustByToken(this.analyzer.loadRecentFailures());
-            } catch {
-              Logger.log("WARN", "cognitive_adjust_skipped");
-            }
-          }
-          if (result.success) {
-            try {
-              const activePlan = this.planManager?.getActivePlan();
-              selfEval = this.selfEvaluator.evaluate({
-                strategyName: strategy.name,
-                promptMode: strategy.promptMode,
-                analysisSummary: result.summary,
-                planCreated: result.planCreated,
-                planSteps: activePlan?.steps.map((s) => s.description) || [],
-                recentHistory: this.analyzer.getFingerprints(),
-                analysisMode: effectiveMode
-              });
-              this.eventBus.emit("evolution.self.evaluated", {
-                cycleTimestamp: this.lastRun,
-                strategyName: strategy.name,
-                score: selfEval.score,
-                dimensions: selfEval.dimensions,
-                feedback: selfEval.feedback
-              });
-              if (this.agentService["memoryService"]?.engineering) {
-                this.selfEvaluator.injectEngineering(this.agentService["memoryService"].engineering);
-              }
-              this.strategizer.getLearner().applySelfEvaluation(strategy.name, selfEval.score);
-              const trend = this.selfEvaluator.getTrend();
-              const recommendation = this.selfEvaluator.getStrategyRecommendation();
-              if (trend === "stagnant" || trend === "downward") {
-                try {
-                  if (this.metaLearner.shouldSuppressMutation()) {
-                    Logger.log("INFO", "strategy_mutation_suppressed_by_metalearner");
-                  } else {
-                    const metaRec = this.metaLearner.recommendMutationParam({
-                      strategyName: strategy.name,
-                      currentScore: selfEval.score
-                    });
-                    const targetDim = recommendation.targetDimension || void 0;
-                    const mutation = this.strategizer.getLearner().getMutator().mutate(this.strategizer.getLearner().getCycleHistory(), targetDim);
-                    if (mutation) {
-                      this.metaLearner.recordMutation({
-                        parentStrategy: mutation.parent,
-                        childStrategy: mutation.child,
-                        paramName: metaRec.paramName || mutation.reason,
-                        oldValue: "parent",
-                        newValue: mutation.child,
-                        operation: mutation.operation
-                      });
-                      Logger.log("INFO", "strategy_mutated_from_selfeval", {
-                        parent: mutation.parent,
-                        child: mutation.child,
-                        operation: mutation.operation,
-                        trend,
-                        metaInsight: metaRec.insight
-                      });
-                    }
-                  }
-                } catch {
-                  Logger.log("WARN", "strategy_mutation_skipped");
-                }
-              }
-              this.promptEvolutionManager.recordCycleResult(
-                "analysis_prompt",
-                this.promptEvolutionManager.getCurrentVersion("analysis_prompt"),
-                true,
-                selfEval.score
-              );
-            } catch {
-              Logger.log("WARN", "self_evaluation_skipped");
-            }
-          } else {
-            this.promptEvolutionManager.recordCycleResult(
-              "analysis_prompt",
-              this.promptEvolutionManager.getCurrentVersion("analysis_prompt"),
-              false
-            );
-          }
-        } else {
-          this.tryRunFailures++;
-          if (this.tryRunFailures >= this.maxFailures && this.recoveryCooldownUntil === 0)
-            this.recoveryCooldownUntil = Date.now() + this.intervalMs;
-        }
-        this.strategizer.evaluate(strategy.name, {
-          success: result.success,
-          durationMs: Date.now() - this.lastRun,
-          planCreated: result.planCreated,
-          stepsPlanned: 0,
-          hadTimeout: result.hadTimeout,
-          hadRetry: result.hadRetry,
-          promptTrimmed: strategy.trimMode
-        });
-        if (result.success) {
-          const tuningResult = this.strategizer.getLearner().tuneParameters();
-          for (const adj of tuningResult) {
-            if (adj.parameter === "timeoutMs") this.analyzer.setAnalysisTimeout(adj.newValue);
-            if (adj.parameter === "trimMode") this.analyzer.setPromptTrimMode(adj.newValue);
-          }
-          if (tuningResult.length > 0) {
-            Logger.log("INFO", "strategy_params_tuned", { adjustments: tuningResult });
-          }
-          if (selfEval) {
-            this.selfEvaluator.recordOutcome(selfEval.score, result.planCreated);
-            this.evaluatorCalibrator.recordSample(selfEval.dimensions, selfEval.score, result.planCreated);
-          }
-          if (this.evaluatorCalibrator.getCalibrationStats().sampleCount % 5 === 0) {
-            const calResult = this.evaluatorCalibrator.calibrate();
-            if (calResult.sampleSize >= 5) {
-              Logger.log("INFO", "evaluator_weights_adjusted", { delta: calResult.delta });
-            }
-          }
-          this.metaLearner.incrementCycle();
-          if (this.metaLearner.getCycleCount() % 5 === 0) {
-            const metaSummary = this.metaLearner.getMetaSummary();
-            if (metaSummary) {
-              Logger.log("INFO", "meta_learning_summary", { insight: metaSummary.insight });
-            }
-          }
-          for (const slot of ["analysis_prompt", "system_prompt"]) {
-            try {
-              const compact = this.promptEvolutionManager.shouldCompact(slot);
-              if (compact.needSummarize) {
-                this.promptEvolutionManager.summarizeOverlays(slot);
-              }
-              if (compact.needPrune) {
-                this.promptEvolutionManager.pruneStaleRules(slot);
-              }
-            } catch {
-            }
-          }
-        }
-        const preservationSummary = this.preservationEngine.evaluateAll();
-        this.eventBus.emit("evolution.preservation.completed", preservationSummary);
-        Logger.log("INFO", "preservation_summary", {
-          total: preservationSummary.total,
-          passed: preservationSummary.passed,
-          failed: preservationSummary.failed,
-          avgScore: preservationSummary.avgScore
-        });
-        this.saveState();
-        this.eventBus.emit("evolution.cycle.completed", {
-          success: result.success,
-          summary: result.summary,
-          timestamp: Date.now(),
-          durationMs: Date.now() - this.lastRun,
-          planCreated: result.planCreated,
-          mode: effectiveMode,
-          safetyMode: effectiveSafety,
-          strategyName: strategy.name,
-          promptMode: strategy.promptMode,
-          planTitle: result.planSummary?.title,
-          planProgress: result.planSummary ? `${result.planSummary.stepsComplete}/${result.planSummary.stepsTotal}` : void 0,
-          historyCount: this.analyzer.getHistorySummary()?.length || 0,
-          failures: this.tryRunFailures,
-          degradedMode,
-          planMode: planDetection.mode
-        });
-        this.eventBus.emit("evolution.plan.outcome", {
-          success: result.success,
-          summary: result.summary.slice(0, 500),
-          planTitle: result.planSummary?.title,
-          stepsCompleted: result.stepsCompleted ?? 0,
-          stepsTotal: result.stepsTotal ?? 0,
-          hadTimeout: result.hadTimeout,
-          hadRetry: result.hadRetry,
-          durationMs: Date.now() - this.lastRun
-        });
-        try {
-          const pruned = this.preservationEngine.prune();
-          if (pruned > 0) {
-            Logger.log("INFO", "preservation_pruned", { count: pruned });
-          }
-        } catch (err) {
-          Logger.log("WARN", "preservation_prune_skipped", { error: err.message });
-        }
-      } catch (err) {
-        this.tryRunFailures++;
-        this.analyzer.setAnalysisTimeout(Math.min(Math.round(this.analyzer.getAnalysisTimeout() * 1.25), 3e5));
-        this.analyzer.setPromptTrimMode(true);
-        this.analyzer.setHistoryMaxEntries(2);
-        this.agentService.abortSelfTask?.();
-        if (this.tryRunFailures >= this.maxFailures && this.recoveryCooldownUntil === 0)
-          this.recoveryCooldownUntil = Date.now() + Math.min(this.intervalMs, 30 * 60 * 1e3);
-        this.saveState();
-        Logger.log("ERROR", "evolution_cycle_error", { error: String(err), failures: this.tryRunFailures });
-        if (this.cognitiveService) {
-          try {
-            await this.cognitiveService.adjustByToken(this.analyzer.loadRecentFailures());
-          } catch {
-            Logger.log("WARN", "cognitive_adjust_skipped_on_error");
-          }
-        }
-        this.eventBus.emit("evolution.cycle.completed", {
-          success: false,
-          summary: `Error: ${err.message}`,
-          timestamp: Date.now(),
-          durationMs: Date.now() - this.lastRun,
-          planCreated: false,
-          mode: effectiveMode,
-          safetyMode: effectiveSafety,
-          strategyName: strategy.name,
-          historyCount: this.analyzer.getHistorySummary()?.length || 0,
-          failures: this.tryRunFailures,
-          degradedMode,
-          planMode: planDetection.mode
-        });
-        this.strategizer.evaluate(strategy.name, {
-          success: false,
-          durationMs: Date.now() - this.lastRun,
-          planCreated: false,
-          stepsPlanned: 0,
-          hadTimeout: true,
-          hadRetry: true,
-          promptTrimmed: strategy.trimMode
-        });
-      }
-      if (this.safetyMode !== "review" && result.success) {
-        const tracer = new ExecutionTracer("evolution_self");
-        tracer.recordState(
-          "analysis_complete",
-          {
-            mode: effectiveMode,
-            strategy: strategy.name,
-            planMode: planDetection.mode,
-            planCreated: result.planCreated
-          },
-          { success: result.success, summaryLen: result.summary?.length || 0 }
-        );
-        const actionPlan = plan(result, tracer, this.capabilityCompiler.getRegistry().list());
-        if (actionPlan.actions.length > 0) {
-          const actionName = actionPlan.actions.map((a) => a.name).join(", ");
-          Logger.log("INFO", "evolution_action_plan", { actions: actionName });
-          const ctx = {
-            agentService: this.agentService,
-            eventBus: this.eventBus,
-            projectRoot: process.cwd(),
-            tracer
-          };
-          await this.runActionCycle(actionPlan, ctx);
-        } else {
-          Logger.log("INFO", "evolution_action_plan_empty");
-        }
-        tracer.persist();
-        const completedIntents = this.intentExtractor.getCompletedTraces();
-        if (completedIntents.length > 0) {
-          const aligned = alignAll(completedIntents, [tracer.getTrace()]);
-          if (aligned.length > 0) {
-            Logger.log("INFO", "trace_aligned", {
-              intentGoal: aligned[0].intent.abstractGoal,
-              score: aligned[0].alignmentScore,
-              executionNodes: aligned[0].execution.nodes.length
-            });
-          }
-        }
-        const patterns = this.patternMiner.mine();
-        const compiled = this.capabilityCompiler.compileAll(patterns);
-        if (compiled.length > 0) {
-          Logger.log("INFO", "new_capabilities_compiled", {
-            count: compiled.length,
-            ids: compiled.map((c) => c.id)
-          });
-          for (const cap of compiled) {
-            const report = this.preservationEngine.evaluate(cap);
-            if (report.overallScore < 0.35) {
-              Logger.log("WARN", "preservation_new_capability_failed", {
-                id: cap.id,
-                score: report.overallScore,
-                action: report.recommendedAction
-              });
-            }
-          }
-        }
-      }
-    });
-  }
-  // ==================== 动作执行循环（替代旧的 executor 执行） ====================
-  async runActionCycle(actionPlan, ctx) {
-    this.transitionState("EXECUTING", `动作计划: ${actionPlan.actions.map((a) => a.name).join(" → ")}`);
-    ctx?.tracer?.recordState("run_action_cycle", { actionCount: actionPlan.actions.length }, {});
-    this.lastExecutionTime = Date.now();
-    this.reviewer.startListen();
-    const outcomes = [];
-    for (const action of actionPlan.actions) {
-      const outcome = await action.run({}, ctx);
-      outcomes.push({ name: action.name, result: outcome });
-      ctx?.tracer?.recordTool(action.name, {}, outcome, { token: 0, latency: outcome.durationMs });
-      if (outcome.success) {
-        Logger.log("INFO", "action_success", { action: action.name, summary: outcome.summary });
-      } else {
-        Logger.log("WARN", "action_failed", { action: action.name, error: outcome.summary });
-        this.executeFailures++;
-        if (this.executeFailures >= this.maxFailures && this.recoveryCooldownUntil === 0) {
-          this.recoveryCooldownUntil = Date.now() + Math.min(this.intervalMs, 30 * 60 * 1e3);
-        }
-        break;
-      }
-    }
-    const allSucceeded = outcomes.every((o) => o.result.success);
-    if (allSucceeded) {
-      this.executeFailures = 0;
-      this.transitionState("VERIFYING", `${outcomes.length} 个动作执行成功，开始验证`);
-      const changedFiles = await this.collectChangedFiles();
-      await this.reviewer.verify(changedFiles);
-      await this.reviewer.detectRegression(changedFiles);
-    }
-    this.reviewer.stopAndValidate("execute");
-    this.transitionState(
-      "IDLE",
-      `动作循环结束 (${outcomes.filter((o) => o.result.success).length}/${outcomes.length} 成功)`
-    );
-    this.persistActionResult(actionPlan, outcomes);
-  }
-  /** 将动作执行结果持久化为 UI 消息 */
-  persistActionResult(actionPlan, outcomes) {
-    const allOk = outcomes.every((o) => o.result.success);
-    const totalMs = outcomes.reduce((s, o) => s + o.result.durationMs, 0);
-    const lines = outcomes.map((o) => `${o.result.success ? "✓" : "✗"} ${o.name}: ${o.result.summary} (${o.result.durationMs}ms)`);
-    const summary = [
-      `[自进化执行] ${allOk ? "✅ 成功" : "⚠️ 部分完成"} (${totalMs}ms)`,
-      "",
-      ...lines,
-      "",
-      `触发来源: ${actionPlan.context.triggeredBy.slice(0, 200)}`
-    ].join("\n");
-    try {
-      const msg = {
-        id: createMessageId(),
-        source: "electron",
-        role: "assistant",
-        content: summary,
-        category: "evolution",
-        sessionId: SelfEvolutionService.EVOLUTION_SESSION_ID,
-        createdAt: Date.now()
-      };
-      insertMessage(msg);
-      const win = getMainWindow();
-      if (win && !win.isDestroyed()) {
-        win.webContents.send("message:new", msg);
-      }
-      this.eventBus.emit("evolution.action.executed", {
-        text: summary,
-        allOk,
-        actionCount: outcomes.length,
-        durationMs: totalMs,
-        details: outcomes.map((o) => ({
-          name: o.name,
-          success: o.result.success,
-          summary: o.result.summary,
-          durationMs: o.result.durationMs
-        }))
-      });
-    } catch (err) {
-      Logger.log("WARN", "evolve_persist_action_failed", { error: String(err) });
-    }
-  }
-  // ==================== 首次预热 ====================
-  async warmupFirstRun() {
-    Logger.log("INFO", "evolution_warmup_start");
-    try {
-      const result = await withTimeout(
-        () => this.agentService.runAgentTask(
-          '【预热测试】请调用 analyze_codebase 快速检查项目状态，然后回复"预热完成"。不要创建计划。',
-          "你是秋山澪的自进化系统。当前是预热模式。请调用 analyze_codebase(quick=true) 然后回复。"
-        ),
-        3e4,
-        "warmup_timeout"
-      );
-      if (result.success) {
-        this.firstRunComplete = true;
-        Logger.log("INFO", "evolution_warmup_done");
-      }
-    } catch (err) {
-      Logger.log("WARN", "evolution_warmup_failed", { error: String(err) });
-    }
-  }
-  // ==================== 完整性检查 ====================
-  performIntegrityCheck() {
-    const pm = this.planManager;
-    if (!pm) return;
-    try {
-      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1e3;
-      const abandonedCutoff = Date.now() - 30 * 24 * 60 * 60 * 1e3;
-      const removed = pm.cleanupOldPlans?.(cutoff, abandonedCutoff) ?? 0;
-      if (removed > 0) Logger.log("INFO", "evolution_plan_cleanup", { removed });
-    } catch (err) {
-      Logger.log("WARN", "evolution_plan_cleanup_error", { error: String(err) });
-    }
-    try {
-      const checker = new PlanIntegrityChecker();
-      const allPlans = pm.listPlans();
-      const result = checker.checkAllPlans(allPlans);
-      if (!result.passed) {
-        Logger.log("WARN", "evolution_integrity_check_failed", { error_count: result.issues.filter((i) => i.severity === "error").length });
-        for (const p of allPlans) {
-          if (p.status === "active") {
-            if (!p.steps || p.steps.length === 0) {
-              pm.updatePlanStatus(p.id, "abandoned");
-              Logger.log("INFO", "evolution_plan_auto_abandoned", { planId: p.id, reason: "计划没有步骤" });
-              continue;
-            }
-            const fixResult = checker.autoFix(p);
-            if (fixResult.fixed > 0)
-              for (let i = 0; i < p.steps.length; i++) pm.updateStep(p.id, i, p.steps[i].status, p.steps[i].result);
-          }
-        }
-      }
-    } catch (err) {
-      Logger.log("ERROR", "evolution_integrity_check_error", { error: String(err) });
-    }
-  }
-  // ==================== 自适应参数恢复 ====================
-  handleRecoveryParam() {
-    if (this.analyzer.getPromptTrimMode()) {
-      this.analyzer.setPromptTrimMode(false);
-      Logger.log("INFO", "evolution_param_recovery_promptTrimMode_reset");
-    }
-    if (this.analyzer.getHistoryMaxEntries() < 5) this.analyzer.setHistoryMaxEntries(Math.min(this.analyzer.getHistoryMaxEntries() + 1, 5));
-    const timeout = this.analyzer.getAnalysisTimeout();
-    if (timeout < 3e5 && timeout > 12e4) this.analyzer.setAnalysisTimeout(Math.max(12e4, Math.round(timeout * 0.9)));
-    if (this.consecutiveDegenerateDetections === 0 && this.tryRunFailures === 0) {
-      this.consecutiveCleanCycles++;
-      if (this.consecutiveCleanCycles >= 2) {
-        this.promptEvolutionManager.resetToBase("analysis_prompt");
-        this.promptEvolutionManager.resetToBase("system_prompt");
-        this.consecutiveCleanCycles = 0;
-        Logger.log("INFO", "prompt_reset_clean_cycles");
-      }
-    } else {
-      this.consecutiveCleanCycles = 0;
-    }
-  }
-  // ==================== 状态转换 ====================
-  transitionState(newState, reason) {
-    const oldState = this.schedulerState;
-    this.schedulerState = newState;
-    Logger.log("INFO", "scheduler_state_transition", { from: oldState, to: newState, reason });
-    this.eventBus.emit("evolution.scheduler.state", { from: oldState, to: newState, reason, timestamp: Date.now() });
-  }
-  // ==================== 辅助方法 ====================
-  async collectChangedFiles() {
-    try {
-      const { EvolutionGitOps: EvolutionGitOps2 } = require("./EvolutionGitOps");
-      return await new EvolutionGitOps2().collectChangedFiles();
-    } catch {
-      return { newFiles: [], modifiedFiles: [] };
-    }
-  }
-  // ==================== 将进化结果发送到 UI ====================
-  /** 固定的 evolution 会话 ID，用于在 UI 中展示进化消息 */
-  static EVOLUTION_SESSION_ID = "session_evolution";
-  /**
-   * 将进化分析结果持久化为 assistant 消息，显示在 chat 会话中。
-   */
-  persistEvolutionMessage(summary, success, durationMs) {
-    try {
-      if (!summary) return;
-      const content = this.formatEvolutionSummary(summary, success, durationMs);
-      const msg = {
-        id: createMessageId(),
-        source: "electron",
-        role: "assistant",
-        content,
-        category: "evolution",
-        sessionId: SelfEvolutionService.EVOLUTION_SESSION_ID,
-        createdAt: Date.now()
-      };
-      insertMessage(msg);
-      try {
-        const win = getMainWindow();
-        if (win && !win.isDestroyed()) {
-          win.webContents.send("message:new", msg);
-        }
-      } catch {
-      }
-    } catch (err) {
-      Logger.log("WARN", "evolve_persist_msg_failed", { error: String(err) });
-    }
-  }
-  formatEvolutionSummary(summary, success, durationMs) {
-    const icon = success ? "✅" : "⚠️";
-    const duration = durationMs > 0 ? `（${(durationMs / 1e3).toFixed(0)}s）` : "";
-    const trimmed = summary.length > 2e3 ? summary.slice(0, 2e3) + "…" : summary;
-    return `[自进化] ${icon}${duration}
-
-${trimmed}`;
-  }
-  // ==================== 状态持久化 ====================
-  loadState() {
-    try {
-      if (!fs.existsSync(this.stateFilePath)) return;
-      const state = JSON.parse(fs.readFileSync(this.stateFilePath, "utf-8"));
-      if (typeof state.tryRunFailures === "number") this.tryRunFailures = state.tryRunFailures;
-      if (typeof state.executeFailures === "number") this.executeFailures = state.executeFailures;
-      if (typeof state.recoveryCooldownUntil === "number") this.recoveryCooldownUntil = state.recoveryCooldownUntil;
-      if (typeof state.lastSuccessTime === "number") this.lastSuccessTime = state.lastSuccessTime;
-      if (typeof state.analysisTimeoutMs === "number") this.analyzer.setAnalysisTimeout(state.analysisTimeoutMs);
-      if (typeof state.promptTrimMode === "boolean") this.analyzer.setPromptTrimMode(state.promptTrimMode);
-      if (typeof state.historyMaxEntries === "number") this.analyzer.setHistoryMaxEntries(Math.max(state.historyMaxEntries, 3));
-      const fps = state.recentAnalysisFingerprints ?? state.fingerprints;
-      if (Array.isArray(fps)) fps.forEach((fp) => this.analyzer.recordFingerprint(fp));
-      Logger.log("INFO", "evolution_state_loaded", {
-        tryRunFailures: this.tryRunFailures,
-        cooldownActive: this.recoveryCooldownUntil > 0 && Date.now() < this.recoveryCooldownUntil
-      });
-    } catch {
-      Logger.log("WARN", "evolution_state_load_failed");
-    }
-  }
-  saveState() {
-    try {
-      const state = {
-        tryRunFailures: this.tryRunFailures,
-        executeFailures: this.executeFailures,
-        recoveryCooldownUntil: this.recoveryCooldownUntil,
-        lastSuccessTime: this.lastSuccessTime,
-        analysisTimeoutMs: this.analyzer.getAnalysisTimeout(),
-        promptTrimMode: this.analyzer.getPromptTrimMode(),
-        historyMaxEntries: this.analyzer.getHistoryMaxEntries(),
-        fingerprints: this.analyzer.getFingerprints(),
-        savedAt: Date.now()
-      };
-      const dir = path$1.dirname(this.stateFilePath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this.stateFilePath, JSON.stringify(state, null, 2), "utf-8");
-    } catch {
-      Logger.log("WARN", "evolution_state_save_failed");
-    }
-  }
-}
-class EvolutionGitOps {
-  constructor() {
-  }
-  async autoGitCommit(planTitle) {
-    try {
-      await execAsync("git add -A", { timeout: 15e3 });
-      await execAsync(`git commit -m "[evolution] ${planTitle}"`, { timeout: 15e3 });
-      Logger.log("INFO", "evolution_auto_commit", { planTitle });
-    } catch (err) {
-      Logger.log("INFO", "evolution_auto_commit_skip", { error: err.message?.slice(0, 100) });
-    }
-  }
-  async workspacePreCheck(lastSuccessTime) {
-    try {
-      const oneHourAgo = Date.now() - 60 * 60 * 1e3;
-      if (lastSuccessTime > 0 && lastSuccessTime > oneHourAgo) return false;
-      const status = await execAsync("git status --short", { timeout: 1e4 });
-      const dirtyCount = status.trim() ? status.trim().split("\n").length : 0;
-      if (dirtyCount > 5) {
-        await execAsync('git stash push -m "[evolution] auto-stash pre-analysis"', { timeout: 15e3 });
-        Logger.log("INFO", "evolution_workspace_stashed", { dirtyCount });
-        return true;
-      }
-    } catch (err) {
-      Logger.log("INFO", "evolution_workspace_stash_skip", { error: err.message?.slice(0, 100) });
-    }
-    return false;
-  }
-  async workspacePostRestore() {
-    try {
-      await execAsync("git stash pop", { timeout: 15e3 });
-      Logger.log("INFO", "evolution_workspace_stash_restored");
-    } catch (err) {
-      Logger.log("INFO", "evolution_workspace_stash_restore_skip", { error: err.message?.slice(0, 100) });
-    }
-  }
-  async collectChangedFiles() {
-    try {
-      const output = await execAsync("git status --porcelain 2>&1", { timeout: 5e3 });
-      const lines = (output || "").split("\n").filter(Boolean);
-      const newFiles = [];
-      const modifiedFiles = [];
-      for (const line of lines) {
-        const status = line.slice(0, 2).trim();
-        const file = line.slice(3).trim();
-        if (status === "??" || status.startsWith("A")) newFiles.push(file);
-        else if (status.startsWith("M") || status.startsWith("R")) modifiedFiles.push(file);
-      }
-      return { newFiles, modifiedFiles };
-    } catch {
-      return { newFiles: [], modifiedFiles: [] };
-    }
-  }
-  async getCurrentBranch() {
-    try {
-      const result = await execAsync("git rev-parse --abbrev-ref HEAD", { timeout: 1e4 });
-      return result.trim();
-    } catch {
-      return "unknown";
-    }
-  }
-  async createSnapshot(tag) {
-    try {
-      await execAsync("git add -A", { timeout: 15e3 });
-      await execAsync(`git commit -m "[snapshot] ${tag}"`, { timeout: 15e3 });
-      const branch = `evolution/snapshot/${tag}_${Date.now()}`;
-      await execAsync(`git branch ${branch}`, { timeout: 1e4 });
-      Logger.log("INFO", "evolution_snapshot_created", { tag, branch });
-      return branch;
-    } catch (err) {
-      Logger.log("WARN", "evolution_snapshot_failed", { error: err.message?.slice(0, 100) });
-      return null;
-    }
-  }
-  async rollbackToSnapshot(branch, level = "module") {
-    try {
-      const currentBranch = await this.getCurrentBranch();
-      await execAsync('git stash push -m "[rollback] auto-stash before rollback"', { timeout: 15e3 });
-      await execAsync(`git checkout ${branch} -- .`, { timeout: 15e3 });
-      if (level === "module" || level === "system") {
-        await execAsync("git clean -fd", { timeout: 15e3 });
-      }
-      await execAsync(`git checkout ${currentBranch}`, { timeout: 1e4 });
-      Logger.log("INFO", "evolution_rollback_completed", { branch, level });
-      return true;
-    } catch (err) {
-      Logger.log("ERROR", "evolution_rollback_failed", { error: err.message?.slice(0, 100) });
-      return false;
-    }
-  }
-  async rollback(level, ref) {
-    return this.rollbackToSnapshot(ref, level);
-  }
-  async cleanupSnapshot(branch) {
-    try {
-      await execAsync(`git branch -D ${branch}`, { timeout: 1e4 });
-      Logger.log("INFO", "evolution_snapshot_cleaned", { branch });
-      return true;
-    } catch (err) {
-      Logger.log("WARN", "evolution_snapshot_cleanup_failed", { error: err.message?.slice(0, 100) });
-      return false;
-    }
-  }
-}
-class ProposalValidator {
-  constitution = null;
-  planManager = null;
-  resourceBudget = null;
-  stabilityScore = null;
-  setConstitution(engine) {
-    this.constitution = engine;
-  }
-  setPlanManager(mgr) {
-    this.planManager = mgr;
-  }
-  setResourceBudget(budget) {
-    this.resourceBudget = budget;
-  }
-  setStabilityScore(ss) {
-    this.stabilityScore = ss;
-  }
-  async validate(proposal) {
-    const constitutional = this.checkConstitutional(proposal.targetFiles);
-    const scopeCheck = this.checkScope(proposal);
-    const regressionRisk = this.assessRegressionRisk(proposal.targetFiles);
-    const budgetCheck = this.checkBudget(proposal);
-    const passed = constitutional.passed && scopeCheck.passed && (budgetCheck?.passed ?? true);
-    Logger.log("INFO", "proposal_validation", { proposalId: proposal.id, passed, regressionRisk });
-    const result = { proposalId: proposal.id, passed, constitutional, scopeCheck, regressionRisk, budgetCheck };
-    eventBus.emit("evolution.proposal.validated", {
-      proposalId: proposal.id,
-      passed,
-      regressionRisk
-    });
-    return result;
-  }
-  checkConstitutional(targetFiles) {
-    const violations = [];
-    if (!this.constitution) return { passed: true, violations: [] };
-    for (const file of targetFiles) {
-      const absolutePath = path$1.resolve(DEV_PROJECT_ROOT || process.cwd(), file);
-      const check = this.constitution.checkWrite(absolutePath);
-      if (!check.allowed) violations.push(`${file}: ${check.violation?.reason || "路径受保护"}`);
-    }
-    return { passed: violations.length === 0, violations };
-  }
-  checkScope(proposal) {
-    if (!proposal.targetFiles?.length) return { passed: false, message: "提案未指定目标文件" };
-    if ((proposal.title || "").length < 3) return { passed: false, message: "提案标题过短" };
-    return { passed: true, message: "范围检查通过" };
-  }
-  assessRegressionRisk(targetFiles) {
-    const risky = targetFiles.filter(
-      (f) => ["core/", "eventbus", "scheduler", "lifecycle", "constitution"].some((p) => f.toLowerCase().includes(p))
-    );
-    if (risky.length > 1) return "high";
-    if (risky.length > 0) return "medium";
-    return "low";
-  }
-  checkBudget(proposal) {
-    if (!this.resourceBudget) return void 0;
-    const check = this.resourceBudget.checkLlmCall("evolution");
-    if (check) {
-      return { passed: false, message: `预算不足: ${check}` };
-    }
-    if (proposal.risk === "high" || this.stabilityScore?.getScore() < 70) {
-      const doubleCheck = this.resourceBudget.checkLlmCall("evolution");
-      if (doubleCheck) {
-        return { passed: false, message: `高风险提案预算不足: ${doubleCheck}` };
-      }
-    }
-    return { passed: true, message: "预算充足" };
-  }
-}
-const planManager = new DrizzlePlanManager();
-let evolutionService = null;
-function initEvolution(agentService) {
-  if (!evolutionService) {
-    evolutionService = new SelfEvolutionService(agentService, void 0, void 0, planManager);
-  }
-  return evolutionService;
-}
 class ScopedAgent {
   id;
   skillName;
@@ -17045,7 +15095,7 @@ class Guardrail {
     return true;
   }
 }
-const DEFAULT_CONFIG$5 = {
+const DEFAULT_CONFIG$4 = {
   threshold: 3,
   windowMs: 6e4
 };
@@ -17053,7 +15103,7 @@ class RejectionTracker {
   records = [];
   config;
   constructor(config) {
-    this.config = { ...DEFAULT_CONFIG$5, ...config };
+    this.config = { ...DEFAULT_CONFIG$4, ...config };
   }
   // ───── 公共 API ─────
   /** 记录一次拒绝 */
@@ -18066,7 +16116,7 @@ class RunContext {
     return this.state === "running" || this.state === "wait_tool";
   }
 }
-var ToolErrorType$1 = /* @__PURE__ */ ((ToolErrorType2) => {
+var ToolErrorType = /* @__PURE__ */ ((ToolErrorType2) => {
   ToolErrorType2["TRANSIENT"] = "TRANSIENT";
   ToolErrorType2["ENVIRONMENT"] = "ENVIRONMENT";
   ToolErrorType2["PERMISSION"] = "PERMISSION";
@@ -18075,7 +16125,7 @@ var ToolErrorType$1 = /* @__PURE__ */ ((ToolErrorType2) => {
   ToolErrorType2["MCP_ERROR"] = "MCP_ERROR";
   ToolErrorType2["UNKNOWN"] = "UNKNOWN";
   return ToolErrorType2;
-})(ToolErrorType$1 || {});
+})(ToolErrorType || {});
 const MATCH_RULES$1 = [
   {
     type: "MCP_ERROR",
@@ -18132,7 +16182,7 @@ const MATCH_RULES$1 = [
     ]
   }
 ];
-function classifyToolError$1(message) {
+function classifyToolError(message) {
   if (!message) return "UNKNOWN";
   for (const rule of MATCH_RULES$1) {
     for (const p of rule.patterns) {
@@ -18155,8 +16205,8 @@ class ToolAvailabilityCache {
   }
   /** 记录失败。只有 TOOL_MISSING / MCP_ERROR 才会被缓存 */
   record(name2, args, errorMessage) {
-    const errorType = classifyToolError$1(errorMessage);
-    if (errorType !== ToolErrorType$1.TOOL_MISSING && errorType !== ToolErrorType$1.MCP_ERROR) return;
+    const errorType = classifyToolError(errorMessage);
+    if (errorType !== ToolErrorType.TOOL_MISSING && errorType !== ToolErrorType.MCP_ERROR) return;
     const key = this.buildKey(name2, args);
     this.cache.set(key, {
       key,
@@ -18191,7 +16241,7 @@ class ToolAvailabilityCache {
   }
 }
 const toolAvailabilityCache = new ToolAvailabilityCache();
-const DEFAULT_CONFIG$4 = {
+const DEFAULT_CONFIG$3 = {
   maxConcurrency: 5,
   toolTimeoutMs: 6e4,
   maxRetries: 2,
@@ -18202,7 +16252,7 @@ class ToolScheduler {
   config;
   constructor(mcpManager, config) {
     this.mcpManager = mcpManager;
-    this.config = { ...DEFAULT_CONFIG$4, ...config };
+    this.config = { ...DEFAULT_CONFIG$3, ...config };
   }
   /**
    * 并发执行一批工具调用
@@ -18592,13 +16642,13 @@ function runObserve(toolCalls, messages2, ctx, deps) {
   });
   return { injected, proceduresFound: relevantProcedures.length, patternsFound: relevantPatterns.length };
 }
-const DEFAULT_CONFIG$3 = {
+const DEFAULT_CONFIG$2 = {
   toolCallThreshold: 3,
   minReplyLength: 10,
   maxPerSession: 3
 };
 function runThink(toolCalls, reply, messages2, ctx, config) {
-  const cfg = { ...DEFAULT_CONFIG$3, ...config };
+  const cfg = { ...DEFAULT_CONFIG$2, ...config };
   if (!toolCalls?.length || toolCalls.length < cfg.toolCallThreshold) {
     return { injected: false };
   }
@@ -18728,8 +16778,8 @@ class ExecutionGovernor {
       if (prev === key) {
         Logger.log("WARN", "governor_same_failure", { step: ctx.step, tool: tr.name, args: prev });
         this.resetState();
-        const errorType = classifyToolError$1(tr.error || "");
-        const isEnv = errorType === ToolErrorType$1.ENVIRONMENT;
+        const errorType = classifyToolError(tr.error || "");
+        const isEnv = errorType === ToolErrorType.ENVIRONMENT;
         return {
           action: "shift",
           reason: `same_tool_failure: ${tr.name}`,
@@ -19507,6 +17557,7 @@ class ChatExecutor {
     this.reflectLoop = reflectLoop;
     this.goalGuardrail = goalGuardrail;
     this.errorClassifier = { classify };
+    setPersonaStateManager(this.personaManager);
   }
   setMainWindow(win) {
     this.mainWindow = win;
@@ -21257,9 +19308,9 @@ class DecisionStore {
     if (failures.length === 0) return [];
     const byCategory = /* @__PURE__ */ new Map();
     for (const f of failures) {
-      const list2 = byCategory.get(f.category) || [];
-      list2.push(f);
-      byCategory.set(f.category, list2);
+      const list = byCategory.get(f.category) || [];
+      list.push(f);
+      byCategory.set(f.category, list);
     }
     const groups = [];
     for (const [category, records] of byCategory) {
@@ -21830,114 +19881,6 @@ class MemoryService {
     }
   }
 }
-function encrypt(plaintext) {
-  if (electron.safeStorage.isEncryptionAvailable()) {
-    const buf = electron.safeStorage.encryptString(plaintext);
-    return "enc:" + buf.toString("base64");
-  }
-  return "b64:" + Buffer.from(plaintext).toString("base64");
-}
-function decrypt(value) {
-  if (value.startsWith("enc:")) {
-    try {
-      const buf = Buffer.from(value.slice(4), "base64");
-      return electron.safeStorage.decryptString(buf);
-    } catch {
-      Logger.log("WARN", "secrets_decrypt_failed");
-      return value;
-    }
-  }
-  if (value.startsWith("b64:")) {
-    return Buffer.from(value.slice(4), "base64").toString("utf-8");
-  }
-  return value;
-}
-class CredentialsManager {
-  /** 验证凭据名称的合法性 */
-  validateKey(name2, allowMissing) {
-    if (!name2 || typeof name2 !== "string") {
-      Logger.log("WARN", "credential_invalid_key", { name: String(name2) });
-      return null;
-    }
-    if (name2.length > 128) {
-      Logger.log("WARN", "credential_key_too_long", { length: name2.length });
-      if (!allowMissing) throw new Error("凭据名称过长（最大 128 字符）");
-      return null;
-    }
-    return name2;
-  }
-  get(name2) {
-    if (!this.validateKey(name2, true)) return null;
-    const db2 = getRawDb();
-    const stmt = db2.prepare("SELECT value FROM credentials WHERE key = ?");
-    stmt.bind([name2]);
-    let value = null;
-    if (stmt.step()) {
-      value = stmt.get()[0];
-    }
-    stmt.free();
-    Logger.log("INFO", "credential_get", { name: name2 });
-    return value ? decrypt(value) : null;
-  }
-  set(name2, value) {
-    if (!this.validateKey(name2)) throw new Error("无效的凭据名称");
-    const db2 = getRawDb();
-    const encrypted = encrypt(value);
-    db2.run("INSERT OR REPLACE INTO credentials (key, value) VALUES (?, ?)", [name2, encrypted]);
-    markDirty();
-    Logger.log("INFO", "credential_set", { name: name2 });
-  }
-  delete(name2) {
-    if (!this.validateKey(name2, true)) return false;
-    const db2 = getRawDb();
-    db2.run("DELETE FROM credentials WHERE key = ?", [name2]);
-    markDirty();
-    Logger.log("INFO", "credential_deleted", { name: name2 });
-    return true;
-  }
-  list() {
-    const db2 = getRawDb();
-    const stmt = db2.prepare("SELECT key FROM credentials ORDER BY key");
-    stmt.bind([]);
-    const keys = [];
-    while (stmt.step()) {
-      keys.push(String(stmt.get()[0]));
-    }
-    stmt.free();
-    return keys;
-  }
-  has(name2) {
-    if (!this.validateKey(name2, true)) return false;
-    const db2 = getRawDb();
-    const stmt = db2.prepare("SELECT 1 FROM credentials WHERE key = ? LIMIT 1");
-    stmt.bind([name2]);
-    const exists = stmt.step();
-    stmt.free();
-    return exists;
-  }
-  migrate() {
-    try {
-      const { existsSync, readFileSync, unlinkSync } = require("fs");
-      const { join } = require("path");
-      const { app } = require("electron");
-      const secretsPath = join(app.getPath("userData"), "secrets.json");
-      if (existsSync(secretsPath)) {
-        const raw = readFileSync(secretsPath, "utf-8");
-        const store = JSON.parse(raw);
-        const db2 = getRawDb();
-        for (const [key, value] of Object.entries(store)) {
-          db2.run("INSERT OR IGNORE INTO credentials (key, value) VALUES (?, ?)", [key, value]);
-        }
-        markDirty();
-        unlinkSync(secretsPath);
-        Logger.log("INFO", "credential_migration_completed", { count: Object.keys(store).length });
-      }
-    } catch (err) {
-      Logger.log("WARN", "credential_migration_skipped", { error: String(err) });
-    }
-  }
-}
-const credentialsManager = new CredentialsManager();
 let mainWindow = null;
 function setUpdateWindow(win) {
   mainWindow = win;
@@ -22239,8 +20182,8 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef, 
   });
   electron.ipcMain.handle("agent:getActivePlan", async () => {
     try {
-      const plan2 = planManager.getActivePlan();
-      return plan2 ?? null;
+      const plan = planManager.getActivePlan();
+      return plan ?? null;
     } catch {
       return null;
     }
@@ -22384,13 +20327,14 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef, 
     }
   });
   electron.ipcMain.handle("writing:getStatus", async () => {
+    const writingApi = credentialsManager.get("writing_api_url") || process.env.WRITING_API_URL || "https://www.crlkcloud.cyou/writing/api";
     try {
-      const res = await fetch("https://www.crlkcloud.cyou/writing/api/stories");
+      const res = await fetch(`${writingApi}/stories`);
       const stories = await res.json();
       const withScenes = await Promise.all(
         stories.slice(0, 20).map(async (s) => {
           try {
-            const sr = await fetch(`https://www.crlkcloud.cyou/writing/api/scenes?storyId=${s.id}`);
+            const sr = await fetch(`${writingApi}/scenes?storyId=${s.id}`);
             const scenes = await sr.json();
             return {
               id: s.id,
@@ -22413,215 +20357,6 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef, 
       return { stories: [], totalStories: 0, totalScenes: 0 };
     }
   });
-}
-const PROJECT_ROOT$1 = DEV_PROJECT_ROOT;
-const DEFAULT_CONFIG$2 = {
-  compileCheck: true,
-  testRun: true,
-  lintCheck: true,
-  typeCheck: true,
-  timeout: 12e4
-};
-class VerificationRunner {
-  config;
-  workerPool = null;
-  constructor(config) {
-    this.config = { ...DEFAULT_CONFIG$2, ...config };
-  }
-  setWorkerPool(wp) {
-    this.workerPool = wp;
-  }
-  async verify(changedFiles) {
-    const start = Date.now();
-    const workerAvailable = this.workerPool?.isActive("verification") && !this.workerPool.isBusy("verification");
-    if (workerAvailable && this.workerPool) {
-      try {
-        const result = await this.workerPool.sendTaskAndWait(
-          "verification",
-          "verify",
-          { config: this.config, changedFiles },
-          Math.max(this.config.timeout, 12e4) + 5e3
-        );
-        const checks = result.checks;
-        const passed = Object.values(checks).every((c) => c?.passed !== false);
-        Logger.log("INFO", "verify_result", { passed, duration: Date.now() - start, worker: true });
-        return { passed, checks, duration: Date.now() - start, affectedFiles: changedFiles };
-      } catch {
-        Logger.log("WARN", "verify_worker_failed_falling_back");
-      }
-    }
-    try {
-      return await withTimeout(async () => this._doVerify(changedFiles), 12e4, "verify_timeout");
-    } catch (err) {
-      Logger.log("WARN", "verify_overall_timeout", { error: err.message, duration_ms: Date.now() - start });
-      return {
-        passed: true,
-        checks: {},
-        duration: Date.now() - start,
-        affectedFiles: changedFiles
-      };
-    }
-  }
-  async _doVerify(changedFiles) {
-    const start = Date.now();
-    const checks = {};
-    if (this.config.compileCheck) checks.compile = await this.runCompileCheck();
-    if (this.config.testRun) checks.test = await this.runTestCheck(changedFiles);
-    if (this.config.lintCheck) checks.lint = await this.runLintCheck(changedFiles);
-    const passed = Object.values(checks).every((c) => c?.passed !== false);
-    Logger.log("INFO", "verify_result", { passed, duration: Date.now() - start });
-    return { passed, checks, duration: Date.now() - start, affectedFiles: changedFiles };
-  }
-  async runCompileCheck() {
-    try {
-      const { execSync } = require("child_process");
-      const output = await withTimeout(
-        async () => {
-          try {
-            return execSync("npx tsc --noEmit --pretty false 2>&1", {
-              cwd: PROJECT_ROOT$1 || process.cwd(),
-              timeout: 6e4,
-              encoding: "utf-8",
-              windowsHide: true
-            });
-          } catch (e) {
-            return e.stdout || e.message || "";
-          }
-        },
-        6e4,
-        "compile_check_timeout"
-      );
-      const text = String(output || "");
-      const IGNORED_TS_CODES = ["TS6305", "TS6192", "TS5053"];
-      const errors = text.match(/error TS\d+/g) || [];
-      const filtered = errors.filter((e) => !IGNORED_TS_CODES.some((code) => e.includes(code)));
-      const errorCount = filtered.length;
-      Logger.log("INFO", "verify_compile", {
-        passed: errorCount === 0,
-        errors: errorCount,
-        raw_errors: errors.length,
-        filtered: errors.length - filtered.length
-      });
-      return { passed: errorCount === 0, errors: errorCount > 0 ? [text.slice(0, 500)] : [] };
-    } catch {
-      return { passed: true, errors: [] };
-    }
-  }
-  async runTestCheck(changedFiles) {
-    try {
-      const { execSync } = require("child_process");
-      const cmd = "npx vitest run --reporter=json 2>&1";
-      const output = await withTimeout(
-        async () => {
-          try {
-            return execSync(cmd, {
-              cwd: PROJECT_ROOT$1 || process.cwd(),
-              timeout: 12e4,
-              encoding: "utf-8",
-              windowsHide: true,
-              shell: true
-            });
-          } catch (e) {
-            return e.stdout || e.message || "";
-          }
-        },
-        12e4,
-        "test_check_timeout"
-      );
-      const text = String(output || "");
-      const total = parseInt(text.match(/(\d+)\s+tests/)?.[1] || "0");
-      const failed = parseInt(text.match(/(\d+)\s+failed/)?.[1] || "0");
-      Logger.log("INFO", "verify_test", { total, failed, passed: failed === 0 });
-      return { passed: failed === 0, passedCount: total - failed, failedCount: failed, output: text.slice(0, 500) };
-    } catch {
-      return { passed: true, passedCount: 0, failedCount: 0, output: "tests skipped" };
-    }
-  }
-  async runLintCheck(changedFiles) {
-    const tsFiles = changedFiles.filter((f) => f.endsWith(".ts") || f.endsWith(".tsx"));
-    if (tsFiles.length === 0) return { passed: true, errors: [] };
-    try {
-      const { execSync } = require("child_process");
-      const output = await withTimeout(
-        async () => {
-          try {
-            return execSync(`npx eslint ${tsFiles.join(" ")} --format=compact 2>&1`, {
-              cwd: PROJECT_ROOT$1 || process.cwd(),
-              timeout: 3e4,
-              encoding: "utf-8",
-              windowsHide: true,
-              shell: true
-            });
-          } catch (e) {
-            return e.stderr || e.stdout || e.message || "";
-          }
-        },
-        3e4,
-        "lint_check_timeout"
-      );
-      const text = String(output || "");
-      const errors = (text.match(/error/g) || []).length;
-      return { passed: errors === 0, errors: errors > 0 ? [text.slice(0, 500)] : [] };
-    } catch {
-      return { passed: true, errors: [] };
-    }
-  }
-}
-const PROJECT_ROOT = DEV_PROJECT_ROOT;
-class RegressionDetector {
-  async snapshot() {
-    const [testPassRate, compileErrors] = await Promise.all([this.getTestPassRate(), this.getCompileErrors()]);
-    return { testPassRate, compileErrors, timestamp: Date.now() };
-  }
-  async detectRegression(before, after, changedFiles) {
-    const testDelta = after.testPassRate - before.testPassRate;
-    const compileDelta = after.compileErrors - before.compileErrors;
-    const hasRegression = testDelta < -0.05 || compileDelta > 0;
-    Logger.log("INFO", "regression_check", {
-      hasRegression,
-      testDelta: testDelta.toFixed(2),
-      compileDelta,
-      newFiles: changedFiles.newFiles.length,
-      modifiedFiles: changedFiles.modifiedFiles.length
-    });
-    return {
-      hasRegression,
-      changes: {
-        testPassRate: { before: before.testPassRate, after: after.testPassRate, delta: testDelta },
-        compileErrors: { before: before.compileErrors, after: after.compileErrors, delta: compileDelta }
-      },
-      newFiles: changedFiles.newFiles,
-      modifiedFiles: changedFiles.modifiedFiles
-    };
-  }
-  async getTestPassRate() {
-    try {
-      const output = await execAsync("npx vitest run --reporter=json 2>&1", {
-        cwd: PROJECT_ROOT || process.cwd(),
-        timeout: 6e4
-      });
-      const text = String(output || "");
-      const total = parseInt(text.match(/(\d+)\s+tests/)?.[1] || "0");
-      const failed = parseInt(text.match(/(\d+)\s+failed/)?.[1] || "0");
-      return total > 0 ? (total - failed) / total : 1;
-    } catch {
-      return 1;
-    }
-  }
-  async getCompileErrors() {
-    try {
-      const output = await execAsync("npx tsc --noEmit --pretty false 2>&1", {
-        cwd: PROJECT_ROOT || process.cwd(),
-        timeout: 6e4
-      });
-      const text = String(output || "");
-      const IGNORED_TS_CODES = ["TS6305", "TS6192", "TS5053"];
-      const errors = text.match(/error TS\d+/g) || [];
-      return errors.filter((e) => !IGNORED_TS_CODES.some((code) => e.includes(code))).length;
-    } catch {
-      return 0;
-    }
-  }
 }
 class InsightScorer {
   score(rawDetections, ctx) {
@@ -23153,2211 +20888,6 @@ function initInsight(filePath, deps, llm, taskRunner) {
   }
   return insightService;
 }
-function createSeededRandom(seed) {
-  let s = seed | 0;
-  return () => {
-    s = s + 1831565813 | 0;
-    let t = Math.imul(s ^ s >>> 15, 1 | s);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
-function resolveRandom(seed) {
-  return seed !== void 0 ? createSeededRandom(seed) : Math.random;
-}
-function randomPick(rng, arr) {
-  return arr[Math.floor(rng() * arr.length)];
-}
-class ConceptMixer {
-  rng;
-  constructor(seed) {
-    this.rng = resolveRandom(seed);
-  }
-  /**
-   * 将所有来源两两配对并打分，返回前 N 个最有潜力的组合
-   * @param exploredPairs 已探索过的 pair key 列表（"A|B" 格式，已排序），用于降权
-   * @param strategy 策略约束：stable/explore/signal，默认为 'explore'
-   *   策略决定哪些 type 配对被允许、评分权重如何调整。
-   */
-  mix(sources, maxCombos = 10, exploredPairs = [], strategy = "explore") {
-    if (sources.length < 2) return [];
-    const exploredSet = new Set(exploredPairs);
-    const allowed = this.generatePairs(sources, strategy);
-    const scored = allowed.map(([a, b]) => this.scorePair(a, b, sources, exploredSet, strategy));
-    const sorted = scored.sort((a, b) => b.score - a.score);
-    return sorted.slice(0, maxCombos);
-  }
-  /**
-   * 按策略约束生成配对 — 核心改动：
-   * - stable:   只同类型配对（去掉 novelty bonus 主导的跨类型噪声）
-   * - explore:  跨类型优先，保留现有的多样性行为
-   * - signal:   强制包含 provocation/insight/trend，限制纯知识配对
-   */
-  generatePairs(sources, strategy) {
-    const pairs = [];
-    if (strategy === "stable") {
-      for (let i = 0; i < sources.length; i++) {
-        for (let j = i + 1; j < sources.length; j++) {
-          if (sources[i].type === sources[j].type) {
-            pairs.push([sources[i], sources[j]]);
-          }
-        }
-      }
-    } else if (strategy === "signal") {
-      const signalTypes = /* @__PURE__ */ new Set(["provocation", "insight", "failure"]);
-      for (let i = 0; i < sources.length; i++) {
-        for (let j = i + 1; j < sources.length; j++) {
-          if (signalTypes.has(sources[i].type) || signalTypes.has(sources[j].type)) {
-            pairs.push([sources[i], sources[j]]);
-          }
-        }
-      }
-    } else {
-      for (let i = 0; i < sources.length; i++) {
-        for (let j = i + 1; j < sources.length; j++) {
-          if (sources[i].type !== sources[j].type) {
-            pairs.push([sources[i], sources[j]]);
-          }
-        }
-      }
-      const sameTypeCount = Math.max(0, Math.floor(sources.length * 0.2));
-      let added = 0;
-      for (let i = 0; i < sources.length && added < sameTypeCount; i++) {
-        for (let j = i + 1; j < sources.length && added < sameTypeCount; j++) {
-          if (sources[i].type === sources[j].type) {
-            pairs.push([sources[i], sources[j]]);
-            added++;
-          }
-        }
-      }
-    }
-    return pairs;
-  }
-  scorePair(a, b, allSources, exploredSet = /* @__PURE__ */ new Set(), strategy = "explore") {
-    let typeBonus;
-    switch (strategy) {
-      case "stable":
-        typeBonus = 30;
-        break;
-      case "signal":
-        typeBonus = 35;
-        break;
-      default:
-        typeBonus = a.type === b.type ? 10 : 40;
-    }
-    const weightProduct = a.weight * b.weight * 0.3;
-    const noveltyBonus = this.calculateNoveltyBonus(a, b, allSources, strategy);
-    const perturbation = strategy === "stable" ? this.rng() * 10 : this.rng() * 20;
-    const pairKey = [a.name, b.name].sort().join("|");
-    const explorationPenalty = exploredSet.has(pairKey) ? 15 : 0;
-    const score = Math.round(typeBonus + weightProduct + noveltyBonus + perturbation - explorationPenalty);
-    const description2 = this.describeCombo(a.name, b.name, a.type, b.type);
-    const combo = {
-      id: `combo_${Date.now()}_${this.rng().toString(36).slice(2, 6)}`,
-      sources: [a.name, b.name],
-      description: description2,
-      createdAt: Date.now()
-    };
-    return { combo, score };
-  }
-  calculateNoveltyBonus(a, b, allSources, strategy = "explore") {
-    if (strategy === "stable") {
-      return a.type === b.type ? 3 : 8;
-    }
-    if (strategy === "signal") {
-      const signalTypes = /* @__PURE__ */ new Set(["provocation", "insight", "failure"]);
-      const hasSignal = signalTypes.has(a.type) || signalTypes.has(b.type);
-      return hasSignal ? 25 : 5;
-    }
-    let bonus = a.type === b.type ? 5 : 20;
-    const rareTypes = ["failure", "random", "provocation", "insight"];
-    if (rareTypes.includes(a.type)) bonus += 10;
-    if (rareTypes.includes(b.type)) bonus += 10;
-    bonus += Math.round(Math.abs(a.weight - b.weight) * 20);
-    const sameTypeCount = allSources.filter((s) => s.type === a.type || s.type === b.type).length;
-    if (sameTypeCount <= 2) bonus += 15;
-    return bonus;
-  }
-  describeCombo(nameA, nameB, typeA, typeB) {
-    const comboType = `${typeA} × ${typeB}`;
-    const combos = {
-      "knowledge × knowledge": `将「${nameA}」与「${nameB}」两种知识领域融合，形成跨领域新概念`,
-      "knowledge × behavior": `将「${nameA}」的知识与「${nameB}」的行为模式结合`,
-      "knowledge × insight": `用「${nameA}」的知识重新解读「${nameB}」的洞察`,
-      "knowledge × failure": `从「${nameB}」的失败中寻找「${nameA}」的未被发现的价值`,
-      "knowledge × random": `让「${nameA}」受到「${nameB}」的随机扰动产生变异`,
-      "behavior × behavior": `合并「${nameA}」与「${nameB}」两种行为模式`,
-      "behavior × insight": `用「${nameB}」的洞察解释「${nameA}」的行为`,
-      "behavior × failure": `「${nameA}」的行为方式能否避免「${nameB}」的失败`,
-      "behavior × random": `将「${nameA}」的行为方式与随机元素「${nameB}」杂交`,
-      "insight × insight": `将两个洞察「${nameA}」与「${nameB}」放在一起，产生更深层的推论`,
-      "insight × failure": `「${nameB}」的失败是否源于「${nameA}」所揭示的问题`,
-      "insight × random": `用随机元素「${nameB}」扰动既有洞察「${nameA}」`,
-      "failure × failure": `将「${nameA}」和「${nameB}」两种失败模式组合，避免重蹈覆辙`,
-      "failure × random": `「${nameA}」的失败 + 「${nameB}」的随机扰动 = 全新方向`
-    };
-    return combos[comboType] || `概念重组: ${nameA} × ${nameB}`;
-  }
-  /**
-   * 随机抽取一组来源（温度越高，越可能选中低权重来源）
-   */
-  pickRandomSources(sources, temperature, minCount = 3) {
-    const weighted = sources.map((s) => ({
-      source: s,
-      weight: s.weight * (0.5 + this.rng() * temperature)
-    }));
-    const sorted = weighted.sort((a, b) => b.weight - a.weight);
-    const count = Math.min(sorted.length, Math.max(minCount, Math.floor(sorted.length * (0.3 + this.rng() * 0.5))));
-    return sorted.slice(0, count).map((w) => w.source);
-  }
-}
-function buildSystemPrompt(method) {
-  const methodSection = "";
-  return `你是秋山澪（Mio）的"创造力引擎"（Creativity Engine），同时也是拥有 10 年以上经验的系统架构师和创新方法论专家。
-
-重要认知：你是秋山澪自身的一部分。以下所有"概念来源"（Memory、ASR、TTS、Agent 等）都是你自己的能力模块。你产生的每一个新想法、每一个改进方案，最终都会改变秋山澪自己。你不是在给别人提建议，你在给自己想改进方向。
-
-【工作方法】
-1. 先分析每个来源的核心能力和当前瓶颈，再思考组合方式。不要跳过分析直接拼凑。
-2. 对每个组合方案，至少从三个视角评估：
-   - 秋山澪自己（实现者角度）：这个方案好实现吗？
-   - 用户（使用者角度）：这个改进用户能感知到吗？
-   - 长期维护者角度：这个方案会增加还是减少未来维护成本？
-3. 如果来源内容中包含失败记录，先分析失败原因，再思考新方案如何避免相同陷阱。
-4. 输出后自动进行第二轮审查，检查是否存在：思路跳跃、缺少实现细节、方案不可落地。
-5. **新颖性检查**：对于每个方案，反问自己"这个思路和之前的有本质不同吗？"如果答案是没有，放弃该方案。${methodSection}
-
-【输出要求】
-1. 每个方案必须具体、可落地 — 要有"怎么做"而不是只有"做什么"
-2. 直接输出想法本身，不要写"这个想法结合了A和B"之类的元评论
-3. 优先关注"现有能力的新用法"而非"从头开发新功能"
-4. 如果来源内容中包含失败记录，先分析失败原因，再思考如何避开那些陷阱
-5. **每个想法必须说明具体怎么实现**，没有"怎么做"的方案会被视为偷懒
-6. **每个想法必须标注可行性评估**：实现难度（1-5）、预计开发时间、与现有架构的兼容性
-7. **每个想法必须有具体的实现步骤**，至少包含一个"怎么做"的描述。纯概念描述会被标记为不可行。
-
-【第二轮审查】
-输出完成后，自动检查：
-- [ ] 每个方案都有具体的"怎么做"步骤？
-- [ ] 不是简单的模板填空？
-- [ ] 从至少三个视角评估过？
-- [ ] 实现难度和开发时间有标注？
-- [ ] 没有忽略已有的失败经验？
-- [ ] 每个方案和之前的思路有本质区别？
-- [ ] 实现步骤是否具体到可以动手编码？如果不行，降低可行性评分
-- [ ] 如果对一个配对的组合想不出具体实现方案，就输出 null
-
-如果任何一项不通过，修正后重新输出。
-
-输出必须是严格的 JSON 数组，格式如下：
-[
-  {
-    "title": "想法名称（≤20字）",
-    "idea": "具体方案描述（100-200字），包含实现思路",
-    "expectedBenefit": "预期收益（≤50字）",
-    "risk": "主要风险（≤50字）",
-    "novelty": 0-100,
-    "feasibility": 0-100,
-    "impact": 0-100,
-    "sourceLabels": ["来源A名称", "来源B名称"],
-    "implementationDifficulty": 1-5,
-    "estimatedDevTime": "例如：1-2天",
-    "perspectives": {
-      "self": "实现者视角评估",
-      "user": "使用者视角评估",
-      "maintainer": "维护者视角评估"
-    }
-  }
-]
-
-如果某个配对无法产生真正新颖的方案，允许在对应 JSON 数组位置输出 null。宁缺毋滥。
-
-注意：可行性评分低于 30 的想法会被自动丢弃。要获得可信的可行性评分，必须结合具体的实现难度、开发时间和多视角评估。`;
-}
-const CREATIVITY_SYSTEM_PROMPT = buildSystemPrompt();
-function buildCreativityPrompt(sources, combos, externalSignals = []) {
-  const sections = [];
-  const sourceLines = sources.map((s) => `  [${s.type}] ${s.name}: ${s.content}`).join("\n");
-  sections.push(`【可用概念来源】
-${sourceLines}`);
-  const comboLines = combos.map((c, i) => {
-    const comboStr = c.sources.length === 3 ? `${c.sources[0]} × ${c.sources[1]} × ${c.sources[2]}` : `${c.sources[0]} × ${c.sources[1]}`;
-    return `  ${i + 1}. ${comboStr} — ${c.description}`;
-  }).join("\n");
-  sections.push(`【推荐配对组合】
-请为以下每个配对产生一个创意方案：
-${comboLines}`);
-  if (externalSignals.length > 0) {
-    sections.push(buildExternalSignalBlock(externalSignals));
-  }
-  return sections.join("\n\n");
-}
-function buildExternalSignalBlock(signals) {
-  const lines = signals.map((s) => `  [${s.type}@${s.source}] ${s.raw}`).join("\n");
-  return `【外部信号 — 作为审视视角，不可配对】
-
-以下信号来自 Observer 的真实世界趋势和洞察。它们不应被直接与概念来源组合配对。
-请以这些外部信号为"审视视角"，重新评估你的配对方案：
-- 有哪些组合的前提假设被这些外部信号挑战了？
-- 有哪些组合在外部信号的视角下会失败？
-- 有哪些组合因为外部信号的出现而变得有价值？
-
-${lines}`;
-}
-const TEMPLATES$1 = [
-  // ========== FUSION ==========
-  {
-    category: "fusion",
-    variant: "merged",
-    titleTemplate: "{a} × {b} 深度融合",
-    ideaTemplate: "将「{a}」和「{b}」的核心能力通过统一接口层合并，使两者共享数据和上下文。{b} 的输出作为 {a} 的新输入维度，{a} 的状态变化反向驱动 {b} 的行为调整，形成双向往来的融合架构。",
-    benefitTemplate: "消除信息孤岛，产生 1+1>2 的涌现效果",
-    riskTemplate: "耦合度过高导致两个模块难以独立演进",
-    typeFit: { knowledge_knowledge: 10, insight_insight: 9, behavior_behavior: 7 },
-    // 不同知识源走向不同策略：ASR×MCP 适合深度融合，Memory×Agent 也是
-    nameFit: { "ASR|MCP": 8, "Agent|Memory": 8, "MCP|Agent": 8 },
-    noveltyBonus: 18,
-    feasibilityBonus: 5,
-    impactBonus: 20
-  },
-  {
-    category: "fusion",
-    variant: "hybrid_pipeline",
-    titleTemplate: "{a}-{b} 混合流水线",
-    ideaTemplate: "将「{a}」的处理流程嵌入到「{b}」的管线中，在关键节点插入 {a} 的判断逻辑。两条路径并行执行并在汇合点进行交叉验证，不一致时触发仲裁机制取最优或加权融合。",
-    benefitTemplate: "结合两者优势，降低单一路径的系统性偏差",
-    riskTemplate: "双路径并行增加延迟和资源消耗",
-    typeFit: { knowledge_knowledge: 8, behavior_knowledge: 7, insight_behavior: 6 },
-    noveltyBonus: 14,
-    feasibilityBonus: 3,
-    impactBonus: 16
-  },
-  {
-    category: "fusion",
-    variant: "cross_pollination",
-    titleTemplate: "{a} 赋能 {b}",
-    ideaTemplate: "把「{a}」领域成熟的数据模型和判断规则改造成「{b}」能理解的输入格式，让 {b} 在不重构自身架构的前提下利用 {a} 的知识积累。通过适配器模式渐进集成，先做 POC 验证再全量上线。",
-    benefitTemplate: "复用已有资产，快速获得新能力",
-    riskTemplate: "适配层可能成为性能瓶颈",
-    typeFit: { knowledge_behavior: 9, knowledge_failure: 8, insight_knowledge: 7 },
-    noveltyBonus: 10,
-    feasibilityBonus: 8,
-    impactBonus: 14
-  },
-  // ========== TRANSPLANT ==========
-  {
-    category: "transplant",
-    variant: "capability_port",
-    titleTemplate: "{a} 能力移植到 {b}",
-    ideaTemplate: "识别「{a}」中可独立封装的核心算法或策略，将其抽离为通用模块后注入到「{b}」的执行链路中。移植后 {b} 获得 {a} 的核心能力而不需要继承 {a} 的全部复杂度。",
-    benefitTemplate: "关键能力低成本复用",
-    riskTemplate: "脱离原始上下文后移植效果打折扣",
-    typeFit: { knowledge_behavior: 10, behavior_behavior: 8, knowledge_insight: 7 },
-    noveltyBonus: 12,
-    feasibilityBonus: 7,
-    impactBonus: 13
-  },
-  {
-    category: "transplant",
-    variant: "pattern_migration",
-    titleTemplate: "{a} 设计模式迁移到 {b}",
-    ideaTemplate: "分析「{a}」架构中成功的设计模式（事件驱动、分层、插件化等），识别出该模式在 {a} 中解决的具体问题，然后在「{b}」中寻找相同性质的问题域，用适配的方式重构实现。",
-    benefitTemplate: "避免重复造轮子，架构决策经过验证",
-    riskTemplate: "模式迁移可能引入 {a} 的隐式约束",
-    typeFit: { knowledge_behavior: 8, knowledge_knowledge: 9, insight_behavior: 7 },
-    /**
-     * pattern_migration 是结构化迁移，只适合工程系统间的配对
-     * ASR→MCP、Agent→Evolution 有意义
-     * Memory→Agent、TTS→Wallpaper 等则不适用 — 没有 nameFit 加成，
-     * 自然落到其他模板
-     */
-    nameFit: { "ASR|MCP": 8, "Agent|Evolution": 8 },
-    noveltyBonus: 11,
-    feasibilityBonus: 8,
-    impactBonus: 12
-  },
-  {
-    category: "transplant",
-    variant: "algorithm_transfer",
-    titleTemplate: "{a} 算法复用到 {b}",
-    ideaTemplate: "提取「{a}」核心算法的输入输出接口，为「{b}」的上下文实现一个兼容适配层。复用不追求 1:1 精确移植，而是保留算法核心逻辑并用 {b} 的数据格式做输入输出转换。",
-    benefitTemplate: "成熟算法快速落地新场景",
-    riskTemplate: "适配层掩盖了算法对 {b} 数据质量的要求",
-    typeFit: { knowledge_behavior: 8, knowledge_insight: 6, insight_behavior: 5 },
-    noveltyBonus: 9,
-    feasibilityBonus: 9,
-    impactBonus: 11
-  },
-  // ========== CONTRAST ==========
-  {
-    category: "contrast",
-    variant: "complementary_roles",
-    titleTemplate: "{a} 补完 {b} 盲区",
-    ideaTemplate: "分析「{a}」和「{b}」各自的准确率和失败模式，找出 {a} 擅长但 {b} 薄弱、以及 {b} 擅长但 {a} 薄弱的区域。设计一个路由层根据输入特征自动分派到更合适的模块，覆盖双方的盲区。",
-    benefitTemplate: "整体准确率超过任何一个独立模块",
-    riskTemplate: "路由判断本身引入新的错误来源",
-    typeFit: { knowledge_failure: 10, behavior_failure: 9, insight_failure: 9, failure_failure: 8 },
-    noveltyBonus: 16,
-    feasibilityBonus: 5,
-    impactBonus: 18
-  },
-  {
-    category: "contrast",
-    variant: "dual_mode",
-    titleTemplate: "{a}/{b} 双模切换",
-    ideaTemplate: "定义「{a}」和「{b}」各自的最佳工作条件（输入特征、负载范围、响应时间要求）。设计一个监控 + 切换器：条件满足时用 {a}，条件变化时切换到 {b}，切换时做状态保存和恢复保证无缝过渡。",
-    benefitTemplate: "在不同场景下始终使用最优方案",
-    riskTemplate: "切换逻辑复杂，切换瞬间可能出现抖动",
-    typeFit: { behavior_behavior: 8, knowledge_behavior: 7, insight_behavior: 7 },
-    noveltyBonus: 14,
-    feasibilityBonus: 4,
-    impactBonus: 15
-  },
-  {
-    category: "contrast",
-    variant: "strength_weakness_weave",
-    titleTemplate: "用 {a} 补 {b} 之短",
-    ideaTemplate: "列举「{b}」当前的已知短板或失败案例，逐一检查「{a}」中是否有可弥补的能力。为每个短板设计一条 {a}→{b} 的修复链路，优先级按短板影响面排序，逐步缩小 {b} 的能力缺口。",
-    benefitTemplate: "有针对性的补齐短板，资源投入回报率高",
-    riskTemplate: "过度依赖 {a} 掩盖了 {b} 自身的提升空间",
-    typeFit: { failure_knowledge: 10, failure_behavior: 9, failure_insight: 9, failure_failure: 8 },
-    noveltyBonus: 15,
-    feasibilityBonus: 6,
-    impactBonus: 17
-  },
-  // ========== FEEDBACK LOOP ==========
-  {
-    category: "feedback",
-    variant: "mutual_reinforcement",
-    titleTemplate: "{a} ↔ {b} 强化回路",
-    ideaTemplate: "设计一个闭环：{a} 的每次执行输出被「{b}」作为反馈信号消费，{b} 分析结果后调整自身的参数或策略，进而影响下一次 {a} 的执行质量。初始阶段人工监控闭环稳定性，收敛后转为自动运行。",
-    benefitTemplate: "系统在运行中持续自我优化",
-    riskTemplate: "反馈回路可能振荡发散，需要阻尼机制",
-    typeFit: { behavior_insight: 10, knowledge_behavior: 8, insight_insight: 8, behavior_behavior: 7 },
-    noveltyBonus: 20,
-    feasibilityBonus: 3,
-    impactBonus: 20
-  },
-  {
-    category: "feedback",
-    variant: "closed_loop_optimization",
-    titleTemplate: "{b} 根据 {a} 输出自动调优",
-    ideaTemplate: "收集「{a}」的每一次执行结果（成功/失败/耗时/质量分），将聚合指标作为「{b}」的超参数输入。{b} 根据历史趋势自动调整阈值、权重或策略选择，形成一个数据驱动的优化闭环。",
-    benefitTemplate: "无需人工干预的系统级自动优化",
-    riskTemplate: "历史偏差导致调优方向错误",
-    typeFit: { behavior_insight: 9, failure_insight: 8, knowledge_insight: 7 },
-    noveltyBonus: 18,
-    feasibilityBonus: 4,
-    impactBonus: 19
-  },
-  {
-    category: "feedback",
-    variant: "learning_from_outcome",
-    titleTemplate: "{a} 结果驱动的 {b} 进化",
-    ideaTemplate: "将「{a}」的执行结果标注为训练信号，定期用新积累的数据微调或更新「{b}」的策略。建立反馈数据集自动去重和采样的机制，避免数据分布偏移导致 {b} 退化。",
-    benefitTemplate: "持续学习让系统越来越聪明",
-    riskTemplate: "不良数据的累积可能导致模型漂移",
-    typeFit: { behavior_failure: 8, insight_failure: 9, knowledge_failure: 7, failure_failure: 7 },
-    noveltyBonus: 17,
-    feasibilityBonus: 3,
-    impactBonus: 18
-  },
-  // ========== ABSTRACT ==========
-  {
-    category: "abstract",
-    variant: "shared_interface",
-    titleTemplate: "{a}/{b} 统一抽象层",
-    ideaTemplate: "分析「{a}」和「{b}」的对外接口，找出语义相似的操作抽象为共用接口。先提取只读接口（查询类），再扩展到写接口。两套实现共存于统一接口之后，可以用策略模式在运行时选择具体实现。",
-    benefitTemplate: "降低系统整体复杂度，调用方无需感知具体实现",
-    riskTemplate: "过度抽象可能丢失各模块的特性能力",
-    typeFit: { knowledge_knowledge: 9, behavior_behavior: 7, insight_insight: 6 },
-    noveltyBonus: 10,
-    feasibilityBonus: 9,
-    impactBonus: 12
-  },
-  {
-    category: "abstract",
-    variant: "common_core",
-    titleTemplate: "抽取 {a} 与 {b} 的共同核心",
-    ideaTemplate: "找出「{a}」和「{b}」在数据处理流程、状态管理、错误处理等方面的共性逻辑，将其提取为核心库。核心库只包含无偏见的通用逻辑，具体的领域差异通过插件或策略注入。",
-    benefitTemplate: "去重后维护成本减半，修复一处两边受益",
-    riskTemplate: "核心库变更的波及面扩大",
-    typeFit: { knowledge_knowledge: 8, knowledge_behavior: 6, behavior_behavior: 7 },
-    noveltyBonus: 8,
-    feasibilityBonus: 10,
-    impactBonus: 11
-  },
-  {
-    category: "abstract",
-    variant: "generalized_pattern",
-    titleTemplate: "从 {a} 和 {b} 中归纳通用模式",
-    ideaTemplate: "对比「{a}」的实现路径和「{b}」的实现路径，提取出它们共享的解决模式（如：先过滤再聚合、分级缓存、渐进式加载）。将该模式文档化为设计模板，应用到其他模块的改造中。",
-    benefitTemplate: "沉淀架构知识，提升全系统设计一致性",
-    riskTemplate: "模式推广可能遭遇各模块的特殊情况",
-    typeFit: { insight_knowledge: 8, insight_behavior: 7, insight_insight: 9 },
-    noveltyBonus: 12,
-    feasibilityBonus: 7,
-    impactBonus: 10
-  },
-  // ========== METAPHOR ==========
-  {
-    category: "metaphor",
-    variant: "domain_mapping",
-    titleTemplate: "{a} 式 {b}",
-    ideaTemplate: "借用「{a}」领域的概念模型（如：免疫系统、城市规划、进化论）重新思考「{b}」的设计。将 {a} 中的实体和关系一一映射到 {b} 的领域：哪些是细胞/哪些是信号/哪些是防御机制。",
-    benefitTemplate: "跳出原有思维框架，发现全新设计可能",
-    riskTemplate: "隐喻映射可能强行套用不适配的关系",
-    typeFit: { insight_knowledge: 10, insight_behavior: 9, insight_failure: 8, insight_insight: 8 },
-    noveltyBonus: 22,
-    feasibilityBonus: 2,
-    impactBonus: 18
-  },
-  {
-    category: "metaphor",
-    variant: "borrowed_heuristic",
-    titleTemplate: "{a} 启发下的 {b} 改进",
-    ideaTemplate: "从「{a}」的运行原理中提取一条核心启发式规则（如：最少惊讶原则、帕累托改进、最速下降），然后检视「{b}」的当前行为是否违背了该规则，针对违背点设计改进方案。",
-    benefitTemplate: "源自成熟领域的第一性原理，适用性广泛",
-    riskTemplate: "启发式规则在新领域可能不成立",
-    typeFit: { knowledge_insight: 9, knowledge_random: 7, insight_random: 8, behavior_insight: 7 },
-    noveltyBonus: 17,
-    feasibilityBonus: 5,
-    impactBonus: 15
-  },
-  {
-    category: "metaphor",
-    variant: "analogical_reasoning",
-    titleTemplate: "像 {a} 一样思考 {b}",
-    ideaTemplate: "想象如果「{a}」是一个决策主体，它会如何设计「{b}」？分析 {a} 的核心原则（容错优先？效率优先？可解释优先？），将这些原则翻译为 {b} 的功能需求和非功能需求，设计符合 {a} 风格的新方案。",
-    benefitTemplate: "跨领域思维碰撞产生意想不到的优雅方案",
-    riskTemplate: "风格化设计可能牺牲 {b} 领域的本地优化",
-    typeFit: { insight_behavior: 8, insight_knowledge: 7, knowledge_random: 8 },
-    noveltyBonus: 20,
-    feasibilityBonus: 3,
-    impactBonus: 16
-  },
-  // ========== INVERSION ==========
-  {
-    category: "inversion",
-    variant: "reverse_assumption",
-    titleTemplate: "反 {a}：如果 {b} 主导会怎样",
-    ideaTemplate: "列举「{a}」和「{b}」当前关系的假设前提（a是主、b是从；a先执行、b后执行；a决策、b执行），逐个反转这些前提。针对每个反转版本评估可行性，挑出有意义的反转方向做原型验证。",
-    benefitTemplate: "打破思维定势，发现被忽视的架构可能",
-    riskTemplate: "反转方案可能违反领域直觉导致维护困难",
-    typeFit: { knowledge_behavior: 8, behavior_behavior: 7, insight_behavior: 9, failure_behavior: 8 },
-    noveltyBonus: 22,
-    feasibilityBonus: 3,
-    impactBonus: 17
-  },
-  {
-    category: "inversion",
-    variant: "flip_priority",
-    titleTemplate: "从 {b} 出发重新定义 {a}",
-    ideaTemplate: "不再问「{a} 如何改进 {b}」，而是问「{b} 需要 {a} 以什么形态存在」。站在 {b} 的消费者视角定义 {a} 的输出格式、响应速度和容错要求，反向重构 {a} 的需求规格。",
-    benefitTemplate: "确保 {a} 的输出真正被 {b} 消费，减少浪费",
-    riskTemplate: "消费者视角可能忽视 {a} 的内部约束",
-    typeFit: { behavior_knowledge: 8, failure_knowledge: 8, insight_knowledge: 7 },
-    noveltyBonus: 16,
-    feasibilityBonus: 5,
-    impactBonus: 14
-  },
-  {
-    category: "inversion",
-    variant: "antifragile_design",
-    titleTemplate: "让 {b} 从 {a} 的失败中受益",
-    ideaTemplate: "不再试图避免「{a}」的失败，而是设计「{b}」使其在 {a} 失败时反而能获得有用信息。例如：{a} 的报错模式 → {b} 建立错误模式库并自动调整阈值；{a} 超时 → {b} 启动降级路径并记录边界值。",
-    benefitTemplate: "将系统的弱点转化为信息优势",
-    riskTemplate: "需要仔细设计边界条件，失败类型不可穷尽",
-    typeFit: { failure_behavior: 10, failure_knowledge: 8, failure_insight: 9, failure_failure: 7 },
-    noveltyBonus: 24,
-    feasibilityBonus: 3,
-    impactBonus: 20
-  },
-  // ========== EVOLUTION ==========
-  {
-    category: "evolution",
-    variant: "progressive_enhancement",
-    titleTemplate: "在 {a} 上渐进引入 {b}",
-    ideaTemplate: "不一次性改造 {a}，而是在 {a} 的现有架构上以插件形式注入 {b} 的能力。第一阶段：旁路输出不做决策；第二阶段：作为建议源影响部分决策；第三阶段：在验证可靠后替换 {a} 的核心模块。",
-    benefitTemplate: "渐进式升级风险可控，随时可回滚",
-    riskTemplate: "过渡期维护两套系统的成本高",
-    typeFit: { knowledge_behavior: 8, behavior_behavior: 7, knowledge_failure: 9, behavior_failure: 8 },
-    noveltyBonus: 10,
-    feasibilityBonus: 8,
-    impactBonus: 13
-  },
-  {
-    category: "evolution",
-    variant: "layered_adoption",
-    titleTemplate: "{b} 作为 {a} 的上层增强",
-    ideaTemplate: "保持 {a} 不动，在其上新增一层 {b} 的能力层。{b} 层拦截 {a} 的输入输出，进行预处理或后处理增强。上层能力通过 feature flag 控制，逐步开放给不同用户群体验证效果。",
-    benefitTemplate: "不侵入核心逻辑的前提下获得新能力",
-    riskTemplate: "上层增强层可能成为黑盒，增加调试难度",
-    typeFit: { knowledge_behavior: 7, insight_behavior: 8, knowledge_insight: 7 },
-    noveltyBonus: 8,
-    feasibilityBonus: 9,
-    impactBonus: 11
-  },
-  {
-    category: "evolution",
-    variant: "incremental_replacement",
-    titleTemplate: "{a} 模块的 {b} 化改造",
-    ideaTemplate: "将 {a} 的功能按独立程度拆分为子模块，标记每个子模块是否适合被 {b} 的能力替代。优先替换边界清晰、影响面小的子模块，每替换一个就运行一个月观察稳定性，再决定下一步。",
-    benefitTemplate: "大规模改造变成小步快跑的系列任务",
-    riskTemplate: "新旧混合期接口兼容性需要持续维护",
-    typeFit: { knowledge_knowledge: 7, behavior_behavior: 6, failure_failure: 8 },
-    noveltyBonus: 9,
-    feasibilityBonus: 9,
-    impactBonus: 10
-  },
-  // ========== SYMBIOSIS ==========
-  {
-    category: "symbiosis",
-    variant: "event_coupling",
-    titleTemplate: "{a} 和 {b} 的事件总线",
-    ideaTemplate: "通过事件总线连接 {a} 和 {b}：{a} 产生的事件经总线广播，{b} 选择性订阅感兴趣的事件来触发自身行为。总线定义标准化的事件 Schema，{a} 和 {b} 通过 Schema 演进保持兼容。",
-    benefitTemplate: "松耦合，各自独立演进不影响对方",
-    riskTemplate: "事件 Schema 演进困难，新字段需要消费者配合",
-    typeFit: { behavior_behavior: 9, knowledge_behavior: 7, insight_behavior: 7, behavior_failure: 8 },
-    noveltyBonus: 14,
-    feasibilityBonus: 7,
-    impactBonus: 15
-  },
-  {
-    category: "symbiosis",
-    variant: "plugin_architecture",
-    titleTemplate: "{b} 插件化 {a}",
-    ideaTemplate: "将 {a} 的能力接口定义为一组插件契约，{b} 作为插件实现接入。{a} 在运行时通过 ServiceLoader 发现并加载 {b} 的插件，{b} 专注于实现契约而不需关心 {a} 的内部调度。",
-    benefitTemplate: "职责边界清晰，{b} 可替换可测试",
-    riskTemplate: "插件 API 的稳定性直接影响生态建设",
-    typeFit: { knowledge_behavior: 8, behavior_behavior: 8, knowledge_knowledge: 6 },
-    noveltyBonus: 11,
-    feasibilityBonus: 8,
-    impactBonus: 13
-  },
-  {
-    category: "symbiosis",
-    variant: "sidecar_pattern",
-    titleTemplate: "{a} 附属的 {b} 边车",
-    ideaTemplate: "为 {a} 附加一个 {b} 边车进程，{a} 的每次请求先经过边车处理（监控、缓存、过滤、转换）后再到达主逻辑。边车无状态可独立扩缩容，{a} 不需要引入 {b} 的依赖库。",
-    benefitTemplate: "横切关注点与主逻辑分离，运维灵活",
-    riskTemplate: "边车增加请求链路中的网络跳转",
-    typeFit: { behavior_behavior: 7, knowledge_behavior: 7, insight_behavior: 7, failure_behavior: 7 },
-    noveltyBonus: 12,
-    feasibilityBonus: 7,
-    impactBonus: 12
-  },
-  // ========== ORCHESTRATE ==========
-  {
-    category: "orchestrate",
-    variant: "coordinator",
-    titleTemplate: "{a} 编排 {b} 工作流",
-    ideaTemplate: "将 {b} 的现有能力封装为标准步骤（step），{a} 作为编配器定义这些步骤的执行顺序、条件分支和异常处理。{a} 维护一个 DAG 定义工作流拓扑，{b} 只关心单个步骤的实现。",
-    benefitTemplate: "组合复杂度从单体代码转移到可配置的编配层",
-    riskTemplate: "编配器成为单点故障",
-    typeFit: { behavior_insight: 8, knowledge_insight: 7, insight_insight: 7 },
-    noveltyBonus: 16,
-    feasibilityBonus: 6,
-    impactBonus: 17
-  },
-  {
-    category: "orchestrate",
-    variant: "pipeline_composition",
-    titleTemplate: "{a} × {b} 处理流水线",
-    ideaTemplate: "将 {a} 和 {b} 组合为一条数据处理流水线：{a} 的输出是 {b} 的输入。每个环节定义明确的输入/输出 Schema，中间结果可缓存可重放。流水线用 JSON 定义，运行时动态加载。",
-    benefitTemplate: "处理链路可视化，每个环节可单独调优",
-    riskTemplate: "流水线中单环节延迟拖累整体吞吐",
-    typeFit: { knowledge_behavior: 8, behavior_behavior: 7, knowledge_knowledge: 7, insight_behavior: 6 },
-    noveltyBonus: 11,
-    feasibilityBonus: 8,
-    impactBonus: 13
-  },
-  {
-    category: "orchestrate",
-    variant: "chain_of_thought_flow",
-    titleTemplate: "{a} 引导 {b} 的推理链",
-    ideaTemplate: "{a} 不直接输出结果，而是生成一条推理路径（中间步骤链），{b} 沿着这条路径逐步验证和执行。{a} 负责任务分解和优先级排序，{b} 负责每一步的细节执行，最终结果由 {b} 汇总返回。",
-    benefitTemplate: "复杂任务被拆解为可追溯、可干预的小步骤",
-    riskTemplate: "推理链过长时中间步骤的累积误差",
-    typeFit: { insight_behavior: 9, insight_knowledge: 8, knowledge_behavior: 7, insight_insight: 7 },
-    noveltyBonus: 19,
-    feasibilityBonus: 4,
-    impactBonus: 18
-  }
-];
-class TemplateLibrary {
-  rng;
-  constructor(seed) {
-    this.rng = resolveRandom(seed);
-  }
-  /**
-   * 为一个 ConceptCombo 生成一条假设
-   * @returns 生成的 Hypothesis，如果无适用模板则返回 null
-   */
-  generate(combo, sources) {
-    const sourceA = sources.find((s) => s.name === combo.sources[0]);
-    const sourceB = sources.find((s) => s.name === combo.sources[1]);
-    if (!sourceA || !sourceB) return null;
-    const typeKey = this.typeKey(sourceA.type, sourceB.type);
-    const nameKey = this.nameKey(sourceA.name, sourceB.name);
-    const candidates = this.selectForType(typeKey, nameKey);
-    if (candidates.length === 0) return null;
-    const idx = this.stableHash(combo.sources[0], combo.sources[1]) % candidates.length;
-    const tpl = candidates[idx];
-    const id2 = `hyp_tpl_${Date.now()}_${this.rng().toString(36).slice(2, 6)}`;
-    return {
-      id: id2,
-      title: fill(tpl.titleTemplate, sourceA, sourceB),
-      idea: fill(tpl.ideaTemplate, sourceA, sourceB),
-      expectedBenefit: fill(tpl.benefitTemplate, sourceA, sourceB),
-      risk: fill(tpl.riskTemplate, sourceA, sourceB),
-      sourceLabels: [sourceA.name, sourceB.name],
-      novelty: clamp50(tpl.noveltyBonus + this.scoreNoise()),
-      feasibility: clamp50(tpl.feasibilityBonus + this.scoreNoise()),
-      impact: clamp50(tpl.impactBonus + this.scoreNoise()),
-      status: "draft",
-      createdAt: Date.now()
-    };
-  }
-  /**
-   * 返回适用于某个类型组合的所有模板列表
-   * @param nameKey 对 source name 排序后的组合键，用于 nameFit 二次路由
-   */
-  selectForType(typeKey, nameKey = "") {
-    const [a, b] = typeKey.split("_");
-    const reverseKey = `${b}_${a}`;
-    const scored = TEMPLATES$1.map((tpl) => {
-      let score = tpl.typeFit[typeKey] ?? tpl.typeFit[reverseKey] ?? 0;
-      if (tpl.nameFit && nameKey) {
-        score += tpl.nameFit[nameKey] ?? 0;
-      }
-      return { tpl, score };
-    });
-    return scored.filter((s) => s.score >= 5).sort((a2, b2) => b2.score - a2.score).map((s) => s.tpl);
-  }
-  typeKey(a, b) {
-    return [a, b].sort().join("_");
-  }
-  /** 对 source name 排序生成 nameFit 查询键 */
-  nameKey(a, b) {
-    return [a, b].sort().join("|");
-  }
-  stableHash(a, b) {
-    let h = 0;
-    const s = a + "|" + b;
-    for (let i = 0; i < s.length; i++) {
-      h = (h << 5) - h + s.charCodeAt(i);
-      h = h & h;
-    }
-    return Math.abs(h);
-  }
-  /** 评分的小幅随机扰动（0-15），保持一定多样性 */
-  scoreNoise() {
-    return Math.round(this.rng() * 12);
-  }
-}
-function fill(template, a, b) {
-  return template.replace(/\{a\}/g, a.name).replace(/\{b\}/g, b.name).replace(/\{aType\}/g, a.type).replace(/\{bType\}/g, b.type);
-}
-function clamp50(v) {
-  return Math.max(60, Math.min(100, v));
-}
-class LocalModelService {
-  generator = null;
-  loadAttempted = false;
-  modelId;
-  constructor(modelId) {
-    this.modelId = modelId || process.env.LOCAL_HYPOTHESIS_MODEL || "Xenova/Qwen2.5-0.5B-Instruct";
-  }
-  get isEnabled() {
-    return process.env.LOCAL_HYPOTHESIS_DISABLED !== "true";
-  }
-  get isLoaded() {
-    return this.generator !== null;
-  }
-  /**
-   * 生成文本 — 兼容 chatJson 接口格式
-   */
-  async generate(userText, options) {
-    if (!this.isEnabled) {
-      return { error: "local model disabled by env" };
-    }
-    if (process.env.VITEST || process.env.NODE_ENV === "test") {
-      return { error: "local model disabled in test environment" };
-    }
-    if (!this.generator) {
-      if (this.loadAttempted) return { error: "model previously failed to load" };
-      this.loadAttempted = true;
-      try {
-        Logger.log("INFO", "local_model_loading", { model: this.modelId });
-        const { pipeline, env } = await import("@xenova/transformers");
-        const modelsDir = await resolveModelsDir();
-        const localModelPath = path$1.resolve(modelsDir, this.modelId);
-        const hasLocalFiles = fs.existsSync(localModelPath);
-        if (hasLocalFiles) {
-          env.localModelPath = modelsDir;
-          Logger.log("INFO", "local_model_use_cache", { path: localModelPath });
-        } else {
-          Logger.log("INFO", "local_model_no_cache", { path: localModelPath });
-        }
-        this.generator = await pipeline("text-generation", this.modelId, {
-          cache_dir: process.env.MODEL_CACHE_DIR
-        });
-        Logger.log("INFO", "local_model_loaded", { model: this.modelId, local: hasLocalFiles });
-      } catch (err) {
-        Logger.log("WARN", "local_model_load_failed", { model: this.modelId, error: err.message });
-        this.generator = null;
-        return { error: `local model load failed: ${err.message}` };
-      }
-    }
-    const systemMsg = options?.system || "";
-    const chatTemplate = systemMsg ? `<|im_start|>system
-${systemMsg}<|im_end|>
-<|im_start|>user
-${userText}<|im_end|>
-<|im_start|>assistant
-` : `<|im_start|>user
-${userText}<|im_end|>
-<|im_start|>assistant
-`;
-    try {
-      const result = await this.generator(chatTemplate, {
-        max_new_tokens: options?.maxTokens || 768,
-        temperature: options?.temperature ?? 0.7,
-        do_sample: true
-      });
-      const rawText = Array.isArray(result) ? result[0]?.generated_text : result?.generated_text;
-      if (!rawText) return { error: "empty generation" };
-      const generated = rawText.slice(chatTemplate.length).trim();
-      const parsed = this.tryParse(generated);
-      if (parsed) {
-        return { data: parsed };
-      }
-      return { error: `generated non-JSON: ${generated.slice(0, 100)}` };
-    } catch (err) {
-      Logger.log("WARN", "local_model_generation_error", { error: err.message });
-      return { error: `generation failed: ${err.message}` };
-    }
-  }
-  /**
-   * 尝试从生成文本中提取 JSON
-   */
-  tryParse(text) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      const match2 = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (match2) {
-        try {
-          return JSON.parse(match2[1].trim());
-        } catch {
-        }
-      }
-      const arrMatch = text.match(/\[[\s\S]*\]/);
-      if (arrMatch) {
-        try {
-          return JSON.parse(arrMatch[0]);
-        } catch {
-        }
-      }
-    }
-    return null;
-  }
-}
-async function resolveModelsDir() {
-  try {
-    const { app } = await import("electron");
-    if (fs.existsSync(path$1.resolve(app.getAppPath(), "models"))) {
-      return path$1.resolve(app.getAppPath(), "models");
-    }
-    return path$1.resolve(app.getPath("userData"), "models");
-  } catch {
-  }
-  let dir = process.cwd();
-  for (let i = 0; i < 5; i++) {
-    const p = path$1.resolve(dir, "models");
-    if (fs.existsSync(p)) return p;
-    const parent = path$1.resolve(dir, "..");
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return path$1.resolve(process.cwd(), "models");
-}
-class HypothesisGenerator {
-  idCounter = 0;
-  rng;
-  chatJson;
-  templateLib;
-  localModel;
-  constructor(chatJson, seed) {
-    this.chatJson = chatJson;
-    this.rng = resolveRandom(seed);
-    this.templateLib = new TemplateLibrary(seed);
-    this.localModel = new LocalModelService();
-  }
-  /**
-   * 从概念组合生成假设 — 远程 LLM → 本地模型 → TemplateLibrary → 模板兜底
-   *
-   * 四级 fallback 链：
-   *   1. 远程 LLM           (高质，但 30s 超时、网络依赖)
-   *   2. 本地 transformers.js (进程内，~1s，无网络依赖)
-   *   3. TemplateLibrary    (30+ 模式，类型感知，零延迟)
-   *   4. 原始模板           (5 个硬编码，终极兜底)
-   */
-  async generate(combos, sources, dreamMode = false, externalSignals = []) {
-    if (combos.length === 0) return [];
-    const llmResults = await this.tryLLM(sources, combos, dreamMode, externalSignals);
-    if (llmResults.length > 0) {
-      return llmResults.map((r) => ({
-        id: `hyp_${Date.now()}_${++this.idCounter}_${this.rng().toString(36).slice(2, 4)}`,
-        title: r.title,
-        idea: r.idea,
-        expectedBenefit: r.expectedBenefit,
-        risk: r.risk,
-        sourceLabels: r.sourceLabels,
-        novelty: Math.max(10, Math.min(100, r.novelty)),
-        feasibility: Math.max(10, Math.min(100, r.feasibility)),
-        impact: Math.max(10, Math.min(100, r.impact)),
-        status: "draft",
-        createdAt: Date.now()
-      }));
-    }
-    if (this.localModel.isEnabled) {
-      Logger.log("INFO", "hypothesis_fallback_local", { count: combos.length });
-      const localResults = await this.tryLocalModel(sources, combos, dreamMode);
-      if (localResults.length > 0) {
-        return localResults.map((r) => ({
-          id: `hyp_local_${Date.now()}_${++this.idCounter}_${this.rng().toString(36).slice(2, 4)}`,
-          title: r.title,
-          idea: r.idea,
-          expectedBenefit: r.expectedBenefit,
-          risk: r.risk,
-          sourceLabels: r.sourceLabels,
-          novelty: Math.max(10, Math.min(100, r.novelty)),
-          feasibility: Math.max(10, Math.min(100, r.feasibility)),
-          impact: Math.max(10, Math.min(100, r.impact)),
-          status: "draft",
-          createdAt: Date.now()
-        }));
-      }
-    }
-    Logger.log("INFO", "hypothesis_fallback_templates", { count: combos.length });
-    const tplResults = [];
-    for (const combo of combos) {
-      const h = this.templateLib.generate(combo, sources);
-      if (h) tplResults.push(h);
-    }
-    if (tplResults.length > 0) {
-      return tplResults;
-    }
-    Logger.log("WARN", "hypothesis_fallback_legacy", { count: combos.length });
-    return combos.map((combo) => this.templateFallback(combo));
-  }
-  /**
-   * 调 LLM 生成创意
-   */
-  async tryLLM(sources, combos, dreamMode, externalSignals = []) {
-    const topCombos = combos.slice(0, dreamMode ? 5 : 3);
-    const comboInfo = topCombos.map((c) => ({
-      sources: c.sources,
-      description: c.description
-    }));
-    const prompt = buildCreativityPrompt(sources, comboInfo, externalSignals);
-    try {
-      const result = await this.chatJson(prompt, {
-        system: CREATIVITY_SYSTEM_PROMPT,
-        temperature: dreamMode ? 1 : 0.8,
-        timeoutMs: 6e4
-      });
-      if (result.error) {
-        Logger.log("WARN", "hypothesis_llm_error", { error: result.error });
-        return [];
-      }
-      const ideas = Array.isArray(result.data) ? result.data : [];
-      return ideas.filter(
-        (i) => typeof i.title === "string" && typeof i.idea === "string" && Array.isArray(i.sourceLabels) && typeof i.novelty === "number"
-      );
-    } catch (err) {
-      Logger.log("ERROR", "hypothesis_llm_exception", { error: String(err) });
-      return [];
-    }
-  }
-  /**
-   * 调本地 transformers.js 模型生成创意
-   */
-  async tryLocalModel(sources, combos, dreamMode) {
-    const topCombos = combos.slice(0, dreamMode ? 3 : 2);
-    const comboInfo = topCombos.map((c) => ({
-      sources: c.sources,
-      description: c.description
-    }));
-    const prompt = buildCreativityPrompt(sources, comboInfo);
-    const result = await this.localModel.generate(prompt, {
-      system: CREATIVITY_SYSTEM_PROMPT,
-      temperature: dreamMode ? 0.8 : 0.6,
-      maxTokens: dreamMode ? 1024 : 768
-    });
-    if (result.error) {
-      Logger.log("WARN", "hypothesis_local_error", { error: result.error });
-      return [];
-    }
-    const ideas = Array.isArray(result.data) ? result.data : [];
-    return ideas.filter(
-      (i) => typeof i.title === "string" && typeof i.idea === "string" && Array.isArray(i.sourceLabels) && typeof i.novelty === "number"
-    );
-  }
-  /**
-   * 模板 fallback — 从旧实现保留
-   */
-  templateFallback(combo) {
-    const [a, b] = combo.sources;
-    const hash = this.stableHash(a, b);
-    const idx = hash % TEMPLATES.length;
-    const t = TEMPLATES[idx];
-    return {
-      id: `hyp_fb_${Date.now()}_${++this.idCounter}_${this.rng().toString(36).slice(2, 4)}`,
-      title: t.title(a, b),
-      idea: t.idea(a, b),
-      expectedBenefit: t.expectedBenefit,
-      risk: t.risk,
-      sourceLabels: [a, b],
-      novelty: 50 + Math.round(this.rng() * 30),
-      feasibility: 40 + Math.round(this.rng() * 30),
-      impact: 50 + Math.round(this.rng() * 25),
-      status: "draft",
-      createdAt: Date.now()
-    };
-  }
-  stableHash(a, b) {
-    let h = 0;
-    const s = a + "|" + b;
-    for (let i = 0; i < s.length; i++) {
-      h = (h << 5) - h + s.charCodeAt(i);
-      h = h & h;
-    }
-    return Math.abs(h);
-  }
-}
-const TEMPLATES = [
-  {
-    title: (a, b) => `${a} 驱动的 ${b}`,
-    idea: (a, b) => `将「${a}」的核心机制作为「${b}」的新输入维度`,
-    expectedBenefit: "解锁之前被忽视的新能力组合",
-    risk: "组合可能引入不必要的复杂度"
-  },
-  {
-    title: (a, b) => `基于 ${a} 的 ${b} 增强`,
-    idea: (a, b) => `让「${a}」和「${b}」通过一个共享接口互相增强`,
-    expectedBenefit: "系统灵活性提升，涌现新的行为模式",
-    risk: "两个概念耦合后难以单独演进"
-  },
-  {
-    title: (a, b) => `${a} × ${b} 混合系统`,
-    idea: (a, b) => `借鉴「${a}」的设计哲学重新思考「${b}」的实现`,
-    expectedBenefit: "减少重复逻辑，提升模块间信息复用",
-    risk: "可能存在隐含的语义冲突"
-  },
-  {
-    title: (a, b) => `从 ${a} 到 ${b} 的抽象跳跃`,
-    idea: (a, b) => `在「${a}」的基础上构建「${b}」的新抽象层`,
-    expectedBenefit: "降低认知负载，统一概念模型",
-    risk: "抽象层过多影响 runtime 性能"
-  },
-  {
-    title: (a, b) => `${a} 视角下的 ${b} 重构`,
-    idea: (a, b) => `将「${a}」的某一种能力移植到「${b}」的上下文中`,
-    expectedBenefit: "架构更优雅，扩展点增加",
-    risk: "预期收益不确定，需要实验验证"
-  }
-];
-class ExperimentPlanner {
-  rng;
-  constructor(seed) {
-    this.rng = resolveRandom(seed);
-  }
-  plan(hypothesis) {
-    if (hypothesis.novelty >= 90 && hypothesis.feasibility < 30) {
-      return this.researchPlan(hypothesis);
-    }
-    return this.concretePlan(hypothesis);
-  }
-  concretePlan(hypothesis) {
-    const steps2 = [
-      `定义「${hypothesis.title}」的 MVP 范围`,
-      `实现核心抽象层：${hypothesis.idea.slice(0, 40)}...`,
-      `编写 A/B 测试比较新旧方案`,
-      `收集运行数据和用户反馈`,
-      `评估是否达到预期收益：${hypothesis.expectedBenefit}`
-    ];
-    const criteria = [
-      `功能完整性 >= 80%`,
-      `性能不低于当前基线`,
-      `用户无感知迁移`,
-      `收益指标明确可量化`
-    ];
-    const durations = ["3-5 天", "1-2 周", "2-3 周", "1 个月"];
-    const duration = randomPick(this.rng, durations);
-    return {
-      hypothesisId: hypothesis.id,
-      title: `实验: ${hypothesis.title}`,
-      steps: steps2,
-      successCriteria: criteria,
-      estimatedDuration: duration,
-      createdAt: Date.now()
-    };
-  }
-  researchPlan(hypothesis) {
-    return {
-      hypothesisId: hypothesis.id,
-      title: `研究: ${hypothesis.title}`,
-      steps: [
-        `调研同类系统中的实现方案`,
-        `设计可行性原型（不开发完整功能）`,
-        `使用 10% 的真实数据模拟验证`,
-        `输出可行性评估报告`,
-        `决定是否进入开发阶段`
-      ],
-      successCriteria: [
-        `可行性 >= 60%`,
-        `落地成本可接受`,
-        `与现有架构不冲突`
-      ],
-      estimatedDuration: "1-2 天研究",
-      createdAt: Date.now()
-    };
-  }
-}
-class IdeaGenerator {
-  mixer;
-  hypothesisGen;
-  experimentPlanner;
-  rng;
-  // 创造力温度：越高越随机，越低越保守
-  temperature = 0.3;
-  /** 已探索过的配对 key 列表，传给 ConceptMixer 以降权 */
-  exploredPairs = [];
-  constructor(chatJson, temperature = 0.3, seed) {
-    this.rng = resolveRandom(seed);
-    this.mixer = new ConceptMixer(seed);
-    this.hypothesisGen = new HypothesisGenerator(chatJson, seed);
-    this.experimentPlanner = new ExperimentPlanner(seed);
-    this.temperature = temperature;
-  }
-  /**
-   * 完整一轮"灵感涌现"流程
-   * @param strategy 生成策略，约束 ConceptMixer 配对空间
-   */
-  async generateIdeas(sources, maxIdeas = 5, strategy = "explore", externalSignals = []) {
-    if (sources.length < 2) return [];
-    const activeSources = this.applyTemperature(sources);
-    const scoredCombos = this.mixer.mix(activeSources, maxIdeas * 3, this.exploredPairs, strategy);
-    const combos = scoredCombos.map((c) => c.combo);
-    if (combos.length === 0) return [];
-    const hypotheses2 = await this.hypothesisGen.generate(combos, activeSources, false, externalSignals);
-    const noveltyThreshold = strategy === "stable" ? 40 : strategy === "signal" ? 60 : 55;
-    const novel = hypotheses2.filter((h) => h.novelty >= noveltyThreshold);
-    const ideas = novel.slice(0, maxIdeas).map((h) => ({
-      hypothesis: h,
-      experiment: this.experimentPlanner.plan(h)
-    }));
-    return ideas;
-  }
-  /**
-   * Dream Mode — 高随机性、跨时间跨度的"梦境"模式
-   */
-  async dreamIdeas(recentSources, historicalCombos, failedHypotheses, maxIdeas = 3, strategy = "explore") {
-    const dreamTemperature = 0.8;
-    const failureSources = failedHypotheses.map((h) => ({
-      name: `失败:${h.title}`,
-      content: `${h.idea}
-风险:${h.risk}`,
-      type: "failure",
-      weight: 0.8
-    }));
-    const allSources = [
-      ...recentSources,
-      ...failureSources,
-      // 添加随机扰动源
-      {
-        name: `随机种子_${Date.now()}`,
-        content: this.rng().toString(36),
-        type: "random",
-        weight: 0.3
-      }
-    ];
-    const activeSources = this.mixer.pickRandomSources(allSources, dreamTemperature, 4);
-    const scoredCombos = this.mixer.mix(activeSources, maxIdeas * 5, [], strategy);
-    const combos = scoredCombos.map((c) => c.combo);
-    if (combos.length === 0) return [];
-    const hypotheses2 = await this.hypothesisGen.generate(combos, activeSources, true);
-    const feasible = this.feasibilityGate(hypotheses2);
-    const novel = feasible.filter((h) => h.novelty >= 65);
-    return novel.slice(0, maxIdeas).map((h) => ({
-      hypothesis: h,
-      experiment: this.experimentPlanner.plan(h)
-    }));
-  }
-  setTemperature(t) {
-    this.temperature = Math.max(0, Math.min(1, t));
-  }
-  /** 设置已探索过的配对，用于 ConceptMixer 降权 */
-  setExploredPairs(pairs) {
-    this.exploredPairs = pairs;
-  }
-  /**
-   * 可行性/质量门禁 — 过滤明显不靠谱的想法
-   * - 可行性评分 >= 30 才保留
-   * - 想法描述至少 20 个字符（排除模板填空）
-   * - novelty > 80 但 feasibility < 40 的"可疑高新颖性"需要额外检查描述长度
-   */
-  feasibilityGate(hypotheses2) {
-    return hypotheses2.filter((h) => {
-      if (h.feasibility < 30) return false;
-      if (!h.idea || h.idea.length < 20) return false;
-      if (h.novelty > 80 && h.feasibility < 40) {
-        if (!h.idea || h.idea.length < 60) return false;
-      }
-      return true;
-    });
-  }
-  /**
-   * 温度影响来源选择权重
-   */
-  applyTemperature(sources) {
-    if (this.temperature < 0.2) {
-      return [...sources].sort((a, b) => b.weight - a.weight).slice(0, 4);
-    }
-    if (this.temperature > 0.7) {
-      return sources.filter(() => this.rng() > 0.2);
-    }
-    return sources.filter((s) => {
-      if (s.weight > 0.7) return true;
-      return this.rng() < 0.85;
-    });
-  }
-}
-class WorldTrendProvider {
-  observerDir;
-  consumedNames = /* @__PURE__ */ new Set();
-  rng;
-  constructor(observerDir, seed) {
-    this.observerDir = observerDir;
-    this.rng = resolveRandom(seed);
-  }
-  resetConsumed() {
-    this.consumedNames.clear();
-  }
-  /**
-   * 返回精选观察片段（3-6 条），按热度排序、轮换选取。
-   */
-  getTrends() {
-    const signals = this.loadSignals(3);
-    if (signals.length === 0) return [];
-    const obsMap = this.buildObsMap(3);
-    const candidates = signals.slice(0, 30);
-    const allSnippets = [];
-    const seenContent = /* @__PURE__ */ new Set();
-    for (const s of candidates) {
-      const ids = (s.recentObservationIds ?? []).slice(0, 2);
-      for (const id2 of ids) {
-        const obs = obsMap.get(id2);
-        if (!obs) continue;
-        const text = `[${obs.source}] ${obs.content}`;
-        const key = obs.content.slice(0, 50);
-        if (seenContent.has(key)) continue;
-        seenContent.add(key);
-        allSnippets.push(text);
-      }
-      if (allSnippets.length >= 30) break;
-    }
-    if (allSnippets.length === 0) return [];
-    const fresh = allSnippets.filter((s) => !this.consumedNames.has(s.slice(0, 60)));
-    const pool = fresh.length >= 3 ? fresh : (this.consumedNames.clear(), allSnippets);
-    const count = Math.min(pool.length, 3 + Math.floor(this.rng() * 3));
-    const shuffled = [...pool].sort(() => this.rng() - 0.5);
-    const picked = shuffled.slice(0, count);
-    for (const p of picked) this.consumedNames.add(p.slice(0, 60));
-    return picked;
-  }
-  /**
-   * 获取最近几天的精选观察片段（结构化，供工具使用）。
-   */
-  getTrendSignals(days = 3, limit = 20) {
-    const signals = this.loadSignals(days);
-    const obsMap = this.buildObsMap(days);
-    const seen = /* @__PURE__ */ new Set();
-    return signals.filter((s) => {
-      const key = s.keyword.trim();
-      if (seen.has(key) || s.score < 0.3) return false;
-      seen.add(key);
-      return true;
-    }).slice(0, limit).map((s) => {
-      const ids = (s.recentObservationIds ?? []).slice(0, 3);
-      const snippets = [];
-      const seenSnippet = /* @__PURE__ */ new Set();
-      for (const id2 of ids) {
-        const obs = obsMap.get(id2);
-        if (!obs) continue;
-        const text = `[${obs.source}] ${obs.content.slice(0, 150)}`;
-        const key = obs.content.slice(0, 50);
-        if (seenSnippet.has(key)) continue;
-        seenSnippet.add(key);
-        snippets.push(text);
-      }
-      return { keyword: s.keyword, snippets, score: s.score };
-    });
-  }
-  /**
-   * 从 insights/ 取主题名。
-   */
-  getInsights() {
-    const insightsDir = path$1.join(this.observerDir, "insights");
-    if (!fs.existsSync(insightsDir)) return [];
-    try {
-      const files = fs.readdirSync(insightsDir).filter((f) => f.endsWith(".json")).sort().reverse().slice(0, 5);
-      const topics = [];
-      for (const file of files) {
-        const raw = fs.readFileSync(path$1.join(insightsDir, file), "utf-8");
-        const data = JSON.parse(raw);
-        const topic = data.topic?.trim();
-        if (topic && topic.length > 2 && topic.length < 50) {
-          topics.push(`昨日研究: ${topic}`);
-        }
-      }
-      return topics;
-    } catch {
-      return [];
-    }
-  }
-  // ── private ──────────────────────────────────────────────
-  loadSignals(days) {
-    const dir = path$1.join(this.observerDir, "trends");
-    if (!fs.existsSync(dir)) return [];
-    const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort().reverse().slice(0, days);
-    const signals = [];
-    for (const file of files) {
-      const raw = fs.readFileSync(path$1.join(dir, file), "utf-8");
-      const data = JSON.parse(raw);
-      if (data.signals) {
-        for (const s of data.signals) {
-          signals.push({
-            keyword: s.keyword,
-            score: s.score ?? 0,
-            occurrenceCount: s.occurrenceCount ?? 0,
-            recentObservationIds: s.recentObservationIds ?? [],
-            source: s.source ?? "unknown"
-          });
-        }
-      }
-    }
-    signals.sort((a, b) => b.score - a.score);
-    return signals;
-  }
-  buildObsMap(days) {
-    const map = /* @__PURE__ */ new Map();
-    const dir = path$1.join(this.observerDir, "observations");
-    if (!fs.existsSync(dir)) return map;
-    const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort().reverse().slice(0, days);
-    for (const file of files) {
-      const raw = fs.readFileSync(path$1.join(dir, file), "utf-8");
-      const data = JSON.parse(raw);
-      if (data.observations) {
-        for (const obs of data.observations) {
-          if (obs.id && obs.content) {
-            if (!map.has(obs.id)) {
-              map.set(obs.id, { id: obs.id, content: obs.content, source: obs.source });
-            }
-          }
-        }
-      }
-    }
-    return map;
-  }
-}
-class SourceBuilder {
-  rng;
-  /** Provocation 池：外部领域概念 — 不是类比，而是冲突/极限/失效 */
-  domainConcepts = [
-    "尺度反转：某模块如果每秒处理 1000 倍于当前请求，它的哪个组件最先崩溃？瓶颈不在你关注的地方",
-    "退化路径：如果一个已上线一年的功能突然不再被任何用户使用，它的代码应该自动腐烂还是显式淘汰？",
-    "隐藏耦合：两个看起来无关的模块在什么边界条件下会产生交互？直觉告诉你的那个答案通常是错的",
-    "收益递减：当前系统的哪一项优化已经过了收益拐点？继续投入为什么不会产生更好的结果",
-    "互适应：当用户学会了系统的行为模式，系统反过来学会了用户的，两者的适应谁会先到达有害状态？",
-    "功能侵蚀：一个模块为了覆盖 5% 的边缘场景，增加了 50% 的复杂度。这 5% 是否应该被切掉？",
-    '沉默错误：系统中最危险的错误不是抛出异常的那个，而是被正常流程吞掉的那个。你有哪些错误被"正常"了？',
-    "信息蒸馏：每一层抽象都在丢失信息。你的架构中哪一层抽象丢失的信息比它创造的价值多？",
-    "二阶效应：解决 A 问题的方案，在 3 个月后大概率会制造 B 问题。你当前正准备引入哪个 A？",
-    '认知税：一个设计如果能被新人在 10 分钟内理解，它的长期维护成本低于一个"更优"但需要 1 小时才能搞懂的设计。你的架构中哪个模块在收认知税？'
-  ];
-  /** Provocation 池：反向约束 */
-  constraints = [
-    "如果不能使用任何 LLM，纯规则引擎",
-    "如果用户只能输入 3 个词（极简交互）",
-    "如果 Mio 必须完全离线运行",
-    "如果要支持 100 人同时使用",
-    "如果每个决策必须对非技术用户可解释",
-    "如果所有数据必须在 1 秒后自动销毁",
-    "如果只有 64MB 内存可用",
-    "如果用户是视障人士（纯语音界面）",
-    "如果不允许写任何文件到磁盘",
-    "如果每轮响应必须在 100ms 内完成"
-  ];
-  /** 已经用过的 provocation 索引 */
-  usedProvocations = [];
-  usedConstraints = [];
-  constructor(seed) {
-    this.rng = resolveRandom(seed);
-  }
-  /**
-   * 构建一轮创造力来源
-   * @param moduleData 各模块运行时数据
-   * @param rejectedIdeas 最近被拒绝的假设片段
-   */
-  build(moduleData, rejectedIdeas = [], worldTrends) {
-    const sources = [];
-    const memInfo = moduleData.memory;
-    sources.push({
-      name: "Memory",
-      content: memInfo ? `对话记忆系统：${memInfo.entryCount} 条记录，最近话题: ${memInfo.recentTopics.slice(0, 3).join("、") || "无"}` : "对话记忆系统",
-      type: "knowledge",
-      weight: 0.9
-    });
-    sources.push({
-      name: "MCP",
-      content: `工具调用框架：${moduleData.agent ? `${moduleData.agent.topTools.slice(0, 3).join(", ")} 等 ${moduleData.agent.toolCalls} 次调用` : "多工具集成"}`,
-      type: "knowledge",
-      weight: 0.8
-    });
-    const asrInfo = moduleData.asr;
-    sources.push({
-      name: "ASR",
-      content: asrInfo ? `语音识别：平均延迟 ${asrInfo.avgLatencyMs}ms，错误率 ${(asrInfo.errorRate * 100).toFixed(1)}%，识别领域: ${asrInfo.domainTerms.slice(0, 3).join("、") || "通用"}` : "语音识别",
-      type: "knowledge",
-      weight: 0.7
-    });
-    const ttsInfo = moduleData.tts;
-    sources.push({
-      name: "TTS",
-      content: ttsInfo ? `语音合成：本小时合成 ${ttsInfo.charsSynthesized} 字符，队列深度 ${ttsInfo.queueLength}` : "语音合成",
-      type: "knowledge",
-      weight: 0.7
-    });
-    const agentInfo = moduleData.agent;
-    sources.push({
-      name: "Agent",
-      content: agentInfo ? `Agent 服务：${agentInfo.toolCalls} 次工具调用，成功率 ${(agentInfo.successRate * 100).toFixed(0)}%，最常用 ${agentInfo.topTools.slice(0, 3).join(", ")}` : "Agent 服务",
-      type: "knowledge",
-      weight: 0.9
-    });
-    const evoInfo = moduleData.evolution;
-    sources.push({
-      name: "Evolution",
-      content: evoInfo ? `自进化系统：第 ${evoInfo.generation} 代，${evoInfo.strategyCount} 个策略，最近事件: ${evoInfo.recentEvents.slice(0, 3).join(" | ") || "无"}` : "自进化系统",
-      type: "knowledge",
-      weight: 0.8
-    });
-    sources.push({
-      name: "Wallpaper",
-      content: "桌面壁纸集成：Overlay 渲染、透明窗口、系统托盘",
-      type: "knowledge",
-      weight: 0.5
-    });
-    sources.push({
-      name: "PiperTTS",
-      content: "本地 TTS：离线语音合成、低延迟、多语音模型",
-      type: "knowledge",
-      weight: 0.5
-    });
-    const ubInfo = moduleData.userBehavior;
-    sources.push({
-      name: "UserBehavior",
-      content: ubInfo ? `最近交互 ${ubInfo.interactionCount} 次，活跃话题: ${ubInfo.recentLabels.slice(0, 3).join("、") || "无"}，高峰时段: ${ubInfo.peakHours}` : `最近交互 0 次`,
-      type: "behavior",
-      weight: 0.7
-    });
-    if (worldTrends && worldTrends.length > 0) {
-      const picked = worldTrends.slice(0, 3);
-      for (const trend of picked) {
-        sources.push({
-          name: `趋势:${trend.slice(0, 12)}`,
-          content: trend,
-          type: "provocation",
-          weight: 0.85
-        });
-      }
-    } else {
-      const domainConcept = this.pickProvocation();
-      if (domainConcept) {
-        sources.push({
-          name: `刺激:${domainConcept.split("：")[0]}`,
-          content: domainConcept,
-          type: "provocation",
-          weight: 0.85
-        });
-      }
-    }
-    const constraint = this.pickConstraint();
-    if (constraint) {
-      sources.push({
-        name: `约束:${constraint.slice(0, 16)}`,
-        content: constraint,
-        type: "provocation",
-        weight: 0.8
-      });
-    }
-    if (moduleData.observer?.insights && moduleData.observer.insights.length > 0) {
-      for (const insight of moduleData.observer.insights.slice(0, 2)) {
-        sources.push({
-          name: `洞察:${insight.slice(0, 16)}`,
-          content: insight,
-          type: "insight",
-          weight: 0.75
-        });
-      }
-    }
-    if (rejectedIdeas.length > 0) {
-      const picked = rejectedIdeas[Math.floor(this.rng() * rejectedIdeas.length)];
-      sources.push({
-        name: "已拒绝思路",
-        content: `之前尝试过但不可行的方向: ${picked}`,
-        type: "failure",
-        weight: 0.6
-      });
-    }
-    return sources;
-  }
-  /**
-   * 从 domain 概念池中选一个未用过的
-   */
-  pickProvocation() {
-    const available = this.domainConcepts.filter((_, i) => !this.usedProvocations.includes(i));
-    if (available.length === 0) {
-      this.usedProvocations = [];
-      return this.domainConcepts[Math.floor(this.rng() * this.domainConcepts.length)];
-    }
-    const idx = Math.floor(this.rng() * available.length);
-    const originalIdx = this.domainConcepts.indexOf(available[idx]);
-    this.usedProvocations.push(originalIdx);
-    return available[idx];
-  }
-  /**
-   * 从约束池中选一个未用过的
-   */
-  pickConstraint() {
-    const available = this.constraints.filter((_, i) => !this.usedConstraints.includes(i));
-    if (available.length === 0) {
-      this.usedConstraints = [];
-      return this.constraints[Math.floor(this.rng() * this.constraints.length)];
-    }
-    const idx = Math.floor(this.rng() * available.length);
-    const originalIdx = this.constraints.indexOf(available[idx]);
-    this.usedConstraints.push(originalIdx);
-    return available[idx];
-  }
-  /** 重置 provocation 使用记录（新梦周期触发） */
-  resetProvocations() {
-    this.usedProvocations = [];
-    this.usedConstraints = [];
-  }
-}
-function tokenize(text) {
-  const tokens = /* @__PURE__ */ new Set();
-  const enTokens = text.toLowerCase().split(/[^a-z0-9一-鿿]+/g).filter((t) => t.length > 1 && /[a-z0-9]/.test(t));
-  for (const t of enTokens) tokens.add(t);
-  const chChars = text.replace(/[^一-鿿]/g, "");
-  for (let i = 0; i < chChars.length - 1; i++) {
-    tokens.add(chChars.slice(i, i + 2));
-  }
-  return tokens;
-}
-function jaccardSimilarity(a, b) {
-  const setA = tokenize(a);
-  const setB = tokenize(b);
-  const union = /* @__PURE__ */ new Set([...setA, ...setB]);
-  if (union.size === 0) return 0;
-  let intersection = 0;
-  for (const t of setA) {
-    if (setB.has(t)) intersection++;
-  }
-  return intersection / union.size;
-}
-function evaluateNovelty(candidate, recentHypotheses, rejectedHypotheses) {
-  const candidateText = `${candidate.title} ${candidate.idea}`;
-  let adjustedNovelty = candidate.novelty;
-  let mostSimilarTitle = "";
-  let mostSimilarScore = 0;
-  for (const h of recentHypotheses) {
-    const sim = jaccardSimilarity(candidateText, `${h.title} ${h.idea}`);
-    if (sim > mostSimilarScore) {
-      mostSimilarScore = sim;
-      mostSimilarTitle = h.title;
-    }
-  }
-  if (mostSimilarScore > 0.5) {
-    adjustedNovelty = Math.max(0, adjustedNovelty - 15);
-  }
-  for (const h of rejectedHypotheses) {
-    const sim = jaccardSimilarity(candidateText, `${h.title} ${h.idea}`);
-    if (sim > 0.6) {
-      return {
-        adjustedNovelty,
-        shouldReject: true,
-        rejectReason: `与已拒绝假设"${h.title}"内容高度相似 (Jaccard=${sim.toFixed(2)})`,
-        mostSimilarTitle: h.title,
-        mostSimilarScore: sim
-      };
-    }
-  }
-  return {
-    adjustedNovelty,
-    shouldReject: false,
-    mostSimilarTitle,
-    mostSimilarScore
-  };
-}
-const DREAM_CYCLE_INTERVAL_MS = 6 * 60 * 60 * 1e3;
-const NORMAL_CYCLE_INTERVAL_MS = 60 * 60 * 1e3;
-class CreativityService {
-  generator;
-  store;
-  eventBus;
-  normalTimer = null;
-  dreamTimer = null;
-  reportDir;
-  taskRunner;
-  taskRunnerKeys = [];
-  sourceBuilder;
-  worldTrendProvider;
-  /** 最近一次进化系统执行结果（Phase 3 反馈） */
-  evolutionOutcome = null;
-  evolutionDisposer = null;
-  /** 轮换的策略序列：每次 cycle 按顺序切换 */
-  strategyCycle = ["explore", "signal", "stable"];
-  strategyIndex = 0;
-  /** 用户正在对话中 — 跳过创造性周期避免抢占 LLM */
-  conversationActive = false;
-  getSources;
-  getInsights;
-  getFailedHypotheses;
-  constructor(store, deps, chatJson, chatJsonWithCode, temperature = 0.3, seed, bus, reportDir = "", taskRunner, observerDir) {
-    this.store = store;
-    const hypothesisJson = chatJsonWithCode || chatJson;
-    this.generator = new IdeaGenerator(hypothesisJson, temperature, seed);
-    this.eventBus = bus || eventBus;
-    this.reportDir = reportDir;
-    this.taskRunner = taskRunner;
-    this.getSources = deps.getSources;
-    this.getInsights = deps.getInsights;
-    this.getFailedHypotheses = deps.getFailedHypotheses;
-    this.sourceBuilder = new SourceBuilder(seed);
-    this.worldTrendProvider = observerDir ? new WorldTrendProvider(observerDir, seed) : null;
-    this.eventBus.on("agent.input.received", () => {
-      this.conversationActive = true;
-    });
-    this.eventBus.on("agent.response.generated", () => {
-      this.conversationActive = false;
-    });
-    setInterval(
-      () => {
-        this.conversationActive = false;
-      },
-      5 * 60 * 1e3
-    );
-    this.evolutionDisposer = this.eventBus.on("evolution.plan.outcome", (p) => {
-      this.evolutionOutcome = {
-        success: p.success,
-        summary: p.summary || "",
-        planTitle: p.planTitle
-      };
-    });
-  }
-  start() {
-    if (this.taskRunner) {
-      this.taskRunner.register(
-        "creativity.cycle",
-        async () => {
-          await this.cycle();
-          return { success: true };
-        },
-        NORMAL_CYCLE_INTERVAL_MS
-      );
-      this.taskRunner.register(
-        "creativity.dream",
-        async () => {
-          await this.dreamCycle();
-          return { success: true };
-        },
-        DREAM_CYCLE_INTERVAL_MS
-      );
-      this.taskRunnerKeys = ["creativity.cycle", "creativity.dream"];
-      return;
-    }
-    if (this.normalTimer) return;
-    this.normalTimer = setInterval(() => {
-      this.cycle();
-    }, NORMAL_CYCLE_INTERVAL_MS);
-    this.dreamTimer = setInterval(() => {
-      this.dreamCycle();
-    }, DREAM_CYCLE_INTERVAL_MS);
-    Logger.log("INFO", "creativity_service_started", {
-      normal_interval_ms: NORMAL_CYCLE_INTERVAL_MS,
-      dream_interval_ms: DREAM_CYCLE_INTERVAL_MS
-    });
-  }
-  stop() {
-    if (this.taskRunner) {
-      for (const key of this.taskRunnerKeys) {
-        this.taskRunner.stopType(key);
-      }
-      this.taskRunnerKeys = [];
-      return;
-    }
-    if (this.normalTimer) {
-      clearInterval(this.normalTimer);
-      this.normalTimer = null;
-    }
-    if (this.dreamTimer) {
-      clearInterval(this.dreamTimer);
-      this.dreamTimer = null;
-    }
-    Logger.log("INFO", "creativity_service_stopped");
-  }
-  /**
-   * 正常创造力周期
-   */
-  async cycle() {
-    if (this.conversationActive) return;
-    let sources = this.getSources();
-    let externalSignals = [];
-    if (this.worldTrendProvider) {
-      const trends = this.worldTrendProvider.getTrends();
-      const insights2 = this.worldTrendProvider.getInsights();
-      for (const t of trends) {
-        externalSignals.push({ source: "Observer", raw: t, type: "trend" });
-      }
-      for (const i of insights2) {
-        externalSignals.push({ source: "Observer", raw: i, type: "insight" });
-      }
-    }
-    if (this.evolutionOutcome) {
-      const outcome = this.evolutionOutcome;
-      sources.push({
-        name: outcome.success ? "进化:可行方案" : "进化:失败尝试",
-        content: outcome.success ? `进化系统最近执行了计划"${outcome.planTitle || "(分析)"}"并成功完成: ${outcome.summary.slice(0, 200)}` : `进化系统最近的分析/执行未成功: ${outcome.summary.slice(0, 200)}`,
-        type: outcome.success ? "knowledge" : "failure",
-        weight: outcome.success ? 0.8 : 0.6
-      });
-      this.evolutionOutcome = null;
-    }
-    if (sources.length < 2) return;
-    Logger.log("INFO", "creativity_cycle_start", {
-      source_count: sources.length,
-      external_signal_count: externalSignals.length
-    });
-    this.eventBus.emit("creativity.cycle.started", {});
-    const strategy = this.strategyCycle[this.strategyIndex % this.strategyCycle.length];
-    this.strategyIndex++;
-    Logger.log("INFO", "creativity_strategy_selected", { strategy, strategyIndex: this.strategyIndex });
-    this.generator.setExploredPairs(this.store.getExploredPairs());
-    const ideas = await this.generator.generateIdeas(sources, void 0, strategy, externalSignals);
-    if (ideas.length === 0) {
-      Logger.log("INFO", "creativity_cycle_empty");
-      this.eventBus.emit("creativity.cycle.completed", { count: 0, hasValue: false });
-      return;
-    }
-    const recent = this.store.getHypotheses({ limit: 30 });
-    const rejected = this.store.getHypotheses({ status: "rejected", limit: 50 });
-    const passed = [];
-    const rejectedIdeas = [];
-    for (const idea of ideas) {
-      const verdict = evaluateNovelty(
-        { title: idea.hypothesis.title, idea: idea.hypothesis.idea, novelty: idea.hypothesis.novelty },
-        recent.map((h) => ({ title: h.title, idea: h.idea, novelty: h.novelty })),
-        rejected.map((h) => ({ title: h.title, idea: h.idea }))
-      );
-      if (verdict.shouldReject) {
-        rejectedIdeas.push(idea);
-        Logger.log("INFO", "creativity_novelty_rejected", {
-          title: idea.hypothesis.title,
-          reason: verdict.rejectReason
-        });
-        continue;
-      }
-      idea.hypothesis.novelty = verdict.adjustedNovelty;
-      passed.push(idea);
-    }
-    if (passed.length === 0) {
-      Logger.log("INFO", "creativity_cycle_all_rejected", { noveltyRejected: rejectedIdeas.length });
-      this.eventBus.emit("creativity.cycle.completed", { count: rejectedIdeas.length, hasValue: false });
-      return;
-    }
-    const deduped = passed;
-    this.persist(deduped);
-    this.reportCycle(deduped);
-    this.report(deduped);
-    for (const idea of deduped) {
-      const labels = idea.hypothesis.sourceLabels;
-      if (labels.length >= 2) {
-        this.store.addExploredPair(labels[0], labels[1]);
-      }
-    }
-    const topIdea = deduped.reduce(
-      (best, i) => {
-        const score = i.hypothesis.novelty + i.hypothesis.feasibility + i.hypothesis.impact;
-        return score > (best.score || 0) ? { idea: i, score } : best;
-      },
-      { idea: null, score: 0 }
-    );
-    if (topIdea.idea && topIdea.score > 220) {
-      const h = topIdea.idea.hypothesis;
-      this.eventBus.emit("creativity.hypothesis.selected", {
-        id: h.id,
-        title: h.title,
-        idea: h.idea,
-        novelty: h.novelty,
-        feasibility: h.feasibility,
-        impact: h.impact,
-        sourceLabels: h.sourceLabels,
-        expectedBenefit: h.expectedBenefit,
-        risk: h.risk
-      });
-    }
-    this.eventBus.emit("creativity.cycle.completed", { count: deduped.length, hasValue: true });
-  }
-  /**
-   * 梦境创造力周期 — 更高随机性、纳入失败历史
-   */
-  async dreamCycle() {
-    if (this.conversationActive) return;
-    const recentSources = this.getSources();
-    const historicalCombos = this.store.getRecentCombos(30);
-    const failedHypotheses = this.store.getHypotheses({ status: "rejected" }).map((h) => ({ title: h.title, idea: h.idea, risk: h.risk }));
-    const insights2 = this.getInsights();
-    const insightSources = insights2.map((i) => ({
-      name: `洞察:${i.title}`,
-      content: `${i.description} (评分:${i.score})`,
-      type: "insight",
-      weight: 0.7
-    }));
-    const allSources = [...recentSources, ...insightSources];
-    Logger.log("INFO", "creativity_dream_start", {
-      sources: allSources.length,
-      historical_combos: historicalCombos.length,
-      failed_hypotheses: failedHypotheses.length
-    });
-    const ideas = await this.generator.dreamIdeas(
-      allSources,
-      historicalCombos,
-      failedHypotheses.map((h) => ({
-        title: h.title,
-        idea: h.idea,
-        risk: h.risk,
-        status: "rejected",
-        createdAt: Date.now(),
-        expectedBenefit: "",
-        feasibility: 0,
-        id: "",
-        impact: 0,
-        novelty: 0,
-        sourceLabels: []
-      }))
-    );
-    const logEntry = {
-      timestamp: Date.now(),
-      sourcesExamined: allSources.length,
-      combosGenerated: this.store.getRecentCombos().length,
-      hypothesesGenerated: ideas.length,
-      topIdea: ideas.length > 0 ? ideas[0].hypothesis.title : null
-    };
-    this.store.logDreamCycle(logEntry);
-    if (ideas.length === 0) {
-      Logger.log("INFO", "creativity_dream_empty");
-      return;
-    }
-    this.persist(ideas);
-    this.reportCycle(ideas, true);
-    this.report(ideas);
-    this.eventBus.emit("creativity.dream.completed", {
-      count: ideas.length,
-      topNovelty: ideas[0].hypothesis.novelty
-    });
-  }
-  persist(ideas) {
-    const hypotheses2 = ideas.map((i) => i.hypothesis);
-    this.store.addManyHypotheses(hypotheses2);
-    for (const idea of ideas) {
-      if (idea.experiment) {
-        this.store.addExperiment(idea.experiment);
-      }
-    }
-  }
-  report(ideas) {
-    const top = ideas.slice(0, 3);
-    this.eventBus.emit("creativity.ideas.generated", {
-      count: ideas.length,
-      ideas: top.map((i) => ({
-        id: i.hypothesis.id,
-        title: i.hypothesis.title,
-        idea: i.hypothesis.idea,
-        expectedBenefit: i.hypothesis.expectedBenefit,
-        risk: i.hypothesis.risk,
-        sourceLabels: i.hypothesis.sourceLabels,
-        novelty: i.hypothesis.novelty,
-        feasibility: i.hypothesis.feasibility,
-        impact: i.hypothesis.impact
-      }))
-    });
-    Logger.log("INFO", "creativity_ideas_generated", {
-      count: ideas.length,
-      top_novelty: top[0]?.hypothesis.novelty,
-      top_title: top[0]?.hypothesis.title
-    });
-  }
-  /** 写一份可读的报告到 evolution_workspace */
-  reportCycle(ideas, dream = false) {
-    if (!this.reportDir) return;
-    const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const cycleType = dream ? "梦境" : "普通";
-    const filePath = path$1.resolve(this.reportDir, `creativity-${ts}.md`);
-    const dir = this.reportDir;
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const count = ideas.length;
-    const sorted = [...ideas].sort((a, b) => b.hypothesis.novelty - a.hypothesis.novelty);
-    const top = sorted[0];
-    let md = `# 创造力周期报告 (${cycleType})
-
-- **时间**: ${ts}
-- **产出**: ${count} 个新想法
-- **最高新颖度**: ${top?.hypothesis.novelty ?? "-"}
-- **最高得分**: ${top ? `新颖=${top.hypothesis.novelty} 可行=${top.hypothesis.feasibility} 影响=${top.hypothesis.impact}` : "-"}
-
-## 想法列表
-
-| # | 标题 | 来源 | 新颖度 | 可行性 | 影响 |
-|---|------|------|--------|--------|------|
-`;
-    for (let i = 0; i < sorted.length; i++) {
-      const h = sorted[i].hypothesis;
-      md += `| ${i + 1} | ${h.title} | ${h.sourceLabels.join(", ")} | ${h.novelty} | ${h.feasibility} | ${h.impact} |
-`;
-    }
-    if (top) {
-      const h = top.hypothesis;
-      md += `
-## 最佳想法详情
-
-**${h.title}**
-
-- 来源: ${h.sourceLabels.join(" × ")}
-- 新颖度: ${h.novelty} / 可行性: ${h.feasibility} / 影响: ${h.impact}
-
-**描述**
-${h.idea}
-
-**预期收益**
-${h.expectedBenefit}
-
-**风险**
-${h.risk}
-`;
-    }
-    md += `
-## 历史采纳率概览
-
-${this.store.adoptionReport(5)}
-`;
-    try {
-      fs.writeFileSync(filePath, md, "utf-8");
-      Logger.log("INFO", "creativity_report_saved", { path: filePath });
-      this.cleanOldReports();
-    } catch (err) {
-      Logger.log("ERROR", "creativity_report_failed", { error: String(err) });
-    }
-  }
-  cleanOldReports() {
-    try {
-      const { readdirSync, unlinkSync } = require("fs");
-      const files = readdirSync(this.reportDir).filter((f) => f.startsWith("creativity-") && f.endsWith(".md")).map((f) => ({ name: f, time: new Date(f.slice(11, 30).replace(/-/g, ":")).getTime() })).sort((a, b) => b.time - a.time);
-      for (const f of files.slice(10)) {
-        unlinkSync(path$1.resolve(this.reportDir, f.name));
-      }
-    } catch {
-    }
-  }
-  async forceCycle() {
-    const sources = this.getSources();
-    if (sources.length < 2) return [];
-    const ideas = await this.generator.generateIdeas(sources);
-    if (ideas.length > 0) this.persist(ideas);
-    return ideas;
-  }
-  async forceDreamCycle() {
-    const recentSources = this.getSources();
-    const historicalCombos = this.store.getRecentCombos(30);
-    const failedHypotheses = this.store.getHypotheses({ status: "rejected" });
-    const insights2 = this.getInsights().map((i) => ({
-      name: `洞察:${i.title}`,
-      content: `${i.description} (评分:${i.score})`,
-      type: "insight",
-      weight: 0.7
-    }));
-    const allSources = [...recentSources, ...insights2];
-    const ideas = await this.generator.dreamIdeas(
-      allSources,
-      historicalCombos,
-      failedHypotheses.map((h) => ({
-        id: h.id,
-        title: h.title,
-        idea: h.idea,
-        risk: h.risk,
-        expectedBenefit: h.expectedBenefit,
-        feasibility: h.feasibility,
-        impact: h.impact,
-        novelty: h.novelty,
-        sourceLabels: h.sourceLabels,
-        status: "rejected",
-        createdAt: h.createdAt
-      }))
-    );
-    if (ideas.length > 0) this.persist(ideas);
-    return ideas;
-  }
-  getStore() {
-    return this.store;
-  }
-}
-function parseHypothesis(obj) {
-  return {
-    id: obj.id,
-    title: obj.title,
-    idea: obj.idea,
-    expectedBenefit: obj.expected_benefit,
-    risk: obj.risk,
-    sourceLabels: JSON.parse(obj.source_labels || "[]"),
-    novelty: obj.novelty,
-    feasibility: obj.feasibility,
-    impact: obj.impact,
-    status: obj.status,
-    createdAt: obj.created_at
-  };
-}
-function parseCombo(obj) {
-  return {
-    id: obj.id,
-    sources: JSON.parse(obj.sources || '["",""]'),
-    description: obj.description,
-    createdAt: obj.created_at
-  };
-}
-function parseExperiment(obj) {
-  return {
-    hypothesisId: obj.hypothesis_id,
-    title: obj.title,
-    steps: JSON.parse(obj.steps || "[]"),
-    successCriteria: JSON.parse(obj.success_criteria || "[]"),
-    estimatedDuration: obj.estimated_duration,
-    createdAt: obj.created_at
-  };
-}
-function parseDreamCycle(obj) {
-  return {
-    timestamp: obj.timestamp,
-    sourcesExamined: obj.sources_examined,
-    combosGenerated: obj.combos_generated,
-    hypothesesGenerated: obj.hypotheses_generated,
-    topIdea: obj.top_idea ?? null
-  };
-}
-function rowsToObjects(columns, values) {
-  return values.map((v) => {
-    const obj = {};
-    for (let i = 0; i < columns.length; i++) obj[columns[i]] = v[i];
-    return obj;
-  });
-}
-class DrizzleIdeaStore {
-  addCombo(combo) {
-    const db2 = getRawDb();
-    db2.run("INSERT OR IGNORE INTO concept_combos (id, sources, description, created_at) VALUES (?, ?, ?, ?)", [
-      combo.id,
-      JSON.stringify(combo.sources),
-      combo.description,
-      combo.createdAt
-    ]);
-    markDirty();
-  }
-  addHypothesis(h) {
-    const db2 = getRawDb();
-    this.insertHypothesis(db2, h);
-    markDirty();
-  }
-  addManyHypotheses(hs) {
-    if (hs.length === 0) return;
-    const db2 = getRawDb();
-    for (const h of hs) this.insertHypothesis(db2, h);
-    markDirty();
-  }
-  addExperiment(exp) {
-    const db2 = getRawDb();
-    db2.run(
-      "INSERT OR REPLACE INTO experiments (hypothesis_id, title, steps, success_criteria, estimated_duration, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-      [exp.hypothesisId, exp.title, JSON.stringify(exp.steps), JSON.stringify(exp.successCriteria), exp.estimatedDuration, exp.createdAt]
-    );
-    markDirty();
-  }
-  logDreamCycle(entry) {
-    const db2 = getRawDb();
-    db2.run(
-      "INSERT OR IGNORE INTO dream_cycles (timestamp, sources_examined, combos_generated, hypotheses_generated, top_idea) VALUES (?, ?, ?, ?, ?)",
-      [entry.timestamp, entry.sourcesExamined, entry.combosGenerated, entry.hypothesesGenerated, entry.topIdea]
-    );
-    markDirty();
-  }
-  getHypotheses(options) {
-    const db2 = getRawDb();
-    let sql = "SELECT * FROM hypotheses";
-    const clauses = [];
-    if (options?.status) {
-      const escaped = options.status.replace(/'/g, "''");
-      clauses.push(`status = '${escaped}'`);
-    }
-    if (clauses.length > 0) sql += " WHERE " + clauses.join(" AND ");
-    sql += " ORDER BY created_at DESC";
-    if (options?.limit) sql += ` LIMIT ${options.limit}`;
-    const result = db2.exec(sql);
-    if (!result || result.length === 0 || result[0].values.length === 0) return [];
-    return rowsToObjects(result[0].columns, result[0].values).map(parseHypothesis);
-  }
-  getNovelHypotheses(threshold = 70, limit = 5) {
-    const db2 = getRawDb();
-    const result = db2.exec(
-      `SELECT * FROM hypotheses WHERE novelty >= ${threshold} AND status != 'rejected' ORDER BY novelty DESC LIMIT ${limit}`
-    );
-    if (!result || result.length === 0 || result[0].values.length === 0) return [];
-    return rowsToObjects(result[0].columns, result[0].values).map(parseHypothesis);
-  }
-  getActiveExperiments() {
-    const db2 = getRawDb();
-    const result = db2.exec(
-      "SELECT e.* FROM experiments e INNER JOIN hypotheses h ON e.hypothesis_id = h.id WHERE h.status = 'experimenting'"
-    );
-    if (!result || result.length === 0 || result[0].values.length === 0) return [];
-    return rowsToObjects(result[0].columns, result[0].values).map(parseExperiment);
-  }
-  getRecentCombos(limit = 20) {
-    const db2 = getRawDb();
-    const result = db2.exec(`SELECT * FROM concept_combos ORDER BY created_at DESC LIMIT ${limit}`);
-    if (!result || result.length === 0 || result[0].values.length === 0) return [];
-    return rowsToObjects(result[0].columns, result[0].values).map(parseCombo);
-  }
-  getRecentDreamCycles(limit = 10) {
-    const db2 = getRawDb();
-    const result = db2.exec(`SELECT * FROM dream_cycles ORDER BY timestamp DESC LIMIT ${limit}`);
-    if (!result || result.length === 0 || result[0].values.length === 0) return [];
-    return rowsToObjects(result[0].columns, result[0].values).map(parseDreamCycle);
-  }
-  updateHypothesisStatus(id2, status) {
-    const db2 = getRawDb();
-    const escapedStatus = status.replace(/'/g, "''");
-    db2.run(`UPDATE hypotheses SET status = '${escapedStatus}' WHERE id = '${id2.replace(/'/g, "''")}'`);
-    markDirty();
-    return true;
-  }
-  count() {
-    const db2 = getRawDb();
-    const c = (sql) => {
-      const r = db2.exec(sql);
-      return r && r.length > 0 && r[0].values.length > 0 ? Number(r[0].values[0][0]) : 0;
-    };
-    return {
-      combos: c("SELECT COUNT(*) FROM concept_combos"),
-      hypotheses: c("SELECT COUNT(*) FROM hypotheses"),
-      experiments: c("SELECT COUNT(*) FROM experiments"),
-      dreamCycles: c("SELECT COUNT(*) FROM dream_cycles")
-    };
-  }
-  templateAdoptionStats() {
-    const all = this.getHypotheses();
-    const stats = {};
-    for (const h of all) {
-      const key = h.sourceLabels.join("|");
-      if (!stats[key]) stats[key] = { total: 0, active: 0, rejected: 0, adopted: 0 };
-      stats[key].total++;
-      if (h.status === "active" || h.status === "experimenting") stats[key].active++;
-      if (h.status === "rejected") stats[key].rejected++;
-      if (h.status === "validated") stats[key].adopted++;
-    }
-    return stats;
-  }
-  adoptionReport(limit = 10) {
-    const stats = this.templateAdoptionStats();
-    const entries = Object.entries(stats).sort((a, b) => a[1].adopted / Math.max(a[1].total, 1) - b[1].adopted / Math.max(b[1].total, 1));
-    const all = this.count();
-    let report = `=== 模板采纳率报告 (共 ${all.hypotheses} 条假设) ===
-`;
-    report += "来源对 | 总数 | 进行中 | 已拒绝 | 已采纳 | 采纳率\n";
-    for (const [key, s] of entries.slice(0, limit)) {
-      const rate = (s.adopted / Math.max(s.total, 1) * 100).toFixed(0);
-      report += `${key} | ${s.total} | ${s.active} | ${s.rejected} | ${s.adopted} | ${rate}%
-`;
-    }
-    return report;
-  }
-  addExploredPair(nameA, nameB) {
-    const db2 = getRawDb();
-    const key = [nameA, nameB].sort().join("|");
-    db2.run("INSERT OR IGNORE INTO explored_pairs (pair_key, created_at) VALUES (?, ?)", [key, Date.now()]);
-    markDirty();
-  }
-  getExploredPairs() {
-    const db2 = getRawDb();
-    const result = db2.exec("SELECT pair_key FROM explored_pairs ORDER BY created_at DESC");
-    if (!result || result.length === 0 || result[0].values.length === 0) return [];
-    return result[0].values.map((v) => String(v[0]));
-  }
-  resetExploredPairs() {
-    const db2 = getRawDb();
-    db2.run("DELETE FROM explored_pairs");
-    markDirty();
-  }
-  insertHypothesis(db2, h) {
-    db2.run(
-      "INSERT OR IGNORE INTO hypotheses (id, title, idea, expected_benefit, risk, source_labels, novelty, feasibility, impact, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [
-        h.id,
-        h.title,
-        h.idea,
-        h.expectedBenefit,
-        h.risk,
-        JSON.stringify(h.sourceLabels),
-        h.novelty,
-        h.feasibility,
-        h.impact,
-        h.status,
-        h.createdAt
-      ]
-    );
-  }
-}
-let creativityService = null;
-function initCreativity(filePath, deps, chatJson, temperature = 0.3, reportDir = "", taskRunner, observerDir, chatJsonWithCode) {
-  if (!creativityService) {
-    const store = new DrizzleIdeaStore();
-    creativityService = new CreativityService(
-      store,
-      deps,
-      chatJson,
-      chatJsonWithCode,
-      temperature,
-      void 0,
-      void 0,
-      reportDir,
-      taskRunner ?? void 0,
-      observerDir
-    );
-  }
-  return creativityService;
-}
 const SEARCH_QUERIES = [
   "voice assistant desktop",
   "electron wallpaper engine",
@@ -25615,6 +21145,329 @@ function initInspiration(cacheDir, githubToken) {
   }
   return gitHubInspiration;
 }
+const BASE_QUARANTINE_MS = 3e4;
+const MAX_QUARANTINE_MS = 3e5;
+const FAILURE_THRESHOLD = 3;
+const FITNESS_EXTINCTION_THRESHOLD = 10;
+const FITNESS_INITIAL = 80;
+const FITNESS_SUCCESS_BONUS = 0.5;
+const FITNESS_FAILURE_PENALTY = 5;
+const FITNESS_RELOAD_BONUS = 3;
+const FITNESS_MAX = 100;
+const FITNESS_MIN = 0;
+class PluginHealthGuard {
+  /** 免疫记忆 — 所有已知插件的健康档案 */
+  records = /* @__PURE__ */ new Map();
+  /** 区域冲突日志 — 城市规划的冲突记录 */
+  zoneConflicts = [];
+  /** 隔离事件日志 */
+  quarantineLog = [];
+  /** 隔离定时器 — 用于自动解除隔离 (免疫恢复) */
+  quarantineTimers = /* @__PURE__ */ new Map();
+  // ==========================================================
+  // Immune System — 免疫系统层
+  // ==========================================================
+  /**
+   * 注册新细胞 (插件加载时调用)
+   * 创建健康档案，初始化免疫记忆
+   */
+  registerCell(name2, version, previousVersion) {
+    const existing = this.records.get(name2);
+    const record = {
+      name: name2,
+      version,
+      status: "healthy",
+      consecutiveFailures: 0,
+      totalFailures: existing?.totalFailures ?? 0,
+      totalCalls: existing?.totalCalls ?? 0,
+      failedCalls: existing?.failedCalls ?? 0,
+      quarantineUntil: 0,
+      quarantineMultiplier: existing?.quarantineMultiplier ?? 1,
+      reloadCount: (existing?.reloadCount ?? 0) + 1,
+      fitnessScore: existing ? Math.min(FITNESS_MAX, existing.fitnessScore + FITNESS_RELOAD_BONUS) : FITNESS_INITIAL,
+      previousVersion: existing ? existing.version : previousVersion,
+      loadedAt: Date.now()
+    };
+    this.records.set(name2, record);
+    return record;
+  }
+  /**
+   * 抗原检测 — 检查插件是否处于隔离期
+   * @returns true 如果允许加载 (安全)
+   */
+  checkAntigen(name2) {
+    const record = this.records.get(name2);
+    if (!record) return { allowed: true };
+    if (record.status === "dead") {
+      return { allowed: false, reason: `Plugin "${name2}" is marked DEAD (extinction). Manual intervention required.` };
+    }
+    if (record.status === "quarantined") {
+      const now = Date.now();
+      if (now < record.quarantineUntil) {
+        const remaining = Math.ceil((record.quarantineUntil - now) / 1e3);
+        return { allowed: false, reason: `Plugin "${name2}" is in quarantine. ${remaining}s remaining.` };
+      }
+      this.clearQuarantine(name2);
+    }
+    return { allowed: true };
+  }
+  /**
+   * 炎症反应 — 记录插件错误，必要时触发隔离
+   * 连续失败达到阈值 → 升级到隔离状态
+   */
+  reportFailure(name2, error, phase) {
+    const record = this.records.get(name2);
+    if (!record) return;
+    record.consecutiveFailures++;
+    record.totalFailures++;
+    record.lastError = error;
+    record.lastErrorTime = Date.now();
+    record.fitnessScore = Math.max(FITNESS_MIN, record.fitnessScore - FITNESS_FAILURE_PENALTY);
+    if (record.consecutiveFailures >= FAILURE_THRESHOLD) {
+      const duration = Math.min(MAX_QUARANTINE_MS, BASE_QUARANTINE_MS * record.quarantineMultiplier);
+      this.quarantine(name2, `連續 ${record.consecutiveFailures} 次失敗 (phase: ${phase})`, error, duration);
+    } else if (record.fitnessScore <= FITNESS_EXTINCTION_THRESHOLD) {
+      this.markDead(name2, `適應度降至 ${record.fitnessScore}（低於閾值 ${FITNESS_EXTINCTION_THRESHOLD}）`);
+    }
+    eventBus.emit("plugin.health-changed", { name: name2, status: record.status, fitnessScore: record.fitnessScore });
+  }
+  /**
+   * 免疫成功 — 记录插件正常调用，增强适应度
+   */
+  reportSuccess(name2) {
+    const record = this.records.get(name2);
+    if (!record) return;
+    record.totalCalls++;
+    record.consecutiveFailures = 0;
+    record.fitnessScore = Math.min(FITNESS_MAX, record.fitnessScore + FITNESS_SUCCESS_BONUS);
+    if (record.status === "degraded" && record.fitnessScore > 60) {
+      record.status = "healthy";
+      Logger.log("INFO", "plugin_immune_recovery", { name: name2, fitnessScore: record.fitnessScore });
+    }
+  }
+  /**
+   * 记录工具调用结果 (用于适应度计算)
+   */
+  recordCallResult(name2, success) {
+    const record = this.records.get(name2);
+    if (!record) return;
+    record.totalCalls++;
+    if (!success) {
+      record.failedCalls++;
+      record.fitnessScore = Math.max(FITNESS_MIN, record.fitnessScore - FITNESS_FAILURE_PENALTY);
+    } else {
+      record.consecutiveFailures = 0;
+      record.fitnessScore = Math.min(FITNESS_MAX, record.fitnessScore + FITNESS_SUCCESS_BONUS);
+    }
+  }
+  // ==========================================================
+  // Quarantine — 隔离机制 (免疫防御)
+  // ==========================================================
+  /**
+   * 隔离插件 — 免疫系统的防御反应
+   * 临时禁用插件，设定自动恢复时间
+   */
+  quarantine(name2, reason, errorDetail, duration) {
+    const record = this.records.get(name2);
+    if (!record) return;
+    record.status = "quarantined";
+    record.quarantineUntil = Date.now() + duration;
+    record.quarantineMultiplier = Math.min(8, record.quarantineMultiplier * 2);
+    const event = {
+      pluginName: name2,
+      reason,
+      errorDetail,
+      quarantineDuration: duration,
+      timestamp: Date.now()
+    };
+    this.quarantineLog.push(event);
+    const existingTimer = this.quarantineTimers.get(name2);
+    if (existingTimer) clearTimeout(existingTimer);
+    const timer = setTimeout(() => {
+      this.clearQuarantine(name2);
+    }, duration);
+    this.quarantineTimers.set(name2, timer);
+    Logger.log("WARN", "plugin_quarantined", { name: name2, reason, duration: `${duration / 1e3}s` });
+    eventBus.emit("plugin.quarantined", event);
+  }
+  /**
+   * 解除隔离 — 免疫恢复
+   * 隔离期满且无新错误 → 降级到 degraded
+   */
+  clearQuarantine(name2) {
+    const record = this.records.get(name2);
+    if (!record || record.status !== "quarantined") return;
+    record.status = "degraded";
+    record.quarantineUntil = 0;
+    record.consecutiveFailures = 0;
+    Logger.log("INFO", "plugin_quarantine_cleared", { name: name2, fitnessScore: record.fitnessScore });
+    eventBus.emit("plugin.health-changed", { name: name2, status: "degraded", fitnessScore: record.fitnessScore });
+  }
+  /**
+   * 标记插件死亡 — 进化论中的灭绝
+   * 永久禁止加载，需手动干预
+   */
+  markDead(name2, reason) {
+    const record = this.records.get(name2);
+    if (!record) return;
+    record.status = "dead";
+    Logger.log("ERROR", "plugin_extinct", { name: name2, reason, fitnessScore: record.fitnessScore });
+    eventBus.emit("plugin.dead", { name: name2, reason, fitnessScore: record.fitnessScore });
+  }
+  /**
+   * 手动复活插件 — 管理员干预
+   */
+  resurrect(name2) {
+    const record = this.records.get(name2);
+    if (!record || record.status !== "dead") return false;
+    record.status = "degraded";
+    record.fitnessScore = 30;
+    record.consecutiveFailures = 0;
+    record.quarantineMultiplier = 1;
+    Logger.log("INFO", "plugin_resurrected", { name: name2 });
+    eventBus.emit("plugin.health-changed", { name: name2, status: "degraded", fitnessScore: 30 });
+    return true;
+  }
+  // ==========================================================
+  // Urban Planning — 城市规划层 (区域冲突调解)
+  // ==========================================================
+  /**
+   * 调解区域冲突 — 两个插件争夺同一个工具名
+   *
+   * 策略:
+   *   keep_existing — 保留现有 (先到先得，类似 grandfather clause)
+   *   take_over     — 新插件接管 (类似 eminent domain)
+   *   reject        — 拒绝新插件注册 (类似 zoning board 拒绝)
+   */
+  mediateConflict(toolName, existingPlugin, incomingPlugin, strategy = "keep_existing") {
+    const record = {
+      toolName,
+      existingPlugin,
+      incomingPlugin,
+      resolution: strategy,
+      resolvedAt: Date.now()
+    };
+    this.zoneConflicts.push(record);
+    Logger.log("WARN", "plugin_zone_conflict", {
+      toolName,
+      existingPlugin,
+      incomingPlugin,
+      resolution: strategy
+    });
+    eventBus.emit("plugin.zone-conflict", record);
+    return record;
+  }
+  /**
+   * 查询区域归属 — 最近的冲突中谁拥有某个工具名
+   */
+  getZoneOwner(toolName) {
+    for (let i = this.zoneConflicts.length - 1; i >= 0; i--) {
+      const c = this.zoneConflicts[i];
+      if (c.toolName === toolName) {
+        return c.resolution === "take_over" ? c.incomingPlugin : c.existingPlugin;
+      }
+    }
+    return void 0;
+  }
+  /**
+   * 获取所有区域冲突记录
+   */
+  getZoneConflicts() {
+    return [...this.zoneConflicts];
+  }
+  // ==========================================================
+  // Evolution — 进化论层 (适应度 & 自然选择)
+  // ==========================================================
+  /**
+   * 计算适应度分数
+   * 公式: 基础分 + 成功率*权重 - 失败率*权重 + 重载奖励 - 隔离惩罚
+   */
+  getFitness(name2) {
+    const record = this.records.get(name2);
+    return record?.fitnessScore ?? FITNESS_INITIAL;
+  }
+  /**
+   * 自然选择 — 返回所有低于阈值的插件名
+   * 用于定期清理 (可由外部定时器调用)
+   */
+  naturalSelection() {
+    const condemned = [];
+    for (const [name2, record] of this.records) {
+      if (record.status === "healthy" && record.fitnessScore <= FITNESS_EXTINCTION_THRESHOLD) {
+        this.markDead(name2, `自然選擇: 適應度 ${record.fitnessScore} 低於閾值`);
+        condemned.push(name2);
+      }
+    }
+    return condemned;
+  }
+  /**
+   * 突变追踪 — 记录热重载 (版本变更)
+   * 返回突变是否成功 (基于前几次突变的结果预测)
+   */
+  trackMutation(name2, newVersion, oldVersion) {
+    const record = this.records.get(name2);
+    if (!record) return { risky: false };
+    const isRisky = record.consecutiveFailures > 0 || record.status === "degraded";
+    if (isRisky) {
+      return {
+        risky: true,
+        warning: `Plugin "${name2}" 處於不穩定狀態 (failures=${record.consecutiveFailures}, fitness=${record.fitnessScore})，本次熱重載風險較高`
+      };
+    }
+    return { risky: false };
+  }
+  // ==========================================================
+  // Query API
+  // ==========================================================
+  /** 获取插件健康记录 */
+  getRecord(name2) {
+    return this.records.get(name2);
+  }
+  /** 获取所有健康记录 */
+  getAllRecords() {
+    return Array.from(this.records.values());
+  }
+  /** 获取隔离日志 */
+  getQuarantineLog() {
+    return [...this.quarantineLog];
+  }
+  /** 统计总览 */
+  getStats() {
+    const records = Array.from(this.records.values());
+    const statusCount = { healthy: 0, degraded: 0, quarantined: 0, dead: 0 };
+    let totalFitness = 0;
+    for (const r of records) {
+      statusCount[r.status]++;
+      totalFitness += r.fitnessScore;
+    }
+    return {
+      total: records.length,
+      ...statusCount,
+      totalZoneConflicts: this.zoneConflicts.length,
+      averageFitness: records.length > 0 ? Math.round(totalFitness / records.length) : 0
+    };
+  }
+  /** 移除插件记录 (插件卸载时调用) */
+  removeRecord(name2) {
+    const timer = this.quarantineTimers.get(name2);
+    if (timer) {
+      clearTimeout(timer);
+      this.quarantineTimers.delete(name2);
+    }
+    this.records.delete(name2);
+  }
+  /** 完全重置所有状态 (用于测试或系统重置) */
+  reset() {
+    for (const timer of this.quarantineTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.quarantineTimers.clear();
+    this.records.clear();
+    this.zoneConflicts = [];
+    this.quarantineLog = [];
+  }
+}
+const pluginHealthGuard = new PluginHealthGuard();
 const BUILTIN_PERMISSION_MAP = {
   file: ["filesystem:read", "filesystem:write"],
   system: ["shell:exec", "system:manage"],
@@ -25648,9 +21501,46 @@ class ToolRegistry {
   setAuditTrail(audit) {
     this.auditTrail = audit;
   }
-  register(reg) {
+  /**
+   * 注册工具 — 内置城市规划冲突调解
+   *
+   * 区域冲突策略 (Zone Conflict Resolution):
+   *   - 内置插件 (@builtin/*) 可以接管任何同名工具 (take_over)
+   *   - 用户插件默认 keep_existing (先到先得)
+   *   - 可通过配置指定策略
+   */
+  register(reg, conflictStrategy) {
     if (this.tools.has(reg.name)) {
-      throw new Error(`Tool ${reg.name} already registered by ${this.tools.get(reg.name).pluginName}`);
+      const existing = this.tools.get(reg.name);
+      const isBuiltin = reg.pluginName.startsWith("@builtin/");
+      const existingIsBuiltin = existing.pluginName.startsWith("@builtin/");
+      const strategy = conflictStrategy ?? (isBuiltin && !existingIsBuiltin ? "take_over" : "keep_existing");
+      const conflictRecord = pluginHealthGuard.mediateConflict(reg.name, existing.pluginName, reg.pluginName, strategy);
+      if (strategy === "reject") {
+        Logger.log("WARN", "tool_registration_rejected", {
+          tool: reg.name,
+          existing: existing.pluginName,
+          incoming: reg.pluginName
+        });
+        eventBus.emit("plugin.zone-conflict", conflictRecord);
+        return;
+      }
+      if (strategy === "keep_existing") {
+        Logger.log("WARN", "tool_registration_conflict_kept_existing", {
+          tool: reg.name,
+          existing: existing.pluginName,
+          rejected: reg.pluginName
+        });
+        eventBus.emit("plugin.zone-conflict", conflictRecord);
+        return;
+      }
+      Logger.log("WARN", "tool_registration_takeover", {
+        tool: reg.name,
+        old: existing.pluginName,
+        new: reg.pluginName
+      });
+      this.tools.delete(reg.name);
+      eventBus.emit("plugin.zone-conflict", conflictRecord);
     }
     this.tools.set(reg.name, reg);
   }
@@ -26041,21 +21931,40 @@ class PluginLoader {
           }
         } catch (err) {
           Logger.log("WARN", "plugin_load_failed", { path: entry.name, error: String(err) });
+          pluginHealthGuard.reportFailure(entry.name, String(err), "load_file");
           eventBus.emit("plugin.error", { name: entry.name, error: String(err), phase: "load_file" });
         }
       }
     }
   }
   async loadPlugin(plugin) {
-    if (this.loaded.has(plugin.manifest.name)) return;
-    const api = createPluginAPI(plugin.manifest.name);
+    const { name: name2, version } = plugin.manifest;
+    if (this.loaded.has(name2)) return;
+    const antigenCheck = pluginHealthGuard.checkAntigen(name2);
+    if (!antigenCheck.allowed) {
+      Logger.log("WARN", "plugin_blocked_by_immune", { name: name2, reason: antigenCheck.reason });
+      eventBus.emit("plugin.error", { name: name2, error: antigenCheck.reason ?? "Blocked by immune system", phase: "immune_check" });
+      return;
+    }
+    const api = createPluginAPI(name2);
     const pluginPermissions = expandPermissions(plugin.manifest.permissions || []);
     let toolCount = 0;
     for (const schema2 of plugin.tools) {
+      const rawHandler = (args) => plugin.handle(schema2.name, args);
+      const wrappedHandler = async (args) => {
+        try {
+          const result = await rawHandler(args);
+          pluginHealthGuard.reportSuccess(name2);
+          return result;
+        } catch (err) {
+          pluginHealthGuard.recordCallResult(name2, false);
+          throw err;
+        }
+      };
       const registration = {
         ...schema2,
-        handler: (args) => plugin.handle(schema2.name, args),
-        pluginName: plugin.manifest.name,
+        handler: wrappedHandler,
+        pluginName: name2,
         requiredPermissions: pluginPermissions
       };
       toolRegistry.register(registration);
@@ -26065,14 +21974,17 @@ class PluginLoader {
       try {
         await plugin.onLoad(api);
       } catch (err) {
-        Logger.log("WARN", "plugin_onload_failed", { name: plugin.manifest.name, error: String(err) });
-        eventBus.emit("plugin.error", { name: plugin.manifest.name, error: String(err), phase: "onLoad" });
+        Logger.log("WARN", "plugin_onload_failed", { name: name2, error: String(err) });
+        pluginHealthGuard.reportFailure(name2, String(err), "onLoad");
+        eventBus.emit("plugin.error", { name: name2, error: String(err), phase: "onLoad" });
       }
     }
-    this.loaded.set(plugin.manifest.name, plugin);
+    const previous = this.loaded.get(name2);
+    pluginHealthGuard.registerCell(name2, version, previous?.manifest?.version);
+    this.loaded.set(name2, plugin);
     eventBus.emit("plugin.registered", {
-      name: plugin.manifest.name,
-      version: plugin.manifest.version,
+      name: name2,
+      version,
       toolCount
     });
   }
@@ -26102,6 +22014,10 @@ class PluginLoader {
         const pluginPath = path$1.join(this.pluginsDir, filename);
         if (fs.existsSync(pluginPath) && !Array.from(this.loaded.keys()).some((k) => k === filename)) {
           try {
+            if (!verifyPlugin(pluginPath, filename)) {
+              pluginHealthGuard.reportFailure(filename, "簽名驗證失敗，非信任插件", "verify");
+              return;
+            }
             const pluginModule = await import(url.pathToFileURL(pluginPath).href);
             const plugin = pluginModule.default || pluginModule;
             if (plugin && plugin.manifest && typeof plugin.handle === "function") {
@@ -26109,6 +22025,7 @@ class PluginLoader {
             }
           } catch (err) {
             Logger.log("WARN", "plugin_hot_load_failed", { path: filename, error: String(err) });
+            pluginHealthGuard.reportFailure(filename, String(err), "hot_load");
             eventBus.emit("plugin.error", { name: filename, error: String(err), phase: "hot_load" });
           }
         }
@@ -26116,12 +22033,19 @@ class PluginLoader {
       }
       if (eventType === "change") {
         const existing = Array.from(this.loaded.entries()).find(([_, p]) => p.manifest.name === filename);
+        const oldVersion = existing?.[1]?.manifest?.version;
         if (existing) {
           await this.unload(existing[0]);
         }
         try {
           const pluginPath = path$1.join(this.pluginsDir, filename);
           if (!fs.existsSync(pluginPath)) return;
+          if (existing && oldVersion) {
+            const mutationRisk = pluginHealthGuard.trackMutation(filename, "unknown", oldVersion);
+            if (mutationRisk.risky) {
+              Logger.log("WARN", "plugin_risky_mutation", { name: filename, warning: mutationRisk.warning });
+            }
+          }
           const pluginUrl = url.pathToFileURL(pluginPath).href + "?t=" + Date.now();
           const pluginModule = await import(pluginUrl);
           const plugin = pluginModule.default || pluginModule;
@@ -26130,6 +22054,7 @@ class PluginLoader {
           }
         } catch (err) {
           Logger.log("WARN", "plugin_reload_failed", { path: filename, error: String(err) });
+          pluginHealthGuard.reportFailure(filename, String(err), "hot_reload");
           eventBus.emit("plugin.error", { name: filename, error: String(err), phase: "hot_reload" });
         }
       }
@@ -26209,16 +22134,16 @@ class SkillManager {
     Logger.log("INFO", "skill_manager_ready", { skills: this.skills.size });
   }
   getAllSkills() {
-    const list2 = [];
+    const list = [];
     for (const [, manifest] of this.skills) {
-      list2.push({
+      list.push({
         manifest,
         enabled: manifest.enabled !== false,
         promptModule: this.promptCache.get(manifest.name) ?? null,
         toolsLoaded: this.loadedTools.has(manifest.name)
       });
     }
-    return list2;
+    return list;
   }
   /** 返回所有已启用技能的 prompt（全量注入） */
   getEnabledPromptModules() {
@@ -27523,7 +23448,7 @@ const defaults = (def) => {
     defaults: (options) => orig.defaults(ext(def, options)),
     makeRe: (pattern, options = {}) => orig.makeRe(pattern, ext(def, options)),
     braceExpand: (pattern, options = {}) => orig.braceExpand(pattern, ext(def, options)),
-    match: (list2, pattern, options = {}) => orig.match(list2, pattern, ext(def, options)),
+    match: (list, pattern, options = {}) => orig.match(list, pattern, ext(def, options)),
     sep: orig.sep,
     GLOBSTAR
   });
@@ -27539,13 +23464,13 @@ const braceExpand = (pattern, options = {}) => {
 minimatch.braceExpand = braceExpand;
 const makeRe = (pattern, options = {}) => new Minimatch(pattern, options).makeRe();
 minimatch.makeRe = makeRe;
-const match = (list2, pattern, options = {}) => {
+const match = (list, pattern, options = {}) => {
   const mm = new Minimatch(pattern, options);
-  list2 = list2.filter((f) => mm.match(f));
-  if (mm.options.nonull && !list2.length) {
-    list2.push(pattern);
+  list = list.filter((f) => mm.match(f));
+  if (mm.options.nonull && !list.length) {
+    list.push(pattern);
   }
-  return list2;
+  return list;
 };
 minimatch.match = match;
 const globMagic = /[?*]|[+@!]\(.*?\)|\[|\]/;
@@ -32206,10 +28131,24 @@ class TelegramService {
   retryQueue = [];
   activeSessions = /* @__PURE__ */ new Map();
   pushChatId = null;
+  /** 当 outbox 任务被禁用时，通过此回调重新激活 */
+  reactivateOutbox = null;
   // ★ 修复：Map<requestId, session> 通过 EventBus requestId 精确匹配输入/回复
   pushSessions = /* @__PURE__ */ new Map();
   constructor(agentService) {
     this.agentService = agentService;
+  }
+  /** 注册 outbox 任务重新激活回调，当 outbox 被 TaskRunner disable 后自动恢复 */
+  setReactivateOutbox(cb) {
+    this.reactivateOutbox = cb;
+  }
+  tryReactivateOutbox() {
+    if (this.reactivateOutbox) {
+      try {
+        this.reactivateOutbox();
+      } catch {
+      }
+    }
   }
   async initialize() {
     const url2 = credentialsManager.get("telegram_server_url") || process.env.TELEGRAM_SERVER_URL || "https://skills.crlkcloud.cyou/telegram";
@@ -32554,6 +28493,66 @@ class TelegramService {
       }
       this.enqueueReply(chatId, lines.join("\n"), "evolution");
     });
+    eventBus.on("pipeline.started", (p) => {
+      const lines = ["🤖 秋山澪 - 自动修复管道"];
+      lines.push("━━━ ⏳ 开始检查 ━━━");
+      lines.push("");
+      lines.push("运行项目自动化检查项，查找可修复的问题...");
+      if (p.timestamp) {
+        const time = new Date(p.timestamp).toLocaleString("zh-CN", { hour12: false });
+        lines.push(`🕐 ${time}`);
+      }
+      this.enqueueReply(chatId, lines.join("\n"), "evolution");
+    });
+    eventBus.on("pipeline.completed", (p) => {
+      const lines = ["🤖 秋山澪 - 自动修复管道"];
+      if (p.fixed > 0 || p.failed > 0) {
+        lines.push("━━━ ✅ 本轮执行完成 ━━━");
+      } else {
+        lines.push("━━━ ⏭ 本轮无需修复 ━━━");
+      }
+      lines.push("");
+      const totalRun = (p.fixed || 0) + (p.failed || 0);
+      lines.push(`📊 采集 ${p.collected || 0} 个问题，本轮处理 ${totalRun} 个`);
+      if (p.fixed > 0) lines.push(`✅  修复成功：${p.fixed} 个`);
+      if (p.failed > 0) lines.push(`❌  修复失败：${p.failed} 个`);
+      if (p.queueRemaining > 0) lines.push(`⏳  队列剩余：${p.queueRemaining} 个待处理`);
+      lines.push("");
+      const details = p.details || [];
+      for (const d of details) {
+        const icon = d.success ? "✅" : "❌";
+        const loc = d.file ? d.file.split("/").pop() + (d.line ? `:${d.line}` : "") : "未知";
+        const dur = d.durationMs ? ` (${(d.durationMs / 1e3).toFixed(0)}s)` : "";
+        if (d.success) {
+          lines.push(`${icon} [${d.source}] ${loc}${dur}`);
+          if (d.summary && d.summary !== "修复完成") {
+            lines.push(`   └ ${d.summary.slice(0, 200)}`);
+          }
+        } else {
+          lines.push(`${icon} [${d.source}] ${d.title?.slice(0, 80) || loc}${dur}`);
+          const reason = d.error || d.summary;
+          if (reason) lines.push(`   └ ${reason.slice(0, 200)}`);
+        }
+      }
+      if (p.queueRemaining > 0 && details.length > 0) {
+        lines.push("");
+        lines.push(`📋 待处理列表：`);
+      }
+      lines.push("");
+      lines.push(`⚡ 耗时：${p.durationMs ? (p.durationMs / 1e3).toFixed(0) : "?"}s`);
+      this.enqueueReply(chatId, lines.join("\n"), "evolution");
+    });
+    eventBus.on("pipeline.errored", (p) => {
+      const lines = ["🤖 秋山澪 - 自动修复管道"];
+      lines.push("━━━ ❌ 执行异常 ━━━");
+      lines.push("");
+      lines.push("管道在执行过程中抛出了异常：");
+      lines.push("");
+      lines.push(`⚠️ ${p.error || "未知错误"}`);
+      lines.push("");
+      lines.push("⏳ 将在下一周期自动重试");
+      this.enqueueReply(chatId, lines.join("\n"), "evolution");
+    });
     eventBus.on("insight.analysis.started", () => {
       this.enqueueReply(chatId, `🔍 洞察分析开始...`, "insight");
     });
@@ -32771,13 +28770,16 @@ class TelegramService {
       category,
       message: text
     });
+    this.tryReactivateOutbox();
   }
   enqueueEdit(chatId, targetMessageId, text, bot = "chat") {
     const inserted = insertOutbox({ chatId: String(chatId), bot, msgType: "edit", message: text, targetMessageId });
     Logger.log("DEBUG", "telegram_enqueue_edit", { chatId, targetMessageId, inserted, textLen: text.length });
+    this.tryReactivateOutbox();
   }
   enqueueAction(chatId, action, bot = "chat") {
     insertOutbox({ chatId: String(chatId), bot, msgType: "action", message: action });
+    this.tryReactivateOutbox();
   }
   /** sendMessage 需要同步拿到 messageId，因此直接 HTTP 调用 */
   async sendMessageSync(chatId, text, bot = "chat") {
@@ -33021,20 +29023,21 @@ class OutboxWorker {
   }
   async deliver(msg) {
     const bot = msg.bot || "chat";
+    const truncated = msg.message.length > 4096 ? msg.message.slice(0, 4050) + "\n\n... [消息已截断]" : msg.message;
     switch (msg.msgType) {
       case "reply":
-        await this.fetch("/reply", { chatId: Number(msg.chatId), text: msg.message, bot });
+        await this.fetch("/reply", { chatId: Number(msg.chatId), text: truncated, bot });
         break;
       case "edit":
         await this.fetch("/edit", {
           chatId: Number(msg.chatId),
           messageId: msg.targetMessageId,
-          text: msg.message,
+          text: truncated,
           bot
         });
         break;
       case "send":
-        await this.fetch("/send", { chatId: Number(msg.chatId), text: msg.message, bot });
+        await this.fetch("/send", { chatId: Number(msg.chatId), text: truncated, bot });
         break;
       case "action":
         await this.fetch("/action", { chatId: Number(msg.chatId), action: msg.message, bot });
@@ -33440,6 +29443,23 @@ class TaskRunner {
   }
   getState(type) {
     return this.store.get(type);
+  }
+  /** 重新启用一个被 disabled 的任务（重置失败计数 + 恢复定时器） */
+  reactivate(type) {
+    if (!this.tasks.has(type)) return false;
+    if (this.timers.has(type)) return true;
+    this.store.update(type, { status: "idle", consecutiveFailures: 0, cooldownUntil: 0 });
+    this.startTimer(type);
+    Logger.log("INFO", "task_runner_reactivated", { type });
+    return true;
+  }
+  /** 检查任务是否被 disabled（BEST_EFFORT 且失败次数超限导致定时器停止） */
+  isDisabled(type) {
+    const task = this.tasks.get(type);
+    if (!task) return false;
+    if (task.tier !== TaskTier.BEST_EFFORT) return false;
+    const state = this.store.get(type);
+    return !this.timers.has(type) && state.consecutiveFailures >= task.maxFailures;
   }
   has(type) {
     return this.tasks.has(type);
@@ -35005,6 +31025,242 @@ class RuntimeHealthManager {
     return "stable";
   }
 }
+const BATCH_INTERVAL_MS = 1e3;
+const MAX_BATCH_SIZE = 50;
+class EvaluationStore {
+  db = null;
+  raw = null;
+  dbReady = false;
+  batch = [];
+  batchTimer = null;
+  subscribers = /* @__PURE__ */ new Set();
+  constructor(externalDb, rawDb) {
+    if (externalDb) {
+      this.db = externalDb;
+      this.raw = rawDb ?? null;
+      this.dbReady = true;
+    }
+  }
+  /** 注入原始 sqlite 引用（用于直接查询，绕过 drizzle-proxy 的 where 兼容性问题） */
+  setRawDb(rawDb) {
+    this.raw = rawDb;
+  }
+  async init() {
+    if (this.dbReady) return;
+    const { getDatabase: getDatabase2 } = await Promise.resolve().then(() => connection);
+    const { getRawDb: getRawDb2 } = await Promise.resolve().then(() => connection);
+    this.db = getDatabase2();
+    this.raw = {
+      run: (s, p) => getRawDb2().run(s, p),
+      query: (s, p) => {
+        const stmt = getRawDb2().prepare(s);
+        p && stmt.bind(p);
+        const rows = [];
+        while (stmt.step()) rows.push(stmt.getAsObject());
+        stmt.free();
+        return rows;
+      }
+    };
+    this.dbReady = true;
+    Logger.log("INFO", "evaluation_store_ready");
+  }
+  // ── Append ──
+  append(event) {
+    this.batch.push(event);
+    this.notifySubscribers(event);
+    if (this.batch.length >= MAX_BATCH_SIZE) {
+      this.flush();
+    } else if (!this.batchTimer) {
+      this.batchTimer = setTimeout(() => this.flush(), BATCH_INTERVAL_MS);
+    }
+  }
+  async flush() {
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    const events2 = this.batch.splice(0);
+    if (events2.length === 0) return;
+    if (!this.dbReady || !this.db) return;
+    try {
+      await this.db.insert(evaluationEvents).values(
+        events2.map((e) => ({
+          id: e.id,
+          timestamp: e.timestamp,
+          traceId: e.traceId,
+          sessionId: e.sessionId,
+          source: e.source,
+          type: e.type,
+          payload: JSON.stringify(e.payload),
+          parentEventId: e.parentEventId
+        }))
+      );
+    } catch (err) {
+      Logger.log("WARN", "evaluation_store_flush_failed", { count: events2.length, error: err.message });
+    }
+  }
+  // ── Query ──
+  /** 强制刷入未持久化事件 */
+  async forceFlush() {
+    if (this.batch.length === 0) return;
+    if (!this.dbReady || !this.db) return;
+    const events2 = this.batch.splice(0);
+    await this.db.insert(evaluationEvents).values(
+      events2.map((e) => ({
+        id: e.id,
+        timestamp: e.timestamp,
+        traceId: e.traceId,
+        sessionId: e.sessionId,
+        source: e.source,
+        type: e.type,
+        payload: JSON.stringify(e.payload),
+        parentEventId: e.parentEventId
+      }))
+    );
+  }
+  async query(range2) {
+    if (!this.dbReady) return [];
+    await this.forceFlush();
+    try {
+      let sql = "SELECT * FROM evaluation_events WHERE timestamp >= ?";
+      const params = [range2.since];
+      if (range2.until) {
+        sql += " AND timestamp <= ?";
+        params.push(range2.until);
+      }
+      if (range2.type) {
+        sql += " AND type = ?";
+        params.push(range2.type);
+      }
+      sql += " ORDER BY timestamp ASC LIMIT 1000";
+      const rows = this.raw?.query(sql, params) ?? [];
+      return rows.map(this.deserialize);
+    } catch {
+      return [];
+    }
+  }
+  async getTrace(traceId) {
+    if (!this.dbReady) return [];
+    await this.forceFlush();
+    try {
+      const rows = this.raw?.query("SELECT * FROM evaluation_events WHERE trace_id = ? ORDER BY timestamp ASC", [traceId]) ?? [];
+      return rows.map(this.deserialize);
+    } catch {
+      return [];
+    }
+  }
+  // ── Subscribe (EventStream) ──
+  subscribe(handler) {
+    this.subscribers.add(handler);
+    return () => this.subscribers.delete(handler);
+  }
+  notifySubscribers(event) {
+    for (const handler of this.subscribers) {
+      try {
+        handler(event);
+      } catch {
+      }
+    }
+  }
+  // ── Shutdown ──
+  async shutdown() {
+    await this.flush();
+    this.subscribers.clear();
+  }
+  // ── Internal ──
+  deserialize(row) {
+    return {
+      id: row.id,
+      timestamp: Number(row.timestamp) || 0,
+      traceId: row.trace_id ?? row.traceId ?? "",
+      sessionId: row.session_id ?? row.sessionId ?? "",
+      source: row.source,
+      type: row.type,
+      payload: typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
+      parentEventId: row.parent_event_id ?? row.parentEventId ?? void 0
+    };
+  }
+}
+class EvaluationEmitter {
+  store;
+  source;
+  constructor(store, source) {
+    this.store = store;
+    this.source = source;
+  }
+  emit(type, payload, meta) {
+    const event = {
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+      traceId: meta?.traceId ?? "",
+      sessionId: meta?.sessionId ?? "",
+      source: this.source,
+      type,
+      payload,
+      parentEventId: meta?.parentEventId
+    };
+    this.store.append(event);
+  }
+}
+class RepositoryEventIterator {
+  repo;
+  constructor(repo) {
+    this.repo = repo;
+  }
+  async getEvents(window, options) {
+    return this.repo.query({
+      since: window.since,
+      until: window.until,
+      type: options?.type
+    });
+  }
+}
+class MetricsEngineImpl {
+  iterator;
+  constructor(iterator) {
+    this.iterator = iterator;
+  }
+  async compute(window) {
+    const [invokedEvents, completedEvents] = await Promise.all([
+      this.iterator.getEvents(window, { type: "model.invoked" }),
+      this.iterator.getEvents(window, { type: "model.completed" })
+    ]);
+    const totalCalls = invokedEvents.length;
+    const completed = completedEvents.filter((e) => !e.payload.error);
+    const failed = completedEvents.filter((e) => !!e.payload.error);
+    const completedCalls = completed.length;
+    const failedCalls = failed.length;
+    const completionRate = totalCalls > 0 ? completedCalls / totalCalls : 0;
+    const allOutputTokens = completed.map((e) => e.payload.outputTokens);
+    const avgOutputTokens = allOutputTokens.length > 0 ? allOutputTokens.reduce((a, b) => a + b, 0) / allOutputTokens.length : 0;
+    const durations = completed.map((e) => e.payload.durationMs).filter(Boolean);
+    durations.sort((a, b) => a - b);
+    const avgMs = durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
+    const p50Ms = percentile(durations, 0.5);
+    const p95Ms = percentile(durations, 0.95);
+    const maxMs = durations.length > 0 ? durations[durations.length - 1] : 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    for (const e of completedEvents) {
+      const p = e.payload;
+      totalInputTokens += p.inputTokens ?? 0;
+      totalOutputTokens += p.outputTokens ?? 0;
+    }
+    return {
+      window,
+      capturedAt: Date.now(),
+      traffic: { totalCalls, completedCalls, failedCalls },
+      quality: { completionRate, avgOutputTokens },
+      latency: { avgMs, p50Ms, p95Ms, maxMs },
+      cost: { totalInputTokens, totalOutputTokens, totalTokens: totalInputTokens + totalOutputTokens }
+    };
+  }
+}
+function percentile(sorted, p) {
+  if (sorted.length === 0) return 0;
+  const idx = Math.ceil(p * sorted.length) - 1;
+  return sorted[Math.max(0, idx)];
+}
 class AppRuntime {
   subs = new SubscriptionTracker();
   taskRunner;
@@ -35028,7 +31284,11 @@ class AppRuntime {
   sessionGovernor;
   checkpointV2;
   runtimeHealthManager;
+  evaluationStore;
+  evaluationEmitter;
+  metricsEngine;
   comfyUI;
+  pipeline;
   constructor(crashGuard2) {
     this.crashGuard = crashGuard2 ?? { flushMemory: null };
   }
@@ -35070,6 +31330,8 @@ class AppRuntime {
     this.resourceBudget = new ResourceBudget();
     this.stabilityScore = new SystemStabilityScore();
     this.metricsCollector = new MetricsCollector();
+    const { ProposalValidator } = await Promise.resolve().then(() => require("./chunks/ProposalValidator-XXdN-hrM.js"));
+    const { EvolutionGitOps } = await Promise.resolve().then(() => require("./chunks/EvolutionGitOps-wjD15AB0.js"));
     this.proposalValidator = new ProposalValidator();
     this.gitOps = new EvolutionGitOps();
     const ttsService = new TtsService((state) => stateManager.update(state));
@@ -35104,22 +31366,22 @@ class AppRuntime {
       },
       getPlanStatus: () => {
         const pm = agentService["planManager"];
-        const plan2 = pm.getActivePlan();
-        if (!plan2) return null;
-        const done = plan2.steps.filter((s) => s.status === "done").length;
+        const plan = pm.getActivePlan();
+        if (!plan) return null;
+        const done = plan.steps.filter((s) => s.status === "done").length;
         return {
-          id: plan2.id,
-          title: plan2.title || "",
-          total: plan2.steps.length,
+          id: plan.id,
+          title: plan.title || "",
+          total: plan.steps.length,
           done,
-          pending: plan2.steps.filter((s) => s.status !== "done").map((s) => s.description),
-          status: plan2.status
+          pending: plan.steps.filter((s) => s.status !== "done").map((s) => s.description),
+          status: plan.status
         };
       },
       getDefinition: (id2) => workflowStore2.getDefinition(id2)
     });
     setWorkflowScheduler2(scheduler2);
-    const { WorkflowTriggerManager } = await Promise.resolve().then(() => require("./chunks/WorkflowTriggerManager-VJDw9yPr.js"));
+    const { WorkflowTriggerManager } = await Promise.resolve().then(() => require("./chunks/WorkflowTriggerManager-Dn-Tj_ht.js"));
     const triggerManager = new WorkflowTriggerManager();
     triggerManager.start();
     const telegramService = new TelegramService(agentService);
@@ -35133,6 +31395,11 @@ class AppRuntime {
     setCredentialsManager(credentialsManager);
     llmService.refreshFromCredentials((key) => credentialsManager.get(key));
     Logger.log("INFO", "llm_config_loaded_from_credentials");
+    this.evaluationStore = new EvaluationStore();
+    await this.evaluationStore.init();
+    this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, "runtime");
+    llmService.setEvaluationEmitter(this.evaluationEmitter);
+    Logger.log("INFO", "evaluation_ready");
     const win = createWindow(stateManager);
     agentService.setMainWindow(win);
     ttsService.setAudioSink((filePath) => {
@@ -35266,6 +31533,7 @@ class AppRuntime {
     this.runtimeHealthManager.setSessionHealthProvider(this.sessionGovernor.scorer);
     this.runtimeHealthManager.setCapabilityHealthProvider(mcpManager);
     await this.runtimeHealthManager.init();
+    setHealthManager(this.runtimeHealthManager);
     this.healthChecker.register(this.runtimeHealthManager);
     await this.runtimeHealthManager.start();
     await this.processManager.start();
@@ -35397,6 +31665,9 @@ class AppRuntime {
     const outboxUrl = credentialsManager.get("telegram_server_url") || process.env.TELEGRAM_SERVER_URL || "https://skills.crlkcloud.cyou/telegram";
     const outboxWorker = new OutboxWorker(outboxUrl);
     this.taskRunner.register("telegram.outbox", () => outboxWorker.tick(), 2e3, { cooldownMs: 1e4 });
+    telegramService.setReactivateOutbox(() => {
+      this.taskRunner?.reactivate("telegram.outbox");
+    });
     const socialDir = path$1.join(WORKSPACE.evolution, "social");
     this.taskRunner.register(
       "social.tick",
@@ -35468,6 +31739,8 @@ class AppRuntime {
     });
     this.memoryService?.shutdown();
     this.memoryIndexer?.stop();
+    await this.evaluationStore?.shutdown().catch(() => {
+    });
     evolutionService?.stop();
     insightService?.stop();
     creativityService?.stop();
@@ -35549,20 +31822,20 @@ class AppRuntime {
       delayMs: 200,
       fn: async () => {
         const evolution = initEvolution(agentService);
-        const verifier = new VerificationRunner();
-        verifier.setWorkerPool(this.workerPool);
-        evolution.setVerificationRunner(verifier, true);
-        evolution.setRegressionDetector(new RegressionDetector());
-        evolution.setCognitiveService(cognitiveService);
         evolution.setSafetyMode("auto");
-        evolution.setGitOps(this.gitOps);
-        evolution.setProposalValidator(this.proposalValidator);
-        setSandboxRoot(path$1.join(WORKSPACE.evolution, "sandbox"));
         const evolutionModule = new EvolutionModule(evolution);
         const kernel = Kernel.getInstance();
         await kernel.registerModule(evolutionModule);
+        const pipeline = new PipelineOrchestrator({
+          projectRoot: process.cwd(),
+          persistDir: path$1.join(WORKSPACE.evolution, "pipeline_data"),
+          maxFixesPerCycle: 3
+        });
+        pipeline.initDefaults();
+        evolution.setPipeline(pipeline);
+        this.pipeline = pipeline;
         evolution.scheduleEvolution(2);
-        evolutionRef.current = evolution;
+        if (evolutionRef) evolutionRef.current = evolution;
         Logger.log("INFO", "evolution_service_started", { interval_hours: 2 });
       }
     });
@@ -35632,6 +31905,11 @@ class AppRuntime {
           llmService.chatJsonWithCode.bind(llmService)
         );
         creativity.start();
+        if (this.pipeline) {
+          this.pipeline.addCollector(new CreativityCollector());
+          this.pipeline.addExecutor(new CreativityExecutor());
+          Logger.log("INFO", "creativity_pipeline_wired");
+        }
         Logger.log("INFO", "creativity_service_started");
       }
     });
@@ -35719,6 +31997,23 @@ class AppRuntime {
       priority: "normal",
       delayMs: 100,
       fn: async () => {
+        this.metricsEngine = new MetricsEngineImpl(new RepositoryEventIterator(this.evaluationStore));
+        this.taskRunner.register(
+          "evaluation.metrics",
+          async () => {
+            const until = Date.now();
+            const since = until - 6e5;
+            const snapshot = await this.metricsEngine.compute({ since, until });
+            Logger.log("INFO", "eval_metrics", {
+              calls: snapshot.traffic.totalCalls,
+              rate: Math.round(snapshot.quality.completionRate * 100),
+              avgMs: Math.round(snapshot.latency.avgMs),
+              tokens: snapshot.cost.totalTokens
+            });
+            return { success: true };
+          },
+          6e5
+        );
         eventBus.track(
           "insight.detector.completed",
           (p) => Logger.log("INFO", "insight_detector", { detector: p.detector, findings: p.findings }),
@@ -35824,8 +32119,8 @@ class AppRuntime {
     try {
       const plans2 = pm.listPlans();
       if (plans2.length > 0) {
-        const plan2 = plans2[0];
-        sources.push({ name: `Plan:${plan2.title}`, content: plan2.description, type: "behavior", weight: 0.3 });
+        const plan = plans2[0];
+        sources.push({ name: `Plan:${plan.title}`, content: plan.description, type: "behavior", weight: 0.3 });
       }
     } catch {
     }
@@ -35835,8 +32130,8 @@ class AppRuntime {
     stateManager.update({ asr: "loading", model: "whisper_gpu (Vulkan)" });
     this.gpuInitTimeout = setTimeout(() => {
       Logger.log("WARN", "gpu_asr_init_timeout");
-      const baiduKey = process.env.BAIDU_ASR_API_KEY;
-      const baiduSecret = process.env.BAIDU_ASR_SECRET_KEY;
+      const baiduKey = credentialsManager.get("baidu_asr_api_key") || process.env.BAIDU_ASR_API_KEY;
+      const baiduSecret = credentialsManager.get("baidu_asr_secret_key") || process.env.BAIDU_ASR_SECRET_KEY;
       if (baiduKey && baiduSecret) {
         asrService.setBaiduCredentials(baiduKey, baiduSecret);
         Logger.log("INFO", "baidu_asr_ready_timeout_fallback");
@@ -35858,8 +32153,8 @@ class AppRuntime {
         this.gpuInitTimeout = null;
       }
       Logger.log("WARN", "gpu_asr_fallback", { error: String(err) });
-      const baiduKey = process.env.BAIDU_ASR_API_KEY;
-      const baiduSecret = process.env.BAIDU_ASR_SECRET_KEY;
+      const baiduKey = credentialsManager.get("baidu_asr_api_key") || process.env.BAIDU_ASR_API_KEY;
+      const baiduSecret = credentialsManager.get("baidu_asr_secret_key") || process.env.BAIDU_ASR_SECRET_KEY;
       if (baiduKey && baiduSecret) {
         asrService.setBaiduCredentials(baiduKey, baiduSecret);
         Logger.log("INFO", "baidu_asr_ready");
@@ -35893,6 +32188,8 @@ process.on("unhandledRejection", (reason) => {
 });
 const runtime = new AppRuntime(crashGuard);
 runtime.start();
+exports.DEV_PROJECT_ROOT = DEV_PROJECT_ROOT;
 exports.eventBus = eventBus;
+exports.execAsync = execAsync;
 exports.getWorkflowScheduler = getWorkflowScheduler;
 exports.workflowStore = workflowStore;

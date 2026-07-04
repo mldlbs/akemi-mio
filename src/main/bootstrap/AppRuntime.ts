@@ -16,12 +16,18 @@ import { MemoryService } from '../memory/MemoryService'
 import { registerHandlers, createServiceRef } from '../ipc/handlers'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import { initEvolution, evolutionService, planManager, SelfEvolutionService } from '../evolution'
-import { PipelineOrchestrator } from '../evolution/automation'
+import { PipelineOrchestrator, CreativityCollector, CreativityExecutor } from '../evolution/automation'
 import { initInsight, insightService, insightStore } from '../insight'
 import { initCreativity, creativityService } from '../creativity'
 import { initInspiration } from '../inspiration'
 import { setMemoryService } from '../mcp/LocalProvider'
-import { setPlanManager, setCredentialsManager, setSkillManager as setToolSkillManager } from '../tool/deps'
+import {
+  setPlanManager,
+  setCredentialsManager,
+  setSkillManager as setToolSkillManager,
+  setCognitiveService,
+  setHealthManager,
+} from '../tool/deps'
 import { PluginLoader, toolRegistry } from '../plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '../skill'
 import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
@@ -59,6 +65,11 @@ import { SessionRecoveryManager } from '../agent/SessionRecoveryManager'
 import { UIBridge } from '../agent/UIBridge'
 import { EventStore } from '../core/event-sourcing/EventStore'
 import { RuntimeHealthManager } from '../health/RuntimeHealthManager'
+import { EvaluationStore } from '../core/evaluation/EvaluationStore'
+import { EvaluationEmitter } from '../core/evaluation/EvaluationEmitter'
+import { RepositoryEventIterator } from '../core/evaluation/RepositoryEventIterator'
+import { MetricsEngineImpl } from '../core/evaluation/MetricsEngine'
+import type { EvaluationRepository, MetricSnapshot, TimeWindow } from '../core/evaluation/types'
 
 /**
  * AppRuntime — 应用启动生命周期编排器。
@@ -87,7 +98,11 @@ export class AppRuntime {
   private sessionGovernor?: SessionGovernor
   private checkpointV2?: CheckpointV2
   private runtimeHealthManager?: RuntimeHealthManager
+  private evaluationStore?: EvaluationStore
+  private evaluationEmitter?: EvaluationEmitter
+  private metricsEngine?: MetricsEngineImpl
   private comfyUI?: ComfyUIManager
+  private pipeline?: PipelineOrchestrator
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
     this.crashGuard = crashGuard ?? { flushMemory: null }
@@ -222,6 +237,13 @@ export class AppRuntime {
     // 从凭据存储覆盖 env 配置，让设置界面填入的 LLM 参数生效
     llmService.refreshFromCredentials((key) => credentialsManager.get(key))
     log('INFO', 'llm_config_loaded_from_credentials')
+
+    // Evaluation 子系统：Store → Emitter（Composition Root）
+    this.evaluationStore = new EvaluationStore()
+    await this.evaluationStore.init()
+    this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, 'runtime')
+    llmService.setEvaluationEmitter(this.evaluationEmitter)
+    log('INFO', 'evaluation_ready')
 
     const win = createWindow(stateManager)
     agentService.setMainWindow(win)
@@ -392,6 +414,7 @@ export class AppRuntime {
     this.runtimeHealthManager.setSessionHealthProvider(this.sessionGovernor!.scorer)
     this.runtimeHealthManager.setCapabilityHealthProvider(mcpManager)
     await this.runtimeHealthManager.init()
+    setHealthManager(this.runtimeHealthManager)
     this.healthChecker.register(this.runtimeHealthManager)
     await this.runtimeHealthManager.start()
     // Phase 4: ProcessManager 启动（此时开始健康检查）
@@ -406,7 +429,7 @@ export class AppRuntime {
     // 注册 stability.tick 到 TaskRunner（原 TaskScheduler 已弃用）
     let previousStabilityStatus: string | undefined
     this.taskRunner.register(
-      'stability.tick' as any,
+      'stability.tick',
       async () => {
         if (this.metricsCollector && this.stabilityScore) {
           previousStabilityStatus = this.stabilityScore.getStatus()
@@ -453,6 +476,7 @@ export class AppRuntime {
     agentService['identityContext'] = cognitiveService.identity.getFormattedContext()
     // Phase 5: 延迟注入 GoalGuardrail 的 GoalEngine（CognitiveService 在此阶段可用）
     agentService.goalGuardrail.setGoalEngine(cognitiveService.goals)
+    setCognitiveService(cognitiveService) // 注入到 tool/deps，供 GoalTools 等使用
     log('INFO', 'cognitive_service_ready', {
       goals: cognitiveService.goals.getActiveGoals().length,
       tokenBalance: cognitiveService.tokenAccount.getBalance(),
@@ -565,7 +589,7 @@ export class AppRuntime {
     // 社交平台自动发布（每分钟检查 content_calendar.yaml）
     const socialDir = join(WORKSPACE.evolution, 'social')
     this.taskRunner.register(
-      'social.tick' as any,
+      'social.tick',
       async (): Promise<TaskExecutionResult> => {
         try {
           const { execSync } = require('child_process')
@@ -644,6 +668,7 @@ export class AppRuntime {
     await this.comfyUI?.stop().catch(() => {})
     this.memoryService?.shutdown()
     this.memoryIndexer?.stop()
+    await this.evaluationStore?.shutdown().catch(() => {})
     evolutionService?.stop()
     insightService?.stop()
     creativityService?.stop()
@@ -752,6 +777,7 @@ export class AppRuntime {
         pipeline.initDefaults()
         // 附加到进化系统（SelfEvolutionService 将消费管道指标）
         evolution.setPipeline(pipeline)
+        this.pipeline = pipeline
         evolution.scheduleEvolution(2)
         if (evolutionRef) evolutionRef.current = evolution
         log('INFO', 'evolution_service_started', { interval_hours: 2 })
@@ -834,6 +860,12 @@ export class AppRuntime {
           llmService.chatJsonWithCode.bind(llmService),
         )
         creativity.start()
+        // 注册创意采集器和执行器到管道
+        if (this.pipeline) {
+          this.pipeline.addCollector(new CreativityCollector())
+          this.pipeline.addExecutor(new CreativityExecutor())
+          log('INFO', 'creativity_pipeline_wired')
+        }
         log('INFO', 'creativity_service_started')
       },
     })
@@ -936,6 +968,24 @@ export class AppRuntime {
       priority: 'normal',
       delayMs: 100,
       fn: async () => {
+        // MetricsEngine 定时计算（每 10 分钟汇总一次）
+        this.metricsEngine = new MetricsEngineImpl(new RepositoryEventIterator(this.evaluationStore!))
+        this.taskRunner!.register(
+          'evaluation.metrics',
+          async () => {
+            const until = Date.now()
+            const since = until - 600_000 // 10 分钟窗口
+            const snapshot = await this.metricsEngine!.compute({ since, until })
+            log('INFO', 'eval_metrics', {
+              calls: snapshot.traffic.totalCalls,
+              rate: Math.round(snapshot.quality.completionRate * 100),
+              avgMs: Math.round(snapshot.latency.avgMs),
+              tokens: snapshot.cost.totalTokens,
+            })
+            return { success: true }
+          },
+          600_000,
+        )
         eventBus.track(
           'insight.detector.completed',
           (p: any) => log('INFO', 'insight_detector', { detector: p.detector, findings: p.findings }),

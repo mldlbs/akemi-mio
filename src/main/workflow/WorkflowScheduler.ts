@@ -483,7 +483,7 @@ export class WorkflowSchedulerV2 {
     outputDir: string,
     ctx: StepContext,
     signal: AbortSignal,
-  ): Promise<{ status: string; data?: any }> {
+  ): Promise<{ status: string; data?: any; error?: string }> {
     const cfg = sd.config.subflow
     if (!cfg) return { status: 'done', data: null }
 
@@ -538,7 +538,7 @@ export class WorkflowSchedulerV2 {
     return { status: 'done', data: null }
   }
 
-  private async handleScript(sd: WorkflowStepDef, ctx: StepContext): Promise<{ status: string; data?: any }> {
+  private async handleScript(sd: WorkflowStepDef, ctx: StepContext): Promise<{ status: string; data?: any; error?: string }> {
     const cfg = sd.config.script
     if (!cfg || !cfg.code) return { status: 'done', data: null }
 
@@ -556,7 +556,7 @@ export class WorkflowSchedulerV2 {
     if (!cfg) return { status: 'done', data: null }
 
     const payload = cfg.payload ? resolveTemplate(cfg.payload, _ctx) : undefined
-    eventBus.emit(cfg.eventName, payload ? { workflow: true, payload } : { workflow: true })
+    eventBus.emit(cfg.eventName as any, payload ? { workflow: true, payload } : { workflow: true })
 
     return { status: 'done', data: { event: cfg.eventName, emitted: true } }
   }
@@ -600,7 +600,7 @@ export class WorkflowSchedulerV2 {
     if (sd.config.llmTimeoutMs !== undefined) subOptions.llmTimeoutMs = sd.config.llmTimeoutMs
 
     subOptions.onProgress = (msg) => {
-      eventBus.emit('workflow.run.step' as any, { runId: run.runId, stepId: sd.id, status: 'running', agentResult: msg })
+      eventBus.emit('workflow.run.step', { runId: run.runId, stepId: sd.id, status: 'running', agentResult: msg })
     }
 
     // Build dependency context from previous step results
@@ -683,7 +683,7 @@ export class WorkflowSchedulerV2 {
       const results = this.dispatch.getCompletedAgentResults()
       const done = agentIds.every((id) => results.some((r) => r.id === id))
       if (done) return results
-      eventBus.emit('workflow.run.step' as any, {
+      eventBus.emit('workflow.run.step', {
         runId: run.runId,
         stepId: sd.id,
         status: 'running',
@@ -789,7 +789,7 @@ function finishRun(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => {
-    const t = setTimeout(r, ms)
+    setTimeout(r, ms)
   })
 }
 

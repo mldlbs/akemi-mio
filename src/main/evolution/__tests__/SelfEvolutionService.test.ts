@@ -1,14 +1,22 @@
 /**
- * SelfEvolutionService 集成测试
+ * SelfEvolutionService 集成测试（v2 精简版）
  *
- * 核心验证点：
- * 1. detectPlanMode：无活跃计划 → first_run, 有活跃计划 → continue_plan
- * 2. 不再 abandonZombiePlans：有活跃计划时不会自动丢弃
- * 3. tryRun 使用 ANALYSIS_PROMPT（无 write_file 指令），超时 120s
- * 4. tryExecutePlan 使用增强的 PLAN_EXECUTE_PROMPT
+ * 当前 SelfEvolutionService 是一个薄层管道调度器：
+ * 1. 注入 PipelineOrchestrator 后周期性触发
+ * 2. 维护冷却/失败状态跨重启
+ * 3. 安全模式管理、用户活跃保护
+ *
+ * 已移除（旧版测试覆盖的闭环内循环组件）：
+ * - analyzer / executor 子组件（不再存在）
+ * - LLM 自我分析（不再使用 runAgentTask）
+ * - 创造力假设注入 / 计划上下文注入
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import * as path from 'path'
+import * as os from 'os'
+import * as fs from 'fs'
+import { EventEmitter } from 'events'
 
 vi.mock('electron', () => ({
   app: { getAppPath: () => process.cwd(), getPath: () => process.cwd() },
@@ -57,44 +65,46 @@ vi.mock('../../config', () => ({
   LLM_MODEL: 'test-model',
 }))
 
+vi.mock('../../db/messages', () => ({
+  insertMessage: vi.fn(),
+  createMessageId: () => `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+}))
+
+vi.mock('../../core/Lifecycle', () => ({
+  getMainWindow: vi.fn(() => null),
+}))
+
 import { SelfEvolutionService } from '../SelfEvolutionService'
-import { AsyncLock } from '../../utils/AsyncLock'
 import type { DevPlan, PlanStep } from '../types'
+import type { PipelineMetrics } from '../automation'
 
 // =============================================================================
-// 测试辅助函数 — 生成隔离的临时文件路径
+// 测试辅助 — 隔离的临时文件路径
 // =============================================================================
 
 let testCounter = 0
 
-/** 每个测试用例获得独立的 history 和 state 文件，避免跨测试状态污染 */
-function makeTestPaths(): { historyPath: string; stateFilePath: string } {
+function makeTestPaths(): { stateFilePath: string } {
   const id = `test_${++testCounter}_${Date.now()}`
-  const tmpDir = require('path').join(require('os').tmpdir(), 'evolution-test', id)
+  const tmpDir = path.join(os.tmpdir(), 'evolution-test', id)
   return {
-    historyPath: require('path').join(tmpDir, 'history.json'),
-    stateFilePath: require('path').join(tmpDir, 'evolution_state.json'),
+    stateFilePath: path.join(tmpDir, 'evolution_state.json'),
   }
 }
 
-function cleanupTestPaths(paths: { historyPath: string; stateFilePath: string }): void {
+function cleanupTestPaths(paths: { stateFilePath: string }): void {
   try {
-    require('fs').unlinkSync(paths.historyPath)
+    fs.unlinkSync(paths.stateFilePath)
   } catch {
     /* ignore */
   }
   try {
-    require('fs').unlinkSync(paths.stateFilePath)
+    fs.rmdirSync(path.dirname(paths.stateFilePath))
   } catch {
     /* ignore */
   }
   try {
-    require('fs').rmdirSync(require('path').dirname(paths.historyPath))
-  } catch {
-    /* ignore */
-  }
-  try {
-    require('fs').rmdirSync(require('path').dirname(require('path').dirname(paths.historyPath)))
+    fs.rmdirSync(path.dirname(path.dirname(paths.stateFilePath)))
   } catch {
     /* ignore */
   }
@@ -106,9 +116,7 @@ function cleanupTestPaths(paths: { historyPath: string; stateFilePath: string })
 
 function createMockPlanManager(initialPlan: DevPlan | null = null) {
   let activePlan = initialPlan ? JSON.parse(JSON.stringify(initialPlan)) : null
-  let planCreatedCount = 0
   let abandonedPlans: string[] = []
-  let completedPlans: string[] = []
 
   return {
     getActivePlan: vi.fn(() => activePlan),
@@ -129,7 +137,6 @@ function createMockPlanManager(initialPlan: DevPlan | null = null) {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       }
-      planCreatedCount++
       return activePlan
     }),
     updateStep: vi.fn((planId: string, stepIndex: number, status: PlanStep['status'], result?: string) => {
@@ -140,7 +147,6 @@ function createMockPlanManager(initialPlan: DevPlan | null = null) {
       return true
     }),
     completePlan: vi.fn((id: string) => {
-      completedPlans.push(id)
       if (activePlan?.id === id) activePlan = null
       return true
     }),
@@ -149,9 +155,10 @@ function createMockPlanManager(initialPlan: DevPlan | null = null) {
       if (activePlan?.id === id) activePlan = null
       return true
     }),
+    freezePlan: vi.fn((_id: string, _reason?: string) => true),
     getFormattedContext: vi.fn(() => {
       if (!activePlan) return ''
-      const doneSteps = activePlan.steps.filter((s) => s.status === 'done').length
+      const doneSteps = activePlan.steps.filter((s: PlanStep) => s.status === 'done').length
       const totalSteps = activePlan.steps.length
       let ctx = `【当前开发计划】${activePlan.title}\n进度: ${doneSteps}/${totalSteps}\n`
       for (const s of activePlan.steps) {
@@ -160,10 +167,9 @@ function createMockPlanManager(initialPlan: DevPlan | null = null) {
       }
       return ctx
     }),
+    cleanupOldPlans: vi.fn(() => 0),
     lock: { run: async <T>(fn: () => Promise<T>) => fn() },
-    _planCreatedCount: () => planCreatedCount,
     _abandonedPlans: () => abandonedPlans,
-    _completedPlans: () => completedPlans,
     _setPlan: (plan: DevPlan | null) => {
       activePlan = plan ? JSON.parse(JSON.stringify(plan)) : null
     },
@@ -176,27 +182,70 @@ function createMockPlanManager(initialPlan: DevPlan | null = null) {
 
 function createMockAgentService() {
   let busy = false
-  let lastPrompt = ''
-
   return {
     isBusy: vi.fn(() => busy),
-    runAgentTask: vi.fn(async (task: string) => {
-      lastPrompt = task
-      busy = true
-      await Promise.resolve()
-      busy = false
-      return { success: true, summary: '分析完成，计划已创建（mock）' }
-    }),
-    setSuppressForceContinue: vi.fn((_val: boolean) => {}),
-    _setBusy: (b: boolean) => {
-      busy = b
-    },
-    _lastPrompt: () => lastPrompt,
+    _setBusy: (b: boolean) => { busy = b },
   }
 }
 
 // =============================================================================
-// 辅助函数 — 创建 DevPlan
+// Mock Scheduler
+// =============================================================================
+
+function createMockScheduler() {
+  const tasks = new Map<string, { handler: () => Promise<string>; cancelled: boolean }>()
+  return {
+    interval: vi.fn((_ms: number, handler: () => Promise<string>, _label?: string) => {
+      const id = `sched_${Date.now()}_${Math.random().toString(36).slice(2)}`
+      tasks.set(id, { handler, cancelled: false })
+      return id
+    }),
+    cancel: vi.fn((id: string) => {
+      const t = tasks.get(id)
+      if (t) t.cancelled = true
+    }),
+    _triggerFirst: async () => {
+      for (const t of tasks.values()) {
+        if (!t.cancelled) await t.handler()
+      }
+    },
+  }
+}
+
+// =============================================================================
+// Mock PipelineOrchestrator
+// =============================================================================
+
+function createMockPipeline(metrics: Partial<PipelineMetrics> = {}) {
+  const defaultMetrics: PipelineMetrics = {
+    totalCollected: 0,
+    totalFixed: 0,
+    totalFailed: 0,
+    queueSize: 0,
+    lastRunAt: 0,
+    isRunning: false,
+  }
+  let currentMetrics = { ...defaultMetrics, ...metrics }
+  let shouldThrow = false
+  let runCount = 0
+
+  return {
+    runOnce: vi.fn(async () => {
+      runCount++
+      if (shouldThrow) throw new Error('Pipeline error (mock)')
+      return currentMetrics
+    }),
+    getMetrics: vi.fn(() => currentMetrics),
+    _setMetrics: (m: Partial<PipelineMetrics>) => {
+      currentMetrics = { ...currentMetrics, ...m }
+    },
+    _setShouldThrow: (b: boolean) => { shouldThrow = b },
+    _runCount: () => runCount,
+  }
+}
+
+// =============================================================================
+// 测试辅助 — 创建 DevPlan
 // =============================================================================
 
 function makePlan(title: string, stepCount: number, doneCount: number, options?: { failedCount?: number }): DevPlan {
@@ -223,8 +272,8 @@ function makePlan(title: string, stepCount: number, doneCount: number, options?:
   }
 }
 
-describe('SelfEvolutionService — 集成测试', () => {
-  let paths: { historyPath: string; stateFilePath: string }
+describe('SelfEvolutionService — v2 精简版集成测试', () => {
+  let paths: { stateFilePath: string }
 
   beforeEach(() => {
     paths = makeTestPaths()
@@ -234,706 +283,495 @@ describe('SelfEvolutionService — 集成测试', () => {
     cleanupTestPaths(paths)
   })
 
-  function resetLastRun(service: SelfEvolutionService) {
-    ;(service as any).lastRun = 0
-  }
+  // ===========================================================================
+  // 构造和初始化
+  // ===========================================================================
 
-  /** Bypass warmup by setting firstRunComplete before trigger */
-  function warmupReady(service: SelfEvolutionService) {
-    ;(service as any).firstRunComplete = true
-  }
-
-  describe('detectPlanMode（通过 tryRun 间接验证）', () => {
-    it('无活跃计划时，runAnalysisCycle 应正常执行分析（不报错）', async () => {
+  describe('构造和默认值', () => {
+    it('应正确初始化所有公开 getter 的默认值', () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const mockSched = createMockScheduler()
+      const bus = new EventEmitter()
+
+      const service = new SelfEvolutionService(mockAgent as any, mockSched as any, bus as any, undefined, {
         stateFilePath: paths.stateFilePath,
       })
-      warmupReady(service)
 
-      await (service as any).runAnalysisCycle()
-
-      expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(1)
-      const prompt = mockAgent._lastPrompt()
-      expect(prompt).toContain('分析模式')
-      expect(prompt).toContain('禁止 write_file')
-      expect(mockPlan._abandonedPlans()).toHaveLength(0)
+      expect(service.name).toBe('SelfEvolutionService')
+      expect(service.state).toBe('created')
+      expect(service.getSchedulerState()).toBe('IDLE' as any)
+      expect(service.getSafetyMode()).toBe('review')
+      expect(service.getConsecutiveFailures()).toBe(0)
+      expect(service.getExecuteFailures()).toBe(0)
+      expect(service.getLastRun()).toBe(0)
+      expect(service.getLastPipelineMetrics()).toBeNull()
     })
 
-    it('有活跃计划时，不应自动 abandon（替代旧 abandonZombiePlans 行为）', async () => {
-      const existingPlan = makePlan('修复数据库连接泄漏', 4, 1)
+    it('应使用自定义 options 覆盖默认值', () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(existingPlan)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
+        intervalMs: 60 * 60 * 1000,
+        maxFailures: 5,
       })
-      warmupReady(service)
 
-      await (service as any).runAnalysisCycle()
-
-      expect(mockPlan._abandonedPlans()).toHaveLength(0)
+      // intervalMs / maxFailures 为内部字段，通过间接方式验证
+      expect(service.getConsecutiveFailures()).toBe(0)
     })
 
-    it('有活跃计划时，prompt 应包含计划上下文注入', async () => {
-      const existingPlan = makePlan('优化查询性能', 3, 1)
+    it('应通过 setPipeline 注入管道引用', () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(existingPlan)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
       })
-      warmupReady(service)
+      const mockPipeline = createMockPipeline({ totalCollected: 5, totalFixed: 3 })
 
-      // detectPlanMode is on the analyzer; verify it returns continue_plan with context
-      const planMode = (service as any).analyzer.detectPlanMode()
-      expect(planMode.mode).toBe('continue_plan')
-      expect(planMode.planContext).toContain('优化查询性能')
-      expect(planMode.planContext).toContain('1/3')
-    })
-
-    it('多次触发不会 abandon 已有计划', async () => {
-      const existingPlan = makePlan('重构 API 路由', 5, 2)
-      const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(existingPlan)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-      })
-      warmupReady(service)
-
-      await (service as any).runAnalysisCycle()
-      await (service as any).runAnalysisCycle()
-
-      expect(mockPlan._abandonedPlans()).toHaveLength(0)
+      expect(() => service.setPipeline(mockPipeline as any)).not.toThrow()
     })
   })
 
-  describe('tryRun prompt 内容验证', () => {
-    it('first_run 模式下 prompt 应声明"分析模式"而非"执行模式"', async () => {
+  // ===========================================================================
+  // ISubsystem 生命周期
+  // ===========================================================================
+
+  describe('ISubsystem 生命周期', () => {
+    it('init() 应将状态从 created → ready', async () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
       })
-      warmupReady(service)
 
-      await (service as any).runAnalysisCycle()
-
-      const prompt = mockAgent._lastPrompt()
-      expect(prompt).toContain('分析模式')
-      expect(prompt).toContain('禁止 write_file')
-      expect(prompt).not.toContain('直接执行 write_file')
+      await service.init()
+      expect(service.state).toBe('ready')
     })
 
-    it('continue_plan 模式应包含计划名称和进度', async () => {
-      // With an active plan, runAnalysisCycle skips the LLM (shouldAnalyze=false).
-      // Verify via detectPlanMode that the plan context is properly built.
-      const existingPlan = makePlan('安全审计修复', 6, 2)
+    it('start() 后应在 running 状态', async () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(existingPlan)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
       })
-      warmupReady(service)
 
-      const planMode = (service as any).analyzer.detectPlanMode()
-      expect(planMode.mode).toBe('continue_plan')
-      expect(planMode.planContext).toContain('安全审计修复')
-      expect(planMode.planContext).toContain('2/6')
+      // 注入管道以触发第一次执行
+      const mockPipeline = createMockPipeline()
+      service.setPipeline(mockPipeline as any)
+
+      await service.init()
+      await service.start()
+      expect(service.state).toBe('running')
     })
 
-    it('prompt 应提示不要创建重复计划（当已有活跃计划时）', async () => {
-      // With active plan, the analysis is skipped — verify via detectPlanMode context
-      const existingPlan = makePlan('插件权限模型', 4, 1)
+    it('stop() 应将状态从 running → stopped', async () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(existingPlan)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
       })
-      warmupReady(service)
 
-      const planMode = (service as any).analyzer.detectPlanMode()
-      expect(planMode.planContext).toContain('不要创建新计划')
+      await service.init()
+      await service.start()
+      await service.stop()
+
+      expect(service.state).toBe('stopped')
+    })
+
+    it('healthCheck() 应报告健康状态和指标', async () => {
+      const mockAgent = createMockAgentService()
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
+        stateFilePath: paths.stateFilePath,
+      })
+      const mockPipeline = createMockPipeline({ totalCollected: 3, totalFixed: 2, queueSize: 1 })
+      service.setPipeline(mockPipeline as any)
+
+      const result = await service.healthCheck()
+      expect(result.healthy).toBe(true)
+      expect(result.metrics).toBeDefined()
+      expect(result.metrics!.pipelineQueueSize).toBe(1)
+      expect(result.metrics!.pipelineFixed).toBe(2)
     })
   })
 
-  describe('tryRun 超时和失败处理', () => {
-    it('连续分析失败超过 maxFailures（3次）后应跳过分析', async () => {
+  // ===========================================================================
+  // 安全模式
+  // ===========================================================================
+
+  describe('安全模式', () => {
+    it('默认安全模式应为 review', () => {
       const mockAgent = createMockAgentService()
-      mockAgent.runAgentTask = vi.fn(async () => ({
-        success: false,
-        summary: '分析失败（mock）',
-      }))
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
       })
-      warmupReady(service)
+
+      expect(service.getSafetyMode()).toBe('review')
+    })
+
+    it('setSafetyMode 应切换模式', () => {
+      const mockAgent = createMockAgentService()
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
+        stateFilePath: paths.stateFilePath,
+      })
+
+      service.setSafetyMode('auto')
+      expect(service.getSafetyMode()).toBe('auto')
+
+      service.setSafetyMode('review')
+      expect(service.getSafetyMode()).toBe('review')
+    })
+  })
+
+  // ===========================================================================
+  // 管道集成
+  // ===========================================================================
+
+  describe('管道集成', () => {
+    it('triggerNow 应执行管道并更新缓存指标', async () => {
+      const mockAgent = createMockAgentService()
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
+        stateFilePath: paths.stateFilePath,
+      })
+      const mockPipeline = createMockPipeline({ totalCollected: 10, totalFixed: 8, totalFailed: 2, queueSize: 0 })
+      service.setPipeline(mockPipeline as any)
+
+      await service.triggerNow()
+
+      expect(mockPipeline.runOnce).toHaveBeenCalledTimes(1)
+      const metrics = service.getLastPipelineMetrics()
+      expect(metrics).not.toBeNull()
+      expect(metrics!.totalFixed).toBe(8)
+    })
+
+    it('triggerNow 成功应重置失败计数和冷却', async () => {
+      const mockAgent = createMockAgentService()
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
+        stateFilePath: paths.stateFilePath,
+      })
+      const mockPipeline = createMockPipeline({ totalCollected: 1, totalFixed: 1 })
+      service.setPipeline(mockPipeline as any)
+
+      // 模拟已有的失败状态
+      ;(service as any).tryRunFailures = 2
+      ;(service as any).recoveryCooldownUntil = Date.now() + 10000
+
+      await service.triggerNow()
+
+      expect(service.getConsecutiveFailures()).toBe(0)
+      expect(service.getRecoveryCooldown().active).toBe(false)
+    })
+
+    it('管道抛出错误应累积失败计数', async () => {
+      const mockAgent = createMockAgentService()
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
+        stateFilePath: paths.stateFilePath,
+        maxFailures: 5,
+      })
+      const mockPipeline = createMockPipeline()
+      mockPipeline._setShouldThrow(true)
+      service.setPipeline(mockPipeline as any)
+
+      await service.triggerNow()
+      expect(service.getConsecutiveFailures()).toBe(1)
+
+      await service.triggerNow()
+      expect(service.getConsecutiveFailures()).toBe(2)
+    })
+
+    it('连续失败达 maxFailures 应触发冷却', async () => {
+      const mockAgent = createMockAgentService()
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
+        stateFilePath: paths.stateFilePath,
+        maxFailures: 3,
+      })
+      const mockPipeline = createMockPipeline()
+      mockPipeline._setShouldThrow(true)
+      service.setPipeline(mockPipeline as any)
 
       for (let i = 0; i < 3; i++) {
-        await (service as any).runAnalysisCycle()
+        await service.triggerNow()
       }
-      const callCountBeforeSkip = mockAgent.runAgentTask.mock.calls.length
-      await (service as any).runAnalysisCycle()
 
-      expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(callCountBeforeSkip)
-      expect(service.getConsecutiveFailures()).toBeGreaterThanOrEqual(3)
+      expect(service.getConsecutiveFailures()).toBe(3)
+      const cooldown = service.getRecoveryCooldown()
+      expect(cooldown.active).toBe(true)
+      expect(cooldown.remainingMs).toBeGreaterThan(0)
     })
 
-    it('失败后成功一次应重置连续失败计数', async () => {
+    it('无管道时 triggerNow 应正常完成不报错', async () => {
       const mockAgent = createMockAgentService()
-      let callCount = 0
-      mockAgent.runAgentTask = vi.fn(async () => {
-        callCount++
-        if (callCount <= 2) return { success: false, summary: '失败' }
-        return { success: true, summary: '成功' }
-      })
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
       })
-      warmupReady(service)
 
-      await (service as any).runAnalysisCycle()
-      await (service as any).runAnalysisCycle()
-      await (service as any).runAnalysisCycle()
-
+      // 无管道注入，triggerNow 应优雅处理
+      await expect(service.triggerNow()).resolves.not.toThrow()
       expect(service.getConsecutiveFailures()).toBe(0)
     })
   })
 
-  describe('分析超时配置', () => {
-    it('应使用配置的分析超时（可在构造函数重写）', async () => {
+  // ===========================================================================
+  // 状态持久化
+  // ===========================================================================
+
+  describe('状态持久化 — saveState / loadState', () => {
+    it('saveState + loadState 应保持失败计数和冷却状态', async () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const mockPipeline = createMockPipeline()
+      mockPipeline._setShouldThrow(true)
+
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
-        analysisTimeoutMs: 30000,
+        maxFailures: 10,
       })
-      warmupReady(service)
+      service.setPipeline(mockPipeline as any)
 
-      await (service as any).runAnalysisCycle()
-      expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(1)
-    })
-  })
+      // 累积 2 次失败
+      await service.triggerNow()
+      await service.triggerNow()
 
-  describe('错误恢复', () => {
-    it('agent 忙时应跳过分析（不报错）', async () => {
-      const mockAgent = createMockAgentService()
-      mockAgent._setBusy(true)
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-      })
-      warmupReady(service)
+      expect(service.getConsecutiveFailures()).toBe(2)
 
-      await (service as any).runAnalysisCycle()
-      // Should not throw despite agent being busy
-    })
-  })
-
-  describe('拆分错误计数器', () => {
-    it('分析失败应累积 tryRunFailures，不影响 executeFailures', async () => {
-      const mockAgent = createMockAgentService()
-      mockAgent.runAgentTask = vi.fn(async () => ({
-        success: false,
-        summary: '分析失败（mock）',
-      }))
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      // 创建新实例读取同一文件
+      const service2 = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
       })
-      warmupReady(service)
 
-      await (service as any).runAnalysisCycle()
-
-      expect(service.getConsecutiveFailures()).toBe(1)
-      expect(service.getExecuteFailures()).toBe(0)
-    })
-  })
-
-  describe('冷却恢复定时器', () => {
-    it('连续 3 次分析失败后应设置冷却时间', async () => {
-      const mockAgent = createMockAgentService()
-      mockAgent.runAgentTask = vi.fn(async () => ({
-        success: false,
-        summary: '失败',
-      }))
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-      })
-      warmupReady(service)
-
-      for (let i = 0; i < 3; i++) {
-        await (service as any).runAnalysisCycle()
-      }
-
-      const cooldown = service.getRecoveryCooldown()
-      expect(cooldown.active).toBe(true)
-      expect(cooldown.remainingMs).toBeGreaterThan(0)
-
-      const callCountBeforeSkip = mockAgent.runAgentTask.mock.calls.length
-      await (service as any).runAnalysisCycle()
-      expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(callCountBeforeSkip)
+      expect(service2.getConsecutiveFailures()).toBe(2)
     })
 
-    it('冷却时间过后应自动恢复', async () => {
+    it('旧状态文件（缺少字段）应优雅降级为默认值', () => {
       const mockAgent = createMockAgentService()
-      mockAgent.runAgentTask = vi.fn(async () => ({
-        success: false,
-        summary: '失败',
-      }))
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-      })
-      warmupReady(service)
 
-      for (let i = 0; i < 3; i++) {
-        await (service as any).runAnalysisCycle()
-      }
-
-      expect(service.getConsecutiveFailures()).toBe(3)
-      expect(service.getRecoveryCooldown().active).toBe(true)
-      ;(service as any).recoveryCooldownUntil = Date.now() - 1000
-      await (service as any).runAnalysisCycle()
-
-      expect(service.getConsecutiveFailures()).toBe(1)
-      expect(service.getRecoveryCooldown().active).toBe(false)
-    })
-  })
-
-  describe('错误计数器与步骤重试修复', () => {
-    it('错误计数器不应在 executor 入口重置', async () => {
-      const existingPlan = makePlan('计数测试', 3, 0)
-      const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(existingPlan)
-
-      mockAgent.runAgentTask = vi.fn(async () => ({
-        success: false,
-        summary: '步骤执行失败（mock）',
-      }))
-      mockPlan.lock.run = async (fn: any) => fn()
-
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-        stepRetryBaseMs: 0,
-      })
-      service.setSafetyMode('auto')
-      ;(service as any).executor.planExecConsecutiveErrors = 0
-      warmupReady(service)
-
-      const execCtx = {
-        planId: existingPlan.id,
-        stepIndex: 0,
-        stepDescription: existingPlan.steps[0].description,
-        planCtx: '',
-        cognitiveCtx: '',
-      }
-      await (service as any).executor.executeNextStep(execCtx)
-      await (service as any).executor.executeNextStep(execCtx)
-      await (service as any).executor.executeNextStep(execCtx)
-
-      // After 3 consecutive errors the executor abandons the plan and resets to 0
-      expect(mockPlan._abandonedPlans().length).toBeGreaterThanOrEqual(1)
-    })
-
-    it('safetyMode=review 时 executor 应跳过执行', async () => {
-      const existingPlan = makePlan('review模式测试', 2, 0)
-      const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(existingPlan)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-      })
-
-      service.setSafetyMode('review')
-      const execCtx = {
-        planId: existingPlan.id,
-        stepIndex: 0,
-        stepDescription: existingPlan.steps[0].description,
-        planCtx: '',
-        cognitiveCtx: '',
-      }
-      await (service as any).executor.executeNextStep(execCtx)
-
-      expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(0)
-      expect(existingPlan.steps[0].status).toBe('pending')
-    })
-
-    it('safetyMode=auto 时 executor 应正常执行', async () => {
-      const existingPlan = makePlan('auto模式测试', 2, 0)
-      const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(existingPlan)
-      mockPlan.lock.run = async (fn: any) => fn()
-
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-      })
-      service.setSafetyMode('auto')
-
-      const execCtx = {
-        planId: existingPlan.id,
-        stepIndex: 0,
-        stepDescription: existingPlan.steps[0].description,
-        planCtx: '',
-        cognitiveCtx: '',
-      }
-      await (service as any).executor.executeNextStep(execCtx)
-      expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(1)
-    })
-
-    it('failed 步骤应自动重试（最多 3 次）', async () => {
-      const existingPlan = makePlan('重试测试', 1, 0)
-      const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(existingPlan)
-      mockPlan.lock.run = async (fn: any) => fn()
-
-      let callCount = 0
-      mockAgent.runAgentTask = vi.fn(async () => {
-        callCount++
-        if (callCount < 3) return { success: false, summary: '临时失败' }
-        return { success: true, summary: '重试成功' }
-      })
-
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-      })
-      service.setSafetyMode('auto')
-
-      const execCtx = {
-        planId: existingPlan.id,
-        stepIndex: 0,
-        stepDescription: existingPlan.steps[0].description,
-        planCtx: '',
-        cognitiveCtx: '',
-      }
-      await (service as any).executor.executeNextStep(execCtx)
-
-      expect(callCount).toBe(3)
-    })
-
-    it('重试 3 次全部失败后应标记为 failed', async () => {
-      const existingPlan = makePlan('三次失败测试', 1, 0)
-      const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(existingPlan)
-      mockPlan.lock.run = async (fn: any) => fn()
-
-      mockAgent.runAgentTask = vi.fn(async () => ({
-        success: false,
-        summary: '永远失败',
-      }))
-
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-      })
-      service.setSafetyMode('auto')
-
-      const execCtx = {
-        planId: existingPlan.id,
-        stepIndex: 0,
-        stepDescription: existingPlan.steps[0].description,
-        planCtx: '',
-        cognitiveCtx: '',
-      }
-      await (service as any).executor.executeNextStep(execCtx)
-    })
-
-    it('连续 3 步失败应触发自动放弃计划', async () => {
-      const existingPlan = makePlan('自动放弃测试', 3, 0)
-      const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(existingPlan)
-      mockPlan.lock.run = async (fn: any) => fn()
-
-      mockAgent.runAgentTask = vi.fn(async () => ({
-        success: false,
-        summary: '步骤失败',
-      }))
-
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-        stepRetryBaseMs: 0,
-      })
-      service.setSafetyMode('auto')
-
-      const execCtx = (stepIndex: number) => ({
-        planId: existingPlan.id,
-        stepIndex,
-        stepDescription: existingPlan.steps[stepIndex].description,
-        planCtx: '',
-        cognitiveCtx: '',
-      })
-      await (service as any).executor.executeNextStep(execCtx(0))
-      await (service as any).executor.executeNextStep(execCtx(1))
-      await (service as any).executor.executeNextStep(execCtx(2))
-
-      expect(mockPlan._abandonedPlans().length).toBeGreaterThanOrEqual(1)
-    })
-
-    it('多个活跃计划时应使用 pickBestPlan 选择进度最高的', async () => {
-      const planA = makePlan('计划A（高进度）', 4, 3)
-      const planB = makePlan('计划B（低进度）', 4, 1)
-
-      const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(planA)
-      mockPlan.lock.run = async (fn: any) => fn()
-      mockPlan.listPlans = vi.fn(() => [planB, planA])
-      mockPlan.getActivePlan = vi.fn(() => planA)
-
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-      })
-      service.setSafetyMode('auto')
-
-      const execCtx = { planId: planA.id, stepIndex: 0, stepDescription: planA.steps[0].description, planCtx: '', cognitiveCtx: '' }
-      await (service as any).executor.executeNextStep(execCtx)
-      expect(mockAgent.runAgentTask).toHaveBeenCalledTimes(1)
-    })
-  })
-
-  describe('状态持久化 — saveState/loadState 闭环', () => {
-    it('saveState + loadState 应完整保持 currentAnalysisTimeoutMs / promptTrimMode / historyMaxEntries', async () => {
-      const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-      })
-
-      // 设定非默认值
-      ;(service as any).analyzer.currentAnalysisTimeoutMs = 250000
-      ;(service as any).analyzer.promptTrimMode = false
-      ;(service as any).analyzer.historyMaxEntries = 10
-
-      // 保存
-      ;(service as any).saveState()
-
-      // 创建新实例，加载同一文件
-      const service2 = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-      })
-
-      expect((service2 as any).analyzer.currentAnalysisTimeoutMs).toBe(250000)
-      expect((service2 as any).analyzer.promptTrimMode).toBe(false)
-      expect((service2 as any).analyzer.historyMaxEntries).toBe(10)
-    })
-
-    it('旧状态文件（不包含新字段）应优雅降级为默认值', async () => {
-      const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(null)
-
-      // 写一个旧格式的状态文件（缺少三个新字段）
-      const fs = require('fs')
-      const path = require('path')
+      // 写入不含新字段的旧格式状态
       const dir = path.dirname(paths.stateFilePath)
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
       fs.writeFileSync(
         paths.stateFilePath,
         JSON.stringify({
-          tryRunFailures: 2,
+          tryRunFailures: 1,
           recoveryCooldownUntil: 0,
           lastSuccessTime: 0,
-          recentAnalysisFingerprints: [],
           savedAt: Date.now(),
-          // 故意缺失 currentAnalysisTimeoutMs / promptTrimMode / historyMaxEntries
+          // 故意缺失 executeFailures
         }),
       )
 
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
       })
 
-      // 应使用默认值
-      expect((service as any).analyzer.currentAnalysisTimeoutMs).toBe(120000)
-      expect((service as any).analyzer.promptTrimMode).toBe(false)
-      expect((service as any).analyzer.historyMaxEntries).toBe(5)
+      expect(service.getConsecutiveFailures()).toBe(1)
+      expect(service.getExecuteFailures()).toBe(0) // 默认值
+    })
+
+    it('不存在状态文件时 loadState 应安全跳过', () => {
+      const mockAgent = createMockAgentService()
+      const nonExistentPath = path.join(os.tmpdir(), 'does_not_exist', 'state.json')
+
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
+        stateFilePath: nonExistentPath,
+      })
+
+      // 不应抛出，使用默认值
+      expect(service.getConsecutiveFailures()).toBe(0)
     })
   })
 
-  describe('步骤 2: buildLivingPlanContext — 上下文裁剪优化', () => {
-    it('无 living plan 文件时应返回模板上下文', async () => {
+  // ===========================================================================
+  // 冷却恢复
+  // ===========================================================================
+
+  describe('冷却恢复', () => {
+    it('getRecoveryCooldown 在无冷却时应返回 inactive', () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
-        maxLivingPlanBytes: 300,
       })
 
-      const context = (service as any).analyzer.buildLivingPlanContext()
-      // 无 mission.yaml 时，只返回模板说明
-      expect(context).toContain('living_plan')
-      expect(context).not.toContain('Mission')
+      const cooldown = service.getRecoveryCooldown()
+      expect(cooldown.active).toBe(false)
+      expect(cooldown.remainingMs).toBe(0)
     })
 
-    it('超出预算时应裁剪低优先级段而非截断内容', async () => {
+    it('冷却时间过后应自动恢复', async () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
-        stateFilePath: paths.stateFilePath,
-        maxLivingPlanBytes: 100,
-      })
+      const mockPipeline = createMockPipeline()
+      mockPipeline._setShouldThrow(true)
 
-      const context = (service as any).analyzer.buildLivingPlanContext()
-      // 无 living_plan 文件时，只返回模板且不包含 mission
-      expect(context).toContain('living_plan')
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
+        stateFilePath: paths.stateFilePath,
+        maxFailures: 2,
+      })
+      service.setPipeline(mockPipeline as any)
+
+      // 触发 2 次失败进入冷却
+      await service.triggerNow()
+      await service.triggerNow()
+
+      expect(service.getRecoveryCooldown().active).toBe(true)
+
+      // 手动设置冷却已过期
+      ;(service as any).recoveryCooldownUntil = Date.now() - 1000
+
+      // triggerNow 应能再次运行
+      mockPipeline._setShouldThrow(false)
+      mockPipeline._setMetrics({ totalCollected: 0, totalFixed: 0 })
+      await service.triggerNow()
+
+      expect(service.getConsecutiveFailures()).toBe(0)
+      expect(service.getRecoveryCooldown().active).toBe(false)
     })
   })
 
-  describe('步骤 2b: getHistorySummary — 历史摘要缩减', () => {
-    it('历史摘要应只取最近 1 条记录', async () => {
+  // ===========================================================================
+  // 错误计数器隔离
+  // ===========================================================================
+
+  describe('错误计数器隔离', () => {
+    it('getConsecutiveFailures 和 getExecuteFailures 应独立', () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(null)
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, undefined as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
       })
 
-      const summary = (service as any).analyzer.getHistorySummary()
-      expect(typeof summary).toBe('string')
+      // 直接设置内部状态验证隔离
+      ;(service as any).tryRunFailures = 3
+      ;(service as any).executeFailures = 1
+
+      expect(service.getConsecutiveFailures()).toBe(3)
+      expect(service.getExecuteFailures()).toBe(1)
     })
   })
 
-  describe('Creativity ↔ Evolution 集成', () => {
-    it('收到 creativity.hypothesis.selected 后应缓存假设', async () => {
+  // ===========================================================================
+  // 调度器集成
+  // ===========================================================================
+
+  describe('调度器集成', () => {
+    it('scheduleEvolution 应创建周期性 tick', () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(null)
-      // 通过构造函数传入本地 EventEmitter
-      const bus = new (require('events').EventEmitter)()
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, bus as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const mockSched = createMockScheduler()
+      const service = new SelfEvolutionService(mockAgent as any, mockSched as any, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
       })
 
-      const hypothesis = {
-        id: 'hyp_001',
-        title: '优化语音唤醒延迟',
-        idea: '采用 VAD 预检测减少唤醒词模型调用频次',
-        novelty: 85,
-        feasibility: 72,
-        impact: 90,
-        expectedBenefit: '唤醒响应时间降低 40%',
-        risk: '可能增加误唤醒率',
-      }
-
-      bus.emit('creativity.hypothesis.selected', hypothesis)
-      const cached = (service as any).creativityHypothesis
-      expect(cached).not.toBeNull()
-      expect(cached.title).toBe('优化语音唤醒延迟')
-      expect(cached.novelty).toBe(85)
-      expect(cached.feasibility).toBe(72)
-      expect(cached.impact).toBe(90)
-      expect(cached.expectedBenefit).toContain('40%')
+      service.scheduleEvolution(2)
+      expect(mockSched.interval).toHaveBeenCalled()
     })
 
-    it('缓存假设应注入到分析 prompt 的 creativityCtx', async () => {
+    it('stopExistingTick 应取消已有的 tick', () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(null)
-      const bus = new (require('events').EventEmitter)()
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, bus as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const mockSched = createMockScheduler()
+      const service = new SelfEvolutionService(mockAgent as any, mockSched as any, undefined, undefined, {
         stateFilePath: paths.stateFilePath,
       })
-      warmupReady(service)
 
-      // 屏蔽 shouldAnalyze() 预过滤
-      const analyzer = (service as any).analyzer
-      vi.spyOn(analyzer, 'shouldAnalyze').mockReturnValue({ shouldRun: true, reason: '' })
+      service.scheduleEvolution(2)
+      service.stopExistingTick()
+      expect(mockSched.cancel).toHaveBeenCalled()
+    })
+  })
 
-      bus.emit('creativity.hypothesis.selected', {
-        id: 'hyp_002',
-        title: '上下文压缩策略优化',
-        idea: '根据 Token 使用率动态调整压缩阈值',
-        novelty: 78,
-        feasibility: 88,
-        impact: 75,
-        expectedBenefit: '上下文窗口利用率提升 25%',
-        risk: '可能丢失边缘案例信息',
+  // ===========================================================================
+  // 事件处理
+  // ===========================================================================
+
+  describe('事件驱动触发', () => {
+    it('agent.input.received 事件应设置用户活跃标志', () => {
+      const mockAgent = createMockAgentService()
+      const bus = new EventEmitter()
+      const service = new SelfEvolutionService(mockAgent as any, undefined, bus as any, undefined, {
+        stateFilePath: paths.stateFilePath,
       })
 
-      await (service as any).runAnalysisCycle()
+      bus.emit('agent.input.received', {})
 
-      const prompt = mockAgent._lastPrompt()
-      expect(prompt).toContain('【创造力系统建议】')
-      expect(prompt).toContain('上下文压缩策略优化')
-      expect(prompt).toContain('新颖=78')
-      expect(prompt).toContain('可行=88')
-      expect(prompt).toContain('影响=75')
-      expect(prompt).toContain('预期收益: 上下文窗口利用率提升 25%')
-      expect(prompt).toContain('风险: 可能丢失边缘案例信息')
+      // 验证活跃标志已设置（内部状态，间接验证：schedulerTick 会跳过）
+      expect((service as any).mioActive).toBe(true)
+      expect((service as any).lastUserInputTime).toBeGreaterThan(0)
     })
 
-    it('无创造力假设时 creativityCtx 不应出现在 prompt 中', async () => {
+    it('agent.response.generated 事件应清除活跃标志', () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(null)
-      const bus = new (require('events').EventEmitter)()
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, bus as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const bus = new EventEmitter()
+      const service = new SelfEvolutionService(mockAgent as any, undefined, bus as any, undefined, {
         stateFilePath: paths.stateFilePath,
       })
-      warmupReady(service)
 
-      const analyzer = (service as any).analyzer
-      vi.spyOn(analyzer, 'shouldAnalyze').mockReturnValue({ shouldRun: true, reason: '' })
+      bus.emit('agent.input.received', {})
+      bus.emit('agent.response.generated', {})
 
-      // 不发送任何 creativity 事件，直接运行
-      await (service as any).runAnalysisCycle()
+      expect((service as any).mioActive).toBe(false)
+    })
+  })
 
-      const prompt = mockAgent._lastPrompt()
-      expect(prompt).not.toContain('【创造力系统建议】')
+  // ===========================================================================
+  // 管道指标缓存
+  // ===========================================================================
+
+  describe('管道指标缓存', () => {
+    it('getLastPipelineMetrics 应返回最近管道指标', async () => {
+      const mockAgent = createMockAgentService()
+      const service = new SelfEvolutionService(mockAgent as any, undefined, undefined, undefined, {
+        stateFilePath: paths.stateFilePath,
+      })
+      const mockPipeline = createMockPipeline({ totalCollected: 7, totalFixed: 5, totalFailed: 2, queueSize: 3 })
+      service.setPipeline(mockPipeline as any)
+
+      await service.triggerNow()
+
+      const metrics = service.getLastPipelineMetrics()
+      expect(metrics).not.toBeNull()
+      expect(metrics!.totalCollected).toBe(7)
+      expect(metrics!.totalFixed).toBe(5)
+      expect(metrics!.totalFailed).toBe(2)
+      expect(metrics!.queueSize).toBe(3)
+    })
+  })
+
+  // ===========================================================================
+  // 用户活跃保护
+  // ===========================================================================
+
+  describe('用户活跃保护', () => {
+    it('用户刚输入时 schedulerTick 不应触发分析', async () => {
+      const mockAgent = createMockAgentService()
+      const bus = new EventEmitter()
+      const mockPipeline = createMockPipeline()
+
+      const service = new SelfEvolutionService(mockAgent as any, undefined, bus as any, undefined, {
+        stateFilePath: paths.stateFilePath,
+      })
+      service.setPipeline(mockPipeline as any)
+
+      // 模拟用户刚输入
+      ;(service as any).mioActive = true
+      ;(service as any).mioActiveSince = Date.now()
+      ;(service as any).lastUserInputTime = Date.now()
+
+      // schedulerTick 应直接返回而不执行管道
+      await (service as any).schedulerTick()
+
+      // 管道不应被调用（用户活跃时跳过）
+      expect(mockPipeline._runCount()).toBe(0)
     })
 
-    it('缓存假设在注入后应持续保留（不会自动清除）', async () => {
+    it('用户活跃超时后应清除活跃标记', async () => {
       const mockAgent = createMockAgentService()
-      const mockPlan = createMockPlanManager(null)
-      const bus = new (require('events').EventEmitter)()
-      const service = new SelfEvolutionService(mockAgent as any, undefined as any, bus as any, mockPlan as any, {
-        historyPath: paths.historyPath,
+      const bus = new EventEmitter()
+      const service = new SelfEvolutionService(mockAgent as any, undefined, bus as any, undefined, {
         stateFilePath: paths.stateFilePath,
       })
-      warmupReady(service)
 
-      const analyzer = (service as any).analyzer
-      vi.spyOn(analyzer, 'shouldAnalyze').mockReturnValue({ shouldRun: true, reason: '' })
+      // 模拟超时的活跃状态（超过 10 分钟）
+      ;(service as any).mioActive = true
+      ;(service as any).mioActiveSince = Date.now() - 11 * 60 * 1000
+      ;(service as any).lastUserInputTime = Date.now() - 11 * 60 * 1000
 
-      bus.emit('creativity.hypothesis.selected', {
-        id: 'hyp_003',
-        title: '持久假设验证',
-        idea: '验证假设跨 cycle 保持',
-        novelty: 60,
-        feasibility: 80,
-        impact: 60,
-        expectedBenefit: '持续可见',
-        risk: '低',
-      })
+      // 手动添加管道避免空指针
+      const mockPipeline = createMockPipeline()
+      service.setPipeline(mockPipeline as any)
 
-      await (service as any).runAnalysisCycle()
-      const cachedAfter = (service as any).creativityHypothesis
-      expect(cachedAfter).not.toBeNull()
-      expect(cachedAfter.title).toBe('持久假设验证')
+      await (service as any).schedulerTick()
+
+      // 活跃标记应被清除
+      expect((service as any).mioActive).toBe(false)
     })
   })
 })

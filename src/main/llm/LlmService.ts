@@ -18,6 +18,7 @@ import {
 } from '../config'
 import { createTimeoutSignal } from '../utils/async'
 import { extractJsonFromLLMReply } from '../utils/llm'
+import type { EvaluationEmitter } from '../core/evaluation/EvaluationEmitter'
 
 export interface ToolCallInfo {
   id: string
@@ -39,9 +40,15 @@ export class LlmService {
   private textApiUrl = LLM_TEXT_API_URL
   private visionApiUrl = LLM_VISION_API_URL
   private mcpManager: ServerManager
+  private evaluationEmitter?: EvaluationEmitter
 
-  constructor(mcpManager?: ServerManager) {
+  constructor(mcpManager?: ServerManager, evaluationEmitter?: EvaluationEmitter) {
     this.mcpManager = mcpManager || new ServerManager()
+    this.evaluationEmitter = evaluationEmitter
+  }
+
+  setEvaluationEmitter(emitter: EvaluationEmitter): void {
+    this.evaluationEmitter = emitter
   }
 
   setMcpManager(manager: ServerManager): void {
@@ -200,7 +207,6 @@ export class LlmService {
           prompt_tokens: promptTokens,
           output_tokens: outputTokens,
         })
-
         context.addAssistant(full)
         context.trimToTokenBudget()
         return { reply: full }
@@ -382,6 +388,15 @@ export class LlmService {
     log('INFO', 'tool_llm_request', { request_id: requestId, model: this.codeModel })
 
     const t0 = Date.now()
+    const promptLength = messages.reduce((s, m) => s + (m.content?.length || 0), 0)
+    const rawPromptTokens = estimateTokens(JSON.stringify(messages))
+
+    // Evaluation: model.invoked
+    this.evaluationEmitter?.emit(
+      'model.invoked',
+      { type: 'model.invoked', modelName: this.codeModel, promptLength, promptTokens: rawPromptTokens },
+      { traceId: requestId },
+    )
 
     // 429 / 网络错误 / API 错误重试：指数退避，最多 3 次
     const RETRYABLE = new Set(['RATE_LIMITED', 'NETWORK'])
@@ -420,7 +435,7 @@ export class LlmService {
               continue
             }
           }
-          return result
+          return this._emitModelCompleted(result, requestId, t0, rawPromptTokens)
         }
 
         const res = await this._doFetch(messages, false, controller.signal, this.codeModel, allowedToolNames)
@@ -434,7 +449,7 @@ export class LlmService {
             await new Promise((r) => setTimeout(r, delay))
             continue
           }
-          return { error: 'RATE_LIMITED' }
+          return this._emitModelError('RATE_LIMITED', Date.now() - t0, requestId, t0, rawPromptTokens)
         }
 
         // 400/500 系列服务端错误可重试（通常为 context 结构问题或临时故障）
@@ -446,11 +461,11 @@ export class LlmService {
             continue
           }
           const statusErr = this._checkStatus(res, requestId, t0)
-          if (statusErr) return statusErr
+          if (statusErr) return this._emitModelError(statusErr.error ?? 'API_ERROR', Date.now() - t0, requestId, t0, rawPromptTokens)
         }
 
         const statusErr = this._checkStatus(res, requestId, t0)
-        if (statusErr) return statusErr
+        if (statusErr) return this._emitModelError(statusErr.error ?? 'API_ERROR', Date.now() - t0, requestId, t0, rawPromptTokens)
 
         const data = (await res.json()) as {
           choices?: Array<{
@@ -465,21 +480,71 @@ export class LlmService {
           }>
         }
 
-        return this._parseToolResponse(data, messages, requestId, t0)
+        const result = this._parseToolResponse(data, messages, requestId, t0)
+        return this._emitModelCompleted(result, requestId, t0, rawPromptTokens)
       } catch (err) {
         const elapsed = Date.now() - t0
         if (err instanceof DOMException && err.name === 'AbortError') {
           log('ERROR', 'tool_llm_timeout', { request_id: requestId, elapsed_ms: elapsed })
-          return { error: 'TIMEOUT' }
+          return this._emitModelError('TIMEOUT', elapsed, requestId, t0, rawPromptTokens)
         }
         log('ERROR', 'tool_llm_network_error', { request_id: requestId, elapsed_ms: elapsed, error: String(err) })
-        return { error: 'NETWORK' }
+        return this._emitModelError(String(err), elapsed, requestId, t0, rawPromptTokens)
       } finally {
         clearTimeout(timer)
       }
     }
 
-    return { error: 'RATE_LIMITED' }
+    return this._emitModelError('RATE_LIMITED_EXHAUSTED', Date.now() - t0, requestId, t0, rawPromptTokens)
+  }
+
+  private _emitModelCompleted(
+    result: { reply?: string; toolCalls?: ToolCallInfo[]; error?: string },
+    requestId: string | undefined,
+    t0: number,
+    rawPromptTokens: number,
+  ): typeof result {
+    const elapsed = Date.now() - t0
+    const replyLen = result.reply?.length ?? 0
+    this.evaluationEmitter?.emit(
+      'model.completed',
+      {
+        type: 'model.completed',
+        modelName: this.codeModel,
+        durationMs: elapsed,
+        inputTokens: rawPromptTokens,
+        outputTokens: Math.round(replyLen * 1.3),
+        responseLength: replyLen,
+        responsePreview: result.reply?.slice(0, 200),
+        error: result.error,
+      },
+      { traceId: requestId },
+    )
+    return result
+  }
+
+  private _emitModelError(
+    error: string,
+    elapsed: number,
+    requestId: string | undefined,
+    t0: number,
+    rawPromptTokens: number,
+  ): { error: string } {
+    const realElapsed = elapsed > 0 ? elapsed : Date.now() - t0
+    this.evaluationEmitter?.emit(
+      'model.completed',
+      {
+        type: 'model.completed',
+        modelName: this.codeModel,
+        durationMs: realElapsed,
+        inputTokens: rawPromptTokens,
+        outputTokens: 0,
+        responseLength: 0,
+        error,
+      },
+      { traceId: requestId },
+    )
+    return { error }
   }
 
   /**

@@ -21,7 +21,8 @@ export const runLocalModelTool = buildTool({
         maxTokens: args.maxTokens ?? 128,
         temperature: args.temperature ?? 0.7,
       })
-      return formatToolResult(result)
+      if (result.error) return formatToolError(result.error)
+      return formatToolResult(typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2))
     } catch (err: any) {
       return formatToolError(err.message)
     }

@@ -58,7 +58,7 @@ export class WorkflowStore {
     def.updatedAt = Date.now()
     if (!def.createdAt) def.createdAt = Date.now()
     writeJsonSafe(join(DEFINITIONS_DIR, `${def.id}.json`), def)
-    eventBus.emit('workflow.def.created' as any, { workflowDefId: def.id, name: def.name })
+    eventBus.emit('workflow.def.created', { workflowDefId: def.id, name: def.name })
     log('INFO', 'workflow_def_saved', { id: def.id, name: def.name, steps: def.steps.length })
   }
 
@@ -131,7 +131,7 @@ export class WorkflowStore {
       startedAt: Date.now(),
     }
     writeJsonSafe(join(RUNS_DIR, `${run.runId}.json`), run)
-    eventBus.emit('workflow.run.created' as any, {
+    eventBus.emit('workflow.run.created', {
       runId: run.runId,
       workflowDefId: def.id,
       workflowName: def.name,
@@ -145,7 +145,7 @@ export class WorkflowStore {
 
   updateRun(run: WorkflowRun): void {
     writeJsonSafe(join(RUNS_DIR, `${run.runId}.json`), run)
-    eventBus.emit('workflow.run.updated' as any, { runId: run.runId, status: run.status })
+    eventBus.emit('workflow.run.updated', { runId: run.runId, status: run.status })
   }
 
   updateStep(run: WorkflowRun, stepId: string, status: string, result?: string, error?: string): void {
@@ -157,7 +157,7 @@ export class WorkflowStore {
     if (status === 'running' && !step.startedAt) step.startedAt = Date.now()
     if (status === 'done' || status === 'failed') step.completedAt = Date.now()
     this.updateRun(run)
-    eventBus.emit('workflow.run.step' as any, { runId: run.runId, stepId, status, error, agentResult: result })
+    eventBus.emit('workflow.run.step', { runId: run.runId, stepId, status, error, agentResult: result })
   }
 
   // ── Preset seeding ──

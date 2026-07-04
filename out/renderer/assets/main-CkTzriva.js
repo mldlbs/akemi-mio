@@ -16192,6 +16192,9 @@ const CRED_KEYS = {
   LLM_IMAGE_API_URL: "llm_image_api_url",
   LLM_IMAGE_MODEL: "llm_image_model",
   LLM_IMAGE_KEY: "llm_image_key",
+  WRITING_API_URL: "writing_api_url",
+  BAIDU_ASR_API_KEY: "baidu_asr_api_key",
+  BAIDU_ASR_SECRET_KEY: "baidu_asr_secret_key",
   TTS_MODE: "tts_mode",
   THEME: "theme",
   WAKE_WORDS: "wake_words",
@@ -16348,6 +16351,32 @@ function SettingsVoiceTab({ values, onSetCredential }) {
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-section", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-section-title", children: "语音识别" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "settings-field", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-label", children: "百度 ASR API Key" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            className: "settings-input",
+            type: "password",
+            value: values[CRED_KEYS.BAIDU_ASR_API_KEY] ?? "",
+            onChange: (e) => onSetCredential(CRED_KEYS.BAIDU_ASR_API_KEY, e.target.value),
+            placeholder: "GPU ASR 加载失败时的备用方案"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "settings-field", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-label", children: "百度 ASR Secret Key" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            className: "settings-input",
+            type: "password",
+            value: values[CRED_KEYS.BAIDU_ASR_SECRET_KEY] ?? "",
+            onChange: (e) => onSetCredential(CRED_KEYS.BAIDU_ASR_SECRET_KEY, e.target.value),
+            placeholder: "留空则使用环境变量 BAIDU_ASR_SECRET_KEY"
+          }
+        )
+      ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "settings-field", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-label", children: "ASR 热词（逗号分隔）" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(

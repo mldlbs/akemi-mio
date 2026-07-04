@@ -533,7 +533,7 @@ export const autoScheduleWorkflowTool = buildTool({
         iteration++
         // 简单修复策略：增加重试次数和超时
         const fixedSteps = currentDef.steps.map((s) => {
-          if (s.status === 'failed' || run.steps.find((rs) => rs.stepId === s.id && rs.status === 'failed')) {
+          if (run.steps.find((rs) => rs.stepId === s.id && rs.status === 'failed')) {
             return {
               ...s,
               retryCount: Math.max(s.retryCount ?? 0, 2),

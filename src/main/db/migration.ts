@@ -549,6 +549,24 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_wf_step_runs_run_id ON workflow_step_runs(run_id);
     `,
   },
+  {
+    version: 27,
+    sql: `
+      CREATE TABLE IF NOT EXISTS evaluation_events (
+        id TEXT PRIMARY KEY,
+        timestamp INTEGER NOT NULL,
+        trace_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        parent_event_id TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_ev_ts ON evaluation_events(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_ev_type ON evaluation_events(type);
+      CREATE INDEX IF NOT EXISTS idx_ev_trace ON evaluation_events(trace_id);
+    `,
+  },
 ]
 
 export function runMigrations(sqlite: SqlJsDatabase): void {

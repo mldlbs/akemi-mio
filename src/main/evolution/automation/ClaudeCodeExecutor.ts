@@ -9,10 +9,12 @@
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { log } from '../../logger/Logger'
 import type { AssignedProblem, FixResult, FixExecutor, ProblemSource } from './types'
+import { credentialsManager } from '../../credentials/CredentialsManager'
 
 export class ClaudeCodeExecutor implements FixExecutor {
   readonly name = 'agent-sdk'
-  readonly supportedSources: ProblemSource[] = ['tsc', 'lint']
+  /** 只保留 tsc — test/lint 用 LLM 修复成本远高于价值 */
+  readonly supportedSources: ProblemSource[] = ['tsc']
   readonly timeoutMs = 180_000
 
   private lastExecuteAt = 0
@@ -33,7 +35,25 @@ export class ClaudeCodeExecutor implements FixExecutor {
     try {
       const prompt = this.buildPrompt(problem)
 
-      log('INFO', 'agent_sdk_fix_start', { problemId: problem.id })
+      // 优先用 credential store（用户设置界面可配），回退到 process.env
+      const llmKey = (process.env.LLM_KEY || credentialsManager.get('llm_key') || '').trim()
+      if (!llmKey) {
+        return { problemId: problem.id, success: false, summary: 'LLM_KEY 未配置', durationMs: 0, error: 'NO_KEY' }
+      }
+
+      log('INFO', 'agent_sdk_fix_start', { problemId: problem.id, proxy: 'deepseek' })
+
+      // 直接走 DeepSeek Anthropic 兼容接口，不依赖 cc-switch
+      const baseEnv: Record<string, string> = {
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+        ANTHROPIC_AUTH_TOKEN: llmKey,
+        ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+        ANTHROPIC_MODEL: 'deepseek-v4-pro',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-pro',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash',
+        CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek-v4-flash',
+      }
 
       let agentOutput = ''
 
@@ -41,11 +61,7 @@ export class ClaudeCodeExecutor implements FixExecutor {
         prompt,
         options: {
           allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Grep', 'Glob'],
-          // 使用系统的 ANTHROPIC_AUTH_TOKEN + cc-switch 代理
-          env: {
-            ...process.env,
-            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-          },
+          env: baseEnv,
         },
       })) {
         if (message.type === 'text' || message.type === 'content') {
@@ -71,7 +87,6 @@ export class ClaudeCodeExecutor implements FixExecutor {
         summary: output?.slice(0, 200) || (isSkip ? '已跳过(问题已不存在)' : '修复完成'),
         durationMs: elapsedMs,
         output,
-        error: isSkip ? undefined : undefined,
       }
     } catch (err: any) {
       log('WARN', 'agent_sdk_fix_failed', {

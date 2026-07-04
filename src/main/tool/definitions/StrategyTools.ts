@@ -52,13 +52,13 @@ export const createStrategyTool = buildTool({
       const cs = getCognitiveService()
       if (!cs) return formatToolError('认知服务暂不可用')
       const strategy = cs.strategies.create({
-        title: args.title,
+        name: args.title,
         description: args.description,
-        context: args.context || '',
-        steps: args.steps,
+        promptTemplate: args.steps.map((s, i) => `${i + 1}. ${s}`).join('\n'),
+        applicableContext: args.context || '',
         priority: args.priority ?? 5,
       })
-      return formatToolResult(`策略已创建: ${strategy.title}`)
+      return formatToolResult(`策略已创建: ${strategy.name}`)
     } catch (err: any) {
       return formatToolError(err.message)
     }

@@ -62,17 +62,18 @@ export const listIdeasTool = buildTool({
       if (hypotheses.length) {
         lines.push(`\n假设 (${hypotheses.length}):`)
         for (const h of hypotheses.slice(0, 20)) {
-          lines.push(`  - ${h.title || h.name}: ${h.description?.slice(0, 80) || ''}`)
+          lines.push(`  - ${h.title}: ${h.idea?.slice(0, 80) || ''}`)
         }
       } else {
         lines.push('\n暂无假设')
       }
 
-      const experiments = store.getExperiments?.() ?? []
+      const experiments = store.getActiveExperiments?.() ?? []
       if (experiments.length) {
         lines.push(`\n实验 (${experiments.length}):`)
         for (const e of experiments.slice(0, 20)) {
-          lines.push(`  - ${e.name || e.title}: ${e.status || '未知'}`)
+          const hypStatus = hypotheses.find((h) => h.id === e.hypothesisId)?.status
+          lines.push(`  - ${e.title}: ${hypStatus || '未知'}`)
         }
       }
 

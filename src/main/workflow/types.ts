@@ -152,6 +152,7 @@ export interface WorkflowDef {
   createdAt: number
   updatedAt: number
   enabled?: boolean
+  tags?: string[]
   inputSchema?: string
   outputDir?: string
   /** 调度触发器 */

@@ -7,7 +7,7 @@
  */
 
 // ── 问题来源类型 ──
-export type ProblemSource = 'tsc' | 'test' | 'lint' | 'log' | 'git' | 'runtime'
+export type ProblemSource = 'tsc' | 'test' | 'lint' | 'log' | 'git' | 'runtime' | 'feature'
 
 // ── 问题严重度 ──
 export type Severity = 'error' | 'warning' | 'info'

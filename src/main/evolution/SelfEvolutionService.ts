@@ -254,6 +254,9 @@ export class SelfEvolutionService implements ISubsystem {
   getConsecutiveFailures(): number {
     return this.tryRunFailures
   }
+  getExecuteFailures(): number {
+    return this.executeFailures
+  }
   getLastPipelineMetrics(): PipelineMetrics | null {
     return this.lastPipelineMetrics
   }

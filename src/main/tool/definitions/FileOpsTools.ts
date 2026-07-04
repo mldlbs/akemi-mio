@@ -1,3 +1,4 @@
+/// <reference path="../glob.d.ts" />
 import { existsSync, renameSync, copyFileSync, unlinkSync, statSync, readdirSync, readFileSync, appendFileSync, mkdirSync } from 'fs'
 import { join, basename, dirname, resolve } from 'path'
 import { buildTool, formatToolResult, formatToolError } from '../types'

@@ -73,7 +73,7 @@ export const listGoalsTool = buildTool({
       const cs = getCognitiveService()
       if (!cs) return formatToolError('认知服务暂不可用')
 
-      const db = (await import('../db/connection')).getRawDb()
+      const db = (await import('../../db/connection')).getRawDb()
       const conditions: string[] = []
       const params: any[] = []
       if (args.status) {

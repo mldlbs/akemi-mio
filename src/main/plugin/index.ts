@@ -1,4 +1,6 @@
 export { toolRegistry, ToolRegistry, ToolRegistration } from './registry'
 export { PluginLoader } from './loader'
 export { createPluginAPI } from './context'
+export { pluginHealthGuard, PluginHealthGuard } from './PluginHealthGuard'
 export type { Plugin, PluginManifest, PluginAPI, ToolSchema } from './types'
+export type { PluginHealthStatus, PluginHealthRecord, ZoneConflictRecord, QuarantineEvent, ConflictResolution } from './PluginHealthGuard'

@@ -40,6 +40,10 @@ export type EventName =
   | 'plugin.registered'
   | 'plugin.unregistered'
   | 'plugin.error'
+  | 'plugin.health-changed'
+  | 'plugin.quarantined'
+  | 'plugin.dead'
+  | 'plugin.zone-conflict'
   | 'recovery.checkpoint.created'
   | 'recovery.session.restored'
   | 'recovery.error.classified'
@@ -70,6 +74,10 @@ export type EventName =
   | 'pipeline.started'
   | 'pipeline.completed'
   | 'pipeline.errored'
+  | 'workflow.run.created'
+  | 'workflow.run.updated'
+  | 'workflow.run.step'
+  | 'workflow.def.created'
 
 export interface EventPayload {
   'task.lifecycle': { taskId: string; type: string; status: string; durationMs?: number; error?: string }
@@ -141,6 +149,10 @@ export interface EventPayload {
   'plugin.registered': { name: string; version: string; toolCount: number }
   'plugin.unregistered': { name: string; reason?: string }
   'plugin.error': { name: string; error: string; phase: string }
+  'plugin.health-changed': { name: string; status: string; fitnessScore: number }
+  'plugin.quarantined': { pluginName: string; reason: string; errorDetail?: string; quarantineDuration: number; timestamp: number }
+  'plugin.dead': { name: string; reason: string; fitnessScore: number }
+  'plugin.zone-conflict': { toolName: string; existingPlugin: string; incomingPlugin: string; resolution: string; resolvedAt: number }
   'recovery.checkpoint.created': { runId: string; trigger: string; path: string }
   'recovery.session.restored': { runId: string; hasUnfinishedPlan: boolean }
   'recovery.error.classified': { category: string; strategy: string; retryDelayMs: number }
@@ -174,6 +186,17 @@ export interface EventPayload {
     }>
   }
   'pipeline.errored': { error: string }
+  'workflow.run.created': {
+    runId: string
+    workflowDefId?: string
+    workflowName?: string
+    steps?: any[]
+    startedAt?: number
+    status?: string
+  }
+  'workflow.run.updated': { runId: string; status?: string; stepId?: string; error?: string; agentResult?: string }
+  'workflow.run.step': { runId: string; stepId: string; status?: string; error?: string; agentResult?: any }
+  'workflow.def.created': { workflowDefId: string; name: string }
   'stability.score.updated': { score: number; trend: string; status: string }
   'stability.status.changed': { previous: string; current: string; score: number }
   'budget.exhausted': { resource: string; utilization: number }

@@ -10,6 +10,7 @@
  *   webhook: 预留
  */
 import { eventBus } from '../core/EventBus'
+import type { EventName } from '../core/EventBus'
 import { log } from '../logger/Logger'
 import { CronMatcher } from './CronMatcher'
 import { getWorkflowScheduler } from './WorkflowScheduler'
@@ -101,7 +102,7 @@ export class WorkflowTriggerManager {
         const trigger = def.trigger
         if (!trigger || trigger.type !== 'event' || !trigger.event) continue
 
-        const unsub = eventBus.on(trigger.event, () => {
+        const unsub = eventBus.on(trigger.event as EventName, () => {
           if (!this.running) return
           log('INFO', 'workflow_event_triggered', { defId: def.id, event: trigger.event })
           this.fireTrigger(def, trigger)

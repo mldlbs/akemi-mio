@@ -7,6 +7,7 @@
 
 import { PipelineOrchestrator } from './PipelineOrchestrator'
 import { TscCollector } from './TscCollector'
+import { TestCollector } from './TestCollector'
 import { ClaudeCodeExecutor } from './ClaudeCodeExecutor'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -28,6 +29,7 @@ async function main() {
     maxFixesPerCycle: 2,
   })
   pipeline.addCollector(new TscCollector(process.cwd()))
+  pipeline.addCollector(new TestCollector(process.cwd()))
   pipeline.addExecutor(new ClaudeCodeExecutor())
 
   // Hook to stdout events for visibility

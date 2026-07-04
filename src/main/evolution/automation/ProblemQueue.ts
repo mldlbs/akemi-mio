@@ -25,6 +25,8 @@ export class ProblemQueue {
   private problems: Problem[] = []
   private completedIds = new Set<string>()
   private failedIds = new Map<string, number>() // problemId → retryCount
+  /** 已弹出但尚未完成/失败的问题，用于 markFailed() 时重建完整信息 */
+  private processingProblems = new Map<string, Problem>()
   private queuePath: string
 
   constructor(persistDir: string) {
@@ -58,6 +60,8 @@ export class ProblemQueue {
     const idx = this.problems.findIndex((p) => !this.completedIds.has(p.id) && !this.failedIds.has(p.id))
     if (idx === -1) return null
     const p = this.problems.splice(idx, 1)[0]
+    // 暂存以支持 markFailed() 重建完整信息
+    this.processingProblems.set(p.id, p)
     const retries = this.failedIds.get(p.id) || 0
     this.save()
     return {
@@ -76,6 +80,9 @@ export class ProblemQueue {
 
   /** 标记问题失败（可重试） */
   markFailed(problemId: string): void {
+    const original = this.findProblemById(problemId) || this.processingProblems.get(problemId)
+    // 从处理中缓存移除
+    this.processingProblems.delete(problemId)
     const retries = (this.failedIds.get(problemId) || 0) + 1
     if (retries >= 3) {
       // 超过重试上限，丢弃
@@ -84,9 +91,37 @@ export class ProblemQueue {
       log('WARN', 'problem_dropped_after_retries', { problemId, retries })
     } else {
       this.failedIds.set(problemId, retries)
-      // 重新入队（放回尾部）
-      this.problems.push(this.rehydrateProblem(problemId))
+      if (original) {
+        // 用完整信息重新入队
+        this.problems.push({ ...original })
+      } else {
+        this.problems.push(this.buildPlaceholderProblem(problemId))
+      }
       this.save()
+    }
+  }
+
+  /** 查找仍在队列中的完整问题 */
+  private findProblemById(problemId: string): Problem | undefined {
+    for (const p of this.problems) {
+      if (p.id === problemId) return p
+    }
+    return undefined
+  }
+
+  /** 构造最小占位 — 引用不在队列中的 problemId（通常不应该发生） */
+  private buildPlaceholderProblem(problemId: string): Problem {
+    const parts = problemId.split(':')
+    return {
+      id: problemId,
+      source: (parts[0] as ProblemSource) || 'tsc',
+      severity: 'error',
+      title: problemId,
+      description: '',
+      estimatedCostChars: 100,
+      lastSeen: Date.now(),
+      occurrenceCount: 1,
+      context: { raw: '' },
     }
   }
 
@@ -120,6 +155,28 @@ export class ProblemQueue {
     return this.problems.filter((p) => p.source === source)
   }
 
+  /**
+   * 将队列中某来源的问题与最新采集结果对齐：
+   * - 仍在 freshIds 中的 → 保留
+   * - 不在 freshIds 中的 → 标记为已完成（已过期）
+   * 返回值: 移除的数量
+   */
+  reconcile(source: ProblemSource, freshIds: Set<string>): number {
+    const before = this.problems.length
+    // 该来源的、不在 freshIds 中的问题 → 标记完成
+    const toRemove = this.problems.filter((p) => p.source === source && !freshIds.has(p.id))
+    for (const p of toRemove) {
+      this.completedIds.add(p.id)
+    }
+    this.problems = this.problems.filter((p) => !(p.source === source && !freshIds.has(p.id)))
+    const removed = before - this.problems.length
+    if (removed > 0) {
+      log('INFO', 'problem_queue_reconciled', { source, removed, remaining: this.problems.length })
+      this.save()
+    }
+    return removed
+  }
+
   // ── private ──
 
   private findDuplicate(p: Problem): Problem | undefined {
@@ -134,26 +191,6 @@ export class ProblemQueue {
     })
   }
 
-  private rehydrateProblem(problemId: string): Problem {
-    // 从持久化或内存重建
-    for (const p of this.problems) {
-      if (p.id === problemId) return p
-    }
-    // 从失败列表的 key 构造一个占位
-    const parts = problemId.split(':')
-    return {
-      id: problemId,
-      source: parts[0] as ProblemSource,
-      severity: 'error',
-      title: problemId,
-      description: '',
-      estimatedCostChars: 100,
-      lastSeen: Date.now(),
-      occurrenceCount: 1,
-      context: { raw: '' },
-    }
-  }
-
   private load(): void {
     try {
       if (!existsSync(this.queuePath)) return
@@ -163,6 +200,15 @@ export class ProblemQueue {
       if (Array.isArray(data.completedIds)) this.completedIds = new Set(data.completedIds)
       if (data.failedIds) {
         this.failedIds = new Map(Object.entries(data.failedIds))
+      }
+      if (data.processingProblems) {
+        this.processingProblems = new Map(Object.entries(data.processingProblems))
+      }
+      // 清理空壳问题（title === id 表示 buildPlaceholderProblem 产生的损坏条目）
+      const before = this.problems.length
+      this.problems = this.problems.filter((p) => p.title !== p.id)
+      if (this.problems.length < before) {
+        log('WARN', 'problem_queue_cleanup', { removed: before - this.problems.length })
       }
       log('INFO', 'problem_queue_loaded', {
         pending: this.problems.length,

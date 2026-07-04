@@ -46,6 +46,7 @@ import { runReflect } from './ReflectStage'
 import { ExecutionGovernor } from './ExecutionGovernor'
 import { ObservabilityLogger } from '../observability/ObservabilityLogger'
 import { PersonaStateManager } from './PersonaStateManager'
+import { setPersonaStateManager } from '../tool/deps'
 import { PersonaDriftControlSystem, DRIFT_CORRECTION_PROMPT } from './PersonaDriftControlSystem'
 import { classifyContent } from './ContentClassifier'
 
@@ -124,6 +125,7 @@ export class ChatExecutor {
     this.reflectLoop = reflectLoop
     this.goalGuardrail = goalGuardrail
     this.errorClassifier = { classify: classifyError }
+    setPersonaStateManager(this.personaManager)
   }
 
   setMainWindow(win: BrowserWindow | null): void {

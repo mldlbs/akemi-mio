@@ -83,7 +83,7 @@ export class WorkflowStoreV2 {
     }
     markDirty()
 
-    eventBus.emit('workflow.def.created' as any, { workflowDefId: def.id, name: def.name })
+    eventBus.emit('workflow.def.created', { workflowDefId: def.id, name: def.name })
     log('INFO', 'workflow_def_saved', { id: def.id, name: def.name, steps: def.steps.length })
   }
 
@@ -191,7 +191,7 @@ export class WorkflowStoreV2 {
     }
     markDirty()
 
-    eventBus.emit('workflow.run.created' as any, {
+    eventBus.emit('workflow.run.created', {
       runId: run.runId,
       workflowDefId: def.id,
       workflowName: def.name,
@@ -216,7 +216,7 @@ export class WorkflowStoreV2 {
       ],
     )
     markDirty()
-    eventBus.emit('workflow.run.updated' as any, { runId: run.runId, status: run.status })
+    eventBus.emit('workflow.run.updated', { runId: run.runId, status: run.status })
   }
 
   updateStep(run: WorkflowRun, stepId: string, status: string, result?: string, error?: string): void {
@@ -244,7 +244,7 @@ export class WorkflowStoreV2 {
     )
     markDirty()
     this.updateRun(run)
-    eventBus.emit('workflow.run.step' as any, { runId: run.runId, stepId, status, error, agentResult: result })
+    eventBus.emit('workflow.run.step', { runId: run.runId, stepId, status, error, agentResult: result })
   }
 
   deleteRun(runId: string): boolean {

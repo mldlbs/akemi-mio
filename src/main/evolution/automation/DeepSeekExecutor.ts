@@ -11,7 +11,7 @@ import type { AssignedProblem, FixResult, FixExecutor, ProblemSource } from './t
 
 export class DeepSeekExecutor implements FixExecutor {
   readonly name = 'deepseek-agent'
-  readonly supportedSources: ProblemSource[] = ['tsc', 'lint']
+  readonly supportedSources: ProblemSource[] = ['tsc']
   readonly timeoutMs = 180_000
 
   private pool: SubAgentPool | null = null

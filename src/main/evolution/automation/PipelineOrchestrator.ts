@@ -13,6 +13,7 @@ import { eventBus } from '../../core/EventBus'
 import type { SignalCollector, FixExecutor, FixResult } from './types'
 import { ProblemQueue } from './ProblemQueue'
 import { TscCollector } from './TscCollector'
+import { TestCollector } from './TestCollector'
 import { ClaudeCodeExecutor } from './ClaudeCodeExecutor'
 import { DeepSeekExecutor } from './DeepSeekExecutor'
 
@@ -57,6 +58,7 @@ export class PipelineOrchestrator {
 
   initDefaults(mcpManager?: any): void {
     this.addCollector(new TscCollector(this.config.projectRoot))
+    this.addCollector(new TestCollector(this.config.projectRoot))
     this.addExecutor(new ClaudeCodeExecutor())
     if (mcpManager) {
       this.addExecutor(new DeepSeekExecutor(mcpManager))
@@ -75,15 +77,23 @@ export class PipelineOrchestrator {
 
     try {
       // Phase 1: Collect
+      const collectResults: Array<{ source: string; problems: import('./types').Problem[] }> = []
       const collectPromises = this.collectors
         .filter((c) => c.shouldRun())
         .map(async (c) => {
           const problems = await c.collect()
           this.queue.push(problems)
           this.totalCollected += problems.length
+          collectResults.push({ source: c.source, problems })
         })
 
       await Promise.all(collectPromises)
+
+      // Phase 1.5: Reconcile — 清除不再活跃的旧问题，避免修已修复的
+      for (const { source, problems } of collectResults) {
+        const freshIds = new Set(problems.map((p) => p.id))
+        this.queue.reconcile(source as import('./types').ProblemSource, freshIds)
+      }
 
       // Phase 2: Execute
       let fixed = 0
@@ -161,8 +171,15 @@ export class PipelineOrchestrator {
 
   /** 按优先级尝试主+备用执行器 */
   private async tryFix(problem: import('./types').AssignedProblem): Promise<FixResult> {
+    const matching = this.executors.filter((e) => (e.supportedSources as string[]).includes(problem.source))
+
+    // 没有支持此类型问题的执行器 → 直接丢弃（不重试）
+    if (matching.length === 0) {
+      return { problemId: problem.id, success: true, summary: `无执行器支持 ${problem.source} 类型，已跳过`, durationMs: 0 }
+    }
+
     // 第一个匹配的 executor 为主
-    const primary = this.executors.find((e) => (e.supportedSources as string[]).includes(problem.source))
+    const primary = matching[0]
 
     if (primary && primary.isAvailable()) {
       const result = await primary.execute(problem)
@@ -171,9 +188,7 @@ export class PipelineOrchestrator {
     }
 
     // 备用：不同名的第二个 executor
-    const fallback = this.executors.find(
-      (e) => e.name !== primary?.name && (e.supportedSources as string[]).includes(problem.source) && e.isAvailable(),
-    )
+    const fallback = matching.find((e) => e.name !== primary?.name && e.isAvailable())
 
     if (fallback) {
       log('INFO', 'pipeline_fallback', { primary: primary?.name, fallback: fallback.name, problemId: problem.id })

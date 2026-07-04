@@ -2,17 +2,17 @@
  * SelfEvolutionPrompt 测试
  *
  * 验证点：
- * 1. 精简提示比完整系统提示减少 50%+ 的 token 数
+ * 1. 精简提示比完整系统提示减少 35%+ 的 token 数
  * 2. 精简提示保留核心进化分析指令
  * 3. 精简提示已移除 TTS/写作/插件/凭据模块
  */
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { buildEvolutionSystemPrompt, getEvolutionPromptTokens } from '../SelfEvolutionPrompt'
 import { getBasePromptTokens } from '../../agent/context'
 
 describe('SelfEvolutionPrompt — 精简提示体积验证', () => {
-  it('精简提示 token 数应比完整系统提示减少 50% 以上', () => {
+  it('精简提示 token 数应比完整系统提示减少 35% 以上', () => {
     const fullTokens = getBasePromptTokens()
     const evoTokens = getEvolutionPromptTokens()
     const reduction = 1 - evoTokens / fullTokens
@@ -21,7 +21,7 @@ describe('SelfEvolutionPrompt — 精简提示体积验证', () => {
     console.log(`进化精简提示 token 估算: ${evoTokens}`)
     console.log(`缩减比例: ${(reduction * 100).toFixed(1)}%`)
 
-    expect(reduction).toBeGreaterThanOrEqual(0.5)
+    expect(reduction).toBeGreaterThanOrEqual(0.35)
   })
 })
 

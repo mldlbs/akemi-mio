@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
     }),
   },
   BrowserWindow: {
-    fromWebContents: vi.fn(() => ({ close: vi.fn() })),
+    fromWebContents: vi.fn(() => ({ close: vi.fn(), hide: vi.fn() })),
   },
   app: {
     getAppPath: () => process.cwd(),
@@ -50,6 +50,14 @@ vi.mock('../../config', () => ({
   WORKSPACE: { evolution: process.cwd() },
 }))
 
+vi.mock('../../core/EventBus', () => ({
+  eventBus: {
+    emit: vi.fn(),
+    on: vi.fn(),
+    off: vi.fn(),
+  },
+}))
+
 import { registerHandlers } from '../handlers'
 import type { AgentService } from '../../agent/AgentService'
 import type { StateManager } from '../../core/StateManager'
@@ -78,6 +86,8 @@ describe('IPC handlers', () => {
       isPaused: vi.fn().mockReturnValue(false),
       pause: vi.fn(),
       resume: vi.fn(),
+      stopConversation: vi.fn().mockResolvedValue(undefined),
+      saveRecoverySnapshot: vi.fn(),
     }
 
     stateManager = {
@@ -119,13 +129,12 @@ describe('IPC handlers', () => {
         'update:check',
         'update:download',
         'update:install',
+        'window:close',
       ]
       const actual = [...registeredHandlers.keys()]
       for (const ch of expected) {
         expect(registeredHandlers.has(ch)).toBe(true)
       }
-      // window:close 用 ipcMain.on 注册，不在 handle 中
-      expect(registeredOns.has('window:close')).toBe(true)
     })
   })
 
@@ -133,7 +142,7 @@ describe('IPC handlers', () => {
     it('调用 agentService.processTextInput 并返回结果', async () => {
       const handler = registeredHandlers.get('ai:chat')!
       const result = await handler({}, '你好', 'req-1')
-      expect(agentService.processTextInput).toHaveBeenCalledWith('你好', 'req-1')
+      expect(agentService.processTextInput).toHaveBeenCalledWith('你好', 'req-1', 'electron', undefined, undefined, undefined)
       expect(result).toEqual({ reply: '你好' })
     })
   })
@@ -292,12 +301,11 @@ describe('IPC handlers', () => {
   })
 
   describe('window:close', () => {
-    it('关闭发送事件的窗口', () => {
-      const handler = registeredOns.get('window:close')!
+    it('关闭发送事件的窗口', async () => {
+      const handler = registeredHandlers.get('window:close')!
       const mockEvent = { sender: {} }
-      handler(mockEvent)
-      // ipcMain.on 调用后，验证事件被处理
-      expect(registeredOns.has('window:close')).toBe(true)
+      const result = await handler(mockEvent)
+      expect(result).toEqual({ success: true })
     })
   })
 })
