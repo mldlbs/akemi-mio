@@ -2,7 +2,7 @@ import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, unli
 import { join, resolve } from 'path'
 import https from 'https'
 
-type Level = 'INFO' | 'WARN' | 'ERROR' | 'PERF' | 'CHAT'
+type Level = 'INFO' | 'WARN' | 'ERROR' | 'PERF' | 'CHAT' | 'DEBUG'
 
 let requestCounter = 0
 let currentRequestId = ''

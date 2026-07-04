@@ -81,5 +81,19 @@ export class UIBridge {
     // Agent 错误
     const dError = eventBus.on('agent.error', (p) => this.send('agent:error', p))
     this.disposers.push(dError)
+
+    // 工作流运行事件
+    const dWfCreated = eventBus.on('workflow.run.created', (p) => this.send('workflow:run_created', p))
+    this.disposers.push(dWfCreated)
+
+    const dWfUpdated = eventBus.on('workflow.run.updated', (p) => this.send('workflow:run_updated', p))
+    this.disposers.push(dWfUpdated)
+
+    const dWfStep = eventBus.on('workflow.run.step', (p) => this.send('workflow:run_step', p))
+    this.disposers.push(dWfStep)
+
+    // 工作流定义变更 → UI 刷新列表
+    const dWfDefCreated = eventBus.on('workflow.def.created', (p) => this.send('workflow:def_created', p))
+    this.disposers.push(dWfDefCreated)
   }
 }

@@ -1,5 +1,7 @@
 import { buildTool, formatToolResult, formatToolError } from '../types'
-import { LLM_IMAGE_KEY, LLM_IMAGE_MODEL, LLM_IMAGE_API_URL, WORKSPACE } from '../../config'
+import type { MCPToolResult } from '../../mcp/types'
+import { WORKSPACE } from '../../config'
+import { getCredentialsManager } from '../deps'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
 import type { ComfyUIManager } from '../../image/ComfyUIManager'
@@ -68,7 +70,7 @@ export const generateImageTool = buildTool({
 
 // ─── ComfyUI 本地生图 ───
 
-async function generateWithComfyUI(prompt: string, size?: string, negativePrompt?: string, refImage?: string): Promise<string> {
+async function generateWithComfyUI(prompt: string, size?: string, negativePrompt?: string, refImage?: string): Promise<MCPToolResult> {
   const [width, height] = parseSize(size) ?? [1024, 1024]
 
   try {
@@ -88,23 +90,27 @@ async function generateWithComfyUI(prompt: string, size?: string, negativePrompt
 
 // ─── CogView 在线 API（fallback） ───
 
-async function generateWithCogView(prompt: string, args: any): Promise<string> {
-  const apiKey = LLM_IMAGE_KEY
+async function generateWithCogView(prompt: string, args: any): Promise<MCPToolResult> {
+  const creds = getCredentialsManager()
+  const apiKey = creds?.get('llm_image_key') || process.env.LLM_IMAGE_KEY || ''
+  const imageUrl =
+    creds?.get('llm_image_api_url') || process.env.LLM_IMAGE_API_URL || 'https://open.bigmodel.cn/api/paas/v4/images/generations'
+  const imageModel = creds?.get('llm_image_model') || process.env.LLM_IMAGE_MODEL || 'cogview-3-flash'
   if (!apiKey) {
-    return formatToolError('未配置 LLM_IMAGE_KEY，且 ComfyUI 未就绪。请在 .env 中设置 LLM_IMAGE_KEY 或安装 ComfyUI')
+    return formatToolError('未配置图片生成的 API Key。请在设置中填写或设置 LLM_IMAGE_KEY 环境变量')
   }
 
   const size = args.size || '1024x1024'
   const n = Math.min(Math.max(args.imageCount || 1, 1), 4)
 
   try {
-    const res = await fetch(LLM_IMAGE_API_URL, {
+    const res = await fetch(imageUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ model: LLM_IMAGE_MODEL, prompt, size, n }),
+      body: JSON.stringify({ model: imageModel, prompt, size, n }),
       signal: AbortSignal.timeout(120000),
     })
 

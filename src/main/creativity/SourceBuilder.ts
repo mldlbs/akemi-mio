@@ -151,7 +151,7 @@ export class SourceBuilder {
       name: 'UserBehavior',
       content: ubInfo
         ? `最近交互 ${ubInfo.interactionCount} 次，活跃话题: ${ubInfo.recentLabels.slice(0, 3).join('、') || '无'}，高峰时段: ${ubInfo.peakHours}`
-        : `最近交互 ${ubInfo?.interactionCount || 0} 次`,
+        : `最近交互 0 次`,
       type: 'behavior',
       weight: 0.7,
     })

@@ -1,14 +1,15 @@
 /**
  * ToolAvailabilityCache — 工具可用性缓存
  *
- * 当工具在某 host 上因确定性错误（command_not_found / binary_missing）失败后，
- * 缓存该结果 30 分钟，避免重复浪费 toolLoop 轮次。
+ * 只缓存 TOOL_MISSING 和 MCP_ERROR 类错误，
+ * ENVIRONMENT/PERMISSION/ARGUMENT 等错误不缓存（LLM 可换路）。
  *
  * 基于日志实证：agent 在 centos 远端反复尝试 node/pm2/SIGTERM
  *   28 次 retry → 8 次 ERROR → 直接导致预算耗尽
  */
 
 import { log } from '../logger/Logger'
+import { classifyToolError, ToolErrorType } from './ToolErrorType'
 
 interface CacheEntry {
   key: string
@@ -18,17 +19,6 @@ interface CacheEntry {
 
 const CACHE_TTL_MS = 30 * 60 * 1000
 const MAX_CACHE_SIZE = 200
-
-const DETERMINISTIC_PATTERNS = [
-  'command not found',
-  'No such file or directory',
-  'is not recognized as an internal',
-  'is not recognized as an operable',
-  'Invalid signal specification',
-  'pm2 not found',
-  'not found',
-  'cannot find',
-]
 
 class ToolAvailabilityCache {
   private cache = new Map<string, CacheEntry>()
@@ -42,10 +32,10 @@ class ToolAvailabilityCache {
     return null
   }
 
-  /** 记录失败。只有确定性错误才会被缓存 */
+  /** 记录失败。只有 TOOL_MISSING / MCP_ERROR 才会被缓存 */
   record(name: string, args: Record<string, any>, errorMessage: string): void {
-    const isDeterministic = DETERMINISTIC_PATTERNS.some((p) => errorMessage.toLowerCase().includes(p.toLowerCase()))
-    if (!isDeterministic) return
+    const errorType = classifyToolError(errorMessage)
+    if (errorType !== ToolErrorType.TOOL_MISSING && errorType !== ToolErrorType.MCP_ERROR) return
 
     const key = this.buildKey(name, args)
     this.cache.set(key, {

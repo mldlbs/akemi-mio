@@ -76,11 +76,11 @@ export function markOutboxFailed(id: number, error: string): boolean {
   const current = db.exec(`SELECT retry_count, msg_type, chat_id, message FROM telegram_outbox WHERE id = ?`, [id])
   const row = current?.[0]?.values?.[0]
   if (!row) return false
-  const retryCount = row[0] ?? 0
+  const retryCount: number = (row[0] ?? 0) as number
   if (retryCount >= 3) {
-    const msgType = row[1]
-    const chatId = row[2]
-    const lastMessage = row[3]
+    const msgType: string = row[1] as string
+    const chatId: string = row[2] as string
+    const lastMessage: string = row[3] as string
     db.run(`DELETE FROM telegram_outbox WHERE id = ?`, [id])
     // ★ 修复：edit 重试 3 次失败后降级为 send 新消息
     if (msgType === 'edit' && chatId && lastMessage) {
@@ -117,7 +117,7 @@ export function cleanupOutbox(): number {
     `DELETE FROM telegram_outbox WHERE (status = 'sent' AND created_at < ?) OR (status = 'failed' AND retry_count >= 3 AND created_at < ?)`,
     [cutoff, cutoff],
   )
-  const deleted = result?.[0]?.values?.[0]?.[0] ?? 0
+  const deleted = Number(result?.[0]?.values?.[0]?.[0] ?? 0)
   if (deleted > 0) markDirty()
   return deleted
 }

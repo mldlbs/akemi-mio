@@ -39,8 +39,9 @@ export class McpClient {
 
   private handleResponse(data: MCPResponse): void {
     // JSON-RPC notification (no id field) — server-initiated message
-    if (data.id == null && data.method) {
-      this.notificationHandler?.(data.method as string, (data as any).params)
+    const maybeNotification = data as any
+    if (data.id == null && maybeNotification.method) {
+      this.notificationHandler?.(maybeNotification.method as string, maybeNotification.params)
       return
     }
     const pending = this.pending.get(data.id)
@@ -99,7 +100,7 @@ export class McpClient {
     // SSE 传输需要建立长期连接以接收服务端推送通知
     if (this.transportType === 'sse') {
       try {
-        await this.transport.connectSSE()
+        await (this.transport as any).connectSSE()
       } catch (err) {
         console.error(`[MCP] SSE connect failed for ${this.name}:`, err)
       }

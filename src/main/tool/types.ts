@@ -8,7 +8,7 @@ export interface Tool<I = Record<string, any>, O = MCPToolResult> {
   description: string
   inputJSONSchema: {
     type: 'object'
-    properties: Record<string, { type: string; description: string }>
+    properties: Record<string, any>
     required: string[]
   }
   handler: (args: I) => Promise<O>

@@ -491,6 +491,82 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_outbox_category ON telegram_outbox(category);
     `,
   },
+  {
+    version: 24,
+    sql: `
+      ALTER TABLE messages ADD COLUMN session_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
+    `,
+  },
+  {
+    version: 25,
+    sql: `
+      ALTER TABLE messages ADD COLUMN category TEXT NOT NULL DEFAULT 'chat';
+      CREATE INDEX IF NOT EXISTS idx_messages_category ON messages(category);
+    `,
+  },
+  {
+    version: 26,
+    sql: `
+      CREATE TABLE IF NOT EXISTS workflow_defs (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        definition TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_runs (
+        run_id TEXT PRIMARY KEY,
+        workflow_def_id TEXT NOT NULL,
+        workflow_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','paused','done','failed')),
+        trigger TEXT,
+        context TEXT,
+        pending_gate TEXT,
+        user_input TEXT,
+        started_at INTEGER NOT NULL,
+        completed_at INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_step_runs (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES workflow_runs(run_id) ON DELETE CASCADE,
+        step_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','done','failed','skipped')),
+        input TEXT,
+        output TEXT,
+        error TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        started_at INTEGER,
+        completed_at INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_wf_runs_def_id ON workflow_runs(workflow_def_id);
+      CREATE INDEX IF NOT EXISTS idx_wf_runs_status ON workflow_runs(status);
+      CREATE INDEX IF NOT EXISTS idx_wf_step_runs_run_id ON workflow_step_runs(run_id);
+    `,
+  },
+  {
+    version: 27,
+    sql: `
+      CREATE TABLE IF NOT EXISTS evaluation_events (
+        id TEXT PRIMARY KEY,
+        timestamp INTEGER NOT NULL,
+        trace_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        parent_event_id TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_ev_ts ON evaluation_events(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_ev_type ON evaluation_events(type);
+      CREATE INDEX IF NOT EXISTS idx_ev_trace ON evaluation_events(trace_id);
+    `,
+  },
 ]
 
 export function runMigrations(sqlite: SqlJsDatabase): void {

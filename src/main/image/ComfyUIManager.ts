@@ -203,7 +203,7 @@ export class ComfyUIManager {
     const height = opts.height ?? 1024
 
     const workflow = this.loadWorkflow({
-      prompt,
+      prompt: opts.prompt,
       negativePrompt: opts.negativePrompt,
       seed,
       width,
@@ -242,7 +242,7 @@ export class ComfyUIManager {
     this.healthy = true
     this.restartAttempts = 0
     log('INFO', 'comfyui_ready', { port: this.config.port })
-    eventBus.emit('comfyui.ready', { port: this.config.port })
+    eventBus.emit('comfyui.ready' as any, { port: this.config.port })
   }
 
   private startHealthCheck(): void {

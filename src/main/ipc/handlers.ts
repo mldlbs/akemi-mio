@@ -9,11 +9,14 @@ import { WAKE_WORDS, LLM_API_URL, LLM_CODE_API_URL, LLM_TEXT_API_URL, LLM_VISION
 import { monitorEventLoopDelay } from 'perf_hooks'
 import { checkForUpdates, downloadUpdate, quitAndInstall } from '../updater/UpdaterService'
 import { MetricsCollector } from '../observability/MetricsCollector'
-import { getRecentMessages } from '../db/messages'
+import { getRecentMessages, getSessions, getMessagesBySession } from '../db/messages'
 import { planManager as planManagerImport } from '../evolution'
+import { workflowStore } from '../workflow/WorkflowStoreV2'
+import { getWorkflowScheduler } from '../workflow/WorkflowScheduler'
 import { createAgentWindow, closeAgentWindow } from '../core/Lifecycle'
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
+import { eventBus } from '../core/EventBus'
 
 /** 打开的沙盒窗口表，防止重复打开 */
 const sandboxWindows = new Map<string, BrowserWindow>()
@@ -70,14 +73,33 @@ export function registerHandlers(
   evolutionRef?: ServiceRef<SelfEvolutionService>,
   metricsCollector?: MetricsCollector,
 ): void {
-  ipcMain.on('window:close', (event) => {
-    BrowserWindow.fromWebContents(event.sender)?.close()
+  ipcMain.handle('window:close', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false }
+    try {
+      // 关闭前保存所有状态
+      agentService.pause()
+      await agentService.stopConversation().catch(() => {})
+      eventBus.emit('agent.session.flush' as any, {})
+      agentService.saveRecoverySnapshot?.('window_close' as any)
+    } catch (err) {
+      log('WARN', 'window_close_save_failed', { error: String(err) })
+    }
+    win.hide() // 隐藏到托盘而非关闭窗口
+    return { success: true }
   })
 
-  ipcMain.handle('ai:chat', async (_event, text: string, requestId?: string) => {
+  ipcMain.handle('window:minimize', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false }
+    win.minimize()
+    return { success: true }
+  })
+
+  ipcMain.handle('ai:chat', async (_event, text: string, requestId?: string, sessionId?: string, noTts?: boolean) => {
     try {
       if (agentService.isPaused()) return { reply: '', error: 'PAUSED' }
-      return await agentService.processTextInput(text, requestId)
+      return await agentService.processTextInput(text, requestId, 'electron', undefined, sessionId, noTts)
     } catch (err) {
       log('ERROR', 'ai_chat_failed', { error: String(err), requestId })
       throw err
@@ -182,6 +204,21 @@ export function registerHandlers(
 
   ipcMain.handle('credentials:set', async (_event, name: string, value: string) => {
     credentialsManager.set(name, value)
+    // LLM 配置变更时实时同步到运行时的 LlmService
+    if (name.startsWith('llm_')) {
+      try {
+        const llm = agentService.getLlmService()
+        llm.refreshFromCredentials((k) => credentialsManager.get(k))
+        log('INFO', 'llm_config_refreshed_from_ui', { changed: name })
+      } catch (err) {
+        log('WARN', 'llm_config_refresh_failed', { error: String(err) })
+      }
+    }
+    return true
+  })
+
+  ipcMain.handle('credentials:delete', async (_event, name: string) => {
+    credentialsManager.delete(name)
     return true
   })
 
@@ -250,6 +287,24 @@ export function registerHandlers(
     }
   })
 
+  ipcMain.handle('messages:getSessions', async () => {
+    try {
+      return await getSessions()
+    } catch (err) {
+      log('ERROR', 'get_sessions_failed', { error: String(err) })
+      return []
+    }
+  })
+
+  ipcMain.handle('messages:getBySession', async (_event, sessionId: string) => {
+    try {
+      return await getMessagesBySession(sessionId)
+    } catch (err) {
+      log('ERROR', 'get_by_session_failed', { error: String(err), sessionId })
+      return []
+    }
+  })
+
   // === Auto-update handlers ===
   ipcMain.handle('update:check', async () => {
     try {
@@ -310,6 +365,170 @@ export function registerHandlers(
       return { success: true }
     } catch {
       return { success: false }
+    }
+  })
+
+  // ── Workflow System ──
+
+  ipcMain.handle('workflow:listDefinitions', async () => {
+    try {
+      return workflowStore.listDefinitions()
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('workflow:getDefinition', async (_event, id: string) => {
+    try {
+      return workflowStore.getDefinition(id)
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle('workflow:listRuns', async (_event, limit?: number) => {
+    try {
+      return workflowStore.listRuns(limit)
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('workflow:getRun', async (_event, runId: string) => {
+    try {
+      return workflowStore.getRun(runId)
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle('workflow:deleteDefinition', async (_event, id: string) => {
+    try {
+      return { success: workflowStore.deleteDefinition(id) }
+    } catch {
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('workflow:saveDefinition', async (_event, def: any) => {
+    try {
+      workflowStore.saveDefinition(def)
+      return { success: true }
+    } catch {
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('workflow:startWorkflow', async (_event, id: string, userInput?: string) => {
+    try {
+      log('INFO', 'workflow_startWorkflow_called', { id, userInput })
+      const def = workflowStore.getDefinition(id)
+      if (!def) return { success: false, error: '工作流不存在' }
+      if (def.enabled === false) return { success: false, error: '工作流已停用，请先启用' }
+      const scheduler = getWorkflowScheduler()
+      log('INFO', 'workflow_scheduler_got', { schedulerExists: !!scheduler })
+      const run = scheduler.startRun(def, userInput)
+      return { success: true, runId: run.runId }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('workflow:stopRun', async (_event, runId: string) => {
+    try {
+      const scheduler = getWorkflowScheduler()
+      const ok = scheduler.stopRun(runId)
+      return { success: ok, error: ok ? undefined : '运行未找到或已结束' }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('workflow:enableDefinition', async (_event, id: string) => {
+    try {
+      const existing = workflowStore.getDefinition(id)
+      if (!existing) return { success: false, error: '工作流不存在' }
+      if (existing.enabled !== false) return { success: false, error: '已经是启用状态' }
+      workflowStore.saveDefinition({ ...existing, enabled: true, updatedAt: Date.now() })
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('workflow:disableDefinition', async (_event, id: string) => {
+    try {
+      const existing = workflowStore.getDefinition(id)
+      if (!existing) return { success: false, error: '工作流不存在' }
+      if (existing.enabled === false) return { success: false, error: '已经是停用状态' }
+      workflowStore.saveDefinition({ ...existing, enabled: false, updatedAt: Date.now() })
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('workflow:duplicateDefinition', async (_event, id: string) => {
+    try {
+      const copy = workflowStore.duplicateDefinition(id)
+      if (!copy) return { success: false, error: '工作流不存在' }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('workflow:deleteRun', async (_event, runId: string) => {
+    try {
+      const ok = workflowStore.deleteRun(runId)
+      return { success: ok, error: ok ? undefined : '运行记录不存在' }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  // V2: 审批 Gate
+  ipcMain.handle('workflow:approveGate', async (_event, runId: string, stepId: string, decision: string, modifiedInput?: string) => {
+    try {
+      const scheduler = getWorkflowScheduler()
+      const ok = scheduler.approveGate(runId, stepId, decision, modifiedInput)
+      return { success: ok, error: ok ? undefined : '审批请求不存在' }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  // ── Writing API status ──
+
+  ipcMain.handle('writing:getStatus', async () => {
+    const writingApi = credentialsManager.get('writing_api_url') || process.env.WRITING_API_URL || 'https://www.crlkcloud.cyou/writing/api'
+    try {
+      const res = await fetch(`${writingApi}/stories`)
+      const stories: any[] = await res.json()
+      const withScenes = await Promise.all(
+        stories.slice(0, 20).map(async (s) => {
+          try {
+            const sr = await fetch(`${writingApi}/scenes?storyId=${s.id}`)
+            const scenes = await sr.json()
+            return {
+              id: s.id,
+              title: s.title,
+              genre: s.genre,
+              sceneCount: Array.isArray(scenes) ? scenes.length : 0,
+              createdAt: s.createdAt,
+            }
+          } catch {
+            return { id: s.id, title: s.title, genre: s.genre, sceneCount: 0, createdAt: s.createdAt }
+          }
+        }),
+      )
+      return {
+        stories: withScenes,
+        totalStories: withScenes.length,
+        totalScenes: withScenes.reduce((a: number, b: any) => a + b.sceneCount, 0),
+      }
+    } catch {
+      return { stories: [], totalStories: 0, totalScenes: 0 }
     }
   })
 }

@@ -6,6 +6,51 @@ vi.mock('electron', () => ({
         close: vi.fn(),
     })),
 }));
+vi.mock('../../config', () => ({
+    LLM_API_URL: 'https://api.example.com/chat',
+    LLM_CHAT_MODEL: 'test-model',
+    LLM_CODE_MODEL: 'test-model',
+    LLM_CODE_API_URL: 'https://api.example.com/code',
+    LLM_VISION_API_URL: 'https://api.example.com/vision',
+    LLM_VISION_MODEL: 'test-vision-model',
+    LLM_VISION_KEY: '',
+    LLM_TEXT_API_URL: 'https://api.example.com/text',
+    LLM_TEXT_MODEL: 'test-text-model',
+    LLM_TEXT_KEY: '',
+    LLM_IMAGE_API_URL: 'https://api.example.com/image',
+    LLM_IMAGE_KEY: '',
+    LLM_IMAGE_MODEL: 'test-image-model',
+    FFPLAY_PATHS: ['ffplay'],
+    PIPER_SCRIPT: '/dev/null/piper.py',
+    PIPER_MODEL: '/dev/null/model.onnx',
+    USE_LOCAL_TTS: false,
+    EVOLUTION_SAFETY_MODE: 'review',
+    FFMPEG_PATHS: ['ffmpeg'],
+    ASR_HOTWORDS: [],
+    ASR_SAMPLE_RATE: 16000,
+    ASR_MAX_AUDIO_SECONDS: 25,
+    WAKE_WORDS: ['mio'],
+    WINDOW_WIDTH: 420,
+    WINDOW_HEIGHT: 640,
+    GGML_MODELS_DIR: '/dev/null/models',
+    INITIAL_HOTWORDS: [],
+    ASR_INITIAL_PROMPT: '',
+    WORKSPACE: {
+        projects: '/dev/null/projects',
+        memory: '/dev/null/memory',
+        knowledge: '/dev/null/knowledge',
+        skills: '/dev/null/skills',
+        workflows: '/dev/null/workflows',
+        proposals: '/dev/null/proposals',
+        logs: '/dev/null/logs',
+        cache: '/dev/null/cache',
+        evolution: '/dev/null/evolution',
+    },
+    RUNTIME_ROOT: '/dev/null',
+    WORKSPACE_ROOT: '/dev/null',
+    DEV_PROJECT_ROOT: '',
+    LLM_MODEL: 'test-model',
+}));
 import { AgentService } from '../AgentService';
 import { LlmService } from '../../llm/LlmService';
 import { AsrService } from '../../asr/AsrService';
@@ -25,6 +70,7 @@ describe('AgentService 核心方法', () => {
         ttsService = new TtsService((s) => Object.assign(ttsState, s));
         vi.spyOn(ttsService, 'speakInternal').mockResolvedValue(undefined);
         vi.spyOn(ttsService, 'flushBuffer').mockReturnValue(undefined);
+        vi.spyOn(ttsService, 'stop').mockReturnValue(undefined);
         llmService = new LlmService();
         llmService.setConfig('test-key');
         const gpuEngine = new WhisperGpuEngine();
@@ -64,8 +110,9 @@ describe('AgentService 核心方法', () => {
             vi.spyOn(llmService, 'chatWithTools').mockResolvedValue({ reply: '工作中' });
             // 先触发 selfTask
             const selfTaskPromise = agent.runSelfTask('后台任务');
+            // processTextInput 现在会抢占 selfTask 而非返回 BUSY
             const result = await agent.processTextInput('新输入');
-            expect(result).toEqual({ error: 'BUSY' });
+            expect(result.reply).toBe('工作中');
             await selfTaskPromise;
         });
         it('正常输入时调用 chatWithTools', async () => {
@@ -135,7 +182,7 @@ describe('AgentService 核心方法', () => {
             agent.clearContext();
             const msgs = ctx.getMessages();
             // 清除后只有 system prompt
-            expect(msgs.filter(m => m.role !== 'system').length).toBe(0);
+            expect(msgs.filter((m) => m.role !== 'system').length).toBe(0);
         });
     });
     describe('setMainWindow', () => {

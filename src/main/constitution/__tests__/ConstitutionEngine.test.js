@@ -192,26 +192,35 @@ describe('ConstitutionDocument', () => {
     it('should create default JSON with correct structure', () => {
         const doc = createDefaultJson();
         expect(doc.version).toBe('1.0.0');
-        expect(doc.immutablePaths.length).toBe(2);
+        expect(doc.immutablePaths.length).toBe(3);
         expect(doc.immutablePaths[0].pattern).toContain('core');
         expect(doc.immutablePaths[1].pattern).toContain('constitution');
+        expect(doc.immutablePaths[2].pattern).toContain('bootstrap');
     });
 });
+const TEST_KERNEL_PREFIXES = [
+    '/project/src/main/core/',
+    '/project/src/main/constitution/',
+    '/project/src/main/bootstrap/',
+    'D:/project/src/main/core/',
+    'D:/project/src/main/constitution/',
+    'D:/project/src/main/bootstrap/',
+];
 // ─── isKernelPath ───
 describe('isKernelPath', () => {
     it('should detect core/ paths', () => {
-        expect(isKernelPath('/project/src/main/core/EventBus.ts')).toBe(true);
+        expect(isKernelPath('/project/src/main/core/EventBus.ts', TEST_KERNEL_PREFIXES)).toBe(true);
     });
     it('should detect constitution/ paths', () => {
-        expect(isKernelPath('/project/src/main/constitution/types.ts')).toBe(true);
+        expect(isKernelPath('/project/src/main/constitution/types.ts', TEST_KERNEL_PREFIXES)).toBe(true);
     });
     it('should reject non-kernel paths', () => {
-        expect(isKernelPath('/project/src/main/memory/MemoryService.ts')).toBe(false);
+        expect(isKernelPath('/project/src/main/memory/MemoryService.ts', TEST_KERNEL_PREFIXES)).toBe(false);
     });
     it('should handle Windows paths', () => {
-        expect(isKernelPath('D:\\project\\src\\main\\core\\Scheduler.ts')).toBe(true);
+        expect(isKernelPath('D:\\project\\src\\main\\core\\Scheduler.ts', TEST_KERNEL_PREFIXES)).toBe(true);
     });
     it('should not match partial paths', () => {
-        expect(isKernelPath('/project/src/main/core_related/helper.ts')).toBe(false);
+        expect(isKernelPath('/project/src/main/core_related/helper.ts', TEST_KERNEL_PREFIXES)).toBe(false);
     });
 });

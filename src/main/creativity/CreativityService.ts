@@ -277,7 +277,7 @@ export class CreativityService {
     )
     if (topIdea.idea && topIdea.score > 220) {
       const h = topIdea.idea.hypothesis
-      this.eventBus.emit('creativity.hypothesis.selected', {
+      ;(this.eventBus.emit as any)('creativity.hypothesis.selected', {
         id: h.id,
         title: h.title,
         idea: h.idea,

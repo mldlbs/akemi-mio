@@ -177,7 +177,7 @@ export class EvolutionExecutor implements ISubsystem {
         const planCtx = pm.getFormattedContext()
         const execPrompt = PLAN_EXECUTE_PROMPT(planCtx, step.description)
         const result = await withTimeout(
-          () => this.agentService.runSelfTask(execPrompt, buildEvolutionSystemPrompt()),
+          () => this.agentService.runAgentTask(execPrompt, buildEvolutionSystemPrompt()),
           this.planExecTimeoutMs,
           'plan_exec_timeout',
         )

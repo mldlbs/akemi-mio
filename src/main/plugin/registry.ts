@@ -2,6 +2,7 @@ import { log } from '../logger/Logger'
 import { ToolSchema } from './types'
 import { eventBus } from '../core/EventBus'
 import { AuditTrail } from './AuditTrail'
+import { pluginHealthGuard, ConflictResolution } from './PluginHealthGuard'
 
 /**
  * 已知权限类型
@@ -80,10 +81,57 @@ export class ToolRegistry {
     this.auditTrail = audit
   }
 
-  register(reg: ToolRegistration): void {
+  /**
+   * 注册工具 — 内置城市规划冲突调解
+   *
+   * 区域冲突策略 (Zone Conflict Resolution):
+   *   - 内置插件 (@builtin/*) 可以接管任何同名工具 (take_over)
+   *   - 用户插件默认 keep_existing (先到先得)
+   *   - 可通过配置指定策略
+   */
+  register(reg: ToolRegistration, conflictStrategy?: ConflictResolution): void {
     if (this.tools.has(reg.name)) {
-      throw new Error(`Tool ${reg.name} already registered by ${this.tools.get(reg.name)!.pluginName}`)
+      const existing = this.tools.get(reg.name)!
+
+      // === 城市规划: 区域冲突检测与调解 ===
+      const isBuiltin = reg.pluginName.startsWith('@builtin/')
+      const existingIsBuiltin = existing.pluginName.startsWith('@builtin/')
+
+      // 内置插件 vs 用户插件 → 内置获胜
+      const strategy = conflictStrategy ?? (isBuiltin && !existingIsBuiltin ? 'take_over' : 'keep_existing')
+
+      const conflictRecord = pluginHealthGuard.mediateConflict(reg.name, existing.pluginName, reg.pluginName, strategy)
+
+      if (strategy === 'reject') {
+        log('WARN', 'tool_registration_rejected', {
+          tool: reg.name,
+          existing: existing.pluginName,
+          incoming: reg.pluginName,
+        })
+        eventBus.emit('plugin.zone-conflict', conflictRecord)
+        return // 静默拒绝
+      }
+
+      if (strategy === 'keep_existing') {
+        log('WARN', 'tool_registration_conflict_kept_existing', {
+          tool: reg.name,
+          existing: existing.pluginName,
+          rejected: reg.pluginName,
+        })
+        eventBus.emit('plugin.zone-conflict', conflictRecord)
+        return // 保留现有，拒绝新注册
+      }
+
+      // take_over: 新插件接管区域，先移除旧的
+      log('WARN', 'tool_registration_takeover', {
+        tool: reg.name,
+        old: existing.pluginName,
+        new: reg.pluginName,
+      })
+      this.tools.delete(reg.name)
+      eventBus.emit('plugin.zone-conflict', conflictRecord)
     }
+
     this.tools.set(reg.name, reg)
   }
 

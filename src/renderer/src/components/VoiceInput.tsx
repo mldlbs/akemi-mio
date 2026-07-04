@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { updateMicEnergy, stopTTS } from './audioShared'
+import { useDeviceStore } from '../store/deviceStore'
 
 const RLOG = (level: string, event: string, meta?: Record<string, unknown>) => {
   const beijing = new Date(Date.now() + 8 * 3600 * 1000)
@@ -10,8 +11,6 @@ const RLOG = (level: string, event: string, meta?: Record<string, unknown>) => {
 interface VoiceInputProps {
   onResult: (text: string, requestId?: string) => void
   disabled?: boolean
-  onConversationChange?: (active: boolean) => void
-  ttsPlaying?: boolean
   onWakeWord?: () => void
 }
 
@@ -30,13 +29,10 @@ const MIN_ASR_SAMPLES = 8000
 const DEFAULT_WAKE_WORDS = ['澪', '秋山澪', 'mio', 'Mio', '开始对话']
 const NOISE_COOLDOWN_THRESHOLD = 3
 const NOISE_COOLDOWN_MS = 8000
-/** TTS 结束时尾音保护期：期间采集的音频不会送 ASR，防止 TTS 回声被转录 */
 const TAIL_MS = 4000
-/** echo_tail 完全结束后额外禁止 VAD 采集的时长（房间回声残留衰减期） */
 const POST_TAIL_QUIET_MS = 4000
 
 type Mode = 'idle' | 'wake' | 'listening' | 'processing' | 'playing_tts' | 'echo_tail'
-/** echo_tail 中认定为"真实人声"的倍率（高于 TTS 打断阈值，防止回声误触 ASR） */
 const TAIL_SPEECH_RMS_MULTIPLIER = 5.0
 
 function resample(audio: Float32Array, fromRate: number, toRate: number): Float32Array {
@@ -52,8 +48,11 @@ function resample(audio: Float32Array, fromRate: number, toRate: number): Float3
   return result
 }
 
-export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlaying, onWakeWord }: VoiceInputProps) {
-  const [active, setActive] = useState(false)
+export function VoiceInput({ onResult, disabled, onWakeWord }: VoiceInputProps) {
+  const ttsPlaying = useDeviceStore((s) => s.ttsPlaying)
+  const setActive = useDeviceStore((s) => s.setActive)
+
+  const [active, setActiveLocal] = useState(false)
   const [status, setStatus] = useState('')
   const modeRef = useRef<Mode>('idle')
   const streamRef = useRef<MediaStream | null>(null)
@@ -64,11 +63,8 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
   const isSpeakingRef = useRef(false)
   const interruptSamplesRef = useRef<Float32Array[]>([])
   const wakeWordsRef = useRef<string[]>(DEFAULT_WAKE_WORDS)
-  /** TTS 期间采集的缓冲（可能含回声），TTS 结束后丢弃 */
   const ttsEchoBufferRef = useRef<Float32Array[]>([])
-  /** 上次 TTS 结束时间戳，用于尾音保护 */
   const ttsEndTimeRef = useRef(0)
-  /** echo_tail 完全退出后禁止 VAD 采集的时间戳（房间回声残留衰减期） */
   const postTailNoCaptureUntilRef = useRef(0)
 
   useEffect(() => {
@@ -152,7 +148,6 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
       setStatus('识别中...')
 
       let result: { text: string; request_id?: string; error?: string }
-      // TTS 尾音保护：结束后 1.5s 内不送 ASR
       if (Date.now() - ttsEndTimeRef.current < 1500) {
         RLOG('INFO', 'asr_skip_echo_tail', { sinceTtsEnd: Date.now() - ttsEndTimeRef.current })
         if (isListening()) setStatus('监听中...')
@@ -175,7 +170,6 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
         consecutiveEmptyResultsRef.current = 0
         noiseCooldownRef.current = 0
 
-        // 转录完成但用户已经关闭对话 → 丢弃结果
         if (modeRef.current === 'idle') {
           RLOG('INFO', 'asr_skip_conversation_closed', { text: result.text })
           return
@@ -186,8 +180,8 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
           if (wakeHit) {
             RLOG('INFO', 'wake_word_detected', { text: result.text })
             setMode('listening')
+            setActiveLocal(true)
             setActive(true)
-            onConversationChange?.(true)
             onWakeWord?.()
             setStatus('监听中...')
             samplesRef.current = []
@@ -224,7 +218,7 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
         modeRef.current = isWake() ? 'wake' : 'listening'
       }
     },
-    [onResult, onConversationChange, onWakeWord],
+    [onResult, onWakeWord, setActive],
   )
 
   const setupAudio = useCallback(async () => {
@@ -263,7 +257,6 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
         silenceTimerRef.current = null
       }
 
-      // 尾音保护定时器引用
       let tailTimer: ReturnType<typeof setTimeout> | null = null
 
       RLOG('INFO', 'audio_capture_start', { sampleRate: sr })
@@ -292,14 +285,12 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
         const aboveNoise = rms > dynamicThreshold && zcrRate < SPEECH_ZCR_MAX
         const aboveInterruption = rms > dynamicThreshold * INTERRUPTION_RMS_MULTIPLIER && zcrRate < SPEECH_ZCR_MAX
 
-        /* ===== TTS 播放中: 全双工 VAD ===== */
         if (mode === 'playing_tts') {
           if (aboveInterruption) {
             interruptionFrames++
           } else {
             interruptionFrames = 0
           }
-          // 持续采集到 TTS 回声缓冲
           ttsEchoBufferRef.current.push(new Float32Array(input))
 
           if (interruptionFrames >= INTERRUPTION_MIN_FRAMES) {
@@ -310,8 +301,6 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
             })
             window.electronAPI.stopSpeaking()
             stopTTS()
-            // 打断后：丢弃 TTS 回声缓冲和打断样本（这些是 AI 自己的回声）
-            // 同时进入 echo_tail 保护期，防止残余回声被循环送 ASR
             ttsEchoBufferRef.current = []
             interruptSamplesRef.current = []
             samplesRef.current = []
@@ -324,11 +313,8 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
           return
         }
 
-        /* ===== TTS 尾音保护期: 采集但不上报 ASR ===== */
         if (mode === 'echo_tail') {
-          // 仍然采集（用于尾音结束后做 VAD 平滑过渡）
           ttsEchoBufferRef.current.push(new Float32Array(input))
-          // 使用极高阈值判断真实人声，防止残余 TTS 回声触发 ASR
           const aboveRealVoice = rms > dynamicThreshold * TAIL_SPEECH_RMS_MULTIPLIER && zcrRate < SPEECH_ZCR_MAX
           if (aboveRealVoice) {
             speechFrames = Math.min(speechFrames + 1, MIN_SPEAKING_FRAMES + 1)
@@ -336,8 +322,6 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
             speechFrames = 0
           }
           if (speechFrames >= MIN_SPEAKING_FRAMES) {
-            // 尾音期听到了真实说话 → 立即退出尾音保护
-            // 不把混合回声的缓冲送 ASR，让正常 VAD 捕获纯净语音
             if (tailTimer) {
               clearTimeout(tailTimer)
               tailTimer = null
@@ -351,12 +335,9 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
           return
         }
 
-        /* ===== 正常 VAD (listening / wake) ===== */
         interruptionFrames = 0
 
-        // echo_tail 结束后的静默期内禁止采集样本（房间回声残留衰减期）
         if (Date.now() < postTailNoCaptureUntilRef.current) {
-          // 仍然更新噪声底噪，但不采样
           if (aboveNoise) graceFrames = GRACE_FRAMES
           isSpeakingRef.current = false
           return
@@ -423,7 +404,6 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
     }
   }, [processAudio])
 
-  // TTS 状态变化：全双工模式
   useEffect(() => {
     if (ttsPlaying && isListening()) {
       setMode('playing_tts')
@@ -438,13 +418,10 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
 
     if (!ttsPlaying && modeRef.current === 'playing_tts') {
       RLOG('INFO', 'vad_enter_echo_tail', { tailMs: TAIL_MS })
-      // TTS 结束 → 不关麦克风，切到 echo_tail 保护期
       setMode('echo_tail')
       ttsEndTimeRef.current = Date.now()
       setStatus('尾音保护...')
 
-      // TAIL_MS 后丢弃回声缓冲，恢复 listening
-      // 同时设静默期阻止 VAD 采集残余房间回声（见 @bug:self-dialog-loop）
       const t = setTimeout(() => {
         if (modeRef.current === 'echo_tail') {
           RLOG('INFO', 'vad_tts_tail_ended', { discarded: ttsEchoBufferRef.current.length })
@@ -454,7 +431,6 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
           setStatus('监听中...')
         }
       }, TAIL_MS)
-      // 在 effect 卸载时清理
       return () => clearTimeout(t)
     }
   }, [ttsPlaying, setMode])
@@ -476,26 +452,25 @@ export function VoiceInput({ onResult, disabled, onConversationChange, ttsPlayin
       interruptSamplesRef.current = []
       ttsEchoBufferRef.current = []
       isSpeakingRef.current = false
+      setActiveLocal(false)
       setActive(false)
       setStatus('')
-      onConversationChange?.(false)
-      RLOG('INFO', 'conversation_stopped')
     } else {
       setMode('listening')
+      setActiveLocal(true)
       setActive(true)
-      onConversationChange?.(true)
       setStatus('监听中...')
       if (!streamRef.current) {
         setupAudio().catch((err) => {
           RLOG('ERROR', 'mic_setup_failed', { error: String(err) })
           setStatus('麦克风启动失败')
+          setActiveLocal(false)
           setActive(false)
           setMode('idle')
-          onConversationChange?.(false)
         })
       }
     }
-  }, [active, closeAudio, setupAudio, onConversationChange])
+  }, [active, closeAudio, setupAudio, setActive])
 
   return (
     <div className="voice-input">

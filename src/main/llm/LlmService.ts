@@ -35,6 +35,10 @@ export class LlmService {
   private codeModel = LLM_CODE_MODEL
   private textModel = LLM_TEXT_MODEL
   private visionModel = LLM_VISION_MODEL
+  private chatApiUrl = LLM_API_URL
+  private codeApiUrl = LLM_CODE_API_URL
+  private textApiUrl = LLM_TEXT_API_URL
+  private visionApiUrl = LLM_VISION_API_URL
   private mcpManager: ServerManager
   private evaluationEmitter?: EvaluationEmitter
 
@@ -51,12 +55,46 @@ export class LlmService {
     this.mcpManager = manager
   }
 
-  setConfig(chatKey: string, codeKey?: string, chatModel?: string, codeModel?: string): void {
+  /** 从外部凭据存储（CredentialsManager）读取并刷新全部 LLM 配置 */
+  refreshFromCredentials(getter: (key: string) => string | null): void {
+    const key = getter('llm_key')
+    const codeKey = getter('llm_code_api_key') || key
+    if (key) this.chatApiKey = key
+    if (codeKey) this.codeApiKey = codeKey
+    this.textApiKey = getter('llm_text_key') || LLM_TEXT_KEY || key || ''
+    this.visionKey = getter('llm_vision_key') || LLM_VISION_KEY || key || ''
+
+    const url = getter('llm_api_url')
+    const codeUrl = getter('llm_code_api_url')
+    if (url) this.chatApiUrl = url
+    if (codeUrl) this.codeApiUrl = codeUrl
+
+    const visionUrl = getter('llm_vision_api_url')
+    if (visionUrl) this.visionApiUrl = visionUrl
+
+    const textUrl = getter('llm_text_api_url')
+    if (textUrl) this.textApiUrl = textUrl
+
+    const model = getter('llm_chat_model')
+    const codeModel = getter('llm_code_model')
+    if (model) this.apiModel = model
+    if (codeModel) this.codeModel = codeModel
+
+    const visionModel = getter('llm_vision_model')
+    if (visionModel) this.visionModel = visionModel
+
+    const textModel = getter('llm_text_model')
+    if (textModel) this.textModel = textModel
+  }
+
+  setConfig(chatKey: string, codeKey?: string, chatModel?: string, codeModel?: string, chatUrl?: string, codeUrl?: string): void {
     this.chatApiKey = chatKey
     this.codeApiKey = codeKey || chatKey
     this.textApiKey = LLM_TEXT_KEY || chatKey
     if (chatModel) this.apiModel = chatModel
     if (codeModel) this.codeModel = codeModel
+    if (chatUrl) this.chatApiUrl = chatUrl
+    if (codeUrl) this.codeApiUrl = codeUrl
     // 如果有 vision key 环境变量则使用之
     this.visionKey = LLM_VISION_KEY || chatKey
   }
@@ -78,7 +116,7 @@ export class LlmService {
 
     try {
       // 用 code 模型的 URL 和 key，但不带 tools 参数（避免模型返回工具调用而非文本）
-      const baseUrl = this.codeApiKey ? LLM_CODE_API_URL : LLM_API_URL
+      const baseUrl = this.codeApiKey ? this.codeApiUrl : this.chatApiUrl
       const res = await fetch(baseUrl, {
         method: 'POST',
         headers: {
@@ -169,7 +207,6 @@ export class LlmService {
           prompt_tokens: promptTokens,
           output_tokens: outputTokens,
         })
-
         context.addAssistant(full)
         context.trimToTokenBudget()
         return { reply: full }
@@ -195,10 +232,25 @@ export class LlmService {
     return systemTokens + estimateTokens(userText) + messages.slice(1).reduce((s, m) => s + estimateTokens(m.content), 0)
   }
 
-  private _doFetch(messages: Message[], stream: boolean, signal: AbortSignal, model?: string): Promise<Response> {
+  private _getFilteredSchemas(allowedToolNames?: string[]) {
+    const allSchemas = this.mcpManager.getAllSchemas()
+    // undefined → 不限制（向后兼容）
+    if (allowedToolNames === undefined) return allSchemas
+    // 显式传入数组（[] 表示无工具可用）→ 过滤
+    return allSchemas.filter((s) => allowedToolNames.includes(s.function.name))
+  }
+
+  private _doFetch(
+    messages: Message[],
+    stream: boolean,
+    signal: AbortSignal,
+    model?: string,
+    allowedToolNames?: string[],
+  ): Promise<Response> {
     const isCode = !!model
-    const baseUrl = isCode ? LLM_CODE_API_URL : LLM_API_URL
+    const baseUrl = isCode ? this.codeApiUrl : this.chatApiUrl
     const key = isCode ? this.codeApiKey! : this.chatApiKey!
+    const tools = this._getFilteredSchemas(allowedToolNames)
     return fetch(baseUrl, {
       method: 'POST',
       headers: {
@@ -209,7 +261,7 @@ export class LlmService {
         model: model || this.apiModel,
         messages,
         stream,
-        ...(stream ? {} : { tools: this.mcpManager.getAllSchemas(), tool_choice: 'auto' }),
+        ...(stream ? {} : { tools: tools.length > 0 ? tools : undefined, tool_choice: 'auto' }),
       }),
       signal,
     })
@@ -329,6 +381,7 @@ export class LlmService {
     timeoutMs = 60000,
     onChunk?: ChunkCallback,
     externalSignal?: AbortSignal,
+    allowedToolNames?: string[],
   ): Promise<{ reply?: string; toolCalls?: ToolCallInfo[]; error?: string }> {
     if (!this.codeApiKey) return { error: 'NO_KEY' }
 
@@ -378,7 +431,7 @@ export class LlmService {
 
         // 有 onChunk 回调时使用流式，边收 token 边喂给 TTS
         if (onChunk) {
-          const result = await this._chatWithToolsStream(messages, requestId, t0, controller.signal, onChunk)
+          const result = await this._chatWithToolsStream(messages, requestId, t0, controller.signal, onChunk, allowedToolNames)
           if (result.error && RETRYABLE.has(result.error)) {
             if (attempt < 3) {
               const delay = Math.min(1000 * Math.pow(2, attempt - 1), 4000)
@@ -390,7 +443,7 @@ export class LlmService {
           return this._emitModelCompleted(result, requestId, t0, rawPromptTokens)
         }
 
-        const res = await this._doFetch(messages, false, controller.signal, this.codeModel)
+        const res = await this._doFetch(messages, false, controller.signal, this.codeModel, allowedToolNames)
 
         // 429 可重试
         if (res.status === 429) {
@@ -401,7 +454,7 @@ export class LlmService {
             await new Promise((r) => setTimeout(r, delay))
             continue
           }
-          return this._emitModelCompleted({ error: 'RATE_LIMITED' }, requestId, t0, rawPromptTokens)
+          return this._emitModelError('RATE_LIMITED', Date.now() - t0, requestId, t0, rawPromptTokens)
         }
 
         // 400/500 系列服务端错误可重试（通常为 context 结构问题或临时故障）
@@ -413,11 +466,11 @@ export class LlmService {
             continue
           }
           const statusErr = this._checkStatus(res, requestId, t0)
-          if (statusErr) return this._emitModelCompleted(statusErr, requestId, t0, rawPromptTokens)
+          if (statusErr) return this._emitModelError(statusErr.error ?? 'API_ERROR', Date.now() - t0, requestId, t0, rawPromptTokens)
         }
 
         const statusErr = this._checkStatus(res, requestId, t0)
-        if (statusErr) return this._emitModelCompleted(statusErr, requestId, t0, rawPromptTokens)
+        if (statusErr) return this._emitModelError(statusErr.error ?? 'API_ERROR', Date.now() - t0, requestId, t0, rawPromptTokens)
 
         const data = (await res.json()) as {
           choices?: Array<{
@@ -432,21 +485,46 @@ export class LlmService {
           }>
         }
 
-        return this._emitModelCompleted(this._parseToolResponse(data, messages, requestId, t0), requestId, t0, rawPromptTokens)
+        const result = this._parseToolResponse(data, messages, requestId, t0)
+        return this._emitModelCompleted(result, requestId, t0, rawPromptTokens)
       } catch (err) {
         const elapsed = Date.now() - t0
         if (err instanceof DOMException && err.name === 'AbortError') {
           log('ERROR', 'tool_llm_timeout', { request_id: requestId, elapsed_ms: elapsed })
-          return this._emitModelCompleted({ error: 'TIMEOUT' }, requestId, t0, rawPromptTokens)
+          return this._emitModelError('TIMEOUT', elapsed, requestId, t0, rawPromptTokens)
         }
         log('ERROR', 'tool_llm_network_error', { request_id: requestId, elapsed_ms: elapsed, error: String(err) })
-        return this._emitModelCompleted({ error: 'NETWORK' }, requestId, t0, rawPromptTokens)
+        return this._emitModelError(String(err), elapsed, requestId, t0, rawPromptTokens)
       } finally {
         clearTimeout(timer)
       }
     }
 
-    return this._emitModelCompleted({ error: 'RATE_LIMITED' }, requestId, t0, rawPromptTokens)
+    return this._emitModelError('RATE_LIMITED_EXHAUSTED', Date.now() - t0, requestId, t0, rawPromptTokens)
+  }
+
+  private _emitModelError(
+    error: string,
+    elapsed: number,
+    requestId: string | undefined,
+    t0: number,
+    rawPromptTokens: number,
+  ): { error: string } {
+    const realElapsed = elapsed > 0 ? elapsed : Date.now() - t0
+    this.evaluationEmitter?.emit(
+      'model.completed',
+      {
+        type: 'model.completed',
+        modelName: this.codeModel,
+        durationMs: realElapsed,
+        inputTokens: rawPromptTokens,
+        outputTokens: 0,
+        responseLength: 0,
+        error,
+      },
+      { traceId: requestId },
+    )
+    return { error }
   }
 
   /**
@@ -458,11 +536,13 @@ export class LlmService {
     t0: number,
     signal: AbortSignal,
     onChunk: ChunkCallback,
+    allowedToolNames?: string[],
   ): Promise<{ reply?: string; toolCalls?: ToolCallInfo[]; error?: string }> {
     // 发流式请求前清理孤儿 tool_calls（兜底，与 chatWithTools 入口处互补）
     trimOrphanedToolCallsFrom(messages)
     // 流式请求中同时携带 tools 声明，让 LLM 仍可选工具调用
-    const res = await fetch(LLM_CODE_API_URL, {
+    const tools = this._getFilteredSchemas(allowedToolNames)
+    const res = await fetch(this.codeApiUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.codeApiKey!}`,
@@ -472,7 +552,7 @@ export class LlmService {
         model: this.codeModel,
         messages,
         stream: true,
-        tools: this.mcpManager.getAllSchemas(),
+        tools: tools.length > 0 ? tools : undefined,
         tool_choice: 'auto',
       }),
       signal,
@@ -690,7 +770,7 @@ export class LlmService {
     const t0 = Date.now()
 
     try {
-      const res = await fetch(LLM_TEXT_API_URL, {
+      const res = await fetch(this.textApiUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${key}`,
@@ -771,7 +851,7 @@ export class LlmService {
     const t0 = Date.now()
 
     try {
-      const res = await fetch(LLM_CODE_API_URL, {
+      const res = await fetch(this.codeApiUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${key}`,
@@ -883,7 +963,7 @@ export class LlmService {
     log('INFO', 'text_llm_request', { request_id: requestId, model })
 
     try {
-      const res = await fetch(LLM_TEXT_API_URL, {
+      const res = await fetch(this.textApiUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${key}`,
@@ -954,7 +1034,7 @@ export class LlmService {
     log('INFO', 'vision_llm_request', { request_id: requestId, model })
 
     try {
-      const res = await fetch(LLM_VISION_API_URL, {
+      const res = await fetch(this.visionApiUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${key}`,

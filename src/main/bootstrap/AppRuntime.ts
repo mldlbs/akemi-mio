@@ -15,27 +15,24 @@ import { AgentService } from '../agent/AgentService'
 import { MemoryService } from '../memory/MemoryService'
 import { registerHandlers, createServiceRef } from '../ipc/handlers'
 import { credentialsManager } from '../credentials/CredentialsManager'
-import {
-  initEvolution,
-  evolutionService,
-  planManager,
-  SelfEvolutionService,
-  ProposalValidator,
-  EvolutionGitOps,
-  RollbackLevel,
-  setSandboxRoot,
-} from '../evolution'
-import { VerificationRunner } from '../evolution/VerificationRunner'
-import { RegressionDetector } from '../evolution/RegressionDetector'
+import { initEvolution, evolutionService, planManager, SelfEvolutionService } from '../evolution'
+import { PipelineOrchestrator, CreativityCollector, CreativityExecutor } from '../evolution/automation'
 import { initInsight, insightService, insightStore } from '../insight'
 import { initCreativity, creativityService } from '../creativity'
 import { initInspiration } from '../inspiration'
 import { setMemoryService } from '../mcp/LocalProvider'
-import { setPlanManager, setCredentialsManager, setSkillManager as setToolSkillManager } from '../tool/deps'
+import {
+  setPlanManager,
+  setCredentialsManager,
+  setSkillManager as setToolSkillManager,
+  setCognitiveService,
+  setHealthManager,
+} from '../tool/deps'
 import { PluginLoader, toolRegistry } from '../plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '../skill'
 import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
-import { setupStartupLogging, createWindow, setupWallpaperListener } from '../core/Lifecycle'
+import { setupStartupLogging, createWindow, setupWallpaperListener, getMainWindow } from '../core/Lifecycle'
+import { initTray, destroyTray } from '../core/TrayManager'
 import { initUpdater, setUpdateWindow } from '../updater/UpdaterService'
 import { initDatabase, closeDatabase } from '../db/connection'
 import { ConstitutionEngine } from '../constitution'
@@ -55,6 +52,7 @@ import type { IModule, SubsystemState } from '../core/lifecycle/types'
 import { TelegramService } from '../telegram/TelegramService'
 import { OutboxWorker } from '../telegram/OutboxWorker'
 import { UumitService } from '../uumit/index'
+import type { TaskExecutionResult } from '../core/tasks/unified/TaskTypes'
 import { TaskRunner } from '../core/tasks/unified/TaskRunner'
 import { MetricsCollector } from '../observability/MetricsCollector'
 import { SystemStabilityScore } from '../observability/SystemStabilityScore'
@@ -93,8 +91,8 @@ export class AppRuntime {
   private resourceBudget?: ResourceBudget
   private metricsCollector?: MetricsCollector
   private stabilityScore?: SystemStabilityScore
-  private proposalValidator?: ProposalValidator
-  private gitOps?: EvolutionGitOps
+  private proposalValidator?: any
+  private gitOps?: any
   private syscallBus?: SyscallBus
   private healthChecker?: HealthChecker
   private capabilityEngine?: CapabilityEngine
@@ -106,6 +104,7 @@ export class AppRuntime {
   private toolEventBridge?: ToolEventBridge
   private metricsEngine?: MetricsEngineImpl
   private comfyUI?: ComfyUIManager
+  private pipeline?: PipelineOrchestrator
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
     this.crashGuard = crashGuard ?? { flushMemory: null }
@@ -164,6 +163,8 @@ export class AppRuntime {
     this.resourceBudget = new ResourceBudget()
     this.stabilityScore = new SystemStabilityScore()
     this.metricsCollector = new MetricsCollector()
+    const { ProposalValidator } = await import('../evolution/ProposalValidator')
+    const { EvolutionGitOps } = await import('../evolution/EvolutionGitOps')
     this.proposalValidator = new ProposalValidator()
     this.gitOps = new EvolutionGitOps()
 
@@ -176,6 +177,54 @@ export class AppRuntime {
 
     const recoveryManager = new SessionRecoveryManager(join(WORKSPACE.evolution, 'recovery'))
     agentService.setRecoveryManager(recoveryManager)
+
+    // 初始化 WorkflowScheduler V2
+    const { WorkflowSchedulerV2, setWorkflowScheduler } = await import('../workflow/WorkflowScheduler')
+    const { workflowStore } = await import('../workflow/WorkflowStoreV2')
+    const scheduler = new WorkflowSchedulerV2({
+      runSubAgent: (goal, parentGoal, options) => agentService['subAgentPool'].spawn(goal, parentGoal, options),
+      runTool: async (name, args) => {
+        const result = await mcpManager.callTool(name, args)
+        return typeof result === 'string' ? result : JSON.stringify(result)
+      },
+      runApi: async (url, method, body) => {
+        const res = await fetch(url, {
+          method,
+          headers: body ? { 'Content-Type': 'application/json' } : undefined,
+          body: body ? JSON.stringify(body) : undefined,
+        })
+        return res.text()
+      },
+      injectPrompt: () => {},
+      getCompletedAgentResults: () =>
+        agentService['subAgentPool'].collectCompleted().map((r) => ({ id: r.id, summary: r.summary, error: r.error })),
+      runPlan: (prompt) => {
+        const planManager = agentService['planManager']
+        return planManager.createPlan('Workflow Plan', prompt, []).id
+      },
+      getPlanStatus: () => {
+        const pm = agentService['planManager']
+        const plan = pm.getActivePlan()
+        if (!plan) return null
+        const done = plan.steps.filter((s: any) => s.status === 'done').length
+        return {
+          id: plan.id,
+          title: plan.title || '',
+          total: plan.steps.length,
+          done,
+          pending: plan.steps.filter((s: any) => s.status !== 'done').map((s: any) => s.description),
+          status: plan.status,
+        }
+      },
+      getDefinition: (id) => workflowStore.getDefinition(id),
+    })
+    setWorkflowScheduler(scheduler)
+
+    // 初始化 WorkflowTriggerManager（cron + event 触发）
+    const { WorkflowTriggerManager } = await import('../workflow/WorkflowTriggerManager')
+    const triggerManager = new WorkflowTriggerManager()
+    triggerManager.start()
+
     const telegramService = new TelegramService(agentService)
 
     // === Stage 2: Electron 窗口 ===
@@ -187,6 +236,16 @@ export class AppRuntime {
     credentialsManager.migrate()
     log('INFO', 'credential_migration_done')
     setCredentialsManager(credentialsManager)
+    // 从凭据存储覆盖 env 配置，让设置界面填入的 LLM 参数生效
+    llmService.refreshFromCredentials((key) => credentialsManager.get(key))
+    log('INFO', 'llm_config_loaded_from_credentials')
+
+    // Evaluation 子系统：Store → Emitter（Composition Root）
+    this.evaluationStore = new EvaluationStore()
+    await this.evaluationStore.init()
+    this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, 'runtime')
+    llmService.setEvaluationEmitter(this.evaluationEmitter)
+    log('INFO', 'evaluation_ready')
 
     // Evaluation 子系统：Store → Emitter → Bridge
     this.evaluationStore = new EvaluationStore()
@@ -206,6 +265,9 @@ export class AppRuntime {
         win.webContents.send('tts:play_audio', filePath)
       }
     })
+
+    // 系统托盘 — 关闭窗口时隐藏到托盘而非退出
+    initTray(() => getMainWindow())
 
     // UIBridge: 将 EventBus 事件桥接到 Renderer 窗口
     const uiBridge = new UIBridge()
@@ -363,6 +425,7 @@ export class AppRuntime {
     this.runtimeHealthManager.setSessionHealthProvider(this.sessionGovernor!.scorer)
     this.runtimeHealthManager.setCapabilityHealthProvider(mcpManager)
     await this.runtimeHealthManager.init()
+    setHealthManager(this.runtimeHealthManager)
     this.healthChecker.register(this.runtimeHealthManager)
     await this.runtimeHealthManager.start()
     // Phase 4: ProcessManager 启动（此时开始健康检查）
@@ -377,7 +440,7 @@ export class AppRuntime {
     // 注册 stability.tick 到 TaskRunner（原 TaskScheduler 已弃用）
     let previousStabilityStatus: string | undefined
     this.taskRunner.register(
-      'stability.tick' as any,
+      'stability.tick',
       async () => {
         if (this.metricsCollector && this.stabilityScore) {
           previousStabilityStatus = this.stabilityScore.getStatus()
@@ -424,6 +487,7 @@ export class AppRuntime {
     agentService['identityContext'] = cognitiveService.identity.getFormattedContext()
     // Phase 5: 延迟注入 GoalGuardrail 的 GoalEngine（CognitiveService 在此阶段可用）
     agentService.goalGuardrail.setGoalEngine(cognitiveService.goals)
+    setCognitiveService(cognitiveService) // 注入到 tool/deps，供 GoalTools 等使用
     log('INFO', 'cognitive_service_ready', {
       goals: cognitiveService.goals.getActiveGoals().length,
       tokenBalance: cognitiveService.tokenAccount.getBalance(),
@@ -512,19 +576,32 @@ export class AppRuntime {
 
     // === Stage 7: 延迟服务 ===
     this.lazyInit = new LazyServiceGroup()
-    this.registerLazyServices(agentService, llmService, memoryService, memoryIndexer, stateManager, planManager, cognitiveService)
+    this.registerLazyServices(
+      agentService,
+      llmService,
+      memoryService,
+      memoryIndexer,
+      stateManager,
+      planManager,
+      cognitiveService,
+      evolutionRef,
+    )
 
     // 注册 Telegram outbox worker（在 taskRunner 启动前注册，start 后生效）
     const outboxUrl =
       credentialsManager.get('telegram_server_url') || process.env.TELEGRAM_SERVER_URL || 'https://skills.crlkcloud.cyou/telegram'
     const outboxWorker = new OutboxWorker(outboxUrl)
     this.taskRunner.register('telegram.outbox', () => outboxWorker.tick(), 2000, { cooldownMs: 10000 })
+    // 当 TelegramService 写入新 outbox 消息时，自动恢复被禁用的 outbox 任务
+    telegramService.setReactivateOutbox(() => {
+      this.taskRunner?.reactivate('telegram.outbox')
+    })
 
     // 社交平台自动发布（每分钟检查 content_calendar.yaml）
     const socialDir = join(WORKSPACE.evolution, 'social')
     this.taskRunner.register(
       'social.tick',
-      async () => {
+      async (): Promise<TaskExecutionResult> => {
         try {
           const { execSync } = require('child_process')
           const result = execSync(`node "${join(socialDir, 'cli.mjs')}" tick`, { encoding: 'utf-8', timeout: 30000, cwd: socialDir })
@@ -535,6 +612,7 @@ export class AppRuntime {
         } catch (err) {
           log('WARN', 'social_tick_error', { error: String(err) })
         }
+        return { success: true }
       },
       60000,
       { cooldownMs: 30000 },
@@ -562,9 +640,18 @@ export class AppRuntime {
     })
 
     // === before-quit ===
-    app.on('before-quit', () => this.shutdown())
+    app.on('before-quit', () => {
+      this.shutdown()
+      destroyTray()
+    })
     app.on('window-all-closed', () => {
-      if (process.platform !== 'darwin') app.quit()
+      // 关闭窗口时隐藏到托盘，不退出进程
+      if (process.platform !== 'darwin') {
+        const win = getMainWindow()
+        if (win && !win.isDestroyed()) {
+          win.hide()
+        }
+      }
     })
   }
 
@@ -594,6 +681,7 @@ export class AppRuntime {
     await this.evaluationStore?.shutdown().catch(() => {})
     this.memoryService?.shutdown()
     this.memoryIndexer?.stop()
+    await this.evaluationStore?.shutdown().catch(() => {})
     evolutionService?.stop()
     insightService?.stop()
     creativityService?.stop()
@@ -678,6 +766,7 @@ export class AppRuntime {
     stateManager: StateManager,
     planManager: any,
     cognitiveService: CognitiveService,
+    evolutionRef?: { current: SelfEvolutionService | null },
   ): void {
     // 进化服务
     this.lazyInit!.add({
@@ -686,21 +775,24 @@ export class AppRuntime {
       delayMs: 200,
       fn: async () => {
         const evolution = initEvolution(agentService)
-        const verifier = new VerificationRunner()
-        verifier.setWorkerPool(this.workerPool!)
-        evolution.setVerificationRunner(verifier, true)
-        evolution.setRegressionDetector(new RegressionDetector())
-        evolution.setCognitiveService(cognitiveService)
         evolution.setSafetyMode('auto')
-        evolution.setGitOps(this.gitOps)
-        evolution.setProposalValidator(this.proposalValidator)
-        // 设置 sandbox 产物验证根目录
-        setSandboxRoot(join(WORKSPACE.evolution, 'sandbox'))
         // 注册 Evolution 内核模块
         const evolutionModule = new EvolutionModule(evolution)
         const kernel = Kernel.getInstance()
         await kernel.registerModule(evolutionModule)
+        // 初始化自动化管道（Collectors → ProblemQueue → Claude Code CLI）
+        const pipeline = new PipelineOrchestrator({
+          projectRoot: process.cwd(),
+          persistDir: join(WORKSPACE.evolution, 'pipeline_data'),
+          maxFixesPerCycle: 3,
+        })
+        // 注册基础 collector 和 executor（先不传 mcpManager，备用执行器延迟注入）
+        pipeline.initDefaults()
+        // 附加到进化系统（SelfEvolutionService 将消费管道指标）
+        evolution.setPipeline(pipeline)
+        this.pipeline = pipeline
         evolution.scheduleEvolution(2)
+        if (evolutionRef) evolutionRef.current = evolution
         log('INFO', 'evolution_service_started', { interval_hours: 2 })
       },
     })
@@ -781,6 +873,12 @@ export class AppRuntime {
           llmService.chatJsonWithCode.bind(llmService),
         )
         creativity.start()
+        // 注册创意采集器和执行器到管道
+        if (this.pipeline) {
+          this.pipeline.addCollector(new CreativityCollector())
+          this.pipeline.addExecutor(new CreativityExecutor())
+          log('INFO', 'creativity_pipeline_wired')
+        }
         log('INFO', 'creativity_service_started')
       },
     })
@@ -883,6 +981,24 @@ export class AppRuntime {
       priority: 'normal',
       delayMs: 100,
       fn: async () => {
+        // MetricsEngine 定时计算（每 10 分钟汇总一次）
+        this.metricsEngine = new MetricsEngineImpl(new RepositoryEventIterator(this.evaluationStore!))
+        this.taskRunner!.register(
+          'evaluation.metrics',
+          async () => {
+            const until = Date.now()
+            const since = until - 600_000 // 10 分钟窗口
+            const snapshot = await this.metricsEngine!.compute({ since, until })
+            log('INFO', 'eval_metrics', {
+              calls: snapshot.traffic.totalCalls,
+              rate: Math.round(snapshot.quality.completionRate * 100),
+              avgMs: Math.round(snapshot.latency.avgMs),
+              tokens: snapshot.cost.totalTokens,
+            })
+            return { success: true }
+          },
+          600_000,
+        )
         eventBus.track(
           'insight.detector.completed',
           (p: any) => log('INFO', 'insight_detector', { detector: p.detector, findings: p.findings }),
@@ -939,6 +1055,37 @@ export class AppRuntime {
           },
           600_000,
         )
+
+        // ── Chain: Evolution → Observer pipeline ──
+        // Evolution 产出有效计划后，立即触发 Observer pipeline 而非等 4h 定时
+        eventBus.track(
+          'evolution.cycle.completed',
+          async (p: any) => {
+            if (p.success && p.planCreated && this.workerPool?.isActive('observer') && !this.workerPool.isBusy('observer')) {
+              log('INFO', 'chain_evolution_to_observer', { planSummary: p.summary?.slice(0, 80) })
+              try {
+                const result = await this.workerPool.sendTaskAndWait('observer', 'pipeline', { mode: 'analytical' }, 180_000)
+                if (result) {
+                  log('INFO', 'chain_observer_insight_from_evolution', { topic: result.payload?.topic })
+                }
+              } catch (err: any) {
+                log('WARN', 'chain_observer_pipeline_failed', { error: err.message })
+              }
+            }
+          },
+          this.subs,
+          'runtime:chain_evolution_to_observer',
+        )
+
+        // ── Chain: Observer pipeline → Creativity nudge ──
+        // Observer 完成 insight 产出后（通过 WorkerPool 回调不可观测），
+        // 此链由 creatority.cycle.completed 隐含覆盖：
+        // CreativityService.WorldTrendProvider 自动读取 Observer store，
+        // 下一个 Creativity 周期即包含最新趋势。
+        // 这里只做监控日志，验证链式工作在运行。
+        log('INFO', 'chain_service_triggers_ready', {
+          evolution_to_observer: true,
+        })
       },
     })
   }
@@ -957,16 +1104,14 @@ export class AppRuntime {
   }
 
   private buildCreativitySources(memoryService: MemoryService, pm: any): any[] {
-    const memInfo = memoryService?.getInfo?.()
-    const recentTopics = memInfo?.recentTopics || []
+    const recentTopics: string[] = []
+    const entryCount = 0
     const interactionCount = memoryService?.getInteractionCount?.() || 0
 
     const sources: any[] = [
       {
         name: 'Memory',
-        content: memInfo
-          ? `对话记忆：${memInfo.entryCount || 0} 条记录，最近话题 ${recentTopics.slice(0, 3).join('、') || '无'}`
-          : '对话记忆系统',
+        content: `对话记忆：${entryCount || 0} 条记录，最近话题 ${recentTopics.slice(0, 3).join('、') || '无'}`,
         type: 'knowledge',
         weight: 0.9,
       },
@@ -1003,8 +1148,8 @@ export class AppRuntime {
     stateManager.update({ asr: 'loading', model: 'whisper_gpu (Vulkan)' })
     this.gpuInitTimeout = setTimeout(() => {
       log('WARN', 'gpu_asr_init_timeout')
-      const baiduKey = process.env.BAIDU_ASR_API_KEY
-      const baiduSecret = process.env.BAIDU_ASR_SECRET_KEY
+      const baiduKey = credentialsManager.get('baidu_asr_api_key') || process.env.BAIDU_ASR_API_KEY
+      const baiduSecret = credentialsManager.get('baidu_asr_secret_key') || process.env.BAIDU_ASR_SECRET_KEY
       if (baiduKey && baiduSecret) {
         asrService.setBaiduCredentials(baiduKey, baiduSecret)
         log('INFO', 'baidu_asr_ready_timeout_fallback')
@@ -1030,8 +1175,8 @@ export class AppRuntime {
           this.gpuInitTimeout = null
         }
         log('WARN', 'gpu_asr_fallback', { error: String(err) })
-        const baiduKey = process.env.BAIDU_ASR_API_KEY
-        const baiduSecret = process.env.BAIDU_ASR_SECRET_KEY
+        const baiduKey = credentialsManager.get('baidu_asr_api_key') || process.env.BAIDU_ASR_API_KEY
+        const baiduSecret = credentialsManager.get('baidu_asr_secret_key') || process.env.BAIDU_ASR_SECRET_KEY
         if (baiduKey && baiduSecret) {
           asrService.setBaiduCredentials(baiduKey, baiduSecret)
           log('INFO', 'baidu_asr_ready')

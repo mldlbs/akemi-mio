@@ -103,7 +103,7 @@ export class EvolutionAnalyzer implements ISubsystem {
       (input.creativityCtx ? '\n' + input.creativityCtx : '')
 
     try {
-      const result = await this.agentService.runSelfTask(prompt, buildEvolutionSystemPrompt(undefined, this.promptOverlay))
+      const result = await this.agentService.runAgentTask(prompt, buildEvolutionSystemPrompt(undefined, this.promptOverlay))
 
       if (result.success) {
         this.recordCycle({
@@ -271,10 +271,17 @@ export class EvolutionAnalyzer implements ISubsystem {
       return { shouldRun: false, reason: 'degenerate_fingerprint' }
     }
 
-    // 2. 近期空闲周期：最近 3 次分析都成功但未创建计划
+    // 2. 活跃计划检测：有非卡住的活跃计划时不重复分析
+    const activePlan = this.planManager?.getActivePlan()
+    if (activePlan && !this.isActivePlanStale()) {
+      return { shouldRun: false, reason: 'active_plan_exists' }
+    }
+
+    // 3. 近期空闲周期：最近 3 次分析都成功但未创建计划
     const history = this.loadHistory()
     const recent = history.cycles.slice(-3)
-    if (recent.length >= 3 && recent.every((c) => c.success && !c.planCreated)) {
+    const lastCycleTime = recent.length > 0 ? recent[recent.length - 1].timestamp : 0
+    if (recent.length >= 3 && recent.every((c) => c.success && !c.planCreated) && Date.now() - lastCycleTime < 24 * 60 * 60 * 1000) {
       return { shouldRun: false, reason: 'recent_cycles_all_idle' }
     }
 

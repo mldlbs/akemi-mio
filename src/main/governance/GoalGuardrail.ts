@@ -139,7 +139,7 @@ export class GoalGuardrail {
         // 硬拒绝：不 inject 到 messages，通过 AuditTrail 落地
         return {
           status: 'denied',
-          reason: 'CONSTITUTION_VIOLATION',
+          reason: 'CONSTITUTION_VIOLATION' as RejectionReason,
           canRetry: false,
           message: '',
           injected: false,
@@ -155,7 +155,7 @@ export class GoalGuardrail {
       eventBus.emit('goal.guardrail.rejection', { reason: 'GOAL_DRIFT', toolName: toolCalls.map((t) => t.name).join(','), step })
       const denial = this.buildGoalDriftDecision(softScore)
       // 软拒绝：注入到 messages，供 LLM 调整策略
-      messages.push({ role: 'user' as const, content: denial.message })
+      messages.push({ role: 'user' as const, content: (denial as Extract<GuardDecision, { status: 'denied' }>).message })
       return denial
     }
 

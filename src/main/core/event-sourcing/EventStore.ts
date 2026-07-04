@@ -13,8 +13,8 @@ export class EventStore implements EventStoreEngine {
 
   async init(): Promise<void> {
     if (this.initialized) return
-    const { getDb } = await import('../../db/connection')
-    this.db = getDb()
+    const { getDatabase } = await import('../../db/connection')
+    this.db = getDatabase()
     this.initialized = true
     log('INFO', 'event_store_ready')
   }
@@ -29,8 +29,8 @@ export class EventStore implements EventStoreEngine {
     if (!this.initialized) return
     try {
       const { events } = await import('../../db/schema')
-      const { getDb } = await import('../../db/connection')
-      const db = getDb()
+      const { getDatabase } = await import('../../db/connection')
+      const db = getDatabase()
       await db.insert(events).values({
         channel: event.channel,
         payload: event.payload,
@@ -47,14 +47,14 @@ export class EventStore implements EventStoreEngine {
     if (!this.initialized) return []
     try {
       const { events } = await import('../../db/schema')
-      const { getDb } = await import('../../db/connection')
-      const db = getDb()
-      return await db
+      const { getDatabase } = await import('../../db/connection')
+      const db = getDatabase()
+      const rows: any[] = (await db
         .select()
         .from(events)
-        .where((e: any) => e.channel === channel && e.timestamp >= sinceTimestamp)
         .orderBy((e: any) => e.timestamp)
-        .limit(limit)
+        .limit(limit)) as unknown as any[]
+      return rows.filter((e: any) => e.channel === channel && e.timestamp >= sinceTimestamp)
     } catch {
       return []
     }
@@ -64,13 +64,18 @@ export class EventStore implements EventStoreEngine {
     if (!this.initialized) return 0
     try {
       const { events } = await import('../../db/schema')
-      const { getDb } = await import('../../db/connection')
-      const db = getDb()
-      const deleted = await db
-        .delete(events)
-        .where((e: any) => e.timestamp < olderThan)
-        .run()
-      const count = deleted?.changes ?? 0
+      const { getDatabase } = await import('../../db/connection')
+      const db = getDatabase()
+      const all = await db.select().from(events).all()
+      const toDelete = all.filter((e: any) => e.timestamp < olderThan).map((e: any) => e.id)
+      const deleted: any =
+        toDelete.length > 0
+          ? await db
+              .delete(events)
+              .where(toDelete.length > 0 ? (`id IN (${toDelete.join(',')})` as any) : undefined)
+              .run()
+          : { changes: 0 }
+      const count: number = typeof deleted?.changes === 'number' ? deleted.changes : 0
       if (count > 0) log('INFO', 'event_store_pruned', { count, olderThan: new Date(olderThan).toISOString() })
       return count
     } catch {

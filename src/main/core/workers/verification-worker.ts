@@ -43,12 +43,12 @@ function runCompileCheck(): CheckResult {
       windowsHide: true,
     }) as string
     const errors = output.match(/error TS\d+/g) || []
-    const filtered = errors.filter((e) => !IGNORED_TS_CODES.some((code) => e.includes(code)))
+    const filtered = errors.filter((e: any) => !IGNORED_TS_CODES.some((code) => e.includes(code)))
     return { passed: filtered.length === 0, errors: filtered.length > 0 ? [output.slice(0, 500)] : [] }
   } catch (e: any) {
     const text = e.stdout || e.message || ''
     const errors = text.match(/error TS\d+/g) || []
-    const filtered = errors.filter((e) => !IGNORED_TS_CODES.some((code) => e.includes(code)))
+    const filtered = errors.filter((e: any) => !IGNORED_TS_CODES.some((code) => e.includes(code)))
     return { passed: filtered.length === 0, errors: filtered.length > 0 ? [text.slice(0, 500)] : [] }
   }
 }

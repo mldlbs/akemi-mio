@@ -120,6 +120,8 @@ export class TelegramService {
     }
   >()
   private pushChatId: number | null = null
+  /** 当 outbox 任务被禁用时，通过此回调重新激活 */
+  private reactivateOutbox: (() => void) | null = null
   // ★ 修复：Map<requestId, session> 通过 EventBus requestId 精确匹配输入/回复
   private pushSessions = new Map<
     string,
@@ -136,6 +138,21 @@ export class TelegramService {
 
   constructor(agentService: AgentService) {
     this.agentService = agentService
+  }
+
+  /** 注册 outbox 任务重新激活回调，当 outbox 被 TaskRunner disable 后自动恢复 */
+  setReactivateOutbox(cb: () => void): void {
+    this.reactivateOutbox = cb
+  }
+
+  private tryReactivateOutbox(): void {
+    if (this.reactivateOutbox) {
+      try {
+        this.reactivateOutbox()
+      } catch {
+        /* 静默 */
+      }
+    }
   }
 
   async initialize(): Promise<void> {
@@ -403,31 +420,61 @@ export class TelegramService {
 
     // === 🧬 进化 ===
     eventBus.on('evolution.cycle.started', (p: any) => {
-      const lines = ['🧬 AI 自进化系统']
-      lines.push(`━━━ 分析开始 ━━━`)
-      if (p.mode) lines.push(`状态: ${p.mode}`)
-      if (p.failures !== undefined && p.failures > 0) lines.push(`连续失败: ${p.failures} 次`)
-      if (p.strategyName) lines.push(`策略: ${p.strategyName}`)
-      if (p.historyCount !== undefined) lines.push(`历史记录: ${p.historyCount} 条`)
-      lines.push(`\n📋 正在分析系统状态、检测退化、检查计划 Integrity...`)
+      const lines = ['🧬 秋山澪 - 自进化检查']
+      lines.push(`系统正在进行每 ${p.historyCount > 0 ? '2 小时' : '首次'} 的例行自我检查`)
+      lines.push('')
+      lines.push('📋 检查项目：')
+      lines.push('  1. 系统配置是否正确（参数有没有被人改偏）')
+      lines.push('  2. 代码质量有没有退化（bug、坏味道）')
+      lines.push('  3. 运行状态是否健康（内存、超时、异常）')
+      lines.push('  4. 计划任务是否在正常推进')
+      if (p.failures > 0) lines.push(`\n⚠️ 注意：上次检查失败了 ${p.failures} 次，本次会更保守`)
+      if (p.strategyName === 'conservative') lines.push('🔒 当前处于保守模式，只检查不修改')
       this.enqueueReply(chatId, lines.join('\n'), 'evolution')
       log('INFO', 'telegram_push_evolution_start')
     })
     eventBus.on('evolution.cycle.completed', (p: any) => {
-      const lines = ['🧬 AI 自进化系统']
-      if (p.success) lines.push(`━━━ ✅ 分析完成 ━━━`)
-      else lines.push(`━━━ ❌ 分析失败 ━━━`)
+      if (p.success && p.summary?.startsWith('预过滤跳过')) {
+        const reasonMap: Record<string, string> = {
+          recent_cycles_all_idle: '最近几轮检查都没发现问题，系统状态稳定',
+          not_enough_time: '距离上次检查时间太短，没必要重复运行',
+        }
+        const reason = reasonMap[p.summary.replace('预过滤跳过: ', '')] || p.summary.replace('预过滤跳过: ', '')
+        const lines = ['🧬 秋山澪 - 自进化检查']
+        lines.push('━━━ ⏭ 跳过本轮 ━━━')
+        lines.push('')
+        lines.push(`原因：${reason}`)
+        lines.push('')
+        if (p.failures > 0) lines.push(`📊 连续失败次数：${p.failures}`)
+        if (p.historyCount > 0) lines.push(`📊 历史检查次数：${p.historyCount}`)
+        lines.push('')
+        lines.push('✅ 系统运行正常，无需干预')
+        this.enqueueReply(chatId, lines.join('\n'), 'evolution')
+        return
+      }
+
+      const lines = ['🧬 秋山澪 - 自进化检查']
+      if (p.success) {
+        lines.push('━━━ ✅ 检查完成 ━━━')
+      } else {
+        lines.push('━━━ ❌ 检查出问题 ━━━')
+      }
+      lines.push('')
       if (p.durationMs) {
         const secs = Math.round(p.durationMs / 1000)
         const mins = Math.floor(secs / 60)
-        lines.push(`耗时: ${mins > 0 ? `${mins}分` : ''}${secs % 60}秒`)
+        lines.push(`⏱ 耗时：${mins > 0 ? `${mins}分` : ''}${secs % 60}秒`)
       }
-      if (p.mode) lines.push(`状态: ${p.mode}`)
       if (p.planTitle) {
-        lines.push(`计划: ${p.planTitle}${p.planProgress ? ` (${p.planProgress})` : ''}`)
+        lines.push(`📋 当前计划：${p.planTitle}（进度 ${p.planProgress}）`)
       }
-      const summary = (p.summary || '').slice(0, 600)
-      if (summary) lines.push(`\n📝 ${summary}`)
+      const summary = (p.summary || '').slice(0, 2000)
+      if (summary && !summary.startsWith('预过滤跳过')) {
+        // LLM 分析摘要直接展示，这才是最有价值的信息
+        lines.push('')
+        lines.push('📝 分析报告：')
+        lines.push(summary)
+      }
       this.enqueueReply(chatId, lines.join('\n'), 'evolution')
     })
     eventBus.on('evolution.snapshot.created', (p: any) => {
@@ -439,6 +486,104 @@ export class TelegramService {
     eventBus.on('evolution.proposal.validated', (p: any) => {
       const icon = p.passed ? '✅' : '⚠️'
       this.enqueueReply(chatId, `🧬 提案验证: ${p.proposalId} ${icon} 风险:${p.regressionRisk}`, 'evolution')
+    })
+    eventBus.on('evolution.action.executed', (p: any) => {
+      const lines = ['🧬 秋山澪 - 自动修正']
+      if (p.allOk) {
+        lines.push('━━━ ✅ 配置修正成功 ━━━')
+      } else {
+        lines.push('━━━ ⚠️ 部分修正失败 ━━━')
+      }
+      lines.push('')
+      for (const d of p.details || []) {
+        if (!d.success) {
+          lines.push(`❌ ${d.name} 执行失败：${d.summary}`)
+          continue
+        }
+        if (d.name === 'batch_fix_config') {
+          // "修正 4 个配置漂移: xx, yy" → 更清晰
+          const items = d.summary.replace('修正 ', '').replace(' 个配置漂移: ', '\n  ')
+          lines.push(`📝 修复了以下配置：`)
+          lines.push(`  ${items.replace(/, /g, '\n  ')}`)
+        } else {
+          lines.push(`📝 ${d.summary}`)
+        }
+      }
+      if (p.durationMs) {
+        lines.push(`⚡ 全部在 ${p.durationMs}ms 内完成，未使用 AI`)
+      }
+      this.enqueueReply(chatId, lines.join('\n'), 'evolution')
+    })
+
+    // === 🤖 自动修复管道 ===
+    eventBus.on('pipeline.started', (p: any) => {
+      const lines = ['🤖 秋山澪 - 自动修复管道']
+      lines.push('━━━ ⏳ 开始检查 ━━━')
+      lines.push('')
+      lines.push('运行项目自动化检查项，查找可修复的问题...')
+      if (p.timestamp) {
+        const time = new Date(p.timestamp).toLocaleString('zh-CN', { hour12: false })
+        lines.push(`🕐 ${time}`)
+      }
+      this.enqueueReply(chatId, lines.join('\n'), 'evolution')
+    })
+
+    eventBus.on('pipeline.completed', (p: any) => {
+      const lines = ['🤖 秋山澪 - 自动修复管道']
+      if (p.fixed > 0 || p.failed > 0) {
+        lines.push('━━━ ✅ 本轮执行完成 ━━━')
+      } else {
+        lines.push('━━━ ⏭ 本轮无需修复 ━━━')
+      }
+      lines.push('')
+
+      // 概览
+      const totalRun = (p.fixed || 0) + (p.failed || 0)
+      lines.push(`📊 采集 ${p.collected || 0} 个问题，本轮处理 ${totalRun} 个`)
+      if (p.fixed > 0) lines.push(`✅  修复成功：${p.fixed} 个`)
+      if (p.failed > 0) lines.push(`❌  修复失败：${p.failed} 个`)
+      if (p.queueRemaining > 0) lines.push(`⏳  队列剩余：${p.queueRemaining} 个待处理`)
+      lines.push('')
+
+      // 每个修复详情
+      const details = p.details || []
+      for (const d of details) {
+        const icon = d.success ? '✅' : '❌'
+        const loc = d.file ? d.file.split('/').pop() + (d.line ? `:${d.line}` : '') : '未知'
+        const dur = d.durationMs ? ` (${(d.durationMs / 1000).toFixed(0)}s)` : ''
+        if (d.success) {
+          lines.push(`${icon} [${d.source}] ${loc}${dur}`)
+          if (d.summary && d.summary !== '修复完成') {
+            lines.push(`   └ ${d.summary.slice(0, 200)}`)
+          }
+        } else {
+          lines.push(`${icon} [${d.source}] ${d.title?.slice(0, 80) || loc}${dur}`)
+          const reason = d.error || d.summary
+          if (reason) lines.push(`   └ ${reason.slice(0, 200)}`)
+        }
+      }
+
+      // 队列头部预览
+      if (p.queueRemaining > 0 && details.length > 0) {
+        lines.push('')
+        lines.push(`📋 待处理列表：`)
+      }
+      lines.push('')
+
+      lines.push(`⚡ 耗时：${p.durationMs ? (p.durationMs / 1000).toFixed(0) : '?'}s`)
+      this.enqueueReply(chatId, lines.join('\n'), 'evolution')
+    })
+
+    eventBus.on('pipeline.errored', (p: any) => {
+      const lines = ['🤖 秋山澪 - 自动修复管道']
+      lines.push('━━━ ❌ 执行异常 ━━━')
+      lines.push('')
+      lines.push('管道在执行过程中抛出了异常：')
+      lines.push('')
+      lines.push(`⚠️ ${p.error || '未知错误'}`)
+      lines.push('')
+      lines.push('⏳ 将在下一周期自动重试')
+      this.enqueueReply(chatId, lines.join('\n'), 'evolution')
     })
 
     // === 🔍 洞察 ===
@@ -675,15 +820,18 @@ export class TelegramService {
       category,
       message: text,
     })
+    this.tryReactivateOutbox()
   }
 
   private enqueueEdit(chatId: number, targetMessageId: number, text: string, bot: string = 'chat'): void {
     const inserted = insertOutbox({ chatId: String(chatId), bot: bot as any, msgType: 'edit', message: text, targetMessageId })
     log('DEBUG', 'telegram_enqueue_edit', { chatId, targetMessageId, inserted, textLen: text.length })
+    this.tryReactivateOutbox()
   }
 
   private enqueueAction(chatId: number, action: string, bot: string = 'chat'): void {
     insertOutbox({ chatId: String(chatId), bot: bot as any, msgType: 'action', message: action })
+    this.tryReactivateOutbox()
   }
 
   /** sendMessage 需要同步拿到 messageId，因此直接 HTTP 调用 */

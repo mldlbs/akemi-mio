@@ -19,13 +19,7 @@ export interface GuardrailDeps {
   proceduralMemory?: ProceduralMemory | null
 }
 
-export interface WorkflowActivation {
-  activated: true
-  moduleContent: string
-}
-
 export interface GuardrailResult {
-  workflowActivation: WorkflowActivation | null
   injected: boolean
 }
 
@@ -62,15 +56,11 @@ export class Guardrail {
    */
   apply(toolResults: ToolResult[], toolCalls: ToolCallInfo[], messages: Message[], ctx: RunContext): GuardrailResult {
     // Guardrail 已请求终止：跳过所有检查，放行最后一轮 LLM 回复
-    if (ctx.guardrailStop) return { workflowActivation: null, injected: false }
+    if (ctx.guardrailStop) return { injected: false }
 
     let injected = false
 
-    // 1. 工作流激活检测
-    const wf = this.checkWorkflowActivation(toolResults)
-    if (wf) injected = true
-
-    // 2. 连续只读检测（仅注入提示，不终止循环）
+    // 1. 连续只读检测（仅注入提示，不终止循环）
     const allReadOnly = toolCalls.every((c) => this.readOnlyTools.has(c.name))
     if (this.checkReadOnlyStuck(allReadOnly, toolResults, messages, ctx)) {
       injected = true
@@ -94,25 +84,10 @@ export class Guardrail {
     // 8. 流程记忆自动建议
     if (this.checkProcedureSuggestion(toolCalls, messages)) injected = true
 
-    return { workflowActivation: wf ?? null, injected }
+    return { injected }
   }
 
   // ── 各 guardrail 实现 ──
-
-  /**
-   * 工作流激活检测
-   */
-  private checkWorkflowActivation(toolResults: ToolResult[]): WorkflowActivation | null {
-    const wfResult = toolResults.find((r) => r.success && r.content.startsWith('__WORKFLOW_ACTIVATED__'))
-    if (!wfResult) return null
-
-    const [, , ...rest] = wfResult.content.split('\n')
-    const wfModule = rest.join('\n').trim()
-    log('INFO', 'guardrail_workflow_activated', {
-      workflow: wfResult.content.replace('__WORKFLOW_ACTIVATED__:', '').split('\n')[0].trim(),
-    })
-    return { activated: true, moduleContent: wfModule }
-  }
 
   /**
    * 连续只读检测 — 连续 2 轮以上全是只读操作则给出提示。

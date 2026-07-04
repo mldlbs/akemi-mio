@@ -26,9 +26,13 @@ export class OutputLayer {
     return parseFloat(((conflicts + eventVelocity + uncertainties) / 3).toFixed(2))
   }
 
-  async publishInsight(insight: InsightOutput, dag: DagStateFile, startedAt: number): Promise<OutputEnvelope & { isAnomaly?: boolean }> {
-    const anomalyScore = this.computeAnomalyScore(insight)
-    insight.anomalyScore = anomalyScore
+  async publishInsight(
+    insight: InsightOutput & { anomalyScore?: number },
+    dag: DagStateFile,
+    startedAt: number,
+  ): Promise<OutputEnvelope & { isAnomaly?: boolean }> {
+    const anomalyScore = this.computeAnomalyScore(insight as InsightOutput)
+    ;(insight as any).anomalyScore = anomalyScore
     const isAnomaly = anomalyScore > ANOMALY_THRESHOLD
 
     const envelope: OutputEnvelope & { isAnomaly?: boolean } = {
@@ -71,7 +75,7 @@ export class OutputLayer {
   }
 
   exportForTelegram(envelope: OutputEnvelope): string {
-    const p = envelope.payload as InsightOutput
+    const p = envelope.payload as InsightOutput & { anomalyScore?: number }
     if (envelope.type === 'daily_research' && p.sections) {
       const anomalyTag = p.anomalyScore && p.anomalyScore > ANOMALY_THRESHOLD ? ' 🚨' : ''
       const parts = [`#obs — ${p.topic}${anomalyTag}\n`]

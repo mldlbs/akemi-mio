@@ -47,9 +47,9 @@ import { SelfEvolutionService } from '../SelfEvolutionService'
 import type { AgentService } from '../../agent/AgentService'
 import type { Scheduler } from '../../core/Scheduler'
 import type { EventBus } from '../../core/EventBus'
-import type { PlanManagerLike, DevPlan } from '../types'
-import { existsSync, readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync, statSync } from 'fs'
-import { join, dirname } from 'path'
+import type { PlanManagerLike } from '../types'
+import { existsSync, readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync } from 'fs'
+import { join } from 'path'
 
 const TEST_STATE_DIR = join(process.cwd(), 'evolution_workspace', 'living_plan')
 const TEST_STATE_PATH = join(TEST_STATE_DIR, 'evolution_state.test.json')
@@ -57,7 +57,7 @@ const TEST_STATE_PATH = join(TEST_STATE_DIR, 'evolution_state.test.json')
 function createMockAgent(overrides?: Partial<AgentService>): AgentService {
   return {
     isBusy: vi.fn().mockReturnValue(false),
-    runSelfTask: vi.fn().mockResolvedValue({ success: true, summary: 'test analysis done' }),
+    runAgentTask: vi.fn().mockResolvedValue({ success: true, summary: 'test analysis done' }),
     setSuppressForceContinue: vi.fn(),
     ...overrides,
   } as unknown as AgentService
@@ -84,17 +84,18 @@ function createMockPlanManager(): PlanManagerLike {
   } as unknown as PlanManagerLike
 }
 
-function makeService(opts?: { agent?: AgentService; statePath?: string; maxReasoning?: number; degThreshold?: number }) {
-  return new SelfEvolutionService(opts?.agent ?? createMockAgent(), createMockScheduler(), createMockEventBus(), createMockPlanManager(), {
-    analysisTimeoutMs: 30000,
-    planExecTimeoutMs: 30000,
-    stepRetryBaseMs: 100,
-    maxLivingPlanBytes: 1024,
-    stateFilePath: opts?.statePath ?? TEST_STATE_PATH,
-    maxReasoningSteps: opts?.maxReasoning ?? 5,
-    degenerationThreshold: opts?.degThreshold ?? 3,
-    historyPath: join(TEST_STATE_DIR, 'history.test.json'),
-  })
+function makeService(opts?: { agent?: AgentService; statePath?: string; intervalMs?: number; maxFailures?: number }) {
+  return new SelfEvolutionService(
+    opts?.agent ?? createMockAgent(),
+    createMockScheduler(),
+    createMockEventBus(),
+    createMockPlanManager(),
+    {
+      stateFilePath: opts?.statePath ?? TEST_STATE_PATH,
+      intervalMs: opts?.intervalMs,
+      maxFailures: opts?.maxFailures,
+    },
+  )
 }
 
 // =========================================================================
@@ -119,17 +120,17 @@ describe('State Persistence — direct', () => {
   it('saveState should create file with correct fields', () => {
     const svc = makeService() as any
     svc.tryRunFailures = 2
+    svc.executeFailures = 1
     svc.recoveryCooldownUntil = 999999
     svc.lastSuccessTime = 888888
-    svc.analyzer.recordFingerprint('fp1')
     svc.saveState()
 
     expect(existsSync(TEST_STATE_PATH)).toBe(true)
     const state = JSON.parse(readFileSync(TEST_STATE_PATH, 'utf-8'))
     expect(state.tryRunFailures).toBe(2)
+    expect(state.executeFailures).toBe(1)
     expect(state.recoveryCooldownUntil).toBe(999999)
     expect(state.lastSuccessTime).toBe(888888)
-    expect(state.fingerprints).toEqual(['fp1'])
     expect(state.savedAt).toBeGreaterThan(0)
     svc.stop()
   })
@@ -140,9 +141,9 @@ describe('State Persistence — direct', () => {
       TEST_STATE_PATH,
       JSON.stringify({
         tryRunFailures: 3,
+        executeFailures: 2,
         recoveryCooldownUntil: 123456,
         lastSuccessTime: 789012,
-        recentAnalysisFingerprints: ['a', 'b', 'c'],
         savedAt: Date.now(),
       }),
       'utf-8',
@@ -150,9 +151,9 @@ describe('State Persistence — direct', () => {
 
     const svc = makeService() as any
     expect(svc.tryRunFailures).toBe(3)
+    expect(svc.executeFailures).toBe(2)
     expect(svc.recoveryCooldownUntil).toBe(123456)
     expect(svc.lastSuccessTime).toBe(789012)
-    expect(svc.analyzer.getFingerprints()).toEqual(['a', 'b', 'c'])
     svc.stop()
   })
 
@@ -183,56 +184,22 @@ describe('State Persistence — direct', () => {
 // =========================================================================
 
 describe('Constructor Options', () => {
-  it('should accept custom analysisTimeoutMs', () => {
-    const svc = makeService({ statePath: TEST_STATE_PATH }) as any
-    expect(svc.analyzer.currentAnalysisTimeoutMs).toBeGreaterThan(0)
+  it('should accept custom stateFilePath', () => {
+    const customPath = join(TEST_STATE_DIR, 'custom_state.test.json')
+    const svc = makeService({ statePath: customPath }) as any
+    expect(svc.stateFilePath).toBe(customPath)
     svc.stop()
   })
 
-  it('should accept custom degenerationThreshold', () => {
-    const svc = makeService({ statePath: TEST_STATE_PATH, degThreshold: 7 }) as any
-    expect(svc.analyzer.degenerationThreshold).toBe(7)
-    svc.stop()
-  })
-})
-
-// =========================================================================
-// Degeneration Detection Tests
-// =========================================================================
-
-describe('Degeneration Detection', () => {
-  it('should not be degenerate initially', () => {
-    const svc = makeService({ statePath: TEST_STATE_PATH }) as any
-    expect(svc.analyzer.isDegenerate()).toBe(false)
+  it('should accept custom maxFailures', () => {
+    const svc = makeService({ statePath: TEST_STATE_PATH, maxFailures: 7 }) as any
+    expect(svc.maxFailures).toBe(7)
     svc.stop()
   })
 
-  it('should detect degeneration after N identical fingerprints', () => {
-    const svc = makeService({ statePath: TEST_STATE_PATH, degThreshold: 3 }) as any
-    svc.analyzer.recordFingerprint('result A')
-    svc.analyzer.recordFingerprint('result A')
-    svc.analyzer.recordFingerprint('result A')
-    expect(svc.analyzer.isDegenerate()).toBe(true)
-    svc.stop()
-  })
-
-  it('should not detect degeneration with varying results', () => {
-    const svc = makeService({ statePath: TEST_STATE_PATH, degThreshold: 3 }) as any
-    svc.analyzer.recordFingerprint('result A')
-    svc.analyzer.recordFingerprint('result B')
-    svc.analyzer.recordFingerprint('result C')
-    expect(svc.analyzer.isDegenerate()).toBe(false)
-    svc.stop()
-  })
-
-  it('should trim fingerprint to 100 chars', () => {
-    const svc = makeService({ statePath: TEST_STATE_PATH }) as any
-    const long = 'x'.repeat(200)
-    // computeFingerprint is private; indirectly verify via recordFingerprint behavior
-    svc.analyzer.recordFingerprint(long)
-    const fps = svc.analyzer.getFingerprints()
-    expect(fps.length).toBe(1)
-    expect(fps[0].length).toBeLessThanOrEqual(100)
+  it('should accept custom intervalMs', () => {
+    const svc = makeService({ statePath: TEST_STATE_PATH, intervalMs: 60000 }) as any
+    expect(svc.intervalMs).toBe(60000)
     svc.stop()
   })
 })
@@ -266,6 +233,10 @@ describe('Analysis Cycle — state file creation', () => {
   it('should create state file after successful analysis', async () => {
     const agent = createMockAgent()
     const svc = makeService({ agent })
+    // Inject a mock pipeline that returns success metrics
+    ;(svc as any).pipeline = {
+      runOnce: vi.fn().mockResolvedValue({ totalCollected: 0, totalFixed: 0, totalFailed: 0, queueSize: 0, lastRunAt: Date.now() }),
+    }
     ;(svc as any).firstRunComplete = true
     await (svc as any).runAnalysisCycle()
     expect(existsSync(TEST_STATE_PATH)).toBe(true)
@@ -275,29 +246,17 @@ describe('Analysis Cycle — state file creation', () => {
   })
 
   it('should update state file after failed analysis', async () => {
-    const agent = createMockAgent({
-      runSelfTask: vi.fn().mockResolvedValue({ success: false, summary: 'error' }),
-    })
+    const agent = createMockAgent()
     const svc = makeService({ agent })
+    // Inject a mock pipeline that throws to trigger the catch path
+    ;(svc as any).pipeline = {
+      runOnce: vi.fn().mockRejectedValue(new Error('test pipeline failure')),
+    }
     ;(svc as any).firstRunComplete = true
     await (svc as any).runAnalysisCycle()
     expect(existsSync(TEST_STATE_PATH)).toBe(true)
     const state = JSON.parse(readFileSync(TEST_STATE_PATH, 'utf-8'))
     expect(state.tryRunFailures).toBe(1)
-    svc.stop()
-  })
-
-  it('should skip analysis when degenerate', async () => {
-    const agent = createMockAgent()
-    const svc = makeService({ agent, degThreshold: 3 }) as any
-    // Pre-load 3 identical fingerprints
-    svc.analyzer.recordFingerprint('same')
-    svc.analyzer.recordFingerprint('same')
-    svc.analyzer.recordFingerprint('same')
-    ;(svc as any).firstRunComplete = true
-    // 退化状态会被检测到，但若指纹超过 12h 会触发自动恢复
-    // 这里保证 analyze 不被 shouldAnalyze 拦截即正确
-    await (svc as any).runAnalysisCycle()
     svc.stop()
   })
 })

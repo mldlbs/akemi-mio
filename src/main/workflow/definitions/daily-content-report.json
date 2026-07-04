@@ -1,0 +1,57 @@
+[
+  {
+    "id": "preset_daily_content_report",
+    "name": "每日内容报告",
+    "description": "每天早 8 点自动生成内容趋势报告并保存到草稿目录",
+    "inputSchema": "",
+    "enabled": true,
+    "trigger": {
+      "type": "cron",
+      "cron": "0 8 * * *",
+      "defaultInput": "生成今日内容趋势报告"
+    },
+    "maxConcurrency": 2,
+    "steps": [
+      {
+        "id": "s1",
+        "name": "趋势收集",
+        "description": "收集今日热点趋势",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 8,
+          "prompt": "使用 read_file 读取 observer 趋势数据 evolution_workspace/observer/trends/，整理今日热点。",
+          "allowedTools": ["read_file"]
+        },
+        "dependsOn": []
+      },
+      {
+        "id": "s2",
+        "name": "报告生成",
+        "description": "生成结构化趋势报告",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 10,
+          "prompt": "基于趋势数据，生成一份今日内容趋势报告。趋势数据：{{steps.s1.result}}"
+        },
+        "dependsOn": ["s1"],
+        "outputSchema": {
+          "title": { "type": "string" },
+          "hotKeywords": { "type": "array" },
+          "recommendations": { "type": "array" }
+        }
+      },
+      {
+        "id": "s3",
+        "name": "保存",
+        "description": "保存报告到草稿目录",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 3,
+          "prompt": "将以下报告保存到草稿目录。报告：{{steps.s2.result}}"
+        },
+        "dependsOn": ["s2"],
+        "outputFile": "evolution_workspace/social/drafts/{DATE}-daily-report.json"
+      }
+    ]
+  }
+]

@@ -1,0 +1,588 @@
+/* ═══════════════════════════════════════
+   Mio — Slot Layout System
+   山脊分割·极简结构
+   ═══════════════════════════════════════ */
+
+/* ─── 外壳：全高 flex 列 ─── */
+.app-shell {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-base);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border-glass-hover);
+  border-radius: var(--radius-panel);
+}
+
+/* ─── TopBar ─── */
+.topbar {
+  height: var(--topbar-height);
+  min-height: var(--topbar-height);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-sm) 0 var(--space-md);
+  background: var(--bg-topbar);
+  border-bottom: 1px solid var(--border-glass);
+  -webkit-app-region: drag;
+  z-index: 20;
+  gap: var(--space-xs);
+}
+
+.topbar-logo {
+  font-size: var(--fs-heading);
+  font-weight: 500;
+  color: var(--text-primary);
+  letter-spacing: 0.04em;
+  -webkit-app-region: no-drag;
+  margin-right: var(--space-lg);
+}
+
+.topbar-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  -webkit-app-region: no-drag;
+}
+
+.topbar-btn {
+  width: 32px; height: 32px; min-width: 32px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+  -webkit-app-region: no-drag;
+}
+
+.topbar-btn:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-glass);
+  background: var(--bg-glass);
+}
+
+.topbar-close {
+  width: 32px; height: 32px; min-width: 32px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+  -webkit-app-region: no-drag;
+  margin-left: var(--space-xs);
+}
+
+.topbar-close:hover {
+  background: oklch(0.55 0.14 16 / 0.12);
+  color: oklch(0.55 0.14 16);
+  border-color: oklch(0.55 0.14 16 / 0.25);
+}
+
+.topbar-window-btn {
+  width: 32px; height: 32px; min-width: 32px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+  -webkit-app-region: no-drag;
+}
+
+.topbar-window-btn:hover {
+  background: var(--bg-glass);
+  color: var(--text-secondary);
+  border-color: var(--border-glass);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+}
+
+/* ─── Body: Sidebar + Main ─── */
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* ─── Sidebar ─── */
+.sidebar {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-glass);
+  position: relative;
+  z-index: 10;
+  overflow: hidden;
+}
+
+/* Panel 分组头部 */
+.sidebar-panel + .sidebar-panel {
+  border-top: 1px solid var(--border-glass);
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+}
+
+.sidebar-panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.sidebar-panel-header i {
+  font-size: 14px;
+}
+
+/* 山脊分割：渐变竖线 ─── */
+.sidebar::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    var(--border-glass-hover) 30%,
+    var(--accent) 50%,
+    var(--border-glass-hover) 70%,
+    transparent 100%
+  );
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.sidebar-date-header {
+  padding: var(--space-lg) var(--space-lg) var(--space-xs);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 var(--space-sm);
+  /* 底部淡出提示还有更多 */
+  mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent 100%);
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-card);
+  font-size: var(--fs-small);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-glass);
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  overflow: hidden;
+}
+
+.sidebar-item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.sidebar-item:hover {
+  background: var(--bg-glass);
+  color: var(--text-primary);
+}
+
+.sidebar-item.active {
+  color: var(--text-primary);
+  background: var(--bg-glass-strong);
+}
+
+.sidebar-empty {
+  padding: var(--space-xl) var(--space-lg);
+  color: var(--text-muted);
+  font-size: var(--fs-small);
+  text-align: center;
+}
+
+.sidebar-icon {
+  font-size: 14px;
+  opacity: 0.6;
+}
+
+.sidebar-item-time {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* ─── Main Area ─── */
+.main-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--bg-main);
+}
+
+.main-area-inner {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+
+/* ─── InputBar ─── */
+.inputbar {
+  flex-shrink: 0;
+  padding: var(--space-md) var(--space-xl);
+  padding-bottom: max(var(--space-md), env(safe-area-inset-bottom));
+  background: var(--bg-input);
+  border-top: 1px solid var(--border-glass);
+  backdrop-filter: blur(var(--panel-blur)) saturate(1.15);
+  -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(1.15);
+  z-index: 15;
+}
+
+.inputbar-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-sm);
+  max-width: var(--chat-max-width);
+  margin: 0 auto;
+  width: 100%;
+}
+
+
+
+.inputbar-field {
+  flex: 1;
+  min-height: 36px;
+  max-height: 120px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-card);
+  background: var(--bg-glass);
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+  font-family: inherit;
+  padding: var(--space-sm) var(--space-md);
+  resize: none;
+  outline: none;
+  transition: border-color var(--duration-fast) var(--ease-glass), box-shadow var(--duration-fast) var(--ease-glass);
+  line-height: 1.5;
+  overflow-y: auto;
+}
+
+.inputbar-field::placeholder {
+  color: var(--text-muted);
+}
+
+.inputbar-field:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow), 0 1px 4px oklch(0 0 0 / 0.06);
+}
+
+.inputbar-send {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: var(--text-primary);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+  flex-shrink: 0;
+}
+
+.inputbar-send:hover:not(:disabled) {
+  background: var(--accent-soft);
+  transform: scale(1.05);
+}
+
+.inputbar-send:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* ─── 停止回复按钮 ─── */
+.inputbar-stop {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 50%;
+  border: 1px solid oklch(0.55 0.14 16 / 0.25);
+  background: oklch(0.98 0.01 14 / 0.8);
+  color: oklch(0.55 0.14 16);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+  flex-shrink: 0;
+}
+
+.inputbar-stop:hover {
+  background: oklch(0.55 0.14 16 / 0.12);
+  transform: scale(1.05);
+}
+
+/* ─── Chat slot messages ─── */
+.chat-slot {
+  flex: 1;
+  padding: var(--space-xl) var(--space-lg) var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  max-width: var(--chat-max-width);
+  width: 100%;
+  margin: 0 auto;
+}
+
+.chat-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  color: var(--text-muted);
+}
+
+.chat-empty-icon {
+  font-size: 32px;
+  opacity: 0.3;
+}
+
+.chat-empty-text {
+  font-size: var(--fs-small);
+}
+
+.msg {
+  animation: msg-in 0.25s var(--ease-spring) both;
+  animation-iteration-count: 1;
+}
+
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.msg-row {
+  display: flex;
+  flex-direction: column;
+}
+
+.msg-row.user {
+  align-items: flex-end;
+}
+
+.msg-row.assistant {
+  align-items: flex-start;
+}
+
+.msg-label {
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+  margin-bottom: 2px;
+  padding: 0 var(--space-sm);
+}
+
+.msg-bubble {
+  max-width: 85%;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-bubble);
+  font-size: var(--fs-body);
+  line-height: 1.6;
+  word-break: break-word;
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
+  box-shadow: 0 1px 3px oklch(0 0 0 / 0.04);
+}
+
+/* 消息底部操作栏：时间 + 复制按钮 — 默认隐藏，hover / 新消息短暂显示 */
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: 2px;
+  padding: 0 var(--space-sm);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-glass);
+}
+
+/* 新消息刚出现时短暂显示操作栏，提升可发现性 */
+.msg .msg-actions {
+  animation: peek-actions 3.5s var(--ease-glass) 0.8s forwards;
+}
+
+@keyframes peek-actions {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.msg-row:hover .msg-actions {
+  opacity: 1 !important;
+  animation: none;
+}
+
+@media (hover: none) {
+  .msg-actions {
+    opacity: 1;
+  }
+}
+
+.msg-copy-btn {
+  width: 20px; height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+
+.msg-copy-btn:hover {
+  color: var(--text-secondary);
+}
+
+.msg-copy-btn.copied {
+  color: oklch(0.52 0.10 150);
+}
+
+/* 流式回复时的闪烁光标 */
+.msg-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink-cursor 0.8s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.msg-row.user .msg-bubble {
+  background: oklch(0.90 0.05 14 / 0.55);
+  color: oklch(0.22 0.015 16);
+  border-bottom-right-radius: 3px;
+  box-shadow: 0 1px 3px oklch(0 0 0 / 0.04);
+}
+
+.msg-row.assistant .msg-bubble {
+  background: oklch(0.97 0.01 50 / 0.5);
+  color: var(--text-glass);
+  border-bottom-left-radius: 3px;
+  box-shadow: 0 1px 3px oklch(0 0 0 / 0.03);
+}
+
+.msg-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  padding: 0 var(--space-sm);
+  opacity: 0.7;
+}
+
+/* ─── Tool / Preview slot placeholders ─── */
+.tool-slot {
+  flex: 1;
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  color: var(--text-muted);
+}
+
+.preview-slot {
+  flex: 1;
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.preview-empty-icon {
+  font-size: 28px;
+  opacity: 0.2;
+  margin-bottom: var(--space-md);
+}
+
+/* ─── Settings Modal ─── */
+/* Moved to settings.css */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slot-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

@@ -24,8 +24,16 @@ import { ToolScheduler, type ToolResult } from './ToolScheduler'
 import type { TokenAccount } from '../cognitive/TokenEconomy'
 import { SkillManager } from '../skill'
 import { WorkingMemory } from './WorkingMemory'
-import { createMessageId, insertMessage, type StoredMessage } from '../db/messages'
-import { RunState, RunContext } from './runstate'
+import {
+  createMessageId,
+  createSessionId,
+  insertMessage,
+  getLastSessionId,
+  getLastMessageTime,
+  getMessagesBySession,
+  type StoredMessage,
+} from '../db/messages'
+import { RunState, RunContext, GovernorRecord } from './runstate'
 import { SessionRecoveryManager } from './SessionRecoveryManager'
 import { classify as classifyError } from './ErrorClassifier'
 import { evaluateMilestone } from './CheckpointScheduler'
@@ -35,9 +43,12 @@ import type { FailureAnalyzer } from './FailureAnalyzer'
 import { runObserve } from './ObserveStage'
 import { runThink } from './ThinkStage'
 import { runReflect } from './ReflectStage'
+import { ExecutionGovernor } from './ExecutionGovernor'
 import { ObservabilityLogger } from '../observability/ObservabilityLogger'
 import { PersonaStateManager } from './PersonaStateManager'
+import { setPersonaStateManager } from '../tool/deps'
 import { PersonaDriftControlSystem, DRIFT_CORRECTION_PROMPT } from './PersonaDriftControlSystem'
+import { classifyContent } from './ContentClassifier'
 
 export class ChatExecutor {
   private llmService: LlmService
@@ -61,9 +72,8 @@ export class ChatExecutor {
   private consecutiveInvalidRequest = 0
   private lastCheckpointStep = -1
   private lastCheckpointTime = 0
-  private activeWorkflowModule: string | null = null
-  private runContext: RunContext | null = null
   private identityContext = ''
+  private runContext: RunContext | null = null
   private proceduralMemory: ProceduralMemory | null = null
   private failureAnalyzer: FailureAnalyzer | null = null
   private thinkStageCount = 0
@@ -75,6 +85,13 @@ export class ChatExecutor {
   private driftControl = new PersonaDriftControlSystem()
   /** 上轮 drift 评估产生的待注入消息信号 */
   private pendingDriftSignal: string | null = null
+  /** 当前轮 user 消息的 content category */
+  private currentCategory = 'chat'
+
+  /** 当前加载的 session，用于切换 session 时重建上下文 */
+  private currentSessionId: string | null = null
+  /** 执行决策门 — 每轮 tool batch 后强制决策 */
+  private executionGovernor = new ExecutionGovernor()
 
   constructor(
     llmService: LlmService,
@@ -108,6 +125,7 @@ export class ChatExecutor {
     this.reflectLoop = reflectLoop
     this.goalGuardrail = goalGuardrail
     this.errorClassifier = { classify: classifyError }
+    setPersonaStateManager(this.personaManager)
   }
 
   setMainWindow(win: BrowserWindow | null): void {
@@ -152,6 +170,11 @@ export class ChatExecutor {
     if (result.transitionSignal) {
       this.workingMemory.scratchpad.add('system_hint', result.transitionSignal)
     }
+    if (result.changed) {
+      this.mainWindow?.webContents.send('persona:updated', {
+        level: this.personaManager.getCurrentLevel(),
+      })
+    }
   }
 
   private refreshMemory(): void {
@@ -159,7 +182,7 @@ export class ChatExecutor {
     const memCtx = this.memoryService.getFormattedContext()
     this.obsLogger?.logMemory(this.lastUserText, memCtx)
     const reflectCtx = this.reflectLoop.getFormattedContext()
-    // 按需注入：根据用户输入匹配技能
+    // 按需注入：根据用户输入匹配外部技能
     const skillModules = this.lastUserText
       ? this.skillManager?.getMatchedPromptModules(this.lastUserText) || []
       : this.skillManager?.getEnabledPromptModules() || []
@@ -170,11 +193,21 @@ export class ChatExecutor {
     if (this.driftControl.needsCorrectionPrompt()) {
       extraModules.unshift(DRIFT_CORRECTION_PROMPT)
     }
-    const wfModule = this.activeWorkflowModule
-    const allExtraModules = wfModule ? [wfModule, ...extraModules] : extraModules.length > 0 ? extraModules : undefined
+    const allExtraModules = extraModules.length > 0 ? extraModules : undefined
     if (memCtx || reflectCtx || allExtraModules || this.identityContext) {
       this.workingMemory.refreshMemory(memCtx, reflectCtx, allExtraModules, this.identityContext || undefined)
     }
+  }
+
+  /** 自动分配或续用 session_id：30 分钟无活动则新建 session */
+  private resolveSessionId(): string {
+    const lastTime = getLastMessageTime()
+    const lastSid = getLastSessionId()
+    const THIRTY_MIN = 30 * 60 * 1000
+    if (lastSid && lastTime && Date.now() - lastTime < THIRTY_MIN) {
+      return lastSid
+    }
+    return createSessionId()
   }
 
   private persistAssistantMessage(reply: string, source: string): void {
@@ -183,18 +216,24 @@ export class ChatExecutor {
       source: source as any,
       role: 'assistant',
       content: reply,
+      category: this.currentCategory,
       createdAt: Date.now(),
     }
     insertMessage(msg)
     this.mainWindow?.webContents.send('message:new', msg)
   }
 
+  private noTts = false
+
   async run(
     text: string,
     requestId?: string,
     source: 'electron' | 'telegram' = 'electron',
     extra?: { telegramChatId?: number; telegramUserId?: number; telegramFrom?: string; telegramMessageId?: number },
+    sessionId?: string,
+    noTts?: boolean,
   ): Promise<ChatResult> {
+    this.noTts = noTts ?? false
     const rid = requestId || createRequestId()
     const t0 = Date.now()
     this.memoryService?.recordInteraction()
@@ -212,15 +251,35 @@ export class ChatExecutor {
     this.consecutiveInvalidRequest = 0
     this.obsLogger = new ObservabilityLogger(rid)
     this.obsLogger.logInput(text, source)
+    // 统一 resolve sessionId（只调一次），后续分支和 DB 存储共用
+    const effectiveSessionId = sessionId || this.resolveSessionId()
+    // session 切换时加载对应历史到 workingMemory
+    if (effectiveSessionId !== this.currentSessionId) {
+      this.currentSessionId = effectiveSessionId
+      this.workingMemory = new WorkingMemory('chat')
+      this.refreshMemory()
+      const history = getMessagesBySession(effectiveSessionId)
+      for (const m of history) {
+        if (m.role === 'user') {
+          this.workingMemory.context.addUser(m.content)
+        } else if (m.role === 'assistant') {
+          this.workingMemory.context.addAssistant(m.content)
+        }
+      }
+    }
     // 先刷新 memory（可能重建 context），再加用户消息，确保消息不丢失
     this.refreshMemory()
     this.workingMemory.addUser(text)
     eventBus.emit('agent.input.received', { text, requestId: rid, source })
+    const contentCategory = classifyContent(text)
+    this.currentCategory = contentCategory
     const userMsg: StoredMessage = {
       id: createMessageId(),
       source,
       role: 'user',
       content: text,
+      category: contentCategory,
+      sessionId: effectiveSessionId,
       telegramChatId: extra?.telegramChatId ?? null,
       telegramUserId: extra?.telegramUserId ?? null,
       telegramFrom: extra?.telegramFrom ?? null,
@@ -247,13 +306,15 @@ export class ChatExecutor {
       this.obsLogger?.flush()
       eventBus.emit('agent.response.generated', { text: reply, requestId: rid, source })
       log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: reply.length })
-      this.ttsService.flushBuffer()
+      if (!this.noTts) this.ttsService.flushBuffer()
       if (reply) {
         const assistMsg: StoredMessage = {
           id: createMessageId(),
           source,
           role: 'assistant',
           content: reply,
+          category: 'chat',
+          sessionId: effectiveSessionId,
           createdAt: Date.now(),
         }
         insertMessage(assistMsg)
@@ -271,8 +332,8 @@ export class ChatExecutor {
         this.memoryService.metaController.onInteractionEnd({
           userMessage: text,
           assistantReply: reply,
-          tokenUsed: this.resourceBudget.getLlmUsage?.() || 0,
-          tokenBudget: this.resourceBudget.getChatBudget?.() || 200000,
+          tokenUsed: this.resourceBudget.getSnapshot().chatLlmCalls || 0,
+          tokenBudget: this.resourceBudget.getConfig().maxChatLlmCalls || 200000,
           planActive: this.sessionPlanIds.size > 0,
           agentId: 'chat',
         })
@@ -291,6 +352,7 @@ export class ChatExecutor {
     this.runContext?.interrupt('user_stop')
     this.runContext = null
     this.ttsService.stop()
+    this.executionGovernor.reset()
   }
 
   private async toolLoop(messages: Message[], ctx: RunContext, requestId: string, source: string): Promise<string> {
@@ -319,7 +381,7 @@ export class ChatExecutor {
         }
         const onToken = (t: string) => {
           if (!ctx.interruptFlag) {
-            this.ttsService.addChunk(t)
+            if (!this.noTts) this.ttsService.addChunk(t)
             this.mainWindow?.webContents.send('ai:chunk', t)
           }
         }
@@ -429,15 +491,33 @@ export class ChatExecutor {
             this.workingMemory.scratchpad.add('system_hint', '你已执行了多步操作。请立即停止工具调用，向用户汇报当前进展。')
           }
           const gr = this.guardrail.apply(toolResults, result.toolCalls, messages, ctx)
-          if (gr.workflowActivation) {
-            this.activeWorkflowModule = gr.workflowActivation.moduleContent
-            const memCtx = this.memoryService?.getFormattedContext() || '',
-              sm = this.skillManager?.getEnabledPromptModules() || []
-            this.workingMemory.refreshMemory(memCtx, undefined, [gr.workflowActivation.moduleContent, ...sm], undefined, true)
-            messages.length = 0
-            messages.push(...this.workingMemory.getMessages())
+          // ── [DECIDE] ExecutionGovernor 强制决策门 ──
+          const failedTools = toolResults.filter((r) => !r.success).map((r) => r.name)
+          const hasFail = failedTools.length > 0
+          const allFail = hasFail && failedTools.length === toolResults.length
+          const roundResult: GovernorRecord['roundResult'] = allFail ? 'all_failed' : hasFail ? 'partial' : 'all_ok'
+          const gd = this.executionGovernor.evaluate(toolResults, result.toolCalls, ctx)
+          ctx.recordGovernor(gd, failedTools, roundResult)
+          eventBus.emit('agent.governor' as any, {
+            requestId,
+            step: i,
+            action: gd.action,
+            reason: gd.reason,
+            roundResult,
+            failedTools,
+          })
+          if (gd.action === 'stop') {
+            log('WARN', 'chat_governor_stop', { step: i, reason: gd.reason })
+            if (gd.message) messages.push({ role: 'user', content: gd.message })
+            this.obsLogger?.logExit('governor_stop', gd.reason)
+            return gd.reason
           }
-          this.checkMilestone(i, toolResults, ctx, requestId, !!gr.workflowActivation)
+          if (gd.action === 'shift') {
+            log('WARN', 'chat_governor_shift', { step: i, reason: gd.reason })
+            if (gd.message) messages.push({ role: 'user', content: gd.message })
+            continue
+          }
+          this.checkMilestone(i, toolResults, ctx, requestId)
           ctx.transition(RunState.RUNNING)
           continue
         }
@@ -504,7 +584,7 @@ export class ChatExecutor {
         log('ERROR', 'chat_invalid_request_rollback', { step, count: this.consecutiveInvalidRequest })
         const stm = this.workingMemory.context.getShortTermMemoryPairs()
         const lastUser = [...m].reverse().find((msg) => msg.role === 'user')
-        rollbackToLastKnownGood(m, stm, lastUser?.content)
+        rollbackToLastKnownGood(m, stm, lastUser?.content ?? undefined)
         this.workingMemory.scratchpad.add('error_hint', '会话状态异常，已回滚到最近的健康检查点，请重试。')
         return 'continue'
       }
@@ -518,7 +598,7 @@ export class ChatExecutor {
       log('ERROR', 'chat_corrupted_state_rollback', { step, category: c.category })
       const stm = this.workingMemory.context.getShortTermMemoryPairs()
       const lastUser = [...m].reverse().find((msg) => msg.role === 'user')
-      rollbackToLastKnownGood(m, stm, lastUser?.content)
+      rollbackToLastKnownGood(m, stm, lastUser?.content ?? undefined)
       this.workingMemory.scratchpad.add('error_hint', '会话状态异常，已回滚到最近的健康检查点。')
       return 'continue'
     }
@@ -574,14 +654,13 @@ export class ChatExecutor {
     return 'continue'
   }
 
-  private checkMilestone(step: number, tr: ToolResult[], ctx: RunContext, rid: string, changed: boolean): void {
+  private checkMilestone(step: number, tr: ToolResult[], ctx: RunContext, rid: string): void {
     if (!this.recoveryManager) return
     const ap = this.planManager?.getActivePlan?.()
     const ms = evaluateMilestone({
       step,
       toolResultsLength: tr.length,
       runContext: ctx,
-      activePlanChanged: changed,
       lastCheckpointStep: this.lastCheckpointStep,
       lastCheckpointTime: this.lastCheckpointTime,
       consecutiveTimeoutRecoveries: ctx.consecutiveTimeouts,

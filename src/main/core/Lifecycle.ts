@@ -1,5 +1,6 @@
 import { app, BrowserWindow, session } from 'electron'
 import { join } from 'path'
+import { existsSync } from 'fs'
 import { cpus, totalmem, freemem } from 'os'
 import { log } from '../logger/Logger'
 import { isWallpaperMode, onWallpaperEvent } from '../wallpaper/WallpaperService'
@@ -35,17 +36,21 @@ export function setMainWindow(w: BrowserWindow | null): void {
 
 export function createWindow(stateManager: StateManager): BrowserWindow {
   mainWindow = new BrowserWindow({
-    width: 420,
-    height: 640,
-    icon: join(app.getAppPath(), 'icon.png'),
+    width: 1024,
+    height: 680,
+    minWidth: 800,
+    minHeight: 500,
+    icon: existsSync(join(process.resourcesPath || '', 'icon.png'))
+      ? join(process.resourcesPath || '', 'icon.png')
+      : join(app.getAppPath(), 'icon.png'),
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
-    hasShadow: false,
-    resizable: false,
-    alwaysOnTop: true,
+    hasShadow: true,
+    resizable: true,
+    alwaysOnTop: false,
     skipTaskbar: false,
-    fullscreenable: false,
+    fullscreenable: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

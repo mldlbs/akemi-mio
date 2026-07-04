@@ -5,9 +5,14 @@ directories:
   buildResources: build
 afterPack: build/afterPack.js
 files:
-  - "**/*"
+  - "out/**/*"
+  - "package.json"
   - "!models/**"
   - "!out/**/*.map"
+  - "!out/**/*.txt"
+  - "!out/electron.vite.config.*"
+  - "!out/tsconfig*.tsbuildinfo"
+  - "!out/src/**"
   - "!docs/**"
   - "!.claude*/**"
   - "!.githooks/**"
@@ -24,6 +29,7 @@ files:
   - "!**/tsconfig*.json"
   - "!logs.txt"
   - "!logs/**"
+  - "!**/node_modules/**/*.map"
 win:
   icon: build/icon.ico
   target:
@@ -43,6 +49,10 @@ nsis:
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
   installerHeaderIcon: build/icon.ico
+extraResources:
+  - from: "."
+    filter:
+      - "icon.png"
 npmRebuild: false
 electronDist: node_modules/electron/dist
 publish:

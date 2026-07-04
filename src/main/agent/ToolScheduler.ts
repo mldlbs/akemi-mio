@@ -1,6 +1,7 @@
 import { log } from '../logger/Logger'
 import type { ToolCallInfo } from '../llm/LlmService'
 import { ServerManager } from '../mcp/ServerManager'
+import { classifyToolError, ToolErrorType } from '../tool/ToolErrorType'
 import { toolAvailabilityCache } from '../tool/ToolAvailabilityCache'
 
 /** 单个工具执行结果 */
@@ -90,32 +91,44 @@ export class ToolScheduler {
         log('INFO', 'tool_scheduler_ok', { tool: call.name, attempt: attempt + 1, latencyMs: Date.now() - t0 })
         return { id: call.id, name: call.name, success: true, content, latencyMs: Date.now() - t0 }
       } catch (err: any) {
-        // 确定性错误：记录到可用性缓存，避免未来重复浪费
+        // 工具调用失败：统一分类后决定是否缓存/重试
+        const errorType = classifyToolError(err.message)
         toolAvailabilityCache.record(call.name, call.arguments, err.message)
 
-        // 确定性错误：重试也无法改变结果，直接跳过重试
-        if (isDeterministicError(err.message)) {
-          log('WARN', 'tool_scheduler_retry', {
+        // TOOL_MISSING / MCP_ERROR → 缓存 + 跳过重试（工具不可用）
+        if (errorType === ToolErrorType.TOOL_MISSING || errorType === ToolErrorType.MCP_ERROR) {
+          log('WARN', 'tool_scheduler_non_retryable', {
             tool: call.name,
             attempt: attempt + 1,
+            errorType,
             error: err.message,
-            willRetry: false,
-            skipRetry: true,
           })
           return { id: call.id, name: call.name, success: false, content: '', error: err.message, latencyMs: Date.now() - t0 }
         }
 
+        // ENVIRONMENT / PERMISSION / ARGUMENT → 跳过重试（但已不缓存）
+        if (errorType !== ToolErrorType.TRANSIENT && errorType !== ToolErrorType.UNKNOWN) {
+          log('WARN', 'tool_scheduler_skip_retry', {
+            tool: call.name,
+            attempt: attempt + 1,
+            errorType,
+            error: err.message,
+          })
+          return { id: call.id, name: call.name, success: false, content: '', error: err.message, latencyMs: Date.now() - t0 }
+        }
+
+        // TRANSIENT / UNKNOWN → 正常重试
         const isLastAttempt = attempt >= this.config.maxRetries
         log(isLastAttempt ? 'ERROR' : 'WARN', 'tool_scheduler_retry', {
           tool: call.name,
           attempt: attempt + 1,
+          errorType,
           error: err.message,
           willRetry: !isLastAttempt,
         })
         if (isLastAttempt) {
           return { id: call.id, name: call.name, success: false, content: '', error: err.message, latencyMs: Date.now() - t0 }
         }
-        // 退避等待
         await sleep(this.config.retryBaseMs * Math.pow(2, attempt))
       }
     }
@@ -161,57 +174,6 @@ export class ToolScheduler {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-/** 确定性错误特征：重试也无法改变结果 */
-function isDeterministicError(message: string): boolean {
-  if (!message) return false
-  const deterministricPatterns = [
-    '目录不存在',
-    '路径不存在',
-    '路径是目录',
-    'path 参数必须为字符串',
-    '路径 .. 超出工作区目录',
-    '路径 / 超出工作区目录',
-    '超出项目根目录',
-    '目录不存在',
-    '不允许执行命令',
-    '未在',
-    '中找到匹配的文本',
-    '超出工作区目录',
-    '子目录不存在',
-    '不能直接写入',
-
-    // English counterparts
-    'File not found',
-    'file not found',
-    'ENOENT',
-    'not a directory',
-    'EISDIR',
-    'EACCES',
-
-    // ToolScheduler 级别错误（非网络类）
-    '未知工具',
-
-    // JSON 解析错误（centos-server Python 脚本输出空内容）
-    'JSONDecodeError',
-    'Expecting value',
-
-    // MCP 连接已断开后遗留的调用（无需重试，等重连）
-    'The operation was aborted',
-
-    // 确定性语义错误
-    '找不到',
-    '没有找到',
-    '不存在',
-    'is not defined',
-    'Cannot find module',
-
-    // 命令执行失败：run_command 返回的确定性错误（命令本身出错，重试没用）
-    '命令执行失败',
-    'nginx: command not found',
-  ]
-  return deterministricPatterns.some((p) => message.includes(p))
 }
 
 /** 简单信号量 */

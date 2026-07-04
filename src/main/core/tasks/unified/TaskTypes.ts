@@ -8,6 +8,8 @@ export type BackgroundTaskType =
   | 'memory.index'
   | 'telegram.outbox'
   | 'stability.tick'
+  | 'evaluation.metrics'
+  | 'social.tick'
 
 /** 任务优先级等级 */
 export enum TaskTier {

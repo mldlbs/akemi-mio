@@ -3,7 +3,7 @@
  *
  * 使用方式（二选一）：
  * 方案 A（推荐）：通过 MCP 协议连接写作系统（结构化工具，无需手动拼 JSON）
- *   1. connect_mcp_server name=writing-system url=https://www.crlkcloud.cyou/writing-mcp/sse transport=sse
+ *   1. connect_mcp_server name=writing-system url=https://www.crlkcloud.cyou/writing-mcp/ transport=http
  *   2. 连接后可使用 writing_create_story、writing_create_character 等结构化工具
  *
  * 方案 B（兼容）：通过旧版 writing_system 工具直接调用远程 API
@@ -19,7 +19,7 @@ export const PROMPT_WRITING = `【小说创作工具】
 
 使用方式（二选一）：
 方案 A（推荐）：通过 MCP 协议连接写作系统（结构化工具，无需手动拼 JSON）
-  1. connect_mcp_server name=writing-system url=https://www.crlkcloud.cyou/writing-mcp/sse transport=sse
+  1. connect_mcp_server name=writing-system url=https://www.crlkcloud.cyou/writing-mcp/ transport=http
   2. 连接后可使用 writing_create_story、writing_create_character 等结构化工具
 
 方案 B（兼容）：通过旧版 writing_system 工具直接调用远程 API

@@ -1,0 +1,191 @@
+[
+  {
+    "id": "preset_content_workflow_v2",
+    "name": "秋山澪 Content Workflow V2",
+    "description": "内容生产工作流 V2 — 带条件分支、循环和审批门。选题→分析→写作→审查→重写循环→平台分发",
+    "inputSchema": "主题: string, 平台: string",
+    "enabled": true,
+    "trigger": { "type": "manual" },
+    "maxConcurrency": 3,
+    "steps": [
+      {
+        "id": "s1",
+        "name": "意图分析",
+        "description": "分析用户需求，输出内容类型、平台、风格、目标用户",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 10,
+          "prompt": "分析用户输入 {INPUT}，确定内容类型、风格、目标平台。",
+          "allowedTools": ["read_file"]
+        },
+        "dependsOn": [],
+        "outputSchema": {
+          "contentType": { "type": "string" },
+          "platform": { "type": "string" },
+          "style": { "type": "string" },
+          "audience": { "type": "string" }
+        }
+      },
+      {
+        "id": "s2",
+        "name": "内容规划",
+        "description": "生成结构化内容方案",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 10,
+          "prompt": "基于意图分析结果，生成结构化内容方案。每个章节包括 CoreClaim、MustExplain、Example。标题方向请直接给出。"
+        },
+        "dependsOn": ["s1"],
+        "outputSchema": {
+          "title": { "type": "string" },
+          "hook": { "type": "string" },
+          "sections": { "type": "array" },
+          "cta": { "type": "string" }
+        }
+      },
+      {
+        "id": "s3",
+        "name": "素材收集",
+        "description": "收集知识、记忆、案例",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 10,
+          "prompt": "收集与主题相关的素材。使用 read_file 读取 observer 趋势数据。",
+          "allowedTools": ["read_file"]
+        },
+        "dependsOn": ["s1"],
+        "outputSchema": {
+          "keyPoints": { "type": "array" },
+          "references": { "type": "array" },
+          "dataPoints": { "type": "array" }
+        }
+      },
+      {
+        "id": "s4",
+        "name": "初稿生成",
+        "description": "展开为第一版正文",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 20,
+          "prompt": "根据规划方案和素材，展开为正文。"
+        },
+        "dependsOn": ["s2", "s3"],
+        "retryCount": 1
+      },
+      {
+        "id": "review-check",
+        "name": "质量审查",
+        "description": "初稿质量评分",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 5,
+          "prompt": "审查正文质量，给出综合评分(0-10)和修改建议。正文内容：\n\n{{steps.s4.result}}"
+        },
+        "dependsOn": ["s4"],
+        "outputSchema": {
+          "score": { "type": "number" },
+          "issues": { "type": "array" },
+          "rewriteVersion": { "type": "string", "optional": true }
+        }
+      },
+      {
+        "id": "score-gate",
+        "name": "评分分支",
+        "description": "根据评分决定是否需要修改",
+        "handler": "condition",
+        "config": {
+          "condition": {
+            "source": "{{steps.review-check.result.score}}",
+            "cases": [
+              { "if": ">= 7", "goto": "human-approval" },
+              { "if": ">= 4 and < 7", "goto": "rewrite" }
+            ],
+            "defaultGoto": "rewrite"
+          }
+        },
+        "dependsOn": ["review-check"]
+      },
+      {
+        "id": "rewrite",
+        "name": "重写",
+        "description": "根据审查意见修改",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 10,
+          "prompt": "根据审查意见修改正文。意见：{{steps.review-check.result.issues}}"
+        },
+        "dependsOn": ["s4", "review-check"],
+        "retryCount": 2
+      },
+      {
+        "id": "human-approval",
+        "name": "人工审核",
+        "description": "发布前人工审核",
+        "handler": "gate",
+        "config": {
+          "gate": {
+            "message": "请审核以下内容，确认是否发布",
+            "preview": "{{steps.s4.result}}",
+            "options": ["approve", "reject", "modify"]
+          }
+        },
+        "dependsOn": ["score-gate", "rewrite"]
+      },
+      {
+        "id": "platform-adapt",
+        "name": "平台适配",
+        "description": "批量适配到各平台格式",
+        "handler": "foreach",
+        "config": {
+          "foreach": {
+            "items": "['wechat_mp', 'zhihu', 'xiaohongshu']",
+            "inlineSteps": [
+              {
+                "id": "adapt-item",
+                "name": "适配单个平台",
+                "handler": "subagent",
+                "config": {
+                  "maxTurns": 8,
+                  "prompt": "将正文适配到 {{input}} 平台格式。正文：{{steps.s4.result}}"
+                },
+                "dependsOn": []
+              }
+            ],
+            "concurrency": 3
+          }
+        },
+        "dependsOn": ["human-approval"]
+      },
+      {
+        "id": "output-aggregate",
+        "name": "结果汇总",
+        "description": "汇总所有平台适配版本",
+        "handler": "aggregate",
+        "config": {
+          "aggregate": {
+            "sources": ["platform-adapt"],
+            "strategy": "merge"
+          }
+        },
+        "dependsOn": ["platform-adapt"]
+      },
+      {
+        "id": "s7",
+        "name": "输出",
+        "description": "输出最终内容包",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 5,
+          "prompt": "汇总输出为 JSON 内容包。"
+        },
+        "dependsOn": ["output-aggregate"],
+        "outputSchema": {
+          "title": { "type": "string" },
+          "platforms": { "type": "object" },
+          "metadata": { "type": "object" }
+        },
+        "outputFile": "evolution_workspace/social/drafts/{DATE}-{STEP_ID}.json"
+      }
+    ]
+  }
+]

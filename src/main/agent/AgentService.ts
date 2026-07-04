@@ -12,7 +12,8 @@ import { eventBus, EventBus } from '../core/EventBus'
 import type { PlanManagerLike } from '../evolution/types'
 import { extractJsonFromLLMReply } from '../utils/llm'
 import { planManager as defaultPlanManager } from '../evolution'
-import { SubAgentPool } from './SubAgentPool'
+import { SubAgentPool, type SpawnTaskOptions } from './SubAgentPool'
+import { getRolePrompt, type SubAgentRoleName } from './roles'
 import { ReflectLoop } from './ReflectLoop'
 import { FailureAnalyzer } from './FailureAnalyzer'
 import { Guardrail } from './Guardrail'
@@ -51,8 +52,6 @@ export class AgentService {
   private toolScheduler: ToolScheduler
   /** Guardrail — 工具循环安全护栏 */
   private guardrail: Guardrail
-  /** 当前激活的工作流提示模块 */
-  private activeWorkflowModule: string | null = null
   /** 自任务超时中止控制器 — 用于取消 timed-out 的进化分析任务 */
   private selfTaskAbortController: AbortController | null = null
   /** 自任务开始时间戳，用于检测挂起超时任务 */
@@ -242,8 +241,7 @@ export class AgentService {
       ? this.skillManager?.getMatchedPromptModules(lastUserText) || []
       : this.skillManager?.getEnabledPromptModules() || []
     const extraModules = skillModules.length > 0 ? skillModules : undefined
-    const wfModule = this.activeWorkflowModule
-    const allExtraModules = wfModule ? [wfModule, ...(extraModules || [])] : extraModules
+    const allExtraModules = extraModules
     const allContextParts = [memCtx, procCtx, reflectCtx, this.failureAnalyzer.getFormattedContext()].filter(Boolean)
     const combinedContext = allContextParts.join('\n\n')
     if (combinedContext || allExtraModules) {
@@ -291,6 +289,10 @@ export class AgentService {
     return this.memoryService
   }
 
+  getSubAgentPool(): SubAgentPool {
+    return this.subAgentPool
+  }
+
   private async executeIntentCommand(intent: IntentResult, requestId: string): Promise<ChatResult> {
     const handler = this.intentHandlers.get(intent.intent)
     if (!handler) return { error: 'UNKNOWN_INTENT' }
@@ -305,6 +307,8 @@ export class AgentService {
     requestId?: string,
     source: 'electron' | 'telegram' = 'electron',
     extra?: { telegramChatId?: number; telegramUserId?: number; telegramFrom?: string; telegramMessageId?: number },
+    sessionId?: string,
+    noTts?: boolean,
   ): Promise<ChatResult> {
     // 熔断检查
     const blocked = this.circuitBreaker.allow('llm')
@@ -342,8 +346,8 @@ export class AgentService {
     }
 
     try {
-      // v2: 委托 ChatExecutor 执行
-      const reply = await this.chatExecutor!.run(text, rid, source, extra)
+      // v2: 委托 ChatExecutor 执行，传入 sessionId 用于加载历史
+      const reply = await this.chatExecutor!.run(text, rid, source, extra, sessionId, noTts)
       if (!reply || reply.error) return reply || { error: 'NO_REPLY' }
       log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: reply.reply?.length || 0 })
       return reply
@@ -545,6 +549,32 @@ export class AgentService {
       this.sessionPlanIds = savedSessionPlanIds
       this.context = savedContext
       this.runContext = null
+    }
+  }
+
+  /**
+   * 通过 SubAgentPool 在独立子 agent 中运行任务。
+   * 与 runSelfTask 的区别：
+   *  - 不进 completedQueue，不影响主对话 collectCompleted()
+   *  - 不占用 isBusy() 锁
+   *  - 没有 context save/restore
+   *  - 没有 inSelfTask 互斥守卫（可并发）
+   */
+  async runAgentTask(
+    task: string,
+    systemPrompt?: string,
+    options?: { maxTurns?: number; llmTimeoutMs?: number; role?: SubAgentRoleName },
+  ): Promise<{ success: boolean; summary: string }> {
+    const rolePrompt = options?.role ? getRolePrompt(options.role) : undefined
+    const combinedPrompt = [rolePrompt, systemPrompt].filter(Boolean).join('\n\n')
+    const spawnOptions: SpawnTaskOptions = {
+      maxTurns: options?.maxTurns,
+      llmTimeoutMs: options?.llmTimeoutMs,
+    }
+    const result = await this.subAgentPool.spawnTask(task, combinedPrompt, spawnOptions)
+    return {
+      success: result.status === 'completed',
+      summary: result.summary,
     }
   }
 }

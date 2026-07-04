@@ -1,0 +1,28 @@
+export const CRED_KEYS = {
+  LLM_KEY: 'llm_key',
+  LLM_API_URL: 'llm_api_url',
+  LLM_CHAT_MODEL: 'llm_chat_model',
+  LLM_CODE_KEY: 'llm_code_api_key',
+  LLM_CODE_API_URL: 'llm_code_api_url',
+  LLM_CODE_MODEL: 'llm_code_model',
+  LLM_VISION_API_URL: 'llm_vision_api_url',
+  LLM_VISION_MODEL: 'llm_vision_model',
+  LLM_VISION_KEY: 'llm_vision_key',
+  LLM_TEXT_API_URL: 'llm_text_api_url',
+  LLM_TEXT_MODEL: 'llm_text_model',
+  LLM_TEXT_KEY: 'llm_text_key',
+  LLM_IMAGE_API_URL: 'llm_image_api_url',
+  LLM_IMAGE_MODEL: 'llm_image_model',
+  LLM_IMAGE_KEY: 'llm_image_key',
+  WRITING_API_URL: 'writing_api_url',
+  BAIDU_ASR_API_KEY: 'baidu_asr_api_key',
+  BAIDU_ASR_SECRET_KEY: 'baidu_asr_secret_key',
+  TTS_MODE: 'tts_mode',
+  THEME: 'theme',
+  WAKE_WORDS: 'wake_words',
+  ASR_HOTWORDS: 'asr_hotwords',
+  ASR_INITIAL_PROMPT: 'asr_initial_prompt',
+  EVOLUTION_SAFETY_MODE: 'evolution_safety_mode',
+} as const
+
+export const ALL_SETTING_KEYS: readonly string[] = Object.values(CRED_KEYS)

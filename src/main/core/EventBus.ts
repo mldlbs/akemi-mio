@@ -40,6 +40,10 @@ export type EventName =
   | 'plugin.registered'
   | 'plugin.unregistered'
   | 'plugin.error'
+  | 'plugin.health-changed'
+  | 'plugin.quarantined'
+  | 'plugin.dead'
+  | 'plugin.zone-conflict'
   | 'recovery.checkpoint.created'
   | 'recovery.session.restored'
   | 'recovery.error.classified'
@@ -54,6 +58,7 @@ export type EventName =
   | 'evolution.rollback.completed'
   | 'evolution.proposal.validated'
   | 'evolution.plan.outcome'
+  | 'evolution.action.executed'
   | 'task.graph.cycle_detected'
   | 'goal.guardrail.rejection'
   | 'goal.guardrail.tripped'
@@ -66,6 +71,13 @@ export type EventName =
   | 'runtime.health.updated'
   | 'skill.enabled'
   | 'skill.disabled'
+  | 'pipeline.started'
+  | 'pipeline.completed'
+  | 'pipeline.errored'
+  | 'workflow.run.created'
+  | 'workflow.run.updated'
+  | 'workflow.run.step'
+  | 'workflow.def.created'
 
 export interface EventPayload {
   'task.lifecycle': { taskId: string; type: string; status: string; durationMs?: number; error?: string }
@@ -137,6 +149,10 @@ export interface EventPayload {
   'plugin.registered': { name: string; version: string; toolCount: number }
   'plugin.unregistered': { name: string; reason?: string }
   'plugin.error': { name: string; error: string; phase: string }
+  'plugin.health-changed': { name: string; status: string; fitnessScore: number }
+  'plugin.quarantined': { pluginName: string; reason: string; errorDetail?: string; quarantineDuration: number; timestamp: number }
+  'plugin.dead': { name: string; reason: string; fitnessScore: number }
+  'plugin.zone-conflict': { toolName: string; existingPlugin: string; incomingPlugin: string; resolution: string; resolvedAt: number }
   'recovery.checkpoint.created': { runId: string; trigger: string; path: string }
   'recovery.session.restored': { runId: string; hasUnfinishedPlan: boolean }
   'recovery.error.classified': { category: string; strategy: string; retryDelayMs: number }
@@ -148,6 +164,39 @@ export interface EventPayload {
   'skill.enabled': { name: string }
   'skill.disabled': { name: string; reason?: string }
   'skill.error': { name: string; error: string; phase: string }
+  'pipeline.started': { timestamp: number }
+  'pipeline.completed': {
+    collected: number
+    fixed: number
+    failed: number
+    queueRemaining: number
+    timestamp: number
+    durationMs: number
+    details: Array<{
+      problemId: string
+      source: string
+      file: string
+      line: number | undefined
+      title: string
+      success: boolean
+      summary: string
+      durationMs: number
+      output?: string
+      error?: string
+    }>
+  }
+  'pipeline.errored': { error: string }
+  'workflow.run.created': {
+    runId: string
+    workflowDefId?: string
+    workflowName?: string
+    steps?: any[]
+    startedAt?: number
+    status?: string
+  }
+  'workflow.run.updated': { runId: string; status?: string; stepId?: string; error?: string; agentResult?: string }
+  'workflow.run.step': { runId: string; stepId: string; status?: string; error?: string; agentResult?: any }
+  'workflow.def.created': { workflowDefId: string; name: string }
   'stability.score.updated': { score: number; trend: string; status: string }
   'stability.status.changed': { previous: string; current: string; score: number }
   'budget.exhausted': { resource: string; utilization: number }
@@ -164,6 +213,11 @@ export interface EventPayload {
     hadTimeout: boolean
     hadRetry: boolean
     durationMs: number
+  }
+  'evolution.action.executed': {
+    allOk: boolean
+    details: { name: string; success: boolean; summary: string }[]
+    durationMs?: number
   }
   'task.graph.cycle_detected': { cycle: string[] }
   'goal.guardrail.rejection': { reason: string; toolName: string; step: number }
@@ -186,7 +240,7 @@ export interface EventPayload {
   }
 }
 
-type Listener<E extends EventName> = (payload: EventPayload[E]) => void
+export type Listener<E extends EventName> = (payload: EventPayload[E]) => void
 
 /**
  * 订阅追踪器 — 收集所有 EventBus 订阅的清理函数，统一 dispose

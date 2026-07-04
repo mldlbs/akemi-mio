@@ -107,7 +107,7 @@ export class EvolutionSelfEvaluator {
     if (this.engineering) {
       try {
         this.engineering.store({
-          type: 'evaluation',
+          type: 'design_decision' as const,
           content: [
             `【自评估】${result.score}/100 (${params.strategyName})`,
             `计划质量: ${result.dimensions.planQuality}`,

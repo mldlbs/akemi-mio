@@ -9,7 +9,7 @@ export interface MilestoneParams {
   step: number
   toolResultsLength: number
   runContext: RunContext
-  activePlanChanged: boolean
+  activePlanChanged?: boolean
   lastCheckpointStep: number
   lastCheckpointTime: number
   consecutiveTimeoutRecoveries: number

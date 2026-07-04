@@ -6,7 +6,7 @@ import { log } from '../../logger/Logger'
  * 提供统一的调用接口，自动决定请求通过 Worker 线程执行还是回退到进程内执行。
  * 当 Worker 不可用时（未注册、崩溃或禁用），静默回退到 in-process 实现。
  */
-export class WorkerBridge<T extends Record<string, Function>> {
+export class WorkerBridge<T extends Record<string, (...args: any[]) => any>> {
   constructor(
     public readonly name: string,
     private isWorkerActive: () => boolean,

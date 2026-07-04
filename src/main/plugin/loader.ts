@@ -9,6 +9,7 @@ import { createPluginAPI } from './context'
 import { verifyPlugin } from './verifier'
 import { eventBus } from '../core/EventBus'
 import { log } from '../logger/Logger'
+import { pluginHealthGuard } from './PluginHealthGuard'
 
 export class PluginLoader {
   private pluginsDir: string
@@ -45,6 +46,7 @@ export class PluginLoader {
           }
         } catch (err) {
           log('WARN', 'plugin_load_failed', { path: entry.name, error: String(err) })
+          pluginHealthGuard.reportFailure(entry.name, String(err), 'load_file')
           eventBus.emit('plugin.error', { name: entry.name, error: String(err), phase: 'load_file' })
         }
       }
@@ -52,17 +54,40 @@ export class PluginLoader {
   }
 
   private async loadPlugin(plugin: Plugin): Promise<void> {
-    if (this.loaded.has(plugin.manifest.name)) return
+    const { name, version } = plugin.manifest
 
-    const api = createPluginAPI(plugin.manifest.name)
+    if (this.loaded.has(name)) return
+
+    // === 免疫检查: 抗原检测 ===
+    const antigenCheck = pluginHealthGuard.checkAntigen(name)
+    if (!antigenCheck.allowed) {
+      log('WARN', 'plugin_blocked_by_immune', { name, reason: antigenCheck.reason })
+      eventBus.emit('plugin.error', { name, error: antigenCheck.reason ?? 'Blocked by immune system', phase: 'immune_check' })
+      return
+    }
+
+    const api = createPluginAPI(name)
     const pluginPermissions = expandPermissions(plugin.manifest.permissions || [])
 
     let toolCount = 0
     for (const schema of plugin.tools) {
+      // === 工具 handler 包装: 适应度追踪 ===
+      const rawHandler = (args: Record<string, any>) => plugin.handle(schema.name, args)
+      const wrappedHandler = async (args: Record<string, any>): Promise<string> => {
+        try {
+          const result = await rawHandler(args)
+          pluginHealthGuard.reportSuccess(name)
+          return result
+        } catch (err) {
+          pluginHealthGuard.recordCallResult(name, false)
+          throw err
+        }
+      }
+
       const registration: ToolRegistration = {
         ...schema,
-        handler: (args) => plugin.handle(schema.name, args),
-        pluginName: plugin.manifest.name,
+        handler: wrappedHandler,
+        pluginName: name,
         requiredPermissions: pluginPermissions,
       }
       toolRegistry.register(registration)
@@ -73,15 +98,21 @@ export class PluginLoader {
       try {
         await plugin.onLoad(api)
       } catch (err) {
-        log('WARN', 'plugin_onload_failed', { name: plugin.manifest.name, error: String(err) })
-        eventBus.emit('plugin.error', { name: plugin.manifest.name, error: String(err), phase: 'onLoad' })
+        log('WARN', 'plugin_onload_failed', { name, error: String(err) })
+        pluginHealthGuard.reportFailure(name, String(err), 'onLoad')
+        eventBus.emit('plugin.error', { name, error: String(err), phase: 'onLoad' })
+        // onLoad 失败不阻止注册，但标记为 degraded
       }
     }
 
-    this.loaded.set(plugin.manifest.name, plugin)
+    // === 注册细胞 (免疫记忆) ===
+    const previous = this.loaded.get(name)
+    pluginHealthGuard.registerCell(name, version, previous?.manifest?.version)
+
+    this.loaded.set(name, plugin)
     eventBus.emit('plugin.registered', {
-      name: plugin.manifest.name,
-      version: plugin.manifest.version,
+      name,
+      version,
       toolCount,
     })
   }
@@ -117,6 +148,11 @@ export class PluginLoader {
         const pluginPath = join(this.pluginsDir, filename)
         if (existsSync(pluginPath) && !Array.from(this.loaded.keys()).some((k) => k === filename)) {
           try {
+            // === 免疫检查: 新文件尝试加载时验证 ===
+            if (!verifyPlugin(pluginPath, filename)) {
+              pluginHealthGuard.reportFailure(filename, '簽名驗證失敗，非信任插件', 'verify')
+              return
+            }
             const pluginModule = await import(pathToFileURL(pluginPath).href)
             const plugin: Plugin = pluginModule.default || pluginModule
             if (plugin && plugin.manifest && typeof plugin.handle === 'function') {
@@ -124,6 +160,7 @@ export class PluginLoader {
             }
           } catch (err) {
             log('WARN', 'plugin_hot_load_failed', { path: filename, error: String(err) })
+            pluginHealthGuard.reportFailure(filename, String(err), 'hot_load')
             eventBus.emit('plugin.error', { name: filename, error: String(err), phase: 'hot_load' })
           }
         }
@@ -132,12 +169,23 @@ export class PluginLoader {
 
       if (eventType === 'change') {
         const existing = Array.from(this.loaded.entries()).find(([_, p]) => p.manifest.name === filename)
+        const oldVersion = existing?.[1]?.manifest?.version
+
         if (existing) {
           await this.unload(existing[0])
         }
         try {
           const pluginPath = join(this.pluginsDir, filename)
           if (!existsSync(pluginPath)) return
+
+          // === 进化论: 突变风险评估 ===
+          if (existing && oldVersion) {
+            const mutationRisk = pluginHealthGuard.trackMutation(filename, 'unknown', oldVersion)
+            if (mutationRisk.risky) {
+              log('WARN', 'plugin_risky_mutation', { name: filename, warning: mutationRisk.warning })
+            }
+          }
+
           const pluginUrl = pathToFileURL(pluginPath).href + '?t=' + Date.now()
           const pluginModule = await import(pluginUrl)
           const plugin: Plugin = pluginModule.default || pluginModule
@@ -146,6 +194,7 @@ export class PluginLoader {
           }
         } catch (err) {
           log('WARN', 'plugin_reload_failed', { path: filename, error: String(err) })
+          pluginHealthGuard.reportFailure(filename, String(err), 'hot_reload')
           eventBus.emit('plugin.error', { name: filename, error: String(err), phase: 'hot_reload' })
         }
       }

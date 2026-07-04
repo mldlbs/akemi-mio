@@ -8,6 +8,7 @@ import { log } from '../logger/Logger'
 import { WORKSPACE_ROOT } from '../config'
 import * as schema from './schema'
 import { runMigrations } from './migration'
+import { classifyContent } from '../agent/ContentClassifier'
 
 let db: SqliteRemoteDatabase<typeof schema> | null = null
 let sqlite: SqlJsDatabase | null = null
@@ -84,6 +85,42 @@ export async function initDatabase(): Promise<void> {
   db = drizzle<typeof schema>(proxyCallback, { schema })
 
   runMigrations(sqlite)
+
+  // 回填已有消息的 category（迁移 v25 引入 category 列后，旧消息仍为 'chat'）
+  try {
+    const rows = sqlite.exec(
+      `SELECT id, content, session_id FROM messages WHERE role = 'user' AND category = 'chat' ORDER BY created_at ASC`,
+    )
+    if (rows.length && rows[0].values.length) {
+      const cols = rows[0].columns
+      const idIdx = cols.indexOf('id')
+      const contentIdx = cols.indexOf('content')
+      const sessionIdx = cols.indexOf('session_id')
+      const stmt1 = sqlite.prepare('UPDATE messages SET category = ? WHERE id = ?')
+      const stmt2 = sqlite.prepare('UPDATE messages SET category = ? WHERE session_id = ? AND role = ? AND category = ?')
+      for (const row of rows[0].values) {
+        const content = String(row[contentIdx] || '')
+        const cat = classifyContent(content)
+        if (cat !== 'chat') {
+          const id = String(row[idIdx])
+          stmt1.bind([cat, id])
+          stmt1.step()
+          stmt1.reset()
+          const sessionId = row[sessionIdx] as string | null
+          if (sessionId) {
+            stmt2.bind([cat, sessionId, 'assistant', 'chat'])
+            stmt2.step()
+            stmt2.reset()
+          }
+        }
+      }
+      stmt1.free()
+      stmt2.free()
+      markDirty()
+    }
+  } catch (err) {
+    log('ERROR', 'db_backfill_categories_failed', { error: String(err) })
+  }
 
   saveTimer = setInterval(() => {
     if (dirty && sqlite) {

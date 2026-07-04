@@ -9,7 +9,21 @@ import { createDevPlanTool, updatePlanProgressTool, listPlansTool, completePlanT
 import { analyzeCodebaseTool } from './definitions/AnalyzeCodebaseTool'
 import { getCredentialTool, setCredentialTool, listCredentialsTool } from './definitions/CredentialTools'
 import { rememberFactTool } from './definitions/RememberFactTool'
-import { analyzeTaskTool, listWorkflowsTool } from './definitions/WorkflowTools'
+import {
+  analyzeTaskTool,
+  listWorkflowsTool,
+  createWorkflowTool,
+  startWorkflowTool,
+  getWorkflowStatusTool,
+  updateWorkflowTool,
+  deleteWorkflowTool,
+  enableWorkflowTool,
+  disableWorkflowTool,
+  cancelWorkflowRunTool,
+  rerunWorkflowTool,
+  listWorkflowRunsTool,
+  autoScheduleWorkflowTool,
+} from './definitions/WorkflowTools'
 import { listSkillsTool, enableSkillTool, disableSkillTool } from './definitions/SkillTools'
 import { writingSystemTool } from './definitions/WritingTool'
 import { generateImageTool } from './definitions/ImageGenerationTool'
@@ -19,6 +33,15 @@ import { centosExecTool, centosReadFileTool, centosWriteFileTool, centosGrepTool
 import { spawnSkillAgentTool } from './definitions/SkillAgentTools'
 import { socialPipelineTool } from './definitions/SocialPipelineTool'
 import { queryTrendsTool } from './definitions/TrendQueryTool'
+import {
+  moveFileTool,
+  copyFileTool,
+  deleteFileTool,
+  fileInfoTool,
+  searchFilesGlobTool,
+  appendFileTool,
+  readMultipleFilesTool,
+} from './definitions/FileOpsTools'
 
 export function getAllTools(): Tool[] {
   return [
@@ -39,7 +62,18 @@ export function getAllTools(): Tool[] {
     listCredentialsTool as Tool,
     rememberFactTool as Tool,
     analyzeTaskTool as Tool,
+    autoScheduleWorkflowTool as Tool,
     listWorkflowsTool as Tool,
+    createWorkflowTool as Tool,
+    startWorkflowTool as Tool,
+    getWorkflowStatusTool as Tool,
+    updateWorkflowTool as Tool,
+    deleteWorkflowTool as Tool,
+    enableWorkflowTool as Tool,
+    disableWorkflowTool as Tool,
+    cancelWorkflowRunTool as Tool,
+    rerunWorkflowTool as Tool,
+    listWorkflowRunsTool as Tool,
     listSkillsTool as Tool,
     enableSkillTool as Tool,
     disableSkillTool as Tool,
@@ -56,6 +90,14 @@ export function getAllTools(): Tool[] {
     centosSearchFilesTool as Tool,
     socialPipelineTool as Tool,
     queryTrendsTool as Tool,
+    // 文件操作增强
+    moveFileTool as Tool,
+    copyFileTool as Tool,
+    deleteFileTool as Tool,
+    fileInfoTool as Tool,
+    searchFilesGlobTool as Tool,
+    appendFileTool as Tool,
+    readMultipleFilesTool as Tool,
   ]
 }
 

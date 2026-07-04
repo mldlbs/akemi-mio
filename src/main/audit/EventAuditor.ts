@@ -126,7 +126,7 @@ export class EventAuditor {
   // ══════════════════════════════════════════
 
   private onToolInvoked(p: EventPayload['agent.tool.invoked']): void {
-    const key = `${p.requestId}_${p.tool}`
+    const key = `tool_${p.tool}_${Date.now()}`
     this.toolInvokedCache.set(key, { tool: p.tool, timestamp: Date.now() })
     this.push({
       eventType: 'tool_invoked',
@@ -137,8 +137,17 @@ export class EventAuditor {
   }
 
   private onToolCompleted(p: EventPayload['agent.tool.completed']): void {
-    const key = `${p.requestId}_${p.tool}`
-    const cached = this.toolInvokedCache.get(key)
+    // Match by tool name + recent timestamp since the payload has no requestId
+    const now = Date.now()
+    let key = ''
+    let cached: { tool: string; timestamp: number } | undefined
+    for (const [k, v] of this.toolInvokedCache) {
+      if (v.tool === p.tool && now - v.timestamp < 30_000) {
+        key = k
+        cached = v
+        break
+      }
+    }
     const durationMs = cached ? Date.now() - cached.timestamp : undefined
     if (cached) this.toolInvokedCache.delete(key)
     this.push({
