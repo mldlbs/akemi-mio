@@ -1,4 +1,18 @@
 import { create } from 'zustand'
+import type { WorkflowState, WorkflowEvent, StepRun } from '../workflow/workflowTypes'
+import {
+  createRun,
+  transitionToRunning,
+  transitionToDone,
+  transitionToFailed,
+  transitionToCancelled,
+  transitionToPaused,
+  transitionToResumed,
+  transitionStepToRunning,
+  transitionStepToDone,
+  transitionStepToFailed,
+  transitionStepToSkipped,
+} from '../workflow/workflowTypes'
 
 export interface WorkflowDef {
   id: string
@@ -9,62 +23,88 @@ export interface WorkflowDef {
   updatedAt: number
 }
 
-export interface WorkflowStepRun {
-  stepId: string
-  status: string
-  agentResult?: string
-  error?: string
-  startedAt?: number
-  completedAt?: number
-}
-
-export interface WorkflowRun {
-  runId: string
-  workflowDefId: string
-  workflowName: string
-  status: string
-  steps: WorkflowStepRun[]
-  startedAt: number
-  completedAt?: number
-}
-
-interface WorkflowState {
+interface WorkflowStateData {
   definitions: WorkflowDef[]
-  runs: WorkflowRun[]
+  workflowRuns: WorkflowState[]
   loading: boolean
 }
 
 interface WorkflowActions {
   setDefinitions: (defs: WorkflowDef[]) => void
-  setRuns: (runs: WorkflowRun[]) => void
   setLoading: (loading: boolean) => void
-  addRun: (run: WorkflowRun) => void
-  updateRunStatus: (runId: string, status: string) => void
-  updateRunStep: (runId: string, stepId: string, data: Partial<WorkflowStepRun>) => void
+  addWorkflowEvent: (event: WorkflowEvent) => void
 }
 
-type WorkflowStore = WorkflowState & WorkflowActions
+type WorkflowStore = WorkflowStateData & WorkflowActions
 
 export const useWorkflowStore = create<WorkflowStore>((set) => ({
   definitions: [],
-  runs: [],
+  workflowRuns: [],
   loading: true,
 
   setDefinitions: (definitions) => set({ definitions }),
-  setRuns: (runs) => set({ runs }),
   setLoading: (loading) => set({ loading }),
-  addRun: (run) =>
-    set((state) => ({
-      runs: state.runs.some((r) => r.runId === run.runId) ? state.runs : [run, ...state.runs].slice(0, 20),
-    })),
-  updateRunStatus: (runId, status) =>
-    set((state) => ({
-      runs: state.runs.map((r) => (r.runId === runId ? { ...r, status } : r)),
-    })),
-  updateRunStep: (runId, stepId, data) =>
-    set((state) => ({
-      runs: state.runs.map((r) =>
-        r.runId === runId ? { ...r, steps: r.steps.map((s) => (s.stepId === stepId ? { ...s, ...data } : s)) } : r,
-      ),
-    })),
+
+  addWorkflowEvent: (event) =>
+    set((s) => {
+      const { workflowRuns } = s
+
+      // New run from a created event
+      if (event.type === 'workflow.created') {
+        if (workflowRuns.some((r) => r.runId === event.runId)) return s
+        const pending = createRun(event)
+        // IPC always creates runs as already running — chain pending → running
+        const running = transitionToRunning(pending, {
+          type: 'workflow.started',
+          runId: event.runId,
+          timestamp: event.timestamp,
+        })
+        return { workflowRuns: [running, ...workflowRuns].slice(0, 20) }
+      }
+
+      // Existing run — find it and apply transition
+      const idx = workflowRuns.findIndex((r) => r.runId === event.runId)
+      if (idx === -1) return s
+
+      const existing = workflowRuns[idx]
+      let next: WorkflowState | null = null
+
+      switch (event.type) {
+        case 'workflow.started':
+          next = transitionToRunning(existing, event)
+          break
+        case 'workflow.completed':
+          next = transitionToDone(existing, event)
+          break
+        case 'workflow.failed':
+          next = transitionToFailed(existing, event)
+          break
+        case 'workflow.cancelled':
+          next = transitionToCancelled(existing, event)
+          break
+        case 'workflow.paused':
+          next = transitionToPaused(existing, event)
+          break
+        case 'workflow.resumed':
+          next = transitionToResumed(existing, event)
+          break
+        case 'step.started':
+          next = transitionStepToRunning(existing, event)
+          break
+        case 'step.completed':
+          next = transitionStepToDone(existing, event)
+          break
+        case 'step.failed':
+          next = transitionStepToFailed(existing, event)
+          break
+        case 'step.skipped':
+          next = transitionStepToSkipped(existing, event)
+          break
+      }
+
+      if (!next) return s
+      const updated = [...workflowRuns]
+      updated[idx] = next
+      return { workflowRuns: updated }
+    }),
 }))

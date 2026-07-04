@@ -106,10 +106,13 @@ export function ToolSlot() {
           </div>
           {completedTools.map((t) => {
             const cssClass =
-              t.status === 'timeout' ? 'tool-item-timedout' :
-              t.status === 'cancelled' ? 'tool-item-cancelled' :
-              t.status === 'error' ? 'tool-item-failed' :
-              'tool-item-done'
+              t.status === 'timeout'
+                ? 'tool-item-timedout'
+                : t.status === 'cancelled'
+                  ? 'tool-item-cancelled'
+                  : t.status === 'error'
+                    ? 'tool-item-failed'
+                    : 'tool-item-done'
 
             return (
               <div key={t.id} className={`tool-item ${cssClass}`}>

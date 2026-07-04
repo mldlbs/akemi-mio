@@ -2,7 +2,10 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { WorkflowEditor } from './WorkflowEditor'
 import { ErrorBoundary } from './ErrorBoundary'
 import { useWorkflowStore } from '../store/workflowStore'
+import { useClockStore } from '../store/clockStore'
 import { useIPCEvent } from '../hooks/useIPCEvent'
+import { isWorkflowActive } from '../workflow/workflowTypes'
+import type { StepRun } from '../workflow/workflowTypes'
 
 type ViewMode = 'list' | 'editor'
 type HistoryFilter = 'all' | 'done' | 'failed'
@@ -143,15 +146,47 @@ function handlerLabel(handler: string): string {
 export function WorkflowSlot() {
   const store = useWorkflowStore()
   const workflowDefs = store.definitions
-  const workflowRuns = store.runs
-  const workflowActiveRuns = store.runs.filter((r) => r.status === 'running')
+  const workflowRuns = store.workflowRuns
+  const workflowActiveRuns = store.workflowRuns.filter((r) => r.status === 'running' || r.status === 'paused')
   const wfLoading = store.loading
 
   const refreshDefs = useCallback(() => {
     Promise.all([window.electronAPI.listWorkflowDefinitions(), window.electronAPI.listWorkflowRuns(20)]).then(([defs, runList]) => {
       store.setDefinitions(defs)
-      store.setRuns(runList)
       store.setLoading(false)
+      for (const run of runList) {
+        const steps: StepRun[] = (run.steps || []).map((s: any) => {
+          if (s.status === 'running' || s.status === 'in_progress')
+            return { status: 'running', stepId: s.stepId, startedAt: s.startedAt ?? Date.now() }
+          if (s.status === 'done' || s.status === 'completed')
+            return {
+              status: 'done',
+              stepId: s.stepId,
+              startedAt: s.startedAt ?? Date.now(),
+              endedAt: s.completedAt ?? Date.now(),
+              agentResult: s.agentResult,
+            }
+          if (s.status === 'failed')
+            return {
+              status: 'failed',
+              stepId: s.stepId,
+              startedAt: s.startedAt ?? Date.now(),
+              endedAt: s.completedAt ?? Date.now(),
+              error: s.error,
+            }
+          if (s.status === 'skipped')
+            return { status: 'skipped', stepId: s.stepId, startedAt: s.startedAt ?? Date.now(), endedAt: s.completedAt ?? Date.now() }
+          return { status: 'pending', stepId: s.stepId }
+        })
+        store.addWorkflowEvent({
+          type: 'workflow.created',
+          runId: run.runId,
+          workflowDefId: run.workflowDefId,
+          workflowName: run.workflowName || '',
+          steps,
+          timestamp: run.startedAt || Date.now(),
+        })
+      }
     })
   }, [store])
 
@@ -161,9 +196,9 @@ export function WorkflowSlot() {
 
   const [view, setView] = useState<ViewMode>('list')
   const [editDef, setEditDef] = useState<any | null>(null)
+  const now = useClockStore((s) => s.now)
   const [runError, setRunError] = useState('')
   const [runSuccess, setRunSuccess] = useState('')
-  const [elapsed, setElapsed] = useState(0)
 
   // ── Search ──
   const [searchQuery, setSearchQuery] = useState('')
@@ -191,17 +226,15 @@ export function WorkflowSlot() {
     if (nearBottom) el.scrollTop = el.scrollHeight
   }, [pipelineLogs])
 
-  // 活跃工作流计时器
+  // 活跃工作流计时器 — 使用全局 ClockStore
   const hasActive = workflowActiveRuns.length > 0
-  useEffect(() => {
-    if (!hasActive) {
-      setElapsed(0)
-      return
-    }
-    const t0 = Date.now()
-    const id = setInterval(() => setElapsed(Date.now() - t0), 1000)
-    return () => clearInterval(id)
-  }, [hasActive])
+  const startTime = useMemo(() => {
+    if (!hasActive) return 0
+    const earliest = Math.min(...workflowActiveRuns.map((r: any) => r.startedAt || Date.now()))
+    return earliest
+  }, [hasActive, workflowActiveRuns])
+
+  const elapsed = hasActive && startTime > 0 ? now - startTime : 0
 
   // 收集 pipeline 实时日志 — 从步骤事件直接累积，不掉帧
   useIPCEvent(window.electronAPI.onWorkflowRunStep, (data) => {
@@ -228,7 +261,7 @@ export function WorkflowSlot() {
   }, [workflowDefs, searchQuery])
 
   const historyRuns = useMemo(() => {
-    const completed = workflowRuns.filter((r: any) => r.status !== 'running')
+    const completed = workflowRuns.filter((r: any) => r.status !== 'running' && r.status !== 'paused')
     if (historyFilter === 'all') return completed
     return completed.filter((r: any) => r.status === historyFilter)
   }, [workflowRuns, historyFilter])
@@ -250,7 +283,7 @@ export function WorkflowSlot() {
   }, [workflowDefs])
 
   const showPipeline = workflowActiveRuns.length > 0
-  const showHistory = workflowRuns.filter((r: any) => r.status !== 'running').length > 0
+  const showHistory = workflowRuns.filter((r: any) => r.status !== 'running' && r.status !== 'paused').length > 0
 
   // 按启用/禁用分组
   const enabledDefs = useMemo(() => filteredDefs.filter((d) => d.enabled !== false), [filteredDefs])
@@ -725,7 +758,9 @@ export function WorkflowSlot() {
               <div className="wf-history-toggle-left">
                 <i className={`ri-arrow-${historyOpen ? 'down' : 'right'}-s-line`} />
                 运行历史
-                <span className="wf-history-count">{workflowRuns.filter((r: any) => r.status !== 'running').length}</span>
+                <span className="wf-history-count">
+                  {workflowRuns.filter((r: any) => r.status !== 'running' && r.status !== 'paused').length}
+                </span>
               </div>
             </button>
 

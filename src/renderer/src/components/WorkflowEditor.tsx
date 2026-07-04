@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { WorkflowCanvas } from './WorkflowCanvas'
 import { WorkflowRunPanel } from './WorkflowRunPanel'
 import { useIPCEvent } from '../hooks/useIPCEvent'
+import { useWorkflowStore } from '../store/workflowStore'
+import { isWorkflowActive } from '../workflow/workflowTypes'
 
 const HANDLER_OPTIONS = [
   { value: 'subagent', label: '子 Agent', icon: 'ri-robot-2-line', tagClass: 'wf-handler-subagent' },
@@ -337,39 +339,23 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
   const [expandedFields, setExpandedFields] = useState<Record<string, boolean>>({})
   const [, forceRender] = useState(0)
 
-  // ── 运行面板 ──
-  const [activeRuns, setActiveRuns] = useState<any[]>([])
+  // ── 运行面板 — 核心状态来自 store，local 只维护 UI 状态 ──
+  const wfStore = useWorkflowStore()
+  const storeActiveRuns = wfStore.workflowRuns.filter(isWorkflowActive)
   const [pipelineLogs, setPipelineLogs] = useState<Record<string, string[]>>({})
   const [showRunPanel, setShowRunPanel] = useState(false)
-  const hasActiveRuns = activeRuns.some((r) => r.status === 'running')
+  const hasActiveRuns = storeActiveRuns.length > 0
 
   useIPCEvent(window.electronAPI.onWorkflowRunCreated, (data: any) => {
-    setActiveRuns((prev) => {
-      if (prev.some((r) => r.runId === data.runId)) return prev
-      return [...prev, { ...data, status: 'running' }]
-    })
     setShowRunPanel(true)
   })
 
-  useIPCEvent(window.electronAPI.onWorkflowRunUpdated, (data: any) => {
-    setActiveRuns((prev) => prev.map((r) => (r.runId === data.runId ? { ...r, status: data.status } : r)))
+  useIPCEvent(window.electronAPI.onWorkflowRunUpdated, (_data: any) => {
+    // Run state updates flow through the store via useWorkflowDefinitions
+    // Nothing extra needed here — the store is the single source of truth
   })
 
-  useIPCEvent(window.electronAPI.onWorkflowRunStep, (data: any) => {
-    setActiveRuns((prev) =>
-      prev.map((r) =>
-        r.runId === data.runId
-          ? {
-              ...r,
-              steps: r.steps.map((s) =>
-                s.stepId === data.stepId
-                  ? { ...s, status: data.status, error: data.error ?? s.error, agentResult: data.agentResult ?? s.agentResult }
-                  : s,
-              ),
-            }
-          : r,
-      ),
-    )
+  useIPCEvent(window.electronAPI.onWorkflowRunStep, (data) => {
     if (!data.agentResult) return
     setPipelineLogs((prev) => {
       const lines = prev[data.runId] ?? []
@@ -969,7 +955,7 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
         />
         {showRunPanel ? (
           <WorkflowRunPanel
-            runs={activeRuns.filter((r) => r.status === 'running' || r.pendingGate)}
+            runs={storeActiveRuns.filter((r) => r.status === 'running' || (r as any).pendingGate)}
             pipelineLogs={pipelineLogs}
             onCancel={async (runId) => {
               await window.electronAPI.stopWorkflowRun(runId)

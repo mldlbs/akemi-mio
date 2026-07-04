@@ -1,7 +1,8 @@
 import { useEffect, useCallback } from 'react'
 import { useIPCEvent } from './useIPCEvent'
 import { useWorkflowStore } from '../store/workflowStore'
-import type { WorkflowRun } from '../store/workflowStore'
+import { isWorkflowActive, isStepActive } from '../workflow/workflowTypes'
+import type { WorkflowEvent, StepRun } from '../workflow/workflowTypes'
 
 export function useWorkflowDefinitions() {
   const store = useWorkflowStore()
@@ -9,51 +10,111 @@ export function useWorkflowDefinitions() {
   const refresh = useCallback(() => {
     Promise.all([window.electronAPI.listWorkflowDefinitions(), window.electronAPI.listWorkflowRuns(20)]).then(([defs, runList]) => {
       store.setDefinitions(defs)
-      store.setRuns(runList)
       store.setLoading(false)
+      // Hydrate initial runs from list via workflow.created events
+      for (const run of runList) {
+        const steps: StepRun[] = (run.steps || []).map((s: any) => {
+          if (s.status === 'running' || s.status === 'in_progress') {
+            return { status: 'running', stepId: s.stepId, startedAt: s.startedAt ?? Date.now() }
+          }
+          if (s.status === 'done' || s.status === 'completed') {
+            return {
+              status: 'done',
+              stepId: s.stepId,
+              startedAt: s.startedAt ?? Date.now(),
+              endedAt: s.completedAt ?? Date.now(),
+              agentResult: s.agentResult,
+            }
+          }
+          if (s.status === 'failed') {
+            return {
+              status: 'failed',
+              stepId: s.stepId,
+              startedAt: s.startedAt ?? Date.now(),
+              endedAt: s.completedAt ?? Date.now(),
+              error: s.error,
+            }
+          }
+          if (s.status === 'skipped') {
+            return { status: 'skipped', stepId: s.stepId, startedAt: s.startedAt ?? Date.now(), endedAt: s.completedAt ?? Date.now() }
+          }
+          return { status: 'pending', stepId: s.stepId }
+        })
+        store.addWorkflowEvent({
+          type: 'workflow.created',
+          runId: run.runId,
+          workflowDefId: run.workflowDefId,
+          workflowName: run.workflowName || '',
+          steps,
+          timestamp: run.startedAt || Date.now(),
+        })
+      }
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [store])
 
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    if (store.loading) refresh()
+  }, [store.loading, refresh])
 
-  // 工作流新运行创建 → 直接使用事件携带的全量数据
   useIPCEvent(window.electronAPI.onWorkflowRunCreated, (data: any) => {
-    store.addRun({
+    const steps: StepRun[] = (data.steps || []).map((s: any) => ({
+      stepId: s.stepId,
+      status: 'pending' as const,
+    }))
+    store.addWorkflowEvent({
+      type: 'workflow.created',
       runId: data.runId,
       workflowDefId: data.workflowDefId,
       workflowName: data.workflowName || '',
-      status: 'running',
-      steps: data.steps || [],
-      startedAt: data.startedAt || Date.now(),
+      steps,
+      timestamp: data.startedAt || Date.now(),
     })
   })
 
-  // 工作流定义创建 → 全量刷新列表
   useIPCEvent(window.electronAPI.onWorkflowDefCreated, () => {
     window.electronAPI.listWorkflowDefinitions().then((defs) => store.setDefinitions(defs))
   })
 
-  // 运行状态变更 → 原地更新
   useIPCEvent(window.electronAPI.onWorkflowRunUpdated, (data) => {
-    store.updateRunStatus(data.runId, data.status)
+    const ts = Date.now()
+    const status = data.status
+    if (status === 'running') {
+      store.addWorkflowEvent({ type: 'workflow.started', runId: data.runId, timestamp: ts })
+    } else if (status === 'done' || status === 'completed') {
+      store.addWorkflowEvent({ type: 'workflow.completed', runId: data.runId, timestamp: ts })
+    } else if (status === 'failed') {
+      store.addWorkflowEvent({ type: 'workflow.failed', runId: data.runId, error: data.error || 'unknown', timestamp: ts })
+    } else if (status === 'paused') {
+      store.addWorkflowEvent({ type: 'workflow.paused', runId: data.runId, timestamp: ts })
+    }
   })
 
-  // 步骤状态变更 → 原地更新（含 error / agentResult）
   useIPCEvent(window.electronAPI.onWorkflowRunStep, (data) => {
-    store.updateRunStep(data.runId, data.stepId, {
-      status: data.status,
-      error: data.error,
-      agentResult: data.agentResult,
-    })
+    const ts = Date.now()
+    const status = data.status
+    if (status === 'running' || status === 'in_progress') {
+      store.addWorkflowEvent({ type: 'step.started', runId: data.runId, stepId: data.stepId, timestamp: ts })
+    } else if (status === 'done' || status === 'completed') {
+      store.addWorkflowEvent({
+        type: 'step.completed',
+        runId: data.runId,
+        stepId: data.stepId,
+        agentResult: data.agentResult || '',
+        timestamp: ts,
+      })
+    } else if (status === 'failed') {
+      store.addWorkflowEvent({ type: 'step.failed', runId: data.runId, stepId: data.stepId, error: data.error || 'unknown', timestamp: ts })
+    } else if (status === 'skipped') {
+      store.addWorkflowEvent({ type: 'step.skipped', runId: data.runId, stepId: data.stepId, timestamp: ts })
+    }
   })
+
+  const activeRuns = store.workflowRuns.filter(isWorkflowActive)
 
   return {
     definitions: store.definitions,
-    runs: store.runs,
-    activeRuns: store.runs.filter((r) => r.status === 'running'),
+    workflowRuns: store.workflowRuns,
+    activeRuns,
     loading: store.loading,
     refresh,
   }

@@ -36,7 +36,7 @@ export function resetAllStores() {
   })
   useWorkflowStore.setState({
     definitions: [],
-    runs: [],
+    workflowRuns: [],
     loading: true,
   })
 }
