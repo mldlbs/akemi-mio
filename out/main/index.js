@@ -12605,11 +12605,7 @@ class LlmService {
     const t0 = Date.now();
     const promptLength = messages2.reduce((s, m) => s + (m.content?.length || 0), 0);
     const rawPromptTokens = estimateTokens(JSON.stringify(messages2));
-    this.evaluationEmitter?.emit(
-      "model.invoked",
-      { type: "model.invoked", modelName: this.codeModel, promptLength, promptTokens: rawPromptTokens },
-      { traceId: requestId2 }
-    );
+    let _evalInvoked = false;
     const RETRYABLE = /* @__PURE__ */ new Set(["RATE_LIMITED", "NETWORK"]);
     const RETRYABLE_STATUS_CODES = /* @__PURE__ */ new Set([429, 500, 502, 503]);
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -12629,6 +12625,14 @@ class LlmService {
         externalSignal.addEventListener("abort", () => controller.abort(), { once: true });
       }
       try {
+        if (!_evalInvoked) {
+          _evalInvoked = true;
+          this.evaluationEmitter?.emit(
+            "model.invoked",
+            { type: "model.invoked", modelName: this.codeModel, promptLength, promptTokens: rawPromptTokens },
+            { traceId: requestId2 }
+          );
+        }
         if (onChunk) {
           const result2 = await this._chatWithToolsStream(messages2, requestId2, t0, controller.signal, onChunk, allowedToolNames);
           if (result2.error && RETRYABLE.has(result2.error)) {
@@ -12680,25 +12684,6 @@ class LlmService {
       }
     }
     return this._emitModelError("RATE_LIMITED_EXHAUSTED", Date.now() - t0, requestId2, t0, rawPromptTokens);
-  }
-  _emitModelCompleted(result, requestId2, t0, rawPromptTokens) {
-    const elapsed = Date.now() - t0;
-    const replyLen = result.reply?.length ?? 0;
-    this.evaluationEmitter?.emit(
-      "model.completed",
-      {
-        type: "model.completed",
-        modelName: this.codeModel,
-        durationMs: elapsed,
-        inputTokens: rawPromptTokens,
-        outputTokens: Math.round(replyLen * 1.3),
-        responseLength: replyLen,
-        responsePreview: result.reply?.slice(0, 200),
-        error: result.error
-      },
-      { traceId: requestId2 }
-    );
-    return result;
   }
   _emitModelError(error, elapsed, requestId2, t0, rawPromptTokens) {
     const realElapsed = elapsed > 0 ? elapsed : Date.now() - t0;
@@ -12995,6 +12980,29 @@ class LlmService {
     }
   }
   // ── 文本处理（摘要、提取、重写、分析等纯文本任务）──
+  /**
+   * Evaluation: 在 chatWithTools 的每个退出点发射 model.completed
+   * （仅当确实发起了 API 调用，即已发出 model.invoked）
+   */
+  _emitModelCompleted(result, requestId2, t0, rawPromptTokens) {
+    const elapsed = Date.now() - t0;
+    const replyLen = result.reply?.length ?? 0;
+    this.evaluationEmitter?.emit(
+      "model.completed",
+      {
+        type: "model.completed",
+        modelName: this.codeModel,
+        durationMs: elapsed,
+        inputTokens: rawPromptTokens,
+        outputTokens: Math.round(replyLen * 1.3),
+        responseLength: replyLen,
+        responsePreview: result.reply?.slice(0, 200),
+        error: result.error
+      },
+      { traceId: requestId2 }
+    );
+    return result;
+  }
   /**
    * chatText — 使用文本处理模型（text）进行纯文本任务，不携带 tools。
    * 适用于摘要、提取、重写、分析等场景，避免占用 code 模型的限额。
@@ -31261,6 +31269,85 @@ function percentile(sorted, p) {
   const idx = Math.ceil(p * sorted.length) - 1;
   return sorted[Math.max(0, idx)];
 }
+class ToolEventBridge {
+  emitter;
+  bus;
+  disposers = [];
+  /**
+   * 每个工具名的 FIFO 调用队列。
+   * 同一轮 toolLoop 中可能多次调用同名工具（不同参数），
+   * 队列确保 completed/failed 与 invoked 按 FIFO 顺序配对。
+   */
+  pendingMap = /* @__PURE__ */ new Map();
+  constructor(emitter, bus) {
+    this.emitter = emitter;
+    this.bus = bus ?? eventBus;
+  }
+  start() {
+    this.disposers.push(
+      this.bus.on("agent.tool.invoked", (p) => this.onToolInvoked(p)),
+      this.bus.on("agent.tool.completed", (p) => this.onToolCompleted(p)),
+      this.bus.on("agent.tool.failed", (p) => this.onToolFailed(p))
+    );
+  }
+  stop() {
+    for (const dispose of this.disposers) dispose();
+    this.disposers = [];
+    this.pendingMap.clear();
+  }
+  onToolInvoked(p) {
+    const toolName = p.tool;
+    const now = Date.now();
+    const queue = this.pendingMap.get(toolName) ?? [];
+    queue.push({ toolName, invokedAt: now });
+    this.pendingMap.set(toolName, queue);
+    this.emitter.emit(
+      "tool.invoked",
+      { type: "tool.invoked", toolName, args: p.args },
+      { traceId: "" }
+      // traceId 由 ChatExecutor 的 requestId 传递，EventBus 当前 payload 不包含
+    );
+  }
+  onToolCompleted(p) {
+    const pending = this.consumePending(p.tool);
+    if (!pending) return;
+    this.emitter.emit(
+      "tool.completed",
+      {
+        type: "tool.completed",
+        toolName: p.tool,
+        durationMs: Date.now() - pending.invokedAt,
+        output: p.result?.slice(0, 5e3)
+        // 截断到安全长度
+      },
+      { traceId: "" }
+    );
+  }
+  onToolFailed(p) {
+    const pending = this.consumePending(p.tool);
+    if (!pending) return;
+    this.emitter.emit(
+      "tool.completed",
+      {
+        type: "tool.completed",
+        toolName: p.tool,
+        durationMs: Date.now() - pending.invokedAt,
+        error: p.error?.slice(0, 2e3)
+      },
+      { traceId: "" }
+    );
+  }
+  /**
+   * 消费 FIFO 队列中最旧的 pending 记录。
+   */
+  consumePending(toolName) {
+    const queue = this.pendingMap.get(toolName);
+    if (!queue || queue.length === 0) return null;
+    const pending = queue.shift();
+    if (queue.length === 0) this.pendingMap.delete(toolName);
+    return pending;
+  }
+}
 class AppRuntime {
   subs = new SubscriptionTracker();
   taskRunner;
@@ -31286,6 +31373,7 @@ class AppRuntime {
   runtimeHealthManager;
   evaluationStore;
   evaluationEmitter;
+  toolEventBridge;
   metricsEngine;
   comfyUI;
   pipeline;
@@ -31399,6 +31487,13 @@ class AppRuntime {
     await this.evaluationStore.init();
     this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, "runtime");
     llmService.setEvaluationEmitter(this.evaluationEmitter);
+    Logger.log("INFO", "evaluation_ready");
+    this.evaluationStore = new EvaluationStore();
+    await this.evaluationStore.init();
+    this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, "runtime");
+    llmService.setEvaluationEmitter(this.evaluationEmitter);
+    this.toolEventBridge = new ToolEventBridge(this.evaluationEmitter, eventBus);
+    this.toolEventBridge.start();
     Logger.log("INFO", "evaluation_ready");
     const win = createWindow(stateManager);
     agentService.setMainWindow(win);
@@ -31737,6 +31832,9 @@ class AppRuntime {
     this.taskRunner?.stop();
     await this.comfyUI?.stop().catch(() => {
     });
+    this.toolEventBridge?.stop();
+    await this.evaluationStore?.shutdown().catch(() => {
+    });
     this.memoryService?.shutdown();
     this.memoryIndexer?.stop();
     await this.evaluationStore?.shutdown().catch(() => {
@@ -32050,6 +32148,23 @@ class AppRuntime {
           (p) => Logger.log("INFO", "creativity_dream_end", { count: p.count, top_novelty: p.topNovelty }),
           this.subs,
           "runtime:creativity_dream"
+        );
+        this.metricsEngine = new MetricsEngineImpl(new RepositoryEventIterator(this.evaluationStore));
+        this.taskRunner.register(
+          "evaluation.metrics",
+          async () => {
+            const until = Date.now();
+            const since = until - 6e5;
+            const snapshot = await this.metricsEngine.compute({ since, until });
+            Logger.log("INFO", "eval_metrics", {
+              calls: snapshot.traffic.totalCalls,
+              rate: Math.round(snapshot.quality.completionRate * 100),
+              avgMs: Math.round(snapshot.latency.avgMs),
+              tokens: snapshot.cost.totalTokens
+            });
+            return { success: true };
+          },
+          6e5
         );
         eventBus.track(
           "evolution.cycle.completed",

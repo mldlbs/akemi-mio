@@ -13120,17 +13120,104 @@ function VoiceInput({ onResult, disabled, onWakeWord }) {
     )
   ] });
 }
-const initialAgent = {
+function isToolActive(state) {
+  return state.status === "pending" || state.status === "running";
+}
+let IllegalTransitionError$1 = class IllegalTransitionError extends Error {
+  constructor(from, to) {
+    super(`Illegal FSM transition: ${from} → ${to}`);
+    this.name = "IllegalTransitionError";
+  }
+};
+function assertNonTerminal(state) {
+  if (state.status === "success" || state.status === "error" || state.status === "timeout" || state.status === "cancelled") {
+    throw new IllegalTransitionError$1(state.status, "running");
+  }
+}
+function assertRunning(state) {
+  if (state.status !== "running") {
+    throw new IllegalTransitionError$1(state.status, "terminal");
+  }
+}
+function createPending(event) {
+  return {
+    status: "pending",
+    id: event.id,
+    tool: event.tool,
+    args: event.args,
+    createdAt: event.timestamp
+  };
+}
+function transitionToRunning$1(state, event) {
+  assertNonTerminal(state);
+  return {
+    status: "running",
+    id: state.id,
+    tool: state.tool,
+    args: state.args ?? event.args,
+    startedAt: event.timestamp
+  };
+}
+function transitionToSuccess(state, event) {
+  assertRunning(state);
+  return {
+    status: "success",
+    id: state.id,
+    tool: state.tool,
+    args: state.args,
+    startedAt: state.startedAt,
+    endedAt: event.timestamp,
+    latencyMs: event.latencyMs,
+    result: event.result
+  };
+}
+function transitionToError(state, event) {
+  assertRunning(state);
+  return {
+    status: "error",
+    id: state.id,
+    tool: state.tool,
+    args: state.args,
+    startedAt: state.startedAt,
+    endedAt: event.timestamp,
+    latencyMs: event.latencyMs,
+    error: event.error
+  };
+}
+function transitionToTimeout(state, event) {
+  assertRunning(state);
+  return {
+    status: "timeout",
+    id: state.id,
+    tool: state.tool,
+    args: state.args,
+    startedAt: state.startedAt,
+    endedAt: event.timestamp,
+    latencyMs: event.latencyMs
+  };
+}
+function transitionToCancelled$1(state, event) {
+  assertRunning(state);
+  return {
+    status: "cancelled",
+    id: state.id,
+    tool: state.tool,
+    args: state.args,
+    startedAt: state.startedAt,
+    endedAt: event.timestamp,
+    latencyMs: event.latencyMs ?? Date.now() - state.startedAt
+  };
+}
+const initialAgentState = {
   agentState: "idle",
   pendingText: "",
   displayText: "",
   transcribed: "",
   toolStatus: null,
-  toolRunning: [],
-  toolCompleted: []
+  tools: []
 };
 const useAgentStore = create((set) => ({
-  ...initialAgent,
+  ...initialAgentState,
   setAgentState: (agentState) => set({ agentState }),
   setPendingText: (pendingText) => set({ pendingText }),
   appendPendingText: (chunk) => set((s) => ({
@@ -13143,12 +13230,38 @@ const useAgentStore = create((set) => ({
     toolStatus,
     agentState: toolStatus?.type === "start" ? "tool_executing" : s.agentState === "tool_executing" ? "replying" : s.agentState
   })),
-  addToolRunning: (tool) => set((s) => ({ toolRunning: [...s.toolRunning, tool] })),
-  removeToolRunning: (id) => set((s) => ({ toolRunning: s.toolRunning.filter((t) => t.id !== id) })),
-  addToolCompleted: (tool) => set((s) => ({ toolCompleted: [...s.toolCompleted, tool] })),
-  clearToolRunning: () => set({ toolRunning: [] }),
-  clearToolCompleted: () => set({ toolCompleted: [] }),
-  resetAgent: () => set(initialAgent)
+  addTool: (event) => set((s) => {
+    const existing = s.tools.find((t) => t.id === event.id);
+    if (!existing) {
+      if (event.type !== "tool.started") return s;
+      const pending = createPending(event);
+      const running = transitionToRunning$1(pending, event);
+      return { tools: [...s.tools, running] };
+    }
+    let next;
+    switch (event.type) {
+      case "tool.started":
+        next = transitionToRunning$1(existing, event);
+        break;
+      case "tool.succeeded":
+        next = transitionToSuccess(existing, event);
+        break;
+      case "tool.failed":
+        next = transitionToError(existing, event);
+        break;
+      case "tool.timedout":
+        next = transitionToTimeout(existing, event);
+        break;
+      case "tool.cancelled":
+        next = transitionToCancelled$1(existing, event);
+        break;
+      default:
+        return s;
+    }
+    return { tools: s.tools.map((t) => t.id === event.id ? next : t) };
+  }),
+  clearTools: () => set({ tools: [] }),
+  resetAgent: () => set(initialAgentState)
 }));
 const PERSONA_LABELS = {
   core: "日常",
@@ -13420,8 +13533,8 @@ const AGENT_LABELS = {
   tool_executing: "执行工具…",
   replying: null
 };
-function humanToolName(t) {
-  const n = t.tool;
+function humanToolName(tool) {
+  const n = tool;
   if (n === "read_file") return "读取文件";
   if (n === "edit_file") return "编辑文件";
   if (n === "write_file") return "写入文件";
@@ -13461,8 +13574,9 @@ function ChatSlot() {
   const displayText = useAgentStore((s) => s.displayText);
   const transcribed = useAgentStore((s) => s.transcribed);
   const agentState = useAgentStore((s) => s.agentState);
-  const toolRunning = useAgentStore((s) => s.toolRunning);
-  const toolCompleted = useAgentStore((s) => s.toolCompleted);
+  const tools = useAgentStore((s) => s.tools);
+  const toolRunning = reactExports.useMemo(() => tools.filter(isToolActive), [tools]);
+  const toolCompleted = reactExports.useMemo(() => tools.filter((t) => !isToolActive(t)), [tools]);
   const bottomRef = reactExports.useRef(null);
   const [toolsCollapsed, setToolsCollapsed] = reactExports.useState(false);
   reactExports.useEffect(() => {
@@ -13474,7 +13588,7 @@ function ChatSlot() {
   const showEmpty = messages.length === 0 && !hasPending && !transcribed && !hasTools && !agentLabel && !historyLoading;
   const toolSummary = reactExports.useMemo(() => {
     const allTools = [...toolRunning, ...toolCompleted];
-    const names = [...new Set(allTools.map((t) => humanToolName(t)))];
+    const names = [...new Set(allTools.map((t) => humanToolName(t.tool)))];
     if (names.length === 0) return "";
     if (names.length <= 2) return names.join("、");
     return `${names[0]} 等 ${names.length} 个工具`;
@@ -13525,7 +13639,7 @@ function ChatSlot() {
       ),
       !toolsCollapsed && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-inline-items", children: toolRunning.map((t) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-inline tool-inline-running", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-loader-4-line ri-spin" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-inline-name", children: humanToolName(t) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-inline-name", children: humanToolName(t.tool) }),
         t.args && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-inline-args", children: summarizeArgs(t.tool, t.args) })
       ] }, t.id)) })
     ] }),
@@ -13538,15 +13652,18 @@ function ChatSlot() {
           " 个工具"
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-inline-items", children: toolCompleted.map((t) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `tool-inline ${t.error ? "tool-inline-failed" : "tool-inline-done"}`, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `ri-${t.error ? "close-circle-line" : "check-line"}` }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-inline-name", children: humanToolName(t) }),
-        t.latencyMs !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "tool-inline-meta", children: [
-          (t.latencyMs / 1e3).toFixed(1),
-          "s"
-        ] }),
-        t.error && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-inline-error", children: t.error })
-      ] }, t.id)) })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-inline-items", children: toolCompleted.map((t) => {
+        const isError = t.status === "error";
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `tool-inline ${isError ? "tool-inline-failed" : "tool-inline-done"}`, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `ri-${isError ? "close-circle-line" : "check-line"}` }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-inline-name", children: humanToolName(t.tool) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "tool-inline-meta", children: [
+            (t.latencyMs / 1e3).toFixed(1),
+            "s"
+          ] }),
+          isError && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-inline-error", children: t.error })
+        ] }, t.id);
+      }) })
     ] }),
     hasPending && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "msg msg-row assistant", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "msg-label", children: "秋山澪" }),
@@ -13558,42 +13675,106 @@ function ChatSlot() {
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref: bottomRef })
   ] });
 }
+let store = null;
+function loop() {
+  store?.setState({ now: Date.now() });
+  requestAnimationFrame(loop);
+}
+const useClockStore = create(() => ({ now: Date.now() }));
+store = useClockStore;
+requestAnimationFrame(loop);
+function useNow() {
+  return useClockStore((s) => s.now);
+}
+function ElapsedTimer({ startedAt }) {
+  const now = useNow();
+  const sec = Math.floor((now - startedAt) / 1e3);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-elapsed", children: `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` });
+}
+function CollapsibleJson({ data, max = 80 }) {
+  const raw = JSON.stringify(data);
+  const [open, setOpen] = reactExports.useState(false);
+  if (raw.length <= max) return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-item-args", children: raw });
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-item-args", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-args-preview", children: open ? raw : raw.slice(0, max) + "…" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "tool-args-toggle", onClick: () => setOpen(!open), children: open ? "收起" : "展开" })
+  ] });
+}
+function ToolIcon({ state }) {
+  switch (state.status) {
+    case "pending":
+    case "running":
+      return /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-loader-4-line ri-spin" });
+    case "timeout":
+      return /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-time-line" });
+    case "cancelled":
+      return /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-stop-circle-line" });
+    case "error":
+      return /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-close-circle-line" });
+    case "success":
+      return /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-check-line" });
+  }
+}
 function ToolSlot() {
-  const toolRunning = useAgentStore((s) => s.toolRunning);
-  const toolCompleted = useAgentStore((s) => s.toolCompleted);
-  const allEmpty = toolRunning.length === 0 && toolCompleted.length === 0;
+  const tools = useAgentStore((s) => s.tools);
+  const activeTools = tools.filter(isToolActive);
+  const completedTools = tools.filter((t) => !isToolActive(t));
+  const allEmpty = tools.length === 0;
   if (allEmpty) {
     return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-slot", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-empty-icon", children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-tools-line" }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "chat-empty-text tool-empty-text", children: "AI 在回答过程中使用工具时，工具调用会显示在此" })
     ] });
   }
+  const handleCancel = (e) => {
+    e.stopPropagation();
+    window.electronAPI.stopConversation().catch(() => {
+    });
+  };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-slot tool-slot-content", children: [
-    toolRunning.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-slot-section", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-slot-heading", children: "执行中" }),
-      toolRunning.map((t) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-item tool-item-running", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-item-icon", children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-loader-4-line ri-spin" }) }),
+    activeTools.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-slot-section", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-slot-heading", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "执行中" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-count-badge", children: activeTools.length })
+      ] }),
+      activeTools.map((t) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-item tool-item-running", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-item-icon", children: /* @__PURE__ */ jsxRuntimeExports.jsx(ToolIcon, { state: t }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-item-body", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-item-name", children: t.tool }),
-          t.args && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-item-args", children: JSON.stringify(t.args).slice(0, 120) })
-        ] })
+          t.args && Object.keys(t.args).length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(CollapsibleJson, { data: t.args }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-item-meta", children: [
+            t.status === "running" && /* @__PURE__ */ jsxRuntimeExports.jsx(ElapsedTimer, { startedAt: t.startedAt }),
+            t.status === "pending" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "等待中" })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "tool-cancel-btn", onClick: handleCancel, title: "取消此工具", children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-close-line" }) })
       ] }, t.id))
     ] }),
-    toolCompleted.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-slot-section", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-slot-heading", children: "已执行" }),
-      toolCompleted.map((t) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `tool-item ${t.error ? "tool-item-failed" : "tool-item-done"}`, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-item-icon", children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `ri-${t.error ? "close-circle-line" : "check-line"}` }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-item-body", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-item-name", children: t.tool }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-item-meta", children: [
-            t.latencyMs !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
-              (t.latencyMs / 1e3).toFixed(1),
-              "s"
-            ] }),
-            t.error && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-error-text", children: t.error })
+    completedTools.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-slot-section", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-slot-heading", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "已执行" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-count-badge", children: completedTools.length })
+      ] }),
+      completedTools.map((t) => {
+        const cssClass = t.status === "timeout" ? "tool-item-timedout" : t.status === "cancelled" ? "tool-item-cancelled" : t.status === "error" ? "tool-item-failed" : "tool-item-done";
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `tool-item ${cssClass}`, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-item-icon", children: /* @__PURE__ */ jsxRuntimeExports.jsx(ToolIcon, { state: t }) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-item-body", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tool-item-name", children: t.tool }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-item-meta", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "tool-latency", children: [
+                (t.latencyMs / 1e3).toFixed(1),
+                "s"
+              ] }),
+              t.status === "timeout" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-error-text", children: "超时" }),
+              t.status === "cancelled" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-cancelled-text", children: "已取消" }),
+              t.status === "error" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-error-text", children: t.error })
+            ] })
           ] })
-        ] })
-      ] }, t.id))
+        ] }, t.id);
+      })
     ] })
   ] });
 }
@@ -14198,6 +14379,203 @@ function useIPCEvent(register, handler, deps = []) {
     };
   }, deps);
 }
+function isWorkflowActive(state) {
+  return state.status === "pending" || state.status === "running" || state.status === "paused";
+}
+class IllegalTransitionError2 extends Error {
+  constructor(from, to, context) {
+    super(`Illegal FSM transition${context ? ` [${context}]` : ""}: ${from} → ${to}`);
+    this.name = "IllegalTransitionError";
+  }
+}
+function assertRunNonTerminal(state) {
+  if (state.status === "done" || state.status === "failed" || state.status === "cancelled") {
+    throw new IllegalTransitionError2(state.status, "running", "workflow");
+  }
+}
+function assertRunRunning(state) {
+  if (state.status !== "running") {
+    throw new IllegalTransitionError2(state.status, "terminal", "workflow");
+  }
+}
+function assertStepPending(state) {
+  if (state.status !== "pending") {
+    throw new IllegalTransitionError2(state.status, "running", "step");
+  }
+}
+function assertStepRunning(state) {
+  if (state.status !== "running") {
+    throw new IllegalTransitionError2(state.status, "terminal", "step");
+  }
+}
+function createRun(event) {
+  return {
+    status: "pending",
+    runId: event.runId,
+    workflowDefId: event.workflowDefId,
+    workflowName: event.workflowName,
+    steps: event.steps,
+    createdAt: event.timestamp
+  };
+}
+function transitionToRunning(state, event) {
+  assertRunNonTerminal(state);
+  return {
+    ...state,
+    status: "running",
+    startedAt: event.timestamp
+  };
+}
+function transitionToDone(state, event) {
+  assertRunRunning(state);
+  return {
+    ...state,
+    status: "done",
+    endedAt: event.timestamp
+  };
+}
+function transitionToFailed(state, event) {
+  assertRunRunning(state);
+  return {
+    ...state,
+    status: "failed",
+    endedAt: event.timestamp,
+    error: event.error
+  };
+}
+function transitionToCancelled(state, event) {
+  assertRunRunning(state);
+  return {
+    ...state,
+    status: "cancelled",
+    endedAt: event.timestamp
+  };
+}
+function transitionToPaused(state, event) {
+  assertRunRunning(state);
+  return {
+    ...state,
+    status: "paused"
+  };
+}
+function transitionToResumed(state, event) {
+  if (state.status !== "paused") {
+    throw new IllegalTransitionError2(state.status, "running", "workflow");
+  }
+  return {
+    ...state,
+    status: "running",
+    startedAt: event.timestamp
+  };
+}
+function transitionStepToRunning(state, event) {
+  const steps = state.steps.map((s) => {
+    if (s.stepId !== event.stepId) return s;
+    assertStepPending(s);
+    return { status: "running", stepId: s.stepId, startedAt: event.timestamp };
+  });
+  return { ...state, steps };
+}
+function transitionStepToDone(state, event) {
+  const steps = state.steps.map((s) => {
+    if (s.stepId !== event.stepId) return s;
+    assertStepRunning(s);
+    return {
+      status: "done",
+      stepId: s.stepId,
+      startedAt: s.startedAt,
+      endedAt: event.timestamp,
+      agentResult: event.agentResult
+    };
+  });
+  return { ...state, steps };
+}
+function transitionStepToFailed(state, event) {
+  const steps = state.steps.map((s) => {
+    if (s.stepId !== event.stepId) return s;
+    assertStepRunning(s);
+    return {
+      status: "failed",
+      stepId: s.stepId,
+      startedAt: s.startedAt,
+      endedAt: event.timestamp,
+      error: event.error
+    };
+  });
+  return { ...state, steps };
+}
+function transitionStepToSkipped(state, event) {
+  const steps = state.steps.map((s) => {
+    if (s.stepId !== event.stepId) return s;
+    assertStepPending(s);
+    return {
+      status: "skipped",
+      stepId: s.stepId,
+      startedAt: event.timestamp,
+      endedAt: event.timestamp
+    };
+  });
+  return { ...state, steps };
+}
+const useWorkflowStore = create((set) => ({
+  definitions: [],
+  workflowRuns: [],
+  loading: true,
+  setDefinitions: (definitions) => set({ definitions }),
+  setLoading: (loading) => set({ loading }),
+  addWorkflowEvent: (event) => set((s) => {
+    const { workflowRuns } = s;
+    if (event.type === "workflow.created") {
+      if (workflowRuns.some((r) => r.runId === event.runId)) return s;
+      const pending = createRun(event);
+      const running = transitionToRunning(pending, {
+        runId: event.runId,
+        timestamp: event.timestamp
+      });
+      return { workflowRuns: [running, ...workflowRuns].slice(0, 20) };
+    }
+    const idx = workflowRuns.findIndex((r) => r.runId === event.runId);
+    if (idx === -1) return s;
+    const existing = workflowRuns[idx];
+    let next = null;
+    switch (event.type) {
+      case "workflow.started":
+        next = transitionToRunning(existing, event);
+        break;
+      case "workflow.completed":
+        next = transitionToDone(existing, event);
+        break;
+      case "workflow.failed":
+        next = transitionToFailed(existing, event);
+        break;
+      case "workflow.cancelled":
+        next = transitionToCancelled(existing, event);
+        break;
+      case "workflow.paused":
+        next = transitionToPaused(existing);
+        break;
+      case "workflow.resumed":
+        next = transitionToResumed(existing, event);
+        break;
+      case "step.started":
+        next = transitionStepToRunning(existing, event);
+        break;
+      case "step.completed":
+        next = transitionStepToDone(existing, event);
+        break;
+      case "step.failed":
+        next = transitionStepToFailed(existing, event);
+        break;
+      case "step.skipped":
+        next = transitionStepToSkipped(existing, event);
+        break;
+    }
+    if (!next) return s;
+    const updated = [...workflowRuns];
+    updated[idx] = next;
+    return { workflowRuns: updated };
+  })
+}));
 const HANDLER_OPTIONS = [
   { value: "subagent", label: "子 Agent", icon: "ri-robot-2-line", tagClass: "wf-handler-subagent" },
   { value: "prompt", label: "Prompt 注入", icon: "ri-question-mark", tagClass: "wf-handler-prompt" },
@@ -14469,31 +14847,17 @@ function WorkflowEditor({ initial, onBack, onSaved }) {
   const editorRef = reactExports.useRef(null);
   const [expandedFields, setExpandedFields] = reactExports.useState({});
   const [, forceRender] = reactExports.useState(0);
-  const [activeRuns, setActiveRuns] = reactExports.useState([]);
+  const wfStore = useWorkflowStore();
+  const storeActiveRuns = wfStore.workflowRuns.filter(isWorkflowActive);
   const [pipelineLogs, setPipelineLogs] = reactExports.useState({});
   const [showRunPanel, setShowRunPanel] = reactExports.useState(false);
-  activeRuns.some((r) => r.status === "running");
+  storeActiveRuns.length > 0;
   useIPCEvent(window.electronAPI.onWorkflowRunCreated, (data) => {
-    setActiveRuns((prev) => {
-      if (prev.some((r) => r.runId === data.runId)) return prev;
-      return [...prev, { ...data, status: "running" }];
-    });
     setShowRunPanel(true);
   });
-  useIPCEvent(window.electronAPI.onWorkflowRunUpdated, (data) => {
-    setActiveRuns((prev) => prev.map((r) => r.runId === data.runId ? { ...r, status: data.status } : r));
+  useIPCEvent(window.electronAPI.onWorkflowRunUpdated, (_data) => {
   });
   useIPCEvent(window.electronAPI.onWorkflowRunStep, (data) => {
-    setActiveRuns(
-      (prev) => prev.map(
-        (r) => r.runId === data.runId ? {
-          ...r,
-          steps: r.steps.map(
-            (s) => s.stepId === data.stepId ? { ...s, status: data.status, error: data.error ?? s.error, agentResult: data.agentResult ?? s.agentResult } : s
-          )
-        } : r
-      )
-    );
     if (!data.agentResult) return;
     setPipelineLogs((prev) => {
       const lines = prev[data.runId] ?? [];
@@ -15056,7 +15420,7 @@ function WorkflowEditor({ initial, onBack, onSaved }) {
       showRunPanel ? /* @__PURE__ */ jsxRuntimeExports.jsx(
         WorkflowRunPanel,
         {
-          runs: activeRuns.filter((r) => r.status === "running" || r.pendingGate),
+          runs: storeActiveRuns.filter((r) => r.status === "running" || r.pendingGate),
           pipelineLogs,
           onCancel: async (runId) => {
             await window.electronAPI.stopWorkflowRun(runId);
@@ -15227,25 +15591,6 @@ class ErrorBoundary extends reactExports.Component {
     return this.props.children;
   }
 }
-const useWorkflowStore = create((set) => ({
-  definitions: [],
-  runs: [],
-  loading: true,
-  setDefinitions: (definitions) => set({ definitions }),
-  setRuns: (runs) => set({ runs }),
-  setLoading: (loading) => set({ loading }),
-  addRun: (run) => set((state) => ({
-    runs: state.runs.some((r) => r.runId === run.runId) ? state.runs : [run, ...state.runs].slice(0, 20)
-  })),
-  updateRunStatus: (runId, status) => set((state) => ({
-    runs: state.runs.map((r) => r.runId === runId ? { ...r, status } : r)
-  })),
-  updateRunStep: (runId, stepId, data) => set((state) => ({
-    runs: state.runs.map(
-      (r) => r.runId === runId ? { ...r, steps: r.steps.map((s) => s.stepId === stepId ? { ...s, ...data } : s) } : r
-    )
-  }))
-}));
 function stageIcon$1(status) {
   switch (status) {
     case "done":
@@ -15375,26 +15720,58 @@ function handlerLabel(handler) {
   }
 }
 function WorkflowSlot() {
-  const store = useWorkflowStore();
-  const workflowDefs = store.definitions;
-  const workflowRuns = store.runs;
-  const workflowActiveRuns = store.runs.filter((r) => r.status === "running");
-  const wfLoading = store.loading;
+  const store2 = useWorkflowStore();
+  const workflowDefs = store2.definitions;
+  const workflowRuns = store2.workflowRuns;
+  const workflowActiveRuns = store2.workflowRuns.filter((r) => r.status === "running" || r.status === "paused");
+  const wfLoading = store2.loading;
   const refreshDefs = reactExports.useCallback(() => {
     Promise.all([window.electronAPI.listWorkflowDefinitions(), window.electronAPI.listWorkflowRuns(20)]).then(([defs, runList]) => {
-      store.setDefinitions(defs);
-      store.setRuns(runList);
-      store.setLoading(false);
+      store2.setDefinitions(defs);
+      store2.setLoading(false);
+      for (const run of runList) {
+        const steps = (run.steps || []).map((s) => {
+          if (s.status === "running" || s.status === "in_progress")
+            return { status: "running", stepId: s.stepId, startedAt: s.startedAt ?? Date.now() };
+          if (s.status === "done" || s.status === "completed")
+            return {
+              status: "done",
+              stepId: s.stepId,
+              startedAt: s.startedAt ?? Date.now(),
+              endedAt: s.completedAt ?? Date.now(),
+              agentResult: s.agentResult
+            };
+          if (s.status === "failed")
+            return {
+              status: "failed",
+              stepId: s.stepId,
+              startedAt: s.startedAt ?? Date.now(),
+              endedAt: s.completedAt ?? Date.now(),
+              error: s.error
+            };
+          if (s.status === "skipped")
+            return { status: "skipped", stepId: s.stepId, startedAt: s.startedAt ?? Date.now(), endedAt: s.completedAt ?? Date.now() };
+          return { status: "pending", stepId: s.stepId };
+        });
+        store2.addWorkflowEvent({
+          type: "workflow.created",
+          runId: run.runId,
+          workflowDefId: run.workflowDefId,
+          workflowName: run.workflowName || "",
+          steps,
+          timestamp: run.startedAt || Date.now()
+        });
+      }
     });
-  }, [store]);
+  }, [store2]);
   reactExports.useEffect(() => {
     if (wfLoading) refreshDefs();
   }, [wfLoading, refreshDefs]);
   const [view, setView] = reactExports.useState("list");
   const [editDef, setEditDef] = reactExports.useState(null);
+  const now = useClockStore((s) => s.now);
   const [runError, setRunError] = reactExports.useState("");
   const [runSuccess, setRunSuccess] = reactExports.useState("");
-  const [elapsed, setElapsed] = reactExports.useState(0);
   const [searchQuery, setSearchQuery] = reactExports.useState("");
   const [expandedDefs, setExpandedDefs] = reactExports.useState({});
   const [pipelineLogs, setPipelineLogs] = reactExports.useState({});
@@ -15410,15 +15787,12 @@ function WorkflowSlot() {
     if (nearBottom) el.scrollTop = el.scrollHeight;
   }, [pipelineLogs]);
   const hasActive = workflowActiveRuns.length > 0;
-  reactExports.useEffect(() => {
-    if (!hasActive) {
-      setElapsed(0);
-      return;
-    }
-    const t0 = Date.now();
-    const id = setInterval(() => setElapsed(Date.now() - t0), 1e3);
-    return () => clearInterval(id);
-  }, [hasActive]);
+  const startTime = reactExports.useMemo(() => {
+    if (!hasActive) return 0;
+    const earliest = Math.min(...workflowActiveRuns.map((r) => r.startedAt || Date.now()));
+    return earliest;
+  }, [hasActive, workflowActiveRuns]);
+  const elapsed = hasActive && startTime > 0 ? now - startTime : 0;
   useIPCEvent(window.electronAPI.onWorkflowRunStep, (data) => {
     if (!data.agentResult) return;
     setPipelineLogs((prev) => {
@@ -15439,7 +15813,7 @@ function WorkflowSlot() {
     return workflowDefs.filter((d) => d.name?.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q));
   }, [workflowDefs, searchQuery]);
   const historyRuns = reactExports.useMemo(() => {
-    const completed = workflowRuns.filter((r) => r.status !== "running");
+    const completed = workflowRuns.filter((r) => r.status !== "running" && r.status !== "paused");
     if (historyFilter === "all") return completed;
     return completed.filter((r) => r.status === historyFilter);
   }, [workflowRuns, historyFilter]);
@@ -15458,7 +15832,7 @@ function WorkflowSlot() {
     ];
   }, [workflowDefs]);
   const showPipeline = workflowActiveRuns.length > 0;
-  const showHistory = workflowRuns.filter((r) => r.status !== "running").length > 0;
+  const showHistory = workflowRuns.filter((r) => r.status !== "running" && r.status !== "paused").length > 0;
   const enabledDefs = reactExports.useMemo(() => filteredDefs.filter((d) => d.enabled !== false), [filteredDefs]);
   const disabledDefs = reactExports.useMemo(() => filteredDefs.filter((d) => d.enabled === false), [filteredDefs]);
   function fmtElapsed(ms) {
@@ -15473,10 +15847,10 @@ function WorkflowSlot() {
   function fmtTime(ts) {
     if (!ts) return "";
     const d = new Date(ts);
-    const now = /* @__PURE__ */ new Date();
-    const sameDay = d.toDateString() === now.toDateString();
+    const now2 = /* @__PURE__ */ new Date();
+    const sameDay = d.toDateString() === now2.toDateString();
     if (sameDay) return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-    const thisYear = d.getFullYear() === now.getFullYear();
+    const thisYear = d.getFullYear() === now2.getFullYear();
     if (thisYear) return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
     return d.toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" });
   }
@@ -15908,7 +16282,7 @@ function WorkflowSlot() {
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "wf-history-toggle", onClick: () => setHistoryOpen(!historyOpen), children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wf-history-toggle-left", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `ri-arrow-${historyOpen ? "down" : "right"}-s-line` }),
         "运行历史",
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-history-count", children: workflowRuns.filter((r) => r.status !== "running").length })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "wf-history-count", children: workflowRuns.filter((r) => r.status !== "running" && r.status !== "paused").length })
       ] }) }),
       historyOpen && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wf-history-filters", children: ["all", "done", "failed"].map((f) => /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -16568,70 +16942,70 @@ function useTimerControl() {
 }
 const EMPTY = [];
 function useSessions() {
-  const store = useSessionStore();
+  const store2 = useSessionStore();
   reactExports.useEffect(() => {
     window.electronAPI.getSessions().then((s) => {
-      store.setSessions(s);
-      if (s.length > 0 && !store.activeSessionId) {
-        store.setActiveSessionId(s[0].id);
+      store2.setSessions(s);
+      if (s.length > 0 && !store2.activeSessionId) {
+        store2.setActiveSessionId(s[0].id);
       }
     }).catch(() => {
-    }).finally(() => store.setSessionsLoading(false));
+    }).finally(() => store2.setSessionsLoading(false));
   }, []);
   reactExports.useEffect(() => {
-    if (!store.activeSessionId) return;
-    if (store.skipDbLoad) {
-      store.setSkipDbLoad(false);
+    if (!store2.activeSessionId) return;
+    if (store2.skipDbLoad) {
+      store2.setSkipDbLoad(false);
       return;
     }
-    store.setHistoryLoading(true);
-    window.electronAPI.getMessagesBySession(store.activeSessionId).then((msgs) => store.setHistoryMessages(msgs)).catch(() => store.setHistoryMessages(EMPTY)).finally(() => store.setHistoryLoading(false));
-  }, [store.activeSessionId]);
+    store2.setHistoryLoading(true);
+    window.electronAPI.getMessagesBySession(store2.activeSessionId).then((msgs) => store2.setHistoryMessages(msgs)).catch(() => store2.setHistoryMessages(EMPTY)).finally(() => store2.setHistoryLoading(false));
+  }, [store2.activeSessionId]);
   useIPCEvent(window.electronAPI.onMessageNew, (msg) => {
     if (!msg.sessionId) return;
-    if (msg.sessionId !== store.activeSessionId) {
+    if (msg.sessionId !== store2.activeSessionId) {
       if (msg.category !== "evolution") {
-        store.setSkipDbLoad(true);
-        store.setActiveSessionId(msg.sessionId);
+        store2.setSkipDbLoad(true);
+        store2.setActiveSessionId(msg.sessionId);
       }
     }
-    store.addHistoryMessage(msg);
-    window.electronAPI.getSessions().then((s) => store.setSessions(s)).catch(() => {
+    store2.addHistoryMessage(msg);
+    window.electronAPI.getSessions().then((s) => store2.setSessions(s)).catch(() => {
     });
   });
   const handleSelectChat = (sessionId) => {
-    store.selectChat(sessionId);
+    store2.selectChat(sessionId);
   };
   return {
-    sessions: store.sessions,
-    sessionsLoading: store.sessionsLoading,
-    activeSessionId: store.activeSessionId,
-    historyMessages: store.historyMessages,
-    historyLoading: store.historyLoading,
+    sessions: store2.sessions,
+    sessionsLoading: store2.sessionsLoading,
+    activeSessionId: store2.activeSessionId,
+    historyMessages: store2.historyMessages,
+    historyLoading: store2.historyLoading,
     handleSelectChat
   };
 }
 function useAIOutput(activeSessionId, voiceActive, onError) {
-  const store = useAgentStore();
+  const store2 = useAgentStore();
   const fadeTimer = useTimerControl();
   const revealTimer = useTimerControl();
   reactExports.useEffect(() => {
-    store.resetAgent();
+    store2.resetAgent();
     revealTimer.clear();
     fadeTimer.clear();
   }, [activeSessionId]);
   reactExports.useEffect(() => {
     const onStart = (duration) => {
-      const t = store.pendingText;
+      const t = store2.pendingText;
       if (!t) return;
       revealTimer.clear();
-      store.setDisplayText("");
+      store2.setDisplayText("");
       const totalMs = duration * 1e3;
       const intervalMs = Math.max(20, totalMs / t.length);
       let i = 0;
       revealTimer.setInterval(() => {
         i++;
-        store.setDisplayText(t.slice(0, i));
+        store2.setDisplayText(t.slice(0, i));
         if (i >= t.length) revealTimer.clear();
       }, intervalMs);
     };
@@ -16646,7 +17020,7 @@ function useAIOutput(activeSessionId, voiceActive, onError) {
     };
   }, []);
   useIPCEvent(window.electronAPI.onAIChunk, (chunk) => {
-    store.appendPendingText(chunk);
+    store2.appendPendingText(chunk);
     fadeTimer.clear();
   });
   useIPCEvent(window.electronAPI.onTTSAudio, (filePath) => {
@@ -16657,20 +17031,20 @@ function useAIOutput(activeSessionId, voiceActive, onError) {
   });
   useIPCEvent(window.electronAPI.onMessageNew, (msg) => {
     if (msg.sessionId && msg.role === "assistant") {
-      store.resetAgent();
+      store2.resetAgent();
       revealTimer.clear();
     }
   });
   useIPCEvent(window.electronAPI.onToolStatus, (status) => {
-    store.setToolStatus(status);
+    store2.setToolStatus(status);
   });
   const handleResult = async (t) => {
     if (!t) return;
-    store.setTranscribed(t);
-    store.setAgentState("thinking");
+    store2.setTranscribed(t);
+    store2.setAgentState("thinking");
     onError?.(void 0);
-    store.setPendingText("");
-    store.setDisplayText("");
+    store2.setPendingText("");
+    store2.setDisplayText("");
     revealTimer.clear();
     try {
       await window.electronAPI.chat(t, void 0, activeSessionId || void 0, !voiceActive);
@@ -16678,94 +17052,108 @@ function useAIOutput(activeSessionId, voiceActive, onError) {
       onError?.(String(err));
     }
     fadeTimer.set(() => {
-      store.resetAgent();
+      store2.resetAgent();
     }, 1e4);
   };
   return {
-    pendingText: store.pendingText,
-    displayText: store.displayText,
-    transcribed: store.transcribed,
-    toolStatus: store.toolStatus,
-    agentState: store.agentState,
+    pendingText: store2.pendingText,
+    displayText: store2.displayText,
+    transcribed: store2.transcribed,
+    toolStatus: store2.toolStatus,
+    agentState: store2.agentState,
     handleResult
   };
 }
 function useTools() {
-  const store = useAgentStore();
+  const store2 = useAgentStore();
   useIPCEvent(window.electronAPI.onToolStatus, (status) => {
     if (status.type === "start") {
-      store.clearToolRunning();
-      store.clearToolCompleted();
+      store2.clearTools();
     }
   });
   useIPCEvent(window.electronAPI.onToolInvoked, (data) => {
     const id = data.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    store.addToolRunning({ id, tool: data.tool, args: data.args });
+    store2.addTool({
+      type: "tool.started",
+      id,
+      tool: data.tool,
+      args: data.args,
+      timestamp: Date.now()
+    });
   });
   useIPCEvent(window.electronAPI.onToolCompleted, (data) => {
     const id = data.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    store.removeToolRunning(id);
-    store.addToolCompleted({ id, tool: data.tool, latencyMs: data.latencyMs, result: data.result });
+    store2.addTool({
+      type: "tool.succeeded",
+      id,
+      result: data.result ?? "",
+      latencyMs: data.latencyMs ?? 0,
+      timestamp: Date.now()
+    });
   });
   useIPCEvent(window.electronAPI.onToolFailed, (data) => {
     const id = data.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    store.removeToolRunning(id);
-    store.addToolCompleted({ id, tool: data.tool, latencyMs: data.latencyMs, error: data.error });
+    store2.addTool({
+      type: "tool.failed",
+      id,
+      error: data.error ?? "unknown error",
+      latencyMs: data.latencyMs ?? 0,
+      timestamp: Date.now()
+    });
   });
   return {
-    toolRunning: store.toolRunning,
-    toolCompleted: store.toolCompleted
+    tools: store2.tools
   };
 }
 function useDeviceStatus() {
-  const store = useDeviceStore();
+  const store2 = useDeviceStore();
   useIPCEvent(window.electronAPI.onStateUpdate, (s) => {
-    if (s.error) store.setError(s.error);
-    if (s.ttsPlaying !== void 0) store.setTtsPlaying(s.ttsPlaying);
-    if (s.sessionHealth) store.setSessionHealth(s.sessionHealth);
+    if (s.error) store2.setError(s.error);
+    if (s.ttsPlaying !== void 0) store2.setTtsPlaying(s.ttsPlaying);
+    if (s.sessionHealth) store2.setSessionHealth(s.sessionHealth);
   });
   useIPCEvent(window.electronAPI.onPersonaUpdated, (data) => {
-    store.setPersonaLevel(data.level);
+    store2.setPersonaLevel(data.level);
   });
   return {
-    active: store.active,
-    setActive: store.setActive,
-    ttsPlaying: store.ttsPlaying,
-    error: store.error,
-    setError: store.setError,
-    sessionHealth: store.sessionHealth,
-    personaLevel: store.personaLevel,
-    settingsOpen: store.settingsOpen,
-    setSettingsOpen: store.setSettingsOpen
+    active: store2.active,
+    setActive: store2.setActive,
+    ttsPlaying: store2.ttsPlaying,
+    error: store2.error,
+    setError: store2.setError,
+    sessionHealth: store2.sessionHealth,
+    personaLevel: store2.personaLevel,
+    settingsOpen: store2.settingsOpen,
+    setSettingsOpen: store2.setSettingsOpen
   };
 }
 function usePlans() {
-  const store = usePlansStore();
+  const store2 = usePlansStore();
   reactExports.useEffect(() => {
-    window.electronAPI.getActivePlan().then((plan) => store.setActivePlan(plan));
+    window.electronAPI.getActivePlan().then((plan) => store2.setActivePlan(plan));
     window.electronAPI.listPlans().then((list) => {
-      store.setPlanHistory(list.filter((p) => p.status !== "active"));
+      store2.setPlanHistory(list.filter((p) => p.status !== "active"));
     });
   }, []);
   useIPCEvent(window.electronAPI.onPlanCreated, () => {
-    window.electronAPI.getActivePlan().then((plan) => store.setActivePlan(plan));
+    window.electronAPI.getActivePlan().then((plan) => store2.setActivePlan(plan));
     window.electronAPI.listPlans().then((list) => {
-      store.setPlanHistory(list.filter((p) => p.status !== "active"));
+      store2.setPlanHistory(list.filter((p) => p.status !== "active"));
     });
   });
   useIPCEvent(window.electronAPI.onPlanStep, (data) => {
-    store.updateActivePlanStep(data.stepIndex, data.status);
+    store2.updateActivePlanStep(data.stepIndex, data.status);
   });
   useIPCEvent(window.electronAPI.onPlanCompleted, () => {
-    store.completeActivePlan();
+    store2.completeActivePlan();
     window.electronAPI.listPlans().then((list) => {
-      store.setPlanHistory(list.filter((p) => p.status !== "active"));
+      store2.setPlanHistory(list.filter((p) => p.status !== "active"));
     });
   });
   useIPCEvent(
     window.electronAPI.onAgentObserve,
     (data) => {
-      store.addOtparStage({
+      store2.addOtparStage({
         type: "observe",
         requestId: data.requestId,
         step: data.step,
@@ -16778,7 +17166,7 @@ function usePlans() {
   useIPCEvent(
     window.electronAPI.onAgentThink,
     (data) => {
-      store.addOtparStage({
+      store2.addOtparStage({
         type: "think",
         requestId: data.requestId,
         step: data.step,
@@ -16790,7 +17178,7 @@ function usePlans() {
   useIPCEvent(
     window.electronAPI.onAgentReflect,
     (data) => {
-      store.addOtparStage({
+      store2.addOtparStage({
         type: "reflect",
         requestId: data.requestId,
         step: data.step,
@@ -16801,51 +17189,114 @@ function usePlans() {
     }
   );
   return {
-    activePlan: store.activePlan,
-    planHistory: store.planHistory,
-    otparStages: store.otparStages
+    activePlan: store2.activePlan,
+    planHistory: store2.planHistory,
+    otparStages: store2.otparStages
   };
 }
 function useWorkflowDefinitions() {
-  const store = useWorkflowStore();
+  const store2 = useWorkflowStore();
   const refresh = reactExports.useCallback(() => {
     Promise.all([window.electronAPI.listWorkflowDefinitions(), window.electronAPI.listWorkflowRuns(20)]).then(([defs, runList]) => {
-      store.setDefinitions(defs);
-      store.setRuns(runList);
-      store.setLoading(false);
+      store2.setDefinitions(defs);
+      store2.setLoading(false);
+      for (const run of runList) {
+        const steps = (run.steps || []).map((s) => {
+          if (s.status === "running" || s.status === "in_progress") {
+            return { status: "running", stepId: s.stepId, startedAt: s.startedAt ?? Date.now() };
+          }
+          if (s.status === "done" || s.status === "completed") {
+            return {
+              status: "done",
+              stepId: s.stepId,
+              startedAt: s.startedAt ?? Date.now(),
+              endedAt: s.completedAt ?? Date.now(),
+              agentResult: s.agentResult
+            };
+          }
+          if (s.status === "failed") {
+            return {
+              status: "failed",
+              stepId: s.stepId,
+              startedAt: s.startedAt ?? Date.now(),
+              endedAt: s.completedAt ?? Date.now(),
+              error: s.error
+            };
+          }
+          if (s.status === "skipped") {
+            return { status: "skipped", stepId: s.stepId, startedAt: s.startedAt ?? Date.now(), endedAt: s.completedAt ?? Date.now() };
+          }
+          return { status: "pending", stepId: s.stepId };
+        });
+        store2.addWorkflowEvent({
+          type: "workflow.created",
+          runId: run.runId,
+          workflowDefId: run.workflowDefId,
+          workflowName: run.workflowName || "",
+          steps,
+          timestamp: run.startedAt || Date.now()
+        });
+      }
     });
-  }, []);
+  }, [store2]);
   reactExports.useEffect(() => {
-    refresh();
-  }, [refresh]);
+    if (store2.loading) refresh();
+  }, [store2.loading, refresh]);
   useIPCEvent(window.electronAPI.onWorkflowRunCreated, (data) => {
-    store.addRun({
+    const steps = (data.steps || []).map((s) => ({
+      stepId: s.stepId,
+      status: "pending"
+    }));
+    store2.addWorkflowEvent({
+      type: "workflow.created",
       runId: data.runId,
       workflowDefId: data.workflowDefId,
       workflowName: data.workflowName || "",
-      status: "running",
-      steps: data.steps || [],
-      startedAt: data.startedAt || Date.now()
+      steps,
+      timestamp: data.startedAt || Date.now()
     });
   });
   useIPCEvent(window.electronAPI.onWorkflowDefCreated, () => {
-    window.electronAPI.listWorkflowDefinitions().then((defs) => store.setDefinitions(defs));
+    window.electronAPI.listWorkflowDefinitions().then((defs) => store2.setDefinitions(defs));
   });
   useIPCEvent(window.electronAPI.onWorkflowRunUpdated, (data) => {
-    store.updateRunStatus(data.runId, data.status);
+    const ts = Date.now();
+    const status = data.status;
+    if (status === "running") {
+      store2.addWorkflowEvent({ type: "workflow.started", runId: data.runId, timestamp: ts });
+    } else if (status === "done" || status === "completed") {
+      store2.addWorkflowEvent({ type: "workflow.completed", runId: data.runId, timestamp: ts });
+    } else if (status === "failed") {
+      store2.addWorkflowEvent({ type: "workflow.failed", runId: data.runId, error: data.error || "unknown", timestamp: ts });
+    } else if (status === "paused") {
+      store2.addWorkflowEvent({ type: "workflow.paused", runId: data.runId, timestamp: ts });
+    }
   });
   useIPCEvent(window.electronAPI.onWorkflowRunStep, (data) => {
-    store.updateRunStep(data.runId, data.stepId, {
-      status: data.status,
-      error: data.error,
-      agentResult: data.agentResult
-    });
+    const ts = Date.now();
+    const status = data.status;
+    if (status === "running" || status === "in_progress") {
+      store2.addWorkflowEvent({ type: "step.started", runId: data.runId, stepId: data.stepId, timestamp: ts });
+    } else if (status === "done" || status === "completed") {
+      store2.addWorkflowEvent({
+        type: "step.completed",
+        runId: data.runId,
+        stepId: data.stepId,
+        agentResult: data.agentResult || "",
+        timestamp: ts
+      });
+    } else if (status === "failed") {
+      store2.addWorkflowEvent({ type: "step.failed", runId: data.runId, stepId: data.stepId, error: data.error || "unknown", timestamp: ts });
+    } else if (status === "skipped") {
+      store2.addWorkflowEvent({ type: "step.skipped", runId: data.runId, stepId: data.stepId, timestamp: ts });
+    }
   });
+  const activeRuns = store2.workflowRuns.filter(isWorkflowActive);
   return {
-    definitions: store.definitions,
-    runs: store.runs,
-    activeRuns: store.runs.filter((r) => r.status === "running"),
-    loading: store.loading,
+    definitions: store2.definitions,
+    workflowRuns: store2.workflowRuns,
+    activeRuns,
+    loading: store2.loading,
     refresh
   };
 }
