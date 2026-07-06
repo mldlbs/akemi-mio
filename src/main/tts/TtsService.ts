@@ -3,9 +3,17 @@ import { unlinkSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { log } from '../logger/Logger'
-import { TtsStateCallback } from './types'
+import { TtsStateCallback, EmotionTtsParams } from './types'
 import { PIPER_SCRIPT, USE_LOCAL_TTS } from '../config'
 import { findFfplay } from '../utils/ffmpeg'
+
+/** 默认 TTS 情感参数（无情感分析时使用） */
+const DEFAULT_EMOTION_PARAMS: EmotionTtsParams = {
+  voice: 'zh-CN-XiaoxiaoNeural',
+  rate: '+10%',
+  pitch: '+8Hz',
+  label: '默认/日常',
+}
 
 function getTempFile(): string {
   return join(tmpdir(), `akemi-mio-${Date.now()}.mp3`)
@@ -77,6 +85,10 @@ export class TtsService {
   private sentenceBuf = ''
   private batchTimer: ReturnType<typeof setTimeout> | null = null
   private stopped = false
+  /** 当前情感 TTS 参数（由外部通过 setEmotion 更新） */
+  private emotionParams: EmotionTtsParams = { ...DEFAULT_EMOTION_PARAMS }
+  /** 情感自适应是否启用（用户可关闭） */
+  private emotionEnabled = true
 
   constructor(onStateUpdate: TtsStateCallback, onAudioReady?: (filePath: string) => void) {
     this.onStateUpdate = onStateUpdate
@@ -85,6 +97,28 @@ export class TtsService {
 
   setAudioSink(cb: (filePath: string) => void): void {
     this.onAudioReady = cb
+  }
+
+  /** 更新情感 TTS 参数（由情感分析器驱动） */
+  setEmotion(params: EmotionTtsParams): void {
+    this.emotionParams = { ...params }
+    log('INFO', 'tts_emotion_update', { voice: params.voice, rate: params.rate, pitch: params.pitch, label: params.label })
+  }
+
+  /** 启用/禁用情感自适应语音 */
+  setEmotionEnabled(enabled: boolean): void {
+    this.emotionEnabled = enabled
+    log('INFO', 'tts_emotion_enabled', { enabled })
+  }
+
+  /** 获取当前情感参数（供调试/UI 展示） */
+  getEmotionParams(): EmotionTtsParams {
+    return { ...this.emotionParams }
+  }
+
+  /** 情感自适应是否启用 */
+  isEmotionEnabled(): boolean {
+    return this.emotionEnabled
   }
 
   addChunk(chunk: string): void {
@@ -191,9 +225,10 @@ export class TtsService {
         })
         return
       }
+      const params = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS
       const edgeTts = execFile(
         'edge-tts',
-        ['--voice', 'zh-CN-XiaoxiaoNeural', '--text', text, '--write-media', outputFile, '--rate', '+10%', '--pitch', '+8Hz'],
+        ['--voice', params.voice, '--text', text, '--write-media', outputFile, '--rate', params.rate, '--pitch', params.pitch],
         { timeout: 30000, windowsHide: true },
       )
       this.currentProcess = { kill: () => edgeTts.kill() }
