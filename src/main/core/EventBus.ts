@@ -68,6 +68,7 @@ export type EventName =
   | 'guardrail.readonly_stuck'
   | 'guardrail.tool_error'
   | 'guardrail.context_corrupted'
+  | 'guardrail.progress_stagnation'
   | 'runtime.health.updated'
   | 'skill.enabled'
   | 'skill.disabled'
@@ -89,9 +90,9 @@ export interface EventPayload {
   'agent.input.received': { text: string; requestId: string; source: 'electron' | 'telegram' }
   'agent.response.generated': { text: string; requestId: string; source: 'electron' | 'telegram' }
   'agent.error': { error: string; requestId: string }
-  'agent.tool.invoked': { tool: string; args: Record<string, any> }
-  'agent.tool.completed': { tool: string; result: string }
-  'agent.tool.failed': { tool: string; error: string }
+  'agent.tool.invoked': { tool: string; args: Record<string, any>; requestId: string }
+  'agent.tool.completed': { tool: string; result: string; requestId: string }
+  'agent.tool.failed': { tool: string; error: string; requestId: string }
   'agent.plan.created': { planId: string; title: string }
   'agent.plan.step': { planId: string; stepIndex: number; status: string }
   'agent.plan.completed': { planId: string }
@@ -228,6 +229,7 @@ export interface EventPayload {
   'guardrail.readonly_stuck': { count: number; consecutiveRounds: number }
   'guardrail.tool_error': { tool: string; error: string; consecutiveErrors: number }
   'guardrail.context_corrupted': { error: string; details?: string }
+  'guardrail.progress_stagnation': { consecutiveRounds: number; step: number }
   'runtime.health.updated': {
     compositeScore: number
     compositeLevel: string

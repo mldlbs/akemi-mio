@@ -16,10 +16,12 @@ import type { EvaluationRepository } from './types'
 export class EvaluationEmitter {
   private store: EvaluationRepository
   private source: string
+  private defaultSessionId: string
 
-  constructor(store: EvaluationRepository, source: string) {
+  constructor(store: EvaluationRepository, source: string, sessionId?: string) {
     this.store = store
     this.source = source
+    this.defaultSessionId = sessionId ?? ''
   }
 
   emit(
@@ -35,7 +37,7 @@ export class EvaluationEmitter {
       id: randomUUID(),
       timestamp: Date.now(),
       traceId: meta?.traceId ?? '',
-      sessionId: meta?.sessionId ?? '',
+      sessionId: meta?.sessionId ?? this.defaultSessionId,
       source: this.source,
       type,
       payload: payload as any,

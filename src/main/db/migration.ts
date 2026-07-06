@@ -567,6 +567,34 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_ev_trace ON evaluation_events(trace_id);
     `,
   },
+  {
+    version: 28,
+    sql: `
+      ALTER TABLE memories ADD COLUMN behavior_score REAL NOT NULL DEFAULT 0.5;
+      ALTER TABLE memories ADD COLUMN last_accessed_at INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE memories ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE memories ADD COLUMN manual_score_override REAL;
+
+      CREATE TABLE IF NOT EXISTS interaction_log (
+        id TEXT PRIMARY KEY,
+        user_text TEXT NOT NULL,
+        response_time_ms INTEGER,
+        topics TEXT NOT NULL DEFAULT '[]',
+        is_explicit_remember INTEGER NOT NULL DEFAULT 0,
+        rementioned_memory_ids TEXT NOT NULL DEFAULT '[]',
+        timestamp INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_interaction_log_ts ON interaction_log(timestamp);
+    `,
+  },
+  {
+    version: 29,
+    sql: `
+      ALTER TABLE memories ADD COLUMN topics TEXT NOT NULL DEFAULT '[]';
+    `,
+  },
 ]
 
 export function runMigrations(sqlite: SqlJsDatabase): void {

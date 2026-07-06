@@ -174,3 +174,22 @@ export const INITIAL_HOTWORDS = process.env.HOTWORDS
 
 /** Initial prompt for Whisper ASR to bias recognition towards domain terms. Override via ASR_INITIAL_PROMPT env. */
 export const ASR_INITIAL_PROMPT = process.env.ASR_INITIAL_PROMPT || '以下是关于泵站设备、音乐练习、日常陪伴和API密钥的语音对话'
+
+// ══════════════════════════════════════════
+//  行为驱动记忆加权配置
+// ══════════════════════════════════════════
+
+/** 行为加权分析窗口大小（最近 N 次交互）。Override via BEHAVIOR_WEIGHT_WINDOW_SIZE env. */
+export const BEHAVIOR_WEIGHT_WINDOW_SIZE = parseInt(process.env.BEHAVIOR_WEIGHT_WINDOW_SIZE || '16', 10)
+
+/** 兴趣时间衰减速率（0-1，每步衰减）。Override via BEHAVIOR_WEIGHT_RECENCY_DECAY env. */
+export const BEHAVIOR_WEIGHT_RECENCY_DECAY = parseFloat(process.env.BEHAVIOR_WEIGHT_RECENCY_DECAY || '0.92')
+
+/** 基础提升因子（0-1，兴趣匹配最大额外加分）。Override via BEHAVIOR_WEIGHT_BASE_BOOST env. */
+export const BEHAVIOR_WEIGHT_BASE_BOOST = parseFloat(process.env.BEHAVIOR_WEIGHT_BASE_BOOST || '0.3')
+
+/** 最小兴趣强度阈值（低于此值的主题不参与加权）。Override via BEHAVIOR_WEIGHT_MIN_STRENGTH env. */
+export const BEHAVIOR_WEIGHT_MIN_STRENGTH = parseFloat(process.env.BEHAVIOR_WEIGHT_MIN_STRENGTH || '2.0')
+
+/** 兴趣更新间隔（毫秒）。Override via BEHAVIOR_WEIGHT_UPDATE_INTERVAL env. */
+export const BEHAVIOR_WEIGHT_UPDATE_INTERVAL = parseInt(process.env.BEHAVIOR_WEIGHT_UPDATE_INTERVAL || '60000', 10)

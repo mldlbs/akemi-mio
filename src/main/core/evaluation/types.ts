@@ -61,6 +61,9 @@ export type EventType =
   // ── Workflow（工作流生命周期） ──
   | 'workflow.started'
   | 'workflow.completed'
+  // ── Guardrail（干预记录 —— 不可逆事实） ──
+  | 'guardrail.checked'
+  | 'guardrail.terminated'
 
 // ══════════════════════════════════════════════
 // 任务类别
@@ -121,6 +124,16 @@ export interface ModelInvokedPayload {
   promptLength: number
   /** Prompt token 数（如果 API 返回了） */
   promptTokens?: number
+  /** 输入 Token 来源归因（v1.1） */
+  tokenBreakdown?: {
+    system: number
+    memory: number
+    retrieval: number
+    runtime: number
+    user: number
+    history: number
+    tools: number
+  }
 }
 
 export interface ModelCompletedPayload {
@@ -198,6 +211,28 @@ export interface WorkflowCompletedPayload {
 }
 
 // ══════════════════════════════════════════════
+// Guardrail Payloads（干预记录 —— 不可逆事实）
+// ══════════════════════════════════════════════
+
+export interface GuardrailCheckedPayload {
+  /** 检测时的轮次 */
+  turn: number
+  /** 决策结果 */
+  decision: 'continue' | 'warning' | 'terminate'
+  /** 决策原因 */
+  reason: string
+}
+
+export interface GuardrailTerminatedPayload {
+  /** 终止时轮次 */
+  turn: number
+  /** 终止时已执行轮次 */
+  totalTurns: number
+  /** 终止原因 */
+  reason: string
+}
+
+// ══════════════════════════════════════════════
 // 联合类型
 // ══════════════════════════════════════════════
 
@@ -213,6 +248,8 @@ export type EventPayload =
   | ({ type: 'user.action' } & UserActionPayload)
   | ({ type: 'workflow.started' } & WorkflowStartedPayload)
   | ({ type: 'workflow.completed' } & WorkflowCompletedPayload)
+  | ({ type: 'guardrail.checked' } & GuardrailCheckedPayload)
+  | ({ type: 'guardrail.terminated' } & GuardrailTerminatedPayload)
 
 // ══════════════════════════════════════════════
 // 事件消费者接口（供 Metrics / Fitness / Evolution 使用）

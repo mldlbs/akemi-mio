@@ -7,6 +7,12 @@ export const memories = sqliteTable('memories', {
   confidence: real('confidence').notNull().default(0.5),
   tier: text('tier', { enum: ['permanent', 'semi', 'ephemeral'] }).notNull().default('ephemeral'),
   reinforceCount: integer('reinforce_count').notNull().default(0),
+  behaviorScore: real('behavior_score').notNull().default(0.5),
+  lastAccessedAt: integer('last_accessed_at').notNull().default(0),
+  accessCount: integer('access_count').notNull().default(0),
+  isPinned: integer('is_pinned').notNull().default(0),
+  manualScoreOverride: real('manual_score_override'),
+  topics: text('topics').notNull().default('[]'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 })
@@ -46,4 +52,15 @@ export const memoryVectors = sqliteTable('memory_vectors', {
   source: text('source', { enum: ['user_fact', 'summary'] }).notNull(),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
+})
+
+export const interactionLog = sqliteTable('interaction_log', {
+  id: text('id').primaryKey(),
+  userText: text('user_text').notNull(),
+  responseTimeMs: integer('response_time_ms'),
+  topics: text('topics').notNull().default('[]'),
+  isExplicitRemember: integer('is_explicit_remember').notNull().default(0),
+  rementionedMemoryIds: text('rementioned_memory_ids').notNull().default('[]'),
+  timestamp: integer('timestamp').notNull(),
+  createdAt: integer('created_at').notNull(),
 })
