@@ -16879,14 +16879,10 @@ function SettingsModal() {
   const onClose = reactExports.useCallback(() => useDeviceStore.getState().setSettingsOpen(false), []);
   const [activeTab, setActiveTab] = reactExports.useState("llm");
   const { values, setAndSave, saving, lastSaved } = useSettings(open);
-  const handleKeyDown = reactExports.useCallback(
-    (e) => {
-      if (e.key === "Escape") onClose();
-    },
-    [onClose]
-  );
+  const handleKeyDown = reactExports.useCallback((e) => {
+  }, []);
   if (!open) return null;
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-overlay", onClick: onClose, onKeyDown: handleKeyDown, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-panel", onClick: (e) => e.stopPropagation(), children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-overlay", onKeyDown: handleKeyDown, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-panel", onClick: (e) => e.stopPropagation(), children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-header", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-title", children: "设置" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "settings-close", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-close-line" }) })
@@ -17041,11 +17037,67 @@ function useAIOutput(activeSessionId, voiceActive, onError) {
   const handleResult = async (t) => {
     if (!t) return;
     store2.setTranscribed(t);
-    store2.setAgentState("thinking");
     onError?.(void 0);
     store2.setPendingText("");
     store2.setDisplayText("");
     revealTimer.clear();
+    try {
+      const intentResult = await window.electronAPI.matchVoiceIntent(t);
+      if (intentResult.matched && intentResult.intent) {
+        const confirmed = window.confirm(
+          `🎤 语音指令识别
+
+意图: ${intentResult.intent.description}
+
+${intentResult.intent.confirmMessage}
+
+将执行 ${intentResult.intent.toolSequence.length} 个工具:
+` + intentResult.intent.toolSequence.map((s, i) => `  ${i + 1}. ${s.tool}`).join("\n") + `
+
+确认执行？`
+        );
+        if (confirmed) {
+          store2.setAgentState("tool_executing");
+          store2.setToolStatus({ type: "start", tool: "voice_chain", message: `执行: ${intentResult.intent.description}` });
+          const execResult = await window.electronAPI.executeVoiceChain(
+            intentResult.intent.name,
+            intentResult.intent.slots
+          );
+          const resultLines = [];
+          for (const step of execResult.steps) {
+            const icon = step.success ? "✅" : "❌";
+            resultLines.push(`${icon} ${step.tool} (${step.durationMs}ms)`);
+            if (step.error) resultLines.push(`   错误: ${step.error}`);
+            if (step.output && step.output.length < 500) {
+              resultLines.push(`   ${step.output.split("\n").slice(0, 3).join("\n")}`);
+            }
+          }
+          const resultText = resultLines.join("\n");
+          store2.setAgentState("replying");
+          store2.appendPendingText(`🔧 工具执行完成:
+${resultText}`);
+          try {
+            await window.electronAPI.chat(
+              `[语音工具编排] ${intentResult.intent.description}
+结果:
+${resultText}`,
+              void 0,
+              activeSessionId || void 0,
+              true
+              // noTts
+            );
+          } catch {
+          }
+          fadeTimer.set(() => store2.resetAgent(), 15e3);
+          return;
+        } else {
+          store2.setAgentState("thinking");
+        }
+      }
+    } catch (err) {
+      console.warn("[VoiceOrch] intent match error:", err);
+    }
+    store2.setAgentState("thinking");
     try {
       await window.electronAPI.chat(t, void 0, activeSessionId || void 0, !voiceActive);
     } catch (err) {

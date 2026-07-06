@@ -253,6 +253,9 @@ bot.action(/style:(.+)/, async (ctx) => {
   await ctx.answerCbQuery(`风格: ${STYLES[styleKey].label}`)
   await ctx.editMessageText(`✅ 风格: **${STYLES[styleKey].label}**\n直接发文字生图吧 ✨`, {
     parse_mode: 'Markdown', ...styleButtons(styleKey),
+  }).catch(err => {
+    if (err.description?.includes('message is not modified')) return
+    throw err
   })
 })
 
@@ -442,6 +445,14 @@ async function doImg2img(ctx, imageName, promptText, editMsgId) {
     console.error(err.message)
   }
 }
+
+// 全局错误处理器（防止单个未捕获错误导致 bot crash 无限重启）
+bot.catch((err) => {
+  const desc = err?.message || String(err)
+  // "message is not modified" 无害，静默忽略
+  if (desc.includes('message is not modified')) return
+  console.error('⚠️ bot.catch:', desc)
+})
 
 // 启动
 bot.launch().then(() => {

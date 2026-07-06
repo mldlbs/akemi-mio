@@ -6,9 +6,29 @@ function createElectronAPI(ipc) {
     closeWindow: () => ipc.invoke("window:close"),
     minimizeWindow: () => ipc.invoke("window:minimize"),
     transcribe: (audio) => ipc.invoke("asr:transcribe", audio),
+    // ── 语音工具编排 ──
+    matchVoiceIntent: (text) => ipc.invoke("voice:matchIntent", text),
+    executeVoiceChain: (intent, slots) => ipc.invoke("voice:executeChain", intent, slots),
     chat: (text, requestId, sessionId, noTts) => ipc.invoke("ai:chat", text, requestId, sessionId, noTts),
     speak: (text) => ipc.invoke("tts:speak", text),
     stopSpeaking: () => ipc.invoke("tts:stop"),
+    // ── 情感自适应语音 ──
+    toggleEmotionTts: (enabled) => ipc.invoke("tts:emotion:toggle", enabled),
+    getEmotionTtsState: () => ipc.invoke("tts:emotion:state"),
+    onTtsEmotion: (callback) => {
+      const handler = (_event, data) => callback(data);
+      ipc.on("tts:emotion", handler);
+      return () => {
+        ipc.removeListener("tts:emotion", handler);
+      };
+    },
+    onTtsEmotionEnabled: (callback) => {
+      const handler = (_event, data) => callback(data);
+      ipc.on("tts:emotion:enabled", handler);
+      return () => {
+        ipc.removeListener("tts:emotion:enabled", handler);
+      };
+    },
     stopConversation: () => ipc.invoke("conversation:stop"),
     getState: () => ipc.invoke("state:get"),
     getWakeWords: () => ipc.invoke("config:getWakeWords"),

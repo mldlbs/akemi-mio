@@ -394,6 +394,11 @@ parseInt(process.env.WINDOW_HEIGHT || "640", 10);
 const GGML_MODELS_DIR = process.env.GGML_MODELS_DIR || path$1.resolve(path$1.join(WORKSPACE_ROOT, "models", "ggml"));
 const INITIAL_HOTWORDS = process.env.HOTWORDS ? process.env.HOTWORDS.split(",").map((w) => w.trim()) : ["贝斯", "音阶", "空弦", "指型", "把位", "小确幸", "巴赫", "轻音", "和弦", "旋律", "节奏", "密钥", "DeepSeek", "字幕"];
 const ASR_INITIAL_PROMPT = process.env.ASR_INITIAL_PROMPT || "以下是关于泵站设备、音乐练习、日常陪伴和API密钥的语音对话";
+const BEHAVIOR_WEIGHT_WINDOW_SIZE = parseInt(process.env.BEHAVIOR_WEIGHT_WINDOW_SIZE || "16", 10);
+const BEHAVIOR_WEIGHT_RECENCY_DECAY = parseFloat(process.env.BEHAVIOR_WEIGHT_RECENCY_DECAY || "0.92");
+const BEHAVIOR_WEIGHT_BASE_BOOST = parseFloat(process.env.BEHAVIOR_WEIGHT_BASE_BOOST || "0.3");
+const BEHAVIOR_WEIGHT_MIN_STRENGTH = parseFloat(process.env.BEHAVIOR_WEIGHT_MIN_STRENGTH || "2.0");
+const BEHAVIOR_WEIGHT_UPDATE_INTERVAL = parseInt(process.env.BEHAVIOR_WEIGHT_UPDATE_INTERVAL || "60000", 10);
 class StdioTransport {
   process;
   buffer = "";
@@ -3210,6 +3215,12 @@ const memories = sqliteCore.sqliteTable("memories", {
   confidence: sqliteCore.real("confidence").notNull().default(0.5),
   tier: sqliteCore.text("tier", { enum: ["permanent", "semi", "ephemeral"] }).notNull().default("ephemeral"),
   reinforceCount: sqliteCore.integer("reinforce_count").notNull().default(0),
+  behaviorScore: sqliteCore.real("behavior_score").notNull().default(0.5),
+  lastAccessedAt: sqliteCore.integer("last_accessed_at").notNull().default(0),
+  accessCount: sqliteCore.integer("access_count").notNull().default(0),
+  isPinned: sqliteCore.integer("is_pinned").notNull().default(0),
+  manualScoreOverride: sqliteCore.real("manual_score_override"),
+  topics: sqliteCore.text("topics").notNull().default("[]"),
   createdAt: sqliteCore.integer("created_at").notNull(),
   updatedAt: sqliteCore.integer("updated_at").notNull()
 });
@@ -3245,6 +3256,16 @@ const memoryVectors = sqliteCore.sqliteTable("memory_vectors", {
   source: sqliteCore.text("source", { enum: ["user_fact", "summary"] }).notNull(),
   createdAt: sqliteCore.integer("created_at").notNull(),
   updatedAt: sqliteCore.integer("updated_at").notNull()
+});
+sqliteCore.sqliteTable("interaction_log", {
+  id: sqliteCore.text("id").primaryKey(),
+  userText: sqliteCore.text("user_text").notNull(),
+  responseTimeMs: sqliteCore.integer("response_time_ms"),
+  topics: sqliteCore.text("topics").notNull().default("[]"),
+  isExplicitRemember: sqliteCore.integer("is_explicit_remember").notNull().default(0),
+  rementionedMemoryIds: sqliteCore.text("rementioned_memory_ids").notNull().default("[]"),
+  timestamp: sqliteCore.integer("timestamp").notNull(),
+  createdAt: sqliteCore.integer("created_at").notNull()
 });
 const credentials = sqliteCore.sqliteTable("credentials", {
   key: sqliteCore.text("key").primaryKey(),
@@ -3963,6 +3984,34 @@ const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS idx_ev_type ON evaluation_events(type);
       CREATE INDEX IF NOT EXISTS idx_ev_trace ON evaluation_events(trace_id);
     `
+  },
+  {
+    version: 28,
+    sql: `
+      ALTER TABLE memories ADD COLUMN behavior_score REAL NOT NULL DEFAULT 0.5;
+      ALTER TABLE memories ADD COLUMN last_accessed_at INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE memories ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE memories ADD COLUMN manual_score_override REAL;
+
+      CREATE TABLE IF NOT EXISTS interaction_log (
+        id TEXT PRIMARY KEY,
+        user_text TEXT NOT NULL,
+        response_time_ms INTEGER,
+        topics TEXT NOT NULL DEFAULT '[]',
+        is_explicit_remember INTEGER NOT NULL DEFAULT 0,
+        rementioned_memory_ids TEXT NOT NULL DEFAULT '[]',
+        timestamp INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_interaction_log_ts ON interaction_log(timestamp);
+    `
+  },
+  {
+    version: 29,
+    sql: `
+      ALTER TABLE memories ADD COLUMN topics TEXT NOT NULL DEFAULT '[]';
+    `
   }
 ];
 function runMigrations(sqlite2) {
@@ -4448,7 +4497,7 @@ class AsyncLock {
     return this.locked;
   }
 }
-let idCounter$b = 0;
+let idCounter$c = 0;
 function rowToPlan(r) {
   return {
     id: r.id,
@@ -4496,7 +4545,7 @@ class DrizzlePlanManager {
       const plan = this.createInMemoryPlan(title, description2, stepDescriptions, Date.now(), priority);
       return plan;
     }
-    const planId = `plan_${Date.now()}_${++idCounter$b}`;
+    const planId = `plan_${Date.now()}_${++idCounter$c}`;
     const now = Date.now();
     db2.run("INSERT INTO plans (id, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", [
       planId,
@@ -4739,7 +4788,7 @@ class DrizzlePlanManager {
     return removed;
   }
   createInMemoryPlan(title, description2, stepDescriptions, now, priority) {
-    const planId = `plan_${now}_${++idCounter$b}`;
+    const planId = `plan_${now}_${++idCounter$c}`;
     const steps2 = stepDescriptions.map((desc, i) => ({
       id: `step_${i}_${now}`,
       description: desc,
@@ -6828,6 +6877,360 @@ class CreativityExecutor {
     ].join("\n");
   }
 }
+const MAX_MESSAGES = 200;
+const MAX_PROBLEMS_PER_CYCLE = 3;
+const MIN_INTERVAL_MS = 30 * 60 * 1e3;
+const SHORT_RESPONSE_CHARS = 50;
+const FOLLOW_UP_WINDOW_MS = 60 * 1e3;
+const DISSATISFACTION_KEYWORDS = [
+  // 中文否定/纠正
+  "不对",
+  "错了",
+  "错误",
+  "不是",
+  "不行",
+  "不好",
+  "不正确",
+  "重新",
+  "再来",
+  "再试",
+  "重试",
+  "换个",
+  "换一个",
+  "听不懂",
+  "不理解",
+  "没懂",
+  "不明白",
+  "没明白",
+  "没用",
+  "无效",
+  "不工作",
+  "坏了",
+  "有问题",
+  "修正",
+  "更正",
+  "改一下",
+  "改改",
+  // 英文否定/纠正
+  "wrong",
+  "incorrect",
+  "not working",
+  "doesn't work",
+  "try again",
+  "redo",
+  "retry",
+  "not right",
+  "don't understand",
+  "doesn't make sense",
+  "fix",
+  "correct",
+  "broken",
+  "error"
+];
+const TOPIC_KEYWORDS = {
+  prompt: ["prompt", "提示词", "提示", "模板", "template", "system prompt"],
+  tool: ["工具", "tool", "调用", "invoke", "mcp", "函数", "function"],
+  response: ["回答", "回复", "响应", "response", "answer", "太长", "太短", "啰嗦"],
+  speed: ["慢", "太慢", "卡", "超时", "timeout", "slow", "延迟", "latency"],
+  accuracy: ["准确", "精度", "精确", "accuracy", "幻觉", "hallucination", "编造"]
+};
+class MemoryAnalysisCollector {
+  name = "memory-analysis";
+  source = "log";
+  lastRun = 0;
+  minIntervalMs = MIN_INTERVAL_MS;
+  /** 已生成过的 signal 指纹集合（防重复） */
+  emittedFingerprints = /* @__PURE__ */ new Set();
+  shouldRun() {
+    if (Date.now() - this.lastRun < this.minIntervalMs) return false;
+    return true;
+  }
+  async collect() {
+    this.lastRun = Date.now();
+    try {
+      const messages2 = getRecentMessages(MAX_MESSAGES);
+      if (messages2.length < 10) {
+        Logger.log("INFO", "memory_analysis_insufficient_data", { count: messages2.length });
+        return [];
+      }
+      const sessions = this.groupBySession(messages2);
+      const allSignals = [];
+      for (const session of sessions) {
+        this.detectCorrections(session, allSignals);
+        this.detectShortResponses(session, allSignals);
+        this.detectRepeatQuestions(session, allSignals);
+        this.detectErrorPatterns(session, allSignals);
+      }
+      const newSignals = allSignals.filter((s) => {
+        const fp = this.signalFingerprint(s);
+        if (this.emittedFingerprints.has(fp)) return false;
+        this.emittedFingerprints.add(fp);
+        return true;
+      });
+      if (this.emittedFingerprints.size > 200) {
+        const entries = Array.from(this.emittedFingerprints);
+        this.emittedFingerprints = new Set(entries.slice(-100));
+      }
+      const problems = this.signalsToProblems(newSignals, messages2);
+      Logger.log("INFO", "memory_analysis_collect_done", {
+        totalMessages: messages2.length,
+        sessions: sessions.length,
+        signals: allSignals.length,
+        newSignals: newSignals.length,
+        problems: problems.length
+      });
+      return problems.slice(0, MAX_PROBLEMS_PER_CYCLE);
+    } catch (err) {
+      Logger.log("ERROR", "memory_analysis_collect_error", { error: err.message });
+      return [];
+    }
+  }
+  // =============================================================================
+  // Session 分组
+  // =============================================================================
+  groupBySession(messages2) {
+    const map = /* @__PURE__ */ new Map();
+    for (const m of messages2) {
+      const sid = m.sessionId || "_no_session";
+      if (!map.has(sid)) map.set(sid, []);
+      map.get(sid).push(m);
+    }
+    return Array.from(map.entries()).map(([sessionId, msgs]) => ({
+      sessionId,
+      messages: msgs,
+      signals: []
+    }));
+  }
+  // =============================================================================
+  // 检测 1: 用户纠正/否定
+  // =============================================================================
+  detectCorrections(session, out) {
+    for (const msg of session.messages) {
+      if (msg.role !== "user") continue;
+      const content = msg.content.toLowerCase();
+      for (const kw of DISSATISFACTION_KEYWORDS) {
+        if (content.includes(kw.toLowerCase())) {
+          out.push({
+            messageId: msg.id,
+            timestamp: msg.createdAt,
+            type: "correction",
+            sessionId: session.sessionId,
+            detail: `用户消息包含不满关键词 "${kw}"：${this.truncate(msg.content, 100)}`
+          });
+          break;
+        }
+      }
+    }
+  }
+  // =============================================================================
+  // 检测 2: 短响应 + 用户追问
+  // =============================================================================
+  detectShortResponses(session, out) {
+    const msgs = session.messages;
+    for (let i = 0; i < msgs.length - 1; i++) {
+      const curr = msgs[i];
+      const next = msgs[i + 1];
+      if (curr.role !== "assistant") continue;
+      if (curr.content.length >= SHORT_RESPONSE_CHARS) continue;
+      if (next.role !== "user") continue;
+      const gap = next.createdAt - curr.createdAt;
+      if (gap > FOLLOW_UP_WINDOW_MS) continue;
+      out.push({
+        messageId: curr.id,
+        timestamp: curr.createdAt,
+        type: "short_response",
+        sessionId: session.sessionId,
+        relatedAssistantMsgId: curr.id,
+        detail: `助手回复仅${curr.content.length}字"${this.truncate(curr.content, 40)}"，用户${gap}ms后追问"${this.truncate(next.content, 60)}"`
+      });
+    }
+  }
+  // =============================================================================
+  // 检测 3: 重复提问
+  // =============================================================================
+  detectRepeatQuestions(session, out) {
+    const userMsgs = session.messages.filter((m) => m.role === "user");
+    if (userMsgs.length < 2) return;
+    for (let i = 0; i < userMsgs.length - 1; i++) {
+      for (let j = i + 1; j < Math.min(i + 5, userMsgs.length); j++) {
+        const similarity = this.textSimilarity(userMsgs[i].content, userMsgs[j].content);
+        if (similarity >= 0.6) {
+          out.push({
+            messageId: userMsgs[j].id,
+            timestamp: userMsgs[j].createdAt,
+            type: "repeat_question",
+            sessionId: session.sessionId,
+            detail: `用户重复提问（相似度${(similarity * 100).toFixed(0)}%）："${this.truncate(userMsgs[i].content, 60)}" → "${this.truncate(userMsgs[j].content, 60)}"`
+          });
+          break;
+        }
+      }
+    }
+  }
+  // =============================================================================
+  // 检测 4: 错误模式（工具调用失败 / 超时）
+  // =============================================================================
+  detectErrorPatterns(session, out) {
+    for (const msg of session.messages) {
+      if (msg.role !== "assistant") continue;
+      const content = msg.content.toLowerCase();
+      const errorPatterns = [
+        { kw: "timeout", label: "超时" },
+        { kw: "超时", label: "超时" },
+        { kw: "error", label: "错误" },
+        { kw: "失败", label: "失败" },
+        { kw: "failed", label: "失败" },
+        { kw: "exception", label: "异常" },
+        { kw: "异常", label: "异常" },
+        { kw: "无法", label: "无法执行" },
+        { kw: "不能", label: "无法执行" },
+        { kw: "抱歉", label: "道歉式回复" },
+        { kw: "sorry", label: "道歉式回复" }
+      ];
+      for (const { kw, label } of errorPatterns) {
+        if (content.includes(kw)) {
+          out.push({
+            messageId: msg.id,
+            timestamp: msg.createdAt,
+            type: "error_pattern",
+            sessionId: session.sessionId,
+            detail: `助手回复包含${label}信号"${kw}"：${this.truncate(msg.content, 100)}`
+          });
+          break;
+        }
+      }
+    }
+  }
+  // =============================================================================
+  // Signal → Problem 转换
+  // =============================================================================
+  signalsToProblems(signals, allMessages) {
+    const byType = /* @__PURE__ */ new Map();
+    for (const s of signals) {
+      if (!byType.has(s.type)) byType.set(s.type, []);
+      byType.get(s.type).push(s);
+    }
+    const problems = [];
+    for (const [type, group] of byType) {
+      const topic = this.inferTopic(group, allMessages);
+      const problem = this.buildProblem(type, group, topic);
+      if (problem) problems.push(problem);
+    }
+    return problems;
+  }
+  inferTopic(signals, messages2) {
+    const contextWords = /* @__PURE__ */ new Set();
+    for (const s of signals) {
+      const related = messages2.find((m) => m.id === s.relatedAssistantMsgId || m.id === s.messageId);
+      if (related) {
+        for (const w of related.content.toLowerCase().split(/\s+/)) {
+          contextWords.add(w);
+        }
+      }
+    }
+    const scores = {};
+    for (const [topic, keywords] of Object.entries(TOPIC_KEYWORDS)) {
+      scores[topic] = 0;
+      for (const kw of keywords) {
+        if (contextWords.has(kw)) scores[topic]++;
+      }
+    }
+    const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
+    return best && best[1] > 0 ? best[0] : "general";
+  }
+  buildProblem(type, signals, topic) {
+    const count = signals.length;
+    if (count === 0) return null;
+    const latest = signals.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+    const examples = signals.slice(0, 3).map((s) => `  - [${new Date(s.timestamp).toLocaleTimeString("zh-CN")}] ${s.detail}`).join("\n");
+    const typeLabel = {
+      correction: "用户频繁纠正/否定助手回答",
+      short_response: "助手短回复导致用户追问",
+      repeat_question: "用户重复提问（前次回答未解决问题）",
+      error_pattern: "助手回复包含错误/异常/道歉"
+    };
+    const title = `[记忆分析] ${typeLabel[type] || type}（${count}次）`;
+    const description2 = [
+      `## 问题类型`,
+      typeLabel[type] || type,
+      "",
+      `## 检测到 ${count} 次信号`,
+      "",
+      `## 最近示例`,
+      examples,
+      "",
+      `## 推断主题领域`,
+      topic,
+      "",
+      `## 建议修复方向`,
+      this.suggestFix(type, topic)
+    ].join("\n");
+    return {
+      id: `memory:${type}:${latest.timestamp}`,
+      source: "log",
+      severity: count >= 3 ? "error" : "warning",
+      title,
+      description: description2,
+      estimatedCostChars: description2.length,
+      lastSeen: latest.timestamp,
+      occurrenceCount: count,
+      context: {
+        raw: description2,
+        snippet: examples,
+        metadata: {
+          signalType: type,
+          signalCount: String(count),
+          topic,
+          latestTimestamp: String(latest.timestamp)
+        }
+      }
+    };
+  }
+  suggestFix(type, topic) {
+    const suggestions = {
+      correction: `- 检查 ${topic === "prompt" ? "system prompt / 提示词模板" : topic === "tool" ? "工具调用顺序和参数" : "响应生成逻辑"}是否需要调整
+- 考虑添加更明确的指令或约束
+- 如果是特定领域频繁出错，考虑添加领域知识或 few-shot 示例`,
+      short_response: `- 检查 prompt 中是否要求了过短的回复格式
+- 增加最小回复长度约束
+- 对于工具调用结果，要求助手进行适当解释而非仅输出原始数据`,
+      repeat_question: `- 用户重复提问说明前次回答不够充分
+- 检查回答是否遗漏了用户问题的关键部分
+- 考虑增加追问检测和上下文延续机制
+- ${topic === "tool" ? "检查工具返回的数据是否完整、准确" : "检查回答是否覆盖了用户的所有子问题"}`,
+      error_pattern: `- 分析导致错误/超时的根本原因
+- 如果是工具超时，考虑增加超时时间或拆分大请求
+- 如果是模型异常，检查 prompt 长度是否超出限制
+- 减少"抱歉"类无意义回复，替换为具体的错误信息和下一步建议`
+    };
+    return suggestions[type] || "- 根据信号模式分析并优化相关代码";
+  }
+  // =============================================================================
+  // 工具方法
+  // =============================================================================
+  truncate(text, maxLen) {
+    if (text.length <= maxLen) return text;
+    return text.slice(0, maxLen) + "…";
+  }
+  /** 简单的 Jaccard 相似度（基于词袋） */
+  textSimilarity(a, b) {
+    const tokenize2 = (s) => {
+      return new Set(
+        s.toLowerCase().split(/[\s,，。！？、；：""''（）\(\)\[\]【】]+/).filter((w) => w.length >= 2)
+      );
+    };
+    const setA = tokenize2(a);
+    const setB = tokenize2(b);
+    if (setA.size === 0 || setB.size === 0) return 0;
+    const intersection = new Set([...setA].filter((x) => setB.has(x)));
+    const union = /* @__PURE__ */ new Set([...setA, ...setB]);
+    return intersection.size / union.size;
+  }
+  /** 生成 signal 去重指纹 */
+  signalFingerprint(s) {
+    return `${s.type}:${s.sessionId}:${s.detail.slice(0, 60)}`;
+  }
+}
 path$1.join(WORKSPACE.evolution, "strategy_scores.json");
 const planManager = new DrizzlePlanManager();
 let evolutionService = null;
@@ -6871,8 +7274,6 @@ function getSkillManager() {
 }
 function getProceduralMemory() {
   return _proceduralMemory;
-}
-function setPersonaStateManager(psm) {
 }
 function setHealthManager(hm) {
 }
@@ -7265,7 +7666,7 @@ const writingPipeline = {
   updatedAt
 };
 const PRESET_DEFINITIONS = [devPipelineSimple, devPipelineMedium, devPipelineLarge, writingPipeline];
-let idCounter$a = 0;
+let idCounter$b = 0;
 class WorkflowStoreV2 {
   seeded = false;
   get db() {
@@ -7394,7 +7795,7 @@ class WorkflowStoreV2 {
     return this.rowToRun(row);
   }
   createRun(def, trigger) {
-    const runId = `run_${Date.now()}_${++idCounter$a}`;
+    const runId = `run_${Date.now()}_${++idCounter$b}`;
     const now = Date.now();
     const run = {
       runId,
@@ -10236,6 +10637,197 @@ ${lines.join("\n")}`);
   },
   isReadOnly: true
 });
+const saveTaskStateTool = buildTool({
+  name: "save_task_state",
+  description: "保存当前任务进度，以便下次对话恢复。当执行多步骤任务时，每完成一步或暂停时调用。系统会自动追踪任务ID、步骤进度和中间结果",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      taskId: { type: "string", description: "唯一任务ID，同一任务多次调用会覆盖更新" },
+      title: { type: "string", description: '简短任务标题，如"修复TypeScript编译错误"' },
+      description: { type: "string", description: "任务详细描述，单句话说明目标" },
+      status: {
+        type: "string",
+        enum: ["active", "paused", "completed", "abandoned"],
+        description: "任务当前状态"
+      },
+      steps: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            description: { type: "string", description: "步骤描述" },
+            status: { type: "string", enum: ["pending", "in_progress", "completed", "failed"], description: "步骤状态" },
+            result: { type: "string", description: "步骤结果摘要（可选）" }
+          },
+          required: ["description", "status"]
+        },
+        description: "步骤列表，至少包含一个步骤"
+      },
+      lastStepIndex: { type: "number", description: "当前进行到的步骤索引（0-based）" },
+      tags: {
+        type: "array",
+        items: { type: "string" },
+        description: '标签列表，如["bug", "typescript", "refactor"]'
+      }
+    },
+    required: ["taskId", "title", "description", "status", "steps", "lastStepIndex"]
+  },
+  handler: async (args) => {
+    try {
+      const ms = getMemoryService();
+      if (!ms) return formatToolError("记忆服务暂不可用");
+      const steps2 = (args.steps || []).map((s) => ({
+        description: String(s.description),
+        status: s.status || "pending",
+        result: s.result ? String(s.result) : void 0,
+        completedAt: s.status === "completed" ? Date.now() : void 0
+      }));
+      const data = {
+        taskId: String(args.taskId),
+        title: String(args.title),
+        description: String(args.description),
+        status: args.status,
+        steps: steps2,
+        lastStepIndex: Number(args.lastStepIndex),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        sessionIds: [],
+        tags: (args.tags || []).map(String)
+      };
+      if (data.status === "completed") {
+        ms.markTaskComplete(data.taskId);
+        return formatToolResult(`任务「${data.title}」已标记完成`);
+      }
+      if (data.status === "abandoned") {
+        ms.markTaskAbandoned(data.taskId);
+        return formatToolResult(`任务「${data.title}」已放弃`);
+      }
+      ms.saveTaskState(data);
+      const stepStats = steps2.filter((s) => s.status === "completed").length;
+      return formatToolResult(
+        `已保存任务「${data.title}」(${data.status === "paused" ? "已暂停" : "进行中"}, ${stepStats}/${steps2.length} 步已完成)`
+      );
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: false
+});
+const queryTasksTool = buildTool({
+  name: "query_tasks",
+  description: "查询未完成的任务列表，用于对话开始时恢复上次的工作。返回任务ID、标题、进度、上次更新时间等信息",
+  inputJSONSchema: {
+    type: "object",
+    properties: {},
+    required: []
+  },
+  handler: async () => {
+    try {
+      const ms = getMemoryService();
+      if (!ms) return formatToolError("记忆服务暂不可用");
+      const unfinished = ms.getUnfinishedTasks();
+      if (unfinished.length === 0) {
+        return formatToolResult("当前没有未完成的任务。");
+      }
+      const lines = unfinished.map((t) => {
+        const completedSteps = t.steps.filter((s) => s.status === "completed").length;
+        const totalSteps = t.steps.length;
+        const nextStep = t.steps.find((s) => s.status === "pending" || s.status === "in_progress");
+        let line = `- [${t.taskId}] ${t.title} (${t.status === "paused" ? "已暂停" : "进行中"}, ${completedSteps}/${totalSteps} 步)`;
+        if (nextStep) line += `
+  下一步: ${nextStep.description.slice(0, 80)}`;
+        line += `
+  上次更新: ${new Date(t.updatedAt).toLocaleString("zh-CN")}`;
+        if (t.tags.length > 0) line += `
+  标签: ${t.tags.join(", ")}`;
+        return line;
+      });
+      return formatToolResult(`未完成的任务（共 ${unfinished.length} 个）：
+${lines.join("\n")}`);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: true
+});
+const saveUserPreferenceTool = buildTool({
+  name: "save_user_preference",
+  description: "保存用户的个人偏好到记忆系统。当用户透露了风格、语言、详略度等偏好时主动调用，用于跨对话保持一致的交互体验",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      key: { type: "string", description: '偏好标识，如"response_style"、"language_level"、"detail_preference"' },
+      value: { type: "string", description: '偏好内容，如"简洁直接"、"中文为主"、"详细解释每一步"' },
+      category: {
+        type: "string",
+        enum: ["style", "detail", "language", "preference", "identity", "other"],
+        description: "偏好分类：style=风格, detail=详略, language=语言, preference=偏好, identity=身份, other=其他"
+      },
+      confidence: { type: "number", description: "确信度 0-1，默认 0.8" },
+      source: { type: "string", description: '来源描述，如"用户明确要求"、"对话推断"、"历史记录"' }
+    },
+    required: ["key", "value", "category"]
+  },
+  handler: async (args) => {
+    try {
+      const ms = getMemoryService();
+      if (!ms) return formatToolError("记忆服务暂不可用");
+      ms.saveUserPreference({
+        key: String(args.key),
+        value: String(args.value),
+        confidence: typeof args.confidence === "number" ? args.confidence : 0.8,
+        category: args.category || "other",
+        source: String(args.source || "对话记录"),
+        updatedAt: Date.now()
+      });
+      return formatToolResult(`已记住用户偏好: ${args.key} = ${args.value.slice(0, 60)}`);
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: false
+});
+const getUserPreferencesTool = buildTool({
+  name: "get_user_preferences",
+  description: "获取已保存的用户画像和偏好信息。在对话开始时自动调用，帮助了解用户习惯和偏好",
+  inputJSONSchema: {
+    type: "object",
+    properties: {},
+    required: []
+  },
+  handler: async () => {
+    try {
+      const ms = getMemoryService();
+      if (!ms) return formatToolError("记忆服务暂不可用");
+      const prefs = ms.getUserPreferences();
+      if (prefs.length === 0) {
+        return formatToolResult("尚未记录任何用户偏好。");
+      }
+      const byCat = {};
+      for (const p of prefs) {
+        if (!byCat[p.category]) byCat[p.category] = [];
+        byCat[p.category].push(`${p.key}: ${p.value} (置信度${p.confidence.toFixed(1)})`);
+      }
+      const labels = {
+        style: "风格",
+        detail: "详略",
+        language: "语言",
+        preference: "偏好",
+        identity: "身份",
+        other: "其他"
+      };
+      const lines = [`用户画像（共 ${prefs.length} 条）：`];
+      for (const [cat, items] of Object.entries(byCat)) {
+        lines.push(`- ${labels[cat] || cat}: ${items.join("; ")}`);
+      }
+      return formatToolResult(lines.join("\n"));
+    } catch (err) {
+      return formatToolError(err.message);
+    }
+  },
+  isReadOnly: true
+});
 const CONNECTION_TIMEOUT = 15e3;
 const EXEC_TIMEOUT = 6e4;
 function getDefaultSSHConfig() {
@@ -11002,6 +11594,10 @@ function getAllTools() {
     cardGeneratorTool,
     rememberProcedureTool,
     listProceduresTool,
+    saveTaskStateTool,
+    queryTasksTool,
+    saveUserPreferenceTool,
+    getUserPreferencesTool,
     centosExecTool,
     centosReadFileTool,
     centosWriteFileTool,
@@ -11045,6 +11641,117 @@ class LocalProvider {
   }
 }
 const WORKSPACE_DIR = WORKSPACE_DIR$1;
+class MemoryAwareInterceptor {
+  memoryService = null;
+  /** 关联 MemoryService 实例 */
+  setMemoryService(ms) {
+    this.memoryService = ms;
+  }
+  /**
+   * 工具调用前：从 Memory 中语义检索相关上下文。
+   *
+   * 检索策略：
+   *   1. VectorMemory 向量语义搜索（基于 toolName + arg 值构建查询）
+   *   2. user_fact 条目关键词匹配补充
+   *   3. 去重合并，最多返回 5 条
+   */
+  preCall(toolName, args) {
+    if (!this.memoryService) {
+      return { facts: [], scores: [], hasContext: false };
+    }
+    try {
+      const queryParts = [toolName];
+      for (const [key, value] of Object.entries(args)) {
+        if (typeof value === "string" && value.length > 0 && value.length < 500) {
+          const cleaned = value.replace(/[\/\\:]/g, " ");
+          queryParts.push(cleaned);
+        }
+      }
+      const query = queryParts.join(" ");
+      const vectorResults = this.memoryService.vector.querySync(query, 5);
+      const userFacts = this.memoryService.getEntries().filter((e) => e.type === "user_fact").map((e) => e.content);
+      const queryLower = query.toLowerCase();
+      const keywordScored = userFacts.map((content) => {
+        const contentLower = content.toLowerCase();
+        let score = 0;
+        if (contentLower.includes(toolName.toLowerCase())) score += 3;
+        for (const part of queryParts.slice(1)) {
+          if (part.length > 2 && contentLower.includes(part.toLowerCase())) score += 1;
+        }
+        return { content, score };
+      }).filter((s) => s.score > 0).sort((a, b) => b.score - a.score).slice(0, 3).map((s) => s.content);
+      const allFacts = [.../* @__PURE__ */ new Set([...vectorResults, ...keywordScored])];
+      const scores = allFacts.map((_, i) => {
+        return i < vectorResults.length ? 0.8 : 0.5;
+      });
+      if (allFacts.length > 0) {
+        Logger.log("INFO", "memory_interceptor_hit", {
+          tool: toolName,
+          matches: allFacts.length,
+          top: allFacts[0]?.slice(0, 60)
+        });
+      }
+      return {
+        facts: allFacts,
+        scores,
+        hasContext: allFacts.length > 0
+      };
+    } catch (err) {
+      Logger.log("WARN", "memory_interceptor_precall_failed", { tool: toolName, error: String(err) });
+      return { facts: [], scores: [], hasContext: false };
+    }
+  }
+  /**
+   * 将记忆上下文注入工具参数。
+   *
+   * 使用 `_memoryContext` 保留前缀以避免与工具实际参数冲突。
+   * 外部 MCP 服务器会忽略未识别的字段；本地工具可选择使用该上下文。
+   */
+  enrichArgs(args, context) {
+    if (!context.hasContext) return args;
+    return {
+      ...args,
+      _memoryContext: {
+        facts: context.facts,
+        note: "【记忆检索】以下是从历史记忆中检索到的可能相关的上下文，仅供参考"
+      }
+    };
+  }
+  /**
+   * 工具调用后：将执行结果摘要存入 Memory。
+   *
+   * 摘要格式: "[工具调用] toolName(key=value, ...) → 成功/失败: resultPreview"
+   * 成功调用置信度 0.6，失败调用置信度 0.3（避免噪声记忆占据高优先级）。
+   */
+  postCall(toolName, args, result, success) {
+    if (!this.memoryService) return;
+    try {
+      const summaryText = this.buildSummary(toolName, args, result, success);
+      if (summaryText) {
+        this.memoryService.addFact(summaryText, success ? 0.6 : 0.3);
+        Logger.log("INFO", "memory_interceptor_stored", {
+          tool: toolName,
+          success,
+          preview: summaryText.slice(0, 80)
+        });
+      }
+    } catch (err) {
+      Logger.log("WARN", "memory_interceptor_postcall_failed", { tool: toolName, error: String(err) });
+    }
+  }
+  /**
+   * 构建工具调用摘要文本。
+   */
+  buildSummary(toolName, args, result, success) {
+    const argSummary = Object.entries(args).filter(([, v]) => typeof v === "string" && v.length > 0).map(([k, v]) => `${k}=${v.slice(0, 60)}`).join(", ");
+    const status = success ? "成功" : "失败";
+    const resultPreview = result.slice(0, 120).replace(/\n/g, " ");
+    if (argSummary) {
+      return `[工具调用] ${toolName}(${argSummary}) → ${status}: ${resultPreview}`;
+    }
+    return `[工具调用] ${toolName} → ${status}: ${resultPreview}`;
+  }
+}
 const FILE_WRITE_TOOLS = /* @__PURE__ */ new Set(["write_file", "edit_file"]);
 const SHELL_TOOLS = /* @__PURE__ */ new Set(["run_command"]);
 const MGR = "@builtin/mcp-mgr";
@@ -11086,6 +11793,7 @@ class ServerManager {
   retryStates = /* @__PURE__ */ new Map();
   constitutionEngine = null;
   capabilityEngine = null;
+  memoryInterceptor = new MemoryAwareInterceptor();
   /** 每个 MCP 服务器的独立熔断器 */
   circuitBreakers = /* @__PURE__ */ new Map();
   /** 重启预算：每小时最多 RESTART_BUDGET_MAX 次重启，超限后自动禁用 */
@@ -11109,6 +11817,10 @@ class ServerManager {
   /** Phase 4: 设置 CapabilityEngine 用于工具调用授权 */
   setCapabilityEngine(engine) {
     this.capabilityEngine = engine;
+  }
+  /** 设置 MemoryService 用于记忆感知的工具调用拦截 */
+  setMemoryService(ms) {
+    this.memoryInterceptor.setMemoryService(ms);
   }
   /** 从 mcp_servers.json 自动恢复持久化的 MCP 服务器 */
   initServers() {
@@ -11272,6 +11984,8 @@ class ServerManager {
     if (!meta) {
       throw new Error(`未知工具: ${name2}`);
     }
+    const memoryCtx = this.memoryInterceptor.preCall(name2, args);
+    const enrichedArgs = this.memoryInterceptor.enrichArgs(args, memoryCtx);
     const caller = meta.serverName;
     if (this.capabilityEngine && meta.serverName !== MGR) {
       const action = this.toolNameToCapability(name2);
@@ -11294,27 +12008,35 @@ class ServerManager {
         throw new Error(`[Sandbox] 外部 MCP 服务器不允许执行 shell 命令: ${name2}`);
       }
     }
-    if (meta.serverName === MGR) {
-      return this.handleMgrTool(name2, args);
-    }
-    if (meta.serverName === this.local.name) {
-      if (this.constitutionEngine && (name2 === "write_file" || name2 === "edit_file")) {
-        const targetPath = args?.path;
-        if (targetPath) {
-          const resolvedPath = path$1.resolve(typeof targetPath === "string" ? targetPath : String(targetPath));
-          const check = this.constitutionEngine.checkWrite(resolvedPath);
-          if (!check.allowed) {
-            throw new Error(`Constitution 拒绝写入: ${resolvedPath} — ${check.violation?.reason || "路径受保护"}`);
+    let result;
+    try {
+      if (meta.serverName === MGR) {
+        result = await this.handleMgrTool(name2, enrichedArgs);
+      } else if (meta.serverName === this.local.name) {
+        if (this.constitutionEngine && (name2 === "write_file" || name2 === "edit_file")) {
+          const targetPath = args?.path;
+          if (targetPath) {
+            const resolvedPath = path$1.resolve(typeof targetPath === "string" ? targetPath : String(targetPath));
+            const check = this.constitutionEngine.checkWrite(resolvedPath);
+            if (!check.allowed) {
+              throw new Error(`Constitution 拒绝写入: ${resolvedPath} — ${check.violation?.reason || "路径受保护"}`);
+            }
           }
         }
+        const toolResult = await this.local.callTool(name2, enrichedArgs);
+        result = this.formatResult(toolResult);
+      } else {
+        const client = this.servers.get(meta.serverName);
+        if (!client) throw new Error(`MCP 服务器不可用: ${meta.serverName}`);
+        const toolResult = await client.callTool(name2, enrichedArgs);
+        result = this.formatResult(toolResult);
       }
-      const result2 = await this.local.callTool(name2, args);
-      return this.formatResult(result2);
+      this.memoryInterceptor.postCall(name2, args, result, true);
+      return result;
+    } catch (err) {
+      this.memoryInterceptor.postCall(name2, args, err.message || String(err), false);
+      throw err;
     }
-    const client = this.servers.get(meta.serverName);
-    if (!client) throw new Error(`MCP 服务器不可用: ${meta.serverName}`);
-    const result = await client.callTool(name2, args);
-    return this.formatResult(result);
   }
   async handleMgrTool(name2, args) {
     switch (name2) {
@@ -11773,6 +12495,10 @@ const PROMPT_TOOLS = `可用工具列表：
 - list_mcp_servers — 查看已注册的 MCP 服务器
 - remove_mcp_server — 移除 MCP 服务器
 - remember_fact — 记住重要信息（用户偏好、关键决定、项目需求），对话中主动使用
+- save_task_state — 保存多步骤任务进度，跨对话恢复（每完成一步主动调用）
+- query_tasks — 查询未完成的任务列表
+- save_user_preference — 保存用户风格/语言/详略偏好
+- get_user_preferences — 获取已保存的用户画像
 - generate_image — 使用 FLUX.1-schnell（本地 ComfyUI GPU）或 CogView-3-Flash（智谱AI）根据提示词生成图片
 - auto_schedule_workflow — 【AI 自主调度】创建并启动工作流，适合多步骤/并行/条件分支/审批门场景
 - list_workflows — 列出已有工作流定义
@@ -12316,6 +13042,75 @@ function extractJsonFromLLMReply(reply) {
   }
   return null;
 }
+const SCRATCHPAD_PREFIXES = ["[system_hint]", "[error_hint]", "[observe]", "[think]", "[reflect]"];
+function isScratchpad(content) {
+  if (!content) return false;
+  const trimmed = content.trimStart();
+  return SCRATCHPAD_PREFIXES.some((p) => trimmed.startsWith(p));
+}
+function findMemorySection(content) {
+  const markers = ["\n\n【长期记忆】\n", "\n\n【反省摘要】\n", "\n\n【外部知识】\n"];
+  for (const m of markers) {
+    const idx = content.indexOf(m);
+    if (idx !== -1) return idx;
+  }
+  return -1;
+}
+function classifyMessageBreakdown(messages2, estimateFn = estimateMessageTokens) {
+  const breakdown = {
+    system: 0,
+    memory: 0,
+    retrieval: 0,
+    runtime: 0,
+    user: 0,
+    history: 0,
+    tools: 0
+  };
+  for (let i = 0; i < messages2.length; i++) {
+    const msg = messages2[i];
+    const tokens = estimateFn(msg);
+    if (msg.role === "system") {
+      const content = msg.content || "";
+      const memIdx = findMemorySection(content);
+      if (memIdx === -1) {
+        breakdown.system += tokens;
+      } else {
+        const beforeMem = content.slice(0, memIdx);
+        const afterMem = content.slice(memIdx);
+        const totalLen = content.length;
+        const beforeRatio = totalLen > 0 ? beforeMem.length / totalLen : 0;
+        totalLen > 0 ? afterMem.length / totalLen : 0;
+        const beforeTokens = Math.round(tokens * beforeRatio);
+        const afterTokens = tokens - beforeTokens;
+        breakdown.system += beforeTokens;
+        const memEndIdx = afterMem.indexOf("\n\n", afterMem.indexOf("】") + 1);
+        if (memEndIdx === -1) {
+          breakdown.memory += afterTokens;
+        } else {
+          const memSectionLen = memEndIdx;
+          const memRatio = afterMem.length > 0 ? memSectionLen / afterMem.length : 0;
+          breakdown.memory += Math.round(afterTokens * memRatio);
+          breakdown.retrieval += afterTokens - Math.round(afterTokens * memRatio);
+        }
+      }
+    } else if (msg.role === "user") {
+      if (isScratchpad(msg.content)) {
+        breakdown.runtime += tokens;
+      } else {
+        breakdown.user += tokens;
+      }
+    } else if (msg.role === "assistant") {
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        breakdown.tools += tokens;
+      } else {
+        breakdown.history += tokens;
+      }
+    } else if (msg.role === "tool") {
+      breakdown.tools += tokens;
+    }
+  }
+  return breakdown;
+}
 class LlmService {
   chatApiKey = null;
   codeApiKey = null;
@@ -12344,7 +13139,7 @@ class LlmService {
   /** 从外部凭据存储（CredentialsManager）读取并刷新全部 LLM 配置 */
   refreshFromCredentials(getter) {
     const key = getter("llm_key");
-    const codeKey = getter("llm_code_api_key") || key;
+    const codeKey = getter("llm_code_api_key");
     if (key) this.chatApiKey = key;
     if (codeKey) this.codeApiKey = codeKey;
     this.textApiKey = getter("llm_text_key") || LLM_TEXT_KEY || key || "";
@@ -12605,6 +13400,7 @@ class LlmService {
     const t0 = Date.now();
     const promptLength = messages2.reduce((s, m) => s + (m.content?.length || 0), 0);
     const rawPromptTokens = estimateTokens(JSON.stringify(messages2));
+    const tokenBreakdown = classifyMessageBreakdown(messages2, estimateMessageTokens);
     let _evalInvoked = false;
     const RETRYABLE = /* @__PURE__ */ new Set(["RATE_LIMITED", "NETWORK"]);
     const RETRYABLE_STATUS_CODES = /* @__PURE__ */ new Set([429, 500, 502, 503]);
@@ -12629,7 +13425,7 @@ class LlmService {
           _evalInvoked = true;
           this.evaluationEmitter?.emit(
             "model.invoked",
-            { type: "model.invoked", modelName: this.codeModel, promptLength, promptTokens: rawPromptTokens },
+            { type: "model.invoked", modelName: this.codeModel, promptLength, promptTokens: rawPromptTokens, tokenBreakdown },
             { traceId: requestId2 }
           );
         }
@@ -13859,6 +14655,12 @@ function findFfplay() {
   }
   return "ffplay";
 }
+const DEFAULT_EMOTION_PARAMS = {
+  voice: "zh-CN-XiaoxiaoNeural",
+  rate: "+10%",
+  pitch: "+8Hz",
+  label: "默认/日常"
+};
 function getTempFile() {
   return path$1.join(os.tmpdir(), `akemi-mio-${Date.now()}.mp3`);
 }
@@ -13887,12 +14689,34 @@ class TtsService {
   sentenceBuf = "";
   batchTimer = null;
   stopped = false;
+  /** 当前情感 TTS 参数（由外部通过 setEmotion 更新） */
+  emotionParams = { ...DEFAULT_EMOTION_PARAMS };
+  /** 情感自适应是否启用（用户可关闭） */
+  emotionEnabled = true;
   constructor(onStateUpdate, onAudioReady) {
     this.onStateUpdate = onStateUpdate;
     this.onAudioReady = onAudioReady ?? null;
   }
   setAudioSink(cb) {
     this.onAudioReady = cb;
+  }
+  /** 更新情感 TTS 参数（由情感分析器驱动） */
+  setEmotion(params) {
+    this.emotionParams = { ...params };
+    Logger.log("INFO", "tts_emotion_update", { voice: params.voice, rate: params.rate, pitch: params.pitch, label: params.label });
+  }
+  /** 启用/禁用情感自适应语音 */
+  setEmotionEnabled(enabled) {
+    this.emotionEnabled = enabled;
+    Logger.log("INFO", "tts_emotion_enabled", { enabled });
+  }
+  /** 获取当前情感参数（供调试/UI 展示） */
+  getEmotionParams() {
+    return { ...this.emotionParams };
+  }
+  /** 情感自适应是否启用 */
+  isEmotionEnabled() {
+    return this.emotionEnabled;
   }
   addChunk(chunk) {
     try {
@@ -13991,9 +14815,10 @@ class TtsService {
         });
         return;
       }
+      const params = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS;
       const edgeTts = require$$0.execFile(
         "edge-tts",
-        ["--voice", "zh-CN-XiaoxiaoNeural", "--text", text, "--write-media", outputFile, "--rate", "+10%", "--pitch", "+8Hz"],
+        ["--voice", params.voice, "--text", text, "--write-media", outputFile, "--rate", params.rate, "--pitch", params.pitch],
         { timeout: 3e4, windowsHide: true }
       );
       this.currentProcess = { kill: () => edgeTts.kill() };
@@ -14317,13 +15142,16 @@ class SubAgentInstance {
     }
   }
   emitToolInvoked(tool, args) {
-    this.eventBus.emit("agent.tool.invoked", { tool, args });
+    const requestId2 = `subagent_${this.id}_${Date.now()}`;
+    this.eventBus.emit("agent.tool.invoked", { tool, args, requestId: requestId2 });
   }
   emitToolCompleted(tool, result) {
-    this.eventBus.emit("agent.tool.completed", { tool, result });
+    const requestId2 = `subagent_${this.id}_${Date.now()}`;
+    this.eventBus.emit("agent.tool.completed", { tool, result, requestId: requestId2 });
   }
   emitToolFailed(tool, error) {
-    this.eventBus.emit("agent.tool.failed", { tool, error });
+    const requestId2 = `subagent_${this.id}_${Date.now()}`;
+    this.eventBus.emit("agent.tool.failed", { tool, error, requestId: requestId2 });
   }
 }
 const SUBAGENT_TIMEOUT_MS = 60 * 60 * 1e3;
@@ -15103,7 +15931,7 @@ class Guardrail {
     return true;
   }
 }
-const DEFAULT_CONFIG$4 = {
+const DEFAULT_CONFIG$5 = {
   threshold: 3,
   windowMs: 6e4
 };
@@ -15111,7 +15939,7 @@ class RejectionTracker {
   records = [];
   config;
   constructor(config) {
-    this.config = { ...DEFAULT_CONFIG$4, ...config };
+    this.config = { ...DEFAULT_CONFIG$5, ...config };
   }
   // ───── 公共 API ─────
   /** 记录一次拒绝 */
@@ -16249,7 +17077,7 @@ class ToolAvailabilityCache {
   }
 }
 const toolAvailabilityCache = new ToolAvailabilityCache();
-const DEFAULT_CONFIG$3 = {
+const DEFAULT_CONFIG$4 = {
   maxConcurrency: 5,
   toolTimeoutMs: 6e4,
   maxRetries: 2,
@@ -16260,7 +17088,7 @@ class ToolScheduler {
   config;
   constructor(mcpManager, config) {
     this.mcpManager = mcpManager;
-    this.config = { ...DEFAULT_CONFIG$3, ...config };
+    this.config = { ...DEFAULT_CONFIG$4, ...config };
   }
   /**
    * 并发执行一批工具调用
@@ -16650,13 +17478,13 @@ function runObserve(toolCalls, messages2, ctx, deps) {
   });
   return { injected, proceduresFound: relevantProcedures.length, patternsFound: relevantPatterns.length };
 }
-const DEFAULT_CONFIG$2 = {
+const DEFAULT_CONFIG$3 = {
   toolCallThreshold: 3,
   minReplyLength: 10,
   maxPerSession: 3
 };
 function runThink(toolCalls, reply, messages2, ctx, config) {
-  const cfg = { ...DEFAULT_CONFIG$2, ...config };
+  const cfg = { ...DEFAULT_CONFIG$3, ...config };
   if (!toolCalls?.length || toolCalls.length < cfg.toolCallThreshold) {
     return { injected: false };
   }
@@ -16993,6 +17821,57 @@ class TaskExecutor {
       }
     }
     return "操作次数过多，请重新尝试";
+  }
+}
+class ProgressGuardrail {
+  /** 连续无文本回复轮次计数 */
+  stagnantRounds = 0;
+  /**
+   * 检查本轮 tool batch 执行后是否满足停滞阈值。
+   * 应在工具结果已推入 messages、Guardrail.apply 执行完毕后调用。
+   */
+  check(llmReply, toolCalls, toolResults, messages2, ctx) {
+    if (ctx.guardrailStop) return { triggered: false };
+    const hasTextReply = !!llmReply && llmReply.trim().length > 0;
+    const hasToolCalls = toolCalls && toolCalls.length > 0;
+    if (!hasTextReply && hasToolCalls) {
+      this.stagnantRounds++;
+      Logger.log("WARN", "progress_guardrail_stagnant_round", {
+        step: ctx.step,
+        consecutive: this.stagnantRounds,
+        toolCount: toolCalls.length,
+        successCount: toolResults?.filter((r) => r.success).length ?? 0
+      });
+      if (this.stagnantRounds >= 3) {
+        Logger.log("WARN", "progress_guardrail_triggered", {
+          step: ctx.step,
+          consecutiveRounds: this.stagnantRounds
+        });
+        eventBus.emit("guardrail.progress_stagnation", {
+          consecutiveRounds: this.stagnantRounds,
+          step: ctx.step
+        });
+        messages2.push({
+          role: "user",
+          content: `【Progress Guardrail】已连续 ${this.stagnantRounds} 轮仅生成工具调用而未产生文本回复，判定为进度停滞。请立即总结当前已获取的信息并给出最终答复，不要再调用任何工具。`
+        });
+        ctx.guardrailStop = true;
+        return { triggered: true, reason: `连续 ${this.stagnantRounds} 轮无文本输出` };
+      }
+    } else {
+      if (this.stagnantRounds > 0) {
+        Logger.log("INFO", "progress_guardrail_recovered", {
+          step: ctx.step,
+          previousStagnantRounds: this.stagnantRounds
+        });
+      }
+      this.stagnantRounds = 0;
+    }
+    return { triggered: false };
+  }
+  /** 重置计数器（新请求 / interrupt 时调用） */
+  reset() {
+    this.stagnantRounds = 0;
   }
 }
 class Scratchpad {
@@ -17507,6 +18386,1536 @@ class PersonaDriftControlSystem {
     this.lastDriftLog = null;
   }
 }
+const ANALYSIS_WINDOW = 16;
+const HIGH_FREQ_TOOL_THRESHOLD = 3;
+const TOPIC_MIN_OCCURRENCES = 2;
+const MAX_SUGGESTED_TOOLS = 5;
+const MAX_SUGGESTED_TOPICS = 3;
+const TOPIC_PATTERNS = [
+  // 中文模式
+  { pattern: /天气/g, label: "天气查询" },
+  { pattern: /代码|编程|写.*程序|开发|实现.*功能/g, label: "软件开发" },
+  { pattern: /调试|debug|bug|报错|错误|异常|修复/g, label: "调试修复" },
+  { pattern: /部署|deploy|上线|发布|发布.*版本/g, label: "部署发布" },
+  { pattern: /测试|test|单元测试|集成测试|验证/g, label: "测试验证" },
+  { pattern: /重构|refactor|优化|改进|改善/g, label: "代码重构" },
+  { pattern: /文档|doc|readme|说明|注释/g, label: "文档编写" },
+  { pattern: /搜索|查找|找.*文件|grep|搜索.*代码/g, label: "代码搜索" },
+  { pattern: /配置|config|设置|环境变量|.env/g, label: "配置管理" },
+  { pattern: /数据库|database|sql|mongo|redis|存储/g, label: "数据存储" },
+  { pattern: /API|接口|REST|GraphQL|端点|endpoint/g, label: "API 开发" },
+  { pattern: /语音|TTS|ASR|说话|朗读|识别|听写/g, label: "语音交互" },
+  { pattern: /图片|图像|生成.*图|画.*图|插图/g, label: "图像生成" },
+  { pattern: /记忆|remember|记住|回忆|知识/g, label: "知识记忆" },
+  { pattern: /计划|plan|任务|task|安排|日程/g, label: "任务管理" },
+  { pattern: /工作流|workflow|流程|自动化|编排/g, label: "工作流自动化" },
+  { pattern: /GitHub|git|commit|push|pull|分支|仓库/g, label: "版本控制" },
+  { pattern: /SSH|远程|centos|服务器|server|连接/g, label: "远程管理" },
+  { pattern: /写作|writing|写.*小说|创作|故事|章节/g, label: "创意写作" },
+  { pattern: /进化|evolution|自.*进化|自我.*改进/g, label: "系统进化" }
+];
+const TOOL_TOPIC_MAP = {
+  read_file: "代码阅读",
+  write_file: "代码编写",
+  edit_file: "代码修改",
+  grep: "代码搜索",
+  list_files: "文件浏览",
+  run_command: "命令执行",
+  create_dev_plan: "任务规划",
+  update_plan_progress: "任务执行",
+  analyze_codebase: "代码分析",
+  analyze_task: "任务分析",
+  remember_fact: "知识记忆",
+  generate_image: "图像生成",
+  writing_system: "创意写作",
+  auto_schedule_workflow: "工作流编排",
+  grep_centos: "远程搜索",
+  read_file_centos: "远程读取",
+  write_file_centos: "远程写入",
+  exec_centos: "远程执行",
+  social_pipeline: "社交媒体",
+  query_trends: "趋势查询"
+};
+class UserBehaviorAnalyzer {
+  /** 最近 N 次工具调用记录（仅记录名称和时间戳） */
+  recentToolCalls = [];
+  /** 最近 N 条用户消息（从 DB 或运行时收集） */
+  recentUserMessages = [];
+  /** 最大保留记录数 */
+  maxRecords;
+  /** 用户反馈：被标记为"不相关"的工具模式（用于降低误判） */
+  suppressedTools = /* @__PURE__ */ new Set();
+  /** 用户反馈：被确认的优先工具 */
+  confirmedTools = /* @__PURE__ */ new Set();
+  constructor(maxRecords = ANALYSIS_WINDOW * 2) {
+    this.maxRecords = maxRecords;
+  }
+  // ── 数据采集 ──
+  /** 记录一次工具调用 */
+  recordToolCall(name2) {
+    this.recentToolCalls.push({ name: name2, timestamp: Date.now() });
+    if (this.recentToolCalls.length > this.maxRecords) {
+      this.recentToolCalls = this.recentToolCalls.slice(-this.maxRecords);
+    }
+  }
+  /** 记录一条用户消息 */
+  recordUserMessage(content) {
+    if (!content || content.trim().length === 0) return;
+    this.recentUserMessages.push({ content: content.trim(), timestamp: Date.now() });
+    if (this.recentUserMessages.length > this.maxRecords) {
+      this.recentUserMessages = this.recentUserMessages.slice(-this.maxRecords);
+    }
+  }
+  /**
+   * 从 DB 的 StoredMessage 数组批量加载用户消息。
+   * 用于冷启动时从持久化存储恢复分析状态。
+   */
+  loadFromStoredMessages(messages2) {
+    const userMessages = messages2.filter((m) => m.role === "user").map((m) => ({ content: m.content, timestamp: m.createdAt }));
+    this.recentUserMessages = userMessages.slice(-this.maxRecords);
+  }
+  // ── 分析 ──
+  /**
+   * 分析最近的交互模式。
+   * @param options 可选配置覆盖
+   * @returns BehaviorPattern 分析结果
+   */
+  analyze(options) {
+    const windowSize = options?.windowSize ?? ANALYSIS_WINDOW;
+    const highFreqThreshold = options?.highFreqThreshold ?? HIGH_FREQ_TOOL_THRESHOLD;
+    const topicMinOccurrences = options?.topicMinOccurrences ?? TOPIC_MIN_OCCURRENCES;
+    const recentTools = this.recentToolCalls.slice(-windowSize);
+    const toolCounts = {};
+    for (const tc of recentTools) {
+      toolCounts[tc.name] = (toolCounts[tc.name] || 0) + 1;
+    }
+    const highFreqTools = Object.entries(toolCounts).filter(([name2, count]) => count >= highFreqThreshold && !this.suppressedTools.has(name2)).sort((a, b) => b[1] - a[1]).slice(0, MAX_SUGGESTED_TOOLS).map(([name2]) => name2);
+    highFreqTools.sort((a, b) => {
+      const aConfirmed = this.confirmedTools.has(a) ? 1 : 0;
+      const bConfirmed = this.confirmedTools.has(b) ? 1 : 0;
+      return bConfirmed - aConfirmed;
+    });
+    const recentUserMsgs = this.recentUserMessages.slice(-windowSize);
+    const topicCounts = {};
+    for (const msg of recentUserMsgs) {
+      for (const { pattern, label } of TOPIC_PATTERNS) {
+        pattern.lastIndex = 0;
+        const matches = msg.content.match(pattern);
+        if (matches) {
+          topicCounts[label] = (topicCounts[label] || 0) + matches.length;
+        }
+      }
+    }
+    for (const tc of recentTools) {
+      const topic = TOOL_TOPIC_MAP[tc.name];
+      if (topic) {
+        topicCounts[topic] = (topicCounts[topic] || 0) + 1;
+      }
+    }
+    const recentTopics = Object.entries(topicCounts).filter(([, count]) => count >= topicMinOccurrences).sort((a, b) => b[1] - a[1]).slice(0, MAX_SUGGESTED_TOPICS).map(([label]) => label);
+    const suggestedToolHints = this._buildToolHints(highFreqTools, recentTopics, toolCounts);
+    const totalInteractions = recentUserMsgs.length;
+    const hasSufficientData = totalInteractions >= 3;
+    const result = {
+      highFrequencyTools: highFreqTools,
+      toolCallCounts: toolCounts,
+      recentTopics,
+      topicCounts,
+      suggestedToolHints,
+      hasSufficientData,
+      totalInteractions
+    };
+    if (hasSufficientData && (highFreqTools.length > 0 || recentTopics.length > 0)) {
+      Logger.log("INFO", "behavior_pattern_detected", {
+        tools: highFreqTools.slice(0, 5),
+        topics: recentTopics.slice(0, 3),
+        interactions: totalInteractions
+      });
+    }
+    return result;
+  }
+  /**
+   * 生成用于注入 system prompt 的工具提示片段。
+   * 按优先级从高到低排列，每条约 60-120 字。
+   */
+  _buildToolHints(tools, topics, toolCounts) {
+    const hints = [];
+    if (tools.length > 0) {
+      const toolList = tools.map((t) => {
+        const count = toolCounts[t] || 0;
+        return `\`${t}\`（最近使用 ${count} 次）`;
+      }).join("、");
+      hints.push(
+        `【行为预判 · 工具优先级】检测到你最近频繁使用以下工具：${toolList}。在回复用户前，优先考虑这些工具是否能直接满足当前需求。若适用，主动调用而非等待用户明确指定。`
+      );
+    }
+    if (topics.length > 0) {
+      const topicList = topics.join("、");
+      hints.push(
+        `【行为预判 · 话题感知】当前活跃话题：${topicList}。回复时可结合这些话题提供更相关的建议。如果检测到用户可能在延续同一话题，主动使用相关工具获取最新信息。`
+      );
+    }
+    if (tools.length > 0 && topics.length > 0) {
+      hints.push(
+        `【行为预判 · 主动服务】基于你的使用习惯，如果当前请求与「${topics[0]}」相关，建议在完成用户请求后，主动询问是否需要进一步操作（如深度分析、生成报告等）。`
+      );
+    }
+    return hints;
+  }
+  // ── 用户反馈调节 ──
+  /**
+   * 用户标记某个工具模式为"不相关"。
+   * 该工具将被抑制一段时间（由外部定时器管理），减少误判。
+   */
+  suppressTool(toolName) {
+    this.suppressedTools.add(toolName);
+    Logger.log("INFO", "behavior_tool_suppressed", { tool: toolName });
+  }
+  /**
+   * 用户确认某个工具优先。
+   * 该工具在后续分析中将排在前面。
+   */
+  confirmTool(toolName) {
+    this.confirmedTools.add(toolName);
+    Logger.log("INFO", "behavior_tool_confirmed", { tool: toolName });
+  }
+  /**
+   * 清除对某工具的抑制（超时后由外部调用）。
+   */
+  unsuppressTool(toolName) {
+    this.suppressedTools.delete(toolName);
+    Logger.log("INFO", "behavior_tool_unsuppressed", { tool: toolName });
+  }
+  /** 重置所有用户反馈 */
+  resetFeedback() {
+    this.suppressedTools.clear();
+    this.confirmedTools.clear();
+  }
+  /** 获取当前抑制列表（用于持久化） */
+  getSuppressedTools() {
+    return [...this.suppressedTools];
+  }
+  /** 获取当前确认列表（用于持久化） */
+  getConfirmedTools() {
+    return [...this.confirmedTools];
+  }
+  // ── 状态管理 ──
+  /** 清除所有运行时数据（不重置用户反馈） */
+  clear() {
+    this.recentToolCalls = [];
+    this.recentUserMessages = [];
+  }
+  /** 完全重置 */
+  reset() {
+    this.clear();
+    this.resetFeedback();
+  }
+}
+const userBehaviorAnalyzer = new UserBehaviorAnalyzer();
+const POSITIVE_WORDS = /* @__PURE__ */ new Set([
+  // 通用正面
+  "好",
+  "棒",
+  "赞",
+  "优秀",
+  "出色",
+  "完美",
+  "精彩",
+  "厉害",
+  "了不起",
+  "不错",
+  "很好",
+  "极好",
+  "超好",
+  "成功",
+  "通过",
+  "完成",
+  "搞定",
+  "解决",
+  "修复",
+  "顺利",
+  "正常",
+  "没问题",
+  "无问题",
+  "开心",
+  "高兴",
+  "愉快",
+  "欢乐",
+  "喜悦",
+  "幸福",
+  "满足",
+  "欣慰",
+  "舒适",
+  "惬意",
+  "喜欢",
+  "热爱",
+  "喜爱",
+  "钟爱",
+  "欣赏",
+  "满意",
+  "欣喜",
+  "感谢",
+  "感激",
+  "感恩",
+  "谢谢",
+  "多谢",
+  "漂亮",
+  "美丽",
+  "好看",
+  "可爱",
+  "帅气",
+  "英俊",
+  "温暖",
+  "温馨",
+  "暖心",
+  "热情",
+  "热烈",
+  "强大",
+  "牛逼",
+  "高效",
+  "快速",
+  "便捷",
+  "流畅",
+  "好用",
+  "进步",
+  "提升",
+  "增长",
+  "突破",
+  "创新",
+  "领先",
+  "第一名",
+  "最佳",
+  "最优",
+  "顶级",
+  "一流",
+  // 天气相关正面
+  "晴天",
+  "晴朗",
+  "阳光",
+  "明媚",
+  "暖和",
+  "凉爽",
+  "微风",
+  "万里无云",
+  "蓝天",
+  "白云",
+  "彩虹",
+  "晴空",
+  "灿烂",
+  // 成功/完成类
+  "✅",
+  "已创建",
+  "已保存",
+  "已更新",
+  "已删除",
+  "已安装",
+  "已部署",
+  "已同步",
+  "已通过",
+  "已认证",
+  "已授权",
+  "已确认",
+  "已验证",
+  "创建成功",
+  "保存成功",
+  "更新成功",
+  "删除成功",
+  "部署成功",
+  "ok",
+  "OK",
+  "Ok",
+  "success",
+  "SUCCESS"
+]);
+const NEGATIVE_WORDS = /* @__PURE__ */ new Set([
+  // 通用负面
+  "差",
+  "烂",
+  "糟糕",
+  "失败",
+  "错误",
+  "问题",
+  "bug",
+  "BUG",
+  "Bug",
+  "坏",
+  "恶",
+  "劣",
+  "低劣",
+  "不合格",
+  "伤心",
+  "难过",
+  "悲伤",
+  "悲哀",
+  "痛苦",
+  "难受",
+  "压抑",
+  "郁闷",
+  "沮丧",
+  "失望",
+  "生气",
+  "愤怒",
+  "恼火",
+  "烦躁",
+  "焦虑",
+  "担心",
+  "担忧",
+  "不安",
+  "紧张",
+  "讨厌",
+  "厌恶",
+  "反感",
+  "厌倦",
+  "嫌弃",
+  "害怕",
+  "恐惧",
+  "恐慌",
+  "惊慌",
+  "惊吓",
+  "孤独",
+  "寂寞",
+  "无助",
+  "绝望",
+  "丑陋",
+  "难看",
+  "恶心",
+  "厌恶",
+  "冷漠",
+  "冷淡",
+  "残酷",
+  "无情",
+  "弱",
+  "废物",
+  "垃圾",
+  "低效",
+  "慢",
+  "卡",
+  "崩溃",
+  "宕机",
+  "退步",
+  "下降",
+  "衰退",
+  "落后",
+  "严重",
+  "紧急",
+  "危险",
+  "致命",
+  "崩溃",
+  // 错误/失败类
+  "❌",
+  "失败",
+  "出错",
+  "报错",
+  "异常",
+  "中断",
+  "终止",
+  "拒绝",
+  "禁止",
+  "超时",
+  "过期",
+  "无效",
+  "不可用",
+  "无法",
+  "不能",
+  "不允许",
+  "error",
+  "Error",
+  "ERROR",
+  "fail",
+  "FAIL",
+  "failed",
+  "FAILED",
+  "timeout",
+  "TIMEOUT",
+  "denied",
+  "rejected",
+  // 天气相关负面
+  "暴雨",
+  "暴风雨",
+  "台风",
+  "飓风",
+  "洪水",
+  "泥石流",
+  "阴天",
+  "阴沉",
+  "多云",
+  "昏暗",
+  "雾霾",
+  "沙尘",
+  "雾",
+  "霾",
+  "寒冷",
+  "酷寒",
+  "严寒",
+  "冰冷",
+  "炎热",
+  "酷热",
+  "闷热",
+  "潮湿",
+  "雷暴",
+  "闪电",
+  "冰雹",
+  "暴雪"
+]);
+const NEGATION_WORDS = /* @__PURE__ */ new Set([
+  "不",
+  "没",
+  "无",
+  "非",
+  "未",
+  "别",
+  "莫",
+  "勿",
+  "否",
+  "没有",
+  "并非",
+  "绝不",
+  "不是",
+  "不会",
+  "不能",
+  "不好",
+  "不行"
+]);
+const INTENSIFIERS = /* @__PURE__ */ new Set([
+  "非常",
+  "十分",
+  "极其",
+  "特别",
+  "格外",
+  "尤其",
+  "相当",
+  "很",
+  "太",
+  "真",
+  "最",
+  "极",
+  "超级",
+  "无比",
+  "极度",
+  "绝对",
+  "完全"
+]);
+const CONTENT_TYPE_KEYWORDS = [
+  {
+    type: "weather",
+    words: ["天气", "气温", "温度", "降雨", "降雪", "风速", "湿度", "晴天", "阴天", "多云", "暴雨", "台风", "雾霾", "空气质量", "紫外线"]
+  },
+  {
+    type: "error",
+    words: ["错误", "失败", "异常", "崩溃", "超时", "拒绝", "禁止", "无效", "无法连接", "中断", "bug", "error", "timeout", "500", "404", "403", "401"]
+  },
+  {
+    type: "success",
+    words: ["成功", "完成", "通过", "已创建", "已保存", "已部署", "已更新", "已删除", "✅", "done", "success", "ok"]
+  },
+  {
+    type: "news",
+    words: ["新闻", "报道", "消息", "资讯", "头条", "快讯", "发布", "公告", "声明"]
+  },
+  {
+    type: "code",
+    words: ["代码", "文件", "函数", "类", "接口", "模块", "import", "export", "function", "class", "const", "type", "interface", "git", "commit", "push", "pull", "merge", "分支", "仓库"]
+  },
+  {
+    type: "data",
+    words: ["数据", "统计", "分析", "查询", "结果", "总数", "平均", "最大", "最小", "比例", "图表", "报告", "趋势"]
+  }
+];
+class SentimentAnalyzer {
+  /** 上次分析结果缓存（用于 debounce / 避免相同文本重复分析） */
+  lastResult = null;
+  lastText = "";
+  /**
+   * 分析文本的情感极性和内容类型
+   *
+   * @param text 待分析文本
+   * @returns SentimentResult
+   */
+  analyze(text) {
+    if (!text || text.trim().length === 0) {
+      return { polarity: "neutral", score: 0, contentType: "unknown", matchedWords: [] };
+    }
+    if (text === this.lastText && this.lastResult) {
+      return this.lastResult;
+    }
+    this.lastText = text;
+    const normalized = text.toLowerCase();
+    let posScore = 0;
+    let negScore = 0;
+    const matchedWords = [];
+    const sentences = normalized.split(/[。！？\n.!?]+/);
+    for (const sentence of sentences) {
+      const words = this._segmentWords(sentence);
+      let sentenceHasNegation = false;
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        if (NEGATION_WORDS.has(word)) {
+          sentenceHasNegation = true;
+          continue;
+        }
+        const hasIntensifier = i > 0 && INTENSIFIERS.has(words[i - 1]);
+        if (POSITIVE_WORDS.has(word)) {
+          matchedWords.push(word);
+          if (sentenceHasNegation) {
+            negScore += hasIntensifier ? 2 : 1;
+          } else {
+            posScore += hasIntensifier ? 2 : 1;
+          }
+          sentenceHasNegation = false;
+        } else if (NEGATIVE_WORDS.has(word)) {
+          matchedWords.push(word);
+          if (sentenceHasNegation) {
+            posScore += 0.5;
+          } else {
+            negScore += hasIntensifier ? 2 : 1;
+          }
+          sentenceHasNegation = false;
+        }
+      }
+    }
+    const totalScore = posScore + negScore;
+    let polarity;
+    let score;
+    if (totalScore === 0) {
+      polarity = "neutral";
+      score = 0;
+    } else if (posScore > negScore * 1.5) {
+      polarity = "positive";
+      score = Math.min(1, posScore / totalScore);
+    } else if (negScore > posScore * 1.5) {
+      polarity = "negative";
+      score = Math.min(1, negScore / totalScore);
+    } else if (posScore > 0 && negScore > 0) {
+      polarity = posScore > negScore ? "positive" : "negative";
+      score = Math.abs(posScore - negScore) / totalScore;
+    } else if (posScore > 0) {
+      polarity = "positive";
+      score = Math.min(1, posScore / (posScore + 1));
+    } else {
+      polarity = "negative";
+      score = Math.min(1, negScore / (negScore + 1));
+    }
+    const contentType = this._detectContentType(normalized, polarity);
+    const result = { polarity, score, contentType, matchedWords };
+    this.lastResult = result;
+    Logger.log("INFO", "sentiment_analysis", {
+      polarity,
+      score: score.toFixed(2),
+      content_type: contentType,
+      matched_words: matchedWords.slice(0, 10).join(","),
+      text_snippet: text.slice(0, 80)
+    });
+    return result;
+  }
+  /**
+   * 简单分词：按标点和空白切分
+   */
+  _segmentWords(sentence) {
+    const chars = sentence.replace(/\s+/g, "").split("");
+    const words = [];
+    for (let i = 0; i < chars.length; i++) {
+      words.push(chars[i]);
+      if (i + 1 < chars.length) {
+        words.push(chars[i] + chars[i + 1]);
+      }
+      if (i + 2 < chars.length) {
+        words.push(chars[i] + chars[i + 1] + chars[i + 2]);
+      }
+    }
+    return words;
+  }
+  /**
+   * 检测内容类型
+   */
+  _detectContentType(text, polarity) {
+    const typeScores = {};
+    for (const { type, words: keywords } of CONTENT_TYPE_KEYWORDS) {
+      let score = 0;
+      for (const kw of keywords) {
+        if (text.includes(kw)) {
+          score += 1;
+          if (new RegExp(`\\b${kw}\\b`, "i").test(text)) {
+            score += 0.5;
+          }
+        }
+      }
+      if (score > 0) typeScores[type] = score;
+    }
+    if (typeScores["error"] && typeScores["error"] >= 2) return "error";
+    if (typeScores["success"] && typeScores["success"] >= 2) return "success";
+    if (typeScores["weather"] && typeScores["weather"] >= 2) return "weather";
+    if (typeScores["news"] && typeScores["news"] >= 2) return "news";
+    if (typeScores["code"] && typeScores["code"] >= 2) return "code";
+    if (typeScores["data"] && typeScores["data"] >= 2) return "data";
+    return polarity === "positive" ? "chat" : polarity === "negative" ? "error" : "info";
+  }
+}
+const sentimentAnalyzer = new SentimentAnalyzer();
+const DEFAULT_PARAMS = {
+  voice: "zh-CN-XiaoxiaoNeural",
+  rate: "+10%",
+  pitch: "+8Hz",
+  label: "默认/日常"
+};
+const TONE_MAP = {
+  // ── 正面情感 ──
+  "positive:weather": {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+18%",
+    pitch: "+12Hz",
+    label: "欢快·天气"
+  },
+  "positive:success": {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+15%",
+    pitch: "+10Hz",
+    label: "欣喜·成功"
+  },
+  "positive:news": {
+    voice: "zh-CN-YunyangNeural",
+    rate: "+12%",
+    pitch: "+6Hz",
+    label: "振奋·新闻"
+  },
+  "positive:chat": {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+12%",
+    pitch: "+8Hz",
+    label: "愉快·闲聊"
+  },
+  "positive:data": {
+    voice: "zh-CN-YunxiNeural",
+    rate: "+8%",
+    pitch: "+5Hz",
+    label: "积极·数据"
+  },
+  "positive:code": {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+10%",
+    pitch: "+6Hz",
+    label: "顺畅·代码"
+  },
+  // ── 负面情感 ──
+  "negative:error": {
+    voice: "zh-CN-YunjianNeural",
+    rate: "-5%",
+    pitch: "-4Hz",
+    label: "沉稳·报错"
+  },
+  "negative:weather": {
+    voice: "zh-CN-YunjianNeural",
+    rate: "-8%",
+    pitch: "-6Hz",
+    label: "低沉·坏天气"
+  },
+  "negative:news": {
+    voice: "zh-CN-YunjianNeural",
+    rate: "-5%",
+    pitch: "-3Hz",
+    label: "凝重·新闻"
+  },
+  "negative:chat": {
+    voice: "zh-CN-XiaoyiNeural",
+    rate: "-3%",
+    pitch: "-2Hz",
+    label: "温柔·安慰"
+  },
+  "negative:data": {
+    voice: "zh-CN-YunjianNeural",
+    rate: "-3%",
+    pitch: "-3Hz",
+    label: "沉重·数据"
+  },
+  "negative:code": {
+    voice: "zh-CN-YunjianNeural",
+    rate: "-3%",
+    pitch: "-3Hz",
+    label: "严肃·代码"
+  },
+  // ── 中性情感 ──
+  "neutral:weather": {
+    voice: "zh-CN-YunxiNeural",
+    rate: "+5%",
+    pitch: "+3Hz",
+    label: "平和·天气"
+  },
+  "neutral:news": {
+    voice: "zh-CN-YunyangNeural",
+    rate: "+3%",
+    pitch: "+0Hz",
+    label: "客观·新闻"
+  },
+  "neutral:data": {
+    voice: "zh-CN-YunxiNeural",
+    rate: "+5%",
+    pitch: "+2Hz",
+    label: "平稳·数据"
+  },
+  "neutral:info": {
+    voice: "zh-CN-YunxiNeural",
+    rate: "+8%",
+    pitch: "+4Hz",
+    label: "平和·信息"
+  },
+  "neutral:code": {
+    voice: "zh-CN-YunxiNeural",
+    rate: "+5%",
+    pitch: "+3Hz",
+    label: "中性·代码"
+  },
+  "neutral:chat": {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+8%",
+    pitch: "+5Hz",
+    label: "自然·闲聊"
+  }
+};
+class EmotionToneMap {
+  /**
+   * 根据情感分析结果获取 TTS 参数
+   *
+   * 匹配优先级：
+   *   1. polarity + contentType 精确匹配
+   *   2. polarity + 'chat' 回退
+   *   3. 默认参数
+   */
+  getParams(result) {
+    const { polarity, contentType } = result;
+    const exactKey = `${polarity}:${contentType}`;
+    if (TONE_MAP[exactKey]) return TONE_MAP[exactKey];
+    const polarityFallback = `${polarity}:chat`;
+    if (TONE_MAP[polarityFallback]) return TONE_MAP[polarityFallback];
+    return DEFAULT_PARAMS;
+  }
+  /**
+   * 将 polarity 和 contentType 分开传入（便利方法）
+   */
+  getByPolarityAndType(polarity, contentType) {
+    return this.getParams({ polarity, contentType, score: 0, matchedWords: [] });
+  }
+  /**
+   * 检查当前参数是否与目标不同（用于避免不必要的 TTS 进程重启）
+   */
+  isDifferent(a, b) {
+    return a.voice !== b.voice || a.rate !== b.rate || a.pitch !== b.pitch;
+  }
+  /**
+   * 获取所有支持的映射（供调试/UI 展示）
+   */
+  getAllMappings() {
+    return Object.entries(TONE_MAP).map(([key, params]) => ({ key, params }));
+  }
+}
+const emotionToneMap = new EmotionToneMap();
+const DEFAULT_TONE_PROFILE = {
+  primaryTone: "casual",
+  features: {
+    energy: 0.5,
+    formality: 0.3,
+    warmth: 0.5,
+    brevity: 0.5,
+    pacePreference: 0.5
+  },
+  confidence: 0,
+  messageCount: 0,
+  lastUpdated: 0,
+  variance: 0
+};
+const DEFAULT_WINDOW_SIZE = 10;
+const COLD_START_MIN_MESSAGES = 3;
+const MAX_MSG_LENGTH = 2e3;
+const HIGH_ENERGY_WORDS = /* @__PURE__ */ new Set([
+  "哈哈",
+  "哈哈哈",
+  "笑死",
+  "绝了",
+  "牛",
+  "牛逼",
+  "太强了",
+  "厉害",
+  "哇",
+  "哇塞",
+  "天哪",
+  "我的天",
+  "oh my god",
+  "omg",
+  "冲",
+  "冲冲冲",
+  "加油",
+  "干就完了",
+  "搞起来",
+  "！",
+  "!!",
+  "!!!",
+  "❗",
+  "真的",
+  "太",
+  "超级",
+  "非常",
+  "简直",
+  "舒服",
+  "爽",
+  "过瘾",
+  "完美"
+]);
+const FORMAL_WORDS = /* @__PURE__ */ new Set([
+  "您",
+  "请",
+  "贵",
+  "尊敬的",
+  "您好",
+  "请问",
+  "谢谢",
+  "感谢",
+  "多谢",
+  "麻烦",
+  "劳驾",
+  "能否",
+  "可否",
+  "是否",
+  "请问能否",
+  "烦请",
+  "建议",
+  "推荐",
+  "认为",
+  "考虑",
+  "评估",
+  "根据",
+  "按照",
+  "依据",
+  "参考",
+  "参阅",
+  "综上",
+  "因此",
+  "所以",
+  "另外",
+  "此外",
+  "首先",
+  "其次",
+  "最后",
+  "然后",
+  "接着",
+  "不过",
+  "但是",
+  "然而",
+  "虽然",
+  "如果",
+  // 英文正式标记
+  "please",
+  "thank you",
+  "would",
+  "could",
+  "should",
+  "regarding",
+  "according to",
+  "therefore",
+  "however"
+]);
+const CASUAL_WORDS = /* @__PURE__ */ new Set([
+  "吧",
+  "嘛",
+  "呀",
+  "啦",
+  "哦",
+  "噢",
+  "喔",
+  "哈",
+  "嘿",
+  "哎",
+  "嗯",
+  "额",
+  "啊",
+  "诶",
+  "哟",
+  "嘞",
+  "哒",
+  "喵",
+  "呗",
+  "咯",
+  "嘛",
+  "啰",
+  "嘿嘿",
+  "嘻嘻",
+  "哈哈",
+  "呵呵",
+  "嘎嘎",
+  "啥",
+  "咋",
+  "咋了",
+  "干嘛",
+  "咋样",
+  "OK",
+  "ok",
+  "okay",
+  "yeah",
+  "yep",
+  "nope",
+  "nah",
+  "超",
+  "蛮",
+  "挺",
+  "有点",
+  "一点儿",
+  "东西",
+  "事情",
+  "事儿",
+  "玩意",
+  "对呀",
+  "是啊",
+  "就是说",
+  "你懂的"
+]);
+const WARM_WORDS = /* @__PURE__ */ new Set([
+  "喜欢",
+  "爱",
+  "可爱",
+  "温柔",
+  "温暖",
+  "贴心",
+  "谢谢",
+  "感谢",
+  "感恩",
+  "辛苦",
+  "不容易",
+  "开心",
+  "快乐",
+  "幸福",
+  "美好",
+  "甜甜",
+  "想你",
+  "惦记",
+  "关心",
+  "在乎",
+  "照顾",
+  "陪伴",
+  "在一起",
+  "真好",
+  "太好了",
+  "抱抱",
+  "摸摸",
+  "蹭蹭",
+  "贴贴",
+  "晚安",
+  "早安",
+  "午安",
+  "好梦",
+  "加油",
+  "支持",
+  "相信",
+  "理解",
+  "包容",
+  "❤",
+  "💕",
+  "🥰",
+  "😊",
+  "🤗",
+  "💖",
+  "朋友",
+  "家人",
+  "伙伴",
+  "亲爱的"
+]);
+const TERSE_PATTERNS = [
+  /^[好行可对是不嗯哦噢诶]{1,2}$/,
+  /^[OKok]{1,2}$/i,
+  /^(yes|no|ok|okay|sure|fine|good|great)$/i,
+  /^[👍👌✅❌🙆💯]{1,2}$/
+];
+class ToneProfileAnalyzer {
+  /** 当前运行均值特征（增量更新用） */
+  runningFeatures = { ...DEFAULT_TONE_PROFILE.features };
+  /** 已分析的消息数（含历史加载） */
+  messageCount = 0;
+  /** 上次分析的消息内容哈希集合（用于去重） */
+  seenHashes = /* @__PURE__ */ new Set();
+  /** 窗口大小 */
+  windowSize;
+  constructor(windowSize = DEFAULT_WINDOW_SIZE) {
+    this.windowSize = windowSize;
+  }
+  // ── 单条消息分析 ──
+  /**
+   * 分析单条用户消息的语气特征。
+   * 轻量级规则引擎，O(n) 复杂度，无外部依赖。
+   */
+  analyzeMessage(text) {
+    const truncated = text.slice(0, MAX_MSG_LENGTH);
+    const charCount = truncated.length;
+    const exclamationCount = (truncated.match(/[！!]/g) || []).length;
+    const questionCount = (truncated.match(/[？?]/g) || []).length;
+    const emojiPattern = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}]/gu;
+    const emojiMatches = truncated.match(emojiPattern);
+    const emojiCount = emojiMatches ? emojiMatches.length : 0;
+    const commaCount = (truncated.match(/[，,、]/g) || []).length;
+    const periodCount = (truncated.match(/[。.]/g) || []).length;
+    const sentenceCount = truncated.split(/[。！？.!?\n]+/).filter(Boolean).length;
+    let formalWordCount = 0;
+    let casualWordCount = 0;
+    let warmWordCount = 0;
+    let highEnergyWordCount = 0;
+    const scanWords = (source, dict) => {
+      let count = 0;
+      for (let len = 4; len >= 1; len--) {
+        for (let i = 0; i <= source.length - len; i++) {
+          if (dict.has(source.slice(i, i + len))) {
+            count++;
+            i += len - 1;
+          }
+        }
+      }
+      return count;
+    };
+    formalWordCount = scanWords(truncated, FORMAL_WORDS);
+    casualWordCount = scanWords(truncated, CASUAL_WORDS);
+    warmWordCount = scanWords(truncated, WARM_WORDS);
+    highEnergyWordCount = scanWords(truncated, HIGH_ENERGY_WORDS);
+    const exclamationDensity = Math.min(1, exclamationCount / Math.max(1, sentenceCount));
+    const emojiDensity = Math.min(1, emojiCount / Math.max(1, sentenceCount));
+    const energyWordDensity = Math.min(1, highEnergyWordCount / Math.max(1, charCount / 10));
+    const energy = clamp01(exclamationDensity * 0.35 + emojiDensity * 0.3 + energyWordDensity * 0.35);
+    const formalDensity = Math.min(1, formalWordCount / Math.max(1, charCount / 15));
+    const casualDensity = Math.min(1, casualWordCount / Math.max(1, charCount / 10));
+    const punctRatio = charCount > 20 ? Math.min(1, (commaCount + periodCount) / Math.max(1, charCount / 15)) : 0.3;
+    const formality = clamp01(formalDensity * 0.5 + punctRatio * 0.25 + (1 - casualDensity) * 0.25);
+    const warmDensity = Math.min(1, warmWordCount / Math.max(1, charCount / 12));
+    const positiveEmojiRatio = emojiCount > 0 ? (truncated.match(/[😊🥰❤💕💖🤗😍💗💝✨🌟]/g) || []).length / emojiCount : 0;
+    const warmth = clamp01(warmDensity * 0.6 + positiveEmojiRatio * 0.4);
+    const isTerse = TERSE_PATTERNS.some((p) => p.test(truncated.trim()));
+    const brevity = isTerse ? 0.95 : charCount <= 5 ? 0.9 : charCount <= 20 ? 0.8 : charCount <= 50 ? 0.55 : charCount <= 100 ? 0.3 : charCount <= 200 ? 0.15 : 0.05;
+    const totalPunct = commaCount + periodCount + exclamationCount + questionCount;
+    const punctDensity = Math.min(1, totalPunct / Math.max(1, charCount / 8));
+    const pacePreference = clamp01(punctDensity * 0.6 + (1 - brevity) * 0.4);
+    const features = {
+      energy,
+      formality,
+      warmth,
+      brevity,
+      pacePreference
+    };
+    return {
+      features,
+      raw: {
+        charCount,
+        exclamationCount,
+        questionCount,
+        emojiCount,
+        formalWordCount,
+        casualWordCount,
+        warmWordCount
+      }
+    };
+  }
+  // ── 增量更新画像 ──
+  /**
+   * 用一条新用户消息增量更新语气画像。
+   * 使用指数移动平均，新消息权重更高（更反映当前状态），
+   * 同时保留历史信息。
+   *
+   * @returns 更新后的 UserToneProfile
+   */
+  updateProfile(text) {
+    const hash = simpleHash$1(text);
+    if (this.seenHashes.has(hash)) {
+      return this.getProfile();
+    }
+    this.seenHashes.add(hash);
+    if (this.seenHashes.size > this.windowSize * 5) {
+      const entries = [...this.seenHashes];
+      this.seenHashes = new Set(entries.slice(-this.windowSize * 3));
+    }
+    const analysis = this.analyzeMessage(text);
+    const { features } = analysis;
+    if (this.messageCount === 0) {
+      this.runningFeatures = { ...features };
+    } else {
+      const alpha = 0.3;
+      this.runningFeatures = {
+        energy: this.runningFeatures.energy * (1 - alpha) + features.energy * alpha,
+        formality: this.runningFeatures.formality * (1 - alpha) + features.formality * alpha,
+        warmth: this.runningFeatures.warmth * (1 - alpha) + features.warmth * alpha,
+        brevity: this.runningFeatures.brevity * (1 - alpha) + features.brevity * alpha,
+        pacePreference: this.runningFeatures.pacePreference * (1 - alpha) + features.pacePreference * alpha
+      };
+    }
+    this.messageCount++;
+    Logger.log("DEBUG", "tone_profile_update", {
+      msg_count: this.messageCount,
+      features: Object.fromEntries(
+        Object.entries(this.runningFeatures).map(([k, v]) => [k, v.toFixed(3)])
+      )
+    });
+    return this.getProfile();
+  }
+  /**
+   * 批量分析消息并生成画像（用于冷启动/从 DB 加载）。
+   * 不重置现有 runningFeatures，而是合并。
+   */
+  analyzeBatch(messages2) {
+    for (const msg of messages2) {
+      this.updateProfile(msg);
+    }
+    return this.getProfile();
+  }
+  // ── 画像生成与查询 ──
+  /**
+   * 获取当前用户语气画像。
+   * 消息不足时返回默认画像（冷启动处理）。
+   */
+  getProfile() {
+    if (this.messageCount < COLD_START_MIN_MESSAGES) {
+      return { ...DEFAULT_TONE_PROFILE };
+    }
+    const primaryTone = this.classifyTone(this.runningFeatures);
+    const confidence = Math.min(1, this.messageCount / this.windowSize);
+    const variance = Object.values(this.runningFeatures).reduce((sum, v) => sum + Math.abs(v - 0.5), 0) / Object.keys(this.runningFeatures).length;
+    return {
+      primaryTone,
+      features: { ...this.runningFeatures },
+      confidence,
+      messageCount: this.messageCount,
+      lastUpdated: Date.now(),
+      variance
+    };
+  }
+  /**
+   * 从 ToneFeatures 分类为主导语气标签。
+   * 基于特征向量的规则分类器。
+   */
+  classifyTone(features) {
+    const { energy, formality, warmth, brevity } = features;
+    if (formality > 0.6) {
+      return energy > 0.45 ? "professional" : "formal";
+    }
+    if (warmth > 0.55 && energy > 0.35) {
+      return "warm";
+    }
+    if (energy > 0.55) {
+      return "lively";
+    }
+    if (energy < 0.4 && brevity > 0.55) {
+      return "calm";
+    }
+    if (formality < 0.4 && brevity > 0.4) {
+      return "casual";
+    }
+    return "casual";
+  }
+  // ── 状态管理 ──
+  /**
+   * 用已有的 UserToneProfile 恢复分析器状态。
+   * 用于从缓存加载后继续增量更新。
+   */
+  restoreFromProfile(profile) {
+    this.runningFeatures = { ...profile.features };
+    this.messageCount = profile.messageCount;
+    Logger.log("INFO", "tone_profile_restored", {
+      tone: profile.primaryTone,
+      msg_count: profile.messageCount,
+      confidence: profile.confidence.toFixed(2)
+    });
+  }
+  /** 重置所有运行时状态 */
+  reset() {
+    this.runningFeatures = { ...DEFAULT_TONE_PROFILE.features };
+    this.messageCount = 0;
+    this.seenHashes.clear();
+  }
+}
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+function simpleHash$1(text) {
+  let hash = 0;
+  for (let i = 0; i < Math.min(text.length, 100); i++) {
+    hash = (hash << 5) - hash + text.charCodeAt(i) | 0;
+  }
+  return hash.toString(36);
+}
+const toneProfileAnalyzer = new ToneProfileAnalyzer();
+const TONE_VOICE_MAP = {
+  lively: {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+18%",
+    pitch: "+10Hz",
+    label: "活泼·用户偏好"
+  },
+  calm: {
+    voice: "zh-CN-YunxiNeural",
+    rate: "+5%",
+    pitch: "+2Hz",
+    label: "沉稳·用户偏好"
+  },
+  formal: {
+    voice: "zh-CN-YunjianNeural",
+    rate: "-3%",
+    pitch: "-2Hz",
+    label: "正式·用户偏好"
+  },
+  casual: {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+12%",
+    pitch: "+6Hz",
+    label: "随意·用户偏好"
+  },
+  warm: {
+    voice: "zh-CN-XiaoyiNeural",
+    rate: "+3%",
+    pitch: "+4Hz",
+    label: "温柔·用户偏好"
+  },
+  professional: {
+    voice: "zh-CN-YunyangNeural",
+    rate: "+5%",
+    pitch: "+0Hz",
+    label: "专业·用户偏好"
+  }
+};
+const PIPER_TONE_MAP = {
+  lively: {
+    modelName: "zh_CN-huayan-medium",
+    lengthScale: 0.85,
+    noiseScale: 0.55,
+    sentenceSilence: 0.15
+  },
+  calm: {
+    modelName: "zh_CN-tx_mati-medium",
+    lengthScale: 1.1,
+    noiseScale: 0.45,
+    sentenceSilence: 0.3
+  },
+  formal: {
+    modelName: "zh_CN-tx_mati-medium",
+    lengthScale: 1.05,
+    noiseScale: 0.4,
+    sentenceSilence: 0.25
+  },
+  casual: {
+    modelName: "zh_CN-huayan-medium",
+    lengthScale: 0.9,
+    noiseScale: 0.5,
+    sentenceSilence: 0.2
+  },
+  warm: {
+    modelName: "zh_CN-ling_ling-medium",
+    lengthScale: 1,
+    noiseScale: 0.5,
+    sentenceSilence: 0.25
+  },
+  professional: {
+    modelName: "zh_CN-tx_mati-medium",
+    lengthScale: 1,
+    noiseScale: 0.45,
+    sentenceSilence: 0.2
+  }
+};
+class ToneToVoiceMapper {
+  /**
+   * 根据用户语气画像获取基线 TTS 语音参数。
+   *
+   * 当 confidence 很低（消息不足）时，回退到默认参数，
+   * 避免不稳定的画像导致不自然的语音切换。
+   */
+  getBaselineParams(profile) {
+    if (profile.confidence < 0.3) {
+      Logger.log("DEBUG", "tone_voice_mapper_fallback", {
+        confidence: profile.confidence.toFixed(2),
+        primaryTone: profile.primaryTone
+      });
+      return TONE_VOICE_MAP["casual"];
+    }
+    const params = TONE_VOICE_MAP[profile.primaryTone];
+    if (!params) {
+      Logger.log("WARN", "tone_voice_mapper_unknown_tone", { tone: profile.primaryTone });
+      return TONE_VOICE_MAP["casual"];
+    }
+    return { ...params };
+  }
+  /**
+   * 获取 PiperTTS 推荐参数。
+   * 在 USE_LOCAL_TTS 模式下使用。
+   */
+  getPiperParams(profile) {
+    if (profile.confidence < 0.3) {
+      return PIPER_TONE_MAP["casual"];
+    }
+    return PIPER_TONE_MAP[profile.primaryTone] || PIPER_TONE_MAP["casual"];
+  }
+  /**
+   * 混合用户语气基线 + 内容情感参数，生成最终 TTS 参数。
+   *
+   * 混合策略：
+   *   - voice: 由用户语气决定（不混合，避免频繁切换语音角色）
+   *   - rate:  基线 70% + 内容情感 30%（内容情感作为微调）
+   *   - pitch: 基线 70% + 内容情感 30%
+   *
+   * @param baseline 用户语气基线参数
+   * @param emotion  内容情感参数（来自 EmotionToneMap）
+   * @returns 混合后的最终参数
+   */
+  blend(baseline, emotion) {
+    const voice = baseline.voice;
+    const baselineRate = parsePercent(baseline.rate);
+    const emotionRate = parsePercent(emotion.rate);
+    const blendedRate = Math.round(baselineRate * 0.7 + emotionRate * 0.3);
+    const rate = formatPercent(blendedRate);
+    const baselinePitch = parseHz(baseline.pitch);
+    const emotionPitch = parseHz(emotion.pitch);
+    const blendedPitch = Math.round(baselinePitch * 0.7 + emotionPitch * 0.3);
+    const pitch = formatHz(blendedPitch);
+    const label = `${baseline.label} + ${emotion.label}`;
+    return { voice, rate, pitch, label };
+  }
+  /**
+   * 判断两个参数是否实质不同（避免不必要的 TTS 更新）。
+   */
+  isDifferent(a, b) {
+    return a.voice !== b.voice || a.rate !== b.rate || a.pitch !== b.pitch;
+  }
+  /**
+   * 获取所有语气→语音映射（供调试/UI展示）。
+   */
+  getAllMappings() {
+    return Object.keys(TONE_VOICE_MAP).map((tone) => ({
+      tone,
+      params: TONE_VOICE_MAP[tone],
+      piper: PIPER_TONE_MAP[tone]
+    }));
+  }
+}
+function parsePercent(rate) {
+  const match2 = rate.match(/^([+-]?\d+)%$/);
+  return match2 ? parseInt(match2[1], 10) : 0;
+}
+function formatPercent(value) {
+  return `${value >= 0 ? "+" : ""}${value}%`;
+}
+function parseHz(pitch) {
+  const match2 = pitch.match(/^([+-]?\d+)Hz$/);
+  return match2 ? parseInt(match2[1], 10) : 0;
+}
+function formatHz(value) {
+  return `${value >= 0 ? "+" : ""}${value}Hz`;
+}
+const toneToVoiceMapper = new ToneToVoiceMapper();
+const CACHE_FILENAME = "user-tone-profile.json";
+function getCachePath() {
+  const dir = WORKSPACE.cache;
+  return path$1.join(dir, CACHE_FILENAME);
+}
+const SAVE_DEBOUNCE_MS = 2e3;
+class UserToneProfileCache {
+  currentProfile = { ...DEFAULT_TONE_PROFILE };
+  saveTimer = null;
+  dirty = false;
+  /**
+   * 从磁盘加载缓存的语气画像。
+   * 文件不存在或损坏时返回默认画像。
+   */
+  load() {
+    const filePath = getCachePath();
+    try {
+      if (!fs.existsSync(filePath)) {
+        Logger.log("INFO", "tone_profile_cache_miss", { path: filePath });
+        return { ...DEFAULT_TONE_PROFILE };
+      }
+      const raw = fs.readFileSync(filePath, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.primaryTone !== "string" || typeof parsed.confidence !== "number" || !parsed.features) {
+        Logger.log("WARN", "tone_profile_cache_invalid", { path: filePath });
+        return { ...DEFAULT_TONE_PROFILE };
+      }
+      this.currentProfile = parsed;
+      Logger.log("INFO", "tone_profile_cache_loaded", {
+        tone: parsed.primaryTone,
+        confidence: parsed.confidence.toFixed(2),
+        messageCount: parsed.messageCount,
+        lastUpdated: new Date(parsed.lastUpdated).toISOString()
+      });
+      return { ...parsed };
+    } catch (err) {
+      Logger.log("WARN", "tone_profile_cache_load_error", {
+        path: filePath,
+        error: String(err)
+      });
+      return { ...DEFAULT_TONE_PROFILE };
+    }
+  }
+  /**
+   * 保存语气画像到磁盘（带 debounce）。
+   * 调用后不立即写入，等待 SAVE_DEBOUNCE_MS 内的后续更新合并。
+   */
+  save(profile) {
+    this.currentProfile = { ...profile };
+    this.dirty = true;
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+    }
+    this.saveTimer = setTimeout(() => {
+      this.flush();
+    }, SAVE_DEBOUNCE_MS);
+  }
+  /**
+   * 立即写入磁盘（跳过 debounce）。
+   * 用于应用退出前的紧急保存。
+   */
+  flush() {
+    if (!this.dirty) return;
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    const filePath = getCachePath();
+    try {
+      const dir = path$1.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const profile = {
+        ...this.currentProfile,
+        lastUpdated: Date.now()
+      };
+      fs.writeFileSync(filePath, JSON.stringify(profile, null, 2), "utf-8");
+      this.dirty = false;
+      Logger.log("INFO", "tone_profile_cache_saved", {
+        tone: profile.primaryTone,
+        confidence: profile.confidence.toFixed(2),
+        messageCount: profile.messageCount
+      });
+    } catch (err) {
+      Logger.log("ERROR", "tone_profile_cache_save_error", {
+        path: filePath,
+        error: String(err)
+      });
+    }
+  }
+  /**
+   * 获取当前内存中的画像（不读磁盘）。
+   */
+  getCurrent() {
+    return { ...this.currentProfile };
+  }
+  /**
+   * 删除缓存文件并重置内存状态。
+   */
+  clear() {
+    this.currentProfile = { ...DEFAULT_TONE_PROFILE };
+    this.dirty = false;
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    const filePath = getCachePath();
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        Logger.log("INFO", "tone_profile_cache_cleared", { path: filePath });
+      }
+    } catch (err) {
+      Logger.log("WARN", "tone_profile_cache_clear_error", { error: String(err) });
+    }
+  }
+}
+const toneProfileCache = new UserToneProfileCache();
 class ChatExecutor {
   llmService;
   ttsService;
@@ -17514,6 +19923,7 @@ class ChatExecutor {
   workingMemory;
   toolScheduler;
   guardrail;
+  progressGuardrail;
   planManager;
   resourceBudget;
   memoryService;
@@ -17548,6 +19958,8 @@ class ChatExecutor {
   currentSessionId = null;
   /** 执行决策门 — 每轮 tool batch 后强制决策 */
   executionGovernor = new ExecutionGovernor();
+  /** Guardrail Pipeline — Trace 级别进展检测（可选注入） */
+  guardrailPipeline = null;
   constructor(llmService, ttsService, mainWindow2, toolScheduler, guardrail, goalGuardrail, planManager2, resourceBudget, memoryService, skillManager, recoveryManager, tokenAccount, subAgentPool, reflectLoop) {
     this.llmService = llmService;
     this.ttsService = ttsService;
@@ -17555,6 +19967,7 @@ class ChatExecutor {
     this.workingMemory = new WorkingMemory("chat");
     this.toolScheduler = toolScheduler;
     this.guardrail = guardrail;
+    this.progressGuardrail = new ProgressGuardrail();
     this.planManager = planManager2;
     this.resourceBudget = resourceBudget;
     this.memoryService = memoryService;
@@ -17565,7 +19978,10 @@ class ChatExecutor {
     this.reflectLoop = reflectLoop;
     this.goalGuardrail = goalGuardrail;
     this.errorClassifier = { classify };
-    setPersonaStateManager(this.personaManager);
+  }
+  /** 注入 GuardrailPipeline（启动时由 AppRuntime 调用） */
+  setGuardrailPipeline(pipeline) {
+    this.guardrailPipeline = pipeline;
   }
   setMainWindow(win) {
     this.mainWindow = win;
@@ -17614,6 +20030,14 @@ class ChatExecutor {
     if (this.driftControl.needsCorrectionPrompt()) {
       extraModules.unshift(DRIFT_CORRECTION_PROMPT);
     }
+    const taskCtx = this.memoryService.getTaskStateContext();
+    if (taskCtx) extraModules.push(taskCtx);
+    const profileCtx = this.memoryService.getUserProfileContext();
+    if (profileCtx) extraModules.push(profileCtx);
+    const behaviorPattern = userBehaviorAnalyzer.analyze();
+    if (behaviorPattern.hasSufficientData && behaviorPattern.suggestedToolHints.length > 0) {
+      extraModules.push(...behaviorPattern.suggestedToolHints);
+    }
     const allExtraModules = extraModules.length > 0 ? extraModules : void 0;
     if (memCtx || reflectCtx || allExtraModules || this.identityContext) {
       this.workingMemory.refreshMemory(memCtx, reflectCtx, allExtraModules, this.identityContext || void 0);
@@ -17642,13 +20066,45 @@ class ChatExecutor {
     this.mainWindow?.webContents.send("message:new", msg);
   }
   noTts = false;
+  /** 情感自适应语音是否启用（用户可通过 IPC 开关） */
+  emotionTtsEnabled = true;
+  /** 上次应用的 TTS 情感参数（避免重复设置相同参数） */
+  lastEmotionParams = null;
+  /** 用户语气记忆个性化语音是否启用 */
+  toneProfileEnabled = true;
+  /** 缓存的用户语气基线参数（避免每次重新计算） */
+  lastToneBaseline = null;
+  /** 当前用户语气画像 */
+  currentToneProfile = null;
+  /** 已初始化标记 */
+  toneProfileInitialized = false;
   async run(text, requestId2, source = "electron", extra, sessionId, noTts) {
     this.noTts = noTts ?? false;
     const rid = requestId2 || Logger.createRequestId();
     const t0 = Date.now();
-    this.memoryService?.recordInteraction();
+    this.memoryService?.recordInteraction(text);
     this.memoryService?.setLastUserText(text);
     this.lastUserText = text;
+    userBehaviorAnalyzer.recordUserMessage(text);
+    this.ensureToneProfileInit();
+    if (this.toneProfileEnabled) {
+      try {
+        const profile = toneProfileAnalyzer.updateProfile(text);
+        this.currentToneProfile = profile;
+        toneProfileCache.save(profile);
+        const newBaseline = toneToVoiceMapper.getBaselineParams(profile);
+        if (!this.lastToneBaseline || toneToVoiceMapper.isDifferent(this.lastToneBaseline, newBaseline)) {
+          this.lastToneBaseline = newBaseline;
+          Logger.log("INFO", "tone_baseline_updated", {
+            tone: profile.primaryTone,
+            confidence: profile.confidence.toFixed(2),
+            voice: newBaseline.voice
+          });
+        }
+      } catch (err) {
+        Logger.log("WARN", "tone_profile_update_error", { error: String(err) });
+      }
+    }
     this.resolvePersonaFor(text);
     if (this.pendingDriftSignal) {
       this.workingMemory.scratchpad.add("system_hint", this.pendingDriftSignal);
@@ -17709,6 +20165,7 @@ class ChatExecutor {
       this.obsLogger?.flush();
       eventBus.emit("agent.response.generated", { text: reply, requestId: rid, source });
       Logger.log("PERF", "round_trip", { request_id: rid, duration_ms: Date.now() - t0, reply_len: reply.length });
+      this.applySentimentToTts(reply);
       if (!this.noTts) this.ttsService.flushBuffer();
       if (reply) {
         const assistMsg = {
@@ -17752,6 +20209,7 @@ class ChatExecutor {
     this.runContext = null;
     this.ttsService.stop();
     this.executionGovernor.reset();
+    this.progressGuardrail.reset();
   }
   async toolLoop(messages2, ctx, requestId2, source) {
     ctx.transition(RunState.RUNNING);
@@ -17847,24 +20305,29 @@ class ChatExecutor {
           }
           ctx.transition(RunState.WAIT_TOOL);
           eventBus.emit("agent.progress", { requestId: requestId2, step: i + 1, toolNames: result.toolCalls.map((t) => t.name) });
-          result.toolCalls.forEach((tc) => eventBus.emit("agent.tool.invoked", { tool: tc.name, args: tc.arguments }));
+          result.toolCalls.forEach((tc) => eventBus.emit("agent.tool.invoked", { tool: tc.name, args: tc.arguments, requestId: requestId2 }));
           const toolResults = await this.toolScheduler.executeAll(result.toolCalls, ctx.abortController.signal);
           this.obsLogger?.logToolBatch(toolResults);
           for (const tr of toolResults) {
             if (tr.success) {
               this.goalGuardrail.onToolSuccess();
               this.proceduralMemory?.recordHit(tr.name);
+              userBehaviorAnalyzer.recordToolCall(tr.name);
             }
           }
           for (const tr of toolResults) {
             this.emitToolStatus(tr.success ? "success" : "error", tr.name, tr.success ? "完成" : `失败: ${tr.error}`);
-            if (tr.success) eventBus.emit("agent.tool.completed", { tool: tr.name, result: tr.content });
-            else eventBus.emit("agent.tool.failed", { tool: tr.name, error: tr.error || "" });
+            if (tr.success) eventBus.emit("agent.tool.completed", { tool: tr.name, result: tr.content, requestId: requestId2 });
+            else eventBus.emit("agent.tool.failed", { tool: tr.name, error: tr.error || "", requestId: requestId2 });
             let c = tr.content || tr.error || "";
             if (c.length > 8e3) c = c.slice(0, 8e3) + `
 ... [已截断，原长 ${c.length} 字符]`;
             messages2.push({ role: "tool", tool_call_id: tr.id, content: c });
           }
+          this.applySentimentToTts(
+            result.reply || "",
+            toolResults.filter((t) => t.success).map((t) => t.content)
+          );
           runReflect(toolResults, result.toolCalls, messages2, ctx);
           this.workingMemory.trimToTokenBudget(6e5);
           if (!ctx.softReplyInjected && i >= 10) {
@@ -17872,6 +20335,10 @@ class ChatExecutor {
             this.workingMemory.scratchpad.add("system_hint", "你已执行了多步操作。请立即停止工具调用，向用户汇报当前进展。");
           }
           const gr = this.guardrail.apply(toolResults, result.toolCalls, messages2, ctx);
+          const pgResult = this.progressGuardrail.check(result.reply, result.toolCalls, toolResults, messages2, ctx);
+          if (pgResult.triggered) {
+            Logger.log("WARN", "chat_progress_guardrail_triggered", { step: i, reason: pgResult.reason });
+          }
           const failedTools = toolResults.filter((r) => !r.success).map((r) => r.name);
           const hasFail = failedTools.length > 0;
           const allFail = hasFail && failedTools.length === toolResults.length;
@@ -17898,6 +20365,23 @@ class ChatExecutor {
             continue;
           }
           this.checkMilestone(i, toolResults, ctx, requestId2);
+          if (this.guardrailPipeline) {
+            const result2 = await this.guardrailPipeline.check(requestId2, i);
+            if (result2) {
+              switch (result2.runtimeAction) {
+                case "TERMINATE":
+                  Logger.log("WARN", "chat_guardrail_kernel_terminate", { step: i, reason: result2.decision.reason, traceId: requestId2 });
+                  eventBus.emit("guardrail.progress_stagnation", { consecutiveRounds: i, step: i });
+                  ctx.guardrailStop = true;
+                  break;
+                case "WARNING":
+                  Logger.log("WARN", "chat_guardrail_kernel_warning", { step: i, reason: result2.decision.reason, traceId: requestId2 });
+                  break;
+                case "CONTINUE":
+                  break;
+              }
+            }
+          }
           ctx.transition(RunState.RUNNING);
           continue;
         }
@@ -18061,6 +20545,113 @@ ${reportLines.join("\n\n")}` });
   emitToolStatus(type, tool, msg) {
     this.mainWindow?.webContents.send("tool:status", { type, tool, message: msg });
   }
+  /**
+   * 情感自适应语音：分析回复文本并更新 TTS 情感参数
+   *
+   * 在 LLM 回复完成后、TTS 发音前调用。
+   * 合并分析 LLM 回复文本 + 本轮工具返回内容，综合判断情感。
+   *
+   * 如果启用了语气记忆个性化语音（toneProfileEnabled），
+   * 会将用户语气基线参数与内容情感参数进行混合：
+   *   - voice 由用户语气决定（保持一致性）
+   *   - rate/pitch 在基线基础上由内容情感微调
+   */
+  applySentimentToTts(llmReply, toolResultTexts) {
+    if (!this.emotionTtsEnabled) return;
+    try {
+      const parts = [];
+      if (llmReply) parts.push(llmReply);
+      if (toolResultTexts && toolResultTexts.length > 0) {
+        parts.push(...toolResultTexts.filter(Boolean));
+      }
+      const combined = parts.join(" ");
+      if (!combined || combined.trim().length < 10) return;
+      const sentiment = sentimentAnalyzer.analyze(combined);
+      const emotionParams = emotionToneMap.getParams(sentiment);
+      let finalParams = emotionParams;
+      if (this.toneProfileEnabled && this.lastToneBaseline) {
+        finalParams = toneToVoiceMapper.blend(this.lastToneBaseline, emotionParams);
+      }
+      if (this.lastEmotionParams && !emotionToneMap.isDifferent(this.lastEmotionParams, finalParams)) {
+        return;
+      }
+      this.lastEmotionParams = finalParams;
+      this.ttsService.setEmotion(finalParams);
+      this.mainWindow?.webContents.send("tts:emotion", {
+        polarity: sentiment.polarity,
+        contentType: sentiment.contentType,
+        score: sentiment.score,
+        voice: finalParams.voice,
+        label: finalParams.label,
+        matchedWords: sentiment.matchedWords.slice(0, 5),
+        toneProfile: this.toneProfileEnabled && this.currentToneProfile ? {
+          primaryTone: this.currentToneProfile.primaryTone,
+          confidence: this.currentToneProfile.confidence
+        } : null
+      });
+    } catch (err) {
+      Logger.log("WARN", "sentiment_apply_error", { error: String(err) });
+    }
+  }
+  /** 切换情感自适应语音开关（供 IPC 调用） */
+  toggleEmotionTts(enabled) {
+    this.emotionTtsEnabled = enabled;
+    this.ttsService.setEmotionEnabled(enabled);
+    if (!enabled) {
+      this.lastEmotionParams = null;
+    }
+    this.mainWindow?.webContents.send("tts:emotion:enabled", { enabled });
+  }
+  /** 获取当前情感 TTS 状态 */
+  getEmotionTtsState() {
+    return {
+      enabled: this.emotionTtsEnabled,
+      params: this.emotionTtsEnabled ? this.ttsService.getEmotionParams() : null
+    };
+  }
+  // ══════════════════════════════════════════
+  //  语气记忆个性化语音
+  // ══════════════════════════════════════════
+  /**
+   * 懒初始化语气画像：首次调用时从缓存加载，
+   * 恢复 ToneProfileAnalyzer 状态。
+   */
+  ensureToneProfileInit() {
+    if (this.toneProfileInitialized) return;
+    this.toneProfileInitialized = true;
+    try {
+      const cached = toneProfileCache.load();
+      if (cached.messageCount > 0) {
+        toneProfileAnalyzer.restoreFromProfile(cached);
+        this.currentToneProfile = cached;
+        this.lastToneBaseline = toneToVoiceMapper.getBaselineParams(cached);
+        Logger.log("INFO", "tone_profile_init_from_cache", {
+          tone: cached.primaryTone,
+          messages: cached.messageCount,
+          confidence: cached.confidence.toFixed(2),
+          baselineVoice: this.lastToneBaseline.voice
+        });
+      }
+    } catch (err) {
+      Logger.log("WARN", "tone_profile_init_error", { error: String(err) });
+    }
+  }
+  /** 切换语气记忆个性化语音开关（供 IPC 调用） */
+  toggleToneProfileTts(enabled) {
+    this.toneProfileEnabled = enabled;
+    if (!enabled) {
+      this.lastToneBaseline = null;
+    }
+    this.mainWindow?.webContents.send("tts:toneProfile:enabled", { enabled });
+  }
+  /** 获取当前语气画像状态（供 IPC/调试） */
+  getToneProfileState() {
+    return {
+      enabled: this.toneProfileEnabled,
+      profile: this.currentToneProfile,
+      baseline: this.lastToneBaseline
+    };
+  }
 }
 const EMBED_DIM = 384;
 const MODEL_CACHE_DIR = path$1.join(__dirname, "..", "..", "..", "..", "models", "Xenova");
@@ -18130,12 +20721,12 @@ async function getEmbedding(text) {
   }
   return embedFn(text);
 }
-let idCounter$9 = 0;
+let idCounter$a = 0;
 const MAX_PROCEDURES = 50;
 class ProceduralMemory {
   save(params) {
     const db2 = getRawDb();
-    const id2 = `proc_${Date.now()}_${++idCounter$9}`;
+    const id2 = `proc_${Date.now()}_${++idCounter$a}`;
     const now = Date.now();
     const embedding = this.computeEmbedding(params);
     const existing = this.findByName(params.name);
@@ -18473,6 +21064,10 @@ class AgentService {
     this.mainWindow = win;
     this.chatExecutor?.setMainWindow(win);
   }
+  /** 注入 GuardrailPipeline（启动时由 AppRuntime 调用） */
+  setGuardrailPipeline(pipeline) {
+    this.chatExecutor?.setGuardrailPipeline(pipeline);
+  }
   getContext() {
     return this.context;
   }
@@ -18515,7 +21110,7 @@ class AgentService {
     this.resourceBudget.startRequest();
     const rid = requestId2 || Logger.createRequestId();
     const t0 = Date.now();
-    this.memoryService?.recordInteraction();
+    this.memoryService?.recordInteraction(text);
     this.memoryService?.setLastUserText(text);
     if (this.inSelfTask) {
       Logger.log("INFO", "input_preempting_self_task", { requestId: rid });
@@ -18552,6 +21147,10 @@ class AgentService {
   }
   isBusy() {
     return this.inSelfTask || this.chatExecutor?.isBusy() === true;
+  }
+  /** 获取 ChatExecutor 实例（供 IPC handler 调用情感 TTS 等功能） */
+  getChatExecutor() {
+    return this.chatExecutor;
   }
   /** 暂停 Chat 处理（暂停 ASR/TTS/LLM 调用，保留上下文） */
   pause() {
@@ -18726,7 +21325,7 @@ ${checkpoint.conversationSummary}`;
     };
   }
 }
-let idCounter$8 = 0;
+let idCounter$9 = 0;
 const MAX_SUMMARIES = 50;
 class SummaryMemory {
   entries = [];
@@ -18771,7 +21370,7 @@ class SummaryMemory {
     }
   }
   addSummary(summary, turnStart, turnEnd, options) {
-    const id2 = `sum_${Date.now()}_${++idCounter$8}`;
+    const id2 = `sum_${Date.now()}_${++idCounter$9}`;
     const entry = {
       id: id2,
       summary,
@@ -18862,7 +21461,7 @@ class SummaryMemory {
     Logger.log("INFO", "summary_flush_skipped_wt", { count: this.entries.length });
   }
 }
-let idCounter$7 = 0;
+let idCounter$8 = 0;
 const MAX_ENTRIES$2 = 200;
 class VectorMemory {
   entries = [];
@@ -18909,7 +21508,7 @@ class VectorMemory {
       Logger.log("WARN", "vector_store_skip_no_embedding", { content });
       return;
     }
-    const id2 = `vec_${Date.now()}_${++idCounter$7}`;
+    const id2 = `vec_${Date.now()}_${++idCounter$8}`;
     const entry = { id: id2, content, embedding, confidence, source, createdAt: Date.now(), updatedAt: Date.now() };
     this.entries.push(entry);
     if (this.entries.length > MAX_ENTRIES$2) this.prune();
@@ -18964,7 +21563,7 @@ class VectorMemory {
     Logger.log("INFO", "vector_flush_skipped_wt", { count: this.entries.length });
   }
 }
-let idCounter$6 = 0;
+let idCounter$7 = 0;
 function extractTriples(content) {
   const triples = [];
   const prefMatch = content.match(/用户(?:喜欢|偏好|使用|用|做)['']?(.+?)(?:['']?$|[，。])/);
@@ -19002,7 +21601,7 @@ class KnowledgeGraph {
         db2.run("UPDATE knowledge_graph SET confidence = ?, updated_at = ? WHERE id = ?", [newConf, now, row.id]);
       } else {
         existing.free();
-        const id2 = `kg_${now}_${++idCounter$6}`;
+        const id2 = `kg_${now}_${++idCounter$7}`;
         db2.run("INSERT INTO knowledge_graph (id, entity, attribute, value, confidence, updated_at) VALUES (?, ?, ?, ?, ?, ?)", [
           id2,
           t.entity,
@@ -19029,7 +21628,7 @@ class KnowledgeGraph {
             db22.run("UPDATE knowledge_graph SET confidence = ?, updated_at = ? WHERE id = ?", [newConf, now2, row.id]);
           } else {
             existing.free();
-            const id2 = `kg_llm_${now2}_${++idCounter$6}`;
+            const id2 = `kg_llm_${now2}_${++idCounter$7}`;
             db22.run("INSERT INTO knowledge_graph (id, entity, attribute, value, confidence, updated_at) VALUES (?, ?, ?, ?, ?, ?)", [
               id2,
               t.entity,
@@ -19087,12 +21686,12 @@ class KnowledgeGraph {
     db2.run("DELETE FROM knowledge_graph");
   }
 }
-let idCounter$5 = 0;
+let idCounter$6 = 0;
 const MAX_ENTRIES$1 = 100;
 class EngineeringMemory {
   store(entry) {
     const db2 = getRawDb();
-    const id2 = `eng_${Date.now()}_${++idCounter$5}`;
+    const id2 = `eng_${Date.now()}_${++idCounter$6}`;
     const now = Date.now();
     db2.run(
       `INSERT INTO engineering_memory (id, type, content, source, confidence, related_files, tags, created_at, updated_at)
@@ -19199,13 +21798,13 @@ class EngineeringMemory {
     }
   }
 }
-let idCounter$4 = 0;
+let idCounter$5 = 0;
 const MAX_RECORDS = 200;
 class DecisionStore {
   /** 写入一条决策记录 */
   record(input) {
     const db2 = getRawDb();
-    const id2 = `dec_${Date.now()}_${++idCounter$4}`;
+    const id2 = `dec_${Date.now()}_${++idCounter$5}`;
     const now = Date.now();
     db2.run(
       `INSERT INTO decisions (id, timestamp, agent_id, category, context, choice, alternatives, outcome, confidence, related_plan_id, created_at)
@@ -19592,25 +22191,369 @@ class UnifiedMemoryQuery {
     return parts.join("\n");
   }
 }
+const RING_SIZE = 32;
+const TOPIC_WINDOW_DAYS = 14;
+let idCounter$4 = 0;
+class InteractionTracker {
+  ring = [];
+  /** 记录一次交互 */
+  record(input) {
+    const id2 = `ilog_${Date.now()}_${++idCounter$4}`;
+    const now = Date.now();
+    const record = {
+      id: id2,
+      userText: input.userText.slice(0, 200),
+      responseTimeMs: input.responseTimeMs ?? null,
+      topics: input.topics || [],
+      isExplicitRemember: input.isExplicitRemember || false,
+      rementionedMemoryIds: input.rementionedMemoryIds || [],
+      timestamp: now,
+      createdAt: now
+    };
+    if (this.ring.length >= RING_SIZE) {
+      this.ring.shift();
+    }
+    this.ring.push(record);
+    this.saveToDb(record);
+    return record;
+  }
+  /** 获取最近 N 条交互记录（默认全部 32） */
+  getRecent(limit) {
+    const n = limit ?? RING_SIZE;
+    return this.ring.slice(-n);
+  }
+  /** 获取所有内存中的记录 */
+  getAll() {
+    return [...this.ring];
+  }
+  /** 从数据库加载最近 32 条记录到环形缓冲区 */
+  load() {
+    try {
+      const db2 = getRawDb();
+      const result = db2.exec(
+        `SELECT * FROM interaction_log ORDER BY timestamp DESC LIMIT ${RING_SIZE}`
+      );
+      if (result && result.length > 0) {
+        const columns = result[0].columns;
+        const records = result[0].values.map((v) => {
+          const obj = {};
+          for (let i = 0; i < columns.length; i++) obj[columns[i]] = v[i];
+          return this.mapRow(obj);
+        });
+        this.ring = records.reverse();
+      }
+      Logger.log("INFO", "interaction_tracker_loaded", { count: this.ring.length });
+    } catch (err) {
+      Logger.log("WARN", "interaction_tracker_load_failed", { error: String(err) });
+    }
+  }
+  /** 检测用户是否在当前上下文中重新提及了某个已知记忆 */
+  detectRementions(userText, knownContents) {
+    if (!userText || knownContents.length === 0) return [];
+    const rementioned = [];
+    const lower = userText.toLowerCase();
+    for (const content of knownContents) {
+      const snippet = content.slice(0, 20).toLowerCase();
+      if (snippet.length >= 3 && lower.includes(snippet)) {
+        rementioned.push(content);
+      }
+    }
+    return rementioned;
+  }
+  /** 检测用户是否明确要求记住某些信息 */
+  detectExplicitRemember(userText) {
+    const patterns = [
+      /记住[：:，,\s]*/,
+      /记下[：:，,\s]*/,
+      /别忘了/,
+      /提醒我/,
+      /下次.*记[得住]/,
+      /remember\b/i,
+      /don'?t\s+forget\b/i,
+      /note\s+this/i
+    ];
+    return patterns.some((p) => p.test(userText));
+  }
+  /** 分析行为模式：按小时统计主题频率（用于预加载） */
+  getHourlyTopicStats() {
+    const cutoff = Date.now() - TOPIC_WINDOW_DAYS * 24 * 36e5;
+    const recent = this.ring.filter((r) => r.timestamp >= cutoff);
+    if (recent.length === 0) return [];
+    const hourMap = /* @__PURE__ */ new Map();
+    for (const r of recent) {
+      const hour = new Date(r.timestamp).getHours();
+      if (!hourMap.has(hour)) hourMap.set(hour, /* @__PURE__ */ new Map());
+      const topicMap = hourMap.get(hour);
+      for (const topic of r.topics) {
+        topicMap.set(topic, (topicMap.get(topic) || 0) + 1);
+      }
+    }
+    const stats = [];
+    for (const [hour, topicMap] of hourMap) {
+      const topics = [...topicMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([topic, count]) => ({ topic, count }));
+      stats.push({ hour, topics });
+    }
+    stats.sort((a, b) => a.hour - b.hour);
+    return stats;
+  }
+  /** 获取当前时段的推荐主题（用于预加载相关记忆） */
+  getSuggestedTopicsForHour(hour) {
+    const stats = this.getHourlyTopicStats();
+    const match2 = stats.find((s) => s.hour === hour);
+    if (!match2) return [];
+    return match2.topics.filter((t) => t.count >= 2).map((t) => t.topic);
+  }
+  /** 获取用户明确要求记住的交互数量 */
+  getExplicitRememberCount(since) {
+    const filtered = since ? this.ring.filter((r) => r.timestamp >= since) : this.ring;
+    return filtered.filter((r) => r.isExplicitRemember).length;
+  }
+  /** 获取重新提及率（最近 N 次交互中有多少次重新提及了旧记忆） */
+  getRementionRate() {
+    if (this.ring.length === 0) return 0;
+    const withRemention = this.ring.filter((r) => r.rementionedMemoryIds.length > 0).length;
+    return withRemention / this.ring.length;
+  }
+  // ── 持久化 ──
+  saveToDb(record) {
+    try {
+      const db2 = getRawDb();
+      db2.run(
+        `INSERT INTO interaction_log (id, user_text, response_time_ms, topics, is_explicit_remember, rementioned_memory_ids, timestamp, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          record.id,
+          record.userText,
+          record.responseTimeMs,
+          JSON.stringify(record.topics),
+          record.isExplicitRemember ? 1 : 0,
+          JSON.stringify(record.rementionedMemoryIds),
+          record.timestamp,
+          record.createdAt
+        ]
+      );
+      markDirty();
+    } catch (err) {
+      Logger.log("WARN", "interaction_save_failed", { error: String(err) });
+    }
+  }
+  /** 清理超出保留期限的旧记录（保留最近 100 条） */
+  prune(maxRecords = 100) {
+    try {
+      const db2 = getRawDb();
+      const count = Number(
+        db2.exec("SELECT COUNT(*) AS c FROM interaction_log")[0]?.values[0]?.[0] || 0
+      );
+      if (count > maxRecords) {
+        db2.run(
+          `DELETE FROM interaction_log WHERE id IN (SELECT id FROM interaction_log ORDER BY timestamp ASC LIMIT ?)`,
+          [count - maxRecords]
+        );
+        markDirty();
+      }
+    } catch {
+    }
+  }
+  mapRow(obj) {
+    const parseJson = (val, fallback) => {
+      if (val === null || val === void 0) return fallback;
+      if (Array.isArray(val)) return val;
+      try {
+        return JSON.parse(val);
+      } catch {
+        return fallback;
+      }
+    };
+    return {
+      id: obj.id,
+      userText: obj.user_text || "",
+      responseTimeMs: obj.response_time_ms ?? null,
+      topics: parseJson(obj.topics, []),
+      isExplicitRemember: obj.is_explicit_remember === 1 || obj.is_explicit_remember === true,
+      rementionedMemoryIds: parseJson(obj.rementioned_memory_ids, []),
+      timestamp: obj.timestamp,
+      createdAt: obj.created_at || obj.timestamp
+    };
+  }
+}
+const DEFAULT_INTEREST_WINDOW_SIZE = 16;
+const DEFAULT_RECENCY_DECAY_RATE = 0.92;
+const DEFAULT_BASE_BOOST_FACTOR = 0.3;
+const DEFAULT_MIN_INTEREST_STRENGTH = 2;
+const DEFAULT_UPDATE_INTERVAL_MS = 6e4;
+const DEFAULT_CONFIG$2 = {
+  interestWindowSize: DEFAULT_INTEREST_WINDOW_SIZE,
+  recencyDecayRate: DEFAULT_RECENCY_DECAY_RATE,
+  baseBoostFactor: DEFAULT_BASE_BOOST_FACTOR,
+  minInterestStrength: DEFAULT_MIN_INTEREST_STRENGTH,
+  updateIntervalMs: DEFAULT_UPDATE_INTERVAL_MS
+};
+class BehaviorWeightingService {
+  config;
+  cachedProfile = null;
+  constructor(config) {
+    this.config = { ...DEFAULT_CONFIG$2, ...config };
+  }
+  /** 获取当前配置的只读副本 */
+  getConfig() {
+    return this.config;
+  }
+  /** 更新配置 */
+  updateConfig(partial) {
+    this.config = { ...this.config, ...partial };
+    this.cachedProfile = null;
+  }
+  // ══════════════════════════════════════════
+  //  兴趣分布计算
+  // ══════════════════════════════════════════
+  /**
+   * 从最近交互记录中计算当前兴趣分布。
+   * 使用时间衰减加权：越近的交互权重越高。
+   *
+   * @param interactions 交互记录列表（按时间升序）
+   * @param forceRefresh 强制刷新缓存
+   */
+  computeInterestProfile(interactions, forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && this.cachedProfile && now - this.cachedProfile.lastUpdated < this.config.updateIntervalMs) {
+      return this.cachedProfile;
+    }
+    const windowSize = this.config.interestWindowSize;
+    const decayRate = this.config.recencyDecayRate;
+    const recent = interactions.slice(-windowSize);
+    const topicWeights = /* @__PURE__ */ new Map();
+    let totalWeight = 0;
+    for (let i = 0; i < recent.length; i++) {
+      const position = recent.length - 1 - i;
+      const recencyWeight = Math.pow(decayRate, position);
+      const record = recent[i];
+      if (!record.topics || record.topics.length === 0) continue;
+      for (const topic of record.topics) {
+        const current = topicWeights.get(topic) || 0;
+        topicWeights.set(topic, current + recencyWeight);
+        totalWeight += recencyWeight;
+      }
+    }
+    const profile = {
+      topicWeights,
+      totalWeight,
+      lastUpdated: now
+    };
+    this.cachedProfile = profile;
+    if (topicWeights.size > 0) {
+      Logger.log("INFO", "behavior_interest_profile_computed", {
+        topics: topicWeights.size,
+        totalWeight: totalWeight.toFixed(2),
+        windowSize,
+        topTopics: [...topicWeights.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, w]) => `${t}(${w.toFixed(2)})`)
+      });
+    }
+    return profile;
+  }
+  /**
+   * 获取兴趣分布中的前 K 个主题（用于调试和显示）
+   */
+  getTopInterests(profile, k = 5) {
+    return [...profile.topicWeights.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([topic]) => topic);
+  }
+  // ══════════════════════════════════════════
+  //  主题相似度计算
+  // ══════════════════════════════════════════
+  /**
+   * 计算记忆主题与当前兴趣分布的相似度 boost 因子。
+   *
+   * 算法：
+   * 1. 计算记忆主题集合与兴趣主题集合的交集
+   * 2. 对交集中的每个主题，累加其在兴趣分布中的权重
+   * 3. 使用 overlap 系数归一化：交集权重 / max(记忆主题数, 1)
+   * 4. 乘以基础提升因子得到最终 boost
+   *
+   * @param memoryTopics 记忆的主题标签列表
+   * @param profile 当前兴趣分布
+   * @returns boost 因子 (0 ~ baseBoostFactor)
+   */
+  getTopicSimilarityBoost(memoryTopics, profile) {
+    if (!memoryTopics || memoryTopics.length === 0) return 0;
+    if (profile.topicWeights.size === 0) return 0;
+    const minStrength = this.config.minInterestStrength;
+    let intersectionWeight = 0;
+    for (const topic of memoryTopics) {
+      const weight = profile.topicWeights.get(topic);
+      if (weight !== void 0 && weight >= minStrength) {
+        intersectionWeight += weight;
+      }
+    }
+    if (intersectionWeight === 0) return 0;
+    const overlapCoefficient = intersectionWeight / Math.max(memoryTopics.length, 1);
+    const normalizedOverlap = Math.tanh(overlapCoefficient);
+    const boost = normalizedOverlap * this.config.baseBoostFactor;
+    return boost;
+  }
+  /**
+   * 计算行为加权后的有效得分。
+   *
+   * @param baseScore 基础得分（来自 getEffectiveScore 等）
+   * @param memoryTopics 记忆主题标签
+   * @param profile 当前兴趣分布
+   * @returns 加权后的得分 (0~1)
+   */
+  getWeightedScore(baseScore, memoryTopics, profile) {
+    const boost = this.getTopicSimilarityBoost(memoryTopics, profile);
+    return Math.min(1, baseScore + boost);
+  }
+  // ══════════════════════════════════════════
+  //  兴趣分布调试
+  // ══════════════════════════════════════════
+  /**
+   * 获取兴趣分布的可读摘要（用于日志和调试）
+   */
+  getInterestSummary(profile) {
+    if (profile.topicWeights.size === 0) return "(无活跃兴趣)";
+    const top = this.getTopInterests(profile, 5);
+    return top.join(" > ");
+  }
+  /** 清除缓存（强制下次检索重新计算） */
+  invalidateCache() {
+    this.cachedProfile = null;
+  }
+}
 const MAX_PERMANENT = 10;
 const MAX_SEMI = 30;
 const MAX_EPHEMERAL = 50;
-const DECAY_SEMI = 0.998;
-const DECAY_EPHEMERAL = 0.99;
 const PROMOTE_SEMI_CONFIDENCE = 0.85;
 const PROMOTE_PERMANENT_REINFORCE = 5;
 const PROMOTE_PERMANENT_CONFIDENCE = 0.97;
 const MIN_CONFIDENCE = 0.5;
 const INTERACTION_RECORD_INTERVAL = 5;
+const BEHAVIOR_SCORE_INITIAL = 0.5;
+const BEHAVIOR_SCORE_ACCESS_BOOST = 0.05;
+const BEHAVIOR_SCORE_EXPLICIT_REMEMBER_BOOST = 0.15;
+const BEHAVIOR_SCORE_DAILY_DECAY = 0.01;
+const BEHAVIOR_SCORE_MIN = 0.1;
+const BEHAVIOR_SCORE_MAX = 1;
+const BEHAVIOR_WEIGHT = 0.7;
+const CONFIDENCE_WEIGHT = 0.3;
+const DECAY_CHECK_INTERVAL = 30 * 60 * 1e3;
 let idCounter$3 = 0;
 function nextId() {
-  return `mem_${Date.now()}_${++idCounter$3}`;
+  return "mem_" + Date.now() + "_" + ++idCounter$3;
+}
+function parseTopicsFromDb(raw) {
+  if (raw === null || raw === void 0) return [];
+  if (Array.isArray(raw)) return raw;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 class MemoryService {
   entries = [];
   messageCount = 0;
   lastUserText = "";
   removedIds = /* @__PURE__ */ new Set();
+  decayTimer = null;
   summary;
   vector;
   knowledgeGraph;
@@ -19618,6 +22561,8 @@ class MemoryService {
   decisionStore;
   metaController;
   unifiedQuery;
+  interactionTracker;
+  behaviorWeighting;
   constructor() {
     this.summary = new SummaryMemory();
     this.vector = new VectorMemory();
@@ -19636,12 +22581,23 @@ class MemoryService {
     this.unifiedQuery.register("summary", this.summary);
     this.unifiedQuery.register("kg", this.knowledgeGraph);
     this.unifiedQuery.register("engineering", this.engineering);
+    this.interactionTracker = new InteractionTracker();
+    this.behaviorWeighting = new BehaviorWeightingService({
+      interestWindowSize: BEHAVIOR_WEIGHT_WINDOW_SIZE,
+      recencyDecayRate: BEHAVIOR_WEIGHT_RECENCY_DECAY,
+      baseBoostFactor: BEHAVIOR_WEIGHT_BASE_BOOST,
+      minInterestStrength: BEHAVIOR_WEIGHT_MIN_STRENGTH,
+      updateIntervalMs: BEHAVIOR_WEIGHT_UPDATE_INTERVAL
+    });
     this.load();
+    this.interactionTracker.load();
+    this.startDecayTimer();
     Logger.log("INFO", "memory_loaded", {
       entries: this.entries.length,
       permanent: this.entries.filter((e) => e.tier === "permanent").length,
       semi: this.entries.filter((e) => e.tier === "semi").length,
-      ephemeral: this.entries.filter((e) => e.tier === "ephemeral").length
+      ephemeral: this.entries.filter((e) => e.tier === "ephemeral").length,
+      interactions: this.interactionTracker.getAll().length
     });
   }
   load() {
@@ -19660,8 +22616,15 @@ class MemoryService {
             confidence: obj.confidence,
             tier: obj.tier || "ephemeral",
             reinforceCount: obj.reinforce_count || 0,
+            behaviorScore: obj.behavior_score ?? BEHAVIOR_SCORE_INITIAL,
+            lastAccessedAt: obj.last_accessed_at || 0,
+            accessCount: obj.access_count || 0,
+            isPinned: obj.is_pinned === 1 || obj.is_pinned === true,
+            manualScoreOverride: obj.manual_score_override ?? null,
             createdAt: obj.created_at,
-            updatedAt: obj.updated_at
+            updatedAt: obj.updated_at,
+            structuredData: obj.structured_data || null,
+            topics: parseTopicsFromDb(obj.topics)
           };
         });
       }
@@ -19703,8 +22666,14 @@ class MemoryService {
       confidence,
       tier: initialTier,
       reinforceCount: initialTier === "permanent" ? 999 : 0,
+      behaviorScore: BEHAVIOR_SCORE_INITIAL,
+      lastAccessedAt: Date.now(),
+      accessCount: 0,
+      isPinned: false,
+      manualScoreOverride: null,
       createdAt: Date.now(),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      topics: this.extractTopics(content)
     };
     this.entries.push(entry);
     this.upsertInDb(entry);
@@ -19735,11 +22704,219 @@ class MemoryService {
   addFact(content, confidence = 0.6, options) {
     this.addEntry("user_fact", content, confidence, options);
   }
-  recordInteraction() {
+  recordInteraction(userText, responseTimeMs) {
     this.messageCount++;
-    if (this.messageCount % INTERACTION_RECORD_INTERVAL === 0) {
-      this.addEntry("interaction", `进行了 ${this.messageCount} 次对话交互`, 0.6);
+    if (userText) {
+      const isExplicitRemember = this.interactionTracker.detectExplicitRemember(userText);
+      const knownContents = this.entries.filter((e) => e.type === "user_fact").map((e) => e.content);
+      const rementionedContents = this.interactionTracker.detectRementions(userText, knownContents);
+      const rementionedIds = this.entries.filter((e) => rementionedContents.includes(e.content)).map((e) => e.id);
+      const topics = this.extractTopics(userText);
+      this.interactionTracker.record({
+        userText,
+        responseTimeMs,
+        topics,
+        isExplicitRemember,
+        rementionedMemoryIds: rementionedIds
+      });
+      this.behaviorWeighting.invalidateCache();
+      if (isExplicitRemember && rementionedIds.length > 0) {
+        for (const id2 of rementionedIds) {
+          this.accessMemory(id2, { explicitRemember: true });
+        }
+      } else if (rementionedIds.length > 0) {
+        for (const id2 of rementionedIds) {
+          this.accessMemory(id2);
+        }
+      }
     }
+    if (this.messageCount % INTERACTION_RECORD_INTERVAL === 0) {
+      this.addEntry("interaction", "进行了 " + this.messageCount + " 次对话交互", 0.6);
+    }
+  }
+  /** 从用户消息中提取简单主题标签 */
+  extractTopics(text) {
+    const topics = [];
+    const lower = text.toLowerCase();
+    const topicPatterns = [
+      { regex: /代码|编程|code|typescript|javascript|python|rust|java/, label: "编程" },
+      { regex: /bug|错误|报错|修复|fix|error|debug/, label: "调试" },
+      { regex: /记忆|记住|memory|回忆|之前/, label: "记忆" },
+      { regex: /部署|deploy|上线|发布|release/, label: "部署" },
+      { regex: /测试|test|单元测试|集成测试/, label: "测试" },
+      { regex: /架构|设计|architecture|design|重构|refactor/, label: "架构" },
+      { regex: /文档|doc|readme|注释|comment/, label: "文档" },
+      { regex: /性能|performance|优化|慢|卡/, label: "性能" },
+      { regex: /安全|security|漏洞|权限|auth/, label: "安全" },
+      { regex: /电报|telegram|消息|推送/, label: "Telegram" },
+      { regex: /进化|evolution|自我|self/, label: "自进化" },
+      { regex: /画画|画图|生成|图片|image|生成图/, label: "图像生成" },
+      { regex: /任务|task|计划|plan|todo/, label: "任务管理" },
+      { regex: /api|接口|请求|响应|http/, label: "API" },
+      { regex: /数据库|database|sql|db|查询/, label: "数据库" },
+      { regex: /聊天|对话|问答|ask|question/, label: "问答" },
+      { regex: /设置|配置|config|setting|偏好/, label: "配置" },
+      { regex: /学习|教程|tutorial|how.?to|示例/, label: "学习" }
+    ];
+    for (const { regex, label } of topicPatterns) {
+      if (regex.test(lower)) topics.push(label);
+    }
+    return [...new Set(topics)].slice(0, 5);
+  }
+  // ══════════════════════════════════════════
+  //  行为驱动得分
+  // ══════════════════════════════════════════
+  /** 访问/引用记忆时提升行为得分 */
+  accessMemory(id2, options) {
+    const entry = this.entries.find((e) => e.id === id2);
+    if (!entry) return false;
+    const boost = options?.explicitRemember ? BEHAVIOR_SCORE_EXPLICIT_REMEMBER_BOOST : BEHAVIOR_SCORE_ACCESS_BOOST;
+    entry.behaviorScore = Math.min(BEHAVIOR_SCORE_MAX, entry.behaviorScore + boost);
+    entry.lastAccessedAt = Date.now();
+    entry.accessCount++;
+    entry.updatedAt = Date.now();
+    this.upsertInDb(entry);
+    return true;
+  }
+  /** 计算记忆的综合重要性得分（行为驱动 + 置信度） */
+  getEffectiveScore(entry) {
+    if (entry.manualScoreOverride !== null) {
+      return entry.manualScoreOverride;
+    }
+    if (entry.isPinned) return 1;
+    if (entry.tier === "permanent") return 1;
+    const now = Date.now();
+    const daysSinceAccess = entry.lastAccessedAt > 0 ? (now - entry.lastAccessedAt) / (1e3 * 60 * 60 * 24) : (now - entry.createdAt) / (1e3 * 60 * 60 * 24);
+    const decayedBehaviorScore = Math.max(
+      BEHAVIOR_SCORE_MIN,
+      entry.behaviorScore - BEHAVIOR_SCORE_DAILY_DECAY * daysSinceAccess
+    );
+    return CONFIDENCE_WEIGHT * entry.confidence + BEHAVIOR_WEIGHT * decayedBehaviorScore;
+  }
+  // ══════════════════════════════════════════
+  //  短期行为驱动加权检索
+  // ══════════════════════════════════════════
+  /** 获取当前兴趣分布（基于最近交互记录） */
+  getCurrentInterestProfile() {
+    const interactions = this.interactionTracker.getRecent();
+    return this.behaviorWeighting.computeInterestProfile(interactions);
+  }
+  /**
+   * 计算行为加权后的记忆得分（基础分 + 兴趣相似度 boost）。
+   * 用于检索时的动态排序。
+   */
+  getBehaviorWeightedScore(entry, profile) {
+    const baseScore = this.getEffectiveScore(entry);
+    if (entry.isPinned || entry.tier === "permanent" || entry.manualScoreOverride !== null) {
+      return baseScore;
+    }
+    const interestProfile = profile || this.getCurrentInterestProfile();
+    return this.behaviorWeighting.getWeightedScore(baseScore, entry.topics || [], interestProfile);
+  }
+  /**
+   * 获取行为加权排序后的记忆（按得分降序）。
+   * 优先返回与当前用户兴趣相关的记忆。
+   */
+  getBehaviorWeightedEntries(tier, limit) {
+    const profile = this.getCurrentInterestProfile();
+    const filtered = tier ? this.entries.filter((e) => e.tier === tier && e.type === "user_fact") : this.entries.filter((e) => e.type === "user_fact");
+    const scored = filtered.map((e) => ({ entry: e, score: this.getBehaviorWeightedScore(e, profile) })).sort((a, b) => b.score - a.score);
+    return (limit ? scored.slice(0, limit) : scored).map((s) => s.entry);
+  }
+  /** 批量应用每日衰减（由定时器调用） */
+  applyDecay() {
+    const now = Date.now();
+    let decayed = 0;
+    for (const entry of this.entries) {
+      if (entry.tier === "permanent" || entry.isPinned) continue;
+      if (entry.manualScoreOverride !== null) continue;
+      const daysSinceAccess = entry.lastAccessedAt > 0 ? (now - entry.lastAccessedAt) / (1e3 * 60 * 60 * 24) : (now - entry.createdAt) / (1e3 * 60 * 60 * 24);
+      const newScore = Math.max(
+        BEHAVIOR_SCORE_MIN,
+        entry.behaviorScore - BEHAVIOR_SCORE_DAILY_DECAY * daysSinceAccess
+      );
+      if (newScore < entry.behaviorScore) {
+        entry.behaviorScore = newScore;
+        decayed++;
+      }
+    }
+    if (decayed > 0) {
+      Logger.log("INFO", "behavior_score_decayed", { decayed, total: this.entries.length });
+      this.prune();
+    }
+  }
+  startDecayTimer() {
+    if (this.decayTimer) clearInterval(this.decayTimer);
+    this.decayTimer = setInterval(() => {
+      this.applyDecay();
+    }, DECAY_CHECK_INTERVAL);
+  }
+  // ══════════════════════════════════════════
+  //  人工干预入口
+  // ══════════════════════════════════════════
+  /** 固定记忆（不受自动清理影响） */
+  pinMemory(id2) {
+    const entry = this.entries.find((e) => e.id === id2);
+    if (!entry) return false;
+    entry.isPinned = true;
+    entry.updatedAt = Date.now();
+    this.upsertInDb(entry);
+    Logger.log("INFO", "memory_pinned", { id: id2, content: entry.content.slice(0, 50) });
+    return true;
+  }
+  /** 取消固定 */
+  unpinMemory(id2) {
+    const entry = this.entries.find((e) => e.id === id2);
+    if (!entry) return false;
+    entry.isPinned = false;
+    entry.updatedAt = Date.now();
+    this.upsertInDb(entry);
+    Logger.log("INFO", "memory_unpinned", { id: id2, content: entry.content.slice(0, 50) });
+    return true;
+  }
+  /** 手动覆盖记忆得分（null=恢复自动计算） */
+  setManualScore(id2, score) {
+    const entry = this.entries.find((e) => e.id === id2);
+    if (!entry) return false;
+    if (score !== null && (score < 0 || score > 1)) return false;
+    entry.manualScoreOverride = score;
+    entry.updatedAt = Date.now();
+    this.upsertInDb(entry);
+    Logger.log("INFO", "memory_manual_score", { id: id2, score, content: entry.content.slice(0, 50) });
+    return true;
+  }
+  /** 获取被固定的记忆列表 */
+  getPinnedMemories() {
+    return this.entries.filter((e) => e.isPinned);
+  }
+  /** 获取得分最低的 N 条记忆（用于手动审查） */
+  getLowestScored(limit = 10) {
+    return [...this.entries].filter((e) => e.tier !== "permanent" && !e.isPinned).map((e) => ({ entry: e, score: this.getEffectiveScore(e) })).sort((a, b) => a.score - b.score).slice(0, limit).map((s) => s.entry);
+  }
+  // ══════════════════════════════════════════
+  //  时间模式预加载
+  // ══════════════════════════════════════════
+  /** 获取当前时段建议预加载的记忆（基于历史行为模式） */
+  getPreloadMemoriesForCurrentHour() {
+    const hour = (/* @__PURE__ */ new Date()).getHours();
+    const suggestedTopics = this.interactionTracker.getSuggestedTopicsForHour(hour);
+    if (suggestedTopics.length === 0) return [];
+    const profile = this.getCurrentInterestProfile();
+    return this.entries.filter((e) => e.type === "user_fact").filter((e) => {
+      const lower = e.content.toLowerCase();
+      return suggestedTopics.some((topic) => lower.includes(topic.toLowerCase()));
+    }).sort((a, b) => this.getBehaviorWeightedScore(b, profile) - this.getBehaviorWeightedScore(a, profile)).slice(0, 5);
+  }
+  /** 获取预加载记忆的格式化上下文（用于注入 system prompt） */
+  getPreloadContext() {
+    const preload = this.getPreloadMemoriesForCurrentHour();
+    if (preload.length === 0) return "";
+    const parts = ["---", "【基于行为模式的预加载记忆】", "根据你在此时段的历史行为，以下信息可能相关："];
+    for (const e of preload) {
+      parts.push("- " + e.content);
+    }
+    parts.push("---");
+    return parts.join("\n");
   }
   getInteractionCount() {
     return this.messageCount;
@@ -19753,49 +22930,63 @@ class MemoryService {
     const permanent = this.entries.filter((e) => e.tier === "permanent" && e.type === "user_fact").slice(0, MAX_PERMANENT);
     if (permanent.length > 0) {
       parts.push("【重要的记忆】");
-      permanent.forEach((f) => parts.push(`- ${f.content}`));
+      permanent.forEach((f) => parts.push("- " + f.content));
     }
-    const topFacts = [...this.getScoredEntries("semi"), ...this.getScoredEntries("ephemeral")].sort((a, b) => b.confidence - a.confidence).slice(0, 5);
+    const profile = this.getCurrentInterestProfile();
+    const semiAndEphemeral = this.entries.filter(
+      (e) => (e.tier === "semi" || e.tier === "ephemeral") && e.type === "user_fact"
+    );
+    const topFacts = semiAndEphemeral.map((e) => ({ entry: e, score: this.getBehaviorWeightedScore(e, profile) })).sort((a, b) => b.score - a.score).slice(0, 5).map((s) => s.entry);
     if (topFacts.length > 0) {
       parts.push("");
       parts.push("你记得以下关于主人的事：");
-      topFacts.forEach((f) => parts.push(`- ${f.content}`));
+      topFacts.forEach((f) => parts.push("- " + f.content));
     }
     if (this.lastUserText) {
       const relevant = this.vector.querySync(this.lastUserText, 3);
       if (relevant.length > 0) {
         parts.push("");
         parts.push("相关的历史记忆：");
-        relevant.forEach((c) => parts.push(`- ${c}`));
+        relevant.forEach((c) => parts.push("- " + c));
       }
     }
     const summaries = this.summary.getRecent(3);
     if (summaries.length > 0) {
       parts.push("");
       parts.push("之前的对话总结：");
-      summaries.forEach((s) => parts.push(`- ${s}`));
+      summaries.forEach((s) => parts.push("- " + s));
     }
     const interactions = this.entries.filter((e) => e.type === "interaction").slice(-3);
     if (interactions.length > 0) {
       parts.push("");
       parts.push("你们之前聊过：");
-      interactions.forEach((i) => parts.push(`- ${i.content}`));
+      interactions.forEach((i) => parts.push("- " + i.content));
     }
     const kgCtx = this.knowledgeGraph.getFormattedContext();
     if (kgCtx) {
       parts.push("");
       parts.push(kgCtx);
     }
+    const preloadCtx = this.getPreloadContext();
+    if (preloadCtx) {
+      parts.push("");
+      parts.push(preloadCtx);
+    }
+    const topInterests = this.behaviorWeighting.getTopInterests(profile);
+    if (topInterests.length > 0) {
+      const interestWeighted = this.getBehaviorWeightedEntries(void 0, 3);
+      if (interestWeighted.length > 0) {
+        parts.push("");
+        parts.push("【当前兴趣相关记忆】根据你最近关注的话题（" + topInterests.join("、") + "），以下记忆可能特别相关：");
+        interestWeighted.forEach((e) => parts.push("- " + e.content));
+      }
+    }
     return parts.length > 0 ? parts.join("\n") : "";
   }
-  /** 按衰减后分数排序 */
+  /** 按行为驱动得分排序（用于上下文注入，优先返回高价值记忆） */
   getScoredEntries(tier) {
-    const now = Date.now();
-    const decay = tier === "semi" ? DECAY_SEMI : DECAY_EPHEMERAL;
-    return this.entries.filter((e) => e.tier === tier && e.type === "user_fact").map((e) => ({
-      entry: e,
-      score: e.confidence * Math.pow(decay, (now - e.updatedAt) / (1e3 * 60 * 60 * 24))
-    })).sort((a, b) => b.score - a.score).map((s) => s.entry);
+    const profile = this.getCurrentInterestProfile();
+    return this.entries.filter((e) => e.tier === tier && e.type === "user_fact").map((e) => ({ entry: e, score: this.getBehaviorWeightedScore(e, profile) })).sort((a, b) => b.score - a.score).map((s) => s.entry);
   }
   flush() {
     this.flushAllToDb();
@@ -19803,6 +22994,10 @@ class MemoryService {
     this.vector.flush();
   }
   shutdown() {
+    if (this.decayTimer) {
+      clearInterval(this.decayTimer);
+      this.decayTimer = null;
+    }
     this.flush();
   }
   clear() {
@@ -19813,21 +23008,227 @@ class MemoryService {
   getEntries() {
     return this.entries;
   }
+  // ===== 任务状态管理 =====
+  /** 保存/更新任务状态。同一 taskId 会覆盖旧记录 */
+  saveTaskState(data) {
+    const content = "【任务】" + data.title + ": " + data.description.slice(0, 200);
+    const structuredData = JSON.stringify(data);
+    const existing = this.entries.find(
+      (e) => e.type === "task_state" && e.structuredData && (() => {
+        try {
+          return JSON.parse(e.structuredData).taskId === data.taskId;
+        } catch {
+          return false;
+        }
+      })()
+    );
+    if (existing) {
+      existing.content = content;
+      existing.structuredData = structuredData;
+      existing.updatedAt = Date.now();
+      this.upsertInDb(existing);
+      Logger.log("INFO", "task_state_updated", { taskId: data.taskId, status: data.status, steps: data.steps.length });
+      return;
+    }
+    const entry = {
+      id: nextId(),
+      type: "task_state",
+      content,
+      confidence: 0.9,
+      tier: "semi",
+      // 任务状态为半永久层，不受临时层衰减影响
+      reinforceCount: 0,
+      behaviorScore: BEHAVIOR_SCORE_INITIAL,
+      lastAccessedAt: Date.now(),
+      accessCount: 0,
+      isPinned: false,
+      manualScoreOverride: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      structuredData,
+      topics: this.extractTopics(content)
+    };
+    this.entries.push(entry);
+    this.upsertInDb(entry);
+    Logger.log("INFO", "task_state_saved", { taskId: data.taskId, status: data.status, steps: data.steps.length });
+  }
+  /** 获取所有未完成的任务（active | paused） */
+  getUnfinishedTasks() {
+    return this.entries.filter((e) => e.type === "task_state" && e.structuredData).map((e) => {
+      try {
+        return JSON.parse(e.structuredData);
+      } catch {
+        return null;
+      }
+    }).filter((t) => t !== null && (t.status === "active" || t.status === "paused")).sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+  /** 标记任务完成 */
+  markTaskComplete(taskId) {
+    const entry = this.entries.find(
+      (e) => e.type === "task_state" && e.structuredData && (() => {
+        try {
+          return JSON.parse(e.structuredData).taskId === taskId;
+        } catch {
+          return false;
+        }
+      })()
+    );
+    if (!entry) return false;
+    entry.tier = "ephemeral";
+    try {
+      const data = JSON.parse(entry.structuredData);
+      data.status = "completed";
+      data.updatedAt = Date.now();
+      entry.structuredData = JSON.stringify(data);
+      entry.content = "【已完成】" + data.title;
+      entry.updatedAt = Date.now();
+      this.upsertInDb(entry);
+      Logger.log("INFO", "task_completed", { taskId });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  /** 放弃任务 */
+  markTaskAbandoned(taskId) {
+    const entry = this.entries.find(
+      (e) => e.type === "task_state" && e.structuredData && (() => {
+        try {
+          return JSON.parse(e.structuredData).taskId === taskId;
+        } catch {
+          return false;
+        }
+      })()
+    );
+    if (!entry) return false;
+    entry.tier = "ephemeral";
+    try {
+      const data = JSON.parse(entry.structuredData);
+      data.status = "abandoned";
+      data.updatedAt = Date.now();
+      entry.structuredData = JSON.stringify(data);
+      entry.content = "【已放弃】" + data.title;
+      entry.updatedAt = Date.now();
+      this.upsertInDb(entry);
+      Logger.log("INFO", "task_abandoned", { taskId });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  /** 格式化未完成任务上下文，用于 system prompt 注入 */
+  getTaskStateContext() {
+    const unfinished = this.getUnfinishedTasks();
+    if (unfinished.length === 0) return "";
+    var parts = ["---", "【未完成任务恢复】", "以下 " + unfinished.length + " 个任务在上次对话中未完成："];
+    for (const t of unfinished.slice(0, 3)) {
+      const stepSummary = t.steps.filter((s) => s.status === "completed").map((s) => s.description.slice(0, 40)).join(", ");
+      const nextStep = t.steps.find((s) => s.status === "pending" || s.status === "in_progress");
+      const statusLabel = t.status === "paused" ? "已暂停" : "进行中";
+      parts.push("- " + t.title + " (" + statusLabel + ")");
+      parts.push("  已完成: " + (stepSummary || "无"));
+      if (nextStep) {
+        parts.push("  下一步: " + nextStep.description.slice(0, 60));
+      }
+      parts.push("  上次更新: " + new Date(t.updatedAt).toLocaleString("zh-CN"));
+    }
+    parts.push("");
+    parts.push("你可以使用 save_task_state 继续上述任务，或用 query_tasks 查看详情。");
+    parts.push('如果用户想开始新的任务，不必主动提起旧任务，但若用户询问"上次做了什么"时主动恢复。');
+    parts.push("---");
+    return parts.join("\n");
+  }
+  // ===== 用户画像管理 =====
+  /** 保存/更新用户偏好 */
+  saveUserPreference(data) {
+    const content = "【偏好】" + data.key + ": " + data.value;
+    const structuredData = JSON.stringify(data);
+    const existing = this.entries.find(
+      (e) => e.type === "user_profile" && e.structuredData && (() => {
+        try {
+          return JSON.parse(e.structuredData).key === data.key;
+        } catch {
+          return false;
+        }
+      })()
+    );
+    if (existing) {
+      const existingData = JSON.parse(existing.structuredData);
+      existing.content = content;
+      existing.confidence = Math.max(existing.confidence, data.confidence);
+      existing.structuredData = JSON.stringify({ ...existingData, ...data, updatedAt: Date.now() });
+      existing.updatedAt = Date.now();
+      this.upsertInDb(existing);
+      return;
+    }
+    const entry = {
+      id: nextId(),
+      type: "user_profile",
+      content,
+      confidence: data.confidence,
+      tier: "semi",
+      // 画像为半永久层
+      reinforceCount: 0,
+      behaviorScore: BEHAVIOR_SCORE_INITIAL,
+      lastAccessedAt: Date.now(),
+      accessCount: 0,
+      isPinned: false,
+      manualScoreOverride: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      structuredData,
+      topics: this.extractTopics(content)
+    };
+    this.entries.push(entry);
+    this.upsertInDb(entry);
+    Logger.log("INFO", "user_preference_saved", { key: data.key, category: data.category });
+  }
+  /** 获取所有用户画像 */
+  getUserPreferences() {
+    return this.entries.filter((e) => e.type === "user_profile" && e.structuredData).map((e) => {
+      try {
+        return JSON.parse(e.structuredData);
+      } catch {
+        return null;
+      }
+    }).filter((p) => p !== null).sort((a, b) => b.confidence - a.confidence);
+  }
+  /** 格式化用户画像上下文，用于 system prompt 注入 */
+  getUserProfileContext() {
+    const prefs = this.getUserPreferences();
+    if (prefs.length === 0) return "";
+    const byCategory = {};
+    for (const p of prefs) {
+      if (!byCategory[p.category]) byCategory[p.category] = [];
+      byCategory[p.category].push(p.key + ": " + p.value);
+    }
+    const parts = ["---", "【用户画像】", "以下是你对用户的了解："];
+    for (const [cat, items] of Object.entries(byCategory)) {
+      const catLabel = {
+        style: "风格偏好",
+        detail: "详略偏好",
+        language: "语言偏好",
+        preference: "个人偏好",
+        identity: "身份信息",
+        other: "其他"
+      };
+      parts.push("- " + (catLabel[cat] || cat) + ": " + items.join("; "));
+    }
+    parts.push("请参考画像调整回复风格和详略程度，但不要让用户觉得你在刻意强调这些信息。");
+    parts.push("---");
+    return parts.join("\n");
+  }
   // ===== Pruning =====
   prune() {
     this.pruneTier("ephemeral", MAX_EPHEMERAL);
     this.pruneTier("semi", MAX_SEMI);
   }
   pruneTier(tier, max) {
-    const tierEntries = this.entries.filter((e) => e.tier === tier);
+    const tierEntries = this.entries.filter(
+      (e) => e.tier === tier && !e.isPinned
+    );
     if (tierEntries.length <= max) return;
-    const now = Date.now();
-    const decay = tier === "semi" ? DECAY_SEMI : DECAY_EPHEMERAL;
-    const scored = tierEntries.map((e) => ({
-      entry: e,
-      score: e.confidence * Math.pow(decay, (now - e.updatedAt) / (1e3 * 60 * 60 * 24))
-    }));
-    scored.sort((a, b) => b.score - a.score);
+    const scored = tierEntries.map((e) => ({ entry: e, score: this.getEffectiveScore(e) })).sort((a, b) => b.score - a.score);
     new Set(scored.slice(0, max).map((s) => s.entry.id));
     const toRemove = scored.slice(max);
     for (const s of toRemove) {
@@ -19841,19 +23242,22 @@ class MemoryService {
       Logger.log("INFO", "memory_pruned", { tier, removed: toRemove.length });
     }
   }
-  /** 永久层超出上限时移除最弱的 */
+  /** 永久层超出上限时移除最弱的（pinned 优先保留） */
   prunePermanent() {
     const perm = this.entries.filter((e) => e.tier === "permanent");
     if (perm.length <= MAX_PERMANENT) return;
-    perm.sort((a, b) => b.reinforceCount - a.reinforceCount || b.confidence - a.confidence);
+    perm.sort((a, b) => {
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+      return b.reinforceCount - a.reinforceCount || b.confidence - a.confidence;
+    });
     const keep = new Set(perm.slice(0, MAX_PERMANENT).map((e) => e.id));
     for (const e of perm) {
-      if (!keep.has(e.id)) {
+      if (!keep.has(e.id) && !e.isPinned) {
         e.tier = "semi";
       }
     }
     Logger.log("INFO", "memory_demoted_from_permanent", {
-      count: perm.length - MAX_PERMANENT
+      count: perm.filter((e) => !keep.has(e.id) && !e.isPinned).length
     });
   }
   // ===== 持久化 =====
@@ -19861,8 +23265,24 @@ class MemoryService {
     try {
       const db2 = getRawDb();
       db2.run(
-        "INSERT OR REPLACE INTO memories (id, type, content, confidence, tier, reinforce_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [entry.id, entry.type, entry.content, entry.confidence, entry.tier, entry.reinforceCount, entry.createdAt, entry.updatedAt]
+        "INSERT OR REPLACE INTO memories (id, type, content, confidence, tier, reinforce_count, behavior_score, last_accessed_at, access_count, is_pinned, manual_score_override, created_at, updated_at, structured_data, topics) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+          entry.id,
+          entry.type,
+          entry.content,
+          entry.confidence,
+          entry.tier,
+          entry.reinforceCount,
+          entry.behaviorScore,
+          entry.lastAccessedAt,
+          entry.accessCount,
+          entry.isPinned ? 1 : 0,
+          entry.manualScoreOverride,
+          entry.createdAt,
+          entry.updatedAt,
+          entry.structuredData ?? null,
+          JSON.stringify(entry.topics || [])
+        ]
       );
       markDirty();
     } catch (err) {
@@ -19961,6 +23381,451 @@ async function downloadUpdate() {
 function quitAndInstall() {
   electronUpdater.autoUpdater.quitAndInstall();
 }
+const VOICE_INTENT_MAP = [
+  // ── 文件操作 ──
+  {
+    intent: "read_file",
+    description: "读取文件内容",
+    patterns: [
+      "读",
+      "读取",
+      "打开",
+      "查看",
+      "看看",
+      "read",
+      "open",
+      "show",
+      "view",
+      "cat",
+      "读文件",
+      "读取文件",
+      "打开文件",
+      "查看文件"
+    ],
+    slotExtractors: {
+      filename: /(?:文件|读取|打开|查看|看看|读)\s*[""'']?([^\s""'']+(?:\.[a-zA-Z]+)?)[""'']?/
+    },
+    tools: [
+      { tool: "read_file", args: { path: "{{slot.filename}}" } }
+    ],
+    confirmMessage: "将读取文件: {{slot.filename}}"
+  },
+  {
+    intent: "write_file",
+    description: "写入内容到文件",
+    patterns: [
+      "写",
+      "写入",
+      "保存",
+      "创建文件",
+      "新建文件",
+      "write",
+      "save",
+      "create file",
+      "new file"
+    ],
+    slotExtractors: {
+      filename: /(?:到|为|文件\s*)\s*[""'']?([^\s""'']+(?:\.[a-zA-Z]+)?)[""'']?/,
+      content: /(?:内容|写入|写)\s*[：:]\s*(.+)/
+    },
+    tools: [
+      { tool: "write_file", args: { path: "{{slot.filename}}", content: "{{slot.content}}" } }
+    ],
+    confirmMessage: "将写入文件: {{slot.filename}}\n内容: {{slot.content}}"
+  },
+  {
+    intent: "edit_file",
+    description: "编辑文件中的文本",
+    patterns: [
+      "编辑",
+      "修改",
+      "替换",
+      "改成",
+      "改为",
+      "edit",
+      "modify",
+      "replace",
+      "change"
+    ],
+    slotExtractors: {
+      filename: /(?:文件)\s*[""'']?([^\s""'']+(?:\.[a-zA-Z]+)?)[""'']?/,
+      oldText: /(?:把|将)\s*[""'']?(.+?)[""'']?\s*(?:替换|改成|改为|修改)/,
+      newText: /(?:替换|改成|改为|修改)\s*[为成]?\s*[""'']?(.+?)[""'']?(?:\s*$)/
+    },
+    tools: [
+      { tool: "edit_file", args: { path: "{{slot.filename}}", old_string: "{{slot.oldText}}", new_string: "{{slot.newText}}" } }
+    ],
+    confirmMessage: '将在 {{slot.filename}} 中:\n把 "{{slot.oldText}}" 替换为 "{{slot.newText}}"'
+  },
+  {
+    intent: "search_code",
+    description: "搜索代码/文本",
+    patterns: [
+      "搜索",
+      "查找",
+      "找",
+      "grep",
+      "搜",
+      "search",
+      "find",
+      "look for"
+    ],
+    slotExtractors: {
+      pattern: /(?:搜索|查找|找|grep|搜)\s*[""'']?(.+?)[""'']?(?:\s|$)/,
+      path: /(?:在|路径|目录)\s*[""'']?([^\s""'']+)[""'']?/
+    },
+    tools: [
+      { tool: "grep", args: { pattern: "{{slot.pattern}}", path: "{{slot.path}}" } }
+    ],
+    confirmMessage: '将搜索: {{slot.pattern}}\n路径: {{slot.path || "当前项目"}}'
+  },
+  {
+    intent: "list_files",
+    description: "列出目录文件",
+    patterns: [
+      "列出",
+      "列表",
+      "有哪些",
+      "显示文件",
+      "ls",
+      "list",
+      "ls",
+      "dir",
+      "what files"
+    ],
+    slotExtractors: {
+      path: /(?:目录|路径|文件夹)\s*[""'']?([^\s""'']+)[""'']?/
+    },
+    tools: [
+      { tool: "list_files", args: { path: "{{slot.path}}" } }
+    ],
+    confirmMessage: '将列出目录: {{slot.path || "当前项目"}}'
+  },
+  // ── 系统状态 / 查询 ──
+  {
+    intent: "system_status",
+    description: "查询系统状态",
+    patterns: [
+      "状态",
+      "怎么样",
+      "如何",
+      "运行情况",
+      "健康",
+      "status",
+      "health",
+      "how is",
+      "diagnostics",
+      "系统状态",
+      "运行状态"
+    ],
+    tools: [
+      { tool: "get_system_health", args: {} }
+    ],
+    confirmMessage: "将查询系统运行状态"
+  },
+  {
+    intent: "list_plans",
+    description: "查看开发计划",
+    patterns: [
+      "计划",
+      "规划",
+      "plan",
+      "任务",
+      "有哪些计划",
+      "plans",
+      "tasks",
+      "todo"
+    ],
+    tools: [
+      { tool: "list_plans", args: {} }
+    ],
+    confirmMessage: "将查看当前开发计划"
+  },
+  // ── 工作流操作 ──
+  {
+    intent: "list_workflows",
+    description: "列出工作流",
+    patterns: [
+      "工作流",
+      "workflow",
+      "流水线",
+      "有哪些工作流",
+      "pipelines",
+      "自动化"
+    ],
+    tools: [
+      { tool: "list_workflows", args: {} }
+    ],
+    confirmMessage: "将列出所有工作流"
+  },
+  // ── 创造力 / 内容生成 ──
+  {
+    intent: "generate_image",
+    description: "生成图片",
+    patterns: [
+      "生成图",
+      "画",
+      "绘制",
+      "生成图片",
+      "图片生成",
+      "generate image",
+      "draw",
+      "create image",
+      "make picture"
+    ],
+    slotExtractors: {
+      prompt: /(?:生成图|画|绘制|生成图片|图片生成)\s*[：:]*\s*(.+)/
+    },
+    tools: [
+      { tool: "generate_image", args: { prompt: "{{slot.prompt}}" } }
+    ],
+    confirmMessage: "将生成图片: {{slot.prompt}}"
+  },
+  // ── 链式操作：搜索 + 读取 ──
+  {
+    intent: "find_and_read",
+    description: "搜索关键词后读取匹配文件",
+    patterns: [
+      "找.*读",
+      "搜.*打开",
+      "查.*看",
+      "find.*read",
+      "search.*open"
+    ],
+    slotExtractors: {
+      pattern: /(?:找|搜|查|find|search)\s*[""'']?(.+?)[""'']?\s*(?:读|打开|看|read|open)/
+    },
+    tools: [
+      { tool: "grep", args: { pattern: "{{slot.pattern}}", path: "." } },
+      // 第二步由用户选择读取哪个文件（暂简化为读取第一个匹配）
+      { tool: "read_file", args: { path: "{{prev.firstMatch}}" } }
+    ],
+    confirmMessage: '将搜索 "{{slot.pattern}}" 并读取第一个匹配文件'
+  }
+];
+function extractSlots(text, extractors) {
+  const slots = {};
+  for (const [key, regex] of Object.entries(extractors)) {
+    const match2 = text.match(regex);
+    if (match2) {
+      slots[key] = (match2[1] || match2[0]).trim();
+    }
+  }
+  return slots;
+}
+function matchIntents(text) {
+  const matches = [];
+  const lower = text.toLowerCase();
+  for (const def of VOICE_INTENT_MAP) {
+    let score = 0;
+    for (const p of def.patterns) {
+      if (lower.includes(p.toLowerCase())) {
+        score += p.length;
+      }
+    }
+    if (score > 0) {
+      matches.push({ def, score });
+    }
+  }
+  matches.sort((a, b) => b.score - a.score);
+  return matches.map((m) => m.def);
+}
+class VoiceToolOrchestrator {
+  toolCaller = null;
+  /** 设置工具调用器（ServerManager 适配） */
+  setToolCaller(caller) {
+    this.toolCaller = caller;
+  }
+  /**
+   * 第一步：匹配意图
+   *
+   * 接收 ASR 转写文本，尝试匹配预定义的工具意图。
+   * 返回匹配结果或 fallback 文本。
+   */
+  match(req) {
+    const rid = req.requestId || Logger.createRequestId();
+    const text = req.text.trim();
+    if (!text) {
+      return { matched: false, fallbackText: text };
+    }
+    Logger.log("INFO", "voice_orchestrate_match_start", { request_id: rid, text: text.slice(0, 100) });
+    const matchedDefs = matchIntents(text);
+    if (matchedDefs.length === 0) {
+      Logger.log("INFO", "voice_orchestrate_no_match", { request_id: rid });
+      return { matched: false, fallbackText: text };
+    }
+    const bestMatch = matchedDefs[0];
+    const slots = bestMatch.slotExtractors ? extractSlots(text, bestMatch.slotExtractors) : {};
+    const toolSequence = bestMatch.tools.map((step) => ({
+      tool: step.tool,
+      args: this.resolveArgs(step.args, slots, {})
+    }));
+    const confirmMessage = this.resolveTemplate(bestMatch.confirmMessage, slots);
+    Logger.log("INFO", "voice_orchestrate_match_found", {
+      request_id: rid,
+      intent: bestMatch.intent,
+      slots: Object.keys(slots),
+      toolCount: toolSequence.length
+    });
+    return {
+      matched: true,
+      intent: {
+        name: bestMatch.intent,
+        description: bestMatch.description,
+        confirmMessage,
+        toolSequence,
+        slots
+      }
+    };
+  }
+  /**
+   * 第二步：执行工具链（用户已确认）
+   *
+   * 按顺序执行工具序列，每步输出注入下一步输入。
+   */
+  async execute(req) {
+    const rid = req.requestId || Logger.createRequestId();
+    if (!this.toolCaller) {
+      return {
+        success: false,
+        steps: [],
+        summary: "工具调用器未初始化"
+      };
+    }
+    const intentDef = this.findIntent(req.intent);
+    if (!intentDef) {
+      return {
+        success: false,
+        steps: [],
+        summary: `未知意图: ${req.intent}`
+      };
+    }
+    Logger.log("INFO", "voice_orchestrate_execute_start", {
+      request_id: rid,
+      intent: req.intent,
+      toolCount: intentDef.tools.length,
+      slots: req.slots
+    });
+    const steps2 = [];
+    let prevOutput = "";
+    for (let i = 0; i < intentDef.tools.length; i++) {
+      const stepDef = intentDef.tools[i];
+      const t0 = Date.now();
+      const resolvedArgs = {};
+      for (const [key, template] of Object.entries(stepDef.args)) {
+        resolvedArgs[key] = this.resolveArgValue(template, req.slots, prevOutput);
+      }
+      Logger.log("INFO", "voice_orchestrate_step", {
+        request_id: rid,
+        step: i + 1,
+        total: intentDef.tools.length,
+        tool: stepDef.tool,
+        args: JSON.stringify(resolvedArgs).slice(0, 200)
+      });
+      try {
+        const output = await this.toolCaller.callTool(stepDef.tool, resolvedArgs);
+        const durationMs = Date.now() - t0;
+        prevOutput = output;
+        steps2.push({
+          tool: stepDef.tool,
+          success: true,
+          output: output.slice(0, 2e3),
+          // 截断过长输出
+          durationMs
+        });
+        Logger.log("INFO", "voice_orchestrate_step_done", {
+          request_id: rid,
+          step: i + 1,
+          tool: stepDef.tool,
+          duration_ms: durationMs,
+          output_len: output.length
+        });
+      } catch (err) {
+        const durationMs = Date.now() - t0;
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        steps2.push({
+          tool: stepDef.tool,
+          success: false,
+          output: "",
+          error: errorMsg,
+          durationMs
+        });
+        Logger.log("ERROR", "voice_orchestrate_step_failed", {
+          request_id: rid,
+          step: i + 1,
+          tool: stepDef.tool,
+          error: errorMsg,
+          duration_ms: durationMs
+        });
+        return {
+          success: false,
+          steps: steps2,
+          summary: `第 ${i + 1} 步 ${stepDef.tool} 执行失败: ${errorMsg}`
+        };
+      }
+    }
+    const summary = steps2.length > 0 ? steps2[steps2.length - 1].output : "(无输出)";
+    Logger.log("INFO", "voice_orchestrate_execute_done", {
+      request_id: rid,
+      intent: req.intent,
+      stepCount: steps2.length,
+      success: true
+    });
+    return { success: true, steps: steps2, summary };
+  }
+  // ── 私有方法 ──
+  /** 查找意图定义 */
+  findIntent(name2) {
+    return VOICE_INTENT_MAP.find((d) => d.intent === name2);
+  }
+  /** 解析参数模板（批量） */
+  resolveArgs(templates, slots, prevOutput) {
+    const resolved = {};
+    for (const [key, template] of Object.entries(templates)) {
+      resolved[key] = this.resolveTemplate(template, { ...slots, ...prevOutput });
+    }
+    return resolved;
+  }
+  /** 解析单个参数值 */
+  resolveArgValue(template, slots, prevOutput) {
+    let result = template;
+    result = result.replace(/\{\{slot\.(\w+)\}\}/g, (_, key) => {
+      return slots[key] || "";
+    });
+    result = result.replace(/\{\{prev\.text\}\}/g, prevOutput);
+    if (result.includes("{{prev.firstMatch}}")) {
+      const firstMatch = this.extractFirstFilePath(prevOutput);
+      result = result.replace(/\{\{prev\.firstMatch\}\}/g, firstMatch || prevOutput);
+    }
+    result = result.replace(/\{\{prev\.json\.(\w+)\}\}/g, (_, key) => {
+      try {
+        const parsed = JSON.parse(prevOutput);
+        return String(parsed[key] || "");
+      } catch {
+        return "";
+      }
+    });
+    return result;
+  }
+  /** 解析确认消息模板 */
+  resolveTemplate(template, slots) {
+    return template.replace(/\{\{slot\.(\w+)\}\}/g, (_, key) => {
+      return slots[key] || `(未指定:${key})`;
+    });
+  }
+  /** 从文本中提取第一个文件路径 */
+  extractFirstFilePath(text) {
+    const patterns = [
+      /([^\s"'\n]+\.(?:ts|tsx|js|jsx|json|py|md|txt|css|html))/i,
+      /(?:^|\n)\s*([^\s"'\n]{2,}(?:\/[^\s"'\n]+)+)/m
+    ];
+    for (const p of patterns) {
+      const m = text.match(p);
+      if (m) return m[1];
+    }
+    return null;
+  }
+}
 function createServiceRef() {
   return { current: null };
 }
@@ -20016,6 +23881,30 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef, 
       throw err;
     }
   });
+  const voiceOrchestrator = new VoiceToolOrchestrator();
+  voiceOrchestrator.setToolCaller({
+    callTool: async (name2, args) => {
+      return agentService.getMcpManager().callTool(name2, args);
+    }
+  });
+  electron.ipcMain.handle("voice:matchIntent", async (_event, text) => {
+    try {
+      const result = voiceOrchestrator.match({ text });
+      return result;
+    } catch (err) {
+      Logger.log("ERROR", "voice_match_intent_failed", { error: String(err) });
+      return { matched: false, fallbackText: text, error: String(err) };
+    }
+  });
+  electron.ipcMain.handle("voice:executeChain", async (_event, intent, slots) => {
+    try {
+      const result = await voiceOrchestrator.execute({ intent, slots });
+      return result;
+    } catch (err) {
+      Logger.log("ERROR", "voice_execute_chain_failed", { error: String(err) });
+      return { success: false, steps: [], summary: String(err) };
+    }
+  });
   electron.ipcMain.handle("tts:speak", async (_event, text) => {
     try {
       Logger.log("PERF", "tts_speak", { char_count: text.length });
@@ -20030,6 +23919,28 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef, 
       ttsService.stop();
     } catch (err) {
       Logger.log("ERROR", "tts_stop_failed", { error: String(err) });
+    }
+  });
+  electron.ipcMain.handle("tts:emotion:toggle", async (_event, enabled) => {
+    try {
+      agentService.getChatExecutor()?.toggleEmotionTts(enabled);
+      Logger.log("INFO", "tts_emotion_toggle_ipc", { enabled });
+      return { success: true, enabled };
+    } catch (err) {
+      Logger.log("ERROR", "tts_emotion_toggle_failed", { error: String(err) });
+      return { success: false };
+    }
+  });
+  electron.ipcMain.handle("tts:emotion:state", async () => {
+    try {
+      const chatExec = agentService.getChatExecutor();
+      if (chatExec) {
+        return { success: true, ...chatExec.getEmotionTtsState() };
+      }
+      return { success: true, enabled: false, params: null };
+    } catch (err) {
+      Logger.log("ERROR", "tts_emotion_state_failed", { error: String(err) });
+      return { success: false };
     }
   });
   electron.ipcMain.handle("conversation:stop", async () => {
@@ -31192,16 +35103,18 @@ class EvaluationStore {
 class EvaluationEmitter {
   store;
   source;
-  constructor(store, source) {
+  defaultSessionId;
+  constructor(store, source, sessionId) {
     this.store = store;
     this.source = source;
+    this.defaultSessionId = sessionId ?? "";
   }
   emit(type, payload, meta) {
     const event = {
       id: crypto.randomUUID(),
       timestamp: Date.now(),
       traceId: meta?.traceId ?? "",
-      sessionId: meta?.sessionId ?? "",
+      sessionId: meta?.sessionId ?? this.defaultSessionId,
       source: this.source,
       type,
       payload,
@@ -31273,11 +35186,7 @@ class ToolEventBridge {
   emitter;
   bus;
   disposers = [];
-  /**
-   * 每个工具名的 FIFO 调用队列。
-   * 同一轮 toolLoop 中可能多次调用同名工具（不同参数），
-   * 队列确保 completed/failed 与 invoked 按 FIFO 顺序配对。
-   */
+  /** 每个工具名的 FIFO 调用队列 */
   pendingMap = /* @__PURE__ */ new Map();
   constructor(emitter, bus) {
     this.emitter = emitter;
@@ -31298,15 +35207,11 @@ class ToolEventBridge {
   onToolInvoked(p) {
     const toolName = p.tool;
     const now = Date.now();
+    const traceId = p.requestId || "";
     const queue = this.pendingMap.get(toolName) ?? [];
-    queue.push({ toolName, invokedAt: now });
+    queue.push({ toolName, invokedAt: now, traceId });
     this.pendingMap.set(toolName, queue);
-    this.emitter.emit(
-      "tool.invoked",
-      { type: "tool.invoked", toolName, args: p.args },
-      { traceId: "" }
-      // traceId 由 ChatExecutor 的 requestId 传递，EventBus 当前 payload 不包含
-    );
+    this.emitter.emit("tool.invoked", { type: "tool.invoked", toolName, args: p.args }, { traceId });
   }
   onToolCompleted(p) {
     const pending = this.consumePending(p.tool);
@@ -31318,9 +35223,8 @@ class ToolEventBridge {
         toolName: p.tool,
         durationMs: Date.now() - pending.invokedAt,
         output: p.result?.slice(0, 5e3)
-        // 截断到安全长度
       },
-      { traceId: "" }
+      { traceId: pending.traceId }
     );
   }
   onToolFailed(p) {
@@ -31334,18 +35238,393 @@ class ToolEventBridge {
         durationMs: Date.now() - pending.invokedAt,
         error: p.error?.slice(0, 2e3)
       },
-      { traceId: "" }
+      { traceId: pending.traceId }
     );
   }
-  /**
-   * 消费 FIFO 队列中最旧的 pending 记录。
-   */
+  /** 消费 FIFO 队列中最旧的 pending 记录 */
   consumePending(toolName) {
     const queue = this.pendingMap.get(toolName);
     if (!queue || queue.length === 0) return null;
     const pending = queue.shift();
     if (queue.length === 0) this.pendingMap.delete(toolName);
     return pending;
+  }
+}
+function toRuntimeAction(action) {
+  switch (action) {
+    case "continue":
+      return "CONTINUE";
+    case "warning":
+      return "WARNING";
+    case "terminate":
+      return "TERMINATE";
+  }
+}
+const DEFAULT_GUARDRAIL_POLICY_CONFIG = {
+  stateChange: { degrading: 3, stalled: 8 },
+  informationGain: { lowOutputDegrading: 3, lowOutputStalled: 8, repeatedContentDegrading: 2, repeatedContentStalled: 5 },
+  goalProgress: { degrading: 4, stalled: 10 }
+};
+function contentFingerprint(text) {
+  if (!text || text.length === 0) return "";
+  return text.slice(0, 64);
+}
+const LOW_OUTPUT_THRESHOLD = 20;
+function groupByTurns(events2) {
+  const sorted = [...events2].sort((a, b) => a.timestamp - b.timestamp);
+  const turns = [];
+  let currentTurn = [];
+  for (const ev of sorted) {
+    if (ev.type === "model.invoked" && currentTurn.length > 0) {
+      turns.push(buildTurn(turns.length, currentTurn));
+      currentTurn = [ev];
+    } else {
+      currentTurn.push(ev);
+    }
+  }
+  if (currentTurn.length > 0) {
+    turns.push(buildTurn(turns.length, currentTurn));
+  }
+  return turns;
+}
+function buildTurn(index, events2) {
+  const fingerprints = [];
+  let hasToolResult = false;
+  let hasAgentResponse = false;
+  let hasProgressEvent = false;
+  let modelOutputLength = 0;
+  let modelOutputPreview = "";
+  for (const ev of events2) {
+    if (ev.type === "tool.completed") {
+      hasToolResult = true;
+      const p = ev.payload;
+      fingerprints.push({ toolName: p.toolName, fingerprint: contentFingerprint(p.output) });
+    } else if (ev.type === "agent.response") {
+      hasAgentResponse = true;
+    } else if (ev.type === "model.completed") {
+      const p = ev.payload;
+      modelOutputLength = p.responseLength ?? 0;
+      modelOutputPreview = p.responsePreview ?? "";
+    } else if (ev.type === "task.completed" || ev.type === "task.started" || ev.type === "workflow.started" || ev.type === "workflow.completed") {
+      hasProgressEvent = true;
+    }
+  }
+  return {
+    index,
+    events: events2,
+    hasToolResult,
+    hasAgentResponse,
+    hasProgressEvent,
+    modelOutputLength,
+    modelOutputPreview,
+    toolResultFingerprints: fingerprints
+  };
+}
+function computeStateChange(turns) {
+  let stagnantTurnCount = 0;
+  let lastChangeTurn = -1;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i];
+    const hasChange = turn.hasToolResult || turn.hasAgentResponse || turn.hasProgressEvent;
+    if (hasChange) {
+      if (lastChangeTurn === -1) {
+        lastChangeTurn = i;
+      }
+      break;
+    } else {
+      if (lastChangeTurn === -1) {
+        stagnantTurnCount++;
+      }
+    }
+  }
+  if (lastChangeTurn === -1) {
+    stagnantTurnCount = turns.length;
+  }
+  const latestTurn = turns[turns.length - 1];
+  return {
+    hasNewToolResult: latestTurn?.hasToolResult ?? false,
+    hasNewAssistantContent: latestTurn?.hasAgentResponse ?? false,
+    hasPlanningStateChange: latestTurn?.hasProgressEvent ?? false,
+    stagnantTurnCount,
+    lastChangeTurn,
+    summary: lastChangeTurn === -1 ? `从未发生状态变化（${turns.length} 轮）` : `最后状态变化在 Turn ${lastChangeTurn}，已停滞 ${stagnantTurnCount} 轮`
+  };
+}
+function computeInformationGain(turns) {
+  let consecutiveLowOutputTurns = 0;
+  let repeatedOutputCount = 0;
+  let totalToolResults = 0;
+  let novelToolResults = 0;
+  const seenFingerprints = /* @__PURE__ */ new Set();
+  let previousPreview = "";
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i];
+    if (turn.modelOutputLength <= LOW_OUTPUT_THRESHOLD) {
+      consecutiveLowOutputTurns++;
+    } else {
+      if (i === turns.length - 1) ;
+      break;
+    }
+  }
+  consecutiveLowOutputTurns = 0;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i];
+    if (turn.modelOutputLength <= LOW_OUTPUT_THRESHOLD) {
+      consecutiveLowOutputTurns++;
+    } else {
+      break;
+    }
+  }
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i];
+    if (previousPreview && turn.modelOutputPreview === previousPreview && turn.modelOutputPreview.length > 0) {
+      repeatedOutputCount++;
+    }
+    if (turn.modelOutputPreview.length > 0) {
+      previousPreview = turn.modelOutputPreview;
+    }
+  }
+  for (const turn of turns) {
+    for (const fp of turn.toolResultFingerprints) {
+      totalToolResults++;
+      const key = `${fp.toolName}::${fp.fingerprint}`;
+      if (!seenFingerprints.has(key)) {
+        seenFingerprints.add(key);
+        novelToolResults++;
+      }
+    }
+  }
+  const toolResultNovelty = totalToolResults > 0 ? novelToolResults / totalToolResults : 1;
+  let repeatedToolResultCount = 0;
+  const seenToolFps = /* @__PURE__ */ new Set();
+  for (let i = turns.length - 1; i >= 0; i--) {
+    for (const fp of turns[i].toolResultFingerprints) {
+      const key = `${fp.toolName}::${fp.fingerprint}`;
+      if (seenToolFps.has(key)) {
+        repeatedToolResultCount++;
+      }
+      seenToolFps.add(key);
+    }
+  }
+  return {
+    consecutiveLowOutputTurns,
+    repeatedOutputCount,
+    repeatedToolResultCount,
+    toolResultNovelty: Math.round(toolResultNovelty * 1e3) / 1e3,
+    summary: `低输出 ${consecutiveLowOutputTurns} 轮，工具结果新颖度 ${(toolResultNovelty * 100).toFixed(0)}%`
+  };
+}
+function computeGoalProgress(turns) {
+  let completedSubtasks = 0;
+  let hasPhaseTransition = false;
+  let lastWorkflowCompleted = false;
+  for (const turn of turns) {
+    for (const ev of turn.events) {
+      if (ev.type === "task.completed") {
+        completedSubtasks++;
+      } else if (ev.type === "workflow.completed") {
+        lastWorkflowCompleted = true;
+      } else if (ev.type === "workflow.started" && lastWorkflowCompleted) {
+        hasPhaseTransition = true;
+      }
+    }
+  }
+  let stagnantTurnCount = 0;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i].hasProgressEvent) {
+      break;
+    }
+    stagnantTurnCount++;
+  }
+  return {
+    completedSubtasks,
+    hasPhaseTransition,
+    stagnantTurnCount,
+    summary: `已完成 ${completedSubtasks} 个子任务${hasPhaseTransition ? "，存在阶段转换" : ""}`
+  };
+}
+class GuardrailProgressAnalyzer {
+  constructor(source) {
+    this.source = source;
+  }
+  async analyze(traceId) {
+    const events2 = await this.source.getTrace(traceId);
+    return GuardrailProgressAnalyzer.compute(traceId, events2);
+  }
+  /**
+   * 纯函数：直接传入 EvaluationEvent[] 计算 ProgressSnapshot。
+   * 测试时无需存储，直接构造事件数组传入。
+   */
+  static compute(traceId, events2) {
+    const turns = groupByTurns(events2);
+    const sessionId = events2.length > 0 ? events2[0].sessionId : "";
+    const sorted = [...events2].sort((a, b) => a.timestamp - b.timestamp);
+    const elapsedMs = sorted.length >= 2 ? sorted[sorted.length - 1].timestamp - sorted[0].timestamp : 0;
+    return {
+      traceId,
+      sessionId,
+      totalTurns: turns.length,
+      elapsedMs,
+      computedAt: Date.now(),
+      stateChange: computeStateChange(turns),
+      informationGain: computeInformationGain(turns),
+      goalProgress: computeGoalProgress(turns)
+    };
+  }
+}
+class DefaultGuardrailPolicy {
+  config;
+  constructor(config) {
+    this.config = {
+      stateChange: { ...DEFAULT_GUARDRAIL_POLICY_CONFIG.stateChange, ...config?.stateChange },
+      informationGain: { ...DEFAULT_GUARDRAIL_POLICY_CONFIG.informationGain, ...config?.informationGain },
+      goalProgress: { ...DEFAULT_GUARDRAIL_POLICY_CONFIG.goalProgress, ...config?.goalProgress }
+    };
+  }
+  evaluate(snapshot) {
+    const signals = [
+      this.evaluateStateChange(snapshot),
+      this.evaluateInformationGain(snapshot),
+      this.evaluateGoalProgress(snapshot)
+    ];
+    const stalled = signals.filter((s) => s.status === "stalled");
+    const degrading = signals.filter((s) => s.status === "degrading");
+    let action;
+    let reason;
+    if (stalled.length > 0) {
+      action = "terminate";
+      reason = `Signal stalled: ${stalled.map((s) => s.name).join(", ")} — ${stalled.map((s) => s.detail).join("; ")}`;
+    } else if (degrading.length > 0) {
+      action = "warning";
+      reason = `Signal degrading: ${degrading.map((s) => s.name).join(", ")} — ${degrading.map((s) => s.detail).join("; ")}`;
+    } else {
+      action = "continue";
+      reason = "All signals healthy";
+    }
+    return { action, reason, decidedAt: Date.now(), traceId: snapshot.traceId, signals, snapshot };
+  }
+  evaluateStateChange(snapshot) {
+    const cfg = this.config.stateChange;
+    const sc = snapshot.stateChange;
+    if (sc.stagnantTurnCount >= cfg.stalled) {
+      return { name: "state_change", status: "stalled", detail: `已停滞 ${sc.stagnantTurnCount} 轮（阈值: ${cfg.stalled}）` };
+    }
+    if (sc.stagnantTurnCount >= cfg.degrading) {
+      return { name: "state_change", status: "degrading", detail: `已停滞 ${sc.stagnantTurnCount} 轮（阈值: ${cfg.degrading}）` };
+    }
+    return { name: "state_change", status: "healthy", detail: "最近轮次有状态变化" };
+  }
+  evaluateInformationGain(snapshot) {
+    const cfg = this.config.informationGain;
+    const ig = snapshot.informationGain;
+    if (ig.consecutiveLowOutputTurns >= cfg.lowOutputStalled) {
+      return {
+        name: "information_gain",
+        status: "stalled",
+        detail: `连续 ${ig.consecutiveLowOutputTurns} 轮低输出（阈值: ${cfg.lowOutputStalled}）`
+      };
+    }
+    if (ig.repeatedOutputCount >= cfg.repeatedContentStalled) {
+      return {
+        name: "information_gain",
+        status: "stalled",
+        detail: `连续 ${ig.repeatedOutputCount} 轮重复内容（阈值: ${cfg.repeatedContentStalled}）`
+      };
+    }
+    if (ig.consecutiveLowOutputTurns >= cfg.lowOutputDegrading) {
+      return {
+        name: "information_gain",
+        status: "degrading",
+        detail: `连续 ${ig.consecutiveLowOutputTurns} 轮低输出（阈值: ${cfg.lowOutputDegrading}）`
+      };
+    }
+    if (ig.repeatedOutputCount >= cfg.repeatedContentDegrading) {
+      return {
+        name: "information_gain",
+        status: "degrading",
+        detail: `连续 ${ig.repeatedOutputCount} 轮重复内容（阈值: ${cfg.repeatedContentDegrading}）`
+      };
+    }
+    return { name: "information_gain", status: "healthy", detail: "信息增益正常" };
+  }
+  evaluateGoalProgress(snapshot) {
+    const cfg = this.config.goalProgress;
+    const gp = snapshot.goalProgress;
+    if (gp.stagnantTurnCount >= cfg.stalled) {
+      return { name: "goal_progress", status: "stalled", detail: `连续 ${gp.stagnantTurnCount} 轮无推进（阈值: ${cfg.stalled}）` };
+    }
+    if (gp.stagnantTurnCount >= cfg.degrading) {
+      return { name: "goal_progress", status: "degrading", detail: `连续 ${gp.stagnantTurnCount} 轮无推进（阈值: ${cfg.degrading}）` };
+    }
+    return { name: "goal_progress", status: "healthy", detail: `已完成 ${gp.completedSubtasks} 个子任务` };
+  }
+}
+const DEFAULT_PIPELINE_CONFIG = {
+  checkIntervalTurns: 5,
+  minTurnsBeforeCheck: 5
+};
+class GuardrailPipeline {
+  analyzer;
+  policy;
+  config;
+  emitter;
+  /** 上次检测时的总轮次数，用于 throttle。负值确保首次检测不被 throttle */
+  lastCheckedTurn = -Infinity;
+  constructor(source, policy, config, emitter) {
+    this.analyzer = new GuardrailProgressAnalyzer(source);
+    this.policy = policy ?? new DefaultGuardrailPolicy();
+    this.config = { ...DEFAULT_PIPELINE_CONFIG, ...config };
+    this.emitter = emitter;
+  }
+  /**
+   * 检测当前 trace 的进展状态。
+   * 返回 null 表示跳过（throttled 或 turn 不足），否则返回 PipelineResult。
+   */
+  async check(traceId, currentTurn) {
+    if (currentTurn < this.config.minTurnsBeforeCheck) return null;
+    if (currentTurn - this.lastCheckedTurn < this.config.checkIntervalTurns) return null;
+    this.lastCheckedTurn = currentTurn;
+    let decision;
+    try {
+      const snapshot = await this.analyzer.analyze(traceId);
+      decision = this.policy.evaluate(snapshot);
+    } catch (err) {
+      console.error("[GuardrailPipeline] analyze error:", err);
+      return null;
+    }
+    const runtimeAction = toRuntimeAction(decision.action);
+    const result = { runtimeAction, decision };
+    this.emitGuardrailEvents(traceId, currentTurn, result);
+    return result;
+  }
+  emitGuardrailEvents(traceId, currentTurn, result) {
+    if (!this.emitter) return;
+    this.emitter.emit(
+      "guardrail.checked",
+      {
+        type: "guardrail.checked",
+        turn: currentTurn,
+        decision: result.decision.action,
+        reason: result.decision.reason
+      },
+      { traceId }
+    );
+    if (result.runtimeAction === "TERMINATE") {
+      this.emitter.emit(
+        "guardrail.terminated",
+        {
+          type: "guardrail.terminated",
+          turn: currentTurn,
+          totalTurns: result.decision.snapshot.totalTurns,
+          reason: result.decision.reason
+        },
+        { traceId }
+      );
+    }
+  }
+  /** 重置 throttle 状态（新 trace 开始时调用） */
+  reset() {
+    this.lastCheckedTurn = -Infinity;
   }
 }
 class AppRuntime {
@@ -31485,16 +35764,14 @@ class AppRuntime {
     Logger.log("INFO", "llm_config_loaded_from_credentials");
     this.evaluationStore = new EvaluationStore();
     await this.evaluationStore.init();
-    this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, "runtime");
-    llmService.setEvaluationEmitter(this.evaluationEmitter);
-    Logger.log("INFO", "evaluation_ready");
-    this.evaluationStore = new EvaluationStore();
-    await this.evaluationStore.init();
-    this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, "runtime");
+    const sessionId = `runtime_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, "runtime", sessionId);
     llmService.setEvaluationEmitter(this.evaluationEmitter);
     this.toolEventBridge = new ToolEventBridge(this.evaluationEmitter, eventBus);
     this.toolEventBridge.start();
-    Logger.log("INFO", "evaluation_ready");
+    const guardrailPipeline = new GuardrailPipeline(this.evaluationStore, void 0, void 0, this.evaluationEmitter);
+    agentService.setGuardrailPipeline(guardrailPipeline);
+    Logger.log("INFO", "evaluation_ready", { sessionId });
     const win = createWindow(stateManager);
     agentService.setMainWindow(win);
     ttsService.setAudioSink((filePath) => {
@@ -31612,6 +35889,7 @@ class AppRuntime {
     this.capabilityEngine.setEnforcementMode("enforce");
     this.capabilityEngine.setConstitutionEngine(constitutionEngine);
     mcpManager.setCapabilityEngine(this.capabilityEngine);
+    mcpManager.setMemoryService(memoryService);
     Logger.log("INFO", "capability_engine_ready", { mode: this.capabilityEngine.getEnforcementMode() });
     await this.healthChecker.init();
     this.healthChecker.register(kernel);
@@ -31930,6 +36208,7 @@ class AppRuntime {
           maxFixesPerCycle: 3
         });
         pipeline.initDefaults();
+        pipeline.addCollector(new MemoryAnalysisCollector());
         evolution.setPipeline(pipeline);
         this.pipeline = pipeline;
         evolution.scheduleEvolution(2);
