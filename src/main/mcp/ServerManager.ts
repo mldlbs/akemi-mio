@@ -7,6 +7,8 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { WORKSPACE_DIR } from './LocalProvider'
 import { ConstitutionEngine } from '../constitution/ConstitutionEngine'
 import { CapabilityEngine } from '../capability/CapabilityEngine'
+import { MemoryAwareInterceptor } from './MemoryAwareInterceptor'
+import type { MemoryService } from '../memory/MemoryService'
 
 const FILE_WRITE_TOOLS = new Set(['write_file', 'edit_file'])
 const FILE_READ_TOOLS = new Set(['read_file', 'list_files', 'grep'])
@@ -67,6 +69,7 @@ export class ServerManager {
   private retryStates = new Map<string, { backoffAttempts: number; nextRetryAt: number }>()
   private constitutionEngine: ConstitutionEngine | null = null
   private capabilityEngine: CapabilityEngine | null = null
+  private memoryInterceptor: MemoryAwareInterceptor = new MemoryAwareInterceptor()
   /** 每个 MCP 服务器的独立熔断器 */
   private circuitBreakers = new Map<string, { failures: number; state: 'closed' | 'open'; openedAt: number }>()
   /** 重启预算：每小时最多 RESTART_BUDGET_MAX 次重启，超限后自动禁用 */
@@ -94,6 +97,11 @@ export class ServerManager {
   /** Phase 4: 设置 CapabilityEngine 用于工具调用授权 */
   setCapabilityEngine(engine: CapabilityEngine): void {
     this.capabilityEngine = engine
+  }
+
+  /** 设置 MemoryService 用于记忆感知的工具调用拦截 */
+  setMemoryService(ms: MemoryService): void {
+    this.memoryInterceptor.setMemoryService(ms)
   }
 
   /** 从 mcp_servers.json 自动恢复持久化的 MCP 服务器 */
@@ -287,6 +295,10 @@ export class ServerManager {
       throw new Error(`未知工具: ${name}`)
     }
 
+    // ★ Memory-aware 拦截：工具调用前检索相关记忆
+    const memoryCtx = this.memoryInterceptor.preCall(name, args)
+    const enrichedArgs = this.memoryInterceptor.enrichArgs(args, memoryCtx)
+
     // ★ Phase 4: Capability Sandbox（替换旧的硬编码检查）
     const caller = meta.serverName
     if (this.capabilityEngine && meta.serverName !== MGR) {
@@ -313,31 +325,42 @@ export class ServerManager {
       }
     }
 
-    if (meta.serverName === MGR) {
-      return this.handleMgrTool(name, args)
-    }
+    let result: string
+    let success = true
 
-    if (meta.serverName === this.local.name) {
-      // Constitution check for file-write operations
-      if (this.constitutionEngine && (name === 'write_file' || name === 'edit_file')) {
-        const targetPath = args?.path
-        if (targetPath) {
-          const resolvedPath = resolve(typeof targetPath === 'string' ? targetPath : String(targetPath))
-          const check = this.constitutionEngine.checkWrite(resolvedPath)
-          if (!check.allowed) {
-            throw new Error(`Constitution 拒绝写入: ${resolvedPath} — ${check.violation?.reason || '路径受保护'}`)
+    try {
+      if (meta.serverName === MGR) {
+        result = await this.handleMgrTool(name, enrichedArgs)
+      } else if (meta.serverName === this.local.name) {
+        // Constitution check for file-write operations
+        if (this.constitutionEngine && (name === 'write_file' || name === 'edit_file')) {
+          const targetPath = args?.path
+          if (targetPath) {
+            const resolvedPath = resolve(typeof targetPath === 'string' ? targetPath : String(targetPath))
+            const check = this.constitutionEngine.checkWrite(resolvedPath)
+            if (!check.allowed) {
+              throw new Error(`Constitution 拒绝写入: ${resolvedPath} — ${check.violation?.reason || '路径受保护'}`)
+            }
           }
         }
+        const toolResult = await this.local.callTool(name, enrichedArgs)
+        result = this.formatResult(toolResult)
+      } else {
+        const client = this.servers.get(meta.serverName)
+        if (!client) throw new Error(`MCP 服务器不可用: ${meta.serverName}`)
+        const toolResult = await client.callTool(name, enrichedArgs)
+        result = this.formatResult(toolResult)
       }
-      const result = await this.local.callTool(name, args)
-      return this.formatResult(result)
+
+      // ★ Memory-aware 拦截：工具调用成功后存储结果摘要
+      this.memoryInterceptor.postCall(name, args, result, true)
+      return result
+    } catch (err: any) {
+      success = false
+      // ★ Memory-aware 拦截：工具调用失败也记录（低置信度）
+      this.memoryInterceptor.postCall(name, args, err.message || String(err), false)
+      throw err
     }
-
-    const client = this.servers.get(meta.serverName)
-    if (!client) throw new Error(`MCP 服务器不可用: ${meta.serverName}`)
-
-    const result = await client.callTool(name, args)
-    return this.formatResult(result)
   }
 
   private async handleMgrTool(name: string, args: Record<string, any>): Promise<string> {

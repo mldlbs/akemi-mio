@@ -17,6 +17,7 @@ import { createAgentWindow, closeAgentWindow } from '../core/Lifecycle'
 import { join } from 'path'
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { eventBus } from '../core/EventBus'
+import { VoiceToolOrchestrator } from '../tool/VoiceToolOrchestrator'
 
 /** 打开的沙盒窗口表，防止重复打开 */
 const sandboxWindows = new Map<string, BrowserWindow>()
@@ -131,6 +132,35 @@ export function registerHandlers(
     }
   })
 
+  // ── 语音工具编排 IPC ──
+
+  const voiceOrchestrator = new VoiceToolOrchestrator()
+  voiceOrchestrator.setToolCaller({
+    callTool: async (name: string, args: Record<string, any>) => {
+      return agentService.getMcpManager().callTool(name, args)
+    },
+  })
+
+  ipcMain.handle('voice:matchIntent', async (_event, text: string) => {
+    try {
+      const result = voiceOrchestrator.match({ text })
+      return result
+    } catch (err) {
+      log('ERROR', 'voice_match_intent_failed', { error: String(err) })
+      return { matched: false, fallbackText: text, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('voice:executeChain', async (_event, intent: string, slots: Record<string, string>) => {
+    try {
+      const result = await voiceOrchestrator.execute({ intent, slots })
+      return result
+    } catch (err) {
+      log('ERROR', 'voice_execute_chain_failed', { error: String(err) })
+      return { success: false, steps: [], summary: String(err) }
+    }
+  })
+
   ipcMain.handle('tts:speak', async (_event, text: string) => {
     try {
       log('PERF', 'tts_speak', { char_count: text.length })
@@ -146,6 +176,31 @@ export function registerHandlers(
       ttsService.stop()
     } catch (err) {
       log('ERROR', 'tts_stop_failed', { error: String(err) })
+    }
+  })
+
+  // ── 情感自适应语音 IPC ──
+  ipcMain.handle('tts:emotion:toggle', async (_event, enabled: boolean) => {
+    try {
+      agentService.getChatExecutor()?.toggleEmotionTts(enabled)
+      log('INFO', 'tts_emotion_toggle_ipc', { enabled })
+      return { success: true, enabled }
+    } catch (err) {
+      log('ERROR', 'tts_emotion_toggle_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('tts:emotion:state', async () => {
+    try {
+      const chatExec = agentService.getChatExecutor()
+      if (chatExec) {
+        return { success: true, ...chatExec.getEmotionTtsState() }
+      }
+      return { success: true, enabled: false, params: null }
+    } catch (err) {
+      log('ERROR', 'tts_emotion_state_failed', { error: String(err) })
+      return { success: false }
     }
   })
 

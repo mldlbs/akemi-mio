@@ -8,12 +8,70 @@ export function createElectronAPI(ipc: IpcRenderer) {
 
     transcribe: (audio: ArrayBuffer): Promise<{ text: string; request_id?: string; error?: string }> => ipc.invoke('asr:transcribe', audio),
 
+    // ── 语音工具编排 ──
+    matchVoiceIntent: (text: string): Promise<{
+      matched: boolean
+      intent?: {
+        name: string
+        description: string
+        confirmMessage: string
+        toolSequence: Array<{ tool: string; args: Record<string, string> }>
+        slots: Record<string, string>
+      }
+      fallbackText?: string
+      error?: string
+    }> => ipc.invoke('voice:matchIntent', text),
+
+    executeVoiceChain: (
+      intent: string,
+      slots: Record<string, string>,
+    ): Promise<{
+      success: boolean
+      steps: Array<{ tool: string; success: boolean; output: string; error?: string; durationMs: number }>
+      summary: string
+    }> => ipc.invoke('voice:executeChain', intent, slots),
+
     chat: (text: string, requestId?: string, sessionId?: string, noTts?: boolean): Promise<{ reply?: string; error?: string }> =>
       ipc.invoke('ai:chat', text, requestId, sessionId, noTts),
 
     speak: (text: string): Promise<void> => ipc.invoke('tts:speak', text),
 
     stopSpeaking: (): Promise<void> => ipc.invoke('tts:stop'),
+
+    // ── 情感自适应语音 ──
+    toggleEmotionTts: (enabled: boolean): Promise<{ success: boolean; enabled: boolean }> =>
+      ipc.invoke('tts:emotion:toggle', enabled),
+
+    getEmotionTtsState: (): Promise<{ success: boolean; enabled: boolean; params: Record<string, unknown> | null }> =>
+      ipc.invoke('tts:emotion:state'),
+
+    onTtsEmotion: (
+      callback: (data: {
+        polarity: string
+        contentType: string
+        score: number
+        voice: string
+        label: string
+        matchedWords: string[]
+      }) => void,
+    ) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        data: { polarity: string; contentType: string; score: number; voice: string; label: string; matchedWords: string[] },
+      ) => callback(data)
+      ipc.on('tts:emotion', handler)
+      return () => {
+        ipc.removeListener('tts:emotion', handler)
+      }
+    },
+
+    onTtsEmotionEnabled: (callback: (data: { enabled: boolean }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: { enabled: boolean }) => callback(data)
+      ipc.on('tts:emotion:enabled', handler)
+      return () => {
+        ipc.removeListener('tts:emotion:enabled', handler)
+      }
+    },
 
     stopConversation: (): Promise<{ success: boolean }> => ipc.invoke('conversation:stop'),
 

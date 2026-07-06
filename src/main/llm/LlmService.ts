@@ -1,5 +1,12 @@
 import { log } from '../logger/Logger'
-import { ConversationContext, estimateTokens, getBasePromptTokens, Message, trimOrphanedToolCallsFrom } from '../agent/context'
+import {
+  ConversationContext,
+  estimateTokens,
+  estimateMessageTokens,
+  getBasePromptTokens,
+  Message,
+  trimOrphanedToolCallsFrom,
+} from '../agent/context'
 import { validateToolCallChain } from '../agent/ContextIntegrityChecker'
 import { ChatResult, ChunkCallback } from './types'
 import { INTENT_CLASSIFY_PROMPT } from '../agent/intent/types'
@@ -19,6 +26,7 @@ import {
 import { createTimeoutSignal } from '../utils/async'
 import { extractJsonFromLLMReply } from '../utils/llm'
 import type { EvaluationEmitter } from '../core/evaluation/EvaluationEmitter'
+import { classifyMessageBreakdown } from '../core/evaluation/TokenBreakdown'
 
 export interface ToolCallInfo {
   id: string
@@ -58,7 +66,7 @@ export class LlmService {
   /** 从外部凭据存储（CredentialsManager）读取并刷新全部 LLM 配置 */
   refreshFromCredentials(getter: (key: string) => string | null): void {
     const key = getter('llm_key')
-    const codeKey = getter('llm_code_api_key') || key
+    const codeKey = getter('llm_code_api_key')
     if (key) this.chatApiKey = key
     if (codeKey) this.codeApiKey = codeKey
     this.textApiKey = getter('llm_text_key') || LLM_TEXT_KEY || key || ''
@@ -390,6 +398,7 @@ export class LlmService {
     const t0 = Date.now()
     const promptLength = messages.reduce((s, m) => s + (m.content?.length || 0), 0)
     const rawPromptTokens = estimateTokens(JSON.stringify(messages))
+    const tokenBreakdown = classifyMessageBreakdown(messages, estimateMessageTokens)
     let _evalInvoked = false
 
     // 429 / 网络错误 / API 错误重试：指数退避，最多 3 次
@@ -424,7 +433,7 @@ export class LlmService {
           _evalInvoked = true
           this.evaluationEmitter?.emit(
             'model.invoked',
-            { type: 'model.invoked', modelName: this.codeModel, promptLength, promptTokens: rawPromptTokens },
+            { type: 'model.invoked', modelName: this.codeModel, promptLength, promptTokens: rawPromptTokens, tokenBreakdown },
             { traceId: requestId },
           )
         }

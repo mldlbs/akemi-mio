@@ -22,17 +22,14 @@ export function SettingsModal() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('llm')
   const { values, setAndSave, saving, lastSaved } = useSettings(open)
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    },
-    [onClose],
-  )
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // do nothing — 仅关闭按钮可关闭
+  }, [])
 
   if (!open) return null
 
   return (
-    <div className="settings-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
+    <div className="settings-overlay" onKeyDown={handleKeyDown}>
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <span className="settings-title">设置</span>

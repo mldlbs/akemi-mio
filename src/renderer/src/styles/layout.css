@@ -43,7 +43,6 @@
   flex: 1;
   display: flex;
   align-items: center;
-  -webkit-app-region: no-drag;
 }
 
 .topbar-btn {

@@ -19,6 +19,8 @@ import type { PlanManagerLike } from '../evolution/types'
 import { SubAgentPool } from './SubAgentPool'
 import { ReflectLoop } from './ReflectLoop'
 import { Guardrail } from './Guardrail'
+import { ProgressGuardrail } from './ProgressGuardrail'
+import { GuardrailPipeline } from '../core/evaluation/GuardrailPipeline'
 import { GoalGuardrail } from '../governance/GoalGuardrail'
 import { ToolScheduler, type ToolResult } from './ToolScheduler'
 import type { TokenAccount } from '../cognitive/TokenEconomy'
@@ -49,6 +51,13 @@ import { PersonaStateManager } from './PersonaStateManager'
 import { setPersonaStateManager } from '../tool/deps'
 import { PersonaDriftControlSystem, DRIFT_CORRECTION_PROMPT } from './PersonaDriftControlSystem'
 import { classifyContent } from './ContentClassifier'
+import { userBehaviorAnalyzer } from './UserBehaviorAnalyzer'
+import { sentimentAnalyzer } from '../tts/SentimentAnalyzer'
+import { emotionToneMap } from '../tts/EmotionToneMap'
+import type { EmotionTtsParams, UserToneProfile } from '../tts/types'
+import { toneProfileAnalyzer } from '../tts/ToneProfileAnalyzer'
+import { toneToVoiceMapper } from '../tts/ToneToVoiceMapper'
+import { toneProfileCache } from '../tts/UserToneProfileCache'
 
 export class ChatExecutor {
   private llmService: LlmService
@@ -57,6 +66,7 @@ export class ChatExecutor {
   private workingMemory: WorkingMemory
   private toolScheduler: ToolScheduler
   private guardrail: Guardrail
+  private progressGuardrail: ProgressGuardrail
   private planManager: PlanManagerLike
   private resourceBudget: ResourceBudget
   private memoryService: MemoryService | null
@@ -92,6 +102,8 @@ export class ChatExecutor {
   private currentSessionId: string | null = null
   /** 执行决策门 — 每轮 tool batch 后强制决策 */
   private executionGovernor = new ExecutionGovernor()
+  /** Guardrail Pipeline — Trace 级别进展检测（可选注入） */
+  private guardrailPipeline: GuardrailPipeline | null = null
 
   constructor(
     llmService: LlmService,
@@ -115,6 +127,7 @@ export class ChatExecutor {
     this.workingMemory = new WorkingMemory('chat')
     this.toolScheduler = toolScheduler
     this.guardrail = guardrail
+    this.progressGuardrail = new ProgressGuardrail()
     this.planManager = planManager
     this.resourceBudget = resourceBudget
     this.memoryService = memoryService
@@ -125,7 +138,11 @@ export class ChatExecutor {
     this.reflectLoop = reflectLoop
     this.goalGuardrail = goalGuardrail
     this.errorClassifier = { classify: classifyError }
-    setPersonaStateManager(this.personaManager)
+  }
+
+  /** 注入 GuardrailPipeline（启动时由 AppRuntime 调用） */
+  setGuardrailPipeline(pipeline: GuardrailPipeline): void {
+    this.guardrailPipeline = pipeline
   }
 
   setMainWindow(win: BrowserWindow | null): void {
@@ -193,6 +210,16 @@ export class ChatExecutor {
     if (this.driftControl.needsCorrectionPrompt()) {
       extraModules.unshift(DRIFT_CORRECTION_PROMPT)
     }
+    // 任务状态恢复 & 用户画像注入（持久任务状态与画像Agent）
+    const taskCtx = this.memoryService.getTaskStateContext()
+    if (taskCtx) extraModules.push(taskCtx)
+    const profileCtx = this.memoryService.getUserProfileContext()
+    if (profileCtx) extraModules.push(profileCtx)
+    // 行为预判：检测高频工具和话题模式，注入工具优先级提示
+    const behaviorPattern = userBehaviorAnalyzer.analyze()
+    if (behaviorPattern.hasSufficientData && behaviorPattern.suggestedToolHints.length > 0) {
+      extraModules.push(...behaviorPattern.suggestedToolHints)
+    }
     const allExtraModules = extraModules.length > 0 ? extraModules : undefined
     if (memCtx || reflectCtx || allExtraModules || this.identityContext) {
       this.workingMemory.refreshMemory(memCtx, reflectCtx, allExtraModules, this.identityContext || undefined)
@@ -224,6 +251,18 @@ export class ChatExecutor {
   }
 
   private noTts = false
+  /** 情感自适应语音是否启用（用户可通过 IPC 开关） */
+  private emotionTtsEnabled = true
+  /** 上次应用的 TTS 情感参数（避免重复设置相同参数） */
+  private lastEmotionParams: EmotionTtsParams | null = null
+  /** 用户语气记忆个性化语音是否启用 */
+  private toneProfileEnabled = true
+  /** 缓存的用户语气基线参数（避免每次重新计算） */
+  private lastToneBaseline: EmotionTtsParams | null = null
+  /** 当前用户语气画像 */
+  private currentToneProfile: UserToneProfile | null = null
+  /** 已初始化标记 */
+  private toneProfileInitialized = false
 
   async run(
     text: string,
@@ -236,9 +275,34 @@ export class ChatExecutor {
     this.noTts = noTts ?? false
     const rid = requestId || createRequestId()
     const t0 = Date.now()
-    this.memoryService?.recordInteraction()
+    this.memoryService?.recordInteraction(text)
     this.memoryService?.setLastUserText(text)
     this.lastUserText = text
+    // 行为分析：记录用户消息用于模式检测
+    userBehaviorAnalyzer.recordUserMessage(text)
+    // 语气记忆：懒初始化 + 增量更新用户语气画像
+    this.ensureToneProfileInit()
+    if (this.toneProfileEnabled) {
+      try {
+        const profile = toneProfileAnalyzer.updateProfile(text)
+        this.currentToneProfile = profile
+        // 缓存到磁盘（debounced）
+        toneProfileCache.save(profile)
+        // 语气变化时更新基线参数
+        const newBaseline = toneToVoiceMapper.getBaselineParams(profile)
+        if (!this.lastToneBaseline || toneToVoiceMapper.isDifferent(this.lastToneBaseline, newBaseline)) {
+          this.lastToneBaseline = newBaseline
+          log('INFO', 'tone_baseline_updated', {
+            tone: profile.primaryTone,
+            confidence: profile.confidence.toFixed(2),
+            voice: newBaseline.voice,
+          })
+        }
+      } catch (err) {
+        // 语气分析失败不应影响对话
+        log('WARN', 'tone_profile_update_error', { error: String(err) })
+      }
+    }
     // Persona 仲裁：检测意图 → 路由人格
     this.resolvePersonaFor(text)
     // 注入上轮待处理的 drift 修正信号
@@ -306,6 +370,8 @@ export class ChatExecutor {
       this.obsLogger?.flush()
       eventBus.emit('agent.response.generated', { text: reply, requestId: rid, source })
       log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: reply.length })
+      // ── [EMOTION] 最终回复情感分析 ──
+      this.applySentimentToTts(reply)
       if (!this.noTts) this.ttsService.flushBuffer()
       if (reply) {
         const assistMsg: StoredMessage = {
@@ -353,6 +419,7 @@ export class ChatExecutor {
     this.runContext = null
     this.ttsService.stop()
     this.executionGovernor.reset()
+    this.progressGuardrail.reset()
   }
 
   private async toolLoop(messages: Message[], ctx: RunContext, requestId: string, source: string): Promise<string> {
@@ -464,7 +531,7 @@ export class ChatExecutor {
           }
           ctx.transition(RunState.WAIT_TOOL)
           eventBus.emit('agent.progress' as any, { requestId, step: i + 1, toolNames: result.toolCalls.map((t) => t.name) })
-          result.toolCalls.forEach((tc) => eventBus.emit('agent.tool.invoked', { tool: tc.name, args: tc.arguments }))
+          result.toolCalls.forEach((tc) => eventBus.emit('agent.tool.invoked', { tool: tc.name, args: tc.arguments, requestId }))
           const toolResults = await this.toolScheduler.executeAll(result.toolCalls, ctx.abortController.signal)
           this.obsLogger?.logToolBatch(toolResults)
           // 信用恢复：每个成功的工具调用降低一次拒绝计数
@@ -473,16 +540,23 @@ export class ChatExecutor {
               this.goalGuardrail.onToolSuccess()
               // 流程记忆：记录成功调用的工具名
               this.proceduralMemory?.recordHit(tr.name)
+              // 行为分析：记录工具调用模式
+              userBehaviorAnalyzer.recordToolCall(tr.name)
             }
           }
           for (const tr of toolResults) {
             this.emitToolStatus(tr.success ? 'success' : 'error', tr.name, tr.success ? '完成' : `失败: ${tr.error}`)
-            if (tr.success) eventBus.emit('agent.tool.completed', { tool: tr.name, result: tr.content })
-            else eventBus.emit('agent.tool.failed', { tool: tr.name, error: tr.error || '' })
+            if (tr.success) eventBus.emit('agent.tool.completed', { tool: tr.name, result: tr.content, requestId })
+            else eventBus.emit('agent.tool.failed', { tool: tr.name, error: tr.error || '', requestId })
             let c = tr.content || tr.error || ''
             if (c.length > 8000) c = c.slice(0, 8000) + `\n... [已截断，原长 ${c.length} 字符]`
             messages.push({ role: 'tool', tool_call_id: tr.id, content: c })
           }
+          // ── [EMOTION] 情感自适应：分析工具结果+LLM回复，调整TTS语调 ──
+          this.applySentimentToTts(
+            result.reply || '',
+            toolResults.filter((t) => t.success).map((t) => t.content),
+          )
           // ── [REFLECT] 同步执行反馈（同一轮可见） ──
           runReflect(toolResults, result.toolCalls, messages, ctx)
           this.workingMemory.trimToTokenBudget(600_000)
@@ -491,6 +565,12 @@ export class ChatExecutor {
             this.workingMemory.scratchpad.add('system_hint', '你已执行了多步操作。请立即停止工具调用，向用户汇报当前进展。')
           }
           const gr = this.guardrail.apply(toolResults, result.toolCalls, messages, ctx)
+          // ── [PROGRESS] Progress Guardrail: 零输出停滞检测 ──
+          const pgResult = this.progressGuardrail.check(result.reply, result.toolCalls, toolResults, messages, ctx)
+          if (pgResult.triggered) {
+            log('WARN', 'chat_progress_guardrail_triggered', { step: i, reason: pgResult.reason })
+            // guardrailStop 已由 check() 设置，放行本轮后退出
+          }
           // ── [DECIDE] ExecutionGovernor 强制决策门 ──
           const failedTools = toolResults.filter((r) => !r.success).map((r) => r.name)
           const hasFail = failedTools.length > 0
@@ -518,6 +598,25 @@ export class ChatExecutor {
             continue
           }
           this.checkMilestone(i, toolResults, ctx, requestId)
+          // ── [GUARDRAIL KERNEL] Trace 级别进展检测，Runtime 只消费 RuntimeAction ──
+          if (this.guardrailPipeline) {
+            const result = await this.guardrailPipeline.check(requestId, i)
+            if (result) {
+              switch (result.runtimeAction) {
+                case 'TERMINATE':
+                  log('WARN', 'chat_guardrail_kernel_terminate', { step: i, reason: result.decision.reason, traceId: requestId })
+                  eventBus.emit('guardrail.progress_stagnation', { consecutiveRounds: i, step: i })
+                  ctx.guardrailStop = true
+                  break
+                case 'WARNING':
+                  log('WARN', 'chat_guardrail_kernel_warning', { step: i, reason: result.decision.reason, traceId: requestId })
+                  break
+                case 'CONTINUE':
+                  // 不干预
+                  break
+              }
+            }
+          }
           ctx.transition(RunState.RUNNING)
           continue
         }
@@ -689,5 +788,138 @@ export class ChatExecutor {
 
   private emitToolStatus(type: 'start' | 'success' | 'error', tool: string, msg: string): void {
     this.mainWindow?.webContents.send('tool:status', { type, tool, message: msg })
+  }
+
+  /**
+   * 情感自适应语音：分析回复文本并更新 TTS 情感参数
+   *
+   * 在 LLM 回复完成后、TTS 发音前调用。
+   * 合并分析 LLM 回复文本 + 本轮工具返回内容，综合判断情感。
+   *
+   * 如果启用了语气记忆个性化语音（toneProfileEnabled），
+   * 会将用户语气基线参数与内容情感参数进行混合：
+   *   - voice 由用户语气决定（保持一致性）
+   *   - rate/pitch 在基线基础上由内容情感微调
+   */
+  private applySentimentToTts(llmReply: string, toolResultTexts?: string[]): void {
+    if (!this.emotionTtsEnabled) return
+
+    try {
+      // 合并 LLM 回复和工具结果进行综合情感分析
+      const parts: string[] = []
+      if (llmReply) parts.push(llmReply)
+      if (toolResultTexts && toolResultTexts.length > 0) {
+        parts.push(...toolResultTexts.filter(Boolean))
+      }
+      const combined = parts.join(' ')
+
+      if (!combined || combined.trim().length < 10) return
+
+      const sentiment = sentimentAnalyzer.analyze(combined)
+      const emotionParams = emotionToneMap.getParams(sentiment)
+
+      // 如果启用了语气记忆，混合用户语气基线 + 内容情感
+      let finalParams = emotionParams
+      if (this.toneProfileEnabled && this.lastToneBaseline) {
+        finalParams = toneToVoiceMapper.blend(this.lastToneBaseline, emotionParams)
+      }
+
+      // 避免重复设置相同参数
+      if (this.lastEmotionParams && !emotionToneMap.isDifferent(this.lastEmotionParams, finalParams)) {
+        return
+      }
+
+      this.lastEmotionParams = finalParams
+      this.ttsService.setEmotion(finalParams)
+
+      // 发送情感信息到渲染进程（供 UI 展示/调试）
+      this.mainWindow?.webContents.send('tts:emotion', {
+        polarity: sentiment.polarity,
+        contentType: sentiment.contentType,
+        score: sentiment.score,
+        voice: finalParams.voice,
+        label: finalParams.label,
+        matchedWords: sentiment.matchedWords.slice(0, 5),
+        toneProfile: this.toneProfileEnabled && this.currentToneProfile
+          ? {
+              primaryTone: this.currentToneProfile.primaryTone,
+              confidence: this.currentToneProfile.confidence,
+            }
+          : null,
+      })
+    } catch (err) {
+      // 情感分析失败不应影响正常对话流程
+      log('WARN', 'sentiment_apply_error', { error: String(err) })
+    }
+  }
+
+  /** 切换情感自适应语音开关（供 IPC 调用） */
+  toggleEmotionTts(enabled: boolean): void {
+    this.emotionTtsEnabled = enabled
+    this.ttsService.setEmotionEnabled(enabled)
+    if (!enabled) {
+      this.lastEmotionParams = null
+    }
+    this.mainWindow?.webContents.send('tts:emotion:enabled', { enabled })
+  }
+
+  /** 获取当前情感 TTS 状态 */
+  getEmotionTtsState(): { enabled: boolean; params: EmotionTtsParams | null } {
+    return {
+      enabled: this.emotionTtsEnabled,
+      params: this.emotionTtsEnabled ? this.ttsService.getEmotionParams() : null,
+    }
+  }
+
+  // ══════════════════════════════════════════
+  //  语气记忆个性化语音
+  // ══════════════════════════════════════════
+
+  /**
+   * 懒初始化语气画像：首次调用时从缓存加载，
+   * 恢复 ToneProfileAnalyzer 状态。
+   */
+  private ensureToneProfileInit(): void {
+    if (this.toneProfileInitialized) return
+    this.toneProfileInitialized = true
+
+    try {
+      const cached = toneProfileCache.load()
+      if (cached.messageCount > 0) {
+        toneProfileAnalyzer.restoreFromProfile(cached)
+        this.currentToneProfile = cached
+        this.lastToneBaseline = toneToVoiceMapper.getBaselineParams(cached)
+        log('INFO', 'tone_profile_init_from_cache', {
+          tone: cached.primaryTone,
+          messages: cached.messageCount,
+          confidence: cached.confidence.toFixed(2),
+          baselineVoice: this.lastToneBaseline.voice,
+        })
+      }
+    } catch (err) {
+      log('WARN', 'tone_profile_init_error', { error: String(err) })
+    }
+  }
+
+  /** 切换语气记忆个性化语音开关（供 IPC 调用） */
+  toggleToneProfileTts(enabled: boolean): void {
+    this.toneProfileEnabled = enabled
+    if (!enabled) {
+      this.lastToneBaseline = null
+    }
+    this.mainWindow?.webContents.send('tts:toneProfile:enabled', { enabled })
+  }
+
+  /** 获取当前语气画像状态（供 IPC/调试） */
+  getToneProfileState(): {
+    enabled: boolean
+    profile: UserToneProfile | null
+    baseline: EmotionTtsParams | null
+  } {
+    return {
+      enabled: this.toneProfileEnabled,
+      profile: this.currentToneProfile,
+      baseline: this.lastToneBaseline,
+    }
   }
 }

@@ -186,15 +186,18 @@ class SubAgentInstance {
   }
 
   private emitToolInvoked(tool: string, args: Record<string, any>): void {
-    this.eventBus.emit('agent.tool.invoked' as any, { tool, args })
+    const requestId = `subagent_${this.id}_${Date.now()}`
+    this.eventBus.emit('agent.tool.invoked' as any, { tool, args, requestId })
   }
 
   private emitToolCompleted(tool: string, result: string): void {
-    this.eventBus.emit('agent.tool.completed' as any, { tool, result })
+    const requestId = `subagent_${this.id}_${Date.now()}`
+    this.eventBus.emit('agent.tool.completed' as any, { tool, result, requestId })
   }
 
   private emitToolFailed(tool: string, error: string): void {
-    this.eventBus.emit('agent.tool.failed' as any, { tool, error })
+    const requestId = `subagent_${this.id}_${Date.now()}`
+    this.eventBus.emit('agent.tool.failed' as any, { tool, error, requestId })
   }
 }
 

@@ -75,11 +75,71 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
   const handleResult = async (t: string) => {
     if (!t) return
     store.setTranscribed(t)
-    store.setAgentState('thinking')
     onError?.(undefined)
     store.setPendingText('')
     store.setDisplayText('')
     revealTimer.clear()
+
+    // ── 语音工具编排：检查是否匹配工具意图 ──
+    try {
+      const intentResult = await window.electronAPI.matchVoiceIntent(t)
+      if (intentResult.matched && intentResult.intent) {
+        const confirmed = window.confirm(
+          `🎤 语音指令识别\n\n` +
+          `意图: ${intentResult.intent.description}\n\n` +
+          `${intentResult.intent.confirmMessage}\n\n` +
+          `将执行 ${intentResult.intent.toolSequence.length} 个工具:\n` +
+          intentResult.intent.toolSequence.map((s, i) => `  ${i + 1}. ${s.tool}`).join('\n') +
+          `\n\n确认执行？`,
+        )
+        if (confirmed) {
+          store.setAgentState('tool_executing')
+          store.setToolStatus({ type: 'start', tool: 'voice_chain', message: `执行: ${intentResult.intent.description}` })
+
+          const execResult = await window.electronAPI.executeVoiceChain(
+            intentResult.intent.name,
+            intentResult.intent.slots,
+          )
+
+          // 展示执行结果
+          const resultLines: string[] = []
+          for (const step of execResult.steps) {
+            const icon = step.success ? '✅' : '❌'
+            resultLines.push(`${icon} ${step.tool} (${step.durationMs}ms)`)
+            if (step.error) resultLines.push(`   错误: ${step.error}`)
+            if (step.output && step.output.length < 500) {
+              resultLines.push(`   ${step.output.split('\n').slice(0, 3).join('\n')}`)
+            }
+          }
+          const resultText = resultLines.join('\n')
+          store.setAgentState('replying')
+          store.appendPendingText(`🔧 工具执行完成:\n${resultText}`)
+
+          // 也作为消息发送
+          try {
+            await window.electronAPI.chat(
+              `[语音工具编排] ${intentResult.intent.description}\n结果:\n${resultText}`,
+              undefined,
+              activeSessionId || undefined,
+              true, // noTts
+            )
+          } catch {
+            /* chat may fail, results already shown */
+          }
+          fadeTimer.set(() => store.resetAgent(), 15000)
+          return
+        } else {
+          // 用户取消，回退到普通聊天
+          store.setAgentState('thinking')
+        }
+      }
+    } catch (err) {
+      // 意图匹配失败静默回退到普通聊天
+      console.warn('[VoiceOrch] intent match error:', err)
+    }
+
+    // ── 普通聊天流程 ──
+    store.setAgentState('thinking')
     try {
       await window.electronAPI.chat(t, undefined, activeSessionId || undefined, !voiceActive)
     } catch (err) {

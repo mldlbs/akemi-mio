@@ -17,15 +17,16 @@
 }
 
 .settings-panel {
-  width: 560px;
-  max-height: 80vh;
+  width: 100%;
+  max-width: 100%;
+  height: 100vh;
   background: var(--bg-base);
-  border: 1px solid var(--border-glass);
-  border-radius: var(--radius-panel);
-  box-shadow: 0 8px 40px oklch(0 0 0 / 0.15);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
   display: flex;
   flex-direction: column;
-  animation: slot-in 0.2s var(--ease-glass) both;
+  animation: fade-in 0.15s var(--ease-glass) both;
 }
 
 .settings-header {
@@ -34,6 +35,7 @@
   justify-content: space-between;
   padding: var(--space-lg) var(--space-xl);
   border-bottom: 1px solid var(--border-glass);
+  -webkit-app-region: drag;
 }
 
 .settings-title {
@@ -43,6 +45,7 @@
 }
 
 .settings-close {
+  -webkit-app-region: no-drag;
   width: 32px; height: 32px;
   border: none;
   border-radius: 6px;
@@ -66,9 +69,11 @@
   padding: 0 var(--space-xl);
   border-bottom: 1px solid var(--border-glass);
   overflow-x: auto;
+  -webkit-app-region: drag;
 }
 
 .settings-tab {
+  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   gap: var(--space-xs);

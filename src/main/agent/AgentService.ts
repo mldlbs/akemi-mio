@@ -29,6 +29,7 @@ import { SessionRecoveryManager } from './SessionRecoveryManager'
 import { classify as classifyError } from './ErrorClassifier'
 import { TaskExecutor } from './TaskExecutor'
 import { ChatExecutor } from './ChatExecutor'
+import type { GuardrailPipeline } from '../core/evaluation/GuardrailPipeline'
 import { ProceduralMemory } from './ProceduralMemory'
 import { setProceduralMemory } from '../tool/deps'
 
@@ -264,6 +265,11 @@ export class AgentService {
     this.chatExecutor?.setMainWindow(win)
   }
 
+  /** 注入 GuardrailPipeline（启动时由 AppRuntime 调用） */
+  setGuardrailPipeline(pipeline: GuardrailPipeline): void {
+    this.chatExecutor?.setGuardrailPipeline(pipeline)
+  }
+
   getContext(): ConversationContext {
     return this.context
   }
@@ -327,7 +333,7 @@ export class AgentService {
     const rid = requestId || createRequestId()
     const t0 = Date.now()
 
-    this.memoryService?.recordInteraction()
+    this.memoryService?.recordInteraction(text)
     this.memoryService?.setLastUserText(text)
 
     // 中断正在运行的 Evolution
@@ -371,6 +377,11 @@ export class AgentService {
 
   isBusy(): boolean {
     return this.inSelfTask || this.chatExecutor?.isBusy() === true
+  }
+
+  /** 获取 ChatExecutor 实例（供 IPC handler 调用情感 TTS 等功能） */
+  getChatExecutor(): ChatExecutor | null {
+    return this.chatExecutor
   }
 
   /** 暂停 Chat 处理（暂停 ASR/TTS/LLM 调用，保留上下文） */

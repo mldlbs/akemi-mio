@@ -16,7 +16,7 @@ import { MemoryService } from '../memory/MemoryService'
 import { registerHandlers, createServiceRef } from '../ipc/handlers'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import { initEvolution, evolutionService, planManager, SelfEvolutionService } from '../evolution'
-import { PipelineOrchestrator, CreativityCollector, CreativityExecutor } from '../evolution/automation'
+import { PipelineOrchestrator, CreativityCollector, CreativityExecutor, MemoryAnalysisCollector } from '../evolution/automation'
 import { initInsight, insightService, insightStore } from '../insight'
 import { initCreativity, creativityService } from '../creativity'
 import { initInspiration } from '../inspiration'
@@ -70,6 +70,7 @@ import { EvaluationEmitter } from '../core/evaluation/EvaluationEmitter'
 import { RepositoryEventIterator } from '../core/evaluation/RepositoryEventIterator'
 import { MetricsEngineImpl } from '../core/evaluation/MetricsEngine'
 import { ToolEventBridge } from '../core/evaluation/ToolEventBridge'
+import { GuardrailPipeline } from '../core/evaluation/GuardrailPipeline'
 import type { MetricSnapshot, TimeWindow } from '../core/evaluation/types'
 
 /**
@@ -240,21 +241,18 @@ export class AppRuntime {
     llmService.refreshFromCredentials((key) => credentialsManager.get(key))
     log('INFO', 'llm_config_loaded_from_credentials')
 
-    // Evaluation 子系统：Store → Emitter（Composition Root）
-    this.evaluationStore = new EvaluationStore()
-    await this.evaluationStore.init()
-    this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, 'runtime')
-    llmService.setEvaluationEmitter(this.evaluationEmitter)
-    log('INFO', 'evaluation_ready')
-
     // Evaluation 子系统：Store → Emitter → Bridge
     this.evaluationStore = new EvaluationStore()
     await this.evaluationStore.init()
-    this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, 'runtime')
+    const sessionId = `runtime_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, 'runtime', sessionId)
     llmService.setEvaluationEmitter(this.evaluationEmitter)
     this.toolEventBridge = new ToolEventBridge(this.evaluationEmitter, eventBus)
     this.toolEventBridge.start()
-    log('INFO', 'evaluation_ready')
+    // GuardrailPipeline — 注入 ChatExecutor 的 GuardrailPipeline（需要 evaluationStore + emitter 就绪）
+    const guardrailPipeline = new GuardrailPipeline(this.evaluationStore, undefined, undefined, this.evaluationEmitter)
+    agentService.setGuardrailPipeline(guardrailPipeline)
+    log('INFO', 'evaluation_ready', { sessionId })
 
     const win = createWindow(stateManager)
     agentService.setMainWindow(win)
@@ -404,6 +402,7 @@ export class AppRuntime {
     this.capabilityEngine.setEnforcementMode('enforce')
     this.capabilityEngine.setConstitutionEngine(constitutionEngine)
     mcpManager.setCapabilityEngine(this.capabilityEngine)
+    mcpManager.setMemoryService(memoryService)
     log('INFO', 'capability_engine_ready', { mode: this.capabilityEngine.getEnforcementMode() })
 
     // Phase 4: HealthChecker 子系统注册
@@ -788,6 +787,8 @@ export class AppRuntime {
         })
         // 注册基础 collector 和 executor（先不传 mcpManager，备用执行器延迟注入）
         pipeline.initDefaults()
+        // 注册记忆分析采集器（从对话记录中检测用户不满意模式）
+        pipeline.addCollector(new MemoryAnalysisCollector())
         // 附加到进化系统（SelfEvolutionService 将消费管道指标）
         evolution.setPipeline(pipeline)
         this.pipeline = pipeline

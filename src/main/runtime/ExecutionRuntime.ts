@@ -330,10 +330,10 @@ export class ExecutionRuntime {
       ctx.toolCallsUsed++
       const content = await this.mcpManager.callTool(call.name, call.arguments)
       ctx.toolExecutions.push({ call, result: { success: true, content, latencyMs: Date.now() - t0 } })
-      eventBus.emit('agent.tool.completed', { tool: call.name, result: content })
+      eventBus.emit('agent.tool.completed', { tool: call.name, result: content, requestId: ctx.task.id })
     } catch (err: any) {
       ctx.toolExecutions.push({ call, result: { success: false, content: '', error: err.message, latencyMs: Date.now() - t0 } })
-      eventBus.emit('agent.tool.failed', { tool: call.name, error: err.message })
+      eventBus.emit('agent.tool.failed', { tool: call.name, error: err.message, requestId: ctx.task.id })
     }
   }
 

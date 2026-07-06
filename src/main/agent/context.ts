@@ -124,6 +124,10 @@ const PROMPT_TOOLS = `可用工具列表：
 - list_mcp_servers — 查看已注册的 MCP 服务器
 - remove_mcp_server — 移除 MCP 服务器
 - remember_fact — 记住重要信息（用户偏好、关键决定、项目需求），对话中主动使用
+- save_task_state — 保存多步骤任务进度，跨对话恢复（每完成一步主动调用）
+- query_tasks — 查询未完成的任务列表
+- save_user_preference — 保存用户风格/语言/详略偏好
+- get_user_preferences — 获取已保存的用户画像
 - generate_image — 使用 FLUX.1-schnell（本地 ComfyUI GPU）或 CogView-3-Flash（智谱AI）根据提示词生成图片
 - auto_schedule_workflow — 【AI 自主调度】创建并启动工作流，适合多步骤/并行/条件分支/审批门场景
 - list_workflows — 列出已有工作流定义

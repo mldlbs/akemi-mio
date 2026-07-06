@@ -7,3 +7,5 @@ export type {
   MCPRequest, MCPResponse, MCPToolSchema, MCPToolResult,
   MCPInitializeResult, MCPCapabilities, MCPToolDefinition, MCPServerConfig
 } from './types'
+export { MemoryAwareInterceptor } from './MemoryAwareInterceptor'
+export type { MemoryContext } from './MemoryAwareInterceptor'

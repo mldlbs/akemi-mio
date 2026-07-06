@@ -29,6 +29,7 @@ import { writingSystemTool } from './definitions/WritingTool'
 import { generateImageTool } from './definitions/ImageGenerationTool'
 import { cardGeneratorTool } from './definitions/CardGeneratorTool'
 import { rememberProcedureTool, listProceduresTool } from './definitions/ProceduralMemoryTool'
+import { saveTaskStateTool, queryTasksTool, saveUserPreferenceTool, getUserPreferencesTool } from './definitions/TaskStateTools'
 import { centosExecTool, centosReadFileTool, centosWriteFileTool, centosGrepTool, centosSearchFilesTool } from './definitions/SshTools'
 import { spawnSkillAgentTool } from './definitions/SkillAgentTools'
 import { socialPipelineTool } from './definitions/SocialPipelineTool'
@@ -83,6 +84,10 @@ export function getAllTools(): Tool[] {
     cardGeneratorTool as Tool,
     rememberProcedureTool as Tool,
     listProceduresTool as Tool,
+    saveTaskStateTool as Tool,
+    queryTasksTool as Tool,
+    saveUserPreferenceTool as Tool,
+    getUserPreferencesTool as Tool,
     centosExecTool as Tool,
     centosReadFileTool as Tool,
     centosWriteFileTool as Tool,
