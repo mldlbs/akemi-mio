@@ -17,12 +17,14 @@ require("os");
 require("koffi");
 require("@anthropic-ai/claude-agent-sdk");
 require("ssh2");
+require("dns/promises");
+require("net");
 require("@kutalia/whisper-node-addon");
 require("opencc-js");
 require("@xenova/transformers");
+require("crypto");
 require("electron-updater");
 require("url");
-require("crypto");
 require("worker_threads");
 class CronMatcher {
   minute;

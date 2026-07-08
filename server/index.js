@@ -27,13 +27,17 @@ const PORT = process.env.PORT || 3003
 function getToken(bot) { return (BOTS[bot] || BOTS.chat).token }
 function getDefaultChatId(bot) { return (BOTS[bot] || BOTS.chat).chatId }
 
+// ── Proxy config ──
+const PROXY = process.env.HTTP_PROXY || process.env.http_proxy || process.env.HTTPS_PROXY || process.env.https_proxy || process.env.ALL_PROXY || process.env.all_proxy || ''
+
 // ── curl-based Telegram API ──
 
 function tg(token, method, body) {
   return new Promise((resolve, reject) => {
     try {
       const api = 'https://api.telegram.org/bot' + token
-      const args = ['-s', '--max-time', '15', '-X', 'POST', api + '/' + method]
+      const args = ['-s', '--connect-timeout', '10', '--max-time', '15', '-X', 'POST', api + '/' + method]
+      if (PROXY) args.push('-x', PROXY)
       if (body) args.push('-H', 'Content-Type: application/json', '-d', JSON.stringify(body))
       cp.execFile('/usr/bin/curl', args, { timeout: 16000, encoding: 'utf-8', maxBuffer: 1024 * 1024 }, (err, stdout) => {
         if (err) return reject(new Error(err.stderr ? String(err.stderr).slice(0, 200) : err.message))

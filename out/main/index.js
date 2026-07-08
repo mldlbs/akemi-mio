@@ -38,12 +38,14 @@ const os = require("os");
 const koffi = require("koffi");
 const claudeAgentSdk = require("@anthropic-ai/claude-agent-sdk");
 const ssh2 = require("ssh2");
+const promises = require("dns/promises");
+const net = require("net");
 const whisper = require("@kutalia/whisper-node-addon");
 const openccJs = require("opencc-js");
 const transformers = require("@xenova/transformers");
+const crypto = require("crypto");
 const electronUpdater = require("electron-updater");
 const url = require("url");
-const crypto = require("crypto");
 const worker_threads = require("worker_threads");
 function _interopNamespaceDefault(e) {
   const n = Object.create(null, { [Symbol.toStringTag]: { value: "Module" } });
@@ -344,8 +346,9 @@ try {
 } catch {
 }
 const LLM_API_URL = process.env.LLM_API_URL || "https://opencode.ai/zen/go/v1/chat/completions";
+process.env.LLM_KEY || "";
 const LLM_CODE_API_URL = process.env.LLM_CODE_API_URL || process.env.LLM_API_URL || "https://opencode.ai/zen/go/v1/chat/completions";
-const LLM_CHAT_MODEL = process.env.LLM_CHAT_MODEL || process.env.LLM_MODEL || "deepseek-chat";
+const LLM_CHAT_MODEL = process.env.LLM_CHAT_MODEL || process.env.LLM_MODEL || "deepseek-v4-flash";
 const LLM_CODE_MODEL = process.env.LLM_CODE_MODEL || process.env.LLM_MODEL || "deepseek-v4-flash";
 const LLM_VISION_API_URL = process.env.LLM_VISION_API_URL || process.env.LLM_API_URL || "https://opencode.ai/zen/go/v1/chat/completions";
 const LLM_VISION_MODEL = process.env.LLM_VISION_MODEL || process.env.LLM_MODEL || "deepseek-chat";
@@ -358,8 +361,14 @@ process.env.LLM_IMAGE_KEY || "";
 process.env.LLM_IMAGE_MODEL || "cogview-3-flash";
 const FFPLAY_PATHS = process.env.FFPLAY_PATH ? [process.env.FFPLAY_PATH] : ["ffplay", "C:\\ffmpeg\\bin\\ffplay.exe"];
 const PIPER_SCRIPT = process.env.PIPER_SCRIPT || path$1.resolve(path$1.join(WORKSPACE_ROOT, "scripts", "piper_speak.py"));
-process.env.PIPER_MODEL || path$1.resolve(path$1.join(WORKSPACE_ROOT, "models", "piper", "zh_CN-huayan-medium.onnx"));
+const PIPER_MODEL = process.env.PIPER_MODEL || path$1.resolve(path$1.join(WORKSPACE_ROOT, "models", "piper", "zh_CN-huayan-medium.onnx"));
 const USE_LOCAL_TTS = process.env.USE_LOCAL_TTS === "true";
+parseInt(process.env.TTS_ROUTER_MAX_LATENCY_MS || "400", 10);
+parseInt(process.env.TTS_ROUTER_PING_TIMEOUT_MS || "3000", 10);
+parseInt(process.env.TTS_ROUTER_CACHE_TTL_MS || "5000", 10);
+parseFloat(process.env.TTS_ROUTER_QUALITY_WEIGHT || "0.6");
+parseFloat(process.env.TTS_ROUTER_LATENCY_WEIGHT || "0.4");
+parseInt(process.env.TTS_ROUTER_GOOD_LATENCY_MS || "150", 10);
 const EVOLUTION_SAFETY_MODE = process.env.EVOLUTION_SAFETY_MODE === "auto" ? "auto" : "review";
 process.env.FFMPEG_PATH ? [process.env.FFMPEG_PATH] : ["ffmpeg", "C:\\ffmpeg\\bin\\ffmpeg.exe"];
 const ASR_HOTWORDS = process.env.ASR_HOTWORDS ? process.env.ASR_HOTWORDS.split(",").map((w) => w.trim()) : [
@@ -394,11 +403,17 @@ parseInt(process.env.WINDOW_HEIGHT || "640", 10);
 const GGML_MODELS_DIR = process.env.GGML_MODELS_DIR || path$1.resolve(path$1.join(WORKSPACE_ROOT, "models", "ggml"));
 const INITIAL_HOTWORDS = process.env.HOTWORDS ? process.env.HOTWORDS.split(",").map((w) => w.trim()) : ["贝斯", "音阶", "空弦", "指型", "把位", "小确幸", "巴赫", "轻音", "和弦", "旋律", "节奏", "密钥", "DeepSeek", "字幕"];
 const ASR_INITIAL_PROMPT = process.env.ASR_INITIAL_PROMPT || "以下是关于泵站设备、音乐练习、日常陪伴和API密钥的语音对话";
+const ASR_HOTWORD_WINDOW_SIZE = parseInt(process.env.ASR_HOTWORD_WINDOW_SIZE || "16", 10);
+const ASR_HOTWORD_FREQ_THRESHOLD = parseInt(process.env.ASR_HOTWORD_FREQ_THRESHOLD || "3", 10);
+parseInt(process.env.ASR_HOTWORD_MAX_COUNT || "15", 10);
 const BEHAVIOR_WEIGHT_WINDOW_SIZE = parseInt(process.env.BEHAVIOR_WEIGHT_WINDOW_SIZE || "16", 10);
 const BEHAVIOR_WEIGHT_RECENCY_DECAY = parseFloat(process.env.BEHAVIOR_WEIGHT_RECENCY_DECAY || "0.92");
 const BEHAVIOR_WEIGHT_BASE_BOOST = parseFloat(process.env.BEHAVIOR_WEIGHT_BASE_BOOST || "0.3");
 const BEHAVIOR_WEIGHT_MIN_STRENGTH = parseFloat(process.env.BEHAVIOR_WEIGHT_MIN_STRENGTH || "2.0");
 const BEHAVIOR_WEIGHT_UPDATE_INTERVAL = parseInt(process.env.BEHAVIOR_WEIGHT_UPDATE_INTERVAL || "60000", 10);
+const BEHAVIOR_REINFORCE_BOOST = parseFloat(process.env.BEHAVIOR_REINFORCE_BOOST || "0.08");
+parseFloat(process.env.BEHAVIOR_REPEAT_SIMILARITY_THRESHOLD || "0.55");
+parseInt(process.env.BEHAVIOR_REPEAT_DETECTION_WINDOW || "8", 10);
 class StdioTransport {
   process;
   buffer = "";
@@ -1025,7 +1040,7 @@ const listFilesTool = buildTool({
   },
   isReadOnly: true
 });
-const asyncExec = require$$3$1.promisify(require$$0.exec);
+const asyncExec$2 = require$$3$1.promisify(require$$0.exec);
 const MAX_BUFFER = 1024 * 1024;
 const MAX_OUTPUT = 3e3;
 const ALLOWED_PREFIXES = [
@@ -1146,7 +1161,7 @@ const runCommandTool = buildTool({
       if (cleanCwd && !fs.existsSync(workDir)) {
         throw new Error(`子目录不存在: ${args.cwd}。请先用 write_file 创建文件（mkdir 会自动创建目录）`);
       }
-      const { stdout } = await asyncExec(command, {
+      const { stdout } = await asyncExec$2(command, {
         cwd: workDir,
         timeout: (args.timeout ?? 60) * 1e3,
         maxBuffer: MAX_BUFFER,
@@ -1176,6 +1191,9 @@ function createSeededRandom(seed) {
 }
 function resolveRandom(seed) {
   return seed !== void 0 ? createSeededRandom(seed) : Math.random;
+}
+function randomInt(rng, min, max) {
+  return Math.floor(rng() * (max - min + 1)) + min;
 }
 function randomPick(rng, arr) {
   return arr[Math.floor(rng() * arr.length)];
@@ -2672,7 +2690,7 @@ class SourceBuilder {
     this.usedConstraints = [];
   }
 }
-function tokenize$1(text) {
+function tokenize$2(text) {
   const tokens = /* @__PURE__ */ new Set();
   const enTokens = text.toLowerCase().split(/[^a-z0-9一-鿿]+/g).filter((t) => t.length > 1 && /[a-z0-9]/.test(t));
   for (const t of enTokens) tokens.add(t);
@@ -2683,8 +2701,8 @@ function tokenize$1(text) {
   return tokens;
 }
 function jaccardSimilarity(a, b) {
-  const setA = tokenize$1(a);
-  const setB = tokenize$1(b);
+  const setA = tokenize$2(a);
+  const setB = tokenize$2(b);
   const union = /* @__PURE__ */ new Set([...setA, ...setB]);
   if (union.size === 0) return 0;
   let intersection = 0;
@@ -3210,7 +3228,7 @@ const dreamCycles = sqliteCore.sqliteTable("dream_cycles", {
 });
 const memories = sqliteCore.sqliteTable("memories", {
   id: sqliteCore.text("id").primaryKey(),
-  type: sqliteCore.text("type", { enum: ["user_fact", "interaction"] }).notNull(),
+  type: sqliteCore.text("type", { enum: ["user_fact", "interaction", "task_state", "user_profile", "fictional"] }).notNull(),
   content: sqliteCore.text("content").notNull(),
   confidence: sqliteCore.real("confidence").notNull().default(0.5),
   tier: sqliteCore.text("tier", { enum: ["permanent", "semi", "ephemeral"] }).notNull().default("ephemeral"),
@@ -5214,6 +5232,218 @@ function rowToMessage(row) {
     createdAt: row.created_at
   };
 }
+const DEFAULT_STATE = {
+  stage: "idle",
+  progress: 0,
+  summary: "",
+  errorCount: 0,
+  fixedCount: 0,
+  queueSize: 0,
+  lastRunAt: null,
+  schedulerState: "IDLE",
+  safetyMode: "auto",
+  consecutiveFailures: 0,
+  visible: true,
+  updatedAt: Date.now()
+};
+class EvolutionDashboardService {
+  state = { ...DEFAULT_STATE };
+  subs = new SubscriptionTracker();
+  mainWindow = null;
+  pushTimer = null;
+  /** 防抖间隔：避免事件风暴导致渲染器过载 */
+  static PUSH_DEBOUNCE_MS = 500;
+  constructor() {
+    this.registerEventListeners();
+  }
+  /** 设置目标渲染窗口 */
+  setWindow(win) {
+    this.mainWindow = win;
+    if (win && !win.isDestroyed()) {
+      this.pushState();
+    }
+  }
+  /** 获取当前仪表盘状态快照 */
+  getState() {
+    return { ...this.state };
+  }
+  /** 切换仪表盘可见性（同时控制鼠标穿透） */
+  toggleVisibility() {
+    this.state.visible = !this.state.visible;
+    this.pushState();
+    this.updateMouseThrough();
+    Logger.log("INFO", "evolution_dashboard_visibility", { visible: this.state.visible });
+    return this.state.visible;
+  }
+  /** 启用鼠标穿透模式（仪表盘完全隐藏时） */
+  enableMouseThrough() {
+    this.applyMouseThrough(true);
+  }
+  /** 禁用鼠标穿透模式（仪表盘显示时） */
+  disableMouseThrough() {
+    this.applyMouseThrough(false);
+  }
+  /** 直接设置 Electron 窗口的鼠标穿透属性 */
+  applyMouseThrough(enabled) {
+    const win = this.mainWindow;
+    if (!win || win.isDestroyed()) return;
+    if (process.platform !== "win32" && process.platform !== "linux") return;
+    try {
+      win.setIgnoreMouseEvents(enabled, { forward: true });
+    } catch {
+      try {
+        win.setIgnoreMouseEvents(enabled);
+      } catch {
+      }
+    }
+  }
+  /** 根据仪表盘状态同步鼠标穿透 */
+  updateMouseThrough() {
+    if (this.state.visible) {
+      this.disableMouseThrough();
+    } else {
+      this.enableMouseThrough();
+    }
+  }
+  /** 销毁服务，清理订阅 */
+  destroy() {
+    this.subs.dispose();
+    if (this.pushTimer) {
+      clearTimeout(this.pushTimer);
+      this.pushTimer = null;
+    }
+  }
+  // ==================== 事件监听注册 ====================
+  registerEventListeners() {
+    eventBus.track(
+      "evolution.cycle.started",
+      (p) => {
+        this.update({
+          stage: "analyzing",
+          progress: 10,
+          summary: "进化周期启动中…",
+          updatedAt: Date.now()
+        });
+      },
+      this.subs,
+      "dashboard:evolution_start"
+    );
+    eventBus.track(
+      "evolution.scheduler.state",
+      (p) => {
+        this.update({
+          schedulerState: p.to || p.state || "UNKNOWN",
+          updatedAt: Date.now()
+        });
+      },
+      this.subs,
+      "dashboard:scheduler_state"
+    );
+    eventBus.track(
+      "pipeline.started",
+      (p) => {
+        this.update({
+          stage: "collecting",
+          progress: 30,
+          summary: `采集问题信号并自动修复中…`,
+          updatedAt: Date.now()
+        });
+      },
+      this.subs,
+      "dashboard:pipeline_started"
+    );
+    eventBus.track(
+      "pipeline.completed",
+      (p) => {
+        const collected = p.totalCollected ?? p.collected ?? 0;
+        const fixed = p.totalFixed ?? p.fixed ?? 0;
+        const failed = p.totalFailed ?? p.failed ?? 0;
+        const queue = p.queueSize ?? p.queueRemaining ?? p.queue ?? 0;
+        this.update({
+          stage: collected === 0 ? "idle" : "verifying",
+          progress: 100,
+          summary: collected === 0 ? "未检测到问题，代码库状态良好" : `采集 ${collected} 个问题，自动修复 ${fixed} 个${failed > 0 ? `，${failed} 个失败` : ""}`,
+          errorCount: failed,
+          fixedCount: fixed,
+          queueSize: queue,
+          updatedAt: Date.now()
+        });
+      },
+      this.subs,
+      "dashboard:pipeline_completed"
+    );
+    eventBus.track(
+      "evolution.cycle.completed",
+      (p) => {
+        const success = p.success ?? false;
+        this.update({
+          stage: success ? "idle" : "error",
+          progress: success ? 100 : 0,
+          summary: p.summary || (success ? "进化周期完成" : "进化周期失败"),
+          errorCount: success ? this.state.errorCount : this.state.errorCount + 1,
+          consecutiveFailures: p.failures ?? this.state.consecutiveFailures,
+          lastRunAt: p.timestamp || Date.now(),
+          updatedAt: Date.now()
+        });
+      },
+      this.subs,
+      "dashboard:evolution_done"
+    );
+    eventBus.track(
+      "pipeline.errored",
+      (p) => {
+        this.update({
+          stage: "error",
+          summary: `管道执行错误: ${p.error || "未知错误"}`,
+          errorCount: this.state.errorCount + 1,
+          updatedAt: Date.now()
+        });
+      },
+      this.subs,
+      "dashboard:pipeline_errored"
+    );
+    eventBus.track(
+      "stability.score.updated",
+      (p) => {
+        if (p.status === "critical") {
+          this.update({
+            stage: "cooldown",
+            summary: `系统不稳定，进入冷却（分数: ${p.score?.toFixed?.(2) ?? p.score}）`,
+            updatedAt: Date.now()
+          });
+        }
+      },
+      this.subs,
+      "dashboard:stability"
+    );
+  }
+  // ==================== 内部方法 ====================
+  /** 合并更新并防抖推送 */
+  update(patch) {
+    Object.assign(this.state, patch);
+    this.schedulePush();
+  }
+  /** 防抖推送 — 合并短时间内的多次更新 */
+  schedulePush() {
+    if (this.pushTimer) {
+      clearTimeout(this.pushTimer);
+    }
+    this.pushTimer = setTimeout(() => {
+      this.pushTimer = null;
+      this.pushState();
+    }, EvolutionDashboardService.PUSH_DEBOUNCE_MS);
+  }
+  /** 立即推送当前状态到渲染进程 */
+  pushState() {
+    const win = this.mainWindow;
+    if (!win || win.isDestroyed()) return;
+    try {
+      win.webContents.send("evolution:dashboard", this.getState());
+    } catch (err) {
+      Logger.log("WARN", "evolution_dashboard_push_failed", { error: String(err) });
+    }
+  }
+}
 function isWallpaperMode() {
   return !!process.env.WALLPAPER_ENGINE;
 }
@@ -5375,7 +5605,6 @@ function createWindow(stateManager) {
   });
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow$1.loadURL(process.env.ELECTRON_RENDERER_URL);
-    mainWindow$1.webContents.openDevTools();
   } else {
     mainWindow$1.loadFile(path$1.join(__dirname, "../renderer/index.html"));
   }
@@ -5407,7 +5636,6 @@ function createAgentWindow() {
   agentWindow.setTitle("Agent — Akemi Mio");
   if (process.env.ELECTRON_RENDERER_URL) {
     agentWindow.loadURL(process.env.ELECTRON_RENDERER_URL.replace("index.html", "agent.html"));
-    agentWindow.webContents.openDevTools();
   } else {
     agentWindow.loadFile(path$1.join(__dirname, "../renderer/agent.html"));
   }
@@ -6245,6 +6473,99 @@ class TestCollector {
     return problems;
   }
 }
+class EslintCollector {
+  name = "eslint";
+  source = "lint";
+  projectRoot;
+  lastRun = 0;
+  minIntervalMs = 15 * 60 * 1e3;
+  constructor(projectRoot) {
+    this.projectRoot = projectRoot;
+  }
+  shouldRun() {
+    if (!fs.existsSync(this.projectRoot)) return false;
+    if (Date.now() - this.lastRun < this.minIntervalMs) return false;
+    return true;
+  }
+  async collect() {
+    this.lastRun = Date.now();
+    try {
+      const stdout = require$$0.execSync(
+        "npx eslint src/ --ext .ts,.tsx --format=compact 2>&1 || true",
+        {
+          cwd: this.projectRoot,
+          timeout: 6e4,
+          windowsHide: true,
+          encoding: "utf-8",
+          maxBuffer: 2 * 1024 * 1024
+        }
+      );
+      const problems = this.parseEslintOutput(stdout);
+      Logger.log("INFO", "eslint_collector_done", { count: problems.length });
+      return problems;
+    } catch (err) {
+      Logger.log("WARN", "eslint_collector_error", { error: err.message });
+      return [];
+    }
+  }
+  parseEslintOutput(output) {
+    const problems = [];
+    const seen = /* @__PURE__ */ new Set();
+    const lineRegex = /^(.+?):\s+line\s+(\d+),\s+col\s+\d+,\s+(Error|Warning)\s+-\s+(.+?)\s+\((.+?)\)\s*$/gm;
+    let match2;
+    while ((match2 = lineRegex.exec(output)) !== null) {
+      const [, file, lineStr, severity, message, rule] = match2;
+      const line = parseInt(lineStr, 10);
+      const normalizedFile = file.replace(/\\/g, "/");
+      const dedupKey = `lint:${normalizedFile}:${line}:${rule}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      problems.push({
+        id: `lint:${normalizedFile}:${line}:${rule}`,
+        source: "lint",
+        severity: severity === "Error" ? "error" : "warning",
+        title: `${rule}: ${message.slice(0, 80)}`,
+        description: message,
+        file: normalizedFile,
+        line,
+        estimatedCostChars: message.length + 50,
+        lastSeen: Date.now(),
+        occurrenceCount: 1,
+        context: {
+          raw: match2[0],
+          metadata: { rule }
+        }
+      });
+    }
+    if (problems.length === 0 && output.trim()) {
+      const fallbackRegex = /^(.+?):\s+line\s+(\d+),\s+col\s+\d+,\s+(Error|Warning)\s+-\s+(.+?)\s*$/gm;
+      while ((match2 = fallbackRegex.exec(output)) !== null) {
+        const [, file, lineStr, severity, message] = match2;
+        const line = parseInt(lineStr, 10);
+        const normalizedFile = file.replace(/\\/g, "/");
+        const dedupKey = `lint:${normalizedFile}:${line}:${message.slice(0, 40)}`;
+        if (seen.has(dedupKey)) continue;
+        seen.add(dedupKey);
+        problems.push({
+          id: `lint:${normalizedFile}:${line}:${message.slice(0, 40)}`,
+          source: "lint",
+          severity: severity === "Error" ? "error" : "warning",
+          title: message.slice(0, 80),
+          description: message,
+          file: normalizedFile,
+          line,
+          estimatedCostChars: message.length + 50,
+          lastSeen: Date.now(),
+          occurrenceCount: 1,
+          context: {
+            raw: match2[0]
+          }
+        });
+      }
+    }
+    return problems;
+  }
+}
 function encrypt(plaintext) {
   if (electron.safeStorage.isEncryptionAvailable()) {
     const buf = electron.safeStorage.encryptString(plaintext);
@@ -6355,8 +6676,7 @@ class CredentialsManager {
 const credentialsManager = new CredentialsManager();
 class ClaudeCodeExecutor {
   name = "agent-sdk";
-  /** 只保留 tsc — test/lint 用 LLM 修复成本远高于价值 */
-  supportedSources = ["tsc"];
+  supportedSources = ["tsc", "lint"];
   timeoutMs = 18e4;
   lastExecuteAt = 0;
   minIntervalMs = 1e4;
@@ -6381,9 +6701,9 @@ class ClaudeCodeExecutor {
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
         ANTHROPIC_AUTH_TOKEN: llmKey,
         ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic",
-        ANTHROPIC_MODEL: "deepseek-v4-pro",
-        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro",
-        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro",
+        ANTHROPIC_MODEL: "deepseek-v4-flash",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-flash",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash",
         CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"
       };
@@ -6432,8 +6752,11 @@ class ClaudeCodeExecutor {
     }
   }
   buildPrompt(problem) {
+    const isLint = problem.source === "lint";
+    const checkCmd = isLint ? "npx eslint src/ --ext .ts,.tsx --format=compact" : "npx tsc --noEmit -p tsconfig.node.json";
+    const category = isLint ? "ESLint" : "TypeScript 编译";
     return [
-      `# 修复以下 TypeScript 编译错误`,
+      `# 修复以下 ${category} 错误`,
       ``,
       `**文件**: ${problem.file || "(未知)"}${problem.line ? `:${problem.line}` : ""}`,
       `**错误**: ${problem.title}`,
@@ -6442,7 +6765,7 @@ class ClaudeCodeExecutor {
       `## 要求`,
       `- 只修改相关文件`,
       `- 保持现有代码风格`,
-      `- 完成后运行 npx tsc --noEmit -p tsconfig.node.json 验证`,
+      `- 完成后运行 \`${checkCmd}\` 验证`,
       `- 如果问题已不存在，回复 SKIP`,
       ``,
       `## 输出格式`,
@@ -6455,7 +6778,7 @@ class ClaudeCodeExecutor {
 }
 class DeepSeekExecutor {
   name = "deepseek-agent";
-  supportedSources = ["tsc"];
+  supportedSources = ["tsc", "lint"];
   timeoutMs = 18e4;
   pool = null;
   lastExecuteAt = 0;
@@ -6492,8 +6815,11 @@ class DeepSeekExecutor {
       };
     }
     try {
+      const isLint = problem.source === "lint";
+      const checkCmd = isLint ? "npx eslint src/ --ext .ts,.tsx --format=compact" : "npx tsc --noEmit -p tsconfig.node.json";
+      const category = isLint ? "ESLint" : "TypeScript 编译";
       const prompt = [
-        `# 修复以下 TypeScript 编译错误`,
+        `# 修复以下 ${category} 错误`,
         ``,
         `**文件**: ${problem.file || "(未知)"}${problem.line ? `:${problem.line}` : ""}`,
         `**错误**: ${problem.title}`,
@@ -6502,7 +6828,7 @@ class DeepSeekExecutor {
         `## 要求`,
         `1. 使用 Read 工具读取相关文件`,
         `2. 使用 Edit 或 Write 工具修复错误`,
-        `3. 完成后运行 \`npx tsc --noEmit -p tsconfig.node.json\` 验证`,
+        `3. 完成后运行 \`${checkCmd}\` 验证`,
         `4. 如果问题已不存在，回复 SKIP`,
         ``,
         `## 输出格式`,
@@ -6573,6 +6899,7 @@ class PipelineOrchestrator {
   initDefaults(mcpManager) {
     this.addCollector(new TscCollector(this.config.projectRoot));
     this.addCollector(new TestCollector(this.config.projectRoot));
+    this.addCollector(new EslintCollector(this.config.projectRoot));
     this.addExecutor(new ClaudeCodeExecutor());
     if (mcpManager) {
       this.addExecutor(new DeepSeekExecutor(mcpManager));
@@ -6787,9 +7114,9 @@ class CreativityExecutor {
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
         ANTHROPIC_AUTH_TOKEN: llmKey,
         ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic",
-        ANTHROPIC_MODEL: "deepseek-v4-pro",
-        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro",
-        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro",
+        ANTHROPIC_MODEL: "deepseek-v4-flash",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-flash",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash",
         CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"
       };
@@ -7277,6 +7604,8 @@ function getProceduralMemory() {
 }
 function setHealthManager(hm) {
 }
+function setTtsService(ts) {
+}
 const createDevPlanTool = buildTool({
   name: "create_dev_plan",
   description: "创建开发计划，记录要实现的步骤",
@@ -7447,6 +7776,15 @@ const abandonPlanTool = buildTool({
   },
   isReadOnly: false
 });
+const asyncExec$1 = require$$3$1.promisify(require$$0.exec);
+async function safeExec(cmd, timeout, fallback) {
+  try {
+    const { stdout } = await asyncExec$1(cmd, { cwd: PROJECT_ROOT, encoding: "utf-8", timeout });
+    return stdout.trim();
+  } catch {
+    return fallback;
+  }
+}
 const analyzeCodebaseTool = buildTool({
   name: "analyze_codebase",
   description: "分析项目状态：测试结果、lint 错误、TODO 数量",
@@ -7462,49 +7800,25 @@ const analyzeCodebaseTool = buildTool({
       let report = "";
       const isQuick = args.quick !== false;
       report += "【项目状态分析】\n";
-      try {
-        const todos = require$$0.execSync('git grep -n "TODO\\|FIXME\\|HACK" -- "*.ts" "*.tsx" "*.js" "*.jsx" 2>nul || echo 0', {
-          cwd: PROJECT_ROOT,
-          encoding: "utf-8",
-          timeout: 1e4
-        }).trim();
-        const todoCount = todos === "0" ? 0 : todos.split("\n").length;
-        report += `- TODO/FIXME: ${todoCount} 处
+      const todos = await safeExec('git grep -n "TODO\\|FIXME\\|HACK" -- "*.ts" "*.tsx" "*.js" "*.jsx" 2>nul || echo 0', 1e4, "0");
+      const todoCount = todos === "0" || todos === "" ? 0 : todos.split("\n").length;
+      report += `- TODO/FIXME: ${todoCount} 处
 `;
-      } catch {
-        report += "- TODO: 检测失败\n";
-      }
       if (!isQuick) {
-        try {
-          const testOut = require$$0.execSync("npx vitest run --reporter=verbose 2>&1", {
-            cwd: PROJECT_ROOT,
-            encoding: "utf-8",
-            timeout: 6e4
-          }).trim();
+        const testOut = await safeExec("npx vitest run --reporter=verbose 2>&1", 6e4, "");
+        if (testOut) {
           const lines = testOut.split("\n");
           const passLine = lines.find((l) => l.includes("Tests") && l.includes("passed"));
           report += `- 测试结果: ${passLine || testOut.slice(-200)}
 `;
-        } catch (err) {
-          const out = String(err.stdout || err.message || "").trim();
-          const lines = out.split("\n");
-          const failLine = lines.find((l) => l.includes("Tests") || l.includes("failed"));
-          report += `- 测试结果: ${failLine || out.slice(-200)}
-`;
+        } else {
+          report += "- 测试结果: 无输出\n";
         }
       }
-      try {
-        const gitStatus = require$$0.execSync("git status --short 2>&1", {
-          cwd: PROJECT_ROOT,
-          encoding: "utf-8",
-          timeout: 5e3
-        }).trim();
-        const modifiedCount = gitStatus ? gitStatus.split("\n").length : 0;
-        report += `- 未提交修改: ${modifiedCount} 个文件
+      const gitStatus = await safeExec("git status --short 2>&1", 5e3, "");
+      const modifiedCount = gitStatus ? gitStatus.split("\n").filter(Boolean).length : 0;
+      report += `- 未提交修改: ${modifiedCount} 个文件
 `;
-      } catch {
-        report += "- Git 状态: 检测失败\n";
-      }
       return formatToolResult(report.trim());
     } catch (err) {
       return formatToolError(err.message);
@@ -7606,6 +7920,339 @@ const rememberFactTool = buildTool({
     } catch (err) {
       return formatToolError(err.message);
     }
+  },
+  isReadOnly: false
+});
+let queueLock = false;
+const pendingQueue = [];
+function enqueue(fn) {
+  return new Promise((resolve, reject) => {
+    const run = async () => {
+      queueLock = true;
+      try {
+        const result = await fn();
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      } finally {
+        queueLock = false;
+        const next = pendingQueue.shift();
+        if (next) next();
+      }
+    };
+    if (queueLock) {
+      pendingQueue.push(run);
+    } else {
+      run();
+    }
+  });
+}
+const storeMemoryTool = buildTool({
+  name: "store_memory",
+  description: "存储一条记忆到记忆系统。支持 key（唯一标识）、content（内容）、metadata（元数据）。用于持久化重要信息、对话上下文、用户偏好等。如果 key 已存在则更新内容。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      key: {
+        type: "string",
+        description: '记忆的唯一标识，用于后续检索和更新。建议使用有意义的命名，如 "user_name"、"project_config"'
+      },
+      content: {
+        type: "string",
+        description: "记忆内容，可以是文本、结构化 JSON 字符串等"
+      },
+      metadata: {
+        type: "object",
+        description: '附加元数据，如 { type: "preference", confidence: 0.9, tags: ["important"] }',
+        properties: {
+          type: {
+            type: "string",
+            enum: ["user_fact", "interaction", "task_state", "user_profile", "fictional"],
+            description: "记忆类型"
+          },
+          confidence: { type: "number", description: "确信度 0-1，默认 0.7" },
+          tags: {
+            type: "array",
+            items: { type: "string" },
+            description: "标签列表"
+          }
+        }
+      }
+    },
+    required: ["key", "content"]
+  },
+  handler: async (args) => {
+    return enqueue(async () => {
+      try {
+        const ms = getMemoryService();
+        if (!ms) return formatToolError("记忆服务暂不可用");
+        const key = String(args.key);
+        const content = String(args.content);
+        const meta = args.metadata || {};
+        const memType = meta.type || "user_fact";
+        const confidence = typeof meta.confidence === "number" ? meta.confidence : 0.7;
+        const enrichedContent = `[${key}] ${content}`;
+        ms.addEntry(memType, enrichedContent, confidence, { tier: "semi" });
+        if (meta.tags && meta.tags.length > 0) {
+          const tagContent = `[tags:${key}] ${meta.tags.join(", ")}`;
+          ms.addEntry("user_fact", tagContent, 0.5, { tier: "ephemeral" });
+        }
+        return formatToolResult(`已存储记忆: key="${key}", 类型=${memType}, 置信度=${confidence}`);
+      } catch (err) {
+        return formatToolError(err.message);
+      }
+    });
+  },
+  isReadOnly: false
+});
+const retrieveMemoryTool = buildTool({
+  name: "retrieve_memory",
+  description: "检索记忆系统中的记忆。支持按 key 精确查找、按 query 语义搜索、按类型筛选。返回匹配的记忆条目及其元数据。用于对话管理、上下文恢复等场景。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "搜索查询文本。如果提供 key 则优先按 key 精确匹配，否则进行语义搜索"
+      },
+      key: {
+        type: "string",
+        description: "记忆的唯一标识 key。如果提供则直接按 key 查找，忽略 query"
+      },
+      options: {
+        type: "object",
+        description: "检索选项",
+        properties: {
+          topK: { type: "number", description: "返回的最大结果数，默认 5" },
+          minConfidence: { type: "number", description: "最低置信度阈值，默认 0.3" },
+          types: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["user_fact", "engineering", "summary", "knowledge_graph", "vector"]
+            },
+            description: "限定检索的记忆类型"
+          }
+        }
+      }
+    },
+    required: []
+  },
+  handler: async (args) => {
+    return enqueue(async () => {
+      try {
+        const ms = getMemoryService();
+        if (!ms) return formatToolError("记忆服务暂不可用");
+        const opts = args.options || {};
+        const topK = opts.topK || 5;
+        if (args.key) {
+          const keyStr = String(args.key);
+          const keyPrefix = `[${keyStr}] `;
+          const allEntries = ms.getEntries();
+          const matched = allEntries.filter((e) => e.content.startsWith(keyPrefix));
+          if (matched.length > 0) {
+            const formatted2 = matched.map((e) => {
+              const pureContent = e.content.startsWith(keyPrefix) ? e.content.slice(keyPrefix.length) : e.content;
+              return `- [${e.id}] (${e.type}, 置信度${e.confidence.toFixed(1)}, tier=${e.tier})
+  内容: ${pureContent.slice(0, 200)}`;
+            });
+            return formatToolResult(`检索到 ${matched.length} 条匹配 key="${keyStr}" 的记忆:
+${formatted2.join("\n")}`);
+          }
+          return formatToolResult(`未找到 key="${keyStr}" 的记忆。`);
+        }
+        if (args.query) {
+          const queryStr = String(args.query);
+          const results = await ms.unifiedQuery.query(queryStr, {
+            topK,
+            minConfidence: opts.minConfidence ?? 0.3,
+            types: opts.types
+          });
+          if (results.length === 0) {
+            return formatToolResult(`未找到与 "${queryStr}" 相关的记忆。`);
+          }
+          const formatted2 = results.map(
+            (r) => `- [${r.store}] (得分${r.score.toFixed(2)})
+  内容: ${r.content.slice(0, 200)}`
+          );
+          return formatToolResult(
+            `检索到 ${results.length} 条与 "${queryStr}" 相关的记忆:
+${formatted2.join("\n")}`
+          );
+        }
+        const entries = ms.getEntries().slice(-topK);
+        if (entries.length === 0) {
+          return formatToolResult("记忆系统为空。");
+        }
+        const formatted = entries.map(
+          (e) => `- [${e.id}] (${e.type}, 置信度${e.confidence.toFixed(1)}, tier=${e.tier})
+  内容: ${e.content.slice(0, 200)}`
+        );
+        return formatToolResult(`最近 ${entries.length} 条记忆:
+${formatted.join("\n")}`);
+      } catch (err) {
+        return formatToolError(err.message);
+      }
+    });
+  },
+  isReadOnly: true
+});
+const searchMemoriesTool = buildTool({
+  name: "search_memories",
+  description: "批量语义搜索记忆系统。接受查询文本（内部自动计算 embedding），返回 top_k 个最相似记忆。比 retrieve_memory 更轻量，专用于快速语义匹配场景。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "搜索查询文本，内部会自动转换为 embedding 向量进行余弦相似度匹配"
+      },
+      top_k: {
+        type: "number",
+        description: "返回的最大结果数，默认 5，范围 1-20"
+      },
+      min_score: {
+        type: "number",
+        description: "最低相似度阈值 0-1，默认 0.3。低于此分数的结果将被过滤"
+      }
+    },
+    required: ["query"]
+  },
+  handler: async (args) => {
+    return enqueue(async () => {
+      try {
+        const ms = getMemoryService();
+        if (!ms) return formatToolError("记忆服务暂不可用");
+        const query = String(args.query);
+        const topK = Math.min(Math.max(args.top_k || 5, 1), 20);
+        const minScore = args.min_score ?? 0.3;
+        const vectorContents = await ms.vector.query(query, topK);
+        const unifiedResults = await ms.unifiedQuery.query(query, {
+          topK: Math.ceil(topK / 2),
+          minConfidence: minScore
+        });
+        const seen = /* @__PURE__ */ new Set();
+        const merged = [];
+        for (const content of vectorContents) {
+          if (!seen.has(content)) {
+            seen.add(content);
+            merged.push({
+              content,
+              score: 0.6,
+              // VectorMemory 内部已用 cosineSimilarity > 0.5 过滤
+              source: "vector"
+            });
+          }
+        }
+        for (const r of unifiedResults) {
+          if (!seen.has(r.content)) {
+            seen.add(r.content);
+            merged.push({
+              content: r.content,
+              score: r.score,
+              source: r.store
+            });
+          }
+        }
+        const filtered = merged.filter((r) => r.score >= minScore).sort((a, b) => b.score - a.score).slice(0, topK);
+        if (filtered.length === 0) {
+          return formatToolResult(`未找到与 "${query}" 语义相似的记忆 (min_score=${minScore})。`);
+        }
+        const formatted = filtered.map(
+          (r) => `- [${r.source}] (相似度${r.score.toFixed(2)})
+  内容: ${r.content.slice(0, 200)}`
+        );
+        return formatToolResult(
+          `语义搜索 "${query}" 找到 ${filtered.length} 条记忆:
+${formatted.join("\n")}`
+        );
+      } catch (err) {
+        return formatToolError(err.message);
+      }
+    });
+  },
+  isReadOnly: true
+});
+const forgetMemoryTool = buildTool({
+  name: "forget_memory",
+  description: "删除记忆系统中的指定记忆。支持按 key（删除所有匹配 key 的记忆）或按 id（精确删除单条）删除。删除操作不可逆，请谨慎使用。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      key: {
+        type: "string",
+        description: "要删除的记忆 key。会删除所有内容以 [key] 开头的记忆条目"
+      },
+      id: {
+        type: "string",
+        description: "要删除的记忆 ID（精确删除单条）。与 key 二选一，优先使用 id"
+      },
+      dry_run: {
+        type: "boolean",
+        description: "如果为 true，仅返回将要删除的记忆而不实际执行删除，默认 false"
+      }
+    },
+    required: []
+  },
+  handler: async (args) => {
+    return enqueue(async () => {
+      try {
+        const ms = getMemoryService();
+        if (!ms) return formatToolError("记忆服务暂不可用");
+        if (!args.key && !args.id) {
+          return formatToolError("必须提供 key 或 id 参数之一");
+        }
+        const dryRun = args.dry_run === true;
+        if (args.id) {
+          const idStr = String(args.id);
+          const entries = ms.getEntries();
+          const target = entries.find((e) => e.id === idStr);
+          if (!target) {
+            return formatToolResult(`未找到 id="${idStr}" 的记忆。`);
+          }
+          if (dryRun) {
+            return formatToolResult(
+              `[DRY RUN] 将删除记忆: id="${target.id}", 内容="${target.content.slice(0, 100)}"`
+            );
+          }
+          const removed = ms.forgetEntry(idStr);
+          if (removed) {
+            ms.vector.forgetByContent(target.content);
+            ms.flush();
+            return formatToolResult(`已删除记忆: id="${idStr}", 内容="${target.content.slice(0, 100)}"`);
+          }
+          return formatToolError(`删除记忆失败: id="${idStr}"`);
+        }
+        if (args.key) {
+          const keyStr = String(args.key);
+          const keyPrefix = `[${keyStr}] `;
+          const entries = ms.getEntries();
+          const matched = entries.filter((e) => e.content.startsWith(keyPrefix));
+          if (matched.length === 0) {
+            return formatToolResult(`未找到 key="${keyStr}" 的记忆。`);
+          }
+          if (dryRun) {
+            const preview = matched.map((e) => `- id="${e.id}", 内容="${e.content.slice(0, 80)}"`).join("\n");
+            return formatToolResult(
+              `[DRY RUN] 将删除 ${matched.length} 条匹配 key="${keyStr}" 的记忆:
+${preview}`
+            );
+          }
+          let removedCount = 0;
+          for (const e of matched) {
+            if (ms.forgetEntry(e.id)) {
+              ms.vector.forgetByContent(e.content);
+              removedCount++;
+            }
+          }
+          ms.flush();
+          return formatToolResult(`已删除 ${removedCount} 条匹配 key="${keyStr}" 的记忆。`);
+        }
+        return formatToolError("未知错误");
+      } catch (err) {
+        return formatToolError(err.message);
+      }
+    });
   },
   isReadOnly: false
 });
@@ -8085,12 +8732,12 @@ function applyCompare(op, actual, expected) {
   }
 }
 function evaluateCompound(expr, actual) {
-  const tokens = tokenize(expr);
+  const tokens = tokenize$1(expr);
   if (tokens.length === 0) return false;
   let pos = 0;
   return parseOr(tokens, actual, () => pos);
 }
-function tokenize(expr) {
+function tokenize$1(expr) {
   const tokens = [];
   let i = 0;
   while (i < expr.length) {
@@ -10257,6 +10904,307 @@ const writingSystemTool = buildTool({
     }
   }
 });
+class WritingMemoryContinuation {
+  /**
+   * 查询与给定故事名相关的记忆条目。
+   *
+   * 检索范围：
+   * - type 为 'writing_feedback' 且 content 包含 storyName 的记忆
+   * - type 为 'user_fact' 且 content 同时包含 storyName 和反馈关键词的记忆
+   */
+  queryStoryFeedback(storyName) {
+    const ms = getMemoryService();
+    if (!ms) {
+      Logger.log("WARN", "writing_memory_no_service", { storyName });
+      return [];
+    }
+    const allEntries = ms.getEntries();
+    const results = [];
+    const feedbackKeywords = [
+      "反馈",
+      "意见",
+      "建议",
+      "修改",
+      "改",
+      "喜欢",
+      "不喜欢",
+      "觉得",
+      "感觉",
+      "情绪",
+      "偏好",
+      "风格",
+      "设定",
+      "情节",
+      "角色",
+      "描写",
+      "节奏",
+      "氛围",
+      "画面"
+    ];
+    for (const entry of allEntries) {
+      if (entry.type !== "writing_feedback" && entry.type !== "user_fact") continue;
+      const content = entry.content.toLowerCase();
+      const name2 = storyName.toLowerCase();
+      if (!content.includes(name2)) continue;
+      let category = "general";
+      let feedback = entry.content;
+      if (entry.type === "writing_feedback") {
+        if (entry.structuredData) {
+          try {
+            const parsed = JSON.parse(entry.structuredData);
+            category = parsed.category || "general";
+            feedback = parsed.feedback || entry.content;
+          } catch {
+            category = "general";
+          }
+        }
+      } else {
+        const hasFeedbackKeyword = feedbackKeywords.some((kw) => content.includes(kw));
+        if (!hasFeedbackKeyword) continue;
+        if (/情绪|喜欢|不喜欢|感觉/.test(content)) category = "emotion_preference";
+        else if (/设定|背景|世界/.test(content)) category = "setting_disagreement";
+        else if (/文笔|文风|风格|描写|修辞/.test(content)) category = "style_feedback";
+        else if (/情节|剧情|走向|发展|建议/.test(content)) category = "plot_suggestion";
+      }
+      results.push({
+        id: entry.id,
+        storyName,
+        feedback,
+        category,
+        timestamp: entry.updatedAt || entry.createdAt
+      });
+    }
+    results.sort((a, b) => b.timestamp - a.timestamp);
+    Logger.log("INFO", "writing_memory_query", {
+      storyName,
+      found: results.length
+    });
+    return results;
+  }
+  /**
+   * 将记忆结果按时间排序并压缩为 300 字以内摘要。
+   *
+   * 策略：
+   * - 以「最近的反馈优先」原则排列
+   * - 按分类分组展示关键意见
+   * - 超过 300 字时截断，保留最新的条目
+   */
+  buildReaderExpectationSummary(storyName) {
+    const entries = this.queryStoryFeedback(storyName);
+    if (entries.length === 0) {
+      return { summary: "", entryCount: 0, isEmpty: true };
+    }
+    const byCategory = {};
+    for (const entry of entries) {
+      if (!byCategory[entry.category]) byCategory[entry.category] = [];
+      byCategory[entry.category].push(entry);
+    }
+    const categoryLabels = {
+      emotion_preference: "情绪偏好",
+      setting_disagreement: "背景设定",
+      style_feedback: "文风反馈",
+      plot_suggestion: "情节建议",
+      general: "其他反馈"
+    };
+    const parts = [];
+    const MAX_LENGTH = 300;
+    const recentEntries = entries.slice(0, 3);
+    const recentLines = [];
+    for (const e of recentEntries) {
+      const label = categoryLabels[e.category] || "反馈";
+      const truncated = e.feedback.length > 80 ? e.feedback.slice(0, 80) + "…" : e.feedback;
+      recentLines.push(`[${label}] ${truncated}`);
+    }
+    if (recentLines.length > 0) {
+      parts.push(`关于《${storyName}》的最新读者反馈：`);
+      parts.push(...recentLines);
+    }
+    const categorySummary = [];
+    for (const [cat, items] of Object.entries(byCategory)) {
+      const label = categoryLabels[cat] || "反馈";
+      const opinionCount = items.length;
+      if (opinionCount >= 2) {
+        categorySummary.push(`${label}(${opinionCount}条)`);
+      }
+    }
+    if (categorySummary.length > 0) {
+      parts.push(`反馈分布：${categorySummary.join("、")}。`);
+    }
+    if (entries.length > 5) {
+      parts.push(`共 ${entries.length} 条相关反馈。`);
+    }
+    let summary = parts.join("\n");
+    if (summary.length > MAX_LENGTH) {
+      const lines = summary.split("\n");
+      const result = [];
+      let len = 0;
+      for (const line of lines) {
+        if (len + line.length + 1 > MAX_LENGTH) break;
+        result.push(line);
+        len += line.length + 1;
+      }
+      if (result.length < 2) {
+        summary = summary.slice(0, MAX_LENGTH - 3) + "…";
+      } else {
+        summary = result.join("\n") + "\n…";
+      }
+    }
+    Logger.log("INFO", "writing_memory_summary_built", {
+      storyName,
+      entryCount: entries.length,
+      summaryLength: summary.length
+    });
+    return {
+      summary,
+      entryCount: entries.length,
+      isEmpty: false
+    };
+  }
+  /**
+   * 获取格式化的读者期望上下文（用于注入 system prompt / writing prompt）
+   *
+   * 格式示例：
+   * ---
+   * 【读者期望摘要】
+   * 关于《工业颂歌》的最新读者反馈：
+   * [情绪偏好] 前几章的工业感很强，但希望第九章加入一些日常生活场景。
+   * [背景设定] 主角的工作环境可以更具体一些。
+   * ...
+   * 请参考以上反馈调整续写方向，让故事更贴合读者期待。
+   * ---
+   */
+  getReaderExpectationContext(storyName) {
+    const result = this.buildReaderExpectationSummary(storyName);
+    if (result.isEmpty) return "";
+    const lines = [
+      "---",
+      "【读者期望摘要】",
+      result.summary,
+      "",
+      "以上是读者对前几章的反馈汇总。续写时请参考以上意见调整方向，",
+      "使新章节更贴合读者偏好。",
+      "---"
+    ];
+    return lines.join("\n");
+  }
+  /**
+   * 存储用户对故事的反馈到 Memory。
+   *
+   * 存储为 writing_feedback 类型的记忆条目，
+   * 包含结构化数据（故事名、反馈内容、分类）。
+   * tier 默认为 semi（半永久层），确保不会被快速清理。
+   */
+  storeFeedback(storyName, feedback, category = "general") {
+    const ms = getMemoryService();
+    if (!ms) {
+      Logger.log("WARN", "writing_memory_store_no_service", { storyName });
+      return;
+    }
+    const content = `【${storyName}反馈】${category}: ${feedback.slice(0, 200)}`;
+    JSON.stringify({
+      storyName,
+      feedback: feedback.slice(0, 500),
+      category
+    });
+    ms.addEntry("writing_feedback", content, 0.8, { tier: "semi" });
+    ms.addFact(`用户对《${storyName}》的${category}反馈：${feedback.slice(0, 150)}`, 0.6, { tier: "semi" });
+    Logger.log("INFO", "writing_memory_feedback_stored", {
+      storyName,
+      category,
+      feedbackLength: feedback.length
+    });
+  }
+  /**
+   * 批量存储多个反馈条目。
+   */
+  storeFeedbackBatch(storyName, feedbacks) {
+    let count = 0;
+    for (const f of feedbacks) {
+      this.storeFeedback(storyName, f.feedback, f.category);
+      count++;
+    }
+    return count;
+  }
+}
+const writingMemoryTool = buildTool({
+  name: "writing_memory",
+  description: "创作记忆管理 — 查询读者对小说章节的历史反馈记忆；生成「读者期望摘要」（压缩为300字内）；存储新的读者反馈。在续写新章节前应先调用 get_summary 获取读者期望摘要附加到 prompt 底部。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        description: "操作类型:\n- search_feedback: 查询历史反馈（返回原始记忆条目列表）\n- get_summary: 生成读者期望摘要（压缩为 300 字以内，含分类汇总）\n- store_feedback: 存储新的用户反馈"
+      },
+      storyName: {
+        type: "string",
+        description: '故事名称（如 "工业颂歌"）。search_feedback / get_summary / store_feedback 均需要。'
+      },
+      feedback: {
+        type: "string",
+        description: "用户反馈内容。store_feedback 时需要。"
+      },
+      category: {
+        type: "string",
+        description: '反馈分类（store_feedback 时需要，search_feedback/get_summary 可选过滤）：\n- emotion_preference: 情绪偏好（如 "喜欢悲壮感""轻松日常"）\n- setting_disagreement: 背景设定分歧（如 "工业背景不够具体"）\n- style_feedback: 文风反馈（如 "描写过于冗长"）\n- plot_suggestion: 情节建议（如 "建议加入角色回忆线"）\n- general: 一般反馈'
+      }
+    },
+    required: ["action"]
+  },
+  isReadOnly: false,
+  handler: async (args) => {
+    const { action, storyName, feedback, category } = args;
+    const service = new WritingMemoryContinuation();
+    try {
+      switch (action) {
+        case "search_feedback": {
+          if (!storyName) return formatToolError("需要 storyName");
+          const entries = service.queryStoryFeedback(storyName);
+          if (entries.length === 0) {
+            return formatToolResult("暂无关于《" + storyName + "》的反馈记忆。");
+          }
+          const formatted = entries.map(
+            (e) => `[${e.category}] (${new Date(e.timestamp).toLocaleString("zh-CN")}) ${e.feedback.slice(0, 200)}`
+          );
+          return formatToolResult(
+            `关于《${storyName}》的 ${entries.length} 条反馈：
+` + formatted.join("\n")
+          );
+        }
+        case "get_summary": {
+          if (!storyName) return formatToolError("需要 storyName");
+          const context = service.getReaderExpectationContext(storyName);
+          if (!context) {
+            return formatToolResult(
+              "暂无关于《" + storyName + "》的读者反馈。直接按原始方向续写即可。"
+            );
+          }
+          return formatToolResult(context);
+        }
+        case "store_feedback": {
+          if (!storyName) return formatToolError("需要 storyName");
+          if (!feedback) return formatToolError("需要 feedback");
+          const validCategories = [
+            "emotion_preference",
+            "setting_disagreement",
+            "style_feedback",
+            "plot_suggestion",
+            "general"
+          ];
+          const cat = category && validCategories.includes(category) ? category : "general";
+          service.storeFeedback(storyName, feedback, cat);
+          return formatToolResult(
+            `✓ 已保存对《${storyName}》的反馈（分类：${cat}）。下次续写时将参考此反馈。`
+          );
+        }
+        default:
+          return formatToolError(`未知操作: ${action}。支持的操作为：search_feedback, get_summary, store_feedback。`);
+      }
+    } catch (e) {
+      return formatToolError(`创作记忆操作失败: ${e.message}`);
+    }
+  }
+});
 let _comfyUI = null;
 function setComfyUIManager(mgr) {
   _comfyUI = mgr;
@@ -11188,6 +12136,7 @@ const SkillAgentTools = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.def
   setSubAgentPool,
   spawnSkillAgentTool
 }, Symbol.toStringTag, { value: "Module" }));
+const asyncExec = require$$3$1.promisify(require$$0.exec);
 const SOCIAL_DIR = path$1.join(WORKSPACE.evolution, "social");
 const PIPELINE_SCRIPT = path$1.join(SOCIAL_DIR, "pipeline.mjs");
 const socialPipelineTool = buildTool({
@@ -11205,14 +12154,13 @@ const socialPipelineTool = buildTool({
   },
   handler: async (input) => {
     try {
-      const result = require$$0.execSync(`node "${PIPELINE_SCRIPT}" ${input.args}`, {
+      const { stdout } = await asyncExec(`node "${PIPELINE_SCRIPT}" ${input.args}`, {
         cwd: SOCIAL_DIR,
         timeout: 12e4,
         maxBuffer: 1024 * 1024,
-        encoding: "utf-8",
-        windowsHide: true
+        encoding: "utf-8"
       });
-      return formatToolResult(result.trim() || "执行完成（无输出）");
+      return formatToolResult(stdout.trim() || "执行完成（无输出）");
     } catch (err) {
       return formatToolError(`pipeline 执行失败: ${err.message || String(err)}`);
     }
@@ -11338,6 +12286,1747 @@ ${lines.join("\n")}`);
     } catch (err) {
       return formatToolError(`查询趋势失败: ${err.message}`);
     }
+  },
+  isReadOnly: true
+});
+function findFfplay() {
+  for (const p of FFPLAY_PATHS) {
+    if (p === "ffplay" || fs.existsSync(p)) return p;
+  }
+  return "ffplay";
+}
+const PING_HOSTS = [
+  { host: "speech.microsoft.com", port: 443 },
+  // Azure Speech (edge-tts 后端)
+  { host: "api.github.com", port: 443 }
+  // 通用互联网可达性
+];
+class NetworkMonitor {
+  /** 缓存的网络状态 */
+  lastStatus = null;
+  /** 缓存 TTL（毫秒） */
+  cacheTtlMs;
+  /** 检测超时（毫秒） */
+  timeoutMs;
+  /** 进行中的检测 Promise（防止并发检测） */
+  pendingCheck = null;
+  constructor(cacheTtlMs = 5e3, timeoutMs = 3e3) {
+    this.cacheTtlMs = cacheTtlMs;
+    this.timeoutMs = timeoutMs;
+  }
+  /**
+   * 获取当前网络状态。
+   * 如果缓存有效则直接返回，否则发起检测。
+   */
+  async getStatus() {
+    const now = Date.now();
+    if (this.lastStatus && now - this.lastStatus.checkedAt < this.cacheTtlMs) {
+      return this.lastStatus;
+    }
+    if (this.pendingCheck) {
+      return this.pendingCheck;
+    }
+    this.pendingCheck = this.checkNetwork();
+    try {
+      const result = await this.pendingCheck;
+      this.lastStatus = result;
+      return result;
+    } finally {
+      this.pendingCheck = null;
+    }
+  }
+  /**
+   * 强制刷新网络状态（忽略缓存）。
+   */
+  async refresh() {
+    this.lastStatus = null;
+    return this.getStatus();
+  }
+  /** 获取缓存的状态（不发起新检测） */
+  getCachedStatus() {
+    return this.lastStatus;
+  }
+  /** 网络是否可用（便捷方法） */
+  async isAvailable() {
+    const status = await this.getStatus();
+    return status.available;
+  }
+  /** 获取当前延迟（便捷方法） */
+  async getLatency() {
+    const status = await this.getStatus();
+    return status.latencyMs;
+  }
+  /** 清除缓存 */
+  clearCache() {
+    this.lastStatus = null;
+  }
+  // ── 私有：网络检测 ──
+  /**
+   * 检测网络可达性和延迟。
+   *
+   * 策略：依次尝试多个目标，测量 DNS 解析 + TCP 连接的总延迟。
+   * 第一个成功的目标即返回其延迟。
+   */
+  async checkNetwork() {
+    for (const target of PING_HOSTS) {
+      try {
+        const t0 = Date.now();
+        await promises.lookup(target.host, { family: 4 });
+        await new Promise((resolve, reject) => {
+          const socket = net.createConnection({
+            host: target.host,
+            port: target.port,
+            timeout: this.timeoutMs
+          });
+          const timer = setTimeout(() => {
+            socket.destroy();
+            reject(new Error("TCP connect timeout"));
+          }, this.timeoutMs);
+          socket.on("connect", () => {
+            clearTimeout(timer);
+            socket.destroy();
+            resolve();
+          });
+          socket.on("error", (err) => {
+            clearTimeout(timer);
+            socket.destroy();
+            reject(err);
+          });
+        });
+        const latencyMs = Date.now() - t0;
+        Logger.log("DEBUG", "network_monitor_check", {
+          target: `${target.host}:${target.port}`,
+          latencyMs
+        });
+        return {
+          available: true,
+          latencyMs,
+          checkedAt: Date.now(),
+          target: `${target.host}:${target.port}`
+        };
+      } catch (err) {
+        Logger.log("DEBUG", "network_monitor_target_failed", {
+          target: `${target.host}:${target.port}`,
+          error: String(err).slice(0, 100)
+        });
+        continue;
+      }
+    }
+    Logger.log("WARN", "network_monitor_all_unavailable", {
+      targets: PING_HOSTS.map((t) => t.host).join(", ")
+    });
+    return {
+      available: false,
+      latencyMs: -1,
+      checkedAt: Date.now(),
+      target: "none"
+    };
+  }
+}
+const networkMonitor = new NetworkMonitor();
+const NetworkMonitor$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  NetworkMonitor,
+  networkMonitor
+}, Symbol.toStringTag, { value: "Module" }));
+const DEFAULT_TONE_PROFILE = {
+  primaryTone: "casual",
+  features: {
+    energy: 0.5,
+    formality: 0.3,
+    warmth: 0.5,
+    brevity: 0.5,
+    pacePreference: 0.5
+  },
+  confidence: 0,
+  messageCount: 0,
+  lastUpdated: 0,
+  variance: 0
+};
+const REPLY_CATEGORY_STYLE_MAP = {
+  notification: "serious",
+  teaching: "calm",
+  casual_chat: "cheerful",
+  success: "cheerful",
+  error: "serious",
+  greeting: "warm",
+  analysis: "neutral",
+  creative: "playful"
+};
+const BEHAVIOR_EMOTION_TTS_MAP = {
+  /** 焦躁 — 语速降低、语调更柔和，起安抚作用 */
+  anxious: {
+    voice: "zh-CN-XiaoyiNeural",
+    rate: "-8%",
+    pitch: "-4Hz",
+    label: "安抚·焦躁"
+  },
+  /** 平静 — 保持自然语速和语调 */
+  calm: {
+    voice: "zh-CN-YunxiNeural",
+    rate: "+5%",
+    pitch: "+2Hz",
+    label: "平和·平静"
+  },
+  /** 专注 — 语速稍快、语调紧凑，配合高效节奏 */
+  focused: {
+    voice: "zh-CN-YunyangNeural",
+    rate: "+12%",
+    pitch: "+4Hz",
+    label: "高效·专注"
+  },
+  /** 中性 — 默认参数，不覆盖 */
+  neutral: {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+10%",
+    pitch: "+8Hz",
+    label: "中性·行为"
+  }
+};
+const CADENCE_TTS_MAP = {
+  rapid: {
+    voice: "zh-CN-YunyangNeural",
+    rate: "+15%",
+    pitch: "+6Hz",
+    label: "高效·急迫"
+  },
+  normal: {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+10%",
+    pitch: "+8Hz",
+    label: "标准·常态"
+  },
+  low: {
+    voice: "zh-CN-YunxiNeural",
+    rate: "+2%",
+    pitch: "+0Hz",
+    label: "舒缓·低频"
+  }
+};
+const DAY_PERIOD_TTS_MAP = {
+  morning: {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+15%",
+    pitch: "+10Hz",
+    label: "晨间·活力"
+  },
+  afternoon: {
+    voice: "zh-CN-YunxiNeural",
+    rate: "+8%",
+    pitch: "+4Hz",
+    label: "午后·自然"
+  },
+  evening: {
+    voice: "zh-CN-XiaoyiNeural",
+    rate: "-3%",
+    pitch: "-2Hz",
+    label: "晚间·柔和"
+  },
+  late_night: {
+    voice: "zh-CN-XiaoyiNeural",
+    rate: "-8%",
+    pitch: "-5Hz",
+    label: "深夜·轻柔"
+  }
+};
+const DEFAULT_TTS_ROUTER_CONFIG = {
+  maxLatencyMs: 400,
+  pingTimeoutMs: 3e3,
+  defaultQualityWeight: 0.6,
+  defaultLatencyWeight: 0.4,
+  networkCacheTtlMs: 5e3,
+  goodLatencyMs: 150
+};
+const IMPLICIT_FEEDBACK_WEIGHTS = {
+  REPLAY: 2,
+  SKIP: -2,
+  INTERRUPT_SPEECH: -1,
+  CONTINUE_CONVERSATION: 1,
+  MODIFY_REQUEST: -1,
+  COMPLETED_NATURALLY: 1
+};
+const DEFAULT_IMPLICIT_FEEDBACK_CONFIG = {
+  updateInterval: 10,
+  minSamplesForRecommendation: 5,
+  blendWeight: 0.15,
+  maxHistorySize: 200,
+  enabled: true
+};
+class TtsRouter {
+  config;
+  userPreference = "auto";
+  /** 最近的路由决策（供调试/UI 展示） */
+  lastDecision = null;
+  constructor(config) {
+    this.config = { ...DEFAULT_TTS_ROUTER_CONFIG, ...config };
+  }
+  // ── 用户偏好 ──
+  /**
+   * 设置用户 TTS 引擎偏好。
+   * - 'auto': 自动路由（默认）
+   * - 'cloud': 强制使用云端 TTS（edge-tts）
+   * - 'local': 强制使用本地 TTS（Piper）
+   */
+  setUserPreference(pref) {
+    const prev = this.userPreference;
+    this.userPreference = pref;
+    Logger.log("INFO", "tts_router_preference_changed", { from: prev, to: pref });
+  }
+  /** 获取当前用户偏好 */
+  getUserPreference() {
+    return this.userPreference;
+  }
+  /** 获取配置 */
+  getConfig() {
+    return { ...this.config };
+  }
+  /** 更新配置 */
+  updateConfig(partial) {
+    this.config = { ...this.config, ...partial };
+  }
+  // ── 核心：路由决策 ──
+  /**
+   * 决定使用哪个 TTS 引擎。
+   *
+   * @param options.qualityWeight 质量权重 0-1（越高越倾向云端，云端表现力更强）
+   * @param options.latencyWeight 延迟权重 0-1（越高越倾向本地，本地延迟更低）
+   * @param options.forceCheck 是否强制刷新网络检测
+   */
+  async decide(options) {
+    const qualityWeight = options?.qualityWeight ?? this.config.defaultQualityWeight;
+    const latencyWeight = options?.latencyWeight ?? this.config.defaultLatencyWeight;
+    if (this.userPreference === "cloud") {
+      return this.makeDecision("cloud", "user_preference_cloud", -1, true, qualityWeight, latencyWeight);
+    }
+    if (this.userPreference === "local") {
+      return this.makeDecision("local", "user_preference_local", -1, true, qualityWeight, latencyWeight);
+    }
+    const netStatus = options?.forceCheck ? await networkMonitor.refresh() : await networkMonitor.getStatus();
+    if (!netStatus.available) {
+      return this.makeDecision("local", "network_unavailable", netStatus.latencyMs, false, qualityWeight, latencyWeight);
+    }
+    const latency = netStatus.latencyMs;
+    if (latency > this.config.maxLatencyMs && latencyWeight > qualityWeight) {
+      return this.makeDecision(
+        "local",
+        `high_latency_${latency}ms_latency_weighted`,
+        latency,
+        true,
+        qualityWeight,
+        latencyWeight
+      );
+    }
+    if (latency <= this.config.goodLatencyMs && qualityWeight >= latencyWeight) {
+      return this.makeDecision(
+        "cloud",
+        `good_network_${latency}ms_quality_weighted`,
+        latency,
+        true,
+        qualityWeight,
+        latencyWeight
+      );
+    }
+    if (qualityWeight >= latencyWeight) {
+      return this.makeDecision(
+        "cloud",
+        `default_cloud_latency_${latency}ms`,
+        latency,
+        true,
+        qualityWeight,
+        latencyWeight
+      );
+    } else {
+      if (latency > this.config.goodLatencyMs) {
+        return this.makeDecision(
+          "local",
+          `default_local_latency_${latency}ms_latency_weighted`,
+          latency,
+          true,
+          qualityWeight,
+          latencyWeight
+        );
+      }
+      return this.makeDecision(
+        "cloud",
+        `default_cloud_latency_${latency}ms`,
+        latency,
+        true,
+        qualityWeight,
+        latencyWeight
+      );
+    }
+  }
+  /**
+   * 同步决策（使用缓存的网络状态，不发起新检测）。
+   * 适用于需要快速决策的场景。
+   */
+  decideSync(options) {
+    const qualityWeight = options?.qualityWeight ?? this.config.defaultQualityWeight;
+    const latencyWeight = options?.latencyWeight ?? this.config.defaultLatencyWeight;
+    if (this.userPreference === "cloud") {
+      return this.makeDecision("cloud", "user_preference_cloud", -1, true, qualityWeight, latencyWeight);
+    }
+    if (this.userPreference === "local") {
+      return this.makeDecision("local", "user_preference_local", -1, true, qualityWeight, latencyWeight);
+    }
+    const cached = networkMonitor.getCachedStatus();
+    if (!cached || !cached.available) {
+      return this.makeDecision(
+        "local",
+        cached ? "cached_unavailable" : "no_cache",
+        cached?.latencyMs ?? -1,
+        cached?.available ?? false,
+        qualityWeight,
+        latencyWeight
+      );
+    }
+    const latency = cached.latencyMs;
+    if (latency > this.config.maxLatencyMs && latencyWeight > qualityWeight) {
+      return this.makeDecision("local", `high_latency_${latency}ms`, latency, true, qualityWeight, latencyWeight);
+    }
+    if (qualityWeight >= latencyWeight) {
+      return this.makeDecision("cloud", `default_cloud_${latency}ms`, latency, true, qualityWeight, latencyWeight);
+    }
+    return this.makeDecision(
+      latency > this.config.goodLatencyMs ? "local" : "cloud",
+      `sync_decision_${latency}ms`,
+      latency,
+      true,
+      qualityWeight,
+      latencyWeight
+    );
+  }
+  /** 获取最近的决策（供调试） */
+  getLastDecision() {
+    return this.lastDecision;
+  }
+  // ── 私有 ──
+  makeDecision(engine, reason, networkLatencyMs, networkAvailable, qualityWeight, latencyWeight) {
+    const decision = {
+      engine,
+      reason,
+      networkLatencyMs,
+      networkAvailable,
+      qualityWeight,
+      latencyWeight
+    };
+    if (!this.lastDecision || this.lastDecision.engine !== engine) {
+      Logger.log("INFO", "tts_router_decision", {
+        engine,
+        reason,
+        latencyMs: networkLatencyMs,
+        qualityWeight: qualityWeight.toFixed(2),
+        latencyWeight: latencyWeight.toFixed(2)
+      });
+    }
+    this.lastDecision = decision;
+    return decision;
+  }
+}
+const ttsRouter = new TtsRouter();
+const DEFAULT_PARAMS$1 = {
+  voice: "zh-CN-XiaoxiaoNeural",
+  rate: "+10%",
+  pitch: "+8Hz",
+  label: "隐式学习·默认"
+};
+function parseRate(rate) {
+  return parseInt(rate.replace(/[^0-9-]/g, "")) || 0;
+}
+function parsePitch(pitch) {
+  return parseInt(pitch.replace(/[^0-9-]/g, "")) || 0;
+}
+function classifyRate(val) {
+  if (val < 0) return "slow";
+  if (val > 12) return "fast";
+  return "normal";
+}
+function classifyPitch(val) {
+  if (val < 0) return "low";
+  if (val > 8) return "high";
+  return "normal";
+}
+class VoicePreferenceModel {
+  /** TTS 输出历史记录 */
+  history = [];
+  /** 当前配置 */
+  config;
+  /** 上次推荐的参数（用于防止突变） */
+  lastRecommendedParams = null;
+  /** 自上次模型更新以来的新输出计数 */
+  pendingUpdateCount = 0;
+  /** 模型是否已初始化（有足够样本） */
+  initialized = false;
+  /** 当前推荐结果缓存 */
+  currentRecommendation = null;
+  /** 累计样本数（包含已清理的历史） */
+  totalSamples = 0;
+  constructor(config) {
+    this.config = { ...DEFAULT_IMPLICIT_FEEDBACK_CONFIG, ...config };
+  }
+  // ── 数据采集 ──
+  /**
+   * 记录一次 TTS 输出。
+   * 在 TTS 开始播放时调用，记录使用的参数。
+   * @returns outputId 供后续关联反馈动作
+   */
+  recordOutput(params, textSnippet) {
+    const outputId = `tts_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const record = {
+      outputId,
+      timestamp: Date.now(),
+      params: { ...params },
+      textSnippet: textSnippet.slice(0, 100),
+      actions: [],
+      cumulativeScore: 0
+    };
+    this.history.push(record);
+    this.totalSamples++;
+    this.pendingUpdateCount++;
+    if (this.history.length > this.config.maxHistorySize) {
+      this.history = this.history.slice(-this.config.maxHistorySize);
+    }
+    if (this.pendingUpdateCount >= this.config.updateInterval) {
+      this.updateModel();
+    }
+    return outputId;
+  }
+  /**
+   * 记录用户对某次 TTS 输出的隐式反馈动作。
+   * @param outputId recordOutput 返回的 ID
+   * @param action 用户行为类型
+   */
+  recordAction(outputId, action) {
+    const record = this.history.find((r) => r.outputId === outputId);
+    if (!record) {
+      Logger.log("WARN", "implicit_feedback_record_not_found", { outputId, action });
+      return;
+    }
+    record.actions.push({ action, timestamp: Date.now() });
+    const weight = IMPLICIT_FEEDBACK_WEIGHTS[action];
+    record.cumulativeScore += weight;
+    Logger.log("INFO", "implicit_feedback_recorded", {
+      outputId: outputId.slice(-8),
+      action,
+      weight,
+      cumulativeScore: record.cumulativeScore.toFixed(1),
+      params: record.params.label
+    });
+    this.pendingUpdateCount++;
+    if (this.pendingUpdateCount >= this.config.updateInterval) {
+      this.updateModel();
+    }
+  }
+  /**
+   * 针对最近一次 TTS 输出记录反馈动作（便捷方法）。
+   */
+  recordActionForLatest(action) {
+    if (this.history.length === 0) return;
+    const latest = this.history[this.history.length - 1];
+    this.recordAction(latest.outputId, action);
+  }
+  // ── 模型更新 ──
+  /**
+   * 执行加权平均分析，更新参数推荐。
+   *
+   * 算法：
+   * 1. 按 voice 分组，计算各 voice 的平均隐式分数
+   * 2. 按 rate 范围（慢/适中/快）分组，计算平均分数
+   * 3. 按 pitch 范围（低/适中/高）分组，计算平均分数
+   * 4. 选择最高分的 voice + rate + pitch 组合
+   * 5. 与上次推荐混合（平滑过渡）
+   */
+  updateModel() {
+    this.pendingUpdateCount = 0;
+    const scored = this.history.filter(
+      (r) => r.actions.length > 0 || r.cumulativeScore !== 0
+    );
+    if (scored.length < this.config.minSamplesForRecommendation) {
+      if (this.initialized) {
+        this.currentRecommendation = this.currentRecommendation ? { ...this.currentRecommendation, confidence: Math.max(0.1, this.currentRecommendation.confidence - 0.05) } : null;
+      }
+      return;
+    }
+    const voiceScores = {};
+    for (const r of scored) {
+      const voice = r.params.voice;
+      if (!voiceScores[voice]) voiceScores[voice] = { total: 0, count: 0 };
+      voiceScores[voice].total += r.cumulativeScore;
+      voiceScores[voice].count++;
+    }
+    let bestVoice = DEFAULT_PARAMS$1.voice;
+    let bestVoiceScore = -Infinity;
+    for (const [voice, { total, count }] of Object.entries(voiceScores)) {
+      const avg = total / count;
+      if (avg > bestVoiceScore) {
+        bestVoiceScore = avg;
+        bestVoice = voice;
+      }
+    }
+    const rateScores = {
+      slow: { total: 0, count: 0 },
+      normal: { total: 0, count: 0 },
+      fast: { total: 0, count: 0 }
+    };
+    for (const r of scored) {
+      const category = classifyRate(parseRate(r.params.rate));
+      rateScores[category].total += r.cumulativeScore;
+      rateScores[category].count++;
+    }
+    const rateCategory = this.pickBestCategory(
+      rateScores,
+      classifyRate(parseRate(DEFAULT_PARAMS$1.rate))
+    );
+    const pitchScores = {
+      low: { total: 0, count: 0 },
+      normal: { total: 0, count: 0 },
+      high: { total: 0, count: 0 }
+    };
+    for (const r of scored) {
+      const category = classifyPitch(parsePitch(r.params.pitch));
+      pitchScores[category].total += r.cumulativeScore;
+      pitchScores[category].count++;
+    }
+    const pitchCategory = this.pickBestCategory(
+      pitchScores,
+      classifyPitch(parsePitch(DEFAULT_PARAMS$1.pitch))
+    );
+    const recommendedRate = this.categoryToRateValue(rateCategory);
+    const recommendedPitch = this.categoryToPitchValue(pitchCategory);
+    const hasSufficientData = scored.length >= 10;
+    let finalRate = recommendedRate;
+    let finalPitch = recommendedPitch;
+    if (this.lastRecommendedParams) {
+      const lastRate = parseRate(this.lastRecommendedParams.rate);
+      const lastPitch = parsePitch(this.lastRecommendedParams.pitch);
+      finalRate = this.lerpWithLimit(lastRate, recommendedRate, this.config.blendWeight, 5);
+      finalPitch = this.lerpWithLimit(lastPitch, recommendedPitch, this.config.blendWeight, 5);
+    }
+    const bestVoiceData = voiceScores[bestVoice];
+    const useVoice = bestVoiceData && bestVoiceData.count >= 2 ? bestVoice : DEFAULT_PARAMS$1.voice;
+    const recommended = {
+      voice: useVoice,
+      rate: `${finalRate >= 0 ? "+" : ""}${finalRate}%`,
+      pitch: `${finalPitch >= 0 ? "+" : ""}${finalPitch}Hz`,
+      label: `隐式学习·${this.classifyRateLabel(finalRate)}`
+    };
+    const confidence = Math.min(0.8, Math.log10(scored.length + 1) / 3 + 0.3);
+    const reason = this.buildRecommendationReason(
+      scored.length,
+      bestVoice,
+      rateCategory,
+      pitchCategory,
+      hasSufficientData
+    );
+    this.currentRecommendation = {
+      params: recommended,
+      confidence: Math.round(confidence * 100) / 100,
+      totalSamples: this.totalSamples,
+      reason
+    };
+    this.lastRecommendedParams = recommended;
+    this.initialized = true;
+    Logger.log("INFO", "voice_preference_model_updated", {
+      voice: recommended.voice,
+      rate: recommended.rate,
+      pitch: recommended.pitch,
+      confidence: confidence.toFixed(2),
+      samples: scored.length,
+      totalSamples: this.totalSamples,
+      reason
+    });
+  }
+  // ── 查询接口 ──
+  /**
+   * 获取当前参数推荐。
+   * 如果模型尚未初始化或数据不足，返回默认值推荐。
+   */
+  getRecommendation() {
+    if (!this.initialized || !this.currentRecommendation) {
+      return {
+        params: { ...DEFAULT_PARAMS$1 },
+        confidence: 0,
+        totalSamples: this.totalSamples,
+        reason: "样本不足，使用默认参数"
+      };
+    }
+    return this.currentRecommendation;
+  }
+  /** 是否已初始化（有足够数据产生推荐） */
+  isInitialized() {
+    return this.initialized;
+  }
+  /** 获取历史记录数 */
+  getHistorySize() {
+    return this.history.length;
+  }
+  /** 获取总样本数 */
+  getTotalSamples() {
+    return this.totalSamples;
+  }
+  /** 获取当前配置 */
+  getConfig() {
+    return { ...this.config };
+  }
+  /** 更新配置 */
+  updateConfig(partial) {
+    this.config = { ...this.config, ...partial };
+    Logger.log("INFO", "voice_preference_model_config_updated", { ...this.config });
+  }
+  /** 重置所有数据 */
+  reset() {
+    this.history = [];
+    this.lastRecommendedParams = null;
+    this.pendingUpdateCount = 0;
+    this.initialized = false;
+    this.currentRecommendation = null;
+    this.totalSamples = 0;
+    Logger.log("INFO", "voice_preference_model_reset");
+  }
+  // ── 私有方法 ──
+  /**
+   * 从评分对象中选择最佳类别。
+   * 如果某个类别无样本或分数相同，回退到默认类别。
+   */
+  pickBestCategory(scores, defaultCategory) {
+    let best = defaultCategory;
+    let bestAvg = -Infinity;
+    for (const [cat, { total, count }] of Object.entries(scores)) {
+      if (count === 0) continue;
+      const avg = total / count;
+      if (avg > bestAvg) {
+        bestAvg = avg;
+        best = cat;
+      }
+    }
+    if (bestAvg < 0) {
+      return defaultCategory;
+    }
+    return best;
+  }
+  /** 类别 → 数值（rate 范围的中点值） */
+  categoryToRateValue(category) {
+    switch (category) {
+      case "slow":
+        return -5;
+      case "fast":
+        return 18;
+      default:
+        return 8;
+    }
+  }
+  /** 类别 → 数值（pitch 范围的中点值） */
+  categoryToPitchValue(category) {
+    switch (category) {
+      case "low":
+        return -3;
+      case "high":
+        return 12;
+      default:
+        return 5;
+    }
+  }
+  /**
+   * 带限制的线性插值：从 current 向 target 移动 blendRatio 比例，
+   * 但单步变化不超过 maxDelta。
+   */
+  lerpWithLimit(current, target, blendRatio, maxDelta) {
+    const delta = (target - current) * blendRatio;
+    const clampedDelta = Math.max(-maxDelta, Math.min(maxDelta, delta));
+    return Math.round(current + clampedDelta);
+  }
+  /** 根据率值生成可读的速率标签 */
+  classifyRateLabel(val) {
+    if (val < -3) return "舒缓";
+    if (val > 15) return "明快";
+    if (val > 8) return "轻快";
+    return "适中";
+  }
+  /** 生成推荐理由文本 */
+  buildRecommendationReason(sampleCount, voice, rateCategory, pitchCategory, sufficient) {
+    const voiceName = voice.replace("zh-CN-", "").replace("Neural", "");
+    const rateLabel = { slow: "舒缓语速", normal: "适中语速", fast: "明快语速" }[rateCategory] || rateCategory;
+    const pitchLabel = { low: "低音调", normal: "适中音调", high: "高音调" }[pitchCategory] || pitchCategory;
+    if (!sufficient) {
+      return `初步学习: ${voiceName} + ${rateLabel} + ${pitchLabel} (样本${sampleCount}条)`;
+    }
+    return `隐式偏好: ${voiceName} + ${rateLabel} + ${pitchLabel} (${sampleCount}条反馈)`;
+  }
+}
+const voicePreferenceModel = new VoicePreferenceModel();
+class ImplicitFeedbackTracker {
+  /** 最近一次 TTS 输出的 outputId（用于便捷反馈） */
+  lastOutputId = null;
+  /** 是否启用 */
+  enabled = true;
+  /** 当前待确认的输出（播放中但尚未结束）的 outputId */
+  activeOutputId = null;
+  /** 当前待确认的输出开始时间 */
+  activeOutputStartTime = 0;
+  /** 标记：是否已记录 COMPLETED_NATURALLY（避免重复触发） */
+  completedRecorded = false;
+  // ── 生命周期 ──
+  /** 启用/禁用隐式反馈跟踪 */
+  setEnabled(enabled) {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.lastOutputId = null;
+      this.activeOutputId = null;
+    }
+    Logger.log("INFO", "implicit_feedback_tracker_enabled", { enabled });
+  }
+  isEnabled() {
+    return this.enabled;
+  }
+  // ── TTS 输出钩子 ──
+  /**
+   * 在 TTS 输出开始时调用。
+   * 记录本次 TTS 的参数并创建一条新的跟踪记录。
+   */
+  onTtsOutput(params, textSnippet) {
+    if (!this.enabled) return "";
+    const outputId = voicePreferenceModel.recordOutput(params, textSnippet);
+    this.lastOutputId = outputId;
+    this.activeOutputId = outputId;
+    this.activeOutputStartTime = Date.now();
+    this.completedRecorded = false;
+    return outputId;
+  }
+  /**
+   * 在 TTS 播放自然结束时调用。
+   * 如果用户没有打断/跳过，记录 COMPLETED_NATURALLY。
+   */
+  onTtsCompleted() {
+    if (!this.enabled || !this.activeOutputId || this.completedRecorded) return;
+    voicePreferenceModel.recordAction(this.activeOutputId, "COMPLETED_NATURALLY");
+    this.completedRecorded = true;
+    this.activeOutputId = null;
+  }
+  // ── 用户行为记录 ──
+  /**
+   * 记录用户对 TTS 的隐式反馈动作。
+   * 可以从渲染进程 IPC、VAD 打断检测、ChatExecutor 等途径调用。
+   */
+  recordUserAction(action, targetOutputId) {
+    if (!this.enabled) return;
+    const outputId = targetOutputId || this.activeOutputId || this.lastOutputId;
+    if (!outputId) {
+      Logger.log("WARN", "implicit_feedback_no_output_id", { action });
+      return;
+    }
+    voicePreferenceModel.recordAction(outputId, action);
+    if (action === "SKIP" || action === "INTERRUPT_SPEECH") {
+      this.activeOutputId = null;
+    }
+  }
+  /**
+   * 针对最近一次 TTS 输出记录反馈动作。
+   * 渲染进程的简单操作（如重听按钮）使用此方法。
+   */
+  recordSimpleAction(action) {
+    if (!this.enabled) return;
+    if (action === "REPLAY" && this.lastOutputId) {
+      voicePreferenceModel.recordAction(this.lastOutputId, "REPLAY");
+    } else if (action === "SKIP") {
+      this.recordUserAction("SKIP");
+    }
+  }
+  // ── 情境检测 ──
+  /**
+   * 检测用户"继续对话"行为。
+   * 在 ChatExecutor.run() 收到新用户消息时调用。
+   * 如果此时 TTS 已经播放完毕（或接近完毕），视为用户接受 TTS 质量。
+   */
+  onUserContinuedConversation() {
+    if (!this.enabled) return;
+    if (this.activeOutputId && !this.completedRecorded) {
+      voicePreferenceModel.recordAction(this.activeOutputId, "CONTINUE_CONVERSATION");
+      this.activeOutputId = null;
+    }
+  }
+  /**
+   * 检测用户"修改指令"行为。
+   * 当 UserBehaviorAnalyzer 检测到重复/修改模式时调用。
+   */
+  onUserModifiedRequest() {
+    if (!this.enabled) return;
+    if (this.activeOutputId && !this.completedRecorded) {
+      voicePreferenceModel.recordAction(this.activeOutputId, "MODIFY_REQUEST");
+      this.activeOutputId = null;
+    } else if (this.lastOutputId) {
+      voicePreferenceModel.recordAction(this.lastOutputId, "MODIFY_REQUEST");
+    }
+  }
+  // ── 代理到模型 ──
+  /** 获取模型推荐 */
+  getRecommendation() {
+    return voicePreferenceModel.getRecommendation();
+  }
+  /** 手动触发模型更新 */
+  updateModel() {
+    voicePreferenceModel.updateModel();
+  }
+  /** 重置所有跟踪数据 */
+  reset() {
+    this.lastOutputId = null;
+    this.activeOutputId = null;
+    this.activeOutputStartTime = 0;
+    this.completedRecorded = false;
+    voicePreferenceModel.reset();
+    Logger.log("INFO", "implicit_feedback_tracker_reset");
+  }
+  /** 获取模型状态摘要（供调试/日志） */
+  getStatus() {
+    const rec = voicePreferenceModel.getRecommendation();
+    return {
+      enabled: this.enabled,
+      lastOutputId: this.lastOutputId,
+      activeOutput: !!this.activeOutputId,
+      modelInitialized: voicePreferenceModel.isInitialized(),
+      totalSamples: voicePreferenceModel.getTotalSamples(),
+      historySize: voicePreferenceModel.getHistorySize(),
+      confidence: rec.confidence,
+      recommendedVoice: rec.params.voice
+    };
+  }
+}
+const implicitFeedbackTracker = new ImplicitFeedbackTracker();
+const DEFAULT_EMOTION_PARAMS = {
+  voice: "zh-CN-XiaoxiaoNeural",
+  rate: "+10%",
+  pitch: "+8Hz",
+  label: "默认/日常"
+};
+function getTempFile() {
+  return path$1.join(os.tmpdir(), `akemi-mio-${Date.now()}.mp3`);
+}
+function compileRegexes() {
+  const surrogate = /[\uD800-\uDFFF]/g;
+  const heading = /^#{1,6}\s*/gm;
+  const bold = /\*{1,2}/g;
+  const codeFence = /```[\s\S]*?```/g;
+  const inlineCode = /`([^`]+)`/g;
+  const imgLink = /!\[([^\]]*)\]\([^)]+\)/g;
+  const textLink = /\[([^\]]*)\]\([^)]+\)/g;
+  const parenAction = /[（(][^）)]*[）)]/g;
+  const listMarker = /^[\s]*[-*+]\s+/gm;
+  const numberedList = /^\s*\d+[.、]\s+/gm;
+  const tablePipe = /[|│]/g;
+  const blockquote = /^>\s+/gm;
+  const separator = /^[-*_]{3,}\s*$/gm;
+  const emoji = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu;
+  const trailingTilde = /[～~]+$/;
+  const tilde = /[～~]/g;
+  const ellipsis = /…{2,}/g;
+  const dash = /—{2,}/g;
+  const whitespace = /\s{2,}/g;
+  return {
+    surrogate,
+    heading,
+    bold,
+    codeFence,
+    inlineCode,
+    imgLink,
+    textLink,
+    parenAction,
+    listMarker,
+    numberedList,
+    tablePipe,
+    blockquote,
+    separator,
+    emoji,
+    trailingTilde,
+    tilde,
+    ellipsis,
+    dash,
+    whitespace
+  };
+}
+const RE = compileRegexes();
+function cleanTTS(text) {
+  const before = text;
+  text = text.replace(RE.surrogate, "");
+  const polyphoneFixed = text.replace(/还行/g, "还型").replace(/行吧/g, "型吧").replace(/行了/g, "型了").replace(/行吗/g, "型吗").replace(/行不/g, "型不").replace(/行啊/g, "型啊").replace(/行啦/g, "型啦");
+  const cleaned = polyphoneFixed.replace(RE.heading, "").replace(RE.bold, "").replace(RE.codeFence, "").replace(RE.inlineCode, "$1").replace(RE.imgLink, "$1").replace(RE.textLink, "$1").replace(RE.parenAction, "").replace(RE.listMarker, "").replace(RE.numberedList, "").replace(RE.tablePipe, "").replace(RE.blockquote, "").replace(RE.separator, "").replace(RE.emoji, "").replace(RE.trailingTilde, "").replace(RE.tilde, "").replace(RE.ellipsis, "…").replace(RE.dash, "—").replace(RE.whitespace, " ").trim();
+  const removed = before.length - cleaned.length;
+  if (removed > 0) {
+    Logger.log("INFO", "tts_clean", { chars_removed: removed, before: before.length, after: cleaned.length, input_snippet: before.slice(0, 60) });
+  }
+  if (before.length > 0 && cleaned.length === 0) {
+    Logger.log("WARN", "tts_clean_all_filtered", { input: before.slice(0, 100) });
+    return "嗯";
+  }
+  return cleaned;
+}
+class TtsService {
+  onStateUpdate;
+  onAudioReady = null;
+  currentProcess = null;
+  playbackStopRequested = false;
+  ttsQueue = [];
+  isProcessing = false;
+  sentenceBuf = "";
+  batchTimer = null;
+  stopped = false;
+  /** 当前情感 TTS 参数（由外部通过 setEmotion 更新） */
+  emotionParams = { ...DEFAULT_EMOTION_PARAMS };
+  /** 情感自适应是否启用（用户可关闭） */
+  emotionEnabled = true;
+  /** TTS 引擎用户偏好 */
+  enginePreference = "auto";
+  /** 当前质量权重 0-1 */
+  qualityWeight = 0.6;
+  /** 当前延迟权重 0-1 */
+  latencyWeight = 0.4;
+  constructor(onStateUpdate, onAudioReady) {
+    this.onStateUpdate = onStateUpdate;
+    this.onAudioReady = onAudioReady ?? null;
+  }
+  setAudioSink(cb) {
+    this.onAudioReady = cb;
+  }
+  /** 更新情感 TTS 参数（由情感分析器驱动） */
+  setEmotion(params) {
+    this.emotionParams = { ...params };
+    Logger.log("INFO", "tts_emotion_update", { voice: params.voice, rate: params.rate, pitch: params.pitch, label: params.label });
+  }
+  /** 启用/禁用情感自适应语音 */
+  setEmotionEnabled(enabled) {
+    this.emotionEnabled = enabled;
+    Logger.log("INFO", "tts_emotion_enabled", { enabled });
+  }
+  /** 获取当前情感参数（供调试/UI 展示） */
+  getEmotionParams() {
+    return { ...this.emotionParams };
+  }
+  /** 情感自适应是否启用 */
+  isEmotionEnabled() {
+    return this.emotionEnabled;
+  }
+  /** 设置 TTS 引擎偏好（auto/cloud/local） */
+  setEnginePreference(pref) {
+    this.enginePreference = pref;
+    ttsRouter.setUserPreference(pref);
+    Logger.log("INFO", "tts_engine_preference", { preference: pref });
+  }
+  /** 获取当前引擎偏好 */
+  getEnginePreference() {
+    return this.enginePreference;
+  }
+  /** 设置质量/延迟权重（供外部根据场景调整） */
+  setRoutingWeights(qualityWeight, latencyWeight) {
+    this.qualityWeight = Math.max(0, Math.min(1, qualityWeight));
+    this.latencyWeight = Math.max(0, Math.min(1, latencyWeight));
+  }
+  /** 获取当前路由权重 */
+  getRoutingWeights() {
+    return { qualityWeight: this.qualityWeight, latencyWeight: this.latencyWeight };
+  }
+  /** 获取最近的路由决策（供调试/UI） */
+  getLastRoutingDecision() {
+    return ttsRouter.getLastDecision();
+  }
+  // ══════════════════════════════════════════
+  //  隐式反馈驱动的语音自适应
+  // ══════════════════════════════════════════
+  /**
+   * 记录用户对 TTS 输出的隐式反馈动作。
+   * 由渲染进程（重听/停止按钮）或 ChatExecutor（继续对话/修改指令检测）调用。
+   */
+  recordImplicitFeedback(action) {
+    if (action === "REPLAY") {
+      implicitFeedbackTracker.recordSimpleAction("REPLAY");
+    } else if (action === "SKIP") {
+      implicitFeedbackTracker.recordSimpleAction("SKIP");
+    } else {
+      implicitFeedbackTracker.recordUserAction(action);
+    }
+    Logger.log("INFO", "tts_implicit_feedback", { action });
+  }
+  /** 获取隐式反馈推荐参数 */
+  getImplicitFeedbackRecommendation() {
+    return implicitFeedbackTracker.getRecommendation();
+  }
+  /** 获取隐式反馈跟踪器状态 */
+  getImplicitFeedbackStatus() {
+    return implicitFeedbackTracker.getStatus();
+  }
+  addChunk(chunk) {
+    try {
+      this.sentenceBuf += chunk;
+      const parts = this.sentenceBuf.split(/(?<=[。！？\n])/);
+      if (parts.length > 1) {
+        this.sentenceBuf = parts.pop() || "";
+        for (const p of parts) {
+          const clean = cleanTTS(p.trim());
+          if (clean && clean.length >= 15) this.ttsQueue.push(clean);
+        }
+        if (this.batchTimer) clearTimeout(this.batchTimer);
+        this.batchTimer = setTimeout(() => {
+          this.batchTimer = null;
+          if (this.ttsQueue.length > 0) this.processQueue();
+        }, 500);
+      }
+    } catch (err) {
+      Logger.log("WARN", "tts_add_chunk_error", { error: String(err) });
+    }
+  }
+  flushBuffer() {
+    this.stopped = false;
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    if (!this.sentenceBuf.trim() && this.ttsQueue.length === 0) return;
+    if (this.sentenceBuf.trim()) {
+      const clean = cleanTTS(this.sentenceBuf.trim());
+      this.sentenceBuf = "";
+      if (clean && clean.length >= 15) this.ttsQueue.push(clean);
+    }
+    if (this.ttsQueue.length > 0) this.processQueue();
+  }
+  stop() {
+    this.stopped = true;
+    this.playbackStopRequested = true;
+    if (this.currentProcess) {
+      this.currentProcess.kill();
+      this.currentProcess = null;
+    }
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    this.ttsQueue = [];
+    this.sentenceBuf = "";
+    this.isProcessing = false;
+    this.onStateUpdate({ ttsPlaying: false });
+  }
+  async speak(text) {
+    this.onStateUpdate({ ttsPlaying: true });
+    try {
+      await this.speakInternal(text);
+    } catch (err) {
+      Logger.log("ERROR", "tts_speak_error", { error: String(err) });
+    } finally {
+      this.onStateUpdate({ ttsPlaying: false });
+    }
+  }
+  async speakInternal(text) {
+    const clean = cleanTTS(text);
+    if (!clean || clean.length < 15) return;
+    const tempFile = getTempFile();
+    const t0 = Date.now();
+    try {
+      const lastDecision = ttsRouter.getLastDecision();
+      Logger.log("INFO", "tts_synthesize", { char_count: clean.length, engine: lastDecision?.engine ?? (USE_LOCAL_TTS ? "piper" : "edge-tts"), preference: this.enginePreference });
+      await this._synthesize(clean, tempFile);
+      Logger.log("PERF", "tts_synthesis_done", { duration_ms: Date.now() - t0, chars: clean.length });
+      const effectiveParams = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS;
+      implicitFeedbackTracker.onTtsOutput(effectiveParams, clean);
+      if (this.onAudioReady) {
+        this.onAudioReady(tempFile);
+      }
+      const estimatedDurationMs = Math.max(clean.length * 80, 2e3);
+      setTimeout(() => {
+        implicitFeedbackTracker.onTtsCompleted();
+      }, estimatedDurationMs);
+    } catch (err) {
+      this._logError(err);
+    } finally {
+      try {
+        fs.promises.unlink(tempFile).catch(() => {
+        });
+      } catch {
+      }
+    }
+  }
+  async _synthesize(text, outputFile, attempt = 1) {
+    const maxAttempts = 2;
+    let useLocal;
+    if (process.env.USE_LOCAL_TTS === "true") {
+      useLocal = true;
+    } else if (process.env.USE_LOCAL_TTS === "false") {
+      useLocal = false;
+    } else {
+      const decision = ttsRouter.decideSync({
+        qualityWeight: this.qualityWeight,
+        latencyWeight: this.latencyWeight
+      });
+      useLocal = decision.engine === "local";
+    }
+    try {
+      if (useLocal) {
+        const piper = require$$0.execFile("python", [PIPER_SCRIPT, outputFile], { timeout: 15e3, windowsHide: true });
+        this.currentProcess = { kill: () => piper.kill() };
+        piper.stdin?.end(text);
+        await new Promise((resolve, reject) => {
+          piper.on("close", (code) => code === 0 ? resolve() : reject(new Error(`piper exit ${code}`)));
+          piper.stderr?.on("data", (d) => console.log("[piper]", d.toString().trim()));
+          piper.on("error", reject);
+        }).finally(() => {
+          this.currentProcess = null;
+        });
+        return;
+      }
+      const params = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS;
+      const edgeTts = require$$0.execFile(
+        "edge-tts",
+        ["--voice", params.voice, "--text", text, "--write-media", outputFile, "--rate", params.rate, "--pitch", params.pitch],
+        { timeout: 3e4, windowsHide: true }
+      );
+      this.currentProcess = { kill: () => edgeTts.kill() };
+      await new Promise((resolve, reject) => {
+        edgeTts.on("close", (code) => code === 0 ? resolve() : reject(new Error(`edge-tts exit ${code}`)));
+        edgeTts.on("error", reject);
+      }).finally(() => {
+        if (this.currentProcess?.kill === edgeTts.kill) {
+          this.currentProcess = null;
+        }
+      });
+    } catch (err) {
+      if (attempt < maxAttempts) {
+        Logger.log("WARN", "tts_synthesis_retry", { attempt, error: String(err).slice(0, 100), text_len: text.length });
+        return this._synthesize(text, outputFile, attempt + 1);
+      }
+      throw err;
+    }
+  }
+  _playAudio(filePath) {
+    const ffplay = findFfplay();
+    Logger.log("INFO", "tts_playback_start", { player: ffplay });
+    const playT0 = Date.now();
+    const ffplayTimeout = setTimeout(() => {
+      if (this.currentProcess) {
+        this.currentProcess.kill();
+        this.currentProcess = null;
+      }
+    }, 3e4);
+    return new Promise((resolve, reject) => {
+      this.playbackStopRequested = false;
+      const proc = require$$0.execFile(ffplay, ["-nodisp", "-autoexit", filePath], { windowsHide: true }, (err) => {
+        clearTimeout(ffplayTimeout);
+        if (this.playbackStopRequested) {
+          Logger.log("INFO", "tts_playback_stopped", { duration_ms: Date.now() - playT0 });
+          resolve();
+          return;
+        }
+        if (err && (err.code === 1 || err.code === null)) {
+          resolve();
+          return;
+        }
+        if (err) reject(err);
+        else resolve();
+      });
+      this.currentProcess = {
+        kill: () => {
+          clearTimeout(ffplayTimeout);
+          proc.kill();
+        }
+      };
+    }).then(() => Logger.log("PERF", "tts_playback_done", { duration_ms: Date.now() - playT0 }));
+  }
+  _logError(err) {
+    const errMsg = String(err);
+    if (errMsg.includes("ffplay") || errMsg.includes("Exit code")) {
+      const code = err instanceof Error && "code" in err ? err.code : null;
+      Logger.log("ERROR", "tts_playback_failed", { error_type: "ffplay_exit", exit_code: code, message: errMsg.slice(0, 200) });
+    } else if (errMsg.includes("edge-tts") || errMsg.includes("ETIMEOUT") || errMsg.includes("timed out")) {
+      Logger.log("ERROR", "tts_synthesis_failed", { error_type: "synthesis_timeout", message: errMsg.slice(0, 200) });
+    } else {
+      Logger.log("ERROR", "tts_failed", { error_type: "unknown", message: errMsg.slice(0, 200) });
+    }
+  }
+  async processQueue() {
+    if (this.isProcessing || this.ttsQueue.length === 0 || this.stopped) return;
+    this.isProcessing = true;
+    this.onStateUpdate({ ttsPlaying: true });
+    try {
+      do {
+        while (this.ttsQueue.length > 0) {
+          const batch = [];
+          while (this.ttsQueue.length > 0) batch.push(this.ttsQueue.shift());
+          await this.speakInternal(batch.join(""));
+        }
+      } while (this.ttsQueue.length > 0);
+    } catch (err) {
+      Logger.log("ERROR", "tts_process_queue", { error: String(err) });
+    } finally {
+      this.isProcessing = false;
+      this.onStateUpdate({ ttsPlaying: false });
+    }
+  }
+}
+const PIPER_MODEL_CATALOG = {
+  "zh_CN-huayan-medium": {
+    name: "zh_CN-huayan-medium",
+    displayName: "花颜·女声",
+    description: "通用女声，响应快速，适合日常对话",
+    speed: 1,
+    pitch: 1
+  },
+  "zh_CN-ling_ling-medium": {
+    name: "zh_CN-ling_ling-medium",
+    displayName: "玲玲·温柔女声",
+    description: "温柔女声，高表现力，适合讲故事、朗读",
+    speed: 0.9,
+    pitch: 1
+  },
+  "zh_CN-tx_mati-medium": {
+    name: "zh_CN-tx_mati-medium",
+    displayName: "马提·沉稳男声",
+    description: "沉稳男声，清晰有力，适合通知、提醒",
+    speed: 1.1,
+    pitch: 0.95
+  }
+};
+const TAG_MODEL_MAP = {
+  chat: "zh_CN-huayan-medium",
+  story: "zh_CN-ling_ling-medium",
+  alert: "zh_CN-tx_mati-medium"
+};
+const DEFAULT_PIPER_MODEL = "zh_CN-huayan-medium";
+const VALID_MODELS = Object.keys(PIPER_MODEL_CATALOG);
+class PiperOrchestrator {
+  /** 当前用户选择的模型（可通过 switchModel 切换） */
+  currentModel = DEFAULT_PIPER_MODEL;
+  /** 请求队列 */
+  queue = [];
+  /** 是否正在处理 */
+  isProcessing = false;
+  /** 是否已停止 */
+  stopped = false;
+  /** 最大队列长度（防止无限堆积） */
+  MAX_QUEUE_SIZE = 50;
+  /** 单次合成超时（毫秒） */
+  SYNTHESIS_TIMEOUT_MS = 3e4;
+  // ── 模型管理 ──
+  /**
+   * 切换当前活跃的 Piper 模型。
+   * 返回是否切换成功（模型名无效时拒绝）。
+   */
+  switchModel(modelName) {
+    if (!VALID_MODELS.includes(modelName)) {
+      return {
+        success: false,
+        model: this.currentModel,
+        message: `无效模型: ${modelName}。可用: ${VALID_MODELS.join(", ")}`
+      };
+    }
+    const prev = this.currentModel;
+    this.currentModel = modelName;
+    Logger.log("INFO", "piper_orchestrator_model_switched", { from: prev, to: modelName });
+    return {
+      success: true,
+      model: this.currentModel,
+      message: `已切换为 ${PIPER_MODEL_CATALOG[modelName].displayName} (${modelName})`
+    };
+  }
+  /** 获取当前活跃模型 */
+  getCurrentModel() {
+    return this.currentModel;
+  }
+  /** 获取所有可用模型列表 */
+  getAvailableModels() {
+    return VALID_MODELS.map((name2) => PIPER_MODEL_CATALOG[name2]);
+  }
+  /**
+   * 根据任务标签解析应该使用的模型。
+   *
+   * 优先级：显式 model > 任务标签推荐 > 当前用户选择 > 默认模型
+   */
+  resolveModel(request) {
+    if (request.model && VALID_MODELS.includes(request.model)) {
+      return request.model;
+    }
+    if (request.taskTag && TAG_MODEL_MAP[request.taskTag]) {
+      return TAG_MODEL_MAP[request.taskTag];
+    }
+    return this.currentModel;
+  }
+  // ── 合成接口 ──
+  /**
+   * 提交合成请求（异步，自动排队）。
+   *
+   * 如果队列已满，返回错误结果而非排队。
+   */
+  async synthesize(request) {
+    if (this.stopped) {
+      return {
+        success: false,
+        model: request.model || DEFAULT_PIPER_MODEL,
+        error: "Piper 编排器已停止",
+        durationMs: 0,
+        fallbackUsed: false
+      };
+    }
+    if (this.queue.length >= this.MAX_QUEUE_SIZE) {
+      return {
+        success: false,
+        model: request.model || DEFAULT_PIPER_MODEL,
+        error: `请求队列已满 (${this.MAX_QUEUE_SIZE})，请稍后重试`,
+        durationMs: 0,
+        fallbackUsed: false
+      };
+    }
+    return new Promise((resolve) => {
+      this.queue.push({ request, resolve });
+      if (!this.isProcessing) {
+        this.processQueue();
+      }
+    });
+  }
+  /**
+   * 清空队列并停止处理。
+   */
+  stop() {
+    this.stopped = true;
+    while (this.queue.length > 0) {
+      const task = this.queue.shift();
+      task.resolve({
+        success: false,
+        model: DEFAULT_PIPER_MODEL,
+        error: "Piper 编排器已停止",
+        durationMs: 0,
+        fallbackUsed: false
+      });
+    }
+    this.isProcessing = false;
+  }
+  /**
+   * 重置停止状态（恢复处理）。
+   */
+  reset() {
+    this.stopped = false;
+  }
+  /** 获取当前队列状态 */
+  getQueueStatus() {
+    return {
+      queueSize: this.queue.length,
+      isProcessing: this.isProcessing,
+      currentModel: this.currentModel
+    };
+  }
+  // ── 私有：队列处理 ──
+  /**
+   * 串行处理队列中的合成请求。
+   *
+   * 每个请求独立合成，失败时自动回退到默认模型重试一次。
+   */
+  async processQueue() {
+    if (this.isProcessing || this.stopped) return;
+    this.isProcessing = true;
+    try {
+      while (this.queue.length > 0 && !this.stopped) {
+        const task = this.queue.shift();
+        const result = await this.processOne(task.request);
+        task.resolve(result);
+      }
+    } finally {
+      this.isProcessing = false;
+      if (this.queue.length > 0 && !this.stopped) {
+        this.processQueue();
+      }
+    }
+  }
+  /**
+   * 处理单个合成请求（含回退逻辑）。
+   */
+  async processOne(request) {
+    const text = cleanTTS(request.text || "");
+    if (!text || text.length < 2) {
+      return {
+        success: false,
+        model: request.model || DEFAULT_PIPER_MODEL,
+        error: "文本太短或清理后为空",
+        durationMs: 0,
+        fallbackUsed: false
+      };
+    }
+    const primaryModel = this.resolveModel(request);
+    const speed = request.speed ?? PIPER_MODEL_CATALOG[primaryModel]?.speed ?? 1;
+    const pitch = request.pitch ?? PIPER_MODEL_CATALOG[primaryModel]?.pitch ?? 1;
+    if (speed < 0.5 || speed > 2) {
+      return {
+        success: false,
+        model: primaryModel,
+        error: `语速超出范围: ${speed}。应在 0.5-2.0 之间。`,
+        durationMs: 0,
+        fallbackUsed: false
+      };
+    }
+    const t0 = Date.now();
+    const firstResult = await this.synthesizeWithModel(text, primaryModel, speed, pitch);
+    if (firstResult.success) {
+      return {
+        success: true,
+        model: primaryModel,
+        audioFile: firstResult.audioFile,
+        durationMs: Date.now() - t0,
+        fallbackUsed: false
+      };
+    }
+    if (primaryModel !== DEFAULT_PIPER_MODEL) {
+      Logger.log("WARN", "piper_orchestrator_fallback", {
+        primaryModel,
+        fallbackModel: DEFAULT_PIPER_MODEL,
+        error: firstResult.error
+      });
+      const fallbackResult = await this.synthesizeWithModel(
+        text,
+        DEFAULT_PIPER_MODEL,
+        speed,
+        pitch
+      );
+      if (fallbackResult.success) {
+        return {
+          success: true,
+          model: DEFAULT_PIPER_MODEL,
+          audioFile: fallbackResult.audioFile,
+          durationMs: Date.now() - t0,
+          fallbackUsed: true
+        };
+      }
+      return {
+        success: false,
+        model: primaryModel,
+        error: `主模型 (${primaryModel}) 和默认模型 (${DEFAULT_PIPER_MODEL}) 均失败: ${fallbackResult.error}`,
+        durationMs: Date.now() - t0,
+        fallbackUsed: true
+      };
+    }
+    return {
+      success: false,
+      model: primaryModel,
+      error: firstResult.error,
+      durationMs: Date.now() - t0,
+      fallbackUsed: false
+    };
+  }
+  /**
+   * 使用指定模型合成语音。
+   */
+  synthesizeWithModel(text, model, speed, pitch) {
+    const tempFile = path$1.join(os.tmpdir(), `akemi-mio-piper-${Date.now()}.wav`);
+    return new Promise((resolve) => {
+      try {
+        const ext2 = path$1.extname(PIPER_MODEL);
+        const dir = path$1.dirname(PIPER_MODEL);
+        const modelPath = path$1.join(dir, model + ext2);
+        const lengthScale = (1 / speed).toFixed(2);
+        const noiseScale = "0.667";
+        const noiseW = "0.8";
+        Logger.log("DEBUG", "piper_orchestrator_synthesize", {
+          model,
+          text_len: text.length,
+          speed,
+          length_scale: lengthScale,
+          text_preview: text.slice(0, 60)
+        });
+        const proc = require$$0.execFile(
+          "python",
+          [
+            PIPER_SCRIPT,
+            "--model",
+            modelPath,
+            "--output_file",
+            tempFile,
+            "--length_scale",
+            lengthScale,
+            "--noise_scale",
+            noiseScale,
+            "--noise_w",
+            noiseW
+          ],
+          {
+            timeout: this.SYNTHESIS_TIMEOUT_MS,
+            windowsHide: true
+          },
+          (err) => {
+            if (err) {
+              try {
+                fs.unlinkSync(tempFile);
+              } catch {
+              }
+              resolve({
+                success: false,
+                error: err.message || String(err)
+              });
+            } else {
+              resolve({
+                success: true,
+                audioFile: tempFile
+              });
+            }
+          }
+        );
+        proc.stdin?.end(text);
+        proc.stderr?.on("data", (d) => {
+          Logger.log("DEBUG", "piper_orchestrator_stderr", { msg: d.toString().trim() });
+        });
+      } catch (err) {
+        resolve({
+          success: false,
+          error: err instanceof Error ? err.message : String(err)
+        });
+      }
+    });
+  }
+}
+const piperOrchestrator = new PiperOrchestrator();
+async function playAudioFile(filePath) {
+  const wins = electron.BrowserWindow.getAllWindows();
+  for (const win of wins) {
+    win.webContents.send("tts:play_audio", filePath);
+  }
+}
+const speakWithPiperTool = buildTool({
+  name: "speak_with_piper",
+  description: "使用本地 Piper TTS 引擎朗读指定文本。支持根据任务标签自动选择语音模型（chat=日常对话/story=讲故事/alert=通知提醒），也可手动指定模型、语速和音调。注意：如果只是普通对话回复，系统会自动朗读，无需调用此工具。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      text: {
+        type: "string",
+        description: "要朗读的文本内容（中文）。会自动清理 markdown 标记和 emoji。"
+      },
+      task_tag: {
+        type: "string",
+        description: "任务标签，自动选择最佳模型。可选: chat（日常对话/快速回复）, story（讲故事/朗读/高表现力）, alert（通知/提醒/警告）。",
+        enum: ["chat", "story", "alert"]
+      },
+      model: {
+        type: "string",
+        description: "显式指定 Piper 语音模型。可选: zh_CN-huayan-medium（花颜·女声/默认）, zh_CN-ling_ling-medium（玲玲·温柔女声）, zh_CN-tx_mati-medium（马提·沉稳男声）。优先级高于 task_tag。"
+      },
+      speed: {
+        type: "number",
+        description: "语速因子，1.0=正常速度，0.7-0.9=较慢（适合教导/解释），1.1-1.3=较快（适合通知/提醒）。默认由模型推荐。"
+      },
+      pitch: {
+        type: "number",
+        description: "音调因子，1.0=正常，>1=偏高（活泼），<1=偏低（沉稳）。默认由模型推荐。"
+      }
+    },
+    required: ["text"]
+  },
+  handler: async (args) => {
+    const text = cleanTTS(args.text || "");
+    if (!text || text.length < 2) {
+      return formatToolError("文本太短或清理后为空");
+    }
+    if (args.task_tag && !["chat", "story", "alert"].includes(args.task_tag)) {
+      return formatToolError(`无效的任务标签: ${args.task_tag}。可选: chat, story, alert`);
+    }
+    const VALID_MODELS2 = Object.keys(PIPER_MODEL_CATALOG);
+    if (args.model && !VALID_MODELS2.includes(args.model)) {
+      return formatToolError(`无效的模型名: ${args.model}。可选: ${VALID_MODELS2.join(", ")}`);
+    }
+    if (args.speed !== void 0 && (args.speed < 0.5 || args.speed > 2)) {
+      return formatToolError(`语速超出范围: ${args.speed}。应在 0.5-2.0 之间。`);
+    }
+    if (args.pitch !== void 0 && (args.pitch < 0.5 || args.pitch > 2)) {
+      return formatToolError(`音调超出范围: ${args.pitch}。应在 0.5-2.0 之间。`);
+    }
+    Logger.log("INFO", "piper_tool_request", {
+      text_len: text.length,
+      task_tag: args.task_tag || "(none)",
+      model: args.model || "(auto)",
+      speed: args.speed ?? "(model default)",
+      pitch: args.pitch ?? "(model default)",
+      text_preview: text.slice(0, 60),
+      queue_size: piperOrchestrator.getQueueStatus().queueSize
+    });
+    const result = await piperOrchestrator.synthesize({
+      text,
+      taskTag: args.task_tag,
+      model: args.model,
+      speed: args.speed,
+      pitch: args.pitch
+    });
+    if (!result.success) {
+      Logger.log("ERROR", "piper_tool_failed", {
+        error: result.error,
+        model: result.model,
+        duration_ms: result.durationMs,
+        fallback: result.fallbackUsed
+      });
+      return formatToolError(`Piper TTS 合成失败: ${result.error}`);
+    }
+    const durationMs = result.durationMs;
+    if (result.audioFile) {
+      await playAudioFile(result.audioFile);
+      const tempFile = result.audioFile;
+      setTimeout(() => {
+        try {
+          fs.unlinkSync(tempFile);
+        } catch {
+        }
+      }, 1e4);
+    }
+    const modelDisplayName = PIPER_MODEL_CATALOG[result.model]?.displayName || result.model;
+    const fallbackNote = result.fallbackUsed ? " (已自动回退到默认模型)" : "";
+    Logger.log("INFO", "piper_tool_done", {
+      duration_ms: durationMs,
+      text_len: text.length,
+      model: result.model,
+      fallback: result.fallbackUsed,
+      queue_remaining: piperOrchestrator.getQueueStatus().queueSize
+    });
+    return formatToolResult(
+      `已通过 Piper TTS 朗读文本 (${text.length} 字符, 模型: ${modelDisplayName}${fallbackNote}, 耗时: ${durationMs}ms):
+"${text.slice(0, 100)}${text.length > 100 ? "..." : ""}"`
+    );
+  },
+  isReadOnly: true
+});
+const switchPiperModelTool = buildTool({
+  name: "switch_piper_model",
+  description: "切换当前 Piper TTS 语音模型。后续所有未指定模型的语音合成将使用此模型。可用于适配不同的使用场景（日常对话/讲故事/通知）。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {
+      model: {
+        type: "string",
+        description: "要切换到的模型名。可选: zh_CN-huayan-medium（花颜·女声/通用）, zh_CN-ling_ling-medium（玲玲·温柔女声/讲故事）, zh_CN-tx_mati-medium（马提·沉稳男声/通知）。",
+        enum: Object.keys(PIPER_MODEL_CATALOG)
+      }
+    },
+    required: ["model"]
+  },
+  handler: async (args) => {
+    const result = piperOrchestrator.switchModel(args.model);
+    if (!result.success) {
+      return formatToolError(result.message);
+    }
+    return formatToolResult(result.message);
+  },
+  isReadOnly: false
+});
+const listPiperModelsTool = buildTool({
+  name: "list_piper_models",
+  description: "列出所有可用的本地 Piper TTS 语音模型及其描述，以及当前活跃模型。",
+  inputJSONSchema: {
+    type: "object",
+    properties: {},
+    required: []
+  },
+  handler: async () => {
+    const models = piperOrchestrator.getAvailableModels();
+    const current = piperOrchestrator.getCurrentModel();
+    const status = piperOrchestrator.getQueueStatus();
+    const lines = [
+      `当前模型: ${PIPER_MODEL_CATALOG[current]?.displayName || current} (${current})`,
+      `队列状态: ${status.queueSize} 个待处理, ${status.isProcessing ? "正在合成" : "空闲"}`,
+      "",
+      "可用模型:",
+      ...models.map((m) => {
+        const marker = m.name === current ? " ★ 当前" : "";
+        return `  - ${m.displayName} (${m.name})${marker}
+    ${m.description}
+    推荐语速: ${m.speed}x, 推荐音调: ${m.pitch}x`;
+      })
+    ];
+    return formatToolResult(lines.join("\n"));
   },
   isReadOnly: true
 });
@@ -11572,6 +14261,10 @@ function getAllTools() {
     setCredentialTool,
     listCredentialsTool,
     rememberFactTool,
+    storeMemoryTool,
+    retrieveMemoryTool,
+    searchMemoriesTool,
+    forgetMemoryTool,
     analyzeTaskTool,
     autoScheduleWorkflowTool,
     listWorkflowsTool,
@@ -11590,6 +14283,7 @@ function getAllTools() {
     disableSkillTool,
     spawnSkillAgentTool,
     writingSystemTool,
+    writingMemoryTool,
     generateImageTool,
     cardGeneratorTool,
     rememberProcedureTool,
@@ -11605,6 +14299,9 @@ function getAllTools() {
     centosSearchFilesTool,
     socialPipelineTool,
     queryTrendsTool,
+    speakWithPiperTool,
+    switchPiperModelTool,
+    listPiperModelsTool,
     // 文件操作增强
     moveFileTool,
     copyFileTool,
@@ -11643,9 +14340,14 @@ class LocalProvider {
 const WORKSPACE_DIR = WORKSPACE_DIR$1;
 class MemoryAwareInterceptor {
   memoryService = null;
+  toolDefaults = null;
   /** 关联 MemoryService 实例 */
   setMemoryService(ms) {
     this.memoryService = ms;
+  }
+  /** 关联 ToolMemoryDefaults 实例用于参数默认值填充 */
+  setToolDefaults(td) {
+    this.toolDefaults = td;
   }
   /**
    * 工具调用前：从 Memory 中语义检索相关上下文。
@@ -11718,6 +14420,37 @@ class MemoryAwareInterceptor {
     };
   }
   /**
+   * 从用户偏好中自动填充工具参数的默认值。
+   *
+   * 仅填充用户未显式提供的参数（用户值优先）。
+   * 依赖 ToolMemoryDefaults 注册表中的映射规则。
+   *
+   * 若未配置 ToolMemoryDefaults 或工具无注册映射，直接返回原始参数。
+   *
+   * @param toolName 工具名
+   * @param args 用户提供的参数（可能已通过 enrichArgs 增强）
+   * @returns 填充结果，包含填充后的参数和填充详情
+   */
+  fillDefaults(toolName, args) {
+    if (!this.toolDefaults || !this.toolDefaults.hasDefaults(toolName)) {
+      return { args, filled: [], hasFilled: false };
+    }
+    try {
+      const result = this.toolDefaults.fill(toolName, args);
+      return {
+        args: result.args,
+        filled: result.filled,
+        hasFilled: result.filled.length > 0
+      };
+    } catch (err) {
+      Logger.log("WARN", "memory_interceptor_fill_defaults_failed", {
+        tool: toolName,
+        error: String(err)
+      });
+      return { args, filled: [], hasFilled: false };
+    }
+  }
+  /**
    * 工具调用后：将执行结果摘要存入 Memory。
    *
    * 摘要格式: "[工具调用] toolName(key=value, ...) → 成功/失败: resultPreview"
@@ -11750,6 +14483,155 @@ class MemoryAwareInterceptor {
       return `[工具调用] ${toolName}(${argSummary}) → ${status}: ${resultPreview}`;
     }
     return `[工具调用] ${toolName} → ${status}: ${resultPreview}`;
+  }
+}
+class MemoryRetriever {
+  memoryService = null;
+  setMemoryService(ms) {
+    this.memoryService = ms;
+  }
+  /**
+   * 按 key 查询用户偏好值。
+   * 返回置信度最高的匹配项，若无匹配返回 null。
+   */
+  getPreference(key) {
+    if (!this.memoryService) return null;
+    try {
+      const prefs = this.memoryService.getUserPreferences();
+      const match2 = prefs.find((p) => p.key === key);
+      if (match2) {
+        return { value: match2.value, confidence: match2.confidence };
+      }
+      return null;
+    } catch (err) {
+      Logger.log("WARN", "memory_retriever_pref_failed", { key, error: String(err) });
+      return null;
+    }
+  }
+  /**
+   * 检索与指定工具相关的最近调用记录。
+   * 从 user_fact 条目中筛选包含 "[工具调用] toolName" 的记录。
+   */
+  getRecentToolCalls(toolName, limit = 5) {
+    if (!this.memoryService) return [];
+    try {
+      const marker = `[工具调用] ${toolName}`;
+      return this.memoryService.getEntries().filter((e) => e.type === "user_fact" && e.content.includes(marker)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit).map((e) => e.content);
+    } catch (err) {
+      Logger.log("WARN", "memory_retriever_history_failed", { toolName, error: String(err) });
+      return [];
+    }
+  }
+  /**
+   * 获取用户的高频工具列表（按调用次数排序）。
+   * 返回格式: [{ toolName, count }]
+   */
+  getFrequentTools(limit = 10) {
+    if (!this.memoryService) return [];
+    try {
+      const marker = "[工具调用] ";
+      const toolCounts = /* @__PURE__ */ new Map();
+      for (const entry of this.memoryService.getEntries()) {
+        if (entry.type !== "user_fact" || !entry.content.startsWith(marker)) continue;
+        const rest = entry.content.slice(marker.length);
+        const parenIdx = rest.indexOf("(");
+        const arrowIdx = rest.indexOf(" → ");
+        const endIdx = parenIdx > 0 ? parenIdx : arrowIdx > 0 ? arrowIdx : rest.length;
+        const toolName = rest.slice(0, endIdx).trim();
+        if (toolName) {
+          toolCounts.set(toolName, (toolCounts.get(toolName) || 0) + 1);
+        }
+      }
+      return Array.from(toolCounts.entries()).map(([toolName, count]) => ({ toolName, count })).sort((a, b) => b.count - a.count).slice(0, limit);
+    } catch (err) {
+      Logger.log("WARN", "memory_retriever_freq_failed", { error: String(err) });
+      return [];
+    }
+  }
+}
+class ToolMemoryDefaults {
+  registry = {};
+  memoryRetriever;
+  constructor(memoryRetriever) {
+    this.memoryRetriever = memoryRetriever;
+  }
+  /**
+   * 注册工具参数默认值映射。
+   *
+   * @param toolName 工具名，如 "query_weather"
+   * @param paramName 参数名，如 "city"
+   * @param prefKey 用户偏好中的 key，如 "default_city"
+   */
+  register(toolName, paramName, prefKey) {
+    const key = `${toolName}.${paramName}`;
+    this.registry[key] = prefKey;
+    Logger.log("INFO", "tool_defaults_registered", { tool: toolName, param: paramName, prefKey });
+  }
+  /**
+   * 批量注册工具参数默认值映射。
+   *
+   * @param mappings 格式: { "toolName.paramName": "prefKey", ... }
+   */
+  registerAll(mappings) {
+    for (const [key, prefKey] of Object.entries(mappings)) {
+      this.registry[key] = prefKey;
+    }
+    Logger.log("INFO", "tool_defaults_registered_batch", { count: Object.keys(mappings).length });
+  }
+  /**
+   * 取消注册。
+   */
+  unregister(toolName, paramName) {
+    const key = `${toolName}.${paramName}`;
+    delete this.registry[key];
+  }
+  /**
+   * 为工具参数填充默认值。
+   *
+   * 仅填充用户未显式提供的参数（即 args 中不存在的 key）。
+   * 若用户已提供该参数，即使值相同也不会被覆盖。
+   *
+   * @param toolName 工具名
+   * @param args 用户提供的参数
+   * @returns 填充后的参数副本，以及填充日志
+   */
+  fill(toolName, args) {
+    const filled = [];
+    const enriched = { ...args };
+    for (const [toolParamKey, prefKey] of Object.entries(this.registry)) {
+      const [regTool, param] = toolParamKey.split(".", 2);
+      if (regTool !== toolName || !param) continue;
+      if (param in args) continue;
+      const pref = this.memoryRetriever.getPreference(prefKey);
+      if (pref) {
+        enriched[param] = pref.value;
+        filled.push({
+          param,
+          value: pref.value,
+          source: `user_preference:${prefKey}`,
+          confidence: pref.confidence
+        });
+      }
+    }
+    if (filled.length > 0) {
+      Logger.log("INFO", "tool_defaults_filled", {
+        tool: toolName,
+        filled: filled.map((f) => `${f.param}=${f.value}`).join(", ")
+      });
+    }
+    return { args: enriched, filled };
+  }
+  /**
+   * 导出当前注册表（用于调试/持久化）。
+   */
+  getRegistry() {
+    return { ...this.registry };
+  }
+  /**
+   * 检查指定工具是否有注册的默认值映射。
+   */
+  hasDefaults(toolName) {
+    return Object.keys(this.registry).some((k) => k.startsWith(`${toolName}.`));
   }
 }
 const FILE_WRITE_TOOLS = /* @__PURE__ */ new Set(["write_file", "edit_file"]);
@@ -11794,6 +14676,8 @@ class ServerManager {
   constitutionEngine = null;
   capabilityEngine = null;
   memoryInterceptor = new MemoryAwareInterceptor();
+  memoryRetriever = new MemoryRetriever();
+  toolDefaults = new ToolMemoryDefaults(this.memoryRetriever);
   /** 每个 MCP 服务器的独立熔断器 */
   circuitBreakers = /* @__PURE__ */ new Map();
   /** 重启预算：每小时最多 RESTART_BUDGET_MAX 次重启，超限后自动禁用 */
@@ -11821,6 +14705,16 @@ class ServerManager {
   /** 设置 MemoryService 用于记忆感知的工具调用拦截 */
   setMemoryService(ms) {
     this.memoryInterceptor.setMemoryService(ms);
+    this.memoryRetriever.setMemoryService(ms);
+    this.memoryInterceptor.setToolDefaults(this.toolDefaults);
+  }
+  /** 获取 ToolMemoryDefaults 注册表，用于注册工具参数默认值映射 */
+  getToolDefaults() {
+    return this.toolDefaults;
+  }
+  /** 获取 MemoryRetriever，用于直接检索用户偏好和工具调用历史 */
+  getMemoryRetriever() {
+    return this.memoryRetriever;
   }
   /** 从 mcp_servers.json 自动恢复持久化的 MCP 服务器 */
   initServers() {
@@ -11985,7 +14879,9 @@ class ServerManager {
       throw new Error(`未知工具: ${name2}`);
     }
     const memoryCtx = this.memoryInterceptor.preCall(name2, args);
-    const enrichedArgs = this.memoryInterceptor.enrichArgs(args, memoryCtx);
+    let enrichedArgs = this.memoryInterceptor.enrichArgs(args, memoryCtx);
+    const fillResult = this.memoryInterceptor.fillDefaults(name2, enrichedArgs);
+    enrichedArgs = fillResult.args;
     const caller = meta.serverName;
     if (this.capabilityEngine && meta.serverName !== MGR) {
       const action = this.toolNameToCapability(name2);
@@ -12342,7 +15238,20 @@ const PROMPT_WRITING = `【小说创作工具】
   2. 连接后可使用 writing_create_story、writing_create_character 等结构化工具
 
 方案 B（兼容）：通过旧版 writing_system 工具直接调用远程 API
-  需要手动拼接 JSON 字符串传给 data 参数`;
+  需要手动拼接 JSON 字符串传给 data 参数
+
+【创作记忆驱动续写】
+续写新章节前，使用 writing_memory 工具获取读者期望摘要：
+  1. writing_memory action=get_summary storyName="故事名"
+     → 获取关于该故事的历史反馈摘要（300字以内），将返回的【读者期望摘要】附加到 prompt 底部
+  2. 如果无历史反馈，直接按原始方向续写即可
+
+续写完成后，收集用户新一轮反馈并存入 Memory：
+  3. writing_memory action=store_feedback storyName="故事名" feedback="用户反馈内容" category="分类"
+     分类可选：emotion_preference | setting_disagreement | style_feedback | plot_suggestion | general
+
+查询已有反馈（调试/查看用）：
+  4. writing_memory action=search_feedback storyName="故事名"`;
 const WRITING_SCORE_PATTERNS = [
   { pattern: /写.*故事|写.*小说|创作.*故事/, weight: 0.9 },
   { pattern: /小说|故事|剧情|角色|章节|情节/, weight: 0.8 },
@@ -13111,6 +16020,14 @@ function classifyMessageBreakdown(messages2, estimateFn = estimateMessageTokens)
   }
   return breakdown;
 }
+function _isHttpUrl(s) {
+  try {
+    const u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 class LlmService {
   chatApiKey = null;
   codeApiKey = null;
@@ -13126,6 +16043,8 @@ class LlmService {
   visionApiUrl = LLM_VISION_API_URL;
   mcpManager;
   evaluationEmitter;
+  /** setConfig() 已被调用 — refreshFromCredentials 不应再覆盖 key/url 等显式配置 */
+  _configured = false;
   constructor(mcpManager, evaluationEmitter) {
     this.mcpManager = mcpManager || new ServerManager();
     this.evaluationEmitter = evaluationEmitter;
@@ -13140,18 +16059,22 @@ class LlmService {
   refreshFromCredentials(getter) {
     const key = getter("llm_key");
     const codeKey = getter("llm_code_api_key");
-    if (key) this.chatApiKey = key;
-    if (codeKey) this.codeApiKey = codeKey;
+    if (!this._configured) {
+      if (key) this.chatApiKey = key;
+      if (codeKey) this.codeApiKey = codeKey;
+    }
     this.textApiKey = getter("llm_text_key") || LLM_TEXT_KEY || key || "";
     this.visionKey = getter("llm_vision_key") || LLM_VISION_KEY || key || "";
-    const url2 = getter("llm_api_url");
-    const codeUrl = getter("llm_code_api_url");
-    if (url2) this.chatApiUrl = url2;
-    if (codeUrl) this.codeApiUrl = codeUrl;
-    const visionUrl = getter("llm_vision_api_url");
-    if (visionUrl) this.visionApiUrl = visionUrl;
-    const textUrl = getter("llm_text_api_url");
-    if (textUrl) this.textApiUrl = textUrl;
+    if (!this._configured) {
+      const url2 = getter("llm_api_url");
+      const codeUrl = getter("llm_code_api_url");
+      if (url2 && _isHttpUrl(url2)) this.chatApiUrl = url2;
+      if (codeUrl && _isHttpUrl(codeUrl)) this.codeApiUrl = codeUrl;
+      const visionUrl = getter("llm_vision_api_url");
+      if (visionUrl && _isHttpUrl(visionUrl)) this.visionApiUrl = visionUrl;
+      const textUrl = getter("llm_text_api_url");
+      if (textUrl && _isHttpUrl(textUrl)) this.textApiUrl = textUrl;
+    }
     const model = getter("llm_chat_model");
     const codeModel = getter("llm_code_model");
     if (model) this.apiModel = model;
@@ -13162,6 +16085,7 @@ class LlmService {
     if (textModel) this.textModel = textModel;
   }
   setConfig(chatKey, codeKey, chatModel, codeModel, chatUrl, codeUrl) {
+    this._configured = true;
     this.chatApiKey = chatKey;
     this.codeApiKey = codeKey || chatKey;
     this.textApiKey = LLM_TEXT_KEY || chatKey;
@@ -14159,10 +17083,13 @@ class WhisperEngine {
   loadPromise = null;
   currentModel = "";
   firstInferenceDone = false;
-  initialPrompt = (() => {
+  defaultPrompt;
+  initialPrompt;
+  constructor() {
     const hotwordPrefix = `关键词: ${ASR_HOTWORDS.slice(0, 20).join(", ")}。`;
-    return `${ASR_INITIAL_PROMPT} ${hotwordPrefix}`;
-  })();
+    this.defaultPrompt = `${ASR_INITIAL_PROMPT} ${hotwordPrefix}`;
+    this.initialPrompt = this.defaultPrompt;
+  }
   async initialize(model = "tiny", onProgress) {
     if (this.transcribeFn) return;
     if (this.loading && this.loadPromise) return this.loadPromise;
@@ -14225,6 +17152,10 @@ class WhisperEngine {
   }
   setInitialPrompt(prompt) {
     this.initialPrompt = prompt;
+  }
+  /** 重置 initialPrompt 为构造函数中的默认值（静态配置） */
+  resetInitialPrompt() {
+    this.initialPrompt = this.defaultPrompt;
   }
   _createTranscriber(pipe) {
     return async (audio) => {
@@ -14348,6 +17279,10 @@ function encodeWAV(samples) {
 class WhisperGpuEngine {
   modelPath = null;
   loaded = false;
+  /** 动态覆盖的初始提示词（null=使用静态配置） */
+  overridePrompt = null;
+  /** 动态覆盖的热词列表（null=使用静态配置） */
+  overrideHotwords = null;
   async initialize(model = "small") {
     if (this.loaded) return;
     this.modelPath = path$1.join(GGML_MODELS_DIR, `ggml-${model}.bin`);
@@ -14372,9 +17307,15 @@ class WhisperGpuEngine {
     await fs.promises.writeFile(tmpFile, wavBuf);
     Logger.log("INFO", "gpu_asr_audio", { length_s: Number(audioLen), engine: "whisper_gpu" });
     try {
-      const hotwordPrefix = `关键词: ${ASR_HOTWORDS.slice(0, 20).join(", ")}。`;
-      const whisperPrompt = `${ASR_INITIAL_PROMPT} ${hotwordPrefix}`;
-      Logger.log("INFO", "gpu_initial_prompt", { prompt: whisperPrompt });
+      const effectiveHotwords = this.overrideHotwords ?? ASR_HOTWORDS;
+      const effectivePrompt = this.overridePrompt ?? ASR_INITIAL_PROMPT;
+      const hotwordPrefix = `关键词: ${effectiveHotwords.slice(0, 20).join(", ")}。`;
+      const whisperPrompt = `${effectivePrompt} ${hotwordPrefix}`;
+      Logger.log("INFO", "gpu_initial_prompt", {
+        prompt: whisperPrompt,
+        hotwords_dynamic: this.overrideHotwords !== null,
+        prompt_dynamic: this.overridePrompt !== null
+      });
       const result = await withTimeout(
         () => whisper.transcribe({
           model: this.modelPath,
@@ -14428,6 +17369,19 @@ class WhisperGpuEngine {
       } catch {
       }
     }
+  }
+  /** 设置动态 initial_prompt（覆盖静态配置），传 null 恢复默认 */
+  setInitialPrompt(prompt) {
+    this.overridePrompt = prompt;
+  }
+  /** 设置动态热词列表（覆盖静态配置），传 null 恢复默认 */
+  setHotwords(hotwords) {
+    this.overrideHotwords = hotwords;
+  }
+  /** 清除所有动态覆盖，恢复静态配置 */
+  resetContextOverrides() {
+    this.overridePrompt = null;
+    this.overrideHotwords = null;
   }
   getStatus() {
     return { loaded: this.loaded, loading: false, error: null };
@@ -14493,6 +17447,486 @@ class BaiduEngine {
     }
   }
 }
+function extractContextFromSummaries(summaries, recentUserText) {
+  const topics = [];
+  const keyEntities = [];
+  for (const summary of summaries) {
+    for (const topic of summary.topics) {
+      if (topic && !topics.includes(topic)) topics.push(topic);
+    }
+    for (const entity of summary.keyEntities) {
+      if (entity && !keyEntities.includes(entity)) keyEntities.push(entity);
+    }
+  }
+  return { topics, keyEntities, recentUserText };
+}
+function buildContextualHotwords(context, maxHotwords = 30) {
+  const dynamicHotwords = [];
+  for (const entity of context.keyEntities) {
+    if (entity && entity.length >= 2 && !dynamicHotwords.includes(entity)) {
+      dynamicHotwords.push(entity);
+    }
+  }
+  for (const topic of context.topics) {
+    if (topic && !dynamicHotwords.includes(topic)) {
+      dynamicHotwords.push(topic);
+    }
+  }
+  const staticHotwords = ASR_HOTWORDS.filter((hw) => !dynamicHotwords.includes(hw));
+  const merged = [...dynamicHotwords, ...staticHotwords];
+  return merged.slice(0, maxHotwords);
+}
+function buildContextualPrompt(context) {
+  const basePrompt = ASR_INITIAL_PROMPT;
+  const parts = [basePrompt];
+  if (context.topics.length > 0) {
+    parts.push(`当前对话主题: ${context.topics.slice(0, 5).join("、")}。`);
+  }
+  if (context.keyEntities.length > 0) {
+    parts.push(`关键实体: ${context.keyEntities.slice(0, 10).join(", ")}。`);
+  }
+  return parts.join(" ");
+}
+function isContextMeaningful(context) {
+  return context.topics.length > 0 || context.keyEntities.length > 0;
+}
+function formatHotwordPrefix(hotwords, limit = 20) {
+  const display = hotwords.slice(0, limit);
+  if (display.length === 0) return "";
+  return `关键词: ${display.join(", ")}。`;
+}
+const DEFAULT_WINDOW_SIZE$1 = 16;
+const DEFAULT_FREQ_THRESHOLD = 3;
+const MAX_HOTWORDS = 15;
+const MIN_WORD_LENGTH = 2;
+const CN_STOPWORDS = /* @__PURE__ */ new Set([
+  "一个",
+  "没有",
+  "我们",
+  "你们",
+  "他们",
+  "她们",
+  "它们",
+  "什么",
+  "怎么",
+  "怎么样",
+  "为什么",
+  "因为",
+  "所以",
+  "但是",
+  "可是",
+  "不过",
+  "而且",
+  "或者",
+  "如果",
+  "虽然",
+  "然而",
+  "于是",
+  "因此",
+  "可以",
+  "可能",
+  "应该",
+  "必须",
+  "需要",
+  "能够",
+  "已经",
+  "曾经",
+  "正在",
+  "将要",
+  "一直",
+  "还是",
+  "就是",
+  "只是",
+  "不是",
+  "不用",
+  "不能",
+  "不会",
+  "不行",
+  "不要",
+  "不敢",
+  "不一定",
+  "这个",
+  "那个",
+  "这些",
+  "那些",
+  "这里",
+  "那里",
+  "哪里",
+  "自己",
+  "大家",
+  "别人",
+  "所有",
+  "一些",
+  "一点",
+  "很多",
+  "很少",
+  "时候",
+  "时间",
+  "地方",
+  "东西",
+  "事情",
+  "问题",
+  "方法",
+  "方式",
+  "今天",
+  "昨天",
+  "明天",
+  "现在",
+  "以前",
+  "以后",
+  "刚才",
+  "知道",
+  "觉得",
+  "认为",
+  "希望",
+  "喜欢",
+  "想要",
+  "告诉",
+  "请问",
+  "帮忙",
+  "谢谢",
+  "你好",
+  "好的",
+  "嗯",
+  "啊",
+  "吧",
+  "吗",
+  "呢",
+  "哦",
+  "的",
+  "了",
+  "在",
+  "是",
+  "有",
+  "和",
+  "与",
+  "或",
+  "对",
+  "把",
+  "被",
+  "让",
+  "给",
+  "从",
+  "到",
+  "用"
+]);
+const EN_STOPWORDS = /* @__PURE__ */ new Set([
+  "the",
+  "a",
+  "an",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "have",
+  "has",
+  "had",
+  "having",
+  "do",
+  "does",
+  "did",
+  "doing",
+  "will",
+  "would",
+  "shall",
+  "should",
+  "may",
+  "might",
+  "must",
+  "can",
+  "could",
+  "i",
+  "me",
+  "my",
+  "mine",
+  "myself",
+  "we",
+  "us",
+  "our",
+  "ours",
+  "ourselves",
+  "you",
+  "your",
+  "yours",
+  "yourself",
+  "yourselves",
+  "he",
+  "him",
+  "his",
+  "himself",
+  "she",
+  "her",
+  "hers",
+  "herself",
+  "it",
+  "its",
+  "itself",
+  "they",
+  "them",
+  "their",
+  "theirs",
+  "themselves",
+  "this",
+  "that",
+  "these",
+  "those",
+  "here",
+  "there",
+  "where",
+  "when",
+  "why",
+  "how",
+  "what",
+  "which",
+  "who",
+  "whom",
+  "whose",
+  "and",
+  "but",
+  "or",
+  "not",
+  "no",
+  "if",
+  "then",
+  "else",
+  "so",
+  "for",
+  "to",
+  "of",
+  "in",
+  "on",
+  "at",
+  "by",
+  "with",
+  "from",
+  "as",
+  "into",
+  "about",
+  "above",
+  "after",
+  "before",
+  "between",
+  "during",
+  "without",
+  "all",
+  "any",
+  "both",
+  "each",
+  "few",
+  "more",
+  "most",
+  "other",
+  "some",
+  "such",
+  "only",
+  "own",
+  "same",
+  "too",
+  "very",
+  "just",
+  "than",
+  "please",
+  "thanks",
+  "hello",
+  "ok",
+  "okay",
+  "yes",
+  "no",
+  "yeah",
+  "well",
+  "also",
+  "still",
+  "now",
+  "then",
+  "here",
+  "very",
+  "really",
+  "quite"
+]);
+function tokenize(text) {
+  if (!text || text.trim().length === 0) return [];
+  const tokens = [];
+  const asciiWords = text.match(/[a-zA-Z0-9_]{2,}/g);
+  if (asciiWords) {
+    for (const w of asciiWords) {
+      const lower = w.toLowerCase();
+      if (!EN_STOPWORDS.has(lower) && lower.length >= MIN_WORD_LENGTH) {
+        tokens.push(lower);
+      }
+    }
+  }
+  const cjkRuns = text.match(/[一-鿿㐀-䶿]{2,}/g);
+  if (cjkRuns) {
+    for (const run of cjkRuns) {
+      for (let i = 0; i <= run.length - 2; i++) {
+        const bigram = run.slice(i, i + 2);
+        if (!CN_STOPWORDS.has(bigram)) {
+          tokens.push(bigram);
+        }
+      }
+      for (let i = 0; i <= run.length - 3; i++) {
+        const trigram = run.slice(i, i + 3);
+        if (!CN_STOPWORDS.has(trigram)) {
+          tokens.push(trigram);
+        }
+      }
+    }
+  }
+  return tokens;
+}
+function isNoiseToken(token) {
+  if (token.length < MIN_WORD_LENGTH) return true;
+  if (/^\d+$/.test(token)) return true;
+  if (/^[\s\p{P}\p{S}]+$/u.test(token)) return true;
+  return false;
+}
+class AsrHotwordManager {
+  /** 是否启用 */
+  enabled = true;
+  /** 分析窗口大小 */
+  windowSize;
+  /** 频率阈值 */
+  freqThreshold;
+  /** 当前热词条目（按 lastSeenAt 排序） */
+  entries = [];
+  /** 记录的用户输入文本（用于窗口计算） */
+  recentTexts = [];
+  /** 总计输入次数（用于调试） */
+  totalInputs = 0;
+  constructor(windowSize = DEFAULT_WINDOW_SIZE$1, freqThreshold = DEFAULT_FREQ_THRESHOLD) {
+    this.windowSize = windowSize;
+    this.freqThreshold = freqThreshold;
+  }
+  // ── 数据采集 ──
+  /**
+   * 喂入一条用户文本（包括 ASR 识别结果或手动输入）。
+   * 自动提取词汇并更新频次统计。
+   */
+  feedUserText(text) {
+    if (!this.enabled) return;
+    if (!text || text.trim().length === 0) return;
+    const trimmed = text.trim();
+    this.recentTexts.push(trimmed);
+    this.totalInputs++;
+    while (this.recentTexts.length > this.windowSize) {
+      this.recentTexts.shift();
+    }
+    this.rebuildEntries();
+    Logger.log("INFO", "asr_hotword_fed", {
+      text_snippet: trimmed.slice(0, 50),
+      total_inputs: this.totalInputs,
+      entry_count: this.entries.length,
+      window_size: this.recentTexts.length
+    });
+  }
+  /**
+   * 从已有的多段文本重建词频统计（用于从 DB 冷启动）。
+   */
+  loadFromTexts(texts) {
+    this.recentTexts = texts.slice(-this.windowSize);
+    this.totalInputs = texts.length;
+    this.rebuildEntries();
+  }
+  // ── 热词获取 ──
+  /**
+   * 获取当前频率超过阈值的热词列表。
+   * 按频次降序排列，限制最大数量。
+   */
+  getHotwords() {
+    if (!this.enabled) return [];
+    const threshold = this.freqThreshold;
+    return this.entries.filter((e) => e.count >= threshold).sort((a, b) => b.count - a.count).slice(0, MAX_HOTWORDS).map((e) => e.word);
+  }
+  /**
+   * 获取所有热词条目（含频次信息，用于调试）。
+   */
+  getEntries() {
+    return [...this.entries].sort((a, b) => b.count - a.count);
+  }
+  /**
+   * 判断是否有足够的数据进行热词推荐。
+   */
+  hasSufficientData() {
+    return this.recentTexts.length >= 3;
+  }
+  // ── 控制 ──
+  /** 启用/禁用热词管理器 */
+  setEnabled(enabled) {
+    if (this.enabled === enabled) return;
+    this.enabled = enabled;
+    if (!enabled) {
+      this.clear();
+    }
+    Logger.log("INFO", "asr_hotword_toggled", { enabled });
+  }
+  /** 是否启用 */
+  isEnabled() {
+    return this.enabled;
+  }
+  /** 获取当前状态（用于持久化/调试） */
+  getState() {
+    return {
+      enabled: this.enabled,
+      windowSize: this.windowSize,
+      freqThreshold: this.freqThreshold,
+      entries: this.getEntries(),
+      totalInputs: this.totalInputs
+    };
+  }
+  /** 清除所有数据 */
+  clear() {
+    this.recentTexts = [];
+    this.entries = [];
+    Logger.log("INFO", "asr_hotword_cleared");
+  }
+  /** 完全重置 */
+  reset() {
+    this.clear();
+    this.totalInputs = 0;
+  }
+  // ── 内部方法 ──
+  /**
+   * 从最近文本重新构建词频统计。
+   * 只考虑窗口内的文本，窗口外的自动遗忘。
+   */
+  rebuildEntries() {
+    const freqMap = /* @__PURE__ */ new Map();
+    for (let i = 0; i < this.recentTexts.length; i++) {
+      const text = this.recentTexts[i];
+      const tokens = tokenize(text);
+      const seenInText = /* @__PURE__ */ new Set();
+      for (const token of tokens) {
+        if (isNoiseToken(token)) continue;
+        if (seenInText.has(token)) continue;
+        seenInText.add(token);
+        const existing = freqMap.get(token);
+        if (existing) {
+          existing.count++;
+          existing.lastSeenAt = i;
+        } else {
+          freqMap.set(token, { count: 1, firstSeenAt: i, lastSeenAt: i });
+        }
+      }
+    }
+    this.entries = Array.from(freqMap.entries()).map(([word, { count, firstSeenAt, lastSeenAt }]) => ({
+      word,
+      count,
+      firstSeenAt,
+      lastSeenAt
+    })).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+    if (this.entries.length > 0) {
+      Logger.log("INFO", "asr_hotword_rebuilt", {
+        total_tokens: this.entries.length,
+        window_texts: this.recentTexts.length,
+        top_words: this.entries.slice(0, 5).map((e) => `${e.word}(${e.count})`)
+      });
+    }
+  }
+}
+const asrHotwordManager = new AsrHotwordManager(ASR_HOTWORD_WINDOW_SIZE, ASR_HOTWORD_FREQ_THRESHOLD);
 function isGarbled(text) {
   if (!text || text.length === 0) return true;
   let valid = 0;
@@ -14543,6 +17977,8 @@ class AsrService {
   baiduApiKey;
   baiduSecretKey;
   _pendingRequests = 0;
+  /** 当前对话上下文（用于动态热词/提示词），null=使用静态配置 */
+  conversationContext = null;
   constructor(gpuEngine, baiduEngine) {
     this.gpuEngine = gpuEngine;
     this.baiduEngine = baiduEngine;
@@ -14564,6 +18000,82 @@ class AsrService {
   setBaiduCredentials(apiKey, secretKey) {
     this.baiduApiKey = apiKey;
     this.baiduSecretKey = secretKey;
+  }
+  /**
+   * 设置当前对话上下文，用于动态热词和提示词。
+   * ASR 在识别前将使用上下文中的主题标签和关键实体构建热词列表和 initial_prompt。
+   * 传 null 清除上下文，恢复静态配置。
+   *
+   * @param context 从 Memory（SummaryMemory）提取的对话上下文
+   */
+  setConversationContext(context) {
+    this.conversationContext = context;
+    const freqHotwords = asrHotwordManager.getHotwords();
+    if (context && isContextMeaningful(context)) {
+      let hotwords = buildContextualHotwords(context);
+      if (freqHotwords.length > 0) {
+        const existing = new Set(hotwords);
+        const newHotwords = freqHotwords.filter((w) => !existing.has(w));
+        hotwords = [...newHotwords, ...hotwords];
+      }
+      const dynamicPrompt = buildContextualPrompt(context);
+      this.gpuEngine.setHotwords(hotwords);
+      this.gpuEngine.setInitialPrompt(dynamicPrompt);
+      if (this.cpuEngine) {
+        const hotwordPrefix = formatHotwordPrefix(hotwords);
+        this.cpuEngine.setInitialPrompt(`${dynamicPrompt} ${hotwordPrefix}`);
+      }
+      Logger.log("INFO", "asr_context_set", {
+        topics: context.topics.slice(0, 5),
+        entities: context.keyEntities.slice(0, 5),
+        hotword_count: hotwords.length,
+        freq_hotwords: freqHotwords.length,
+        has_user_text: !!context.recentUserText
+      });
+    } else if (freqHotwords.length > 0) {
+      this.gpuEngine.setHotwords(freqHotwords);
+      if (this.cpuEngine) {
+        const hotwordPrefix = formatHotwordPrefix(freqHotwords);
+        this.cpuEngine.setInitialPrompt(hotwordPrefix);
+      }
+      Logger.log("INFO", "asr_context_freq_only", {
+        freq_hotwords: freqHotwords.length,
+        sample: freqHotwords.slice(0, 5)
+      });
+    } else {
+      this.gpuEngine.resetContextOverrides();
+      if (this.cpuEngine) {
+        this.cpuEngine.resetInitialPrompt();
+      }
+      if (context) {
+        Logger.log("INFO", "asr_context_empty", { note: "no meaningful context, using static config" });
+      }
+    }
+  }
+  /** 获取当前对话上下文（用于调试） */
+  getConversationContext() {
+    return this.conversationContext;
+  }
+  /**
+   * 向热词管理器喂入用户文本（用于行为驱动的热词提取）。
+   * 应在每次获取到用户文本（ASR识别结果或手动输入）后调用。
+   */
+  feedUserTextToHotwords(text) {
+    asrHotwordManager.feedUserText(text);
+  }
+  /** 启用/禁用行为驱动热词增强 */
+  toggleHotwordManager(enabled) {
+    asrHotwordManager.setEnabled(enabled);
+  }
+  /** 获取热词管理器状态 */
+  getHotwordManagerState() {
+    const state = asrHotwordManager.getState();
+    return {
+      enabled: state.enabled,
+      entryCount: state.entries.length,
+      hotwords: asrHotwordManager.getHotwords(),
+      totalInputs: state.totalInputs
+    };
   }
   get useBaidu() {
     return !!(this.baiduApiKey && this.baiduSecretKey);
@@ -14646,260 +18158,6 @@ class AsrService {
       return { text: "", request_id: rid, error: "no ASR engine available" };
     } finally {
       decrement();
-    }
-  }
-}
-function findFfplay() {
-  for (const p of FFPLAY_PATHS) {
-    if (p === "ffplay" || fs.existsSync(p)) return p;
-  }
-  return "ffplay";
-}
-const DEFAULT_EMOTION_PARAMS = {
-  voice: "zh-CN-XiaoxiaoNeural",
-  rate: "+10%",
-  pitch: "+8Hz",
-  label: "默认/日常"
-};
-function getTempFile() {
-  return path$1.join(os.tmpdir(), `akemi-mio-${Date.now()}.mp3`);
-}
-function cleanTTS(text) {
-  const before = text;
-  text = text.replace(/[\uD800-\uDFFF]/g, "");
-  const polyphoneFixed = text.replace(/还行/g, "还型").replace(/行吧/g, "型吧").replace(/行了/g, "型了").replace(/行吗/g, "型吗").replace(/行不/g, "型不").replace(/行啊/g, "型啊").replace(/行啦/g, "型啦");
-  const cleaned = polyphoneFixed.replace(/^#{1,6}\s*/gm, "").replace(/\*{1,2}/g, "").replace(/```[\s\S]*?```/g, "").replace(/`([^`]+)`/g, "$1").replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1").replace(/\[([^\]]*)\]\([^)]+\)/g, "$1").replace(/[（(][^）)]*[）)]/g, "").replace(/^[\s]*[-*+]\s+/gm, "").replace(/^\s*\d+[.、]\s+/gm, "").replace(/[|│]/g, "").replace(/^>\s+/gm, "").replace(/^[-*_]{3,}\s*$/gm, "").replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "").replace(/[～~]+$/, "").replace(/[～~]/g, "").replace(/…{2,}/g, "…").replace(/—{2,}/g, "—").replace(/\s{2,}/g, " ").trim();
-  const removed = before.length - cleaned.length;
-  if (removed > 0) {
-    Logger.log("INFO", "tts_clean", { chars_removed: removed, before: before.length, after: cleaned.length, input_snippet: before.slice(0, 60) });
-  }
-  if (before.length > 0 && cleaned.length === 0) {
-    Logger.log("WARN", "tts_clean_all_filtered", { input: before.slice(0, 100) });
-    return "嗯";
-  }
-  return cleaned;
-}
-class TtsService {
-  onStateUpdate;
-  onAudioReady = null;
-  currentProcess = null;
-  playbackStopRequested = false;
-  ttsQueue = [];
-  isProcessing = false;
-  sentenceBuf = "";
-  batchTimer = null;
-  stopped = false;
-  /** 当前情感 TTS 参数（由外部通过 setEmotion 更新） */
-  emotionParams = { ...DEFAULT_EMOTION_PARAMS };
-  /** 情感自适应是否启用（用户可关闭） */
-  emotionEnabled = true;
-  constructor(onStateUpdate, onAudioReady) {
-    this.onStateUpdate = onStateUpdate;
-    this.onAudioReady = onAudioReady ?? null;
-  }
-  setAudioSink(cb) {
-    this.onAudioReady = cb;
-  }
-  /** 更新情感 TTS 参数（由情感分析器驱动） */
-  setEmotion(params) {
-    this.emotionParams = { ...params };
-    Logger.log("INFO", "tts_emotion_update", { voice: params.voice, rate: params.rate, pitch: params.pitch, label: params.label });
-  }
-  /** 启用/禁用情感自适应语音 */
-  setEmotionEnabled(enabled) {
-    this.emotionEnabled = enabled;
-    Logger.log("INFO", "tts_emotion_enabled", { enabled });
-  }
-  /** 获取当前情感参数（供调试/UI 展示） */
-  getEmotionParams() {
-    return { ...this.emotionParams };
-  }
-  /** 情感自适应是否启用 */
-  isEmotionEnabled() {
-    return this.emotionEnabled;
-  }
-  addChunk(chunk) {
-    try {
-      this.sentenceBuf += chunk;
-      const parts = this.sentenceBuf.split(/(?<=[。！？\n])/);
-      if (parts.length > 1) {
-        this.sentenceBuf = parts.pop() || "";
-        for (const p of parts) {
-          const clean = cleanTTS(p.trim());
-          if (clean && clean.length >= 15) this.ttsQueue.push(clean);
-        }
-        if (this.batchTimer) clearTimeout(this.batchTimer);
-        this.batchTimer = setTimeout(() => {
-          this.batchTimer = null;
-          if (this.ttsQueue.length > 0) this.processQueue();
-        }, 500);
-      }
-    } catch (err) {
-      Logger.log("WARN", "tts_add_chunk_error", { error: String(err) });
-    }
-  }
-  flushBuffer() {
-    this.stopped = false;
-    if (this.batchTimer) {
-      clearTimeout(this.batchTimer);
-      this.batchTimer = null;
-    }
-    if (!this.sentenceBuf.trim() && this.ttsQueue.length === 0) return;
-    if (this.sentenceBuf.trim()) {
-      const clean = cleanTTS(this.sentenceBuf.trim());
-      this.sentenceBuf = "";
-      if (clean && clean.length >= 15) this.ttsQueue.push(clean);
-    }
-    if (this.ttsQueue.length > 0) this.processQueue();
-  }
-  stop() {
-    this.stopped = true;
-    this.playbackStopRequested = true;
-    if (this.currentProcess) {
-      this.currentProcess.kill();
-      this.currentProcess = null;
-    }
-    if (this.batchTimer) {
-      clearTimeout(this.batchTimer);
-      this.batchTimer = null;
-    }
-    this.ttsQueue = [];
-    this.sentenceBuf = "";
-    this.isProcessing = false;
-    this.onStateUpdate({ ttsPlaying: false });
-  }
-  async speak(text) {
-    this.onStateUpdate({ ttsPlaying: true });
-    try {
-      await this.speakInternal(text);
-    } catch (err) {
-      Logger.log("ERROR", "tts_speak_error", { error: String(err) });
-    } finally {
-      this.onStateUpdate({ ttsPlaying: false });
-    }
-  }
-  async speakInternal(text) {
-    const clean = cleanTTS(text);
-    if (!clean || clean.length < 15) return;
-    const tempFile = getTempFile();
-    const t0 = Date.now();
-    try {
-      Logger.log("INFO", "tts_synthesize", { char_count: clean.length, engine: USE_LOCAL_TTS ? "piper" : "edge-tts" });
-      await this._synthesize(clean, tempFile);
-      Logger.log("PERF", "tts_synthesis_done", { duration_ms: Date.now() - t0, chars: clean.length });
-      if (this.onAudioReady) {
-        this.onAudioReady(tempFile);
-      }
-    } catch (err) {
-      this._logError(err);
-    } finally {
-      try {
-        fs.unlinkSync(tempFile);
-      } catch {
-      }
-    }
-  }
-  async _synthesize(text, outputFile, attempt = 1) {
-    const maxAttempts = 2;
-    try {
-      if (USE_LOCAL_TTS) {
-        const piper = require$$0.execFile("python", [PIPER_SCRIPT, outputFile], { timeout: 15e3, windowsHide: true });
-        this.currentProcess = { kill: () => piper.kill() };
-        piper.stdin?.end(text);
-        await new Promise((resolve, reject) => {
-          piper.on("close", (code) => code === 0 ? resolve() : reject(new Error(`piper exit ${code}`)));
-          piper.stderr?.on("data", (d) => console.log("[piper]", d.toString().trim()));
-          piper.on("error", reject);
-        }).finally(() => {
-          this.currentProcess = null;
-        });
-        return;
-      }
-      const params = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS;
-      const edgeTts = require$$0.execFile(
-        "edge-tts",
-        ["--voice", params.voice, "--text", text, "--write-media", outputFile, "--rate", params.rate, "--pitch", params.pitch],
-        { timeout: 3e4, windowsHide: true }
-      );
-      this.currentProcess = { kill: () => edgeTts.kill() };
-      await new Promise((resolve, reject) => {
-        edgeTts.on("close", (code) => code === 0 ? resolve() : reject(new Error(`edge-tts exit ${code}`)));
-        edgeTts.on("error", reject);
-      }).finally(() => {
-        if (this.currentProcess?.kill === edgeTts.kill) {
-          this.currentProcess = null;
-        }
-      });
-    } catch (err) {
-      if (attempt < maxAttempts) {
-        Logger.log("WARN", "tts_synthesis_retry", { attempt, error: String(err).slice(0, 100), text_len: text.length });
-        return this._synthesize(text, outputFile, attempt + 1);
-      }
-      throw err;
-    }
-  }
-  _playAudio(filePath) {
-    const ffplay = findFfplay();
-    Logger.log("INFO", "tts_playback_start", { player: ffplay });
-    const playT0 = Date.now();
-    const ffplayTimeout = setTimeout(() => {
-      if (this.currentProcess) {
-        this.currentProcess.kill();
-        this.currentProcess = null;
-      }
-    }, 3e4);
-    return new Promise((resolve, reject) => {
-      this.playbackStopRequested = false;
-      const proc = require$$0.execFile(ffplay, ["-nodisp", "-autoexit", filePath], { windowsHide: true }, (err) => {
-        clearTimeout(ffplayTimeout);
-        if (this.playbackStopRequested) {
-          Logger.log("INFO", "tts_playback_stopped", { duration_ms: Date.now() - playT0 });
-          resolve();
-          return;
-        }
-        if (err && (err.code === 1 || err.code === null)) {
-          resolve();
-          return;
-        }
-        if (err) reject(err);
-        else resolve();
-      });
-      this.currentProcess = {
-        kill: () => {
-          clearTimeout(ffplayTimeout);
-          proc.kill();
-        }
-      };
-    }).then(() => Logger.log("PERF", "tts_playback_done", { duration_ms: Date.now() - playT0 }));
-  }
-  _logError(err) {
-    const errMsg = String(err);
-    if (errMsg.includes("ffplay") || errMsg.includes("Exit code")) {
-      const code = err instanceof Error && "code" in err ? err.code : null;
-      Logger.log("ERROR", "tts_playback_failed", { error_type: "ffplay_exit", exit_code: code, message: errMsg.slice(0, 200) });
-    } else if (errMsg.includes("edge-tts") || errMsg.includes("ETIMEOUT") || errMsg.includes("timed out")) {
-      Logger.log("ERROR", "tts_synthesis_failed", { error_type: "synthesis_timeout", message: errMsg.slice(0, 200) });
-    } else {
-      Logger.log("ERROR", "tts_failed", { error_type: "unknown", message: errMsg.slice(0, 200) });
-    }
-  }
-  async processQueue() {
-    if (this.isProcessing || this.ttsQueue.length === 0 || this.stopped) return;
-    this.isProcessing = true;
-    this.onStateUpdate({ ttsPlaying: true });
-    try {
-      do {
-        while (this.ttsQueue.length > 0) {
-          const batch = [];
-          while (this.ttsQueue.length > 0) batch.push(this.ttsQueue.shift());
-          await this.speakInternal(batch.join(""));
-        }
-      } while (this.ttsQueue.length > 0);
-    } catch (err) {
-      Logger.log("ERROR", "tts_process_queue", { error: String(err) });
-    } finally {
-      this.isProcessing = false;
-      this.onStateUpdate({ ttsPlaying: false });
     }
   }
 }
@@ -18391,6 +21649,8 @@ const HIGH_FREQ_TOOL_THRESHOLD = 3;
 const TOPIC_MIN_OCCURRENCES = 2;
 const MAX_SUGGESTED_TOOLS = 5;
 const MAX_SUGGESTED_TOPICS = 3;
+const REPEAT_SIMILARITY_THRESHOLD = 0.55;
+const REPEAT_MIN_MESSAGE_LENGTH = 6;
 const TOPIC_PATTERNS = [
   // 中文模式
   { pattern: /天气/g, label: "天气查询" },
@@ -18562,6 +21822,89 @@ class UserBehaviorAnalyzer {
     }
     return hints;
   }
+  // ── 重复模式检测 ──
+  /**
+   * 检测用户是否在短时间内重复提问相似问题。
+   * 使用字符 bigram Jaccard 相似度进行快速比较，
+   * 不依赖 LLM（避免在热路径上增加延迟）。
+   *
+   * @param currentText 当前用户消息
+   * @returns RepeatedPattern 检测结果
+   */
+  detectRepeatedPattern(currentText) {
+    const emptyResult = {
+      detected: false,
+      matchedIndex: -1,
+      similarity: 0,
+      currentTopics: [],
+      matchedTopics: [],
+      mergedTopics: [],
+      currentText: currentText.slice(0, 80),
+      matchedText: ""
+    };
+    if (!currentText || currentText.trim().length < REPEAT_MIN_MESSAGE_LENGTH) {
+      return emptyResult;
+    }
+    const normalized = currentText.trim().toLowerCase();
+    const recent = this.recentUserMessages.slice(-8);
+    if (recent.length < 2) return emptyResult;
+    const currentTopics = this._extractTopicsFromText(currentText);
+    let bestSimilarity = 0;
+    let bestIndex = -1;
+    let bestText = "";
+    for (let i = recent.length - 1; i >= 0; i--) {
+      const past = recent[i];
+      if (past.content === currentText.trim()) continue;
+      if (past.content.length < REPEAT_MIN_MESSAGE_LENGTH) continue;
+      const similarity = computeBigramJaccard(
+        normalized,
+        past.content.toLowerCase()
+      );
+      if (similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+        bestIndex = i;
+        bestText = past.content;
+      }
+    }
+    if (bestSimilarity < REPEAT_SIMILARITY_THRESHOLD || bestIndex < 0) {
+      return { ...emptyResult, similarity: bestSimilarity, currentTopics };
+    }
+    const matchedTopics = this._extractTopicsFromText(bestText);
+    const mergedTopics = [.../* @__PURE__ */ new Set([...currentTopics, ...matchedTopics])];
+    Logger.log("INFO", "behavior_repeat_detected", {
+      similarity: bestSimilarity.toFixed(3),
+      currentTopics,
+      matchedTopics,
+      mergedTopics,
+      currentSnippet: normalized.slice(0, 40),
+      matchedSnippet: bestText.slice(0, 40)
+    });
+    return {
+      detected: true,
+      matchedIndex: bestIndex,
+      similarity: bestSimilarity,
+      currentTopics,
+      matchedTopics,
+      mergedTopics,
+      currentText: normalized.slice(0, 80),
+      matchedText: bestText.slice(0, 80)
+    };
+  }
+  /**
+   * 从单条文本中提取话题标签（供 detectRepeatedPattern 使用）。
+   * 复用 TOPIC_PATTERNS + TOOL_TOPIC_MAP（工具不可用，仅做文本匹配）。
+   */
+  _extractTopicsFromText(text) {
+    const topics = [];
+    const lower = text.toLowerCase();
+    for (const { pattern, label } of TOPIC_PATTERNS) {
+      pattern.lastIndex = 0;
+      if (pattern.test(lower)) {
+        topics.push(label);
+      }
+    }
+    return [...new Set(topics)].slice(0, MAX_SUGGESTED_TOPICS);
+  }
   // ── 用户反馈调节 ──
   /**
    * 用户标记某个工具模式为"不相关"。
@@ -18610,6 +21953,26 @@ class UserBehaviorAnalyzer {
     this.clear();
     this.resetFeedback();
   }
+}
+function computeBigramJaccard(a, b) {
+  if (a === b) return 1;
+  if (!a || !b) return 0;
+  const bigramsA = /* @__PURE__ */ new Set();
+  const bigramsB = /* @__PURE__ */ new Set();
+  for (let i = 0; i < a.length - 1; i++) {
+    bigramsA.add(a.slice(i, i + 2));
+  }
+  for (let i = 0; i < b.length - 1; i++) {
+    bigramsB.add(b.slice(i, i + 2));
+  }
+  if (bigramsA.size === 0 && bigramsB.size === 0) return 0;
+  let intersection = 0;
+  for (const bg of bigramsA) {
+    if (bigramsB.has(bg)) intersection++;
+  }
+  const union = bigramsA.size + bigramsB.size - intersection;
+  if (union === 0) return 0;
+  return intersection / union;
 }
 const userBehaviorAnalyzer = new UserBehaviorAnalyzer();
 const POSITIVE_WORDS = /* @__PURE__ */ new Set([
@@ -19207,20 +22570,6 @@ class EmotionToneMap {
   }
 }
 const emotionToneMap = new EmotionToneMap();
-const DEFAULT_TONE_PROFILE = {
-  primaryTone: "casual",
-  features: {
-    energy: 0.5,
-    formality: 0.3,
-    warmth: 0.5,
-    brevity: 0.5,
-    pacePreference: 0.5
-  },
-  confidence: 0,
-  messageCount: 0,
-  lastUpdated: 0,
-  variance: 0
-};
 const DEFAULT_WINDOW_SIZE = 10;
 const COLD_START_MIN_MESSAGES = 3;
 const MAX_MSG_LENGTH = 2e3;
@@ -19916,6 +23265,815 @@ class UserToneProfileCache {
   }
 }
 const toneProfileCache = new UserToneProfileCache();
+const STYLE_PARAMS_MAP = {
+  cheerful: {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+18%",
+    pitch: "+12Hz",
+    label: "欢快"
+  },
+  serious: {
+    voice: "zh-CN-YunjianNeural",
+    rate: "-5%",
+    pitch: "-4Hz",
+    label: "严肃"
+  },
+  gentle: {
+    voice: "zh-CN-XiaoyiNeural",
+    rate: "-3%",
+    pitch: "-2Hz",
+    label: "温柔"
+  },
+  neutral: {
+    voice: "zh-CN-YunxiNeural",
+    rate: "+5%",
+    pitch: "+2Hz",
+    label: "中性"
+  },
+  warm: {
+    voice: "zh-CN-XiaoyiNeural",
+    rate: "+5%",
+    pitch: "+4Hz",
+    label: "温暖"
+  },
+  energetic: {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+25%",
+    pitch: "+15Hz",
+    label: "活力"
+  },
+  calm: {
+    voice: "zh-CN-YunxiNeural",
+    rate: "+3%",
+    pitch: "+0Hz",
+    label: "沉稳"
+  },
+  playful: {
+    voice: "zh-CN-XiaoxiaoNeural",
+    rate: "+20%",
+    pitch: "+10Hz",
+    label: "俏皮"
+  }
+};
+const CATEGORY_KEYWORDS = {
+  notification: ["通知", "提醒", "警告", "注意", "公告", "更新", "同步", "推送"],
+  teaching: ["教", "学", "解释", "说明", "原理", "步骤", "教程", "指南", "帮助", "怎么", "如何"],
+  casual_chat: ["闲聊", "聊天", "聊", "哈哈", "有趣", "好玩", "开心"],
+  success: ["成功", "完成", "通过", "搞定", "好了", "已", "✅", "ok"],
+  error: ["失败", "错误", "异常", "崩溃", "超时", "无法", "❌", "bug"],
+  greeting: ["你好", "早上好", "晚上好", "晚安", "再见", "拜拜", "嗨", "hello", "hi"],
+  analysis: ["分析", "统计", "数据", "报告", "趋势", "图表", "查询", "调查", "评估"],
+  creative: ["创意", "灵感", "生成", "创作", "写", "画", "设计", "故事", "点子"]
+};
+class VoiceStyleMap {
+  /**
+   * 根据 VoiceStyle 标签获取对应的 TTS 参数
+   */
+  getParams(style) {
+    return STYLE_PARAMS_MAP[style];
+  }
+  /**
+   * 根据回复类别获取推荐的 VoiceStyle
+   */
+  getStyleForCategory(category) {
+    return REPLY_CATEGORY_STYLE_MAP[category];
+  }
+  /**
+   * 根据回复类别获取对应的 TTS 参数（两步映射：category → style → params）
+   */
+  getParamsForCategory(category) {
+    const style = REPLY_CATEGORY_STYLE_MAP[category];
+    return STYLE_PARAMS_MAP[style];
+  }
+  /**
+   * 根据回复文本自动检测回复类别
+   *
+   * 通过关键词匹配推断文本属于哪种回复类型。
+   * 返回匹配到的类别，若无匹配则返回 'casual_chat'。
+   */
+  detectCategory(text) {
+    if (!text || text.trim().length === 0) return "casual_chat";
+    const lower = text.toLowerCase();
+    const scores = {};
+    for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+      let score = 0;
+      for (const kw of keywords) {
+        if (lower.includes(kw)) {
+          score += 1;
+          if (new RegExp(`\\b${kw}\\b`, "i").test(lower)) {
+            score += 0.5;
+          }
+        }
+      }
+      if (score > 0) scores[category] = score;
+    }
+    let best = "casual_chat";
+    let bestScore = 0;
+    for (const [cat, s] of Object.entries(scores)) {
+      if (s > bestScore) {
+        bestScore = s;
+        best = cat;
+      }
+    }
+    return best;
+  }
+  /**
+   * 一键式：根据回复文本自动检测类别 → 映射风格 → 返回 TTS 参数
+   */
+  detectAndMap(text) {
+    const category = this.detectCategory(text);
+    const style = REPLY_CATEGORY_STYLE_MAP[category];
+    const params = STYLE_PARAMS_MAP[style];
+    return { style, params, category };
+  }
+  /**
+   * 混合两个 VoiceStyle（用于用户语气基线 + 内容风格的融合）
+   *
+   * 规则：voice 由 contentStyle 决定（以当前内容为准），
+   * rate/pitch 在用户基线基础上由内容微调。
+   */
+  blend(baseParams, contentStyle) {
+    const contentParams = STYLE_PARAMS_MAP[contentStyle];
+    const baseRate = parseInt(baseParams.rate.replace(/[^0-9-]/g, "")) || 0;
+    const contentRate = parseInt(contentParams.rate.replace(/[^0-9-]/g, "")) || 0;
+    const basePitch = parseInt(baseParams.pitch.replace(/[^0-9-]/g, "")) || 0;
+    const contentPitch = parseInt(contentParams.pitch.replace(/[^0-9-]/g, "")) || 0;
+    const blendedRate = Math.round(baseRate + contentRate * 0.4);
+    const blendedPitch = Math.round(basePitch + contentPitch * 0.4);
+    return {
+      voice: contentParams.voice,
+      // voice 以内容风格为准
+      rate: `${blendedRate > 0 ? "+" : ""}${blendedRate}%`,
+      pitch: `${blendedPitch > 0 ? "+" : ""}${blendedPitch}Hz`,
+      label: `${contentParams.label}·混合`
+    };
+  }
+  /**
+   * 获取所有 VoiceStyle 支持的参数（供调试/UI）
+   */
+  getAllStyles() {
+    return Object.entries(STYLE_PARAMS_MAP).map(([style, params]) => ({
+      style,
+      params
+    }));
+  }
+}
+const voiceStyleMap = new VoiceStyleMap();
+const DEFAULT_WINDOW_SECONDS = 60;
+const APM_HIGH_THRESHOLD = 30;
+const APM_LOW_THRESHOLD = 5;
+const WINDOW_SWITCH_HIGH_THRESHOLD = 6;
+const JITTER_HIGH_THRESHOLD = 0.6;
+const JITTER_LOW_THRESHOLD = 0.2;
+const MOUSE_SAMPLE_INTERVAL_MS = 2e3;
+const JITTER_SAMPLE_COUNT = 15;
+const MIN_INTERACTIONS_FOR_CONFIDENCE$1 = 3;
+class BehaviorEmotionDetector {
+  /** 动作时间戳列表（用户消息 + 工具调用） */
+  actions = [];
+  /** 窗口切换时间戳列表 */
+  windowSwitches = [];
+  /** 鼠标采样历史（用于计算抖动度） */
+  mouseSamples = [];
+  /** 滑动窗口大小（秒） */
+  windowSeconds;
+  /** 鼠标采样定时器 */
+  mouseTimer = null;
+  /** 窗口切换事件监听器是否已绑定 */
+  windowListenerBound = false;
+  /** 关联的 BrowserWindow（用于监听 focus/blur） */
+  boundWindow = null;
+  /** 是否已启动 */
+  running = false;
+  /** 是否启用（用户可通过 IPC 关闭） */
+  enabled = true;
+  /** 上次检测结果缓存（避免频繁重算） */
+  lastResult = null;
+  lastResultTime = 0;
+  /** 缓存有效期（毫秒），在此期间直接返回缓存 */
+  CACHE_TTL_MS = 3e3;
+  constructor(windowSeconds = DEFAULT_WINDOW_SECONDS) {
+    this.windowSeconds = windowSeconds;
+  }
+  // ── 生命周期 ──
+  /**
+   * 启动行为监控。
+   * 绑定 BrowserWindow focus/blur 事件，启动鼠标采样定时器。
+   */
+  start(mainWindow2) {
+    if (this.running) return;
+    this.running = true;
+    if (mainWindow2 && !this.windowListenerBound) {
+      this.bindWindowEvents(mainWindow2);
+    }
+    this.startMouseSampling();
+    Logger.log("INFO", "behavior_emotion_detector_started", {
+      window_seconds: this.windowSeconds,
+      mouse_sample_interval_ms: MOUSE_SAMPLE_INTERVAL_MS
+    });
+  }
+  /**
+   * 停止行为监控。
+   * 解绑事件监听器，停止定时器。
+   */
+  stop() {
+    if (!this.running) return;
+    this.running = false;
+    this.unbindWindowEvents();
+    this.stopMouseSampling();
+    Logger.log("INFO", "behavior_emotion_detector_stopped");
+  }
+  /** 启用/禁用行为情绪检测（用户可关闭） */
+  setEnabled(enabled) {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.lastResult = null;
+      this.lastResultTime = 0;
+    }
+    Logger.log("INFO", "behavior_emotion_enabled", { enabled });
+  }
+  isEnabled() {
+    return this.enabled;
+  }
+  /**
+   * 更新关联的 BrowserWindow（窗口重建时调用）。
+   */
+  updateWindow(mainWindow2) {
+    if (this.boundWindow === mainWindow2) return;
+    this.unbindWindowEvents();
+    this.boundWindow = null;
+    if (mainWindow2 && this.running) {
+      this.bindWindowEvents(mainWindow2);
+    }
+  }
+  // ── 数据采集 ──
+  /** 记录一次用户交互（消息发送、工具调用等） */
+  recordInteraction() {
+    this.actions.push({ timestamp: Date.now() });
+    this.pruneOldActions();
+    this.lastResult = null;
+  }
+  /** 记录一次动作（工具调用等，与 recordInteraction 相同语义） */
+  recordAction() {
+    this.recordInteraction();
+  }
+  /** 记录一次窗口切换 */
+  recordWindowSwitch() {
+    this.windowSwitches.push({ timestamp: Date.now() });
+    this.pruneOldSwitches();
+    this.lastResult = null;
+  }
+  // ── 情绪检测 ──
+  /**
+   * 获取当前行为情绪。
+   *
+   * 3 秒内有缓存直接返回，避免高频重算。
+   * 数据不足时返回 neutral。
+   */
+  getEmotion() {
+    if (!this.enabled) {
+      return this.neutralResult("disabled");
+    }
+    const now = Date.now();
+    if (this.lastResult && now - this.lastResultTime < this.CACHE_TTL_MS) {
+      return this.lastResult;
+    }
+    const metrics = this.computeMetrics();
+    const result = this.classifyEmotion(metrics);
+    this.lastResult = result;
+    this.lastResultTime = now;
+    return result;
+  }
+  /**
+   * 获取当前行为情绪对应的 TTS 参数（便捷方法）。
+   */
+  getEmotionTtsParams() {
+    const result = this.getEmotion();
+    return result.ttsParams;
+  }
+  // ── 私有：指标计算 ──
+  /**
+   * 从滑动窗口计算当前行为指标。
+   */
+  computeMetrics() {
+    const now = Date.now();
+    const cutoff = now - this.windowSeconds * 1e3;
+    const recentActions = this.actions.filter((a) => a.timestamp >= cutoff);
+    const totalActions = recentActions.length;
+    const apm = totalActions / (this.windowSeconds / 60);
+    const recentSwitches = this.windowSwitches.filter((s) => s.timestamp >= cutoff);
+    const totalWindowSwitches = recentSwitches.length;
+    const windowSwitchesPerMin = totalWindowSwitches / (this.windowSeconds / 60);
+    const mouseJitter = this.computeMouseJitter();
+    return {
+      apm: Math.round(apm * 10) / 10,
+      windowSwitchesPerMin: Math.round(windowSwitchesPerMin * 10) / 10,
+      mouseJitter: Math.round(mouseJitter * 100) / 100,
+      windowSeconds: this.windowSeconds,
+      totalActions,
+      totalWindowSwitches,
+      lastUpdated: now
+    };
+  }
+  /**
+   * 计算鼠标抖动度（0–1）。
+   *
+   * 算法：计算相邻采样点之间的方向变化角度的方差。
+   * 方向变化大 → 抖动度高（鼠标在频繁改变方向）。
+   * 方向变化小 → 抖动度低（鼠标沿平滑路径移动）。
+   */
+  computeMouseJitter() {
+    const samples = this.mouseSamples;
+    if (samples.length < 3) return 0;
+    const angleChanges = [];
+    for (let i = 2; i < samples.length; i++) {
+      const p0 = samples[i - 2];
+      const p1 = samples[i - 1];
+      const p2 = samples[i];
+      const v1x = p1.x - p0.x;
+      const v1y = p1.y - p0.y;
+      const v2x = p2.x - p1.x;
+      const v2y = p2.y - p1.y;
+      const len1 = Math.sqrt(v1x * v1x + v1y * v1y);
+      const len2 = Math.sqrt(v2x * v2x + v2y * v2y);
+      if (len1 < 2 || len2 < 2) continue;
+      const dot = v1x * v2x + v1y * v2y;
+      const cosAngle = Math.max(-1, Math.min(1, dot / (len1 * len2)));
+      const angle = Math.acos(cosAngle);
+      angleChanges.push(angle);
+    }
+    if (angleChanges.length === 0) return 0;
+    const mean = angleChanges.reduce((s, a) => s + a, 0) / angleChanges.length;
+    const variance = angleChanges.reduce((s, a) => s + (a - mean) ** 2, 0) / angleChanges.length;
+    return Math.min(1, variance / 2);
+  }
+  // ── 私有：情绪分类 ──
+  /**
+   * 基于指标阈值规则分类行为情绪。
+   *
+   * 规则优先级（从高到低）：
+   *   1. 高 APM + 高窗口切换 + 高抖动 → anxious（焦躁）
+   *   2. 高 APM + 低窗口切换 + 低抖动 → focused（专注）
+   *   3. 低 APM + 低窗口切换 + 低抖动 → calm（平静）
+   *   4. 其他 → neutral（中性）
+   */
+  classifyEmotion(metrics) {
+    const { apm, windowSwitchesPerMin, mouseJitter, totalActions, totalWindowSwitches } = metrics;
+    const hasEnoughData = totalActions >= MIN_INTERACTIONS_FOR_CONFIDENCE$1;
+    let emotion;
+    let confidence;
+    if (!hasEnoughData) {
+      emotion = "neutral";
+      confidence = 0.1;
+    } else if (apm >= APM_HIGH_THRESHOLD && windowSwitchesPerMin >= WINDOW_SWITCH_HIGH_THRESHOLD && mouseJitter >= JITTER_HIGH_THRESHOLD) {
+      emotion = "anxious";
+      confidence = 0.75 + apm / 100 * 0.25;
+    } else if (apm >= APM_HIGH_THRESHOLD && windowSwitchesPerMin < WINDOW_SWITCH_HIGH_THRESHOLD && mouseJitter < JITTER_HIGH_THRESHOLD) {
+      emotion = "focused";
+      confidence = 0.7 + apm / 100 * 0.3;
+    } else if (apm <= APM_LOW_THRESHOLD && windowSwitchesPerMin < WINDOW_SWITCH_HIGH_THRESHOLD && mouseJitter <= JITTER_LOW_THRESHOLD) {
+      emotion = "calm";
+      confidence = 0.7 + (1 - apm / APM_LOW_THRESHOLD) * 0.3;
+    } else {
+      const scores2 = this.computeEmotionScores(metrics);
+      const entries = Object.entries(scores2);
+      entries.sort((a, b) => b[1] - a[1]);
+      emotion = entries[0][0];
+      confidence = entries[0][1];
+    }
+    confidence = Math.min(1, Math.max(0.1, confidence));
+    const scores = this.computeEmotionScores(metrics);
+    const ttsParams = { ...BEHAVIOR_EMOTION_TTS_MAP[emotion] };
+    if (emotion !== "neutral" && confidence > 0.3) {
+      Logger.log("INFO", "behavior_emotion_detected", {
+        emotion,
+        confidence: confidence.toFixed(2),
+        apm: metrics.apm,
+        windowSwitchesPerMin: metrics.windowSwitchesPerMin,
+        mouseJitter: metrics.mouseJitter,
+        totalActions: metrics.totalActions
+      });
+    }
+    return {
+      emotion,
+      scores,
+      metrics,
+      confidence: Math.round(confidence * 100) / 100,
+      ttsParams
+    };
+  }
+  /**
+   * 计算各情绪标签的得分（0–1），用于混合信号时的软分类。
+   */
+  computeEmotionScores(metrics) {
+    const { apm, windowSwitchesPerMin, mouseJitter } = metrics;
+    const apmNorm = Math.min(1, apm / 60);
+    const switchNorm = Math.min(1, windowSwitchesPerMin / 12);
+    const jitterNorm = Math.min(1, mouseJitter);
+    const anxiousScore = apmNorm * 0.4 + switchNorm * 0.35 + jitterNorm * 0.25;
+    const focusedScore = apmNorm * 0.5 + (1 - switchNorm) * 0.25 + (1 - jitterNorm) * 0.25;
+    const calmScore = (1 - apmNorm) * 0.4 + (1 - switchNorm) * 0.3 + (1 - jitterNorm) * 0.3;
+    const neutralScore = 1 - Math.max(anxiousScore, focusedScore, calmScore);
+    const total = anxiousScore + focusedScore + calmScore + neutralScore;
+    if (total === 0) {
+      return { anxious: 0, calm: 0, focused: 0, neutral: 1 };
+    }
+    return {
+      anxious: Math.round(anxiousScore / total * 100) / 100,
+      calm: Math.round(calmScore / total * 100) / 100,
+      focused: Math.round(focusedScore / total * 100) / 100,
+      neutral: Math.round(neutralScore / total * 100) / 100
+    };
+  }
+  // ── 私有：鼠标采样 ──
+  /**
+   * 启动鼠标位置采样定时器。
+   * 每隔 MOUSE_SAMPLE_INTERVAL_MS 记录一次屏幕光标位置。
+   */
+  startMouseSampling() {
+    if (this.mouseTimer) return;
+    this.mouseTimer = setInterval(() => {
+      try {
+        const point = electron.screen.getCursorScreenPoint();
+        this.mouseSamples.push({
+          x: point.x,
+          y: point.y,
+          timestamp: Date.now()
+        });
+        if (this.mouseSamples.length > JITTER_SAMPLE_COUNT) {
+          this.mouseSamples = this.mouseSamples.slice(-JITTER_SAMPLE_COUNT);
+        }
+      } catch {
+      }
+    }, MOUSE_SAMPLE_INTERVAL_MS);
+  }
+  /** 停止鼠标采样定时器 */
+  stopMouseSampling() {
+    if (this.mouseTimer) {
+      clearInterval(this.mouseTimer);
+      this.mouseTimer = null;
+    }
+    this.mouseSamples = [];
+  }
+  // ── 私有：窗口切换监听 ──
+  /** 窗口 focus 事件处理器引用（用于精确解绑） */
+  onFocusHandler = null;
+  /** 窗口 blur 事件处理器引用 */
+  onBlurHandler = null;
+  /**
+   * 绑定 BrowserWindow 的 focus/blur 事件以检测窗口切换。
+   */
+  bindWindowEvents(win) {
+    if (this.windowListenerBound) return;
+    this.onFocusHandler = () => {
+      this.recordWindowSwitch();
+    };
+    this.onBlurHandler = () => {
+    };
+    win.on("focus", this.onFocusHandler);
+    win.on("blur", this.onBlurHandler);
+    win.once("closed", () => {
+      this.unbindWindowEvents();
+    });
+    this.boundWindow = win;
+    this.windowListenerBound = true;
+  }
+  /** 解绑窗口事件监听器 */
+  unbindWindowEvents() {
+    if (this.boundWindow && this.windowListenerBound) {
+      if (this.onFocusHandler) {
+        this.boundWindow.removeListener("focus", this.onFocusHandler);
+        this.onFocusHandler = null;
+      }
+      if (this.onBlurHandler) {
+        this.boundWindow.removeListener("blur", this.onBlurHandler);
+        this.onBlurHandler = null;
+      }
+      this.windowListenerBound = false;
+      this.boundWindow = null;
+    }
+  }
+  // ── 私有：数据清理 ──
+  /** 清理窗口外的旧动作记录 */
+  pruneOldActions() {
+    const cutoff = Date.now() - this.windowSeconds * 2 * 1e3;
+    this.actions = this.actions.filter((a) => a.timestamp >= cutoff);
+  }
+  /** 清理窗口外的旧切换记录 */
+  pruneOldSwitches() {
+    const cutoff = Date.now() - this.windowSeconds * 2 * 1e3;
+    this.windowSwitches = this.windowSwitches.filter((s) => s.timestamp >= cutoff);
+  }
+  // ── 私有：工具方法 ──
+  /** 生成中性结果（用于禁用/数据不足） */
+  neutralResult(reason) {
+    return {
+      emotion: "neutral",
+      scores: { anxious: 0, calm: 0, focused: 0, neutral: 1 },
+      metrics: {
+        apm: 0,
+        windowSwitchesPerMin: 0,
+        mouseJitter: 0,
+        windowSeconds: this.windowSeconds,
+        totalActions: 0,
+        totalWindowSwitches: 0,
+        lastUpdated: Date.now()
+      },
+      confidence: 0,
+      ttsParams: { ...BEHAVIOR_EMOTION_TTS_MAP["neutral"] }
+    };
+  }
+  // ── 状态查询 ──
+  /** 获取当前原始指标（供调试/UI 展示） */
+  getMetrics() {
+    return this.computeMetrics();
+  }
+  /** 获取所有支持的映射（供调试/UI 展示） */
+  getAllEmotionMappings() {
+    return Object.keys(BEHAVIOR_EMOTION_TTS_MAP).map((emotion) => ({
+      emotion,
+      params: BEHAVIOR_EMOTION_TTS_MAP[emotion]
+    }));
+  }
+  /** 重置所有运行时数据 */
+  reset() {
+    this.actions = [];
+    this.windowSwitches = [];
+    this.mouseSamples = [];
+    this.lastResult = null;
+    this.lastResultTime = 0;
+  }
+}
+const behaviorEmotionDetector = new BehaviorEmotionDetector();
+const INTERVAL_WINDOW_SIZE = 12;
+const RAPID_INTERVAL_THRESHOLD_SEC = 30;
+const RAPID_BURST_THRESHOLD = 4;
+const LOW_INTERACTION_GAP_SEC = 300;
+const LOW_MEAN_INTERVAL_SEC = 120;
+const MAX_INTERACTION_RECORDS = INTERVAL_WINDOW_SIZE * 3;
+const MIN_INTERACTIONS_FOR_CONFIDENCE = 3;
+const LATE_NIGHT_START_HOUR = 23;
+const LATE_NIGHT_END_HOUR = 6;
+const MORNING_START_HOUR = 6;
+const AFTERNOON_START_HOUR = 12;
+const EVENING_START_HOUR = 18;
+class ContextualTtsAdvisor {
+  /** 交互时间戳列表（Unix ms） */
+  interactionTimestamps = [];
+  /** 是否启用（用户可通过系统托盘切换自动/手动模式） */
+  enabled = true;
+  /** 上次推荐结果缓存 */
+  lastRecommendation = null;
+  lastRecommendationTime = 0;
+  /** 缓存有效期（ms） */
+  CACHE_TTL_MS = 5e3;
+  // ── 生命周期 ──
+  /** 启用/禁用情境自适应语音（用户通过系统托盘切换） */
+  setEnabled(enabled) {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.lastRecommendation = null;
+      this.lastRecommendationTime = 0;
+    }
+    Logger.log("INFO", "contextual_tts_enabled", { enabled });
+  }
+  isEnabled() {
+    return this.enabled;
+  }
+  // ── 数据采集 ──
+  /**
+   * 记录一次用户交互（消息发送或工具调用）。
+   * 应在每次用户输入到达时调用。
+   */
+  recordInteraction() {
+    this.interactionTimestamps.push(Date.now());
+    if (this.interactionTimestamps.length > MAX_INTERACTION_RECORDS) {
+      this.interactionTimestamps = this.interactionTimestamps.slice(-MAX_INTERACTION_RECORDS);
+    }
+    this.lastRecommendation = null;
+  }
+  // ── 情境分析 ──
+  /**
+   * 获取当前交互情境的 TTS 参数推荐。
+   *
+   * 5 秒内有缓存直接返回。
+   * 综合交互节奏（权重 60%）和时段（权重 40%）生成推荐。
+   */
+  getRecommendation() {
+    if (!this.enabled) {
+      return this.neutralContext("disabled");
+    }
+    const now = Date.now();
+    if (this.lastRecommendation && now - this.lastRecommendationTime < this.CACHE_TTL_MS) {
+      return this.lastRecommendation;
+    }
+    const intervalStats = this.computeIntervalStats();
+    const cadence = this.classifyCadence(intervalStats);
+    const dayPeriod = this.classifyDayPeriod();
+    const hasEnoughData = intervalStats.interactionCount >= MIN_INTERACTIONS_FOR_CONFIDENCE;
+    const confidence = hasEnoughData ? Math.min(1, intervalStats.interactionCount / INTERVAL_WINDOW_SIZE) : 0.15;
+    const cadenceParams = CADENCE_TTS_MAP[cadence];
+    const dayParams = DAY_PERIOD_TTS_MAP[dayPeriod];
+    const cadenceRate = parseInt(cadenceParams.rate.replace(/[^0-9-]/g, "")) || 0;
+    const dayRate = parseInt(dayParams.rate.replace(/[^0-9-]/g, "")) || 0;
+    const cadencePitch = parseInt(cadenceParams.pitch.replace(/[^0-9-]/g, "")) || 0;
+    const dayPitch = parseInt(dayParams.pitch.replace(/[^0-9-]/g, "")) || 0;
+    let cadenceWeight = 0.6;
+    let dayWeight = 0.4;
+    if (dayPeriod === "late_night") {
+      cadenceWeight = 0.3;
+      dayWeight = 0.7;
+    }
+    const finalRate = Math.round(cadenceRate * cadenceWeight + dayRate * dayWeight);
+    const finalPitch = Math.round(cadencePitch * cadenceWeight + dayPitch * dayWeight);
+    const ttsParams = {
+      voice: cadenceWeight > dayWeight ? cadenceParams.voice : dayParams.voice,
+      rate: `${finalRate >= 0 ? "+" : ""}${finalRate}%`,
+      pitch: `${finalPitch >= 0 ? "+" : ""}${finalPitch}Hz`,
+      label: `${cadenceParams.label}·${dayParams.label}`
+    };
+    const description2 = this.buildDescription(cadence, dayPeriod, intervalStats);
+    if (confidence > 0.3 && (cadence !== "normal" || dayPeriod === "late_night")) {
+      Logger.log("INFO", "contextual_tts_recommendation", {
+        cadence,
+        dayPeriod,
+        confidence: confidence.toFixed(2),
+        meanIntervalSec: intervalStats.meanIntervalSec.toFixed(1),
+        rapidBurstCount: intervalStats.rapidBurstCount,
+        voice: ttsParams.voice,
+        rate: ttsParams.rate,
+        pitch: ttsParams.pitch,
+        label: ttsParams.label
+      });
+    }
+    const result = {
+      cadence,
+      dayPeriod,
+      intervalStats,
+      ttsParams,
+      confidence: Math.round(confidence * 100) / 100,
+      description: description2
+    };
+    this.lastRecommendation = result;
+    this.lastRecommendationTime = now;
+    return result;
+  }
+  /**
+   * 获取推荐的 TTS 参数（便捷方法）。
+   */
+  getRecommendedTtsParams() {
+    return this.getRecommendation().ttsParams;
+  }
+  // ── 私有：交互间隔统计 ──
+  /**
+   * 计算交互间隔统计。
+   * 基于时间戳数组计算均值、中位数、最近间隔等。
+   */
+  computeIntervalStats() {
+    const now = Date.now();
+    const timestamps = this.interactionTimestamps.slice(-INTERVAL_WINDOW_SIZE);
+    if (timestamps.length < 2) {
+      const lastGap = timestamps.length === 1 ? (now - timestamps[0]) / 1e3 : 0;
+      return {
+        meanIntervalSec: 0,
+        medianIntervalSec: 0,
+        lastInteractionSec: lastGap,
+        interactionCount: timestamps.length,
+        intervals: [],
+        rapidBurstCount: 0
+      };
+    }
+    const intervals = [];
+    for (let i = 1; i < timestamps.length; i++) {
+      intervals.push((timestamps[i] - timestamps[i - 1]) / 1e3);
+    }
+    const meanIntervalSec = intervals.reduce((s, v) => s + v, 0) / intervals.length;
+    const sorted = [...intervals].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const medianIntervalSec = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+    const lastInteractionSec = (now - timestamps[timestamps.length - 1]) / 1e3;
+    let rapidBurstCount = 0;
+    for (let i = intervals.length - 1; i >= 0; i--) {
+      if (intervals[i] < RAPID_INTERVAL_THRESHOLD_SEC) {
+        rapidBurstCount++;
+      } else {
+        break;
+      }
+    }
+    return {
+      meanIntervalSec: Math.round(meanIntervalSec * 10) / 10,
+      medianIntervalSec: Math.round(medianIntervalSec * 10) / 10,
+      lastInteractionSec: Math.round(lastInteractionSec * 10) / 10,
+      interactionCount: timestamps.length,
+      intervals,
+      rapidBurstCount
+    };
+  }
+  // ── 私有：交互节奏分类 ──
+  /**
+   * 基于间隔统计分类交互节奏。
+   *
+   * 规则优先级：
+   *   1. 连续快速交互次数 >= 阈值 → rapid
+   *   2. 最后交互距今 > 低频阈值 且平均间隔 > 低频均值阈值 → low
+   *   3. 其他 → normal
+   */
+  classifyCadence(stats) {
+    if (stats.interactionCount < MIN_INTERACTIONS_FOR_CONFIDENCE) {
+      return "normal";
+    }
+    if (stats.rapidBurstCount >= RAPID_BURST_THRESHOLD) {
+      return "rapid";
+    }
+    if (stats.lastInteractionSec > LOW_INTERACTION_GAP_SEC && stats.meanIntervalSec > LOW_MEAN_INTERVAL_SEC) {
+      return "low";
+    }
+    return "normal";
+  }
+  // ── 私有：时段分类 ──
+  /**
+   * 根据当前系统时间分类时段。
+   */
+  classifyDayPeriod() {
+    const hour = (/* @__PURE__ */ new Date()).getHours();
+    if (hour >= LATE_NIGHT_START_HOUR || hour < LATE_NIGHT_END_HOUR) {
+      return "late_night";
+    }
+    if (hour >= MORNING_START_HOUR && hour < AFTERNOON_START_HOUR) {
+      return "morning";
+    }
+    if (hour >= AFTERNOON_START_HOUR && hour < EVENING_START_HOUR) {
+      return "afternoon";
+    }
+    return "evening";
+  }
+  // ── 私有：描述生成 ──
+  /**
+   * 生成人类可读的情境描述。
+   */
+  buildDescription(cadence, dayPeriod, stats) {
+    const cadenceLabel = {
+      rapid: "高频交互",
+      normal: "正常节奏",
+      low: "低频交互"
+    };
+    const periodLabel = {
+      morning: "早晨",
+      afternoon: "午后",
+      evening: "傍晚",
+      late_night: "深夜"
+    };
+    let desc = `${periodLabel[dayPeriod]}·${cadenceLabel[cadence]}`;
+    if (stats.interactionCount >= MIN_INTERACTIONS_FOR_CONFIDENCE) {
+      desc += ` | 均隔${stats.meanIntervalSec.toFixed(0)}s`;
+    }
+    return desc;
+  }
+  // ── 状态查询 ──
+  /** 获取当前交互间隔统计（供调试/UI 展示） */
+  getIntervalStats() {
+    return this.computeIntervalStats();
+  }
+  /** 获取当前时段 */
+  getDayPeriod() {
+    return this.classifyDayPeriod();
+  }
+  /** 获取所有支持的情境映射（供调试/UI 展示） */
+  getAllMappings() {
+    const cadenceKeys = ["rapid", "normal", "low"];
+    const periodKeys = ["morning", "afternoon", "evening", "late_night"];
+    return {
+      cadences: cadenceKeys.map((c) => ({ cadence: c, params: CADENCE_TTS_MAP[c] })),
+      periods: periodKeys.map((p) => ({ period: p, params: DAY_PERIOD_TTS_MAP[p] }))
+    };
+  }
+  /** 重置所有运行时数据 */
+  reset() {
+    this.interactionTimestamps = [];
+    this.lastRecommendation = null;
+    this.lastRecommendationTime = 0;
+  }
+  // ── 私有工具方法 ──
+  /** 生成中性/禁用结果 */
+  neutralContext(reason) {
+    return {
+      cadence: "normal",
+      dayPeriod: this.classifyDayPeriod(),
+      intervalStats: {
+        meanIntervalSec: 0,
+        medianIntervalSec: 0,
+        lastInteractionSec: 0,
+        interactionCount: 0,
+        intervals: [],
+        rapidBurstCount: 0
+      },
+      ttsParams: { ...CADENCE_TTS_MAP["normal"] },
+      confidence: 0,
+      description: `${reason}`
+    };
+  }
+}
+const contextualTtsAdvisor = new ContextualTtsAdvisor();
 class ChatExecutor {
   llmService;
   ttsService;
@@ -20038,6 +24196,12 @@ class ChatExecutor {
     if (behaviorPattern.hasSufficientData && behaviorPattern.suggestedToolHints.length > 0) {
       extraModules.push(...behaviorPattern.suggestedToolHints);
     }
+    if (this.lastUserText) {
+      const repeatPattern = userBehaviorAnalyzer.detectRepeatedPattern(this.lastUserText);
+      if (repeatPattern.detected && repeatPattern.mergedTopics.length > 0) {
+        this.memoryService.reinforceByBehaviorPattern(repeatPattern.mergedTopics, repeatPattern.currentText);
+      }
+    }
     const allExtraModules = extraModules.length > 0 ? extraModules : void 0;
     if (memCtx || reflectCtx || allExtraModules || this.identityContext) {
       this.workingMemory.refreshMemory(memCtx, reflectCtx, allExtraModules, this.identityContext || void 0);
@@ -20078,14 +24242,47 @@ class ChatExecutor {
   currentToneProfile = null;
   /** 已初始化标记 */
   toneProfileInitialized = false;
+  /** 行为情绪检测是否启用（用户可通过 IPC 开关） */
+  behaviorEmotionEnabled = true;
+  /** 上次检测的行为情绪结果（用于混合） */
+  lastBehaviorEmotion = null;
+  /** 交互情境自适应语音是否启用（用户可通过系统托盘切换自动/手动模式） */
+  contextualTtsEnabled = true;
+  /** 上次交互情境推荐结果 */
+  lastContextualContext = null;
+  /** 隐式反馈驱动的语音自适应是否启用 */
+  implicitFeedbackEnabled = true;
+  /** 上次隐式反馈推荐结果 */
+  lastImplicitFeedback = null;
   async run(text, requestId2, source = "electron", extra, sessionId, noTts) {
     this.noTts = noTts ?? false;
+    if (this.behaviorEmotionEnabled && !behaviorEmotionDetector.isEnabled()) {
+      behaviorEmotionDetector.setEnabled(true);
+      if (this.mainWindow) {
+        behaviorEmotionDetector.updateWindow(this.mainWindow);
+      }
+      behaviorEmotionDetector.start(this.mainWindow ?? void 0);
+    }
     const rid = requestId2 || Logger.createRequestId();
     const t0 = Date.now();
     this.memoryService?.recordInteraction(text);
     this.memoryService?.setLastUserText(text);
     this.lastUserText = text;
     userBehaviorAnalyzer.recordUserMessage(text);
+    if (this.implicitFeedbackEnabled) {
+      implicitFeedbackTracker.onUserContinuedConversation();
+      const repeatPattern = userBehaviorAnalyzer.detectRepeatedPattern(text);
+      if (repeatPattern.detected && repeatPattern.similarity > 0.6) {
+        implicitFeedbackTracker.onUserModifiedRequest();
+      }
+    }
+    asrHotwordManager.feedUserText(text);
+    if (this.behaviorEmotionEnabled) {
+      behaviorEmotionDetector.recordInteraction();
+    }
+    if (this.contextualTtsEnabled) {
+      contextualTtsAdvisor.recordInteraction();
+    }
     this.ensureToneProfileInit();
     if (this.toneProfileEnabled) {
       try {
@@ -20208,11 +24405,16 @@ class ChatExecutor {
     this.runContext?.interrupt("user_stop");
     this.runContext = null;
     this.ttsService.stop();
+    if (this.implicitFeedbackEnabled) {
+      implicitFeedbackTracker.recordSimpleAction("SKIP");
+    }
     this.executionGovernor.reset();
     this.progressGuardrail.reset();
+    behaviorEmotionDetector.stop();
   }
   async toolLoop(messages2, ctx, requestId2, source) {
     ctx.transition(RunState.RUNNING);
+    this.guardrailPipeline?.reset();
     const MAX_TURNS2 = 300;
     const tryRecordOrphan = (reason, msgsBefore) => {
       if (messages2.length > msgsBefore) {
@@ -20313,6 +24515,9 @@ class ChatExecutor {
               this.goalGuardrail.onToolSuccess();
               this.proceduralMemory?.recordHit(tr.name);
               userBehaviorAnalyzer.recordToolCall(tr.name);
+              if (this.behaviorEmotionEnabled) {
+                behaviorEmotionDetector.recordAction();
+              }
             }
           }
           for (const tr of toolResults) {
@@ -20549,12 +24754,10 @@ ${reportLines.join("\n\n")}` });
    * 情感自适应语音：分析回复文本并更新 TTS 情感参数
    *
    * 在 LLM 回复完成后、TTS 发音前调用。
-   * 合并分析 LLM 回复文本 + 本轮工具返回内容，综合判断情感。
+   * 优先使用 VoiceStyleMap（基于回复类型语义），回退到 EmotionToneMap（基于文本情感）。
    *
    * 如果启用了语气记忆个性化语音（toneProfileEnabled），
-   * 会将用户语气基线参数与内容情感参数进行混合：
-   *   - voice 由用户语气决定（保持一致性）
-   *   - rate/pitch 在基线基础上由内容情感微调
+   * 会将用户语气基线参数与内容风格参数进行混合。
    */
   applySentimentToTts(llmReply, toolResultTexts) {
     if (!this.emotionTtsEnabled) return;
@@ -20566,11 +24769,88 @@ ${reportLines.join("\n\n")}` });
       }
       const combined = parts.join(" ");
       if (!combined || combined.trim().length < 10) return;
+      const { style, params: styleParams, category } = voiceStyleMap.detectAndMap(combined);
       const sentiment = sentimentAnalyzer.analyze(combined);
       const emotionParams = emotionToneMap.getParams(sentiment);
-      let finalParams = emotionParams;
+      let finalParams = styleParams;
+      if (sentiment.polarity === "positive") {
+        finalParams = {
+          ...styleParams,
+          rate: emotionParams.rate,
+          pitch: emotionParams.pitch,
+          label: `${styleParams.label}·${emotionParams.label}`
+        };
+      } else if (sentiment.polarity === "negative") {
+        finalParams = {
+          ...styleParams,
+          rate: emotionParams.rate,
+          pitch: emotionParams.pitch,
+          label: `${styleParams.label}·${emotionParams.label}`
+        };
+      }
       if (this.toneProfileEnabled && this.lastToneBaseline) {
-        finalParams = toneToVoiceMapper.blend(this.lastToneBaseline, emotionParams);
+        finalParams = toneToVoiceMapper.blend(this.lastToneBaseline, finalParams);
+      }
+      if (this.behaviorEmotionEnabled) {
+        const behaviorResult = behaviorEmotionDetector.getEmotion();
+        this.lastBehaviorEmotion = behaviorResult;
+        if (behaviorResult.emotion !== "neutral" && behaviorResult.confidence > 0.3) {
+          const behaviorParams = behaviorResult.ttsParams;
+          const currentRate = parseInt(finalParams.rate.replace(/[^0-9-]/g, "")) || 0;
+          const behaviorRate = parseInt(behaviorParams.rate.replace(/[^0-9-]/g, "")) || 0;
+          const currentPitch = parseInt(finalParams.pitch.replace(/[^0-9-]/g, "")) || 0;
+          const behaviorPitch = parseInt(behaviorParams.pitch.replace(/[^0-9-]/g, "")) || 0;
+          const blendedRate = Math.round(currentRate * 0.8 + behaviorRate * 0.2);
+          const blendedPitch = Math.round(currentPitch * 0.8 + behaviorPitch * 0.2);
+          finalParams = {
+            voice: finalParams.voice,
+            // voice 保持不变
+            rate: `${blendedRate >= 0 ? "+" : ""}${blendedRate}%`,
+            pitch: `${blendedPitch >= 0 ? "+" : ""}${blendedPitch}Hz`,
+            label: `${finalParams.label}·${behaviorParams.label}`
+          };
+        }
+      }
+      if (this.contextualTtsEnabled) {
+        const contextualResult = contextualTtsAdvisor.getRecommendation();
+        this.lastContextualContext = contextualResult;
+        if (contextualResult.confidence > 0.2) {
+          const contextualParams = contextualResult.ttsParams;
+          const currentRate = parseInt(finalParams.rate.replace(/[^0-9-]/g, "")) || 0;
+          const contextualRate = parseInt(contextualParams.rate.replace(/[^0-9-]/g, "")) || 0;
+          const currentPitch = parseInt(finalParams.pitch.replace(/[^0-9-]/g, "")) || 0;
+          const contextualPitch = parseInt(contextualParams.pitch.replace(/[^0-9-]/g, "")) || 0;
+          const blendedRate = Math.round(currentRate * 0.85 + contextualRate * 0.15);
+          const blendedPitch = Math.round(currentPitch * 0.85 + contextualPitch * 0.15);
+          finalParams = {
+            voice: finalParams.voice,
+            // voice 保持不变
+            rate: `${blendedRate >= 0 ? "+" : ""}${blendedRate}%`,
+            pitch: `${blendedPitch >= 0 ? "+" : ""}${blendedPitch}Hz`,
+            label: `${finalParams.label}·${contextualParams.label}`
+          };
+        }
+      }
+      if (this.implicitFeedbackEnabled) {
+        const prefRec = implicitFeedbackTracker.getRecommendation();
+        this.lastImplicitFeedback = prefRec;
+        if (prefRec.confidence > 0.2 && prefRec.totalSamples >= 5) {
+          const prefParams = prefRec.params;
+          const currentRate = parseInt(finalParams.rate.replace(/[^0-9-]/g, "")) || 0;
+          const prefRate = parseInt(prefParams.rate.replace(/[^0-9-]/g, "")) || 0;
+          const currentPitch = parseInt(finalParams.pitch.replace(/[^0-9-]/g, "")) || 0;
+          const prefPitch = parseInt(prefParams.pitch.replace(/[^0-9-]/g, "")) || 0;
+          const feedbackWeight = Math.min(0.15, 0.08 + prefRec.confidence * 0.08);
+          const blendedRate = Math.round(currentRate * (1 - feedbackWeight) + prefRate * feedbackWeight);
+          const blendedPitch = Math.round(currentPitch * (1 - feedbackWeight) + prefPitch * feedbackWeight);
+          finalParams = {
+            voice: finalParams.voice,
+            // voice 保持之前多层决策的结果
+            rate: `${blendedRate >= 0 ? "+" : ""}${blendedRate}%`,
+            pitch: `${blendedPitch >= 0 ? "+" : ""}${blendedPitch}Hz`,
+            label: `${finalParams.label}·${prefParams.label}`
+          };
+        }
       }
       if (this.lastEmotionParams && !emotionToneMap.isDifferent(this.lastEmotionParams, finalParams)) {
         return;
@@ -20584,9 +24864,39 @@ ${reportLines.join("\n\n")}` });
         voice: finalParams.voice,
         label: finalParams.label,
         matchedWords: sentiment.matchedWords.slice(0, 5),
+        // ── VoiceStyle 字段 ──
+        voiceStyle: style,
+        replyCategory: category,
         toneProfile: this.toneProfileEnabled && this.currentToneProfile ? {
           primaryTone: this.currentToneProfile.primaryTone,
           confidence: this.currentToneProfile.confidence
+        } : null,
+        // ── BehaviorEmotion 字段 ──
+        behaviorEmotion: this.behaviorEmotionEnabled && this.lastBehaviorEmotion ? {
+          emotion: this.lastBehaviorEmotion.emotion,
+          confidence: this.lastBehaviorEmotion.confidence,
+          scores: this.lastBehaviorEmotion.scores,
+          metrics: {
+            apm: this.lastBehaviorEmotion.metrics.apm,
+            windowSwitchesPerMin: this.lastBehaviorEmotion.metrics.windowSwitchesPerMin,
+            mouseJitter: this.lastBehaviorEmotion.metrics.mouseJitter
+          }
+        } : null,
+        // ── ContextualTts 字段 ──
+        contextualTts: this.contextualTtsEnabled && this.lastContextualContext ? {
+          cadence: this.lastContextualContext.cadence,
+          dayPeriod: this.lastContextualContext.dayPeriod,
+          confidence: this.lastContextualContext.confidence,
+          description: this.lastContextualContext.description,
+          meanIntervalSec: this.lastContextualContext.intervalStats.meanIntervalSec,
+          rapidBurstCount: this.lastContextualContext.intervalStats.rapidBurstCount
+        } : null,
+        // ── [隐式反馈] 偏好学习字段 ──
+        implicitFeedback: this.implicitFeedbackEnabled && this.lastImplicitFeedback ? {
+          confidence: this.lastImplicitFeedback.confidence,
+          totalSamples: this.lastImplicitFeedback.totalSamples,
+          reason: this.lastImplicitFeedback.reason,
+          recommendedVoice: this.lastImplicitFeedback.params.voice
         } : null
       });
     } catch (err) {
@@ -20651,6 +24961,81 @@ ${reportLines.join("\n\n")}` });
       profile: this.currentToneProfile,
       baseline: this.lastToneBaseline
     };
+  }
+  // ══════════════════════════════════════════
+  //  行为情绪检测
+  // ══════════════════════════════════════════
+  /** 切换行为情绪检测开关（供 IPC 调用） */
+  toggleBehaviorEmotion(enabled) {
+    this.behaviorEmotionEnabled = enabled;
+    behaviorEmotionDetector.setEnabled(enabled);
+    if (!enabled) {
+      this.lastBehaviorEmotion = null;
+    }
+    this.mainWindow?.webContents.send("tts:behaviorEmotion:enabled", { enabled });
+  }
+  /** 获取当前行为情绪状态（供 IPC/调试） */
+  getBehaviorEmotionState() {
+    return {
+      enabled: this.behaviorEmotionEnabled,
+      result: this.lastBehaviorEmotion,
+      metrics: this.behaviorEmotionEnabled ? behaviorEmotionDetector.getMetrics() : null
+    };
+  }
+  // ══════════════════════════════════════════
+  //  交互情境自适应语音
+  // ══════════════════════════════════════════
+  /** 切换交互情境自适应语音开关（供 IPC 调用，系统托盘 auto/manual 模式） */
+  toggleContextualTts(enabled) {
+    this.contextualTtsEnabled = enabled;
+    contextualTtsAdvisor.setEnabled(enabled);
+    if (!enabled) {
+      this.lastContextualContext = null;
+    }
+    this.mainWindow?.webContents.send("tts:contextual:enabled", { enabled });
+  }
+  /** 获取当前交互情境自适应状态（供 IPC/调试） */
+  getContextualTtsState() {
+    return {
+      enabled: this.contextualTtsEnabled,
+      context: this.contextualTtsEnabled ? contextualTtsAdvisor.getRecommendation() : null
+    };
+  }
+  // ══════════════════════════════════════════
+  //  隐式反馈驱动的语音自适应
+  // ══════════════════════════════════════════
+  /** 切换隐式反馈语音自适应开关（供 IPC 调用） */
+  toggleImplicitFeedback(enabled) {
+    this.implicitFeedbackEnabled = enabled;
+    implicitFeedbackTracker.setEnabled(enabled);
+    if (!enabled) {
+      this.lastImplicitFeedback = null;
+    }
+    this.mainWindow?.webContents.send("tts:implicitFeedback:enabled", { enabled });
+  }
+  /** 获取当前隐式反馈状态（供 IPC/调试） */
+  getImplicitFeedbackState() {
+    const status = implicitFeedbackTracker.getStatus();
+    return {
+      enabled: this.implicitFeedbackEnabled,
+      recommendation: this.implicitFeedbackEnabled ? this.lastImplicitFeedback : null,
+      status: {
+        modelInitialized: status.modelInitialized,
+        totalSamples: status.totalSamples,
+        historySize: status.historySize
+      }
+    };
+  }
+  /** 触发隐式反馈模型立即更新 */
+  triggerImplicitFeedbackUpdate() {
+    implicitFeedbackTracker.updateModel();
+    Logger.log("INFO", "implicit_feedback_manual_update_triggered");
+  }
+  /** 重置隐式反馈模型学习数据 */
+  resetImplicitFeedback() {
+    implicitFeedbackTracker.reset();
+    this.lastImplicitFeedback = null;
+    Logger.log("INFO", "implicit_feedback_reset");
   }
 }
 const EMBED_DIM = 384;
@@ -20964,6 +25349,7 @@ class AgentService {
       this.reflectLoop
     );
     setProceduralMemory(this.proceduralMemory);
+    setTtsService(this.ttsService);
     this.taskExecutor = new TaskExecutor(this.llmService, this.toolScheduler, this.guardrail, this.planManager, this.resourceBudget);
   }
   getMcpManager() {
@@ -21516,6 +25902,26 @@ class VectorMemory {
     this.saveToDb(entry);
     Logger.log("INFO", "vector_stored", { content, source });
   }
+  /**
+   * 按内容删除向量条目。通常与 MemoryService.forgetEntry() 配合使用。
+   * 返回 true 表示成功删除，false 表示未找到。
+   */
+  forgetByContent(content) {
+    const idx = this.entries.findIndex((e) => e.content === content);
+    if (idx < 0) return false;
+    const entry = this.entries[idx];
+    this.entries.splice(idx, 1);
+    this.dirty = true;
+    try {
+      const db2 = getRawDb();
+      db2.run("DELETE FROM memory_vectors WHERE id = ?", [entry.id]);
+      markDirty();
+    } catch (err) {
+      Logger.log("WARN", "vector_forget_db_failed", { error: String(err) });
+    }
+    Logger.log("INFO", "vector_forgotten", { content: content.slice(0, 50) });
+    return true;
+  }
   async query(query, topK = 3) {
     const queryEmb = await getEmbedding(query);
     if (queryEmb.length === 0) return [];
@@ -22003,6 +26409,8 @@ class MetaController {
   summary = null;
   decisions = null;
   memory = null;
+  /** 可选的 LLM 服务，用于生成高质量摘要和实体提取 */
+  summaryLLM = null;
   tickSinceLastSummary = 0;
   constructor(policy) {
     this.policy = { ...DEFAULT_POLICY, ...policy };
@@ -22011,6 +26419,9 @@ class MetaController {
     this.summary = deps.summary;
     this.decisions = deps.decisions;
     this.memory = deps.memory;
+    if (deps.summaryLLM) {
+      this.summaryLLM = deps.summaryLLM;
+    }
   }
   getPolicy() {
     return this.policy;
@@ -22047,6 +26458,79 @@ class MetaController {
   createSummary(context) {
     this.tickSinceLastSummary = 0;
     const turnEnd = Date.now();
+    if (this.summaryLLM) {
+      this.createLLMSummary(context, turnEnd);
+      return;
+    }
+    const summaryText = context.assistantReply ? `用户: ${context.userMessage.slice(0, 60)} → ${context.assistantReply.slice(0, 60)}` : context.userMessage.slice(0, 80);
+    this.summary?.addSummary(summaryText, this.stats.totalInteractions, turnEnd, {
+      topics: [],
+      decisions: context.planActive ? ["计划活跃中"] : [],
+      keyEntities: []
+    });
+    this.stats.summariesCreated++;
+  }
+  /**
+   * 使用 LLM 异步生成高质量对话摘要。
+   * 提取主题、决策、实体，并写入 SummaryMemory + 触发 KG 更新。
+   */
+  createLLMSummary(context, turnEnd) {
+    const prompt = `分析以下对话，返回 JSON：
+{
+  "summary": "一句话摘要（不超过80字）",
+  "topics": ["话题1", "话题2"],
+  "decisions": ["决策1"],
+  "keyEntities": ["实体1"],
+  "userIntent": "用户意图简述",
+  "failureRisk": "是否有失败风险及原因（无风险填'none'）"
+}
+
+用户：${context.userMessage.slice(0, 300)}
+助手：${context.assistantReply.slice(0, 500)}`;
+    this.summaryLLM.chatJson(prompt, {
+      system: "你是对话分析助手。只提取明确陈述的信息，不要编造。输出严格 JSON。",
+      temperature: 0.1
+    }).then((response) => {
+      if (response.error) {
+        Logger.log("WARN", "meta_llm_summary_api_error", { error: response.error });
+        this.fallbackSummary(context, turnEnd);
+        return;
+      }
+      const result = response.data;
+      const summary = result?.summary || context.userMessage.slice(0, 80);
+      const topics = Array.isArray(result?.topics) ? result.topics : [];
+      const decisions2 = Array.isArray(result?.decisions) ? result.decisions : [];
+      const keyEntities = Array.isArray(result?.keyEntities) ? result.keyEntities : [];
+      if (context.planActive && !decisions2.includes("计划活跃中")) {
+        decisions2.push("计划活跃中");
+      }
+      this.summary?.addSummary(summary, this.stats.totalInteractions, turnEnd, {
+        topics,
+        decisions: decisions2,
+        keyEntities
+      });
+      this.stats.summariesCreated++;
+      if (keyEntities.length > 0 && this.memory) {
+        for (const entity of keyEntities) {
+          this.memory.knowledgeGraph.ingest(
+            `对话实体: ${entity} (上下文: ${summary.slice(0, 60)})`,
+            0.55
+          );
+        }
+      }
+      Logger.log("INFO", "meta_llm_summary_created", {
+        summary: summary.slice(0, 60),
+        topics: topics.length,
+        decisions: decisions2.length,
+        entities: keyEntities.length
+      });
+    }).catch((err) => {
+      Logger.log("WARN", "meta_llm_summary_failed", { error: String(err) });
+      this.fallbackSummary(context, turnEnd);
+    });
+  }
+  /** 简单摘要回退（无 LLM 或 LLM 失败时使用） */
+  fallbackSummary(context, turnEnd) {
     const summaryText = context.assistantReply ? `用户: ${context.userMessage.slice(0, 60)} → ${context.assistantReply.slice(0, 60)}` : context.userMessage.slice(0, 80);
     this.summary?.addSummary(summaryText, this.stats.totalInteractions, turnEnd, {
       topics: [],
@@ -22133,15 +26617,51 @@ class MetaController {
   }
 }
 class UnifiedMemoryQuery {
+  /** 向后兼容：通用 store map（支持非 IMemoryPlugin 对象） */
   stores = /* @__PURE__ */ new Map();
+  /** 正式插件注册表 */
+  plugins = /* @__PURE__ */ new Map();
+  /** 注册通用 store（向后兼容） */
   register(name2, store) {
     this.stores.set(name2, store);
+  }
+  /** 注册 IMemoryPlugin 插件 */
+  registerPlugin(plugin) {
+    this.plugins.set(plugin.name, plugin);
+    Logger.log("INFO", "umq_plugin_registered", { plugin: plugin.name });
+  }
+  /** 注销插件 */
+  unregisterPlugin(name2) {
+    return this.plugins.delete(name2);
+  }
+  /** 获取所有已注册的插件名 */
+  getPluginNames() {
+    return [...this.plugins.keys()];
   }
   async query(text, options) {
     const topK = options?.topK || 5;
     const results = [];
+    for (const [name2, plugin] of this.plugins) {
+      if (options?.types && !options.types.includes(name2)) continue;
+      try {
+        const pluginResults = await plugin.retrieve(text, topK);
+        for (const pr of pluginResults) {
+          if (options?.minConfidence && pr.score < options.minConfidence) continue;
+          results.push({
+            store: name2,
+            content: pr.content,
+            score: pr.score,
+            metadata: pr.metadata || {},
+            timestamp: pr.timestamp || Date.now()
+          });
+        }
+      } catch {
+        Logger.log("WARN", "umq_plugin_query_failed", { plugin: name2 });
+      }
+    }
     for (const [name2, store] of this.stores) {
       if (options?.types && !options.types.includes(name2)) continue;
+      if (this.plugins.has(name2)) continue;
       try {
         if (typeof store.search === "function") {
           const entries = await Promise.resolve(store.search(text, topK));
@@ -22182,12 +26702,56 @@ class UnifiedMemoryQuery {
     results.sort((a, b) => b.score - a.score);
     return results.slice(0, topK);
   }
+  /**
+   * 通过插件接口批量更新记忆。
+   * 在对话结束后调用，各插件异步持久化摘要和知识实体。
+   */
+  async updateAll(input) {
+    const pluginInput = {
+      userMessage: input.userMessage,
+      assistantReply: input.assistantReply,
+      topics: input.topics || [],
+      decisions: input.decisions || [],
+      entities: input.entities || [],
+      timestamp: Date.now(),
+      metadata: input.metadata || {}
+    };
+    const promises2 = [];
+    for (const [name2, plugin] of this.plugins) {
+      if (plugin.update) {
+        promises2.push(
+          plugin.update(pluginInput).catch((err) => {
+            Logger.log("WARN", "umq_plugin_update_failed", { plugin: name2, error: String(err) });
+          })
+        );
+      }
+    }
+    await Promise.allSettled(promises2);
+  }
   async getFormattedContext(options) {
     const results = await this.query("", { ...options, topK: 10 });
     if (results.length === 0) return "";
     const parts = ["---", "【综合记忆上下文】"];
     for (const r of results) parts.push(`[${r.store}] ${r.content.slice(0, 200)}`);
     parts.push("---");
+    return parts.join("\n");
+  }
+  /**
+   * 通过插件接口获取所有已注册插件的格式化上下文。
+   * 比 query() 更高效，直接调用各插件的 getContext()。
+   */
+  async getPluginContexts(query) {
+    const parts = [];
+    for (const [name2, plugin] of this.plugins) {
+      try {
+        if (plugin.getContext) {
+          const ctx = await Promise.resolve(plugin.getContext(query));
+          if (ctx) parts.push(ctx);
+        }
+      } catch {
+        Logger.log("WARN", "umq_plugin_context_failed", { plugin: name2 });
+      }
+    }
     return parts.join("\n");
   }
 }
@@ -22517,6 +27081,148 @@ class BehaviorWeightingService {
     this.cachedProfile = null;
   }
 }
+function adaptToPlugin(name2, store) {
+  const hasSearch = typeof store.search === "function";
+  const hasQuery = typeof store.query === "function";
+  const hasGetFormattedContext = typeof store.getFormattedContext === "function";
+  const hasDispose = typeof store.dispose === "function";
+  return {
+    name: name2,
+    async retrieve(query, topK = 5) {
+      const results = [];
+      if (hasSearch) {
+        const entries = await Promise.resolve(store.search(query, topK));
+        if (Array.isArray(entries)) {
+          for (const e of entries) {
+            if (!e) continue;
+            results.push({
+              content: typeof e.content === "string" ? e.content : typeof e.summary === "string" ? e.summary : String(e.value || e.attribute || ""),
+              score: typeof e.confidence === "number" ? e.confidence : typeof e.score === "number" ? e.score : 0.5,
+              source: name2,
+              metadata: { type: e.type, tags: e.tags },
+              timestamp: e.updatedAt || e.createdAt || Date.now()
+            });
+          }
+        }
+      } else if (hasQuery) {
+        const contents = await Promise.resolve(store.query(query, topK));
+        if (Array.isArray(contents)) {
+          for (const c of contents) {
+            if (c === null || c === void 0) continue;
+            results.push({
+              content: typeof c === "string" ? c : typeof c.content === "string" ? c.content : JSON.stringify(c),
+              score: typeof c.confidence === "number" ? c.confidence : 0.5,
+              source: name2,
+              timestamp: c.updatedAt || c.createdAt || Date.now()
+            });
+          }
+        }
+      }
+      return results;
+    },
+    getContext(_query) {
+      if (hasGetFormattedContext) {
+        const ctx = store.getFormattedContext();
+        return typeof ctx === "string" ? ctx : "";
+      }
+      return "";
+    },
+    async dispose() {
+      if (hasDispose) {
+        await Promise.resolve(store.dispose());
+      }
+    }
+  };
+}
+const TRAIT_POOL = [
+  { trait: "容易紧张", scene: "在轻音部练习贝斯时紧张得手指发抖" },
+  { trait: "温柔体贴", scene: "给熬夜的朋友泡了一杯热茶，安静地陪在旁边" },
+  { trait: "认真执着", scene: "反复练习同一段旋律直到深夜，手指都酸了" },
+  { trait: "害羞内向", scene: "在众人面前说话时声音越来越小，脸红到耳根" },
+  { trait: "善解人意", scene: "察觉到朋友心情不好，默默递过去一颗糖" },
+  { trait: "喜欢安静", scene: "独自在音乐室角落看乐谱，享受午后的宁静" },
+  { trait: "有点笨拙", scene: "第一次尝试做便当时把厨房弄得一团糟" },
+  { trait: "热爱音乐", scene: "听到喜欢的旋律会不自觉地轻轻哼唱出来" },
+  { trait: "珍惜友情", scene: "和朋友一起在放学后的茶会上分享点心，聊到天黑" },
+  { trait: "偶尔固执", scene: "坚持要用自己的方式调音，即使花了比预想更长的时间" },
+  { trait: "心思细腻", scene: "注意到朋友换了新发型，真诚地称赞很好看" },
+  { trait: "容易感动", scene: "听到一首感人的歌曲时悄悄抹了抹眼角" },
+  { trait: "责任感强", scene: "承担了文化祭的准备工作，熬夜制作装饰直到天亮" },
+  { trait: "有点迷糊", scene: "早上匆忙出门结果穿了两只不一样的袜子" },
+  { trait: "喜欢学习", scene: "在图书馆找到一本有趣的书，不知不觉坐了一下午" },
+  { trait: "关心他人", scene: "发现同学生病后，主动帮忙做好了当天的值日" },
+  { trait: "偶尔自卑", scene: "在音乐比赛中看到其他选手的表演后有些沮丧，但很快振作" },
+  { trait: "勇敢面对", scene: "鼓起勇气在学园祭的舞台上独奏了一曲，收获满堂掌声" },
+  { trait: "有点天然呆", scene: "把盐当成糖放进了曲奇面团里，烤出来的味道一言难尽" },
+  { trait: "珍惜日常", scene: "认真记录每一天的小确幸，日记本已经写满了大半" }
+];
+const MEMORY_TEMPLATES = [
+  "记得{TRAITS}。",
+  "想起自己{TRAITS}。",
+  "印象中，{TRAITS}。",
+  "以前{TRAITS}。"
+];
+const CONNECTORS = ["，也", "，还", "，又"];
+class FictionalMemoryGenerator {
+  seed;
+  rng;
+  constructor(userId) {
+    this.seed = this.hashUserId(userId || WORKSPACE_ROOT || "akemi-mio-default");
+    this.rng = createSeededRandom(this.seed);
+  }
+  /** 将用户 ID 字符串 hash 为 32-bit 种子 */
+  hashUserId(userId) {
+    const hash = crypto.createHash("sha256").update(userId, "utf-8").digest("hex");
+    return parseInt(hash.slice(0, 8), 16);
+  }
+  /**
+   * 生成虚构初始记忆
+   * @param traitCount 选取的特征数量 (3-5)，不传则随机
+   */
+  generate(traitCount) {
+    const count = traitCount ?? randomInt(this.rng, 3, 5);
+    const pool = [...TRAIT_POOL];
+    const selected = [];
+    const used = /* @__PURE__ */ new Set();
+    while (selected.length < count && used.size < pool.length) {
+      const idx = Math.floor(this.rng() * pool.length);
+      if (!used.has(idx)) {
+        used.add(idx);
+        selected.push(pool[idx]);
+      }
+    }
+    const scenes = selected.map((s, i) => {
+      if (i === 0) return s.scene;
+      const connector = CONNECTORS[Math.floor(this.rng() * CONNECTORS.length)];
+      return `${connector}${s.scene}`;
+    }).join("");
+    const templateIdx = Math.floor(this.rng() * MEMORY_TEMPLATES.length);
+    const template = MEMORY_TEMPLATES[templateIdx];
+    const text = template.replace("{TRAITS}", scenes);
+    return {
+      text,
+      selectedTraits: selected.map((s) => s.trait),
+      weight: 1,
+      isFictional: true
+    };
+  }
+  /**
+   * 计算虚构记忆的当前权重
+   * 真实记忆条目越多，虚构记忆权重越低。
+   *
+   * @param realMemoryCount 真实记忆条目数（不含虚构类型）
+   * @param threshold 阈值，超过此数量权重归零（默认 10）
+   * @returns 0-1 的权重值
+   */
+  static computeWeight(realMemoryCount, threshold = 10) {
+    if (realMemoryCount >= threshold) return 0;
+    return Math.max(0, 1 - realMemoryCount / threshold);
+  }
+  /** 暴露种子供调试和日志 */
+  getSeed() {
+    return this.seed;
+  }
+}
 const MAX_PERMANENT = 10;
 const MAX_SEMI = 30;
 const MAX_EPHEMERAL = 50;
@@ -22528,7 +27234,7 @@ const INTERACTION_RECORD_INTERVAL = 5;
 const BEHAVIOR_SCORE_INITIAL = 0.5;
 const BEHAVIOR_SCORE_ACCESS_BOOST = 0.05;
 const BEHAVIOR_SCORE_EXPLICIT_REMEMBER_BOOST = 0.15;
-const BEHAVIOR_SCORE_DAILY_DECAY = 0.01;
+const BEHAVIOR_SCORE_DAILY_DECAY = 0.015;
 const BEHAVIOR_SCORE_MIN = 0.1;
 const BEHAVIOR_SCORE_MAX = 1;
 const BEHAVIOR_WEIGHT = 0.7;
@@ -22563,12 +27269,14 @@ class MemoryService {
   unifiedQuery;
   interactionTracker;
   behaviorWeighting;
+  fictionalGenerator;
   constructor() {
     this.summary = new SummaryMemory();
     this.vector = new VectorMemory();
     this.knowledgeGraph = new KnowledgeGraph();
     this.engineering = new EngineeringMemory();
     this.decisionStore = new DecisionStore();
+    this.fictionalGenerator = new FictionalMemoryGenerator();
     this.metaController = new MetaController();
     this.metaController.setDeps({
       summary: this.summary,
@@ -22581,6 +27289,10 @@ class MemoryService {
     this.unifiedQuery.register("summary", this.summary);
     this.unifiedQuery.register("kg", this.knowledgeGraph);
     this.unifiedQuery.register("engineering", this.engineering);
+    this.unifiedQuery.registerPlugin(adaptToPlugin("vector", this.vector));
+    this.unifiedQuery.registerPlugin(adaptToPlugin("kg", this.knowledgeGraph));
+    this.unifiedQuery.registerPlugin(adaptToPlugin("engineering", this.engineering));
+    this.unifiedQuery.registerPlugin(adaptToPlugin("summary", this.summary));
     this.interactionTracker = new InteractionTracker();
     this.behaviorWeighting = new BehaviorWeightingService({
       interestWindowSize: BEHAVIOR_WEIGHT_WINDOW_SIZE,
@@ -22766,6 +27478,74 @@ class MemoryService {
   // ══════════════════════════════════════════
   //  行为驱动得分
   // ══════════════════════════════════════════
+  /**
+   * 行为强化记忆巩固：根据 UserBehaviorAnalyzer 检测到的重复话题模式，
+   * 自动强化相关记忆条目的检索权重，并生成标签关联。
+   *
+   * 调用时机：ChatExecutor.refreshMemory() 中检测到重复模式后。
+   *
+   * @param topics 检测到的话题标签列表
+   * @param sourceText 触发强化的用户消息摘要（用于新建记忆条目）
+   * @param boostAmount 每次强化的 boost 量（默认 0.08，约需 6 次达标到 1.0）
+   * @returns 被强化的条目数和新创建的条目数
+   */
+  reinforceByBehaviorPattern(topics, sourceText, boostAmount = BEHAVIOR_REINFORCE_BOOST) {
+    if (!topics || topics.length === 0) return { boosted: 0, created: 0 };
+    let boosted = 0;
+    let created = 0;
+    for (const entry of this.entries) {
+      if (entry.tier === "permanent" || entry.isPinned) continue;
+      if (!entry.topics || entry.topics.length === 0) continue;
+      const hasOverlap = entry.topics.some((t) => topics.includes(t));
+      if (!hasOverlap) continue;
+      const oldScore = entry.behaviorScore;
+      entry.behaviorScore = Math.min(BEHAVIOR_SCORE_MAX, entry.behaviorScore + boostAmount);
+      entry.lastAccessedAt = Date.now();
+      entry.accessCount++;
+      entry.updatedAt = Date.now();
+      const newTopics = [.../* @__PURE__ */ new Set([...entry.topics || [], ...topics])];
+      entry.topics = newTopics.slice(0, 8);
+      this.upsertInDb(entry);
+      boosted++;
+      Logger.log("INFO", "memory_reinforced_by_behavior", {
+        id: entry.id,
+        content: entry.content.slice(0, 50),
+        oldScore: oldScore.toFixed(3),
+        newScore: entry.behaviorScore.toFixed(3),
+        topics: entry.topics.slice(0, 5)
+      });
+    }
+    if (boosted === 0 && sourceText) {
+      const topicLabel = topics.slice(0, 3).join("、");
+      const content = `【行为强化】用户近期频繁关注：${topicLabel}。触发消息：「${sourceText.slice(0, 100)}」`;
+      const entry = {
+        id: nextId(),
+        type: "user_fact",
+        content,
+        confidence: 0.55,
+        tier: "semi",
+        // 半永久层，慢衰减
+        reinforceCount: 0,
+        behaviorScore: BEHAVIOR_SCORE_INITIAL + boostAmount,
+        lastAccessedAt: Date.now(),
+        accessCount: 1,
+        isPinned: false,
+        manualScoreOverride: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        topics: [...topics]
+      };
+      this.entries.push(entry);
+      this.upsertInDb(entry);
+      created++;
+      Logger.log("INFO", "memory_created_by_behavior_reinforcement", {
+        id: entry.id,
+        topics: topics.slice(0, 5),
+        sourceSnippet: sourceText.slice(0, 60)
+      });
+    }
+    return { boosted, created };
+  }
   /** 访问/引用记忆时提升行为得分 */
   accessMemory(id2, options) {
     const entry = this.entries.find((e) => e.id === id2);
@@ -22921,12 +27701,88 @@ class MemoryService {
   getInteractionCount() {
     return this.messageCount;
   }
+  /** 注入 LLM 服务用于生成高质量摘要（传递给 MetaController） */
+  setSummaryLLM(llm) {
+    this.metaController.setDeps({
+      summary: this.summary,
+      decisions: this.decisionStore,
+      memory: this,
+      summaryLLM: llm
+    });
+  }
   /** 设置最近的用户消息文本，用于 getFormattedContext 中的语义召回 */
   setLastUserText(text) {
     this.lastUserText = text;
   }
+  /** 获取最近的用户消息文本 */
+  getLastUserText() {
+    return this.lastUserText;
+  }
+  /**
+   * 获取虚构初始记忆上下文（用于暖启动）。
+   * 仅在真实 user_fact 条目不足时返回，权重随真实记忆增长线性衰减。
+   * 返回值已标注为虚构，且在真实记忆达到阈值后完全消失。
+   */
+  getFictionalMemoryContext() {
+    const realFacts = this.entries.filter((e) => e.type === "user_fact");
+    const FICTIONAL_THRESHOLD = 10;
+    const weight = FictionalMemoryGenerator.computeWeight(realFacts.length, FICTIONAL_THRESHOLD);
+    if (weight <= 0) return "";
+    const existingFictional = this.entries.find((e) => e.type === "fictional");
+    let fictionalText;
+    let selectedTraits;
+    if (existingFictional) {
+      fictionalText = existingFictional.content;
+      try {
+        selectedTraits = existingFictional.topics || [];
+      } catch {
+        selectedTraits = [];
+      }
+    } else {
+      const result = this.fictionalGenerator.generate();
+      fictionalText = result.text;
+      selectedTraits = result.selectedTraits;
+      const entry = {
+        id: "fictional_init_" + this.fictionalGenerator.getSeed().toString(16),
+        type: "fictional",
+        content: fictionalText,
+        confidence: 0.3,
+        // 低置信度，标记为虚构
+        tier: "ephemeral",
+        reinforceCount: 0,
+        behaviorScore: 0.3,
+        lastAccessedAt: Date.now(),
+        accessCount: 0,
+        isPinned: false,
+        manualScoreOverride: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        topics: selectedTraits
+      };
+      this.entries.push(entry);
+      this.upsertInDb(entry);
+      Logger.log("INFO", "fictional_memory_generated", {
+        traits: selectedTraits,
+        seed: this.fictionalGenerator.getSeed().toString(16)
+      });
+    }
+    if (weight >= 0.7) {
+      return `【关于你的模糊印象】（这些是初始印象，随着相处会变得更准确）
+${fictionalText}`;
+    }
+    if (weight >= 0.3) {
+      const shortText = fictionalText.length > 60 ? fictionalText.slice(0, 60) + "…" : fictionalText;
+      return `【关于你的一些过往回忆】（这些印象可能不太准确，你们已经相处了一段时间）
+${shortText}`;
+    }
+    return "【模糊的印象】你们似乎有过一些交集，但记忆已经淡去了。";
+  }
   getFormattedContext() {
     const parts = [];
+    const fictionalCtx = this.getFictionalMemoryContext();
+    if (fictionalCtx) {
+      parts.push(fictionalCtx);
+    }
     const permanent = this.entries.filter((e) => e.tier === "permanent" && e.type === "user_fact").slice(0, MAX_PERMANENT);
     if (permanent.length > 0) {
       parts.push("【重要的记忆】");
@@ -22966,6 +27822,11 @@ class MemoryService {
     if (kgCtx) {
       parts.push("");
       parts.push(kgCtx);
+    }
+    const engCtx = this.engineering.getFormattedContext(3);
+    if (engCtx) {
+      parts.push("");
+      parts.push(engCtx);
     }
     const preloadCtx = this.getPreloadContext();
     if (preloadCtx) {
@@ -23007,6 +27868,20 @@ class MemoryService {
   }
   getEntries() {
     return this.entries;
+  }
+  /**
+   * 按 id 删除一条记忆条目。
+   * 返回 true 表示成功删除，false 表示未找到。
+   * 删除操作会同时标记为待从 DB 中移除（通过 flush() 持久化）。
+   */
+  forgetEntry(id2) {
+    const idx = this.entries.findIndex((e) => e.id === id2);
+    if (idx < 0) return false;
+    const entry = this.entries[idx];
+    this.removedIds.add(entry.id);
+    this.entries.splice(idx, 1);
+    Logger.log("INFO", "memory_forgotten", { id: entry.id, content: entry.content.slice(0, 50) });
+    return true;
   }
   // ===== 任务状态管理 =====
   /** 保存/更新任务状态。同一 taskId 会覆盖旧记录 */
@@ -23829,7 +28704,7 @@ class VoiceToolOrchestrator {
 function createServiceRef() {
   return { current: null };
 }
-function registerHandlers(agentService, stateManager, ttsService, evolutionRef, metricsCollector) {
+function registerHandlers(agentService, stateManager, ttsService, evolutionRef, metricsCollector, dashboardRef) {
   electron.ipcMain.handle("window:close", async (event) => {
     const win = electron.BrowserWindow.fromWebContents(event.sender);
     if (!win) return { success: false };
@@ -23875,11 +28750,39 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef, 
     try {
       const asr = agentService.getAsrService();
       if (!asr) throw new Error("ASR service not initialized");
-      return await asr.transcribe(audioBuffer);
+      const memoryService = agentService.getMemoryService();
+      if (memoryService) {
+        const recentSummaries = memoryService.summary.getRecentFull(3);
+        const lastUserText = memoryService.getLastUserText();
+        const context = extractContextFromSummaries(recentSummaries, lastUserText || void 0);
+        asr.setConversationContext(context);
+      }
+      const result = await asr.transcribe(audioBuffer);
+      if (memoryService && result.text && result.text.trim()) {
+        memoryService.recordInteraction(result.text);
+        memoryService.setLastUserText(result.text);
+        asrHotwordManager.feedUserText(result.text);
+      }
+      return result;
     } catch (err) {
       Logger.log("ERROR", "asr_transcribe_failed", { error: String(err) });
       throw err;
     }
+  });
+  electron.ipcMain.handle("asr:toggle-hotwords", async (_event, enabled) => {
+    const asr = agentService.getAsrService();
+    if (asr) {
+      asr.toggleHotwordManager(enabled);
+    }
+    asrHotwordManager.setEnabled(enabled);
+    return { enabled: asrHotwordManager.isEnabled() };
+  });
+  electron.ipcMain.handle("asr:hotword-state", async () => {
+    const asr = agentService.getAsrService();
+    if (asr) {
+      return asr.getHotwordManagerState();
+    }
+    return { enabled: asrHotwordManager.isEnabled(), entryCount: 0, hotwords: [], totalInputs: 0 };
   });
   const voiceOrchestrator = new VoiceToolOrchestrator();
   voiceOrchestrator.setToolCaller({
@@ -23916,6 +28819,7 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef, 
   });
   electron.ipcMain.handle("tts:stop", async () => {
     try {
+      ttsService.recordImplicitFeedback("SKIP");
       ttsService.stop();
     } catch (err) {
       Logger.log("ERROR", "tts_stop_failed", { error: String(err) });
@@ -23940,6 +28844,136 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef, 
       return { success: true, enabled: false, params: null };
     } catch (err) {
       Logger.log("ERROR", "tts_emotion_state_failed", { error: String(err) });
+      return { success: false };
+    }
+  });
+  electron.ipcMain.handle("tts:behaviorEmotion:toggle", async (_event, enabled) => {
+    try {
+      agentService.getChatExecutor()?.toggleBehaviorEmotion(enabled);
+      Logger.log("INFO", "tts_behavior_emotion_toggle_ipc", { enabled });
+      return { success: true, enabled };
+    } catch (err) {
+      Logger.log("ERROR", "tts_behavior_emotion_toggle_failed", { error: String(err) });
+      return { success: false };
+    }
+  });
+  electron.ipcMain.handle("tts:behaviorEmotion:state", async () => {
+    try {
+      const chatExec = agentService.getChatExecutor();
+      if (chatExec) {
+        return { success: true, ...chatExec.getBehaviorEmotionState() };
+      }
+      return { success: true, enabled: false, result: null, metrics: null };
+    } catch (err) {
+      Logger.log("ERROR", "tts_behavior_emotion_state_failed", { error: String(err) });
+      return { success: false };
+    }
+  });
+  electron.ipcMain.handle("tts:implicitFeedback:recordAction", async (_event, action) => {
+    try {
+      const valid = ["REPLAY", "SKIP", "INTERRUPT_SPEECH", "CONTINUE_CONVERSATION", "MODIFY_REQUEST", "COMPLETED_NATURALLY"];
+      if (!valid.includes(action)) return { success: false, error: `无效的反馈动作: ${action}` };
+      ttsService.recordImplicitFeedback(action);
+      return { success: true };
+    } catch (err) {
+      Logger.log("ERROR", "tts_implicit_feedback_record_failed", { error: String(err) });
+      return { success: false, error: String(err) };
+    }
+  });
+  electron.ipcMain.handle("tts:implicitFeedback:toggle", async (_event, enabled) => {
+    try {
+      agentService.getChatExecutor()?.toggleImplicitFeedback(enabled);
+      Logger.log("INFO", "tts_implicit_feedback_toggle_ipc", { enabled });
+      return { success: true, enabled };
+    } catch (err) {
+      Logger.log("ERROR", "tts_implicit_feedback_toggle_failed", { error: String(err) });
+      return { success: false };
+    }
+  });
+  electron.ipcMain.handle("tts:implicitFeedback:state", async () => {
+    try {
+      const chatExec = agentService.getChatExecutor();
+      if (chatExec) {
+        return { success: true, ...chatExec.getImplicitFeedbackState() };
+      }
+      return { success: true, enabled: false, recommendation: null, status: { modelInitialized: false, totalSamples: 0, historySize: 0 } };
+    } catch (err) {
+      Logger.log("ERROR", "tts_implicit_feedback_state_failed", { error: String(err) });
+      return { success: false };
+    }
+  });
+  electron.ipcMain.handle("tts:implicitFeedback:updateModel", async () => {
+    try {
+      agentService.getChatExecutor()?.triggerImplicitFeedbackUpdate();
+      return { success: true };
+    } catch (err) {
+      Logger.log("ERROR", "tts_implicit_feedback_update_failed", { error: String(err) });
+      return { success: false };
+    }
+  });
+  electron.ipcMain.handle("tts:implicitFeedback:reset", async () => {
+    try {
+      agentService.getChatExecutor()?.resetImplicitFeedback();
+      return { success: true };
+    } catch (err) {
+      Logger.log("ERROR", "tts_implicit_feedback_reset_failed", { error: String(err) });
+      return { success: false };
+    }
+  });
+  electron.ipcMain.handle("tts:contextual:toggle", async (_event, enabled) => {
+    try {
+      agentService.getChatExecutor()?.toggleContextualTts(enabled);
+      Logger.log("INFO", "tts_contextual_toggle_ipc", { enabled });
+      return { success: true, enabled };
+    } catch (err) {
+      Logger.log("ERROR", "tts_contextual_toggle_failed", { error: String(err) });
+      return { success: false };
+    }
+  });
+  electron.ipcMain.handle("tts:contextual:state", async () => {
+    try {
+      const chatExec = agentService.getChatExecutor();
+      if (chatExec) {
+        return { success: true, ...chatExec.getContextualTtsState() };
+      }
+      return { success: true, enabled: false, context: null };
+    } catch (err) {
+      Logger.log("ERROR", "tts_contextual_state_failed", { error: String(err) });
+      return { success: false };
+    }
+  });
+  electron.ipcMain.handle("tts:engine-preference:set", async (_event, pref) => {
+    try {
+      const valid = pref === "auto" || pref === "cloud" || pref === "local";
+      if (!valid) return { success: false, error: `无效的引擎偏好: ${pref}` };
+      ttsService.setEnginePreference(pref);
+      credentialsManager.set("tts_mode", pref);
+      return { success: true, preference: pref };
+    } catch (err) {
+      Logger.log("ERROR", "tts_engine_preference_set_failed", { error: String(err) });
+      return { success: false, error: String(err) };
+    }
+  });
+  electron.ipcMain.handle("tts:engine-preference:get", async () => {
+    try {
+      return { success: true, preference: ttsService.getEnginePreference() };
+    } catch (err) {
+      Logger.log("ERROR", "tts_engine_preference_get_failed", { error: String(err) });
+      return { success: false };
+    }
+  });
+  electron.ipcMain.handle("tts:router-state", async () => {
+    try {
+      const decision = ttsService.getLastRoutingDecision();
+      const weights = ttsService.getRoutingWeights();
+      return {
+        success: true,
+        preference: ttsService.getEnginePreference(),
+        lastDecision: decision,
+        weights
+      };
+    } catch (err) {
+      Logger.log("ERROR", "tts_router_state_failed", { error: String(err) });
       return { success: false };
     }
   });
@@ -23982,6 +29016,14 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef, 
       };
     });
   }
+  if (dashboardRef) {
+    electron.ipcMain.handle("evolution:dashboard:toggle", async () => {
+      const svc = dashboardRef.current;
+      if (!svc) return { success: false, visible: false };
+      const visible = svc.toggleVisibility();
+      return { success: true, visible };
+    });
+  }
   electron.ipcMain.handle("credentials:list", async () => {
     return credentialsManager.list();
   });
@@ -23998,6 +29040,11 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef, 
       } catch (err) {
         Logger.log("WARN", "llm_config_refresh_failed", { error: String(err) });
       }
+    }
+    if (name2 === "tts_mode") {
+      const pref = value === "cloud" ? "cloud" : value === "local" ? "local" : "auto";
+      ttsService.setEnginePreference(pref);
+      Logger.log("INFO", "tts_mode_credential_synced", { value, preference: pref });
     }
     return true;
   });
@@ -24243,6 +29290,32 @@ function registerHandlers(agentService, stateManager, ttsService, evolutionRef, 
       return { success: ok, error: ok ? void 0 : "审批请求不存在" };
     } catch (err) {
       return { success: false, error: err.message };
+    }
+  });
+  const desktopToolMap = {};
+  Promise.resolve().then(() => require("./chunks/DesktopTools-BG1rz3W1.js")).then(({ desktopTools }) => {
+    for (const tool of desktopTools) {
+      desktopToolMap[tool.name] = tool.handler;
+    }
+    Logger.log("INFO", "desktop_tools_loaded", { count: desktopTools.length });
+  }).catch((err) => {
+    Logger.log("WARN", "desktop_tools_load_failed", { error: String(err) });
+  });
+  electron.ipcMain.handle("desktop:invokeTool", async (_event, toolName, args) => {
+    try {
+      const handler = desktopToolMap[toolName];
+      if (!handler) {
+        return { success: false, error: `未知工具: ${toolName}` };
+      }
+      const result = await handler(args);
+      if (result && typeof result === "object" && "content" in result) {
+        const text = result.content?.[0]?.text || "";
+        return { success: !result.isError, result: text, error: result.isError ? text : void 0 };
+      }
+      return { success: true, result: String(result) };
+    } catch (err) {
+      Logger.log("ERROR", "desktop_invoke_tool_failed", { toolName, error: String(err) });
+      return { success: false, error: err.message || String(err) };
     }
   });
   electron.ipcMain.handle("writing:getStatus", async () => {
@@ -26236,6 +31309,14 @@ function setupTransformers() {
 }
 const TRAY_ICON_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAADvUlEQVR4nL1X3W4bRRQ+P7N/tpMYYgIhQUlDaKEEoSKKVFRVSIgb6A3iDeAaCXHHM/ACPAlvgIS4KxcRICJFpaIVqWMnsb3r3Zlz0GyJmlaxd93UnKvR7JnzfedvzizCjLK+frU/7fu9e7vtWezh8wC9CBmaF3jdszgP4FmiQf8H+DSb+CzgqoqqWq6J6NHiGSOBs4B7YFFh4jDgIGFAJtFC1FmRIs2Z2M5KwszCXhHDqLkSMRtUFfBBMBgxADA1l4N02C3Q5aNZbFJd751IkCyuxoiIIoWPhqcEj4g4KIpM4+ZyIBg0qkDPYlEdcFXBZGm14ez4ad4lEQQEIkZbZNpY6AROHNclQVWKJQiZiBDBOe+xAtHj0kmiQJ0I+O9EhCIOOGoldezWJKAQJUuhtRbiiPXWB1ekkcTgnICowjdf3YbldksHowwQCUAFwniRfdRqEVivUflIhIV18NGNq7BzeVVXOy0ZpmN4Y6Mj13YuwY33NuXK1sviRMGJA0T05GqlAasIiDiOFl9pvdppSJ4d25PhAD68/i4nzUU86vXkz/19saJme+M13d3r8WA0UuYIB/37GSOMKyMAFaJIhpAhign7/ZOid2hgmBp6aSmGh92u3d/v234vFmcLycYZfPvlbd1c64BTrtXippIhB+Tz/+BghJ9/ejM66Ia68/YqfPbJNTzsH5mVFzdle2ML/j78g0UP4Tgd41/3H0IUJqR2UEkAq/vfcdh4oVE4ppvvX9Lvvv4Cd7Zfh5/v/CbtRgOPsyH2+kf6/Q8/wt7dA/TFGUcRZIN/aqUA69z9ngRyECIQvLm9ph/fum7eubxFvujv7O65n375VX6/exjkaSYcGMyzkUPJU0TU50Jgsnj7WN4NZbdg2Xl+AXWFqhQEORZxT+j5HlfiyIOvrbwVEBL6qeg9ngXcS6k9KQreq3ChsyDiNB90R0zsRITCVrvJJqbs6MGx4YicFOU+BlGo4gAQQW1uq6ajn4qVXZCnxxZsngbJUtOOB3nYakfFsD/IKYg9+9SmhgGVgiTWIvXXofrMBMli02UnQ8Tp7wWqDBGxz63K+GRAJmIP7o0imzJ6hoNSTUWUiIWQ1KfD5qkt51SF0GkophH4bwVgx+mpR4xUnkVkP5pKKAEInTjjRIyJWsG0LjjFxLOb59WCL0Dv2aR9ESkL0HNwoqcp9bVofTSmgXupvgnPAT+7//hNiMCEtZ5kT9iBCczmJU9jUJXCPMHPJTAvEpNsYtXBi/6kVDlDFzVw0bOzXdxz+D3/FydqA+vh1II2AAAAAElFTkSuQmCC";
 let tray = null;
+let dashboardToggleCb = null;
+let contextualTtsToggleCb = null;
+function setDashboardToggle(cb) {
+  dashboardToggleCb = cb;
+}
+function setContextualTtsToggle(cb) {
+  contextualTtsToggleCb = cb;
+}
 function initTray(mainWindow2) {
   if (tray) return;
   const icon = electron.nativeImage.createFromBuffer(Buffer.from(TRAY_ICON_BASE64, "base64"));
@@ -26258,6 +31339,20 @@ function initTray(mainWindow2) {
         click: () => {
           const win = mainWindow2();
           if (win && !win.isDestroyed()) win.hide();
+        }
+      },
+      { type: "separator" },
+      {
+        label: "切换自进化仪表盘",
+        click: () => {
+          dashboardToggleCb?.();
+        }
+      },
+      { type: "separator" },
+      {
+        label: "语音模式：自动/手动",
+        click: () => {
+          contextualTtsToggleCb?.();
         }
       },
       { type: "separator" },
@@ -30080,11 +35175,11 @@ class WorkerPool {
       clearInterval(this.healthTimer);
       this.healthTimer = null;
     }
-    const promises = [];
+    const promises2 = [];
     for (const [name2, reg] of this.workers) {
-      promises.push(this.gracefulShutdown(name2, reg));
+      promises2.push(this.gracefulShutdown(name2, reg));
     }
-    await Promise.all(promises);
+    await Promise.all(promises2);
     this.responseHandlers.clear();
     this.state = "stopped";
     Logger.log("INFO", "workerpool.stopped");
@@ -34291,11 +39386,11 @@ class SessionRecoveryManager {
       const filename = `chk_${params.runId}_${data.meta.timestamp}.json`;
       const filePath = path$1.join(this.checkpointsDir, filename);
       const latestPath = path$1.join(this.checkpointsDir, "latest.json");
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
-      fs.writeFileSync(latestPath, JSON.stringify(data, null, 2), "utf-8");
-      this.writeTaskStatus(data);
-      this.writeSummaryStatus(data);
-      this.appendHistory({ runId: params.runId, timestamp: data.meta.timestamp, trigger: data.meta.trigger });
+      await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+      await fs.promises.writeFile(latestPath, JSON.stringify(data, null, 2), "utf-8");
+      await this.writeTaskStatus(data);
+      await this.writeSummaryStatus(data);
+      await this.appendHistory({ runId: params.runId, timestamp: data.meta.timestamp, trigger: data.meta.trigger });
       eventBus.emit("recovery.checkpoint.created", {
         runId: params.runId,
         trigger: data.meta.trigger,
@@ -34493,7 +39588,7 @@ class SessionRecoveryManager {
       }
     };
   }
-  writeTaskStatus(data) {
+  async writeTaskStatus(data) {
     try {
       const lines = [
         "# Session Tasks",
@@ -34516,12 +39611,12 @@ class SessionRecoveryManager {
       lines.push(`Last Checkpoint: chk_${data.meta.runId}_${data.meta.timestamp}.json`);
       lines.push(`Conversation turns: ${data.conversationStats.totalTurns}`);
       const filePath = path$1.join(this.baseDir, "TASK.md");
-      fs.writeFileSync(filePath, lines.join("\n"), "utf-8");
+      await fs.promises.writeFile(filePath, lines.join("\n"), "utf-8");
     } catch (err) {
       Logger.log("WARN", "task_status_write_failed", { error: String(err) });
     }
   }
-  writeSummaryStatus(data) {
+  async writeSummaryStatus(data) {
     try {
       const lines = [
         "# Session Status",
@@ -34545,23 +39640,23 @@ class SessionRecoveryManager {
       lines.push(`  Short-term pairs: ${data.shortTermMemory.length}`);
       lines.push(`  Total messages tracked: ${data.conversationStats.totalMessages}`);
       const filePath = path$1.join(this.baseDir, "STATUS.md");
-      fs.writeFileSync(filePath, lines.join("\n"), "utf-8");
+      await fs.promises.writeFile(filePath, lines.join("\n"), "utf-8");
     } catch (err) {
       Logger.log("WARN", "summary_status_write_failed", { error: String(err) });
     }
   }
-  appendHistory(entry) {
+  async appendHistory(entry) {
     try {
       const historyPath = path$1.join(this.baseDir, "history.json");
       let history = [];
       if (fs.existsSync(historyPath)) {
-        history = JSON.parse(fs.readFileSync(historyPath, "utf-8"));
+        history = JSON.parse(await fs.promises.readFile(historyPath, "utf-8"));
       }
       history.push(entry);
       if (history.length > 20) {
         history = history.slice(-20);
       }
-      fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), "utf-8");
+      await fs.promises.writeFile(historyPath, JSON.stringify(history, null, 2), "utf-8");
     } catch (err) {
       Logger.log("WARN", "history_append_failed", { error: String(err) });
     }
@@ -35265,6 +40360,7 @@ const DEFAULT_GUARDRAIL_POLICY_CONFIG = {
   informationGain: { lowOutputDegrading: 3, lowOutputStalled: 8, repeatedContentDegrading: 2, repeatedContentStalled: 5 },
   goalProgress: { degrading: 4, stalled: 10 }
 };
+const PROGRESS_VERSION = 1;
 function contentFingerprint(text) {
   if (!text || text.length === 0) return "";
   return text.slice(0, 64);
@@ -35451,6 +40547,9 @@ class GuardrailProgressAnalyzer {
     const events2 = await this.source.getTrace(traceId);
     return GuardrailProgressAnalyzer.compute(traceId, events2);
   }
+  compute(traceId, events2) {
+    return GuardrailProgressAnalyzer.compute(traceId, events2);
+  }
   /**
    * 纯函数：直接传入 EvaluationEvent[] 计算 ProgressSnapshot。
    * 测试时无需存储，直接构造事件数组传入。
@@ -35463,9 +40562,10 @@ class GuardrailProgressAnalyzer {
     return {
       traceId,
       sessionId,
+      version: PROGRESS_VERSION,
       totalTurns: turns.length,
       elapsedMs,
-      computedAt: Date.now(),
+      observedAt: Date.now(),
       stateChange: computeStateChange(turns),
       informationGain: computeInformationGain(turns),
       goalProgress: computeGoalProgress(turns)
@@ -35656,6 +40756,7 @@ class AppRuntime {
   metricsEngine;
   comfyUI;
   pipeline;
+  dashboardService;
   constructor(crashGuard2) {
     this.crashGuard = crashGuard2 ?? { flushMemory: null };
   }
@@ -35697,11 +40798,24 @@ class AppRuntime {
     this.resourceBudget = new ResourceBudget();
     this.stabilityScore = new SystemStabilityScore();
     this.metricsCollector = new MetricsCollector();
-    const { ProposalValidator } = await Promise.resolve().then(() => require("./chunks/ProposalValidator-XXdN-hrM.js"));
-    const { EvolutionGitOps } = await Promise.resolve().then(() => require("./chunks/EvolutionGitOps-wjD15AB0.js"));
+    const { ProposalValidator } = await Promise.resolve().then(() => require("./chunks/ProposalValidator-DZUtUbzM.js"));
+    const { EvolutionGitOps } = await Promise.resolve().then(() => require("./chunks/EvolutionGitOps-Cn7KtWb7.js"));
     this.proposalValidator = new ProposalValidator();
     this.gitOps = new EvolutionGitOps();
     const ttsService = new TtsService((state) => stateManager.update(state));
+    try {
+      const savedPref = credentialsManager.get("tts_mode");
+      if (savedPref === "cloud" || savedPref === "local" || savedPref === "auto") {
+        ttsService.setEnginePreference(savedPref);
+        Logger.log("INFO", "tts_preference_restored", { preference: savedPref });
+      }
+    } catch (err) {
+      Logger.log("DEBUG", "tts_preference_restore_skipped", { error: String(err).slice(0, 60) });
+    }
+    Promise.resolve().then(() => NetworkMonitor$1).then(({ networkMonitor: networkMonitor2 }) => {
+      networkMonitor2.refresh().catch(() => {
+      });
+    });
     const agentService = new AgentService(llmService, asrService, ttsService, eventBus, mcpManager);
     this.agentServiceRef = agentService;
     const { setSubAgentPool: setSubAgentPool2 } = await Promise.resolve().then(() => SkillAgentTools);
@@ -35748,7 +40862,7 @@ class AppRuntime {
       getDefinition: (id2) => workflowStore2.getDefinition(id2)
     });
     setWorkflowScheduler2(scheduler2);
-    const { WorkflowTriggerManager } = await Promise.resolve().then(() => require("./chunks/WorkflowTriggerManager-Dn-Tj_ht.js"));
+    const { WorkflowTriggerManager } = await Promise.resolve().then(() => require("./chunks/WorkflowTriggerManager-DO9l84xF.js"));
     const triggerManager = new WorkflowTriggerManager();
     triggerManager.start();
     const telegramService = new TelegramService(agentService);
@@ -35774,9 +40888,10 @@ class AppRuntime {
     Logger.log("INFO", "evaluation_ready", { sessionId });
     const win = createWindow(stateManager);
     agentService.setMainWindow(win);
-    ttsService.setAudioSink((filePath) => {
+    ttsService.setAudioSink(async (filePath) => {
       try {
-        win.webContents.send("tts:play_audio_buffer", fs.readFileSync(filePath));
+        const buf = await fs.promises.readFile(filePath);
+        win.webContents.send("tts:play_audio_buffer", buf);
       } catch {
         win.webContents.send("tts:play_audio", filePath);
       }
@@ -35880,7 +40995,8 @@ class AppRuntime {
     Logger.log("INFO", "mcp_ready", { servers: mcpManager.listServers().length, tools: mcpManager.listTools().length });
     telegramService.initialize();
     const evolutionRef = createServiceRef();
-    registerHandlers(agentService, stateManager, ttsService, evolutionRef);
+    const dashboardRef = createServiceRef();
+    registerHandlers(agentService, stateManager, ttsService, evolutionRef, void 0, dashboardRef);
     const constitutionEngine = new ConstitutionEngine();
     await constitutionEngine.initialize(path$1.join(WORKSPACE.evolution, "constitution"));
     constitutionEngine.setEnforcementMode("enforce");
@@ -36033,7 +41149,8 @@ class AppRuntime {
       stateManager,
       planManager,
       cognitiveService,
-      evolutionRef
+      evolutionRef,
+      dashboardRef
     );
     const outboxUrl = credentialsManager.get("telegram_server_url") || process.env.TELEGRAM_SERVER_URL || "https://skills.crlkcloud.cyou/telegram";
     const outboxWorker = new OutboxWorker(outboxUrl);
@@ -36046,9 +41163,11 @@ class AppRuntime {
       "social.tick",
       async () => {
         try {
-          const { execSync } = require("child_process");
-          const result = execSync(`node "${path$1.join(socialDir, "cli.mjs")}" tick`, { encoding: "utf-8", timeout: 3e4, cwd: socialDir });
-          const data = JSON.parse(result.trim());
+          const { exec } = require("child_process");
+          const { promisify } = require("util");
+          const asyncExec2 = promisify(exec);
+          const result = await asyncExec2(`node "${path$1.join(socialDir, "cli.mjs")}" tick`, { encoding: "utf-8", timeout: 3e4, cwd: socialDir });
+          const data = JSON.parse(result.stdout.trim());
           if (data.posted > 0 || data.errors > 0) {
             Logger.log("INFO", "social_tick", { posted: data.posted, skipped: data.skipped, errors: data.errors });
           }
@@ -36120,6 +41239,7 @@ class AppRuntime {
     evolutionService?.stop();
     insightService?.stop();
     creativityService?.stop();
+    this.dashboardService?.destroy();
     this.lazyInit?.cancel();
     this.subs.dispose();
     closeDatabase();
@@ -36191,7 +41311,7 @@ class AppRuntime {
       "runtime:context_compress"
     );
   }
-  registerLazyServices(agentService, llmService, memoryService, memoryIndexer, stateManager, planManager2, cognitiveService, evolutionRef) {
+  registerLazyServices(agentService, llmService, memoryService, memoryIndexer, stateManager, planManager2, cognitiveService, evolutionRef, dashboardRef) {
     this.lazyInit.add({
       name: "evolution",
       priority: "normal",
@@ -36335,6 +41455,32 @@ class AppRuntime {
       fn: async () => {
         setInterval(() => agentService.sleepCycle.run(() => agentService.isBusy()), 2 * 60 * 60 * 1e3);
         Logger.log("INFO", "sleep_cycle_service_started", { interval_hours: 2 });
+      }
+    });
+    this.lazyInit.add({
+      name: "evolution-dashboard",
+      priority: "normal",
+      delayMs: 100,
+      fn: async () => {
+        const dashboard = new EvolutionDashboardService();
+        const win = getMainWindow();
+        if (win && !win.isDestroyed()) {
+          dashboard.setWindow(win);
+        }
+        if (dashboardRef) dashboardRef.current = dashboard;
+        this.dashboardService = dashboard;
+        setDashboardToggle(() => {
+          const d = dashboardRef?.current;
+          if (d) d.toggleVisibility();
+        });
+        setContextualTtsToggle(() => {
+          const chatExec = agentService.getChatExecutor();
+          if (chatExec) {
+            const currentState = chatExec.getContextualTtsState();
+            chatExec.toggleContextualTts(!currentState.enabled);
+          }
+        });
+        Logger.log("INFO", "evolution_dashboard_started");
       }
     });
     this.lazyInit.add({
@@ -36583,7 +41729,11 @@ process.on("unhandledRejection", (reason) => {
 const runtime = new AppRuntime(crashGuard);
 runtime.start();
 exports.DEV_PROJECT_ROOT = DEV_PROJECT_ROOT;
+exports.WORKSPACE = WORKSPACE;
+exports.buildTool = buildTool;
 exports.eventBus = eventBus;
 exports.execAsync = execAsync;
+exports.formatToolError = formatToolError;
+exports.formatToolResult = formatToolResult;
 exports.getWorkflowScheduler = getWorkflowScheduler;
 exports.workflowStore = workflowStore;

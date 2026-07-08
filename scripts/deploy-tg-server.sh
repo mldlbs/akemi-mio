@@ -11,9 +11,15 @@ echo "=== nginx done ==="
 echo "=== env file ==="
 cat > /opt/telegram-bot/.env << 'ENVEOF'
 TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN_HERE
+# Multi-bot tokens (override TELEGRAM_BOT_TOKEN per bot)
+# TOKEN_CHAT=xxx
+# TOKEN_PUSH=xxx
+# TOKEN_GEN=xxx
+# TOKEN_WRITE=xxx
 PUBLIC_URL=https://skills.crlkcloud.cyou/telegram
 PORT=3003
-# HTTP_PROXY=http://127.0.0.1:7890
+# Proxy for Telegram API (required if GFW blocks api.telegram.org)
+HTTP_PROXY=http://127.0.0.1:7890
 # TG_API_TIMEOUT=15000
 ENVEOF
 echo "=== .env created ==="

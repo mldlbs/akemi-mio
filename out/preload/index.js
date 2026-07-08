@@ -6,6 +6,9 @@ function createElectronAPI(ipc) {
     closeWindow: () => ipc.invoke("window:close"),
     minimizeWindow: () => ipc.invoke("window:minimize"),
     transcribe: (audio) => ipc.invoke("asr:transcribe", audio),
+    // ── ASR 热词管理 ──
+    toggleAsrHotwords: (enabled) => ipc.invoke("asr:toggle-hotwords", enabled),
+    getAsrHotwordState: () => ipc.invoke("asr:hotword-state"),
     // ── 语音工具编排 ──
     matchVoiceIntent: (text) => ipc.invoke("voice:matchIntent", text),
     executeVoiceChain: (intent, slots) => ipc.invoke("voice:executeChain", intent, slots),
@@ -29,6 +32,20 @@ function createElectronAPI(ipc) {
         ipc.removeListener("tts:emotion:enabled", handler);
       };
     },
+    // ── 行为情绪检测 ──
+    toggleBehaviorEmotion: (enabled) => ipc.invoke("tts:behaviorEmotion:toggle", enabled),
+    getBehaviorEmotionState: () => ipc.invoke("tts:behaviorEmotion:state"),
+    onBehaviorEmotionEnabled: (callback) => {
+      const handler = (_event, data) => callback(data);
+      ipc.on("tts:behaviorEmotion:enabled", handler);
+      return () => {
+        ipc.removeListener("tts:behaviorEmotion:enabled", handler);
+      };
+    },
+    // ── TTS 引擎路由 ──
+    setEnginePreference: (pref) => ipc.invoke("tts:engine-preference:set", pref),
+    getEnginePreference: () => ipc.invoke("tts:engine-preference:get"),
+    getTtsRouterState: () => ipc.invoke("tts:router-state"),
     stopConversation: () => ipc.invoke("conversation:stop"),
     getState: () => ipc.invoke("state:get"),
     getWakeWords: () => ipc.invoke("config:getWakeWords"),
@@ -211,11 +228,35 @@ function createElectronAPI(ipc) {
     duplicateWorkflowDefinition: (id) => ipc.invoke("workflow:duplicateDefinition", id),
     deleteWorkflowRun: (runId) => ipc.invoke("workflow:deleteRun", runId),
     approveGate: (runId, stepId, decision, modifiedInput) => ipc.invoke("workflow:approveGate", runId, stepId, decision, modifiedInput),
+    // ── 隐式反馈驱动的语音自适应 ──
+    recordImplicitFeedback: (action) => ipc.invoke("tts:implicitFeedback:recordAction", action),
+    toggleImplicitFeedback: (enabled) => ipc.invoke("tts:implicitFeedback:toggle", enabled),
+    getImplicitFeedbackState: () => ipc.invoke("tts:implicitFeedback:state"),
+    triggerImplicitFeedbackUpdate: () => ipc.invoke("tts:implicitFeedback:updateModel"),
+    resetImplicitFeedback: () => ipc.invoke("tts:implicitFeedback:reset"),
+    onImplicitFeedbackEnabled: (callback) => {
+      const handler = (_event, data) => callback(data);
+      ipc.on("tts:implicitFeedback:enabled", handler);
+      return () => {
+        ipc.removeListener("tts:implicitFeedback:enabled", handler);
+      };
+    },
     // ── Writing Status ──
     getWritingStatus: () => ipc.invoke("writing:getStatus"),
     // ── Evolution ──
     evolutionStatus: () => ipc.invoke("evolution:status"),
-    evolutionTrigger: () => ipc.invoke("evolution:trigger")
+    evolutionTrigger: () => ipc.invoke("evolution:trigger"),
+    // ── Evolution Dashboard ──
+    onEvolutionDashboard: (callback) => {
+      const handler = (_event, data) => callback(data);
+      ipc.on("evolution:dashboard", handler);
+      return () => {
+        ipc.removeListener("evolution:dashboard", handler);
+      };
+    },
+    toggleEvolutionDashboard: () => ipc.invoke("evolution:dashboard:toggle"),
+    // ── Desktop Toolbar (桌面任务控制浮层) ──
+    invokeDesktopTool: (toolName, args) => ipc.invoke("desktop:invokeTool", toolName, args)
   };
 }
 const electronAPI = createElectronAPI(electron.ipcRenderer);

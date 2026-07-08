@@ -12596,12 +12596,15 @@ function doPlay(buf) {
     ttsAnalyser.connect(ctx.destination);
     ttsSource.start();
     const freqData = new Uint8Array(ttsAnalyser.frequencyBinCount);
+    let ttsPollFrame = 0;
     const poll = () => {
       if (ttsState !== "playing") return;
-      ttsAnalyser?.getByteFrequencyData(freqData);
-      let total = 0;
-      for (let b = 0; b < freqData.length; b++) total += freqData[b];
-      total / (freqData.length * 255);
+      if (++ttsPollFrame % 2 === 0) {
+        ttsAnalyser?.getByteFrequencyData(freqData);
+        let total = 0;
+        for (let b = 0; b < freqData.length; b++) total += freqData[b];
+        total / (freqData.length * 255);
+      }
       ttsAnimId = requestAnimationFrame(poll);
     };
     poll();
@@ -12720,6 +12723,24 @@ function resample(audio, fromRate, toRate) {
     result[i] = idx + 1 < audio.length ? audio[idx] * (1 - frac) + audio[idx + 1] * frac : audio[idx] || 0;
   }
   return result;
+}
+function quickSelect(arr, k) {
+  if (arr.length === 0) return 0;
+  const a = arr.slice();
+  let lo = 0, hi = a.length - 1;
+  while (lo < hi) {
+    const pivot = a[lo + (hi - lo >>> 1)];
+    let i = lo - 1, j = hi + 1;
+    while (true) {
+      while (a[++i] < pivot) ;
+      while (a[--j] > pivot) ;
+      if (i >= j) break;
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    if (k <= j) hi = j;
+    else lo = j + 1;
+  }
+  return a[k];
 }
 function VoiceInput({ onResult, disabled, onWakeWord }) {
   const ttsPlaying = useDeviceStore((s) => s.ttsPlaying);
@@ -12926,8 +12947,7 @@ function VoiceInput({ onResult, disabled, onWakeWord }) {
         updateMicEnergy(rms);
         noiseFloorHistory.push(rms);
         if (noiseFloorHistory.length > NOISE_FLOOR_FRAMES) noiseFloorHistory.shift();
-        const sorted = [...noiseFloorHistory].sort((a, b) => a - b);
-        const noiseFloor = sorted[Math.floor(sorted.length * 0.2)] || 1e-3;
+        const noiseFloor = quickSelect(noiseFloorHistory, Math.floor(noiseFloorHistory.length * 0.2)) || 1e-3;
         dynamicThreshold = Math.max(0.06, noiseFloor * RMS_MULTIPLIER);
         const aboveNoise = rms > dynamicThreshold && zcrRate < SPEECH_ZCR_MAX;
         const aboveInterruption = rms > dynamicThreshold * INTERRUPTION_RMS_MULTIPLIER && zcrRate < SPEECH_ZCR_MAX;
@@ -13567,8 +13587,29 @@ function summarizeArgs(tool, args) {
   if (tool === "start_workflow") return v("workflowId");
   return Object.values(args).filter((v2) => typeof v2 === "string").map((s) => s.slice(0, 30)).join(" ").slice(0, 80);
 }
-function ChatSlot() {
+const MessageList = React.memo(function MessageList2({
+  bottomRef,
+  onMessageCount
+}) {
   const messages = useSessionStore((s) => s.historyMessages);
+  const prevLen = reactExports.useRef(0);
+  reactExports.useEffect(() => {
+    onMessageCount?.(messages.length);
+    if (messages.length > prevLen.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "instant" });
+    }
+    prevLen.current = messages.length;
+  }, [messages, bottomRef, onMessageCount]);
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: messages.map((m) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `msg msg-row ${m.role}`, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "msg-label", children: m.role === "user" ? "你" : "秋山澪" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "msg-bubble", children: m.content }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "msg-actions", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(CopyButton, { text: m.content }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "msg-time", children: new Date(m.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) })
+    ] })
+  ] }, m.id)) });
+});
+function ChatSlot() {
   const historyLoading = useSessionStore((s) => s.historyLoading);
   const pendingText = useAgentStore((s) => s.pendingText);
   const displayText = useAgentStore((s) => s.displayText);
@@ -13579,13 +13620,16 @@ function ChatSlot() {
   const toolCompleted = reactExports.useMemo(() => tools.filter((t) => !isToolActive(t)), [tools]);
   const bottomRef = reactExports.useRef(null);
   const [toolsCollapsed, setToolsCollapsed] = reactExports.useState(false);
+  const [messageCount, setMessageCount] = reactExports.useState(0);
   reactExports.useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, displayText, toolRunning, toolCompleted]);
+    if (pendingText || displayText) {
+      bottomRef.current?.scrollIntoView({ behavior: "instant" });
+    }
+  }, [pendingText, displayText]);
   const hasPending = !!pendingText;
   const agentLabel = AGENT_LABELS[agentState];
   const hasTools = toolRunning.length > 0 || toolCompleted.length > 0;
-  const showEmpty = messages.length === 0 && !hasPending && !transcribed && !hasTools && !agentLabel && !historyLoading;
+  const showEmpty = messageCount === 0 && !hasPending && !transcribed && !hasTools && !agentLabel && !historyLoading;
   const toolSummary = reactExports.useMemo(() => {
     const allTools = [...toolRunning, ...toolCompleted];
     const names = [...new Set(allTools.map((t) => humanToolName(t.tool)))];
@@ -13615,14 +13659,7 @@ function ChatSlot() {
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "msg-bubble", children: transcribed }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "msg-actions", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CopyButton, { text: transcribed }) })
     ] }),
-    messages.map((m) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `msg msg-row ${m.role}`, children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "msg-label", children: m.role === "user" ? "你" : "秋山澪" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "msg-bubble", children: m.content }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "msg-actions", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CopyButton, { text: m.content }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "msg-time", children: new Date(m.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) })
-      ] })
-    ] }, m.id)),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(MessageList, { bottomRef, onMessageCount: setMessageCount }),
     toolRunning.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tool-inline-group", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "div",
@@ -13678,11 +13715,10 @@ function ChatSlot() {
 let store = null;
 function loop() {
   store?.setState({ now: Date.now() });
-  requestAnimationFrame(loop);
 }
 const useClockStore = create(() => ({ now: Date.now() }));
 store = useClockStore;
-requestAnimationFrame(loop);
+setInterval(loop, 100);
 function useNow() {
   return useClockStore((s) => s.now);
 }
@@ -16574,7 +16610,10 @@ const CRED_KEYS = {
   WAKE_WORDS: "wake_words",
   ASR_HOTWORDS: "asr_hotwords",
   ASR_INITIAL_PROMPT: "asr_initial_prompt",
-  EVOLUTION_SAFETY_MODE: "evolution_safety_mode"
+  EVOLUTION_SAFETY_MODE: "evolution_safety_mode",
+  OVERLAY_OPACITY_MIN: "overlay_opacity_min",
+  OVERLAY_OPACITY_MAX: "overlay_opacity_max",
+  OVERLAY_IDLE_THRESHOLD: "overlay_idle_threshold"
 };
 const ALL_SETTING_KEYS = Object.values(CRED_KEYS);
 function useSettings(open) {
@@ -16678,13 +16717,22 @@ function SettingsLLMTab({ values, onSetCredential }) {
   ] }, section.title)) });
 }
 function SettingsVoiceTab({ values, onSetCredential }) {
-  const ttsMode = values[CRED_KEYS.TTS_MODE] || "cloud";
+  const ttsMode = values[CRED_KEYS.TTS_MODE] || "auto";
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-section", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-section-title", children: "语音输出" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-field", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-label", children: "TTS 模式" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-toggle", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: `settings-toggle-btn${ttsMode === "auto" ? " active" : ""}`,
+              onClick: () => onSetCredential(CRED_KEYS.TTS_MODE, "auto"),
+              children: "自动"
+            }
+          ),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
             "button",
             {
@@ -16703,7 +16751,10 @@ function SettingsVoiceTab({ values, onSetCredential }) {
               children: "本地"
             }
           )
-        ] })
+        ] }),
+        ttsMode === "auto" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-help", children: "根据网络状况和内容需求自动选择云端/本地引擎" }),
+        ttsMode === "cloud" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-help", children: "始终使用云端 TTS（高表现力，需联网）" }),
+        ttsMode === "local" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-help", children: "始终使用本地 Piper TTS（低延迟，可离线）" })
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-section", children: [
@@ -16909,6 +16960,434 @@ function SettingsModal() {
     ] })
   ] }) });
 }
+const DEFAULT_IDLE_THRESHOLD = 3e4;
+const DEFAULT_MIN_OPACITY = 0.15;
+const DEFAULT_MAX_OPACITY = 1;
+const DEFAULT_CHECK_INTERVAL = 1e3;
+function useActivityOpacity(options = {}) {
+  const {
+    idleThresholdMs = DEFAULT_IDLE_THRESHOLD,
+    minOpacity = DEFAULT_MIN_OPACITY,
+    maxOpacity = DEFAULT_MAX_OPACITY,
+    checkIntervalMs = DEFAULT_CHECK_INTERVAL
+  } = options;
+  const lastActivityRef = reactExports.useRef(Date.now());
+  const [opacity, setOpacity] = reactExports.useState(maxOpacity);
+  const [idleTimeMs, setIdleTimeMs] = reactExports.useState(0);
+  const markActive = reactExports.useCallback(() => {
+    lastActivityRef.current = Date.now();
+  }, []);
+  reactExports.useEffect(() => {
+    const events = ["mousemove", "keydown", "click", "wheel", "touchstart"];
+    for (const ev of events) {
+      window.addEventListener(ev, markActive, { passive: true });
+    }
+    return () => {
+      for (const ev of events) {
+        window.removeEventListener(ev, markActive);
+      }
+    };
+  }, [markActive]);
+  reactExports.useEffect(() => {
+    const interval = setInterval(() => {
+      const idle = Date.now() - lastActivityRef.current;
+      setIdleTimeMs(idle);
+      const activityScore = Math.max(0, 1 - idle / idleThresholdMs);
+      const newOpacity = minOpacity + activityScore * (maxOpacity - minOpacity);
+      setOpacity(Math.round(newOpacity * 1e3) / 1e3);
+    }, checkIntervalMs);
+    return () => clearInterval(interval);
+  }, [idleThresholdMs, minOpacity, maxOpacity, checkIntervalMs]);
+  const isActive = idleTimeMs < idleThresholdMs;
+  return {
+    opacity,
+    isActive,
+    idleTimeMs,
+    resetTimer: markActive
+  };
+}
+const STAGE_LABELS = {
+  idle: "待机中",
+  collecting: "采集信号",
+  analyzing: "分析中",
+  fixing: "修复中",
+  verifying: "验证中",
+  cooldown: "冷却中",
+  error: "异常"
+};
+const STAGE_COLORS = {
+  idle: "var(--text-muted)",
+  collecting: "var(--accent-slot)",
+  analyzing: "var(--accent-slot)",
+  fixing: "var(--accent)",
+  verifying: "var(--accent-soft)",
+  cooldown: "#f59e0b",
+  error: "#ef4444"
+};
+function ProgressBar({ progress, stage }) {
+  const clamped = Math.max(0, Math.min(100, progress));
+  const color = STAGE_COLORS[stage] || "var(--accent)";
+  const isIndeterminate = stage === "analyzing" || stage === "fixing";
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "evo-dash-progress-track", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "div",
+      {
+        className: `evo-dash-progress-fill ${isIndeterminate ? "evo-dash-progress--indeterminate" : ""}`,
+        style: {
+          width: isIndeterminate ? "40%" : `${clamped}%`,
+          background: color
+        }
+      }
+    ),
+    !isIndeterminate && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "evo-dash-progress-label", children: [
+      clamped,
+      "%"
+    ] })
+  ] });
+}
+function formatTimeAgo(timestamp) {
+  if (!timestamp) return "—";
+  const diff = Date.now() - timestamp;
+  if (diff < 6e4) return "刚刚";
+  if (diff < 36e5) return `${Math.floor(diff / 6e4)} 分钟前`;
+  if (diff < 864e5) return `${Math.floor(diff / 36e5)} 小时前`;
+  return `${Math.floor(diff / 864e5)} 天前`;
+}
+function EvolutionDashboard() {
+  const [data, setData] = reactExports.useState(null);
+  const [collapsed, setCollapsed] = reactExports.useState(false);
+  const { opacity } = useActivityOpacity({ idleThresholdMs: 3e4, minOpacity: 0.15, maxOpacity: 1 });
+  useIPCEvent(
+    (cb) => window.electronAPI?.onEvolutionDashboard?.(cb) ?? (() => {
+    }),
+    (incoming) => {
+      setData(incoming);
+    }
+  );
+  reactExports.useEffect(() => {
+    const handler = (e) => {
+      if (e.key === "Escape") {
+        setCollapsed((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+  const toggleCollapse = reactExports.useCallback(() => {
+    setCollapsed((prev) => !prev);
+  }, []);
+  if (!data || !data.visible) {
+    return null;
+  }
+  const stage = data.stage || "idle";
+  const stageLabel = STAGE_LABELS[stage] || stage;
+  const stageColor2 = STAGE_COLORS[stage] || "var(--text-muted)";
+  const hasActivity = stage !== "idle";
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "evolution-dashboard", "data-stage": stage, style: { opacity, transition: "opacity 0.8s ease" }, children: collapsed ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "button",
+    {
+      className: "evo-dash-collapsed-btn",
+      onClick: toggleCollapse,
+      title: "展开自进化仪表盘",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "span",
+          {
+            className: "evo-dash-dot",
+            style: { background: stageColor2 }
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "evo-dash-collapsed-label", children: stageLabel })
+      ]
+    }
+  ) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "evo-dash-card", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "evo-dash-header", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "evo-dash-title", children: "自进化" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "evo-dash-header-right", children: [
+        hasActivity && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "span",
+          {
+            className: "evo-dash-stage-badge",
+            style: { background: stageColor2 },
+            children: stageLabel
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            className: "evo-dash-collapse-btn",
+            onClick: toggleCollapse,
+            title: "折叠",
+            children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-arrow-down-s-line" })
+          }
+        )
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(ProgressBar, { progress: data.progress, stage }),
+    data.summary && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "evo-dash-summary", children: data.summary }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "evo-dash-stats", children: [
+      data.fixedCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "evo-dash-stat evo-dash-stat--good", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-check-line" }),
+        data.fixedCount,
+        " 修复"
+      ] }),
+      data.errorCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "evo-dash-stat evo-dash-stat--bad", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-error-warning-line" }),
+        data.errorCount,
+        " 错误"
+      ] }),
+      data.queueSize > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "evo-dash-stat evo-dash-stat--queue", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-stack-line" }),
+        data.queueSize,
+        " 待处理"
+      ] }),
+      data.consecutiveFailures > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "evo-dash-stat evo-dash-stat--bad", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-close-circle-line" }),
+        "连续 ",
+        data.consecutiveFailures,
+        " 次失败"
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "evo-dash-footer", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "evo-dash-time", children: formatTimeAgo(data.lastRunAt) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "evo-dash-mode", children: data.safetyMode === "review" ? "审查模式" : "自动模式" })
+    ] })
+  ] }) });
+}
+const MAX_TASKS = 20;
+let feedbackTimer = null;
+const useDesktopToolbarStore = create((set) => ({
+  tasks: [],
+  feedback: null,
+  visible: true,
+  expanded: false,
+  addTask: (task) => set((s) => {
+    const tasks = [task, ...s.tasks].slice(0, MAX_TASKS);
+    return { tasks };
+  }),
+  updateTask: (id, patch) => set((s) => ({
+    tasks: s.tasks.map((t) => t.id === id ? { ...t, ...patch } : t)
+  })),
+  removeTask: (id) => set((s) => ({
+    tasks: s.tasks.filter((t) => t.id !== id)
+  })),
+  showFeedback: (feedback) => {
+    if (feedbackTimer) clearTimeout(feedbackTimer);
+    set({ feedback });
+    feedbackTimer = setTimeout(() => {
+      set({ feedback: null });
+      feedbackTimer = null;
+    }, 3e3);
+  },
+  clearFeedback: () => {
+    if (feedbackTimer) {
+      clearTimeout(feedbackTimer);
+      feedbackTimer = null;
+    }
+    set({ feedback: null });
+  },
+  toggleVisible: () => set((s) => ({ visible: !s.visible })),
+  toggleExpanded: () => set((s) => ({ expanded: !s.expanded }))
+}));
+const TOOL_BUTTONS = [
+  {
+    id: "quick_note",
+    label: "快速笔记",
+    icon: "ri-sticky-note-line",
+    tool: "desktop_quick_note",
+    defaultArgs: {},
+    inputPrompt: "输入笔记内容",
+    inputField: "content"
+  },
+  {
+    id: "todo_add",
+    label: "待办添加",
+    icon: "ri-task-line",
+    tool: "desktop_todo_add",
+    defaultArgs: { priority: "normal" },
+    inputPrompt: "输入待办事项",
+    inputField: "title"
+  },
+  {
+    id: "app_launch",
+    label: "应用启动",
+    icon: "ri-apps-2-line",
+    tool: "desktop_app_launch",
+    defaultArgs: {},
+    inputPrompt: "输入应用名（如 vscode, chrome, wechat）",
+    inputField: "appName"
+  }
+];
+function DesktopToolbar() {
+  const { tasks, feedback, visible, expanded, addTask, updateTask, showFeedback, toggleVisible, toggleExpanded } = useDesktopToolbarStore();
+  const { opacity } = useActivityOpacity({ idleThresholdMs: 3e4, minOpacity: 0.15, maxOpacity: 1 });
+  const [activeInput, setActiveInput] = reactExports.useState(null);
+  const [inputValue, setInputValue] = reactExports.useState("");
+  const [executingTool, setExecutingTool] = reactExports.useState(null);
+  const pendingCount = tasks.filter((t) => t.status === "pending" || t.status === "running").length;
+  const invokeTool = reactExports.useCallback(
+    async (btn, args) => {
+      const taskId = `dt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const task = {
+        id: taskId,
+        title: args[btn.inputField] || btn.label,
+        tool: btn.tool,
+        status: "running",
+        createdAt: Date.now()
+      };
+      addTask(task);
+      setExecutingTool(btn.id);
+      try {
+        const result = await window.electronAPI.invokeDesktopTool(btn.tool, args);
+        const success = !result?.error && result?.success !== false;
+        updateTask(taskId, {
+          status: success ? "success" : "error",
+          result: result?.result || result?.message || "",
+          error: result?.error
+        });
+        showFeedback({
+          tool: btn.id,
+          label: btn.label,
+          success,
+          message: result?.result || result?.message || result?.error || (success ? "完成" : "失败"),
+          timestamp: Date.now()
+        });
+      } catch (err) {
+        updateTask(taskId, {
+          status: "error",
+          error: String(err)
+        });
+        showFeedback({
+          tool: btn.id,
+          label: btn.label,
+          success: false,
+          message: `错误: ${err.message || String(err)}`,
+          timestamp: Date.now()
+        });
+      } finally {
+        setExecutingTool(null);
+      }
+    },
+    [addTask, updateTask, showFeedback]
+  );
+  const handleToolClick = reactExports.useCallback(
+    (btn) => {
+      if (btn.inputPrompt) {
+        if (activeInput === btn.id) {
+          if (inputValue.trim()) {
+            const args = { ...btn.defaultArgs, [btn.inputField]: inputValue.trim() };
+            invokeTool(btn, args);
+            setInputValue("");
+            setActiveInput(null);
+          }
+        } else {
+          setActiveInput(btn.id);
+          setInputValue("");
+        }
+      } else {
+        invokeTool(btn, btn.defaultArgs);
+      }
+    },
+    [activeInput, inputValue, invokeTool]
+  );
+  const handleInputSubmit = reactExports.useCallback(
+    (btn) => {
+      if (inputValue.trim()) {
+        const args = { ...btn.defaultArgs, [btn.inputField]: inputValue.trim() };
+        invokeTool(btn, args);
+        setInputValue("");
+        setActiveInput(null);
+      }
+    },
+    [inputValue, invokeTool]
+  );
+  const handleInputKeyDown = reactExports.useCallback(
+    (e, btn) => {
+      if (e.key === "Enter") {
+        handleInputSubmit(btn);
+      } else if (e.key === "Escape") {
+        setActiveInput(null);
+        setInputValue("");
+      }
+    },
+    [handleInputSubmit]
+  );
+  const handleBlur = reactExports.useCallback(() => {
+    setTimeout(() => {
+      setActiveInput(null);
+      setInputValue("");
+    }, 150);
+  }, []);
+  const overlayStyle = { opacity, transition: "opacity 0.8s ease" };
+  if (!visible) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "desktop-toolbar desktop-toolbar-collapsed", style: overlayStyle, children: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "dt-toggle-btn dt-toggle-show", onClick: toggleVisible, title: "显示工具栏", children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-menu-line" }) }) });
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "desktop-toolbar", style: overlayStyle, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dt-buttons", children: [
+      TOOL_BUTTONS.map((btn) => {
+        const isActive = activeInput === btn.id;
+        const isExecuting = executingTool === btn.id;
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dt-btn-wrapper", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "button",
+            {
+              className: `dt-tool-btn${isActive ? " active" : ""}${isExecuting ? " executing" : ""}`,
+              onClick: () => handleToolClick(btn),
+              title: btn.label,
+              disabled: isExecuting,
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `${btn.icon}${isExecuting ? " ri-spin" : ""}` }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "dt-btn-label", children: btn.label })
+              ]
+            }
+          ),
+          isActive && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dt-inline-input", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                type: "text",
+                className: "dt-input",
+                placeholder: btn.inputPrompt,
+                value: inputValue,
+                onChange: (e) => setInputValue(e.target.value),
+                onKeyDown: (e) => handleInputKeyDown(e, btn),
+                onBlur: handleBlur,
+                autoFocus: true
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "dt-input-submit", onMouseDown: () => handleInputSubmit(btn), children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-arrow-right-line" }) })
+          ] })
+        ] }, btn.id);
+      }),
+      pendingCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { className: "dt-task-badge", onClick: toggleExpanded, title: "查看任务队列", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "dt-badge-count", children: pendingCount }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `ri-arrow-${expanded ? "down" : "up"}-s-line` })
+      ] })
+    ] }),
+    feedback && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `dt-feedback${feedback.success ? " success" : " error"}`, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: `ri-${feedback.success ? "check" : "error-warning"}-line` }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "dt-feedback-text", children: feedback.message })
+    ] }),
+    expanded && tasks.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dt-task-queue", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "dt-queue-header", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "任务队列" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "dt-queue-count", children: tasks.length })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "dt-queue-list", children: tasks.slice(0, 10).map((task) => /* @__PURE__ */ jsxRuntimeExports.jsx(QueueItem, { task }, task.id)) })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "dt-toggle-btn dt-toggle-hide", onClick: toggleVisible, title: "隐藏工具栏", children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "ri-close-line" }) })
+  ] });
+}
+function QueueItem({ task }) {
+  const icon = task.status === "running" ? "ri-loader-4-line ri-spin" : task.status === "success" ? "ri-check-line" : task.status === "error" ? "ri-close-circle-line" : "ri-time-line";
+  const className = task.status === "error" ? "dt-queue-item error" : task.status === "success" ? "dt-queue-item success" : "dt-queue-item";
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: icon }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "dt-queue-title", children: task.title }),
+    task.error && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "dt-queue-error", children: task.error }),
+    task.result && task.status === "success" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "dt-queue-result", children: task.result })
+  ] });
+}
 function useTimerControl() {
   const timerRef = reactExports.useRef(null);
   const clear = reactExports.useCallback(() => {
@@ -16957,17 +17436,21 @@ function useSessions() {
     store2.setHistoryLoading(true);
     window.electronAPI.getMessagesBySession(store2.activeSessionId).then((msgs) => store2.setHistoryMessages(msgs)).catch(() => store2.setHistoryMessages(EMPTY)).finally(() => store2.setHistoryLoading(false));
   }, [store2.activeSessionId]);
+  const lastMsgRef = reactExports.useRef(0);
   useIPCEvent(window.electronAPI.onMessageNew, (msg) => {
     if (!msg.sessionId) return;
+    if (msg.createdAt <= lastMsgRef.current) return;
+    lastMsgRef.current = msg.createdAt;
     if (msg.sessionId !== store2.activeSessionId) {
       if (msg.category !== "evolution") {
         store2.setSkipDbLoad(true);
         store2.setActiveSessionId(msg.sessionId);
+        window.electronAPI.getSessions().then((s) => store2.setSessions(s)).catch(() => {
+        });
       }
+    } else {
+      store2.addHistoryMessage(msg);
     }
-    store2.addHistoryMessage(msg);
-    window.electronAPI.getSessions().then((s) => store2.setSessions(s)).catch(() => {
-    });
   });
   const handleSelectChat = (sessionId) => {
     store2.selectChat(sessionId);
@@ -17015,9 +17498,22 @@ function useAIOutput(activeSessionId, voiceActive, onError) {
       fadeTimer.clear();
     };
   }, []);
+  const chunkBufRef = reactExports.useRef("");
+  const chunkTimerRef = reactExports.useRef(null);
   useIPCEvent(window.electronAPI.onAIChunk, (chunk) => {
-    store2.appendPendingText(chunk);
+    chunkBufRef.current += chunk;
     fadeTimer.clear();
+    if (!chunkTimerRef.current) {
+      chunkTimerRef.current = setInterval(() => {
+        if (chunkBufRef.current) {
+          store2.appendPendingText(chunkBufRef.current);
+          chunkBufRef.current = "";
+        } else if (chunkTimerRef.current) {
+          clearInterval(chunkTimerRef.current);
+          chunkTimerRef.current = null;
+        }
+      }, 16);
+    }
   });
   useIPCEvent(window.electronAPI.onTTSAudio, (filePath) => {
     playTTS(filePath);
@@ -17027,6 +17523,14 @@ function useAIOutput(activeSessionId, voiceActive, onError) {
   });
   useIPCEvent(window.electronAPI.onMessageNew, (msg) => {
     if (msg.sessionId && msg.role === "assistant") {
+      if (chunkBufRef.current) {
+        store2.appendPendingText(chunkBufRef.current);
+        chunkBufRef.current = "";
+      }
+      if (chunkTimerRef.current) {
+        clearInterval(chunkTimerRef.current);
+        chunkTimerRef.current = null;
+      }
       store2.resetAgent();
       revealTimer.clear();
     }
@@ -17059,10 +17563,7 @@ ${intentResult.intent.confirmMessage}
         if (confirmed) {
           store2.setAgentState("tool_executing");
           store2.setToolStatus({ type: "start", tool: "voice_chain", message: `执行: ${intentResult.intent.description}` });
-          const execResult = await window.electronAPI.executeVoiceChain(
-            intentResult.intent.name,
-            intentResult.intent.slots
-          );
+          const execResult = await window.electronAPI.executeVoiceChain(intentResult.intent.name, intentResult.intent.slots);
           const resultLines = [];
           for (const step of execResult.steps) {
             const icon = step.success ? "✅" : "❌";
@@ -17368,7 +17869,9 @@ function App() {
       /* @__PURE__ */ jsxRuntimeExports.jsx(MainArea, { children: uiState.activeSlot === "tool" ? /* @__PURE__ */ jsxRuntimeExports.jsx(ToolSlot, {}) : uiState.activeSlot === "otpar" ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBoundary, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(OtparSlot, {}) }) : uiState.activeSlot === "devplan" ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBoundary, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(DevPlanSlot, {}) }) : uiState.activeSlot === "workflow" ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBoundary, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(WorkflowSlot, {}) }) : uiState.activeSlot === "preview" ? /* @__PURE__ */ jsxRuntimeExports.jsx(PreviewSlot, {}) : /* @__PURE__ */ jsxRuntimeExports.jsx(ChatSlot, {}) })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(InputBar, { onSend: handleResult, voiceSlot: /* @__PURE__ */ jsxRuntimeExports.jsx(VoiceInput, { onResult: handleResult }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(SettingsModal, {})
+    /* @__PURE__ */ jsxRuntimeExports.jsx(SettingsModal, {}),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(EvolutionDashboard, {}),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(DesktopToolbar, {})
   ] });
 }
 ReactDOM.createRoot(document.getElementById("root")).render(

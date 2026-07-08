@@ -45,3 +45,4 @@ test-*.txt
 test_write.txt
 test*.json
 writing-ui/
+.ssh/
