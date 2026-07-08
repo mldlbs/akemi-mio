@@ -310,10 +310,14 @@ export class WhisperEngine {
   private loadPromise: Promise<void> | null = null
   private currentModel = ''
   private firstInferenceDone = false
-  private initialPrompt: string = (() => {
+  private defaultPrompt: string
+  private initialPrompt: string
+
+  constructor() {
     const hotwordPrefix = `关键词: ${ASR_HOTWORDS.slice(0, 20).join(', ')}。`
-    return `${ASR_INITIAL_PROMPT} ${hotwordPrefix}`
-  })()
+    this.defaultPrompt = `${ASR_INITIAL_PROMPT} ${hotwordPrefix}`
+    this.initialPrompt = this.defaultPrompt
+  }
 
   async initialize(model = 'tiny', onProgress?: ProgressCallback): Promise<void> {
     if (this.transcribeFn) return
@@ -382,6 +386,11 @@ export class WhisperEngine {
 
   setInitialPrompt(prompt: string): void {
     this.initialPrompt = prompt
+  }
+
+  /** 重置 initialPrompt 为构造函数中的默认值（静态配置） */
+  resetInitialPrompt(): void {
+    this.initialPrompt = this.defaultPrompt
   }
 
   private _createTranscriber(pipe: Awaited<ReturnType<typeof pipeline>>): Transcriber {

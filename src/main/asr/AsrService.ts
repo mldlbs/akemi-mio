@@ -2,6 +2,15 @@ import { log, createRequestId } from '../logger/Logger'
 import { WhisperGpuEngine } from './WhisperGpuEngine'
 import { WhisperEngine } from './WhisperEngine'
 import { BaiduEngine } from './BaiduEngine'
+import type { AsrConversationContext } from './types'
+import {
+  buildContextualHotwords,
+  buildContextualPrompt,
+  formatHotwordPrefix,
+  isContextMeaningful,
+} from './AsrContextBuilder'
+import { asrHotwordManager } from './AsrHotwordManager'
+import type { VocabEntry, DomainStats } from './AsrHotwordManager'
 
 /** 检查识别结果是否有意义：有效字符占比过低则判定为乱码 */
 function isGarbled(text: string): boolean {
@@ -63,6 +72,8 @@ export class AsrService {
   private baiduApiKey?: string
   private baiduSecretKey?: string
   private _pendingRequests = 0
+  /** 当前对话上下文（用于动态热词/提示词），null=使用静态配置 */
+  private conversationContext: AsrConversationContext | null = null
 
   constructor(gpuEngine: WhisperGpuEngine, baiduEngine: BaiduEngine) {
     this.gpuEngine = gpuEngine
@@ -88,6 +99,169 @@ export class AsrService {
   setBaiduCredentials(apiKey: string, secretKey: string): void {
     this.baiduApiKey = apiKey
     this.baiduSecretKey = secretKey
+  }
+
+  /**
+   * 设置当前对话上下文，用于动态热词和提示词。
+   * ASR 在识别前将使用上下文中的主题标签和关键实体构建热词列表和 initial_prompt。
+   * 传 null 清除上下文，恢复静态配置。
+   *
+   * @param context 从 Memory（SummaryMemory）提取的对话上下文
+   */
+  setConversationContext(context: AsrConversationContext | null): void {
+    this.conversationContext = context
+
+    // 从频率热词管理器获取高频词汇（行为驱动热词）
+    const freqHotwords = asrHotwordManager.getHotwords()
+
+    if (context && isContextMeaningful(context)) {
+      // 构建动态热词和提示词
+      let hotwords = buildContextualHotwords(context)
+
+      // 合并频率热词：频率热词优先级最高（因为来自用户实际输入），放最前面
+      if (freqHotwords.length > 0) {
+        const existing = new Set(hotwords)
+        const newHotwords = freqHotwords.filter((w) => !existing.has(w))
+        hotwords = [...newHotwords, ...hotwords]
+      }
+
+      const dynamicPrompt = buildContextualPrompt(context)
+
+      // 注入到 GPU 引擎
+      this.gpuEngine.setHotwords(hotwords)
+      this.gpuEngine.setInitialPrompt(dynamicPrompt)
+
+      // 注入到 CPU 引擎（如果已初始化）
+      if (this.cpuEngine) {
+        const hotwordPrefix = formatHotwordPrefix(hotwords)
+        this.cpuEngine.setInitialPrompt(`${dynamicPrompt} ${hotwordPrefix}`)
+      }
+
+      log('INFO', 'asr_context_set', {
+        topics: context.topics.slice(0, 5),
+        entities: context.keyEntities.slice(0, 5),
+        hotword_count: hotwords.length,
+        freq_hotwords: freqHotwords.length,
+        has_user_text: !!context.recentUserText,
+      })
+    } else if (freqHotwords.length > 0) {
+      // 没有 Memory 上下文但有频率热词，仅应用频率热词
+      this.gpuEngine.setHotwords(freqHotwords)
+      if (this.cpuEngine) {
+        const hotwordPrefix = formatHotwordPrefix(freqHotwords)
+        this.cpuEngine.setInitialPrompt(hotwordPrefix)
+      }
+      log('INFO', 'asr_context_freq_only', {
+        freq_hotwords: freqHotwords.length,
+        sample: freqHotwords.slice(0, 5),
+      })
+    } else {
+      // 清除动态覆盖，恢复静态配置
+      this.gpuEngine.resetContextOverrides()
+      if (this.cpuEngine) {
+        this.cpuEngine.resetInitialPrompt()
+      }
+      if (context) {
+        log('INFO', 'asr_context_empty', { note: 'no meaningful context, using static config' })
+      }
+    }
+  }
+
+  /**
+   * 初始化热词管理器的长时词表（从持久化存储加载），
+   * 然后在 ASR 引擎上应用已学习的词汇。
+   * 在应用启动时调用。
+   */
+  initVocabulary(): void {
+    asrHotwordManager.loadPersistedVocabulary()
+    this.refreshContext()
+    log('INFO', 'asr_vocab_initialized', {
+      long_term_count: asrHotwordManager.getLongTermVocabSize(),
+      hotwords: asrHotwordManager.getHotwords().slice(0, 5),
+    })
+  }
+
+  /**
+   * 强制刷新 ASR 上下文（结合 Memory 上下文 + 频率热词 + 长时词表）。
+   * 可在定时器或用户手动触发时调用。
+   */
+  refreshContext(): void {
+    // 重新获取热词后重新 setConversationContext
+    const currentCtx = this.conversationContext
+    if (currentCtx) {
+      this.setConversationContext(currentCtx)
+    } else {
+      // 没有 Memory 上下文时，仅推送频率热词
+      const freqHotwords = asrHotwordManager.getHotwords()
+      if (freqHotwords.length > 0) {
+        this.gpuEngine.setHotwords(freqHotwords)
+        if (this.cpuEngine) {
+          const hotwordPrefix = formatHotwordPrefix(freqHotwords)
+          this.cpuEngine.setInitialPrompt(hotwordPrefix)
+        }
+        log('INFO', 'asr_context_refreshed', {
+          hotword_count: freqHotwords.length,
+          source: 'vocab_only',
+        })
+      }
+    }
+  }
+
+  /**
+   * 获取长时词表词汇列表（供 UI 使用）。
+   */
+  getLearnedVocabulary(): VocabEntry[] {
+    return asrHotwordManager.exportVocabulary()
+  }
+
+  /**
+   * 获取词汇领域分布统计（供 UI 使用）。
+   */
+  getVocabularyDomainStats(): DomainStats[] {
+    return asrHotwordManager.getDomainBreakdown()
+  }
+
+  /**
+   * 删除指定已学习词汇。
+   */
+  deleteLearnedWord(word: string): boolean {
+    return asrHotwordManager.deleteWord(word)
+  }
+
+  /**
+   * 清空所有已学习词汇。
+   */
+  clearAllLearnedVocabulary(): void {
+    asrHotwordManager.clearAllVocabulary()
+  }
+
+  /** 获取当前对话上下文（用于调试） */
+  getConversationContext(): AsrConversationContext | null {
+    return this.conversationContext
+  }
+
+  /**
+   * 向热词管理器喂入用户文本（用于行为驱动的热词提取）。
+   * 应在每次获取到用户文本（ASR识别结果或手动输入）后调用。
+   */
+  feedUserTextToHotwords(text: string): void {
+    asrHotwordManager.feedUserText(text)
+  }
+
+  /** 启用/禁用行为驱动热词增强 */
+  toggleHotwordManager(enabled: boolean): void {
+    asrHotwordManager.setEnabled(enabled)
+  }
+
+  /** 获取热词管理器状态 */
+  getHotwordManagerState(): { enabled: boolean; entryCount: number; hotwords: string[]; totalInputs: number } {
+    const state = asrHotwordManager.getState()
+    return {
+      enabled: state.enabled,
+      entryCount: state.entries.length,
+      hotwords: asrHotwordManager.getHotwords(),
+      totalInputs: state.totalInputs,
+    }
   }
 
   get useBaidu(): boolean {

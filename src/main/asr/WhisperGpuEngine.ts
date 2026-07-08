@@ -50,6 +50,10 @@ function encodeWAV(samples: Int16Array): Buffer {
 export class WhisperGpuEngine {
   private modelPath: string | null = null
   private loaded = false
+  /** 动态覆盖的初始提示词（null=使用静态配置） */
+  private overridePrompt: string | null = null
+  /** 动态覆盖的热词列表（null=使用静态配置） */
+  private overrideHotwords: string[] | null = null
 
   async initialize(model = 'small'): Promise<void> {
     if (this.loaded) return
@@ -81,10 +85,16 @@ export class WhisperGpuEngine {
     log('INFO', 'gpu_asr_audio', { length_s: Number(audioLen), engine: 'whisper_gpu' })
 
     try {
-      // 构建 initial_prompt：将热词以逗号列出，引导模型关注这些领域词汇
-      const hotwordPrefix = `关键词: ${ASR_HOTWORDS.slice(0, 20).join(', ')}。`
-      const whisperPrompt = `${ASR_INITIAL_PROMPT} ${hotwordPrefix}`
-      log('INFO', 'gpu_initial_prompt', { prompt: whisperPrompt })
+      // 构建 initial_prompt：优先使用动态上下文，回退到静态配置
+      const effectiveHotwords = this.overrideHotwords ?? ASR_HOTWORDS
+      const effectivePrompt = this.overridePrompt ?? ASR_INITIAL_PROMPT
+      const hotwordPrefix = `关键词: ${effectiveHotwords.slice(0, 20).join(', ')}。`
+      const whisperPrompt = `${effectivePrompt} ${hotwordPrefix}`
+      log('INFO', 'gpu_initial_prompt', {
+        prompt: whisperPrompt,
+        hotwords_dynamic: this.overrideHotwords !== null,
+        prompt_dynamic: this.overridePrompt !== null,
+      })
 
       const result = await withTimeout(
         () =>
@@ -149,6 +159,22 @@ export class WhisperGpuEngine {
         await fsp.unlink(tmpFile)
       } catch {}
     }
+  }
+
+  /** 设置动态 initial_prompt（覆盖静态配置），传 null 恢复默认 */
+  setInitialPrompt(prompt: string | null): void {
+    this.overridePrompt = prompt
+  }
+
+  /** 设置动态热词列表（覆盖静态配置），传 null 恢复默认 */
+  setHotwords(hotwords: string[] | null): void {
+    this.overrideHotwords = hotwords
+  }
+
+  /** 清除所有动态覆盖，恢复静态配置 */
+  resetContextOverrides(): void {
+    this.overridePrompt = null
+    this.overrideHotwords = null
   }
 
   getStatus(): { loaded: boolean; loading: boolean; error: string | null } {
