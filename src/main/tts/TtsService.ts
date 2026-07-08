@@ -1,11 +1,13 @@
 import { execFile } from 'child_process'
-import { unlinkSync } from 'fs'
+import { promises as fsp, unlinkSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { log } from '../logger/Logger'
-import { TtsStateCallback, EmotionTtsParams } from './types'
+import { TtsStateCallback, EmotionTtsParams, type TtsUserPreference } from './types'
 import { PIPER_SCRIPT, USE_LOCAL_TTS } from '../config'
 import { findFfplay } from '../utils/ffmpeg'
+import { ttsRouter } from './TtsRouter'
+import { implicitFeedbackTracker } from './ImplicitFeedbackTracker'
 
 /** 默认 TTS 情感参数（无情感分析时使用） */
 const DEFAULT_EMOTION_PARAMS: EmotionTtsParams = {
@@ -19,14 +21,57 @@ function getTempFile(): string {
   return join(tmpdir(), `akemi-mio-${Date.now()}.mp3`)
 }
 
+export function compileRegexes() {
+  const surrogate = /[\uD800-\uDFFF]/g
+  const heading = /^#{1,6}\s*/gm
+  const bold = /\*{1,2}/g
+  const codeFence = /```[\s\S]*?```/g
+  const inlineCode = /`([^`]+)`/g
+  const imgLink = /!\[([^\]]*)\]\([^)]+\)/g
+  const textLink = /\[([^\]]*)\]\([^)]+\)/g
+  const parenAction = /[（(][^）)]*[）)]/g
+  const listMarker = /^[\s]*[-*+]\s+/gm
+  const numberedList = /^\s*\d+[.、]\s+/gm
+  const tablePipe = /[|│]/g
+  const blockquote = /^>\s+/gm
+  const separator = /^[-*_]{3,}\s*$/gm
+  const emoji = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu
+  const trailingTilde = /[～~]+$/
+  const tilde = /[～~]/g
+  const ellipsis = /…{2,}/g
+  const dash = /—{2,}/g
+  const whitespace = /\s{2,}/g
+  return {
+    surrogate,
+    heading,
+    bold,
+    codeFence,
+    inlineCode,
+    imgLink,
+    textLink,
+    parenAction,
+    listMarker,
+    numberedList,
+    tablePipe,
+    blockquote,
+    separator,
+    emoji,
+    trailingTilde,
+    tilde,
+    ellipsis,
+    dash,
+    whitespace,
+  }
+}
+const RE = compileRegexes()
+
 export function cleanTTS(text: string): string {
   const before = text
   // 剥离流式响应中可能出现的畸形 UTF-16 代理对
-  text = text.replace(/[\uD800-\uDFFF]/g, '')
-  // 多音字修正 — 仅修复 edge-tts 已知会读错的极少数边界情况
-  // 99% 的多音字 edge-tts 自己就能正确处理
+  text = text.replace(RE.surrogate, '')
+  // 多音字修正
   const polyphoneFixed = text
-    .replace(/还行/g, '还型') // 行(xíng)→型, 避免读成háng
+    .replace(/还行/g, '还型')
     .replace(/行吧/g, '型吧')
     .replace(/行了/g, '型了')
     .replace(/行吗/g, '型吗')
@@ -34,34 +79,24 @@ export function cleanTTS(text: string): string {
     .replace(/行啊/g, '型啊')
     .replace(/行啦/g, '型啦')
   const cleaned = polyphoneFixed
-    // markdown 标题标记 ###
-    .replace(/^#{1,6}\s*/gm, '')
-    // 粗体/斜体 **text** *text* — 仅剥离标记符号，保留文字内容
-    .replace(/\*{1,2}/g, '')
-    // 反引号代码 (inline code / code fence)
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/`([^`]+)`/g, '$1')
-    // 图片/链接标记
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
-    .replace(/\[([^\]]*)\]\([^)]+\)/g, '$1')
-    // 括号动作指示 (表情/动作)
-    .replace(/[（(][^）)]*[）)]/g, '')
-    // 列表标记
-    .replace(/^[\s]*[-*+]\s+/gm, '')
-    .replace(/^\s*\d+[.、]\s+/gm, '')
-    // 表格管道符
-    .replace(/[|│]/g, '')
-    // 引用标记
-    .replace(/^>\s+/gm, '')
-    // 分隔线
-    .replace(/^[-*_]{3,}\s*$/gm, '')
-    // emoji
-    .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
-    .replace(/[～~]+$/, '')
-    .replace(/[～~]/g, '')
-    .replace(/…{2,}/g, '…')
-    .replace(/—{2,}/g, '—')
-    .replace(/\s{2,}/g, ' ')
+    .replace(RE.heading, '')
+    .replace(RE.bold, '')
+    .replace(RE.codeFence, '')
+    .replace(RE.inlineCode, '$1')
+    .replace(RE.imgLink, '$1')
+    .replace(RE.textLink, '$1')
+    .replace(RE.parenAction, '')
+    .replace(RE.listMarker, '')
+    .replace(RE.numberedList, '')
+    .replace(RE.tablePipe, '')
+    .replace(RE.blockquote, '')
+    .replace(RE.separator, '')
+    .replace(RE.emoji, '')
+    .replace(RE.trailingTilde, '')
+    .replace(RE.tilde, '')
+    .replace(RE.ellipsis, '…')
+    .replace(RE.dash, '—')
+    .replace(RE.whitespace, ' ')
     .trim()
   const removed = before.length - cleaned.length
   if (removed > 0) {
@@ -89,6 +124,12 @@ export class TtsService {
   private emotionParams: EmotionTtsParams = { ...DEFAULT_EMOTION_PARAMS }
   /** 情感自适应是否启用（用户可关闭） */
   private emotionEnabled = true
+  /** TTS 引擎用户偏好 */
+  private enginePreference: TtsUserPreference = 'auto'
+  /** 当前质量权重 0-1 */
+  private qualityWeight = 0.6
+  /** 当前延迟权重 0-1 */
+  private latencyWeight = 0.4
 
   constructor(onStateUpdate: TtsStateCallback, onAudioReady?: (filePath: string) => void) {
     this.onStateUpdate = onStateUpdate
@@ -119,6 +160,63 @@ export class TtsService {
   /** 情感自适应是否启用 */
   isEmotionEnabled(): boolean {
     return this.emotionEnabled
+  }
+
+  /** 设置 TTS 引擎偏好（auto/cloud/local） */
+  setEnginePreference(pref: TtsUserPreference): void {
+    this.enginePreference = pref
+    ttsRouter.setUserPreference(pref)
+    log('INFO', 'tts_engine_preference', { preference: pref })
+  }
+
+  /** 获取当前引擎偏好 */
+  getEnginePreference(): TtsUserPreference {
+    return this.enginePreference
+  }
+
+  /** 设置质量/延迟权重（供外部根据场景调整） */
+  setRoutingWeights(qualityWeight: number, latencyWeight: number): void {
+    this.qualityWeight = Math.max(0, Math.min(1, qualityWeight))
+    this.latencyWeight = Math.max(0, Math.min(1, latencyWeight))
+  }
+
+  /** 获取当前路由权重 */
+  getRoutingWeights(): { qualityWeight: number; latencyWeight: number } {
+    return { qualityWeight: this.qualityWeight, latencyWeight: this.latencyWeight }
+  }
+
+  /** 获取最近的路由决策（供调试/UI） */
+  getLastRoutingDecision() {
+    return ttsRouter.getLastDecision()
+  }
+
+  // ══════════════════════════════════════════
+  //  隐式反馈驱动的语音自适应
+  // ══════════════════════════════════════════
+
+  /**
+   * 记录用户对 TTS 输出的隐式反馈动作。
+   * 由渲染进程（重听/停止按钮）或 ChatExecutor（继续对话/修改指令检测）调用。
+   */
+  recordImplicitFeedback(action: 'REPLAY' | 'SKIP' | 'INTERRUPT_SPEECH' | 'CONTINUE_CONVERSATION' | 'MODIFY_REQUEST' | 'COMPLETED_NATURALLY'): void {
+    if (action === 'REPLAY') {
+      implicitFeedbackTracker.recordSimpleAction('REPLAY')
+    } else if (action === 'SKIP') {
+      implicitFeedbackTracker.recordSimpleAction('SKIP')
+    } else {
+      implicitFeedbackTracker.recordUserAction(action)
+    }
+    log('INFO', 'tts_implicit_feedback', { action })
+  }
+
+  /** 获取隐式反馈推荐参数 */
+  getImplicitFeedbackRecommendation() {
+    return implicitFeedbackTracker.getRecommendation()
+  }
+
+  /** 获取隐式反馈跟踪器状态 */
+  getImplicitFeedbackStatus() {
+    return implicitFeedbackTracker.getStatus()
   }
 
   addChunk(chunk: string): void {
@@ -191,28 +289,58 @@ export class TtsService {
     const tempFile = getTempFile()
     const t0 = Date.now()
     try {
-      log('INFO', 'tts_synthesize', { char_count: clean.length, engine: USE_LOCAL_TTS ? 'piper' : 'edge-tts' })
+      const lastDecision = ttsRouter.getLastDecision()
+      log('INFO', 'tts_synthesize', { char_count: clean.length, engine: lastDecision?.engine ?? (USE_LOCAL_TTS ? 'piper' : 'edge-tts'), preference: this.enginePreference })
       await this._synthesize(clean, tempFile)
       log('PERF', 'tts_synthesis_done', { duration_ms: Date.now() - t0, chars: clean.length })
+
+      // ── [隐式反馈] 记录本次 TTS 输出参数 ──
+      const effectiveParams = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS
+      implicitFeedbackTracker.onTtsOutput(effectiveParams, clean)
 
       // 仅通过 onAudioReady 发送到渲染进程播放（Web Audio API），
       // 不再额外调用 _playAudio，避免双路播放造成回声/叠音
       if (this.onAudioReady) {
         this.onAudioReady(tempFile)
       }
+
+      // TTS 播放完成后标记自然结束（onAudioReady 的播放是异步的，
+      // 实际完成由渲染进程的 AudioContext.onended 触发）
+      // 此处通过一个延迟标记"预计完成"时间，作为自然结束的备份判断
+      const estimatedDurationMs = Math.max(clean.length * 80, 2000) // 约 80ms/字
+      setTimeout(() => {
+        implicitFeedbackTracker.onTtsCompleted()
+      }, estimatedDurationMs)
     } catch (err) {
       this._logError(err)
     } finally {
       try {
-        unlinkSync(tempFile)
+        fsp.unlink(tempFile).catch(() => {})
       } catch {}
     }
   }
 
   private async _synthesize(text: string, outputFile: string, attempt = 1): Promise<void> {
     const maxAttempts = 2
+
+    // ── 路由决策：使用 TtsRouter 动态选择引擎 ──
+    // USE_LOCAL_TTS 环境变量作为硬覆盖（向后兼容），优先级高于路由器
+    let useLocal: boolean
+    if (process.env.USE_LOCAL_TTS === 'true') {
+      useLocal = true
+    } else if (process.env.USE_LOCAL_TTS === 'false') {
+      useLocal = false
+    } else {
+      // 动态路由：使用缓存的网络状态同步决策（避免每次句子都检测网络）
+      const decision = ttsRouter.decideSync({
+        qualityWeight: this.qualityWeight,
+        latencyWeight: this.latencyWeight,
+      })
+      useLocal = decision.engine === 'local'
+    }
+
     try {
-      if (USE_LOCAL_TTS) {
+      if (useLocal) {
         const piper = execFile('python', [PIPER_SCRIPT, outputFile], { timeout: 15000, windowsHide: true })
         this.currentProcess = { kill: () => piper.kill() }
         piper.stdin?.end(text)
