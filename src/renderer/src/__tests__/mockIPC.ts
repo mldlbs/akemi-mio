@@ -22,6 +22,30 @@ export function createMockIPC(overrides?: Partial<MockedElectronAPI>): MockedEle
     getState: vi.fn<[], Promise<{ asr: string; error?: string }>>().mockResolvedValue({ asr: 'idle' }),
     getWakeWords: vi.fn<[], Promise<string[]>>().mockResolvedValue(['澪', 'mio']),
 
+    // ASR hotwords & vocabulary
+    toggleAsrHotwords: vi.fn<[boolean], Promise<{ enabled: boolean }>>().mockResolvedValue({ enabled: true }),
+    getAsrHotwordState: vi
+      .fn<[], Promise<{ enabled: boolean; entryCount: number; hotwords: string[]; totalInputs: number }>>()
+      .mockResolvedValue({ enabled: true, entryCount: 0, hotwords: [], totalInputs: 0 }),
+
+    getVocabState: vi
+      .fn<
+        [],
+        Promise<{
+          words: Array<{ word: string; count: number; domain: string; lastSeen: number; firstSeen: number }>
+          domainStats: Array<{ label: string; count: number }>
+          totalWords: number
+          enabled: boolean
+        }>
+      >()
+      .mockResolvedValue({ words: [], domainStats: [], totalWords: 0, enabled: true }),
+
+    deleteVocabWord: vi.fn<[string], Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
+
+    clearVocabData: vi.fn<[], Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
+
+    refreshVocabContext: vi.fn<[], Promise<{ success: boolean; error?: string }>>().mockResolvedValue({ success: true }),
+
     // Events (main -> renderer push)
     onStateUpdate: vi.fn<[(state: Record<string, unknown>) => void], () => void>().mockReturnValue(vi.fn()),
     onAIChunk: vi.fn<[(text: string) => void], () => void>().mockReturnValue(vi.fn()),
@@ -191,6 +215,29 @@ export function createMockIPC(overrides?: Partial<MockedElectronAPI>): MockedEle
     approveGate: vi
       .fn<[string, string, string, string?], Promise<{ success: boolean; error?: string }>>()
       .mockResolvedValue({ success: true }),
+
+    // 隐式反馈驱动的语音自适应
+    recordImplicitFeedback: vi.fn<[string], Promise<{ success: boolean; error?: string }>>().mockResolvedValue({ success: true }),
+    toggleImplicitFeedback: vi.fn<[boolean], Promise<{ success: boolean; enabled: boolean }>>().mockResolvedValue({ success: true, enabled: true }),
+    getImplicitFeedbackState: vi
+      .fn<
+        [],
+        Promise<{
+          success: boolean
+          enabled: boolean
+          recommendation: Record<string, unknown> | null
+          status: { modelInitialized: boolean; totalSamples: number; historySize: number }
+        }>
+      >()
+      .mockResolvedValue({
+        success: true,
+        enabled: true,
+        recommendation: null,
+        status: { modelInitialized: false, totalSamples: 0, historySize: 0 },
+      }),
+    triggerImplicitFeedbackUpdate: vi.fn<[], Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
+    resetImplicitFeedback: vi.fn<[], Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
+    onImplicitFeedbackEnabled: vi.fn<[(data: { enabled: boolean }) => void], () => void>().mockReturnValue(vi.fn()),
 
     // Writing
     getWritingStatus: vi

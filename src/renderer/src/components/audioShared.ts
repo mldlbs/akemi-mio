@@ -1,6 +1,10 @@
 let micEnergy = 0
-export function updateMicEnergy(rms: number) { micEnergy = Math.min(1, rms * 8) }
-export function readMicEnergy(): number { return micEnergy }
+export function updateMicEnergy(rms: number) {
+  micEnergy = Math.min(1, rms * 8)
+}
+export function readMicEnergy(): number {
+  return micEnergy
+}
 
 // --- TTS 有限状态机 ---
 type TTSState = 'idle' | 'loading' | 'playing'
@@ -13,15 +17,27 @@ let ttsAnimId = 0
 let ttsStartCb: ((duration: number) => void) | null = null
 let ttsErrorCb: ((err: string) => void) | null = null
 
-export function onTTSStart(cb: (duration: number) => void) { ttsStartCb = cb }
-export function onTTSError(cb: (err: string) => void) { ttsErrorCb = cb }
+export function onTTSStart(cb: (duration: number) => void) {
+  ttsStartCb = cb
+}
+export function onTTSError(cb: (err: string) => void) {
+  ttsErrorCb = cb
+}
 
 function safeCleanup() {
-  if (ttsAnimId) { cancelAnimationFrame(ttsAnimId); ttsAnimId = 0 }
+  if (ttsAnimId) {
+    cancelAnimationFrame(ttsAnimId)
+    ttsAnimId = 0
+  }
   ttsEnergy = 0
   try {
-    if (ttsSource) { ttsSource.stop(); ttsSource.disconnect() }
-  } catch { /* already stopped */ }
+    if (ttsSource) {
+      ttsSource.stop()
+      ttsSource.disconnect()
+    }
+  } catch {
+    /* already stopped */
+  }
   ttsSource = null
   ttsAnalyser = null
   if (ttsCtx && ttsCtx.state !== 'closed') ttsCtx.close()
@@ -35,9 +51,13 @@ function doPlay(buf: ArrayBuffer) {
   const ctx = new AudioContext()
   ttsCtx = ctx
 
-  ctx.decodeAudioData(buf.slice(0))
-    .then(audioBuf => {
-      if (ttsState !== 'loading') { ctx.close(); return }
+  ctx
+    .decodeAudioData(buf.slice(0))
+    .then((audioBuf) => {
+      if (ttsState !== 'loading') {
+        ctx.close()
+        return
+      }
       ttsState = 'playing'
 
       const duration = audioBuf.duration
@@ -54,19 +74,25 @@ function doPlay(buf: ArrayBuffer) {
       ttsSource.start()
 
       const freqData = new Uint8Array(ttsAnalyser.frequencyBinCount)
+      let ttsPollFrame = 0
       const poll = () => {
         if (ttsState !== 'playing') return
-        ttsAnalyser?.getByteFrequencyData(freqData)
-        let total = 0
-        for (let b = 0; b < freqData.length; b++) total += freqData[b]
-        ttsEnergy = total / (freqData.length * 255)
+        // 每 2 帧（~30fps）采样一次，避免与 React 渲染竞争
+        if (++ttsPollFrame % 2 === 0) {
+          ttsAnalyser?.getByteFrequencyData(freqData)
+          let total = 0
+          for (let b = 0; b < freqData.length; b++) total += freqData[b]
+          ttsEnergy = total / (freqData.length * 255)
+        }
         ttsAnimId = requestAnimationFrame(poll)
       }
       poll()
 
-      ttsSource.onended = () => { safeCleanup() }
+      ttsSource.onended = () => {
+        safeCleanup()
+      }
     })
-    .catch(err => {
+    .catch((err) => {
       if (ttsCtx === ctx) safeCleanup()
       ttsErrorCb?.(String(err))
     })
@@ -75,8 +101,11 @@ function doPlay(buf: ArrayBuffer) {
 export function playTTS(filePath: string): void {
   try {
     fetch(`file://${filePath.replace(/\\/g, '/')}`)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer() })
-      .then(buf => doPlay(buf))
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.arrayBuffer()
+      })
+      .then((buf) => doPlay(buf))
       .catch((err) => {
         console.error('[TTS] playTTS fetch failed:', err)
         ttsErrorCb?.(`TTS 文件加载失败: ${err instanceof Error ? err.message : String(err)}`)

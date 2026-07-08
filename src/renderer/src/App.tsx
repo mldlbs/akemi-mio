@@ -11,6 +11,8 @@ import { DevPlanSlot } from './components/DevPlanSlot'
 import { OtparSlot } from './components/OtparSlot'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { SettingsModal } from './components/SettingsModal'
+import { EvolutionDashboard } from './components/EvolutionDashboard'
+import { DesktopToolbar } from './components/DesktopToolbar'
 import { useSlots } from './slots/SlotContext'
 import { useSessions, useAIOutput, useTools, useDeviceStatus, usePlans, useWorkflowDefinitions } from './hooks'
 import { useSessionStore } from './store/sessionStore'
@@ -58,6 +60,8 @@ function App() {
       </div>
       <InputBar onSend={handleResult} voiceSlot={<VoiceInput onResult={handleResult} />} />
       <SettingsModal />
+      <EvolutionDashboard />
+      <DesktopToolbar />
     </div>
   )
 }

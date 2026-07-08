@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
+import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useAgentStore } from '../store/agentStore'
 import type { AgentState } from '../store/agentStore'
@@ -71,8 +71,42 @@ function summarizeArgs(tool: string, args: Record<string, any>): string {
     .slice(0, 80)
 }
 
-export function ChatSlot() {
+/** 纯消息列表子组件 — 仅订阅 messages，不受 pendingText/tools 变化影响 */
+const MessageList = React.memo(function MessageList({
+  bottomRef,
+  onMessageCount,
+}: {
+  bottomRef: React.RefObject<HTMLDivElement | null>
+  onMessageCount?: (n: number) => void
+}) {
   const messages = useSessionStore((s) => s.historyMessages)
+
+  const prevLen = useRef(0)
+  useEffect(() => {
+    onMessageCount?.(messages.length)
+    if (messages.length > prevLen.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'instant' })
+    }
+    prevLen.current = messages.length
+  }, [messages, bottomRef, onMessageCount])
+
+  return (
+    <>
+      {messages.map((m) => (
+        <div key={m.id} className={`msg msg-row ${m.role}`}>
+          <div className="msg-label">{m.role === 'user' ? '你' : '秋山澪'}</div>
+          <div className="msg-bubble">{m.content}</div>
+          <div className="msg-actions">
+            <CopyButton text={m.content} />
+            <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+        </div>
+      ))}
+    </>
+  )
+})
+
+export function ChatSlot() {
   const historyLoading = useSessionStore((s) => s.historyLoading)
 
   const pendingText = useAgentStore((s) => s.pendingText)
@@ -86,15 +120,19 @@ export function ChatSlot() {
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const [toolsCollapsed, setToolsCollapsed] = useState(false)
+  const [messageCount, setMessageCount] = useState(0)
 
+  // 只在 pendingText 或 displayText 变化时滚到底部（禁止 JS 动画避免与 React 渲染竞争）
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, displayText, toolRunning, toolCompleted])
+    if (pendingText || displayText) {
+      bottomRef.current?.scrollIntoView({ behavior: 'instant' })
+    }
+  }, [pendingText, displayText])
 
   const hasPending = !!pendingText
   const agentLabel = AGENT_LABELS[agentState]
   const hasTools = toolRunning.length > 0 || toolCompleted.length > 0
-  const showEmpty = messages.length === 0 && !hasPending && !transcribed && !hasTools && !agentLabel && !historyLoading
+  const showEmpty = messageCount === 0 && !hasPending && !transcribed && !hasTools && !agentLabel && !historyLoading
 
   const toolSummary = useMemo(() => {
     const allTools = [...toolRunning, ...toolCompleted]
@@ -149,16 +187,8 @@ export function ChatSlot() {
         </div>
       )}
 
-      {messages.map((m) => (
-        <div key={m.id} className={`msg msg-row ${m.role}`}>
-          <div className="msg-label">{m.role === 'user' ? '你' : '秋山澪'}</div>
-          <div className="msg-bubble">{m.content}</div>
-          <div className="msg-actions">
-            <CopyButton text={m.content} />
-            <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
-          </div>
-        </div>
-      ))}
+      {/* 消息列表独立组件，不受 pendingText/tools 重渲染影响 */}
+      <MessageList bottomRef={bottomRef} onMessageCount={setMessageCount} />
 
       {toolRunning.length > 0 && (
         <div className="tool-inline-group">

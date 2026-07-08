@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { playTTS, playTTSBuffer, onTTSStart, onTTSError } from '../components/audioShared'
 import { useIPCEvent } from './useIPCEvent'
 import { useTimerControl } from './useTimer'
@@ -48,9 +48,24 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // ai:chunk 合并节流：16ms 窗口内只触发一次 React 更新
+  const chunkBufRef = useRef('')
+  const chunkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
   useIPCEvent(window.electronAPI.onAIChunk, (chunk: string) => {
-    store.appendPendingText(chunk)
+    chunkBufRef.current += chunk
     fadeTimer.clear()
+    if (!chunkTimerRef.current) {
+      chunkTimerRef.current = setInterval(() => {
+        if (chunkBufRef.current) {
+          store.appendPendingText(chunkBufRef.current)
+          chunkBufRef.current = ''
+        } else if (chunkTimerRef.current) {
+          clearInterval(chunkTimerRef.current)
+          chunkTimerRef.current = null
+        }
+      }, 16)
+    }
   })
 
   useIPCEvent(window.electronAPI.onTTSAudio, (filePath: string) => {
@@ -63,6 +78,15 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
   // 带 sessionId 的 message:new = 最终完整消息；无 sessionId 的（中间 tool 输出）不清除 streaming 状态
   useIPCEvent(window.electronAPI.onMessageNew, (msg: { id: string; role: string; sessionId?: string }) => {
     if (msg.sessionId && msg.role === 'assistant') {
+      // flush 残留 chunk 再重置
+      if (chunkBufRef.current) {
+        store.appendPendingText(chunkBufRef.current)
+        chunkBufRef.current = ''
+      }
+      if (chunkTimerRef.current) {
+        clearInterval(chunkTimerRef.current)
+        chunkTimerRef.current = null
+      }
       store.resetAgent()
       revealTimer.clear()
     }
@@ -86,20 +110,17 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
       if (intentResult.matched && intentResult.intent) {
         const confirmed = window.confirm(
           `🎤 语音指令识别\n\n` +
-          `意图: ${intentResult.intent.description}\n\n` +
-          `${intentResult.intent.confirmMessage}\n\n` +
-          `将执行 ${intentResult.intent.toolSequence.length} 个工具:\n` +
-          intentResult.intent.toolSequence.map((s, i) => `  ${i + 1}. ${s.tool}`).join('\n') +
-          `\n\n确认执行？`,
+            `意图: ${intentResult.intent.description}\n\n` +
+            `${intentResult.intent.confirmMessage}\n\n` +
+            `将执行 ${intentResult.intent.toolSequence.length} 个工具:\n` +
+            intentResult.intent.toolSequence.map((s, i) => `  ${i + 1}. ${s.tool}`).join('\n') +
+            `\n\n确认执行？`,
         )
         if (confirmed) {
           store.setAgentState('tool_executing')
           store.setToolStatus({ type: 'start', tool: 'voice_chain', message: `执行: ${intentResult.intent.description}` })
 
-          const execResult = await window.electronAPI.executeVoiceChain(
-            intentResult.intent.name,
-            intentResult.intent.slots,
-          )
+          const execResult = await window.electronAPI.executeVoiceChain(intentResult.intent.name, intentResult.intent.slots)
 
           // 展示执行结果
           const resultLines: string[] = []

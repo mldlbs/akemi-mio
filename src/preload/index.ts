@@ -8,6 +8,24 @@ export function createElectronAPI(ipc: IpcRenderer) {
 
     transcribe: (audio: ArrayBuffer): Promise<{ text: string; request_id?: string; error?: string }> => ipc.invoke('asr:transcribe', audio),
 
+    // ── ASR 热词管理 ──
+    toggleAsrHotwords: (enabled: boolean): Promise<{ enabled: boolean }> => ipc.invoke('asr:toggle-hotwords', enabled),
+    getAsrHotwordState: (): Promise<{ enabled: boolean; entryCount: number; hotwords: string[]; totalInputs: number }> => ipc.invoke('asr:hotword-state'),
+
+    // ── ASR 个性化词表管理 ──
+    getVocabState: (): Promise<{
+      words: Array<{ word: string; count: number; domain: string; lastSeen: number; firstSeen: number }>
+      domainStats: Array<{ label: string; count: number }>
+      totalWords: number
+      enabled: boolean
+    }> => ipc.invoke('asr:vocabulary:list'),
+
+    deleteVocabWord: (word: string): Promise<{ success: boolean }> => ipc.invoke('asr:vocabulary:delete', word),
+
+    clearVocabData: (): Promise<{ success: boolean }> => ipc.invoke('asr:vocabulary:clear'),
+
+    refreshVocabContext: (): Promise<{ success: boolean; error?: string }> => ipc.invoke('asr:context:refresh'),
+
     // ── 语音工具编排 ──
     matchVoiceIntent: (text: string): Promise<{
       matched: boolean
@@ -72,6 +90,35 @@ export function createElectronAPI(ipc: IpcRenderer) {
         ipc.removeListener('tts:emotion:enabled', handler)
       }
     },
+
+    // ── 行为情绪检测 ──
+    toggleBehaviorEmotion: (enabled: boolean): Promise<{ success: boolean; enabled: boolean }> =>
+      ipc.invoke('tts:behaviorEmotion:toggle', enabled),
+
+    getBehaviorEmotionState: (): Promise<{ success: boolean; enabled: boolean; result: Record<string, unknown> | null; metrics: Record<string, unknown> | null }> =>
+      ipc.invoke('tts:behaviorEmotion:state'),
+
+    onBehaviorEmotionEnabled: (callback: (data: { enabled: boolean }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: { enabled: boolean }) => callback(data)
+      ipc.on('tts:behaviorEmotion:enabled', handler)
+      return () => {
+        ipc.removeListener('tts:behaviorEmotion:enabled', handler)
+      }
+    },
+
+    // ── TTS 引擎路由 ──
+    setEnginePreference: (pref: string): Promise<{ success: boolean; preference?: string; error?: string }> =>
+      ipc.invoke('tts:engine-preference:set', pref),
+
+    getEnginePreference: (): Promise<{ success: boolean; preference?: string }> =>
+      ipc.invoke('tts:engine-preference:get'),
+
+    getTtsRouterState: (): Promise<{
+      success: boolean
+      preference?: string
+      lastDecision?: Record<string, unknown> | null
+      weights?: { qualityWeight: number; latencyWeight: number }
+    }> => ipc.invoke('tts:router-state'),
 
     stopConversation: (): Promise<{ success: boolean }> => ipc.invoke('conversation:stop'),
 
@@ -352,6 +399,34 @@ export function createElectronAPI(ipc: IpcRenderer) {
     approveGate: (runId: string, stepId: string, decision: string, modifiedInput?: string): Promise<{ success: boolean; error?: string }> =>
       ipc.invoke('workflow:approveGate', runId, stepId, decision, modifiedInput),
 
+    // ── 隐式反馈驱动的语音自适应 ──
+    recordImplicitFeedback: (action: string): Promise<{ success: boolean; error?: string }> =>
+      ipc.invoke('tts:implicitFeedback:recordAction', action),
+
+    toggleImplicitFeedback: (enabled: boolean): Promise<{ success: boolean; enabled: boolean }> =>
+      ipc.invoke('tts:implicitFeedback:toggle', enabled),
+
+    getImplicitFeedbackState: (): Promise<{
+      success: boolean
+      enabled: boolean
+      recommendation: Record<string, unknown> | null
+      status: { modelInitialized: boolean; totalSamples: number; historySize: number }
+    }> => ipc.invoke('tts:implicitFeedback:state'),
+
+    triggerImplicitFeedbackUpdate: (): Promise<{ success: boolean }> =>
+      ipc.invoke('tts:implicitFeedback:updateModel'),
+
+    resetImplicitFeedback: (): Promise<{ success: boolean }> =>
+      ipc.invoke('tts:implicitFeedback:reset'),
+
+    onImplicitFeedbackEnabled: (callback: (data: { enabled: boolean }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: { enabled: boolean }) => callback(data)
+      ipc.on('tts:implicitFeedback:enabled', handler)
+      return () => {
+        ipc.removeListener('tts:implicitFeedback:enabled', handler)
+      }
+    },
+
     // ── Writing Status ──
     getWritingStatus: (): Promise<{ stories: any[]; totalStories: number; totalScenes: number }> => ipc.invoke('writing:getStatus'),
 
@@ -359,6 +434,37 @@ export function createElectronAPI(ipc: IpcRenderer) {
     evolutionStatus: (): Promise<{ lastRun: number | null; consecutiveFailures: number; isBusy: boolean }> =>
       ipc.invoke('evolution:status'),
     evolutionTrigger: (): Promise<{ success: boolean; error?: string }> => ipc.invoke('evolution:trigger'),
+
+    // ── Evolution Dashboard ──
+    onEvolutionDashboard: (
+      callback: (data: {
+        stage: string
+        progress: number
+        summary: string
+        errorCount: number
+        fixedCount: number
+        queueSize: number
+        lastRunAt: number | null
+        schedulerState: string
+        safetyMode: string
+        consecutiveFailures: number
+        visible: boolean
+        updatedAt: number
+      }) => void,
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('evolution:dashboard', handler)
+      return () => {
+        ipc.removeListener('evolution:dashboard', handler)
+      }
+    },
+
+    toggleEvolutionDashboard: (): Promise<{ success: boolean; visible: boolean }> =>
+      ipc.invoke('evolution:dashboard:toggle'),
+
+    // ── Desktop Toolbar (桌面任务控制浮层) ──
+    invokeDesktopTool: (toolName: string, args: Record<string, string>): Promise<{ success: boolean; result?: string; error?: string }> =>
+      ipc.invoke('desktop:invokeTool', toolName, args),
   }
 }
 

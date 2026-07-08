@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useIPCEvent } from './useIPCEvent'
 import { useSessionStore } from '../store/sessionStore'
 import type { MessageItem } from '../slots/types'
@@ -38,19 +38,29 @@ export function useSessions() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.activeSessionId])
 
+  // message:new 只添加消息，不重新拉全量 sessions 列表
+  // 除非是新会话（activeSessionId 不同）才更新
+  const lastMsgRef = useRef(0)
   useIPCEvent<MessageItem>(window.electronAPI.onMessageNew as any, (msg) => {
     if (!msg.sessionId) return
+    // 防止重复消息（IPC 可能多发）
+    if (msg.createdAt <= lastMsgRef.current) return
+    lastMsgRef.current = msg.createdAt
+
     if (msg.sessionId !== store.activeSessionId) {
       if (msg.category !== 'evolution') {
         store.setSkipDbLoad(true)
         store.setActiveSessionId(msg.sessionId)
+        // 切到新会话时才重新拉 sessions
+        window.electronAPI
+          .getSessions()
+          .then((s) => store.setSessions(s))
+          .catch(() => {})
       }
+    } else {
+      // 同一会话只添加消息，不刷新 sessions
+      store.addHistoryMessage(msg)
     }
-    store.addHistoryMessage(msg)
-    window.electronAPI
-      .getSessions()
-      .then((s) => store.setSessions(s))
-      .catch(() => {})
   })
 
   const handleSelectChat = (sessionId: string) => {

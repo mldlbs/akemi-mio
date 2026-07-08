@@ -23,6 +23,9 @@ export const CRED_KEYS = {
   ASR_HOTWORDS: 'asr_hotwords',
   ASR_INITIAL_PROMPT: 'asr_initial_prompt',
   EVOLUTION_SAFETY_MODE: 'evolution_safety_mode',
+  OVERLAY_OPACITY_MIN: 'overlay_opacity_min',
+  OVERLAY_OPACITY_MAX: 'overlay_opacity_max',
+  OVERLAY_IDLE_THRESHOLD: 'overlay_idle_threshold',
 } as const
 
 export const ALL_SETTING_KEYS: readonly string[] = Object.values(CRED_KEYS)

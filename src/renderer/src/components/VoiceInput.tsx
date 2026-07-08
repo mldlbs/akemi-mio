@@ -48,6 +48,30 @@ function resample(audio: Float32Array, fromRate: number, toRate: number): Float3
   return result
 }
 
+/**
+ * 快速选择第 k 小元素（k 从 0 开始），期望 O(n)，避免全排序 O(n log n)
+ */
+function quickSelect(arr: number[], k: number): number {
+  if (arr.length === 0) return 0
+  const a = arr.slice() // 不修改原数组
+  let lo = 0,
+    hi = a.length - 1
+  while (lo < hi) {
+    const pivot = a[lo + ((hi - lo) >>> 1)]
+    let i = lo - 1,
+      j = hi + 1
+    while (true) {
+      while (a[++i] < pivot);
+      while (a[--j] > pivot);
+      if (i >= j) break
+      ;[a[i], a[j]] = [a[j], a[i]]
+    }
+    if (k <= j) hi = j
+    else lo = j + 1
+  }
+  return a[k]
+}
+
 export function VoiceInput({ onResult, disabled, onWakeWord }: VoiceInputProps) {
   const ttsPlaying = useDeviceStore((s) => s.ttsPlaying)
   const setActive = useDeviceStore((s) => s.setActive)
@@ -279,8 +303,8 @@ export function VoiceInput({ onResult, disabled, onWakeWord }: VoiceInputProps) 
 
         noiseFloorHistory.push(rms)
         if (noiseFloorHistory.length > NOISE_FLOOR_FRAMES) noiseFloorHistory.shift()
-        const sorted = [...noiseFloorHistory].sort((a, b) => a - b)
-        const noiseFloor = sorted[Math.floor(sorted.length * 0.2)] || 0.001
+        // 快速选择第 20 百分位，避免 O(n log n) 全排序
+        const noiseFloor = quickSelect(noiseFloorHistory, Math.floor(noiseFloorHistory.length * 0.2)) || 0.001
         dynamicThreshold = Math.max(0.06, noiseFloor * RMS_MULTIPLIER)
         const aboveNoise = rms > dynamicThreshold && zcrRate < SPEECH_ZCR_MAX
         const aboveInterruption = rms > dynamicThreshold * INTERRUPTION_RMS_MULTIPLIER && zcrRate < SPEECH_ZCR_MAX
