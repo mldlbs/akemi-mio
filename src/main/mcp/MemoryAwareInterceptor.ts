@@ -1,5 +1,6 @@
 import type { MemoryService } from '../memory/MemoryService'
 import { log } from '../logger/Logger'
+import type { ToolMemoryDefaults } from './ToolMemoryDefaults'
 
 /**
  * 从 Memory 中检索到的工具调用上下文。
@@ -15,6 +16,18 @@ export interface MemoryContext {
 }
 
 /**
+ * 默认值填充结果。
+ */
+export interface DefaultFillResult {
+  /** 填充后的参数 */
+  args: Record<string, any>
+  /** 被填充的参数列表 */
+  filled: Array<{ param: string; value: string; source: string; confidence: number }>
+  /** 是否有参数被填充 */
+  hasFilled: boolean
+}
+
+/**
  * MemoryAwareInterceptor — MCP 工具调用的记忆感知拦截器。
  *
  * 在工具调用前检索相关记忆作为上下文注入，
@@ -25,14 +38,21 @@ export interface MemoryContext {
  * ## 生命周期
  *   1. preCall()  — 工具调用前：语义检索相关记忆
  *   2. enrichArgs() — 将记忆上下文注入工具参数
- *   3. postCall() — 工具调用后：摘要存入记忆
+ *   3. fillDefaults() — 从用户偏好自动填充未提供的参数默认值
+ *   4. postCall() — 工具调用后：摘要存入记忆
  */
 export class MemoryAwareInterceptor {
   private memoryService: MemoryService | null = null
+  private toolDefaults: ToolMemoryDefaults | null = null
 
   /** 关联 MemoryService 实例 */
   setMemoryService(ms: MemoryService | null): void {
     this.memoryService = ms
+  }
+
+  /** 关联 ToolMemoryDefaults 实例用于参数默认值填充 */
+  setToolDefaults(td: ToolMemoryDefaults | null): void {
+    this.toolDefaults = td
   }
 
   /**
@@ -128,6 +148,39 @@ export class MemoryAwareInterceptor {
         facts: context.facts,
         note: '【记忆检索】以下是从历史记忆中检索到的可能相关的上下文，仅供参考',
       },
+    }
+  }
+
+  /**
+   * 从用户偏好中自动填充工具参数的默认值。
+   *
+   * 仅填充用户未显式提供的参数（用户值优先）。
+   * 依赖 ToolMemoryDefaults 注册表中的映射规则。
+   *
+   * 若未配置 ToolMemoryDefaults 或工具无注册映射，直接返回原始参数。
+   *
+   * @param toolName 工具名
+   * @param args 用户提供的参数（可能已通过 enrichArgs 增强）
+   * @returns 填充结果，包含填充后的参数和填充详情
+   */
+  fillDefaults(toolName: string, args: Record<string, any>): DefaultFillResult {
+    if (!this.toolDefaults || !this.toolDefaults.hasDefaults(toolName)) {
+      return { args, filled: [], hasFilled: false }
+    }
+
+    try {
+      const result = this.toolDefaults.fill(toolName, args)
+      return {
+        args: result.args,
+        filled: result.filled,
+        hasFilled: result.filled.length > 0,
+      }
+    } catch (err) {
+      log('WARN', 'memory_interceptor_fill_defaults_failed', {
+        tool: toolName,
+        error: String(err),
+      })
+      return { args, filled: [], hasFilled: false }
     }
   }
 

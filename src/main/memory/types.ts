@@ -1,6 +1,6 @@
 export interface MemoryEntry {
   id: string
-  type: 'user_fact' | 'interaction' | 'task_state' | 'user_profile'
+  type: 'user_fact' | 'interaction' | 'task_state' | 'user_profile' | 'fictional' | 'writing_feedback'
   content: string
   confidence: number
   createdAt: number

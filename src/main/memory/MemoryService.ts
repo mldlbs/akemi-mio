@@ -8,8 +8,11 @@ import { MetaController } from './MetaController'
 import { UnifiedMemoryQuery } from './UnifiedMemoryQuery'
 import { InteractionTracker } from './InteractionTracker'
 import { BehaviorWeightingService } from './BehaviorWeightingService'
+import { adaptToPlugin } from './IMemoryPlugin'
+import { FictionalMemoryGenerator } from './FictionalMemoryGenerator'
 import type { MemoryEntry } from './types'
 import type { InterestProfile } from './BehaviorWeightingService'
+import type { SummaryLLM } from './MetaController'
 import { getRawDb, markDirty } from '../db/connection'
 import {
   BEHAVIOR_WEIGHT_WINDOW_SIZE,
@@ -17,6 +20,7 @@ import {
   BEHAVIOR_WEIGHT_BASE_BOOST,
   BEHAVIOR_WEIGHT_MIN_STRENGTH,
   BEHAVIOR_WEIGHT_UPDATE_INTERVAL,
+  BEHAVIOR_REINFORCE_BOOST,
 } from '../config'
 
 // ===== 任务状态 & 用户画像类型 =====
@@ -72,7 +76,7 @@ const INTERACTION_RECORD_INTERVAL = 5
 const BEHAVIOR_SCORE_INITIAL = 0.5 // 新记忆初始得分
 const BEHAVIOR_SCORE_ACCESS_BOOST = 0.05 // 每次访问加分
 const BEHAVIOR_SCORE_EXPLICIT_REMEMBER_BOOST = 0.15 // 明确要求记住加分
-const BEHAVIOR_SCORE_DAILY_DECAY = 0.01 // 每天未访问减去
+const BEHAVIOR_SCORE_DAILY_DECAY = 0.015 // 每天未访问减去（~10.5%/周，符合行为强化的10%/周衰减目标）
 const BEHAVIOR_SCORE_MIN = 0.1 // 最低得分（避免归零无法恢复）
 const BEHAVIOR_SCORE_MAX = 1.0 // 最高得分
 // 综合得分公式中 behaviorScore 的权重（剩余为 confidence）
@@ -114,6 +118,7 @@ export class MemoryService {
   readonly unifiedQuery: UnifiedMemoryQuery
   readonly interactionTracker: InteractionTracker
   readonly behaviorWeighting: BehaviorWeightingService
+  readonly fictionalGenerator: FictionalMemoryGenerator
 
   constructor() {
     this.summary = new SummaryMemory()
@@ -121,6 +126,7 @@ export class MemoryService {
     this.knowledgeGraph = new KnowledgeGraph()
     this.engineering = new EngineeringMemory()
     this.decisionStore = new DecisionStore()
+    this.fictionalGenerator = new FictionalMemoryGenerator()
     this.metaController = new MetaController()
     this.metaController.setDeps({
       summary: this.summary,
@@ -133,6 +139,11 @@ export class MemoryService {
     this.unifiedQuery.register('summary', this.summary)
     this.unifiedQuery.register('kg', this.knowledgeGraph)
     this.unifiedQuery.register('engineering', this.engineering)
+    // 注册正式插件接口（IMemoryPlugin），使各 store 可通过统一插件协议检索和更新
+    this.unifiedQuery.registerPlugin(adaptToPlugin('vector', this.vector))
+    this.unifiedQuery.registerPlugin(adaptToPlugin('kg', this.knowledgeGraph))
+    this.unifiedQuery.registerPlugin(adaptToPlugin('engineering', this.engineering))
+    this.unifiedQuery.registerPlugin(adaptToPlugin('summary', this.summary))
     this.interactionTracker = new InteractionTracker()
     this.behaviorWeighting = new BehaviorWeightingService({
       interestWindowSize: BEHAVIOR_WEIGHT_WINDOW_SIZE,
@@ -365,6 +376,91 @@ export class MemoryService {
   //  行为驱动得分
   // ══════════════════════════════════════════
 
+  /**
+   * 行为强化记忆巩固：根据 UserBehaviorAnalyzer 检测到的重复话题模式，
+   * 自动强化相关记忆条目的检索权重，并生成标签关联。
+   *
+   * 调用时机：ChatExecutor.refreshMemory() 中检测到重复模式后。
+   *
+   * @param topics 检测到的话题标签列表
+   * @param sourceText 触发强化的用户消息摘要（用于新建记忆条目）
+   * @param boostAmount 每次强化的 boost 量（默认 0.08，约需 6 次达标到 1.0）
+   * @returns 被强化的条目数和新创建的条目数
+   */
+  reinforceByBehaviorPattern(
+    topics: string[],
+    sourceText: string,
+    boostAmount: number = BEHAVIOR_REINFORCE_BOOST,
+  ): { boosted: number; created: number } {
+    if (!topics || topics.length === 0) return { boosted: 0, created: 0 }
+
+    let boosted = 0
+    let created = 0
+
+    // 1. 查找与话题标签匹配的记忆条目并提升 behaviorScore
+    for (const entry of this.entries) {
+      if (entry.tier === 'permanent' || entry.isPinned) continue
+      if (!entry.topics || entry.topics.length === 0) continue
+
+      const hasOverlap = entry.topics.some((t) => topics.includes(t))
+      if (!hasOverlap) continue
+
+      const oldScore = entry.behaviorScore
+      entry.behaviorScore = Math.min(BEHAVIOR_SCORE_MAX, entry.behaviorScore + boostAmount)
+      entry.lastAccessedAt = Date.now()
+      entry.accessCount++
+      entry.updatedAt = Date.now()
+
+      // 合并新话题标签到已有条目
+      const newTopics = [...new Set([...(entry.topics || []), ...topics])]
+      entry.topics = newTopics.slice(0, 8) // 最多 8 个标签
+
+      this.upsertInDb(entry)
+      boosted++
+
+      log('INFO', 'memory_reinforced_by_behavior', {
+        id: entry.id,
+        content: entry.content.slice(0, 50),
+        oldScore: oldScore.toFixed(3),
+        newScore: entry.behaviorScore.toFixed(3),
+        topics: entry.topics.slice(0, 5),
+      })
+    }
+
+    // 2. 如果没有匹配的现有条目，创建新的半永久记忆条目
+    if (boosted === 0 && sourceText) {
+      const topicLabel = topics.slice(0, 3).join('、')
+      const content = `【行为强化】用户近期频繁关注：${topicLabel}。触发消息：「${sourceText.slice(0, 100)}」`
+      const entry: MemoryEntry = {
+        id: nextId(),
+        type: 'user_fact',
+        content,
+        confidence: 0.55,
+        tier: 'semi', // 半永久层，慢衰减
+        reinforceCount: 0,
+        behaviorScore: BEHAVIOR_SCORE_INITIAL + boostAmount,
+        lastAccessedAt: Date.now(),
+        accessCount: 1,
+        isPinned: false,
+        manualScoreOverride: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        topics: [...topics],
+      }
+      this.entries.push(entry)
+      this.upsertInDb(entry)
+      created++
+
+      log('INFO', 'memory_created_by_behavior_reinforcement', {
+        id: entry.id,
+        topics: topics.slice(0, 5),
+        sourceSnippet: sourceText.slice(0, 60),
+      })
+    }
+
+    return { boosted, created }
+  }
+
   /** 访问/引用记忆时提升行为得分 */
   accessMemory(id: string, options?: { explicitRemember?: boolean }): boolean {
     const entry = this.entries.find((e) => e.id === id)
@@ -579,13 +675,106 @@ export class MemoryService {
     return this.messageCount
   }
 
+  /** 注入 LLM 服务用于生成高质量摘要（传递给 MetaController） */
+  setSummaryLLM(llm: SummaryLLM): void {
+    this.metaController.setDeps({
+      summary: this.summary,
+      decisions: this.decisionStore,
+      memory: this,
+      summaryLLM: llm,
+    })
+  }
+
   /** 设置最近的用户消息文本，用于 getFormattedContext 中的语义召回 */
   setLastUserText(text: string): void {
     this.lastUserText = text
   }
 
+  /** 获取最近的用户消息文本 */
+  getLastUserText(): string {
+    return this.lastUserText
+  }
+
+  /**
+   * 获取虚构初始记忆上下文（用于暖启动）。
+   * 仅在真实 user_fact 条目不足时返回，权重随真实记忆增长线性衰减。
+   * 返回值已标注为虚构，且在真实记忆达到阈值后完全消失。
+   */
+  getFictionalMemoryContext(): string {
+    // 统计真实 user_fact 条目（排除虚构类型）
+    const realFacts = this.entries.filter((e) => e.type === 'user_fact')
+    const FICTIONAL_THRESHOLD = 10
+
+    // 真实记忆足够时不再注入虚构记忆
+    const weight = FictionalMemoryGenerator.computeWeight(realFacts.length, FICTIONAL_THRESHOLD)
+    if (weight <= 0) return ''
+
+    // 检查是否已有缓存的虚构记忆（避免重复生成）
+    const existingFictional = this.entries.find((e) => e.type === 'fictional')
+    let fictionalText: string
+    let selectedTraits: string[]
+
+    if (existingFictional) {
+      fictionalText = existingFictional.content
+      try {
+        selectedTraits = existingFictional.topics || []
+      } catch {
+        selectedTraits = []
+      }
+    } else {
+      // 生成并缓存虚构记忆
+      const result = this.fictionalGenerator.generate()
+      fictionalText = result.text
+      selectedTraits = result.selectedTraits
+
+      // 作为虚构类型条目缓存（tier=ephemeral，会在真实记忆增长后自然衰减）
+      const entry: MemoryEntry = {
+        id: 'fictional_init_' + this.fictionalGenerator.getSeed().toString(16),
+        type: 'fictional',
+        content: fictionalText,
+        confidence: 0.3, // 低置信度，标记为虚构
+        tier: 'ephemeral',
+        reinforceCount: 0,
+        behaviorScore: 0.3,
+        lastAccessedAt: Date.now(),
+        accessCount: 0,
+        isPinned: false,
+        manualScoreOverride: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        topics: selectedTraits,
+      }
+      this.entries.push(entry)
+      this.upsertInDb(entry)
+      log('INFO', 'fictional_memory_generated', {
+        traits: selectedTraits,
+        seed: this.fictionalGenerator.getSeed().toString(16),
+      })
+    }
+
+    // 根据权重决定展示强度
+    // weight >= 0.7：完整展示，标记为"模糊印象"
+    // weight >= 0.3：缩略展示，标记为"可能不太准确的回忆"
+    // weight < 0.3：只显示一行提示
+    if (weight >= 0.7) {
+      return `【关于你的模糊印象】（这些是初始印象，随着相处会变得更准确）\n${fictionalText}`
+    }
+    if (weight >= 0.3) {
+      const shortText = fictionalText.length > 60 ? fictionalText.slice(0, 60) + '…' : fictionalText
+      return `【关于你的一些过往回忆】（这些印象可能不太准确，你们已经相处了一段时间）\n${shortText}`
+    }
+    // weight > 0 but < 0.3: minimal mention
+    return '【模糊的印象】你们似乎有过一些交集，但记忆已经淡去了。'
+  }
+
   getFormattedContext(): string {
     const parts: string[] = []
+
+    // ── 虚构初始记忆（真实记忆不足时暖启动）──
+    const fictionalCtx = this.getFictionalMemoryContext()
+    if (fictionalCtx) {
+      parts.push(fictionalCtx)
+    }
 
     // 永久层：始终显示
     const permanent = this.entries.filter((e) => e.tier === 'permanent' && e.type === 'user_fact').slice(0, MAX_PERMANENT)
@@ -643,6 +832,13 @@ export class MemoryService {
       parts.push(kgCtx)
     }
 
+    // 工程记忆（失败经验 & 设计决策）：检索与当前查询相关的条目
+    const engCtx = this.engineering.getFormattedContext(3)
+    if (engCtx) {
+      parts.push('')
+      parts.push(engCtx)
+    }
+
     // 行为模式预加载（基于时间段）
     const preloadCtx = this.getPreloadContext()
     if (preloadCtx) {
@@ -697,6 +893,21 @@ export class MemoryService {
 
   getEntries(): MemoryEntry[] {
     return this.entries
+  }
+
+  /**
+   * 按 id 删除一条记忆条目。
+   * 返回 true 表示成功删除，false 表示未找到。
+   * 删除操作会同时标记为待从 DB 中移除（通过 flush() 持久化）。
+   */
+  forgetEntry(id: string): boolean {
+    const idx = this.entries.findIndex((e) => e.id === id)
+    if (idx < 0) return false
+    const entry = this.entries[idx]
+    this.removedIds.add(entry.id)
+    this.entries.splice(idx, 1)
+    log('INFO', 'memory_forgotten', { id: entry.id, content: entry.content.slice(0, 50) })
+    return true
   }
 
   // ===== 任务状态管理 =====

@@ -16,8 +16,9 @@ import type {
   StateChangeSignal,
   InformationGainSignal,
   GoalProgressSignal,
-  TraceEventSource,
-} from './GuardrailTypes'
+} from './progress'
+import { PROGRESS_VERSION } from './progress'
+import type { TraceEventSource } from './GuardrailTypes'
 
 // ══════════════════════════════════════════════
 // Turn 分组
@@ -301,6 +302,10 @@ export class GuardrailProgressAnalyzer implements ProgressAnalyzer {
     return GuardrailProgressAnalyzer.compute(traceId, events)
   }
 
+  compute(traceId: string, events: EvaluationEvent[]): ProgressSnapshot {
+    return GuardrailProgressAnalyzer.compute(traceId, events)
+  }
+
   /**
    * 纯函数：直接传入 EvaluationEvent[] 计算 ProgressSnapshot。
    * 测试时无需存储，直接构造事件数组传入。
@@ -318,9 +323,10 @@ export class GuardrailProgressAnalyzer implements ProgressAnalyzer {
     return {
       traceId,
       sessionId,
+      version: PROGRESS_VERSION,
       totalTurns: turns.length,
       elapsedMs,
-      computedAt: Date.now(),
+      observedAt: Date.now(),
       stateChange: computeStateChange(turns),
       informationGain: computeInformationGain(turns),
       goalProgress: computeGoalProgress(turns),

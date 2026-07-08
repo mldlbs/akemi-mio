@@ -16,6 +16,11 @@ import type { SummaryMemory } from '../memory/SummaryMemory'
 import type { DecisionStore } from '../memory/DecisionStore'
 import type { MemoryService } from '../memory/MemoryService'
 
+/** LLM 摘要生成的轻量接口（兼容 LlmService.chatJson 返回类型） */
+export interface SummaryLLM {
+  chatJson(userText: string, opts?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string }): Promise<{ data?: any; error?: string }>
+}
+
 // ─── 策略配置 ───
 
 export interface MetaPolicy {
@@ -73,16 +78,21 @@ export class MetaController {
   private summary: SummaryMemory | null = null
   private decisions: DecisionStore | null = null
   private memory: MemoryService | null = null
+  /** 可选的 LLM 服务，用于生成高质量摘要和实体提取 */
+  private summaryLLM: SummaryLLM | null = null
   private tickSinceLastSummary = 0
 
   constructor(policy?: Partial<MetaPolicy>) {
     this.policy = { ...DEFAULT_POLICY, ...policy }
   }
 
-  setDeps(deps: { summary: SummaryMemory; decisions: DecisionStore; memory: MemoryService }): void {
+  setDeps(deps: { summary: SummaryMemory; decisions: DecisionStore; memory: MemoryService; summaryLLM?: SummaryLLM }): void {
     this.summary = deps.summary
     this.decisions = deps.decisions
     this.memory = deps.memory
+    if (deps.summaryLLM) {
+      this.summaryLLM = deps.summaryLLM
+    }
   }
 
   getPolicy(): Readonly<MetaPolicy> {
@@ -134,10 +144,107 @@ export class MetaController {
   private createSummary(context: { userMessage: string; assistantReply: string; planActive: boolean }): void {
     this.tickSinceLastSummary = 0
     const turnEnd = Date.now()
+
+    // 有 LLM 可用时异步生成高质量摘要（含主题/实体/决策提取）
+    if (this.summaryLLM) {
+      this.createLLMSummary(context, turnEnd)
+      return
+    }
+
+    // 无 LLM 时的简单摘要（保留向后兼容）
     const summaryText = context.assistantReply
       ? `用户: ${context.userMessage.slice(0, 60)} → ${context.assistantReply.slice(0, 60)}`
       : context.userMessage.slice(0, 80)
 
+    this.summary?.addSummary(summaryText, this.stats.totalInteractions, turnEnd, {
+      topics: [],
+      decisions: context.planActive ? ['计划活跃中'] : [],
+      keyEntities: [],
+    })
+    this.stats.summariesCreated++
+  }
+
+  /**
+   * 使用 LLM 异步生成高质量对话摘要。
+   * 提取主题、决策、实体，并写入 SummaryMemory + 触发 KG 更新。
+   */
+  private createLLMSummary(
+    context: { userMessage: string; assistantReply: string; planActive: boolean },
+    turnEnd: number,
+  ): void {
+    const prompt = `分析以下对话，返回 JSON：
+{
+  "summary": "一句话摘要（不超过80字）",
+  "topics": ["话题1", "话题2"],
+  "decisions": ["决策1"],
+  "keyEntities": ["实体1"],
+  "userIntent": "用户意图简述",
+  "failureRisk": "是否有失败风险及原因（无风险填'none'）"
+}
+
+用户：${context.userMessage.slice(0, 300)}
+助手：${context.assistantReply.slice(0, 500)}`
+
+    this.summaryLLM!
+      .chatJson(prompt, {
+        system: '你是对话分析助手。只提取明确陈述的信息，不要编造。输出严格 JSON。',
+        temperature: 0.1,
+      })
+      .then((response: { data?: any; error?: string }) => {
+        if (response.error) {
+          log('WARN', 'meta_llm_summary_api_error', { error: response.error })
+          this.fallbackSummary(context, turnEnd)
+          return
+        }
+        const result = response.data
+        const summary = result?.summary || context.userMessage.slice(0, 80)
+        const topics: string[] = Array.isArray(result?.topics) ? result.topics : []
+        const decisions: string[] = Array.isArray(result?.decisions) ? result.decisions : []
+        const keyEntities: string[] = Array.isArray(result?.keyEntities) ? result.keyEntities : []
+
+        if (context.planActive && !decisions.includes('计划活跃中')) {
+          decisions.push('计划活跃中')
+        }
+
+        this.summary?.addSummary(summary, this.stats.totalInteractions, turnEnd, {
+          topics,
+          decisions,
+          keyEntities,
+        })
+        this.stats.summariesCreated++
+
+        // 触发知识图谱更新：将提取的实体写入 KG
+        if (keyEntities.length > 0 && this.memory) {
+          for (const entity of keyEntities) {
+            this.memory.knowledgeGraph.ingest(
+              `对话实体: ${entity} (上下文: ${summary.slice(0, 60)})`,
+              0.55,
+            )
+          }
+        }
+
+        log('INFO', 'meta_llm_summary_created', {
+          summary: summary.slice(0, 60),
+          topics: topics.length,
+          decisions: decisions.length,
+          entities: keyEntities.length,
+        })
+      })
+      .catch((err: any) => {
+        // LLM 摘要失败时回退到简单摘要
+        log('WARN', 'meta_llm_summary_failed', { error: String(err) })
+        this.fallbackSummary(context, turnEnd)
+      })
+  }
+
+  /** 简单摘要回退（无 LLM 或 LLM 失败时使用） */
+  private fallbackSummary(
+    context: { userMessage: string; assistantReply: string; planActive: boolean },
+    turnEnd: number,
+  ): void {
+    const summaryText = context.assistantReply
+      ? `用户: ${context.userMessage.slice(0, 60)} → ${context.assistantReply.slice(0, 60)}`
+      : context.userMessage.slice(0, 80)
     this.summary?.addSummary(summaryText, this.stats.totalInteractions, turnEnd, {
       topics: [],
       decisions: context.planActive ? ['计划活跃中'] : [],

@@ -66,6 +66,28 @@ export class VectorMemory {
     log('INFO', 'vector_stored', { content, source })
   }
 
+  /**
+   * 按内容删除向量条目。通常与 MemoryService.forgetEntry() 配合使用。
+   * 返回 true 表示成功删除，false 表示未找到。
+   */
+  forgetByContent(content: string): boolean {
+    const idx = this.entries.findIndex((e) => e.content === content)
+    if (idx < 0) return false
+    const entry = this.entries[idx]
+    this.entries.splice(idx, 1)
+    this.dirty = true
+    // 标记为从 DB 删除
+    try {
+      const db = getRawDb()
+      db.run('DELETE FROM memory_vectors WHERE id = ?', [entry.id])
+      markDirty()
+    } catch (err) {
+      log('WARN', 'vector_forget_db_failed', { error: String(err) })
+    }
+    log('INFO', 'vector_forgotten', { content: content.slice(0, 50) })
+    return true
+  }
+
   async query(query: string, topK = 3): Promise<string[]> {
     const queryEmb = await getEmbedding(query)
     if (queryEmb.length === 0) return []

@@ -9,6 +9,7 @@ import { ConstitutionEngine } from '../constitution/ConstitutionEngine'
 import { CapabilityEngine } from '../capability/CapabilityEngine'
 import { MemoryAwareInterceptor } from './MemoryAwareInterceptor'
 import type { MemoryService } from '../memory/MemoryService'
+import { MemoryRetriever, ToolMemoryDefaults } from './ToolMemoryDefaults'
 
 const FILE_WRITE_TOOLS = new Set(['write_file', 'edit_file'])
 const FILE_READ_TOOLS = new Set(['read_file', 'list_files', 'grep'])
@@ -70,6 +71,8 @@ export class ServerManager {
   private constitutionEngine: ConstitutionEngine | null = null
   private capabilityEngine: CapabilityEngine | null = null
   private memoryInterceptor: MemoryAwareInterceptor = new MemoryAwareInterceptor()
+  private memoryRetriever: MemoryRetriever = new MemoryRetriever()
+  private toolDefaults: ToolMemoryDefaults = new ToolMemoryDefaults(this.memoryRetriever)
   /** 每个 MCP 服务器的独立熔断器 */
   private circuitBreakers = new Map<string, { failures: number; state: 'closed' | 'open'; openedAt: number }>()
   /** 重启预算：每小时最多 RESTART_BUDGET_MAX 次重启，超限后自动禁用 */
@@ -102,6 +105,18 @@ export class ServerManager {
   /** 设置 MemoryService 用于记忆感知的工具调用拦截 */
   setMemoryService(ms: MemoryService): void {
     this.memoryInterceptor.setMemoryService(ms)
+    this.memoryRetriever.setMemoryService(ms)
+    this.memoryInterceptor.setToolDefaults(this.toolDefaults)
+  }
+
+  /** 获取 ToolMemoryDefaults 注册表，用于注册工具参数默认值映射 */
+  getToolDefaults(): ToolMemoryDefaults {
+    return this.toolDefaults
+  }
+
+  /** 获取 MemoryRetriever，用于直接检索用户偏好和工具调用历史 */
+  getMemoryRetriever(): MemoryRetriever {
+    return this.memoryRetriever
   }
 
   /** 从 mcp_servers.json 自动恢复持久化的 MCP 服务器 */
@@ -297,7 +312,11 @@ export class ServerManager {
 
     // ★ Memory-aware 拦截：工具调用前检索相关记忆
     const memoryCtx = this.memoryInterceptor.preCall(name, args)
-    const enrichedArgs = this.memoryInterceptor.enrichArgs(args, memoryCtx)
+    let enrichedArgs = this.memoryInterceptor.enrichArgs(args, memoryCtx)
+
+    // ★ Memory-aware 拦截：从用户偏好自动填充未提供的参数默认值
+    const fillResult = this.memoryInterceptor.fillDefaults(name, enrichedArgs)
+    enrichedArgs = fillResult.args
 
     // ★ Phase 4: Capability Sandbox（替换旧的硬编码检查）
     const caller = meta.serverName

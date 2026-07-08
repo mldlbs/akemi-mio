@@ -8,4 +8,6 @@ export type {
   MCPInitializeResult, MCPCapabilities, MCPToolDefinition, MCPServerConfig
 } from './types'
 export { MemoryAwareInterceptor } from './MemoryAwareInterceptor'
-export type { MemoryContext } from './MemoryAwareInterceptor'
+export type { MemoryContext, DefaultFillResult } from './MemoryAwareInterceptor'
+export { MemoryRetriever, ToolMemoryDefaults } from './ToolMemoryDefaults'
+export type { ToolParamDefaults } from './ToolMemoryDefaults'

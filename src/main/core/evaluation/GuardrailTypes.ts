@@ -1,34 +1,22 @@
 /**
- * Guardrail Types — Trace-Level Progress 检测协议
+ * Guardrail Types — Guardrail 专有类型定义
  *
- * 职责仅定义接口，不包含任何检测逻辑。
- * 所有分析器和策略都是此协议的实现。
+ * 职责仅定义 Guardrail 决策/策略/配置类型。
+ * Progress 相关类型（ProgressSnapshot, ProgressAnalyzer 等）已迁移到 progress.ts。
+ *
+ * 依赖方向（冻结）：
+ *   Guardrail → progress.ts
+ *
+ * 不得出现的反向依赖：
+ *   progress.ts → Guardrail ✗
  *
  * 关键约束：
  * - GuardrailAction 当前限定 continue / warning / terminate
  * - 后续加入 Retry / Replan / Escalate 需升级 Runtime 状态机
  * - 不依赖 EventBus，只依赖 EvaluationRepository.getTrace()
- *
- * ── 数据流 ──
- * EvaluationRepository.getTrace(traceId)
- *         ↓
- * ProgressAnalyzer.analyze(traceId)
- *         ↓
- *   ProgressSnapshot
- *         ↓
- * GuardrailPolicy.evaluate(snapshot)
- *         ↓
- *   GuardrailDecision
- *         ↓
- *   GuardrailDecision ———→ RuntimeAction (CONTINUE / WARNING / TERMINATE)
- *         ↓
- * GuardrailPipeline.check()
- *         ↓
- * EvaluationEmitter (guardrail.checked / guardrail.terminated)
- *         ↓
- * Observation v1.2
  */
 
+import type { ProgressSnapshot } from './progress'
 import type { EvaluationEvent } from './types'
 
 // ══════════════════════════════════════════════
@@ -80,93 +68,6 @@ export interface SignalState {
   name: string
   status: 'healthy' | 'degrading' | 'stalled'
   detail: string
-}
-
-// ══════════════════════════════════════════════
-// ProgressSnapshot — ProgressAnalyzer → GuardrailPolicy 的中间数据
-// ══════════════════════════════════════════════
-
-export interface ProgressSnapshot {
-  traceId: string
-  sessionId: string
-  /** 已执行轮次（model.invoked 计数） */
-  totalTurns: number
-  /** 从第一个事件到 now 的毫秒数 */
-  elapsedMs: number
-  /** 快照生成时间 */
-  computedAt: number
-
-  /** Signal 1: 状态变化 */
-  stateChange: StateChangeSignal
-  /** Signal 2: 信息增益 */
-  informationGain: InformationGainSignal
-  /** Signal 3: 目标推进 */
-  goalProgress: GoalProgressSignal
-}
-
-// ══════════════════════════════════════════════
-// Signal 1 — State Change（状态变化）
-// ══════════════════════════════════════════════
-
-export interface StateChangeSignal {
-  /** 是否有新的 tool.completed 结果 */
-  hasNewToolResult: boolean
-  /** 是否有新的 assistant 文本输出 */
-  hasNewAssistantContent: boolean
-  /** 是否有新的 planning 状态变化 */
-  hasPlanningStateChange: boolean
-  /** 连续无状态变化的轮次数 */
-  stagnantTurnCount: number
-  /** 上次发生状态变化的轮次索引（-1 = 从未发生） */
-  lastChangeTurn: number
-  summary: string
-}
-
-// ══════════════════════════════════════════════
-// Signal 2 — Information Gain（信息增益）
-// ══════════════════════════════════════════════
-
-export interface InformationGainSignal {
-  /** 连续低输出（<= 20 chars）的轮次数 */
-  consecutiveLowOutputTurns: number
-  /** 连续重复 assistant 内容的次数 */
-  repeatedOutputCount: number
-  /** 工具结果重复的计数（相同工具 + 相同输出指纹） */
-  repeatedToolResultCount: number
-  /** 工具结果新颖度 0~1（0 = 全部重复，1 = 全部新颖） */
-  toolResultNovelty: number
-  summary: string
-}
-
-// ══════════════════════════════════════════════
-// Signal 3 — Goal Progress（目标推进）
-// ══════════════════════════════════════════════
-
-export interface GoalProgressSignal {
-  /** 已完成子任务数（task.completed 计数） */
-  completedSubtasks: number
-  /** 是否有阶段转换（workflow.completed → workflow.started） */
-  hasPhaseTransition: boolean
-  /** 连续无推进事件的轮次数 */
-  stagnantTurnCount: number
-  summary: string
-}
-
-// ══════════════════════════════════════════════
-// 核心接口
-// ══════════════════════════════════════════════
-
-/**
- * ProgressAnalyzer — 从事件流计算当前进展状态
- *
- * 职责：
- * - 接收 EvaluationEvent[]，计算 ProgressSnapshot
- * - 不包含任何决策逻辑
- * - 纯函数可测试：compute() 可直接传入伪造事件
- */
-export interface ProgressAnalyzer {
-  /** 从存储中按 traceId 加载事件并分析 */
-  analyze(traceId: string): Promise<ProgressSnapshot>
 }
 
 /**
@@ -223,3 +124,25 @@ export const DEFAULT_GUARDRAIL_POLICY_CONFIG: GuardrailPolicyConfig = {
 export interface TraceEventSource {
   getTrace(traceId: string): Promise<EvaluationEvent[]>
 }
+
+// ══════════════════════════════════════════════
+// 向后兼容 Re-export（从 progress.ts）
+//
+// 这些类型已在 progress.ts 中定义，此处仅 re-export
+// 以保持现有导入链不中断。
+// 新代码应直接 import from './progress'。
+// ══════════════════════════════════════════════
+
+/**
+ * @deprecated 从 './progress' 导入。
+ * Progress 相关类型已迁移到 progress.ts，此 re-export 将在 Guardrail v2 重构时移除。
+ */
+export type {
+  StateChangeSignal,
+  InformationGainSignal,
+  GoalProgressSignal,
+  ProgressSnapshot,
+  ProgressAnalyzer,
+  ProgressConsumer,
+  ProgressSignal,
+} from './progress'
