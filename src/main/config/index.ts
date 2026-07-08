@@ -71,10 +71,11 @@ function getModelsDir(): string {
 
 /** LLM API endpoint URL for chat/conversation. Override via LLM_API_URL env. */
 export const LLM_API_URL = process.env.LLM_API_URL || 'https://opencode.ai/zen/go/v1/chat/completions'
+export const LLM_KEY = process.env.LLM_KEY || ''
 /** LLM API endpoint URL for code/tool-calling. Falls back to LLM_API_URL if not set. Override via LLM_CODE_API_URL env. */
 export const LLM_CODE_API_URL = process.env.LLM_CODE_API_URL || process.env.LLM_API_URL || 'https://opencode.ai/zen/go/v1/chat/completions'
 /** LLM model for casual conversation & intent classification. Override via LLM_CHAT_MODEL env. */
-export const LLM_CHAT_MODEL = process.env.LLM_CHAT_MODEL || process.env.LLM_MODEL || 'deepseek-chat'
+export const LLM_CHAT_MODEL = process.env.LLM_CHAT_MODEL || process.env.LLM_MODEL || 'deepseek-v4-flash'
 /** LLM model for tool calling, code generation, and development tasks. Override via LLM_CODE_MODEL env. */
 export const LLM_CODE_MODEL = process.env.LLM_CODE_MODEL || process.env.LLM_MODEL || 'deepseek-v4-flash'
 /** @deprecated Use LLM_CHAT_MODEL / LLM_CODE_MODEL individually. */
@@ -113,6 +114,23 @@ export const PIPER_SCRIPT = process.env.PIPER_SCRIPT || resolve(join(WORKSPACE_R
 export const PIPER_MODEL = process.env.PIPER_MODEL || resolve(join(WORKSPACE_ROOT, 'models', 'piper', 'zh_CN-huayan-medium.onnx'))
 /** Whether to prefer local Piper TTS over cloud TTS. Set USE_LOCAL_TTS=true to enable. */
 export const USE_LOCAL_TTS = process.env.USE_LOCAL_TTS === 'true'
+
+// ══════════════════════════════════════════
+//  TTS Router — 混合 TTS 智能路由配置
+// ══════════════════════════════════════════
+
+/** TTS 路由：网络延迟阈值（ms），高于此值倾向本地引擎。Override via TTS_ROUTER_MAX_LATENCY_MS env. */
+export const TTS_ROUTER_MAX_LATENCY_MS = parseInt(process.env.TTS_ROUTER_MAX_LATENCY_MS || '400', 10)
+/** TTS 路由：网络检测超时（ms）。Override via TTS_ROUTER_PING_TIMEOUT_MS env. */
+export const TTS_ROUTER_PING_TIMEOUT_MS = parseInt(process.env.TTS_ROUTER_PING_TIMEOUT_MS || '3000', 10)
+/** TTS 路由：网络检测缓存 TTL（ms）。Override via TTS_ROUTER_CACHE_TTL_MS env. */
+export const TTS_ROUTER_CACHE_TTL_MS = parseInt(process.env.TTS_ROUTER_CACHE_TTL_MS || '5000', 10)
+/** TTS 路由：默认质量权重（0-1）。Override via TTS_ROUTER_QUALITY_WEIGHT env. */
+export const TTS_ROUTER_QUALITY_WEIGHT = parseFloat(process.env.TTS_ROUTER_QUALITY_WEIGHT || '0.6')
+/** TTS 路由：默认延迟权重（0-1）。Override via TTS_ROUTER_LATENCY_WEIGHT env. */
+export const TTS_ROUTER_LATENCY_WEIGHT = parseFloat(process.env.TTS_ROUTER_LATENCY_WEIGHT || '0.4')
+/** TTS 路由：良好网络延迟阈值（ms），低于此值视为网络良好。Override via TTS_ROUTER_GOOD_LATENCY_MS env. */
+export const TTS_ROUTER_GOOD_LATENCY_MS = parseInt(process.env.TTS_ROUTER_GOOD_LATENCY_MS || '150', 10)
 
 /** Default safety mode for SelfEvolution. 'review' = plan-only (default), 'auto' = plan + auto-execute.
  *  Override via EVOLUTION_SAFETY_MODE=auto in .env */
@@ -175,6 +193,13 @@ export const INITIAL_HOTWORDS = process.env.HOTWORDS
 /** Initial prompt for Whisper ASR to bias recognition towards domain terms. Override via ASR_INITIAL_PROMPT env. */
 export const ASR_INITIAL_PROMPT = process.env.ASR_INITIAL_PROMPT || '以下是关于泵站设备、音乐练习、日常陪伴和API密钥的语音对话'
 
+/** 行为驱动热词增强：分析窗口大小（最近 N 次交互）。Override via ASR_HOTWORD_WINDOW_SIZE env. */
+export const ASR_HOTWORD_WINDOW_SIZE = parseInt(process.env.ASR_HOTWORD_WINDOW_SIZE || '16', 10)
+/** 行为驱动热词增强：词汇出现次数 >= 此值视为热词。Override via ASR_HOTWORD_FREQ_THRESHOLD env. */
+export const ASR_HOTWORD_FREQ_THRESHOLD = parseInt(process.env.ASR_HOTWORD_FREQ_THRESHOLD || '3', 10)
+/** 行为驱动热词增强：最大热词数量（避免过多热词降低其他词识别率）。Override via ASR_HOTWORD_MAX_COUNT env. */
+export const ASR_HOTWORD_MAX_COUNT = parseInt(process.env.ASR_HOTWORD_MAX_COUNT || '15', 10)
+
 // ══════════════════════════════════════════
 //  行为驱动记忆加权配置
 // ══════════════════════════════════════════
@@ -193,3 +218,12 @@ export const BEHAVIOR_WEIGHT_MIN_STRENGTH = parseFloat(process.env.BEHAVIOR_WEIG
 
 /** 兴趣更新间隔（毫秒）。Override via BEHAVIOR_WEIGHT_UPDATE_INTERVAL env. */
 export const BEHAVIOR_WEIGHT_UPDATE_INTERVAL = parseInt(process.env.BEHAVIOR_WEIGHT_UPDATE_INTERVAL || '60000', 10)
+
+/** 行为强化记忆巩固：每次强化 boost 量（0-1）。Override via BEHAVIOR_REINFORCE_BOOST env. */
+export const BEHAVIOR_REINFORCE_BOOST = parseFloat(process.env.BEHAVIOR_REINFORCE_BOOST || '0.08')
+
+/** 行为强化记忆巩固：最小相似度阈值（0-1）。Override via BEHAVIOR_REPEAT_SIMILARITY_THRESHOLD env. */
+export const BEHAVIOR_REPEAT_SIMILARITY_THRESHOLD = parseFloat(process.env.BEHAVIOR_REPEAT_SIMILARITY_THRESHOLD || '0.55')
+
+/** 行为强化记忆巩固：重复检测窗口大小（最近 N 条消息）。Override via BEHAVIOR_REPEAT_DETECTION_WINDOW env. */
+export const BEHAVIOR_REPEAT_DETECTION_WINDOW = parseInt(process.env.BEHAVIOR_REPEAT_DETECTION_WINDOW || '8', 10)

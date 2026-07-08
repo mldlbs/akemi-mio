@@ -13,8 +13,7 @@ import { credentialsManager } from '../../credentials/CredentialsManager'
 
 export class ClaudeCodeExecutor implements FixExecutor {
   readonly name = 'agent-sdk'
-  /** 只保留 tsc — test/lint 用 LLM 修复成本远高于价值 */
-  readonly supportedSources: ProblemSource[] = ['tsc']
+  readonly supportedSources: ProblemSource[] = ['tsc', 'lint']
   readonly timeoutMs = 180_000
 
   private lastExecuteAt = 0
@@ -48,9 +47,9 @@ export class ClaudeCodeExecutor implements FixExecutor {
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
         ANTHROPIC_AUTH_TOKEN: llmKey,
         ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
-        ANTHROPIC_MODEL: 'deepseek-v4-pro',
-        ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro',
-        ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-pro',
+        ANTHROPIC_MODEL: 'deepseek-v4-flash',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-flash',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-flash',
         ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash',
         CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek-v4-flash',
       }
@@ -107,8 +106,12 @@ export class ClaudeCodeExecutor implements FixExecutor {
   }
 
   private buildPrompt(problem: AssignedProblem): string {
+    const isLint = problem.source === 'lint'
+    const checkCmd = isLint ? 'npx eslint src/ --ext .ts,.tsx --format=compact' : 'npx tsc --noEmit -p tsconfig.node.json'
+    const category = isLint ? 'ESLint' : 'TypeScript 编译'
+
     return [
-      `# 修复以下 TypeScript 编译错误`,
+      `# 修复以下 ${category} 错误`,
       ``,
       `**文件**: ${problem.file || '(未知)'}${problem.line ? `:${problem.line}` : ''}`,
       `**错误**: ${problem.title}`,
@@ -117,7 +120,7 @@ export class ClaudeCodeExecutor implements FixExecutor {
       `## 要求`,
       `- 只修改相关文件`,
       `- 保持现有代码风格`,
-      `- 完成后运行 npx tsc --noEmit -p tsconfig.node.json 验证`,
+      `- 完成后运行 \`${checkCmd}\` 验证`,
       `- 如果问题已不存在，回复 SKIP`,
       ``,
       `## 输出格式`,

@@ -34,6 +34,16 @@ export interface ToolCallInfo {
   arguments: Record<string, any>
 }
 
+/** 校验 URL 字符串是否为合法的 HTTP/HTTPS URL，防止凭据库中误存的 API key 污染 URL 配置 */
+function _isHttpUrl(s: string): boolean {
+  try {
+    const u = new URL(s)
+    return u.protocol === 'http:' || u.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 export class LlmService {
   private chatApiKey: string | null = null
   private codeApiKey: string | null = null
@@ -49,6 +59,8 @@ export class LlmService {
   private visionApiUrl = LLM_VISION_API_URL
   private mcpManager: ServerManager
   private evaluationEmitter?: EvaluationEmitter
+  /** setConfig() 已被调用 — refreshFromCredentials 不应再覆盖 key/url 等显式配置 */
+  private _configured = false
 
   constructor(mcpManager?: ServerManager, evaluationEmitter?: EvaluationEmitter) {
     this.mcpManager = mcpManager || new ServerManager()
@@ -67,21 +79,26 @@ export class LlmService {
   refreshFromCredentials(getter: (key: string) => string | null): void {
     const key = getter('llm_key')
     const codeKey = getter('llm_code_api_key')
-    if (key) this.chatApiKey = key
-    if (codeKey) this.codeApiKey = codeKey
+    // _configured 表示 setConfig() 已从 .env 设定了权威值，不再覆盖
+    if (!this._configured) {
+      if (key) this.chatApiKey = key
+      if (codeKey) this.codeApiKey = codeKey
+    }
     this.textApiKey = getter('llm_text_key') || LLM_TEXT_KEY || key || ''
     this.visionKey = getter('llm_vision_key') || LLM_VISION_KEY || key || ''
 
-    const url = getter('llm_api_url')
-    const codeUrl = getter('llm_code_api_url')
-    if (url) this.chatApiUrl = url
-    if (codeUrl) this.codeApiUrl = codeUrl
+    if (!this._configured) {
+      const url = getter('llm_api_url')
+      const codeUrl = getter('llm_code_api_url')
+      if (url && _isHttpUrl(url)) this.chatApiUrl = url
+      if (codeUrl && _isHttpUrl(codeUrl)) this.codeApiUrl = codeUrl
 
-    const visionUrl = getter('llm_vision_api_url')
-    if (visionUrl) this.visionApiUrl = visionUrl
+      const visionUrl = getter('llm_vision_api_url')
+      if (visionUrl && _isHttpUrl(visionUrl)) this.visionApiUrl = visionUrl
 
-    const textUrl = getter('llm_text_api_url')
-    if (textUrl) this.textApiUrl = textUrl
+      const textUrl = getter('llm_text_api_url')
+      if (textUrl && _isHttpUrl(textUrl)) this.textApiUrl = textUrl
+    }
 
     const model = getter('llm_chat_model')
     const codeModel = getter('llm_code_model')
@@ -96,6 +113,7 @@ export class LlmService {
   }
 
   setConfig(chatKey: string, codeKey?: string, chatModel?: string, codeModel?: string, chatUrl?: string, codeUrl?: string): void {
+    this._configured = true
     this.chatApiKey = chatKey
     this.codeApiKey = codeKey || chatKey
     this.textApiKey = LLM_TEXT_KEY || chatKey

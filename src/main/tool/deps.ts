@@ -115,3 +115,16 @@ export function getObserverService(): ObserverService | null {
 export function getLocalModelService(): LocalModelService | null {
   return _localModelService
 }
+
+// ── TTS 服务（供 PiperTTS 工具调用）──
+import type { TtsService } from '../tts/TtsService'
+
+let _ttsService: TtsService | null = null
+
+export function setTtsService(ts: TtsService | null): void {
+  _ttsService = ts
+}
+
+export function getTtsService(): TtsService | null {
+  return _ttsService
+}

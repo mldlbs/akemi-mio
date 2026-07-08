@@ -2,7 +2,7 @@ import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core'
 
 export const memories = sqliteTable('memories', {
   id: text('id').primaryKey(),
-  type: text('type', { enum: ['user_fact', 'interaction'] }).notNull(),
+  type: text('type', { enum: ['user_fact', 'interaction', 'task_state', 'user_profile', 'fictional'] }).notNull(),
   content: text('content').notNull(),
   confidence: real('confidence').notNull().default(0.5),
   tier: text('tier', { enum: ['permanent', 'semi', 'ephemeral'] }).notNull().default('ephemeral'),

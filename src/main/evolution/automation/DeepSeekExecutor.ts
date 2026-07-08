@@ -11,7 +11,7 @@ import type { AssignedProblem, FixResult, FixExecutor, ProblemSource } from './t
 
 export class DeepSeekExecutor implements FixExecutor {
   readonly name = 'deepseek-agent'
-  readonly supportedSources: ProblemSource[] = ['tsc']
+  readonly supportedSources: ProblemSource[] = ['tsc', 'lint']
   readonly timeoutMs = 180_000
 
   private pool: SubAgentPool | null = null
@@ -55,8 +55,14 @@ export class DeepSeekExecutor implements FixExecutor {
     }
 
     try {
+      const isLint = problem.source === 'lint'
+      const checkCmd = isLint
+        ? 'npx eslint src/ --ext .ts,.tsx --format=compact'
+        : 'npx tsc --noEmit -p tsconfig.node.json'
+      const category = isLint ? 'ESLint' : 'TypeScript 编译'
+
       const prompt = [
-        `# 修复以下 TypeScript 编译错误`,
+        `# 修复以下 ${category} 错误`,
         ``,
         `**文件**: ${problem.file || '(未知)'}${problem.line ? `:${problem.line}` : ''}`,
         `**错误**: ${problem.title}`,
@@ -65,7 +71,7 @@ export class DeepSeekExecutor implements FixExecutor {
         `## 要求`,
         `1. 使用 Read 工具读取相关文件`,
         `2. 使用 Edit 或 Write 工具修复错误`,
-        `3. 完成后运行 \`npx tsc --noEmit -p tsconfig.node.json\` 验证`,
+        `3. 完成后运行 \`${checkCmd}\` 验证`,
         `4. 如果问题已不存在，回复 SKIP`,
         ``,
         `## 输出格式`,

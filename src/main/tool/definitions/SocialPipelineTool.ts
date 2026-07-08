@@ -1,8 +1,10 @@
 import { buildTool, formatToolResult, formatToolError } from '../types'
-import { execSync } from 'child_process'
+import { exec } from 'child_process'
+import { promisify } from 'util'
 import { WORKSPACE } from '../../config'
 import { join } from 'path'
 
+const asyncExec = promisify(exec)
 const SOCIAL_DIR = join(WORKSPACE.evolution, 'social')
 const PIPELINE_SCRIPT = join(SOCIAL_DIR, 'pipeline.mjs')
 
@@ -22,14 +24,13 @@ export const socialPipelineTool = buildTool({
   },
   handler: async (input: { args: string }) => {
     try {
-      const result = execSync(`node "${PIPELINE_SCRIPT}" ${input.args}`, {
+      const { stdout } = await asyncExec(`node "${PIPELINE_SCRIPT}" ${input.args}`, {
         cwd: SOCIAL_DIR,
         timeout: 120_000,
         maxBuffer: 1024 * 1024,
         encoding: 'utf-8',
-        windowsHide: true,
       })
-      return formatToolResult(result.trim() || '执行完成（无输出）')
+      return formatToolResult(stdout.trim() || '执行完成（无输出）')
     } catch (err: any) {
       return formatToolError(`pipeline 执行失败: ${err.message || String(err)}`)
     }

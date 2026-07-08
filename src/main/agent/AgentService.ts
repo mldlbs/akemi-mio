@@ -31,7 +31,7 @@ import { TaskExecutor } from './TaskExecutor'
 import { ChatExecutor } from './ChatExecutor'
 import type { GuardrailPipeline } from '../core/evaluation/GuardrailPipeline'
 import { ProceduralMemory } from './ProceduralMemory'
-import { setProceduralMemory } from '../tool/deps'
+import { setProceduralMemory, setTtsService } from '../tool/deps'
 
 export class AgentService {
   private llmService: LlmService
@@ -149,6 +149,8 @@ export class AgentService {
 
     // 注册流程记忆到工具依赖
     setProceduralMemory(this.proceduralMemory)
+    // 注册 TTS 服务到工具依赖（供 PiperTTS 工具调用）
+    setTtsService(this.ttsService)
 
     this.taskExecutor = new TaskExecutor(this.llmService, this.toolScheduler, this.guardrail, this.planManager, this.resourceBudget)
   }

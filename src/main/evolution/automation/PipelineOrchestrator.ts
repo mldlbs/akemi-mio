@@ -14,6 +14,7 @@ import type { SignalCollector, FixExecutor, FixResult } from './types'
 import { ProblemQueue } from './ProblemQueue'
 import { TscCollector } from './TscCollector'
 import { TestCollector } from './TestCollector'
+import { EslintCollector } from './EslintCollector'
 import { ClaudeCodeExecutor } from './ClaudeCodeExecutor'
 import { DeepSeekExecutor } from './DeepSeekExecutor'
 
@@ -59,6 +60,7 @@ export class PipelineOrchestrator {
   initDefaults(mcpManager?: any): void {
     this.addCollector(new TscCollector(this.config.projectRoot))
     this.addCollector(new TestCollector(this.config.projectRoot))
+    this.addCollector(new EslintCollector(this.config.projectRoot))
     this.addExecutor(new ClaudeCodeExecutor())
     if (mcpManager) {
       this.addExecutor(new DeepSeekExecutor(mcpManager))

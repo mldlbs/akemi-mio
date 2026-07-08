@@ -9,6 +9,7 @@ import { createDevPlanTool, updatePlanProgressTool, listPlansTool, completePlanT
 import { analyzeCodebaseTool } from './definitions/AnalyzeCodebaseTool'
 import { getCredentialTool, setCredentialTool, listCredentialsTool } from './definitions/CredentialTools'
 import { rememberFactTool } from './definitions/RememberFactTool'
+import { storeMemoryTool, retrieveMemoryTool, searchMemoriesTool, forgetMemoryTool } from './definitions/MemoryTools'
 import {
   analyzeTaskTool,
   listWorkflowsTool,
@@ -26,6 +27,7 @@ import {
 } from './definitions/WorkflowTools'
 import { listSkillsTool, enableSkillTool, disableSkillTool } from './definitions/SkillTools'
 import { writingSystemTool } from './definitions/WritingTool'
+import { writingMemoryTool } from './definitions/WritingMemoryTool'
 import { generateImageTool } from './definitions/ImageGenerationTool'
 import { cardGeneratorTool } from './definitions/CardGeneratorTool'
 import { rememberProcedureTool, listProceduresTool } from './definitions/ProceduralMemoryTool'
@@ -34,6 +36,7 @@ import { centosExecTool, centosReadFileTool, centosWriteFileTool, centosGrepTool
 import { spawnSkillAgentTool } from './definitions/SkillAgentTools'
 import { socialPipelineTool } from './definitions/SocialPipelineTool'
 import { queryTrendsTool } from './definitions/TrendQueryTool'
+import { speakWithPiperTool, switchPiperModelTool, listPiperModelsTool } from './definitions/PiperTtsTool'
 import {
   moveFileTool,
   copyFileTool,
@@ -62,6 +65,10 @@ export function getAllTools(): Tool[] {
     setCredentialTool as Tool,
     listCredentialsTool as Tool,
     rememberFactTool as Tool,
+    storeMemoryTool as Tool,
+    retrieveMemoryTool as Tool,
+    searchMemoriesTool as Tool,
+    forgetMemoryTool as Tool,
     analyzeTaskTool as Tool,
     autoScheduleWorkflowTool as Tool,
     listWorkflowsTool as Tool,
@@ -80,6 +87,7 @@ export function getAllTools(): Tool[] {
     disableSkillTool as Tool,
     spawnSkillAgentTool as Tool,
     writingSystemTool as Tool,
+    writingMemoryTool as Tool,
     generateImageTool as Tool,
     cardGeneratorTool as Tool,
     rememberProcedureTool as Tool,
@@ -95,6 +103,9 @@ export function getAllTools(): Tool[] {
     centosSearchFilesTool as Tool,
     socialPipelineTool as Tool,
     queryTrendsTool as Tool,
+    speakWithPiperTool as Tool,
+    switchPiperModelTool as Tool,
+    listPiperModelsTool as Tool,
     // 文件操作增强
     moveFileTool as Tool,
     copyFileTool as Tool,

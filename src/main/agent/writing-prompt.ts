@@ -23,7 +23,20 @@ export const PROMPT_WRITING = `【小说创作工具】
   2. 连接后可使用 writing_create_story、writing_create_character 等结构化工具
 
 方案 B（兼容）：通过旧版 writing_system 工具直接调用远程 API
-  需要手动拼接 JSON 字符串传给 data 参数`
+  需要手动拼接 JSON 字符串传给 data 参数
+
+【创作记忆驱动续写】
+续写新章节前，使用 writing_memory 工具获取读者期望摘要：
+  1. writing_memory action=get_summary storyName="故事名"
+     → 获取关于该故事的历史反馈摘要（300字以内），将返回的【读者期望摘要】附加到 prompt 底部
+  2. 如果无历史反馈，直接按原始方向续写即可
+
+续写完成后，收集用户新一轮反馈并存入 Memory：
+  3. writing_memory action=store_feedback storyName="故事名" feedback="用户反馈内容" category="分类"
+     分类可选：emotion_preference | setting_disagreement | style_feedback | plot_suggestion | general
+
+查询已有反馈（调试/查看用）：
+  4. writing_memory action=search_feedback storyName="故事名"`
 
 // ─── 写作意图检测 ───
 

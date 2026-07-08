@@ -33,6 +33,15 @@ const MAX_SUGGESTED_TOOLS = 5
 /** 提示注入的最大话题数 */
 const MAX_SUGGESTED_TOPICS = 3
 
+/** 重复模式检测：检查最近 N 条消息 */
+const REPEAT_DETECTION_WINDOW = 8
+
+/** 重复模式检测：Jaccard 相似度阈值（超过此值视为重复提问） */
+const REPEAT_SIMILARITY_THRESHOLD = 0.55
+
+/** 重复模式检测：最小消息长度（字符数，低于此值跳过检测） */
+const REPEAT_MIN_MESSAGE_LENGTH = 6
+
 // ── 话题关键词提取（中文 + 英文） ──
 
 /**
@@ -121,6 +130,26 @@ export interface AnalysisOptions {
   highFreqThreshold?: number
   /** 话题最小出现次数，默认 2 */
   topicMinOccurrences?: number
+}
+
+/** 重复提问检测结果 */
+export interface RepeatedPattern {
+  /** 是否检测到重复提问模式 */
+  detected: boolean
+  /** 与当前消息最相似的历史消息索引（在 recentUserMessages 中的位置） */
+  matchedIndex: number
+  /** Jaccard 相似度 (0-1) */
+  similarity: number
+  /** 当前消息提取的话题标签 */
+  currentTopics: string[]
+  /** 匹配到的历史消息的话题标签 */
+  matchedTopics: string[]
+  /** 合并去重后的话题标签（用于记忆强化） */
+  mergedTopics: string[]
+  /** 当前消息文本（截断） */
+  currentText: string
+  /** 匹配的历史消息文本（截断） */
+  matchedText: string
 }
 
 // ── UserBehaviorAnalyzer ──
@@ -312,6 +341,109 @@ export class UserBehaviorAnalyzer {
     return hints
   }
 
+  // ── 重复模式检测 ──
+
+  /**
+   * 检测用户是否在短时间内重复提问相似问题。
+   * 使用字符 bigram Jaccard 相似度进行快速比较，
+   * 不依赖 LLM（避免在热路径上增加延迟）。
+   *
+   * @param currentText 当前用户消息
+   * @returns RepeatedPattern 检测结果
+   */
+  detectRepeatedPattern(currentText: string): RepeatedPattern {
+    const emptyResult: RepeatedPattern = {
+      detected: false,
+      matchedIndex: -1,
+      similarity: 0,
+      currentTopics: [],
+      matchedTopics: [],
+      mergedTopics: [],
+      currentText: currentText.slice(0, 80),
+      matchedText: '',
+    }
+
+    if (!currentText || currentText.trim().length < REPEAT_MIN_MESSAGE_LENGTH) {
+      return emptyResult
+    }
+
+    const normalized = currentText.trim().toLowerCase()
+    // 检查最近 N 条消息（排除自身）
+    const recent = this.recentUserMessages.slice(-REPEAT_DETECTION_WINDOW)
+    if (recent.length < 2) return emptyResult
+
+    // 提取当前消息的话题标签
+    const currentTopics = this._extractTopicsFromText(currentText)
+
+    let bestSimilarity = 0
+    let bestIndex = -1
+    let bestText = ''
+
+    // 倒序遍历（最近的优先），找到最高相似度的匹配
+    for (let i = recent.length - 1; i >= 0; i--) {
+      const past = recent[i]
+      // 跳过自己（同一时间戳的相同消息）
+      if (past.content === currentText.trim()) continue
+      if (past.content.length < REPEAT_MIN_MESSAGE_LENGTH) continue
+
+      const similarity = computeBigramJaccard(
+        normalized,
+        past.content.toLowerCase(),
+      )
+
+      if (similarity > bestSimilarity) {
+        bestSimilarity = similarity
+        bestIndex = i
+        bestText = past.content
+      }
+    }
+
+    if (bestSimilarity < REPEAT_SIMILARITY_THRESHOLD || bestIndex < 0) {
+      return { ...emptyResult, similarity: bestSimilarity, currentTopics }
+    }
+
+    // 提取匹配消息的话题标签
+    const matchedTopics = this._extractTopicsFromText(bestText)
+    // 合并去重话题标签
+    const mergedTopics = [...new Set([...currentTopics, ...matchedTopics])]
+
+    log('INFO', 'behavior_repeat_detected', {
+      similarity: bestSimilarity.toFixed(3),
+      currentTopics,
+      matchedTopics,
+      mergedTopics,
+      currentSnippet: normalized.slice(0, 40),
+      matchedSnippet: bestText.slice(0, 40),
+    })
+
+    return {
+      detected: true,
+      matchedIndex: bestIndex,
+      similarity: bestSimilarity,
+      currentTopics,
+      matchedTopics,
+      mergedTopics,
+      currentText: normalized.slice(0, 80),
+      matchedText: bestText.slice(0, 80),
+    }
+  }
+
+  /**
+   * 从单条文本中提取话题标签（供 detectRepeatedPattern 使用）。
+   * 复用 TOPIC_PATTERNS + TOOL_TOPIC_MAP（工具不可用，仅做文本匹配）。
+   */
+  private _extractTopicsFromText(text: string): string[] {
+    const topics: string[] = []
+    const lower = text.toLowerCase()
+    for (const { pattern, label } of TOPIC_PATTERNS) {
+      pattern.lastIndex = 0
+      if (pattern.test(lower)) {
+        topics.push(label)
+      }
+    }
+    return [...new Set(topics)].slice(0, MAX_SUGGESTED_TOPICS)
+  }
+
   // ── 用户反馈调节 ──
 
   /**
@@ -369,6 +501,50 @@ export class UserBehaviorAnalyzer {
     this.clear()
     this.resetFeedback()
   }
+}
+
+// ── 文本相似度工具 ──
+
+/**
+ * 计算两个文本的字符 bigram Jaccard 相似度。
+ * 纯字符串运算，不依赖任何外部库，适合在热路径上使用。
+ *
+ * 算法：
+ * 1. 将文本转为小写并提取所有相邻字符对（bigram）
+ * 2. Jaccard = |交集| / |并集|
+ * 3. 返回 0~1 之间的相似度
+ *
+ * 示例：
+ *   "hello" → ["he","el","ll","lo"]
+ *   "helo"  → ["he","el","lo"]
+ *   Jaccard = 3/5 = 0.6
+ */
+export function computeBigramJaccard(a: string, b: string): number {
+  if (a === b) return 1.0
+  if (!a || !b) return 0
+
+  const bigramsA = new Set<string>()
+  const bigramsB = new Set<string>()
+
+  for (let i = 0; i < a.length - 1; i++) {
+    bigramsA.add(a.slice(i, i + 2))
+  }
+  for (let i = 0; i < b.length - 1; i++) {
+    bigramsB.add(b.slice(i, i + 2))
+  }
+
+  if (bigramsA.size === 0 && bigramsB.size === 0) return 0
+
+  // 计算交集大小
+  let intersection = 0
+  for (const bg of bigramsA) {
+    if (bigramsB.has(bg)) intersection++
+  }
+
+  const union = bigramsA.size + bigramsB.size - intersection
+  if (union === 0) return 0
+
+  return intersection / union
 }
 
 // ── 单例 ──

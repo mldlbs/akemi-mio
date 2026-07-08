@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { join, dirname } from 'path'
-import { readFileSync } from 'fs'
+import { promises as fsp, readFileSync } from 'fs'
 import { log, initLogFile, getLogFilePath, sanitizeForLog } from '../logger/Logger'
 import { StateManager } from '../core/StateManager'
 import { eventBus, SubscriptionTracker } from '../core/EventBus'
@@ -32,8 +32,9 @@ import { PluginLoader, toolRegistry } from '../plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '../skill'
 import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
 import { setupStartupLogging, createWindow, setupWallpaperListener, getMainWindow } from '../core/Lifecycle'
-import { initTray, destroyTray } from '../core/TrayManager'
+import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle } from '../core/TrayManager'
 import { initUpdater, setUpdateWindow } from '../updater/UpdaterService'
+import { EvolutionDashboardService } from '../wallpaper/WallpaperService'
 import { initDatabase, closeDatabase } from '../db/connection'
 import { ConstitutionEngine } from '../constitution'
 import { CapabilityEngine, freezeDefaults } from '../capability'
@@ -106,6 +107,7 @@ export class AppRuntime {
   private metricsEngine?: MetricsEngineImpl
   private comfyUI?: ComfyUIManager
   private pipeline?: PipelineOrchestrator
+  private dashboardService?: EvolutionDashboardService
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
     this.crashGuard = crashGuard ?? { flushMemory: null }
@@ -144,6 +146,8 @@ export class AppRuntime {
     const gpuEngine = new WhisperGpuEngine()
     const baiduEngine = new BaiduEngine()
     const asrService = new AsrService(gpuEngine, baiduEngine)
+    // 初始化长时个性化词表（从持久化存储加载）
+    asrService.initVocabulary()
 
     this.registerCoreEventBus()
     this.logModelConfig(llmKey)
@@ -170,6 +174,24 @@ export class AppRuntime {
     this.gitOps = new EvolutionGitOps()
 
     const ttsService = new TtsService((state) => stateManager.update(state))
+
+    // ── TTS 路由：从凭据存储恢复用户的引擎偏好 ──
+    try {
+      const savedPref = credentialsManager.get('tts_mode')
+      if (savedPref === 'cloud' || savedPref === 'local' || savedPref === 'auto') {
+        ttsService.setEnginePreference(savedPref)
+        log('INFO', 'tts_preference_restored', { preference: savedPref })
+      }
+    } catch (err) {
+      // 凭据存储可能尚未就绪
+      log('DEBUG', 'tts_preference_restore_skipped', { error: String(err).slice(0, 60) })
+    }
+
+    // ── 预检测网络状态（后台异步，不阻塞启动） ──
+    import('../tts/NetworkMonitor').then(({ networkMonitor }) => {
+      networkMonitor.refresh().catch(() => {})
+    })
+
     const agentService = new AgentService(llmService, asrService, ttsService, eventBus, mcpManager)
     this.agentServiceRef = agentService
     // 将 SubAgentPool 引用注入到 SkillAgentTools 全局
@@ -256,9 +278,10 @@ export class AppRuntime {
 
     const win = createWindow(stateManager)
     agentService.setMainWindow(win)
-    ttsService.setAudioSink((filePath) => {
+    ttsService.setAudioSink(async (filePath) => {
       try {
-        win.webContents.send('tts:play_audio_buffer', readFileSync(filePath))
+        const buf = await fsp.readFile(filePath)
+        win.webContents.send('tts:play_audio_buffer', buf)
       } catch {
         win.webContents.send('tts:play_audio', filePath)
       }
@@ -390,7 +413,8 @@ export class AppRuntime {
 
     // === Stage 5: Handler 注册 & 宪法 ===
     const evolutionRef = createServiceRef<SelfEvolutionService>()
-    registerHandlers(agentService, stateManager, ttsService, evolutionRef)
+    const dashboardRef = createServiceRef<EvolutionDashboardService>()
+    registerHandlers(agentService, stateManager, ttsService, evolutionRef, undefined, dashboardRef)
 
     const constitutionEngine = new ConstitutionEngine()
     await constitutionEngine.initialize(join(WORKSPACE.evolution, 'constitution'))
@@ -584,6 +608,7 @@ export class AppRuntime {
       planManager,
       cognitiveService,
       evolutionRef,
+      dashboardRef,
     )
 
     // 注册 Telegram outbox worker（在 taskRunner 启动前注册，start 后生效）
@@ -602,9 +627,11 @@ export class AppRuntime {
       'social.tick',
       async (): Promise<TaskExecutionResult> => {
         try {
-          const { execSync } = require('child_process')
-          const result = execSync(`node "${join(socialDir, 'cli.mjs')}" tick`, { encoding: 'utf-8', timeout: 30000, cwd: socialDir })
-          const data = JSON.parse(result.trim())
+          const { exec } = require('child_process')
+          const { promisify } = require('util')
+          const asyncExec = promisify(exec)
+          const result = await asyncExec(`node "${join(socialDir, 'cli.mjs')}" tick`, { encoding: 'utf-8', timeout: 30000, cwd: socialDir })
+          const data = JSON.parse(result.stdout.trim())
           if (data.posted > 0 || data.errors > 0) {
             log('INFO', 'social_tick', { posted: data.posted, skipped: data.skipped, errors: data.errors })
           }
@@ -684,6 +711,7 @@ export class AppRuntime {
     evolutionService?.stop()
     insightService?.stop()
     creativityService?.stop()
+    this.dashboardService?.destroy()
     this.lazyInit?.cancel()
     this.subs.dispose()
     closeDatabase()
@@ -766,6 +794,7 @@ export class AppRuntime {
     planManager: any,
     cognitiveService: CognitiveService,
     evolutionRef?: { current: SelfEvolutionService | null },
+    dashboardRef?: { current: EvolutionDashboardService | null },
   ): void {
     // 进化服务
     this.lazyInit!.add({
@@ -935,6 +964,36 @@ export class AppRuntime {
       fn: async () => {
         setInterval(() => agentService.sleepCycle.run(() => agentService.isBusy()), 2 * 60 * 60 * 1000)
         log('INFO', 'sleep_cycle_service_started', { interval_hours: 2 })
+      },
+    })
+
+    // 进化仪表盘 — 在桌面右下角展示进化状态卡片
+    this.lazyInit!.add({
+      name: 'evolution-dashboard',
+      priority: 'normal',
+      delayMs: 100,
+      fn: async () => {
+        const dashboard = new EvolutionDashboardService()
+        const win = getMainWindow()
+        if (win && !win.isDestroyed()) {
+          dashboard.setWindow(win)
+        }
+        if (dashboardRef) dashboardRef.current = dashboard
+        this.dashboardService = dashboard
+        // 托盘切换回调
+        setDashboardToggle(() => {
+          const d = dashboardRef?.current
+          if (d) d.toggleVisibility()
+        })
+        // 交互情境语音 自动/手动 模式切换回调
+        setContextualTtsToggle(() => {
+          const chatExec = agentService.getChatExecutor()
+          if (chatExec) {
+            const currentState = chatExec.getContextualTtsState()
+            chatExec.toggleContextualTts(!currentState.enabled)
+          }
+        })
+        log('INFO', 'evolution_dashboard_started')
       },
     })
 

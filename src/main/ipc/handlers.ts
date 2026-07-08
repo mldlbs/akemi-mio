@@ -4,6 +4,7 @@ import { AgentService } from '../agent/AgentService'
 import { StateManager } from '../core/StateManager'
 import { TtsService } from '../tts/TtsService'
 import { SelfEvolutionService } from '../evolution'
+import { EvolutionDashboardService } from '../wallpaper/WallpaperService'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import { WAKE_WORDS, LLM_API_URL, LLM_CODE_API_URL, LLM_TEXT_API_URL, LLM_VISION_API_URL, WORKSPACE } from '../config'
 import { monitorEventLoopDelay } from 'perf_hooks'
@@ -18,6 +19,8 @@ import { join } from 'path'
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { eventBus } from '../core/EventBus'
 import { VoiceToolOrchestrator } from '../tool/VoiceToolOrchestrator'
+import { extractContextFromSummaries } from '../asr/AsrContextBuilder'
+import { asrHotwordManager } from '../asr/AsrHotwordManager'
 
 /** 打开的沙盒窗口表，防止重复打开 */
 const sandboxWindows = new Map<string, BrowserWindow>()
@@ -73,6 +76,7 @@ export function registerHandlers(
   ttsService: TtsService,
   evolutionRef?: ServiceRef<SelfEvolutionService>,
   metricsCollector?: MetricsCollector,
+  dashboardRef?: ServiceRef<EvolutionDashboardService>,
 ): void {
   ipcMain.handle('window:close', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -125,11 +129,101 @@ export function registerHandlers(
     try {
       const asr = agentService.getAsrService()
       if (!asr) throw new Error('ASR service not initialized')
-      return await asr.transcribe(audioBuffer)
+
+      // 1. 从 Memory 获取最近对话上下文，注入到 ASR 引擎
+      const memoryService = agentService.getMemoryService()
+      if (memoryService) {
+        const recentSummaries = memoryService.summary.getRecentFull(3)
+        const lastUserText = memoryService.getLastUserText()
+        const context = extractContextFromSummaries(recentSummaries, lastUserText || undefined)
+        asr.setConversationContext(context)
+      }
+
+      // 2. 执行转录
+      const result = await asr.transcribe(audioBuffer)
+
+      // 3. 识别后新文本并入 Memory（记录交互、提取主题）
+      if (memoryService && result.text && result.text.trim()) {
+        memoryService.recordInteraction(result.text)
+        memoryService.setLastUserText(result.text)
+        // ASR热词增强：将识别结果回灌到频率热词管理器
+        asrHotwordManager.feedUserText(result.text)
+      }
+
+      return result
     } catch (err) {
       log('ERROR', 'asr_transcribe_failed', { error: String(err) })
       throw err
     }
+  })
+
+  // ── ASR 热词管理 IPC ──
+
+  ipcMain.handle('asr:toggle-hotwords', async (_event, enabled: boolean) => {
+    const asr = agentService.getAsrService()
+    if (asr) {
+      asr.toggleHotwordManager(enabled)
+    }
+    asrHotwordManager.setEnabled(enabled)
+    return { enabled: asrHotwordManager.isEnabled() }
+  })
+
+  ipcMain.handle('asr:hotword-state', async () => {
+    const asr = agentService.getAsrService()
+    if (asr) {
+      return asr.getHotwordManagerState()
+    }
+    return { enabled: asrHotwordManager.isEnabled(), entryCount: 0, hotwords: [], totalInputs: 0 }
+  })
+
+  // ── ASR 词汇管理 IPC（长时个性化词表 ──
+
+  ipcMain.handle('asr:vocabulary:list', async () => {
+    const asr = agentService.getAsrService()
+    if (!asr) return { words: [], domainStats: [], totalWords: 0 }
+    return {
+      words: asr.getLearnedVocabulary(),
+      domainStats: asr.getVocabularyDomainStats(),
+      totalWords: asrHotwordManager.getLongTermVocabSize(),
+      enabled: asrHotwordManager.isEnabled(),
+    }
+  })
+
+  ipcMain.handle('asr:vocabulary:delete', async (_event, word: string) => {
+    const asr = agentService.getAsrService()
+    const removed = asr ? asr.deleteLearnedWord(word) : asrHotwordManager.deleteWord(word)
+    // 删除后刷新 ASR 上下文
+    if (removed && asr) {
+      asr.refreshContext()
+    }
+    return { success: removed }
+  })
+
+  ipcMain.handle('asr:vocabulary:clear', async () => {
+    const asr = agentService.getAsrService()
+    if (asr) {
+      asr.clearAllLearnedVocabulary()
+      asr.refreshContext()
+    } else {
+      asrHotwordManager.clearAllVocabulary()
+    }
+    return { success: true }
+  })
+
+  ipcMain.handle('asr:context:refresh', async () => {
+    const asr = agentService.getAsrService()
+    if (!asr) return { success: false, error: 'ASR not ready' }
+    // 1. 从 Memory 获取最新上下文
+    const memoryService = agentService.getMemoryService()
+    if (memoryService) {
+      const recentSummaries = memoryService.summary.getRecentFull(3)
+      const lastUserText = memoryService.getLastUserText()
+      const context = extractContextFromSummaries(recentSummaries, lastUserText || undefined)
+      asr.setConversationContext(context)
+    } else {
+      asr.refreshContext()
+    }
+    return { success: true }
   })
 
   // ── 语音工具编排 IPC ──
@@ -173,6 +267,8 @@ export function registerHandlers(
 
   ipcMain.handle('tts:stop', async () => {
     try {
+      // 记录隐式反馈：用户主动停止 TTS → SKIP
+      ttsService.recordImplicitFeedback('SKIP')
       ttsService.stop()
     } catch (err) {
       log('ERROR', 'tts_stop_failed', { error: String(err) })
@@ -200,6 +296,153 @@ export function registerHandlers(
       return { success: true, enabled: false, params: null }
     } catch (err) {
       log('ERROR', 'tts_emotion_state_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  // ── 行为情绪检测 IPC ──
+  ipcMain.handle('tts:behaviorEmotion:toggle', async (_event, enabled: boolean) => {
+    try {
+      agentService.getChatExecutor()?.toggleBehaviorEmotion(enabled)
+      log('INFO', 'tts_behavior_emotion_toggle_ipc', { enabled })
+      return { success: true, enabled }
+    } catch (err) {
+      log('ERROR', 'tts_behavior_emotion_toggle_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('tts:behaviorEmotion:state', async () => {
+    try {
+      const chatExec = agentService.getChatExecutor()
+      if (chatExec) {
+        return { success: true, ...chatExec.getBehaviorEmotionState() }
+      }
+      return { success: true, enabled: false, result: null, metrics: null }
+    } catch (err) {
+      log('ERROR', 'tts_behavior_emotion_state_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  // ── 隐式反馈驱动的语音自适应 IPC ──
+  ipcMain.handle('tts:implicitFeedback:recordAction', async (_event, action: string) => {
+    try {
+      const valid = ['REPLAY', 'SKIP', 'INTERRUPT_SPEECH', 'CONTINUE_CONVERSATION', 'MODIFY_REQUEST', 'COMPLETED_NATURALLY']
+      if (!valid.includes(action)) return { success: false, error: `无效的反馈动作: ${action}` }
+      ttsService.recordImplicitFeedback(action as any)
+      return { success: true }
+    } catch (err) {
+      log('ERROR', 'tts_implicit_feedback_record_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('tts:implicitFeedback:toggle', async (_event, enabled: boolean) => {
+    try {
+      agentService.getChatExecutor()?.toggleImplicitFeedback(enabled)
+      log('INFO', 'tts_implicit_feedback_toggle_ipc', { enabled })
+      return { success: true, enabled }
+    } catch (err) {
+      log('ERROR', 'tts_implicit_feedback_toggle_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('tts:implicitFeedback:state', async () => {
+    try {
+      const chatExec = agentService.getChatExecutor()
+      if (chatExec) {
+        return { success: true, ...chatExec.getImplicitFeedbackState() }
+      }
+      return { success: true, enabled: false, recommendation: null, status: { modelInitialized: false, totalSamples: 0, historySize: 0 } }
+    } catch (err) {
+      log('ERROR', 'tts_implicit_feedback_state_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('tts:implicitFeedback:updateModel', async () => {
+    try {
+      agentService.getChatExecutor()?.triggerImplicitFeedbackUpdate()
+      return { success: true }
+    } catch (err) {
+      log('ERROR', 'tts_implicit_feedback_update_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('tts:implicitFeedback:reset', async () => {
+    try {
+      agentService.getChatExecutor()?.resetImplicitFeedback()
+      return { success: true }
+    } catch (err) {
+      log('ERROR', 'tts_implicit_feedback_reset_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  // ── 交互情境自适应语音 IPC ──
+  ipcMain.handle('tts:contextual:toggle', async (_event, enabled: boolean) => {
+    try {
+      agentService.getChatExecutor()?.toggleContextualTts(enabled)
+      log('INFO', 'tts_contextual_toggle_ipc', { enabled })
+      return { success: true, enabled }
+    } catch (err) {
+      log('ERROR', 'tts_contextual_toggle_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('tts:contextual:state', async () => {
+    try {
+      const chatExec = agentService.getChatExecutor()
+      if (chatExec) {
+        return { success: true, ...chatExec.getContextualTtsState() }
+      }
+      return { success: true, enabled: false, context: null }
+    } catch (err) {
+      log('ERROR', 'tts_contextual_state_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  // ── TTS 引擎偏好（混合路由） ──
+  ipcMain.handle('tts:engine-preference:set', async (_event, pref: string) => {
+    try {
+      const valid = pref === 'auto' || pref === 'cloud' || pref === 'local'
+      if (!valid) return { success: false, error: `无效的引擎偏好: ${pref}` }
+      ttsService.setEnginePreference(pref as 'auto' | 'cloud' | 'local')
+      // 同步写入凭据，持久化偏好
+      credentialsManager.set('tts_mode', pref)
+      return { success: true, preference: pref }
+    } catch (err) {
+      log('ERROR', 'tts_engine_preference_set_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('tts:engine-preference:get', async () => {
+    try {
+      return { success: true, preference: ttsService.getEnginePreference() }
+    } catch (err) {
+      log('ERROR', 'tts_engine_preference_get_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('tts:router-state', async () => {
+    try {
+      const decision = ttsService.getLastRoutingDecision()
+      const weights = ttsService.getRoutingWeights()
+      return {
+        success: true,
+        preference: ttsService.getEnginePreference(),
+        lastDecision: decision,
+        weights,
+      }
+    } catch (err) {
+      log('ERROR', 'tts_router_state_failed', { error: String(err) })
       return { success: false }
     }
   })
@@ -249,6 +492,16 @@ export function registerHandlers(
     })
   }
 
+  // Evolution Dashboard toggle
+  if (dashboardRef) {
+    ipcMain.handle('evolution:dashboard:toggle', async () => {
+      const svc = dashboardRef.current
+      if (!svc) return { success: false, visible: false }
+      const visible = svc.toggleVisibility()
+      return { success: true, visible }
+    })
+  }
+
   ipcMain.handle('credentials:list', async () => {
     return credentialsManager.list()
   })
@@ -268,6 +521,12 @@ export function registerHandlers(
       } catch (err) {
         log('WARN', 'llm_config_refresh_failed', { error: String(err) })
       }
+    }
+    // TTS 引擎偏好变更时实时同步到 TtsRouter
+    if (name === 'tts_mode') {
+      const pref = value === 'cloud' ? 'cloud' : value === 'local' ? 'local' : 'auto'
+      ttsService.setEnginePreference(pref as 'auto' | 'cloud' | 'local')
+      log('INFO', 'tts_mode_credential_synced', { value, preference: pref })
     }
     return true
   })
@@ -550,6 +809,41 @@ export function registerHandlers(
       return { success: ok, error: ok ? undefined : '审批请求不存在' }
     } catch (err: any) {
       return { success: false, error: err.message }
+    }
+  })
+
+  // ── Desktop Toolbar (桌面任务控制浮层) ──
+
+  const desktopToolMap: Record<string, (args: any) => Promise<any>> = {}
+
+  // 延迟加载 DesktopTools，避免循环依赖
+  import('../tool/definitions/DesktopTools')
+    .then(({ desktopTools }) => {
+      for (const tool of desktopTools) {
+        desktopToolMap[tool.name] = tool.handler
+      }
+      log('INFO', 'desktop_tools_loaded', { count: desktopTools.length })
+    })
+    .catch((err) => {
+      log('WARN', 'desktop_tools_load_failed', { error: String(err) })
+    })
+
+  ipcMain.handle('desktop:invokeTool', async (_event, toolName: string, args: Record<string, any>) => {
+    try {
+      const handler = desktopToolMap[toolName]
+      if (!handler) {
+        return { success: false, error: `未知工具: ${toolName}` }
+      }
+      const result = await handler(args)
+      // MCPToolResult 格式: { content: [{ type: 'text', text: string }], isError: boolean }
+      if (result && typeof result === 'object' && 'content' in result) {
+        const text = result.content?.[0]?.text || ''
+        return { success: !result.isError, result: text, error: result.isError ? text : undefined }
+      }
+      return { success: true, result: String(result) }
+    } catch (err: any) {
+      log('ERROR', 'desktop_invoke_tool_failed', { toolName, error: String(err) })
+      return { success: false, error: err.message || String(err) }
     }
   })
 

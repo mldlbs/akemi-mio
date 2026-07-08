@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, promises as fsp } from 'fs'
 import { join } from 'path'
 import { log } from '../logger/Logger'
 import { eventBus } from '../core/EventBus'
@@ -111,12 +111,12 @@ export class SessionRecoveryManager {
       const filePath = join(this.checkpointsDir, filename)
       const latestPath = join(this.checkpointsDir, 'latest.json')
 
-      writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
-      writeFileSync(latestPath, JSON.stringify(data, null, 2), 'utf-8')
+      await fsp.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8')
+      await fsp.writeFile(latestPath, JSON.stringify(data, null, 2), 'utf-8')
 
-      this.writeTaskStatus(data)
-      this.writeSummaryStatus(data)
-      this.appendHistory({ runId: params.runId, timestamp: data.meta.timestamp, trigger: data.meta.trigger })
+      await this.writeTaskStatus(data)
+      await this.writeSummaryStatus(data)
+      await this.appendHistory({ runId: params.runId, timestamp: data.meta.timestamp, trigger: data.meta.trigger })
 
       eventBus.emit('recovery.checkpoint.created', {
         runId: params.runId,
@@ -356,7 +356,7 @@ export class SessionRecoveryManager {
     }
   }
 
-  private writeTaskStatus(data: CheckpointData): void {
+  private async writeTaskStatus(data: CheckpointData): Promise<void> {
     try {
       const lines: string[] = [
         '# Session Tasks',
@@ -382,13 +382,13 @@ export class SessionRecoveryManager {
       lines.push(`Conversation turns: ${data.conversationStats.totalTurns}`)
 
       const filePath = join(this.baseDir, 'TASK.md')
-      writeFileSync(filePath, lines.join('\n'), 'utf-8')
+      await fsp.writeFile(filePath, lines.join('\n'), 'utf-8')
     } catch (err: any) {
       log('WARN', 'task_status_write_failed', { error: String(err) })
     }
   }
 
-  private writeSummaryStatus(data: CheckpointData): void {
+  private async writeSummaryStatus(data: CheckpointData): Promise<void> {
     try {
       const lines: string[] = [
         '# Session Status',
@@ -415,19 +415,19 @@ export class SessionRecoveryManager {
       lines.push(`  Total messages tracked: ${data.conversationStats.totalMessages}`)
 
       const filePath = join(this.baseDir, 'STATUS.md')
-      writeFileSync(filePath, lines.join('\n'), 'utf-8')
+      await fsp.writeFile(filePath, lines.join('\n'), 'utf-8')
     } catch (err: any) {
       log('WARN', 'summary_status_write_failed', { error: String(err) })
     }
   }
 
-  private appendHistory(entry: { runId: string; timestamp: number; trigger: string }): void {
+  private async appendHistory(entry: { runId: string; timestamp: number; trigger: string }): Promise<void> {
     try {
       const historyPath = join(this.baseDir, 'history.json')
       let history: Array<{ runId: string; timestamp: number; trigger: string }> = []
 
       if (existsSync(historyPath)) {
-        history = JSON.parse(readFileSync(historyPath, 'utf-8'))
+        history = JSON.parse(await fsp.readFile(historyPath, 'utf-8'))
       }
 
       history.push(entry)
@@ -435,7 +435,7 @@ export class SessionRecoveryManager {
         history = history.slice(-20)
       }
 
-      writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf-8')
+      await fsp.writeFile(historyPath, JSON.stringify(history, null, 2), 'utf-8')
     } catch (err: any) {
       log('WARN', 'history_append_failed', { error: String(err) })
     }

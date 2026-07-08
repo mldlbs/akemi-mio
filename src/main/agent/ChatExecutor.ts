@@ -52,12 +52,23 @@ import { setPersonaStateManager } from '../tool/deps'
 import { PersonaDriftControlSystem, DRIFT_CORRECTION_PROMPT } from './PersonaDriftControlSystem'
 import { classifyContent } from './ContentClassifier'
 import { userBehaviorAnalyzer } from './UserBehaviorAnalyzer'
+import { asrHotwordManager } from '../asr/AsrHotwordManager'
 import { sentimentAnalyzer } from '../tts/SentimentAnalyzer'
 import { emotionToneMap } from '../tts/EmotionToneMap'
-import type { EmotionTtsParams, UserToneProfile } from '../tts/types'
+import type { EmotionTtsParams, UserToneProfile, VoiceStyle, ReplyCategory } from '../tts/types'
 import { toneProfileAnalyzer } from '../tts/ToneProfileAnalyzer'
 import { toneToVoiceMapper } from '../tts/ToneToVoiceMapper'
 import { toneProfileCache } from '../tts/UserToneProfileCache'
+import { voiceStyleMap } from '../tts/VoiceStyleMap'
+import { behaviorEmotionDetector } from '../tts/BehaviorEmotionDetector'
+import { contextualTtsAdvisor } from '../tts/ContextualTtsAdvisor'
+import { implicitFeedbackTracker } from '../tts/ImplicitFeedbackTracker'
+import type {
+  BehaviorEmotionResult,
+  BehaviorMetrics,
+  InteractionContext,
+  PreferenceRecommendation,
+} from '../tts/types'
 
 export class ChatExecutor {
   private llmService: LlmService
@@ -220,6 +231,13 @@ export class ChatExecutor {
     if (behaviorPattern.hasSufficientData && behaviorPattern.suggestedToolHints.length > 0) {
       extraModules.push(...behaviorPattern.suggestedToolHints)
     }
+    // 行为强化记忆巩固：检测重复提问模式，自动强化相关记忆条目
+    if (this.lastUserText) {
+      const repeatPattern = userBehaviorAnalyzer.detectRepeatedPattern(this.lastUserText)
+      if (repeatPattern.detected && repeatPattern.mergedTopics.length > 0) {
+        this.memoryService.reinforceByBehaviorPattern(repeatPattern.mergedTopics, repeatPattern.currentText)
+      }
+    }
     const allExtraModules = extraModules.length > 0 ? extraModules : undefined
     if (memCtx || reflectCtx || allExtraModules || this.identityContext) {
       this.workingMemory.refreshMemory(memCtx, reflectCtx, allExtraModules, this.identityContext || undefined)
@@ -263,6 +281,18 @@ export class ChatExecutor {
   private currentToneProfile: UserToneProfile | null = null
   /** 已初始化标记 */
   private toneProfileInitialized = false
+  /** 行为情绪检测是否启用（用户可通过 IPC 开关） */
+  private behaviorEmotionEnabled = true
+  /** 上次检测的行为情绪结果（用于混合） */
+  private lastBehaviorEmotion: BehaviorEmotionResult | null = null
+  /** 交互情境自适应语音是否启用（用户可通过系统托盘切换自动/手动模式） */
+  private contextualTtsEnabled = true
+  /** 上次交互情境推荐结果 */
+  private lastContextualContext: InteractionContext | null = null
+  /** 隐式反馈驱动的语音自适应是否启用 */
+  private implicitFeedbackEnabled = true
+  /** 上次隐式反馈推荐结果 */
+  private lastImplicitFeedback: PreferenceRecommendation | null = null
 
   async run(
     text: string,
@@ -273,6 +303,14 @@ export class ChatExecutor {
     noTts?: boolean,
   ): Promise<ChatResult> {
     this.noTts = noTts ?? false
+    // 行为情绪检测器懒启动（首次 run 时绑定窗口事件并开始采样）
+    if (this.behaviorEmotionEnabled && !behaviorEmotionDetector.isEnabled()) {
+      behaviorEmotionDetector.setEnabled(true)
+      if (this.mainWindow) {
+        behaviorEmotionDetector.updateWindow(this.mainWindow)
+      }
+      behaviorEmotionDetector.start(this.mainWindow ?? undefined)
+    }
     const rid = requestId || createRequestId()
     const t0 = Date.now()
     this.memoryService?.recordInteraction(text)
@@ -280,6 +318,25 @@ export class ChatExecutor {
     this.lastUserText = text
     // 行为分析：记录用户消息用于模式检测
     userBehaviorAnalyzer.recordUserMessage(text)
+    // ── [隐式反馈] 用户发送新消息 → 标记"继续对话"（接受当前 TTS 质量）──
+    if (this.implicitFeedbackEnabled) {
+      implicitFeedbackTracker.onUserContinuedConversation()
+      // 检测用户是否在修改/重述之前的请求
+      const repeatPattern = userBehaviorAnalyzer.detectRepeatedPattern(text)
+      if (repeatPattern.detected && repeatPattern.similarity > 0.6) {
+        implicitFeedbackTracker.onUserModifiedRequest()
+      }
+    }
+    // ASR热词增强：喂入用户文本用于提取高频词汇
+    asrHotwordManager.feedUserText(text)
+    // 行为情绪：记录用户交互用于 APM 计算
+    if (this.behaviorEmotionEnabled) {
+      behaviorEmotionDetector.recordInteraction()
+    }
+    // 交互情境：记录交互时间戳用于节奏检测
+    if (this.contextualTtsEnabled) {
+      contextualTtsAdvisor.recordInteraction()
+    }
     // 语气记忆：懒初始化 + 增量更新用户语气画像
     this.ensureToneProfileInit()
     if (this.toneProfileEnabled) {
@@ -418,12 +475,19 @@ export class ChatExecutor {
     this.runContext?.interrupt('user_stop')
     this.runContext = null
     this.ttsService.stop()
+    // ── [隐式反馈] 用户停止对话 → 记录 SKIP ──
+    if (this.implicitFeedbackEnabled) {
+      implicitFeedbackTracker.recordSimpleAction('SKIP')
+    }
     this.executionGovernor.reset()
     this.progressGuardrail.reset()
+    // 停止行为情绪检测器的鼠标采样（释放定时器）
+    behaviorEmotionDetector.stop()
   }
 
   private async toolLoop(messages: Message[], ctx: RunContext, requestId: string, source: string): Promise<string> {
     ctx.transition(RunState.RUNNING)
+    this.guardrailPipeline?.reset()
     const MAX_TURNS = 300
     /** 诊断：记录 LLM 返回 tool_calls 但未执行的路径 */
     const orphanSources: Record<string, number> = {}
@@ -542,6 +606,10 @@ export class ChatExecutor {
               this.proceduralMemory?.recordHit(tr.name)
               // 行为分析：记录工具调用模式
               userBehaviorAnalyzer.recordToolCall(tr.name)
+              // 行为情绪：记录工具调用用于 APM 计算
+              if (this.behaviorEmotionEnabled) {
+                behaviorEmotionDetector.recordAction()
+              }
             }
           }
           for (const tr of toolResults) {
@@ -794,18 +862,16 @@ export class ChatExecutor {
    * 情感自适应语音：分析回复文本并更新 TTS 情感参数
    *
    * 在 LLM 回复完成后、TTS 发音前调用。
-   * 合并分析 LLM 回复文本 + 本轮工具返回内容，综合判断情感。
+   * 优先使用 VoiceStyleMap（基于回复类型语义），回退到 EmotionToneMap（基于文本情感）。
    *
    * 如果启用了语气记忆个性化语音（toneProfileEnabled），
-   * 会将用户语气基线参数与内容情感参数进行混合：
-   *   - voice 由用户语气决定（保持一致性）
-   *   - rate/pitch 在基线基础上由内容情感微调
+   * 会将用户语气基线参数与内容风格参数进行混合。
    */
   private applySentimentToTts(llmReply: string, toolResultTexts?: string[]): void {
     if (!this.emotionTtsEnabled) return
 
     try {
-      // 合并 LLM 回复和工具结果进行综合情感分析
+      // 合并 LLM 回复和工具结果进行综合分析
       const parts: string[] = []
       if (llmReply) parts.push(llmReply)
       if (toolResultTexts && toolResultTexts.length > 0) {
@@ -815,13 +881,109 @@ export class ChatExecutor {
 
       if (!combined || combined.trim().length < 10) return
 
+      // ── 第一层：VoiceStyleMap（基于回复类型语义）──
+      const { style, params: styleParams, category } = voiceStyleMap.detectAndMap(combined)
+
+      // ── 第二层：EmotionToneMap（基于文本情感，作为补充）──
       const sentiment = sentimentAnalyzer.analyze(combined)
       const emotionParams = emotionToneMap.getParams(sentiment)
 
-      // 如果启用了语气记忆，混合用户语气基线 + 内容情感
-      let finalParams = emotionParams
+      // ── 融合：优先 VoiceStyle voice，情感微调 rate/pitch ──
+      let finalParams = styleParams
+      if (sentiment.polarity === 'positive') {
+        // 正面情感强化 style 的活力
+        finalParams = {
+          ...styleParams,
+          rate: emotionParams.rate,
+          pitch: emotionParams.pitch,
+          label: `${styleParams.label}·${emotionParams.label}`,
+        }
+      } else if (sentiment.polarity === 'negative') {
+        // 负面情感降低 style 的活力
+        finalParams = {
+          ...styleParams,
+          rate: emotionParams.rate,
+          pitch: emotionParams.pitch,
+          label: `${styleParams.label}·${emotionParams.label}`,
+        }
+      }
+
+      // 如果启用了语气记忆，混合用户语气基线 + 内容风格
       if (this.toneProfileEnabled && this.lastToneBaseline) {
-        finalParams = toneToVoiceMapper.blend(this.lastToneBaseline, emotionParams)
+        finalParams = toneToVoiceMapper.blend(this.lastToneBaseline, finalParams)
+      }
+
+      // 如果启用了行为情绪，混合行为情绪参数（20% 权重，温和修正）
+      if (this.behaviorEmotionEnabled) {
+        const behaviorResult = behaviorEmotionDetector.getEmotion()
+        this.lastBehaviorEmotion = behaviorResult
+        if (behaviorResult.emotion !== 'neutral' && behaviorResult.confidence > 0.3) {
+          const behaviorParams = behaviorResult.ttsParams
+          // 混合：保留 voice 不变，rate/pitch 加入 20% 的行为情绪影响
+          const currentRate = parseInt(finalParams.rate.replace(/[^0-9-]/g, '')) || 0
+          const behaviorRate = parseInt(behaviorParams.rate.replace(/[^0-9-]/g, '')) || 0
+          const currentPitch = parseInt(finalParams.pitch.replace(/[^0-9-]/g, '')) || 0
+          const behaviorPitch = parseInt(behaviorParams.pitch.replace(/[^0-9-]/g, '')) || 0
+
+          const blendedRate = Math.round(currentRate * 0.8 + behaviorRate * 0.2)
+          const blendedPitch = Math.round(currentPitch * 0.8 + behaviorPitch * 0.2)
+
+          finalParams = {
+            voice: finalParams.voice, // voice 保持不变
+            rate: `${blendedRate >= 0 ? '+' : ''}${blendedRate}%`,
+            pitch: `${blendedPitch >= 0 ? '+' : ''}${blendedPitch}Hz`,
+            label: `${finalParams.label}·${behaviorParams.label}`,
+          }
+        }
+      }
+
+      // 如果启用了交互情境自适应，混合情境参数（15% 权重，温和修正）
+      if (this.contextualTtsEnabled) {
+        const contextualResult = contextualTtsAdvisor.getRecommendation()
+        this.lastContextualContext = contextualResult
+        if (contextualResult.confidence > 0.2) {
+          const contextualParams = contextualResult.ttsParams
+          const currentRate = parseInt(finalParams.rate.replace(/[^0-9-]/g, '')) || 0
+          const contextualRate = parseInt(contextualParams.rate.replace(/[^0-9-]/g, '')) || 0
+          const currentPitch = parseInt(finalParams.pitch.replace(/[^0-9-]/g, '')) || 0
+          const contextualPitch = parseInt(contextualParams.pitch.replace(/[^0-9-]/g, '')) || 0
+
+          // 混合：情境影响 15%，保留其他层级的 85%
+          const blendedRate = Math.round(currentRate * 0.85 + contextualRate * 0.15)
+          const blendedPitch = Math.round(currentPitch * 0.85 + contextualPitch * 0.15)
+
+          finalParams = {
+            voice: finalParams.voice, // voice 保持不变
+            rate: `${blendedRate >= 0 ? '+' : ''}${blendedRate}%`,
+            pitch: `${blendedPitch >= 0 ? '+' : ''}${blendedPitch}Hz`,
+            label: `${finalParams.label}·${contextualParams.label}`,
+          }
+        }
+      }
+
+      // ── [隐式反馈] 混合隐式偏好学习的参数推荐（10-15% 权重，渐进调整）──
+      if (this.implicitFeedbackEnabled) {
+        const prefRec = implicitFeedbackTracker.getRecommendation()
+        this.lastImplicitFeedback = prefRec
+        if (prefRec.confidence > 0.2 && prefRec.totalSamples >= 5) {
+          const prefParams = prefRec.params
+          const currentRate = parseInt(finalParams.rate.replace(/[^0-9-]/g, '')) || 0
+          const prefRate = parseInt(prefParams.rate.replace(/[^0-9-]/g, '')) || 0
+          const currentPitch = parseInt(finalParams.pitch.replace(/[^0-9-]/g, '')) || 0
+          const prefPitch = parseInt(prefParams.pitch.replace(/[^0-9-]/g, '')) || 0
+
+          // 隐式反馈权重：置信度越高，影响越大（0.1~0.15）
+          const feedbackWeight = Math.min(0.15, 0.08 + prefRec.confidence * 0.08)
+          const blendedRate = Math.round(currentRate * (1 - feedbackWeight) + prefRate * feedbackWeight)
+          const blendedPitch = Math.round(currentPitch * (1 - feedbackWeight) + prefPitch * feedbackWeight)
+
+          finalParams = {
+            voice: finalParams.voice, // voice 保持之前多层决策的结果
+            rate: `${blendedRate >= 0 ? '+' : ''}${blendedRate}%`,
+            pitch: `${blendedPitch >= 0 ? '+' : ''}${blendedPitch}Hz`,
+            label: `${finalParams.label}·${prefParams.label}`,
+          }
+        }
       }
 
       // 避免重复设置相同参数
@@ -832,7 +994,7 @@ export class ChatExecutor {
       this.lastEmotionParams = finalParams
       this.ttsService.setEmotion(finalParams)
 
-      // 发送情感信息到渲染进程（供 UI 展示/调试）
+      // 发送完整语音风格信息到渲染进程（供 UI 展示/调试）
       this.mainWindow?.webContents.send('tts:emotion', {
         polarity: sentiment.polarity,
         contentType: sentiment.contentType,
@@ -840,12 +1002,52 @@ export class ChatExecutor {
         voice: finalParams.voice,
         label: finalParams.label,
         matchedWords: sentiment.matchedWords.slice(0, 5),
-        toneProfile: this.toneProfileEnabled && this.currentToneProfile
-          ? {
-              primaryTone: this.currentToneProfile.primaryTone,
-              confidence: this.currentToneProfile.confidence,
-            }
-          : null,
+        // ── VoiceStyle 字段 ──
+        voiceStyle: style,
+        replyCategory: category,
+        toneProfile:
+          this.toneProfileEnabled && this.currentToneProfile
+            ? {
+                primaryTone: this.currentToneProfile.primaryTone,
+                confidence: this.currentToneProfile.confidence,
+              }
+            : null,
+        // ── BehaviorEmotion 字段 ──
+        behaviorEmotion:
+          this.behaviorEmotionEnabled && this.lastBehaviorEmotion
+            ? {
+                emotion: this.lastBehaviorEmotion.emotion,
+                confidence: this.lastBehaviorEmotion.confidence,
+                scores: this.lastBehaviorEmotion.scores,
+                metrics: {
+                  apm: this.lastBehaviorEmotion.metrics.apm,
+                  windowSwitchesPerMin: this.lastBehaviorEmotion.metrics.windowSwitchesPerMin,
+                  mouseJitter: this.lastBehaviorEmotion.metrics.mouseJitter,
+                },
+              }
+            : null,
+        // ── ContextualTts 字段 ──
+        contextualTts:
+          this.contextualTtsEnabled && this.lastContextualContext
+            ? {
+                cadence: this.lastContextualContext.cadence,
+                dayPeriod: this.lastContextualContext.dayPeriod,
+                confidence: this.lastContextualContext.confidence,
+                description: this.lastContextualContext.description,
+                meanIntervalSec: this.lastContextualContext.intervalStats.meanIntervalSec,
+                rapidBurstCount: this.lastContextualContext.intervalStats.rapidBurstCount,
+              }
+            : null,
+        // ── [隐式反馈] 偏好学习字段 ──
+        implicitFeedback:
+          this.implicitFeedbackEnabled && this.lastImplicitFeedback
+            ? {
+                confidence: this.lastImplicitFeedback.confidence,
+                totalSamples: this.lastImplicitFeedback.totalSamples,
+                reason: this.lastImplicitFeedback.reason,
+                recommendedVoice: this.lastImplicitFeedback.params.voice,
+              }
+            : null,
       })
     } catch (err) {
       // 情感分析失败不应影响正常对话流程
@@ -921,5 +1123,106 @@ export class ChatExecutor {
       profile: this.currentToneProfile,
       baseline: this.lastToneBaseline,
     }
+  }
+
+  // ══════════════════════════════════════════
+  //  行为情绪检测
+  // ══════════════════════════════════════════
+
+  /** 切换行为情绪检测开关（供 IPC 调用） */
+  toggleBehaviorEmotion(enabled: boolean): void {
+    this.behaviorEmotionEnabled = enabled
+    behaviorEmotionDetector.setEnabled(enabled)
+    if (!enabled) {
+      this.lastBehaviorEmotion = null
+    }
+    this.mainWindow?.webContents.send('tts:behaviorEmotion:enabled', { enabled })
+  }
+
+  /** 获取当前行为情绪状态（供 IPC/调试） */
+  getBehaviorEmotionState(): {
+    enabled: boolean
+    result: BehaviorEmotionResult | null
+    metrics: BehaviorMetrics | null
+  } {
+    return {
+      enabled: this.behaviorEmotionEnabled,
+      result: this.lastBehaviorEmotion,
+      metrics: this.behaviorEmotionEnabled ? behaviorEmotionDetector.getMetrics() : null,
+    }
+  }
+
+  // ══════════════════════════════════════════
+  //  交互情境自适应语音
+  // ══════════════════════════════════════════
+
+  /** 切换交互情境自适应语音开关（供 IPC 调用，系统托盘 auto/manual 模式） */
+  toggleContextualTts(enabled: boolean): void {
+    this.contextualTtsEnabled = enabled
+    contextualTtsAdvisor.setEnabled(enabled)
+    if (!enabled) {
+      this.lastContextualContext = null
+    }
+    this.mainWindow?.webContents.send('tts:contextual:enabled', { enabled })
+  }
+
+  /** 获取当前交互情境自适应状态（供 IPC/调试） */
+  getContextualTtsState(): {
+    enabled: boolean
+    context: InteractionContext | null
+  } {
+    return {
+      enabled: this.contextualTtsEnabled,
+      context: this.contextualTtsEnabled ? contextualTtsAdvisor.getRecommendation() : null,
+    }
+  }
+
+  // ══════════════════════════════════════════
+  //  隐式反馈驱动的语音自适应
+  // ══════════════════════════════════════════
+
+  /** 切换隐式反馈语音自适应开关（供 IPC 调用） */
+  toggleImplicitFeedback(enabled: boolean): void {
+    this.implicitFeedbackEnabled = enabled
+    implicitFeedbackTracker.setEnabled(enabled)
+    if (!enabled) {
+      this.lastImplicitFeedback = null
+    }
+    this.mainWindow?.webContents.send('tts:implicitFeedback:enabled', { enabled })
+  }
+
+  /** 获取当前隐式反馈状态（供 IPC/调试） */
+  getImplicitFeedbackState(): {
+    enabled: boolean
+    recommendation: PreferenceRecommendation | null
+    status: {
+      modelInitialized: boolean
+      totalSamples: number
+      historySize: number
+    }
+  } {
+    const status = implicitFeedbackTracker.getStatus()
+    return {
+      enabled: this.implicitFeedbackEnabled,
+      recommendation: this.implicitFeedbackEnabled ? this.lastImplicitFeedback : null,
+      status: {
+        modelInitialized: status.modelInitialized,
+        totalSamples: status.totalSamples,
+        historySize: status.historySize,
+      },
+    }
+  }
+
+  /** 触发隐式反馈模型立即更新 */
+  triggerImplicitFeedbackUpdate(): void {
+    implicitFeedbackTracker.updateModel()
+    log('INFO', 'implicit_feedback_manual_update_triggered')
+  }
+
+  /** 重置隐式反馈模型学习数据 */
+  resetImplicitFeedback(): void {
+    implicitFeedbackTracker.reset()
+    this.lastImplicitFeedback = null
+    log('INFO', 'implicit_feedback_reset')
   }
 }

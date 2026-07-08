@@ -151,7 +151,7 @@ export function createWindow(stateManager: StateManager): BrowserWindow {
 
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
-    mainWindow.webContents.openDevTools()
+    // mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
@@ -194,7 +194,7 @@ export function createAgentWindow(): BrowserWindow {
 
   if (process.env.ELECTRON_RENDERER_URL) {
     agentWindow.loadURL(process.env.ELECTRON_RENDERER_URL.replace('index.html', 'agent.html'))
-    agentWindow.webContents.openDevTools()
+    // agentWindow.webContents.openDevTools()
   } else {
     agentWindow.loadFile(join(__dirname, '../renderer/agent.html'))
   }
