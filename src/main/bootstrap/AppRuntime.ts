@@ -77,6 +77,8 @@ import { MetricsEngineImpl } from '../core/evaluation/MetricsEngine'
 import { ToolEventBridge } from '../core/evaluation/ToolEventBridge'
 import { GuardrailPipeline } from '../core/evaluation/GuardrailPipeline'
 import { GuardrailProgressConsumer } from '../core/evaluation/progress-consumers/GuardrailProgressConsumer'
+import { GuardrailConfigStore } from '../core/evaluation/GuardrailConfigStore'
+import { DEFAULT_GUARDRAIL_POLICY_CONFIG } from '../core/evaluation/GuardrailTypes'
 import { ProgressObserver } from '../core/evaluation/ProgressObserver'
 import { GuardrailProgressAnalyzer } from '../core/evaluation/GuardrailProgressAnalyzer'
 import { type ToolEventBridge } from '../core/evaluation/ToolEventBridge'
@@ -295,11 +297,14 @@ export class AppRuntime {
     // 注入 EvaluationEmitter 用于写入 Delivery Trace 事件
     agentService.setEvaluationEmitter(this.evaluationEmitter)
 
+    // GuardrailConfigStore — 版本管理
+    const guardrailConfigStore = new GuardrailConfigStore(DEFAULT_GUARDRAIL_POLICY_CONFIG)
+
     // GuardrailProgressConsumer 接入 ProgressObserver
     // ADR-004 Option A: Consumer 通过 callback 将 GuardrailDecision 交付给 Pipeline
     const guardrailConsumer = new GuardrailProgressConsumer(undefined, (decision) => {
       guardrailPipeline.onGuardrailDecision(decision)
-    })
+    }, guardrailConfigStore)
 
     // ProgressObserver — Event Pipeline Observer（单例）
     this.progressObserver = new ProgressObserver(this.evaluationStore, new GuardrailProgressAnalyzer(this.evaluationStore))

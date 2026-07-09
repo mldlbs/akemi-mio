@@ -20,27 +20,33 @@
  *
  * 变更记录：
  *   M4 (2026-07-09): evaluate() 改为 PolicyInput 调用；config 从 Consumer 传递。
+ *   M4.3 (2026-07-09): 接受 GuardrailConfigStore 替代静态 GuardrailPolicyConfig；
+ *                       consume() 每次读取 getActiveConfig()，支持运行中 Config 切换。
  *
  * 不引用：ChatExecutor, Runtime, EvaluationStore, EvaluationEmitter, EventBus
  */
 import type { ProgressConsumer, ProgressSnapshot } from '../progress'
-import type { GuardrailPolicy, GuardrailDecision, GuardrailPolicyConfig } from '../GuardrailTypes'
+import type { GuardrailPolicy, GuardrailDecision } from '../GuardrailTypes'
 import { DefaultGuardrailPolicy } from '../GuardrailPolicy'
 import { DEFAULT_GUARDRAIL_POLICY_CONFIG } from '../GuardrailTypes'
+import type { GuardrailConfigStore } from '../GuardrailConfigStore'
 
 export class GuardrailProgressConsumer implements ProgressConsumer {
   private policy: GuardrailPolicy
-  private config: GuardrailPolicyConfig
+  private configStore?: GuardrailConfigStore
   private onDecision: (decision: GuardrailDecision) => void
 
-  constructor(policy?: GuardrailPolicy, onDecision?: ((decision: GuardrailDecision) => void) | null, config?: GuardrailPolicyConfig) {
+  constructor(policy?: GuardrailPolicy, onDecision?: ((decision: GuardrailDecision) => void) | null, configStore?: GuardrailConfigStore) {
     this.policy = policy ?? new DefaultGuardrailPolicy()
-    this.config = config ?? DEFAULT_GUARDRAIL_POLICY_CONFIG
+    this.configStore = configStore
     this.onDecision = onDecision ?? (() => {})
   }
 
   async consume(snapshot: ProgressSnapshot): Promise<void> {
-    const decision = this.policy.evaluate({ snapshot, config: this.config })
+    const { config } = this.configStore
+      ? this.configStore.getActiveConfig()
+      : { config: DEFAULT_GUARDRAIL_POLICY_CONFIG }
+    const decision = this.policy.evaluate({ snapshot, config })
     this.onDecision(decision)
   }
 }

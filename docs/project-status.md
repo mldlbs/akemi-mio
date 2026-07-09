@@ -63,20 +63,6 @@ Guardrail / Fitness / Reflection / Evolution / Planner / ...
 Policies / Thresholds / Adaptive Logic
 ```
 
-```
-Facts
-──────────────
-EvaluationEvent
-Observation
-──────────────
-ProgressAnalyzer        ← Infrastructure
-──────────────
-ProgressSnapshot
-──────────────
-Capabilities
-Guardrail / Fitness / Reflection / Evolution / Planner / ...
-```
-
 每一层只依赖下一层，不跨层。不会出现：Guardrail 直接读 Runtime、Fitness 直接解析 Event、Reflection 自己定义 Progress。
 
 ## Current Phase
@@ -124,7 +110,7 @@ Layer 4:  Policies / Thresholds / Adaptive Logic
 ```text
 M1 — Shared Facts        ✅
 M2 — Shared Meaning      ✅
-M3 — Shared Observer     ⏳
+M3 — Shared Observer     ✅ 2026-07-09
 M4 — Shared Policy       🔮
 M5 — Shared Evolution    🔮
 ```
@@ -151,9 +137,35 @@ Shared Evolution
 |-----------|----------|----------|---------------|------|
 | M1: Shared Facts | EvaluationEvent, Replay, Observation v1.2 | 所有模块基于同一不可变事实流分析 | 所有 Runtime 行为均可重放为 EvaluationEvent | ✅ 冻结 |
 | **M2: Shared Meaning** | **progress.ts, ADR-003, Producer Contract, Evolution Pattern** | **全系统使用同一种推进语言** | **所有 Progress 消费者共享同一 ProgressSnapshot 语义** | **✅ Program Baseline v2** |
-| M3: Shared Observer | Event Pipeline Observer, Runtime Migration, Chat Runtime | 所有 Runtime 通过同一 Observer 获取 Progress | 所有 Runtime 通过统一 Observer 获得 Progress，不再自行计算 | ⏳ |
-| M4: Shared Policy | 多个 Consumer 基于同一 Snapshot 独立决策 | 决策与基础设施完全解耦 | 多个 Consumer 独立消费同一 Snapshot，无重复分析逻辑 | 🔮 未来 |
+| M3: Shared Observer | Event Pipeline Observer, Runtime Migration, Chat Runtime | 所有 Runtime 通过同一 Observer 获取 Progress。四个 Invariant 全部验证通过：I-1 Replay Consistency ✅ 12 tests, I-2 Producer Purity ✅, I-3 Consumer Independence ✅, I-4 Zero Regression ✅ 103/103 | **✅ M3 完成 2026-07-09** |
+| M4: Shared Policy | Policy Contract + Consumer Boundary | 决策与基础设施完全解耦 | Contract Frozen: PolicyInput, evaluate(input), DecisionIdentity, Consumer Boundary Constraints | **⏳ Contract Frozen (2026-07-09)** |
 | M5: Shared Evolution | 系统基于统一语义自我演化 | 治理闭环 | Policy 可基于 Observation 持续演化，且不改变协议 | 🔮 未来 |
+
+### M4 完成条件（仍在发展）
+
+M4 当前处于 Contract Freeze 阶段，尚未达到完整 M4 Closure：
+
+```text
+Contract Frozen                ✅ 2026-07-09
+M4.1 Contract Production Ver   ✅ 2026-07-09
+Consumer Impl                   ⏳
+Consumer Verification            ⏳
+Runtime Action Delivery          ⏳
+─────────────────────────────────
+M4 Completed                    ❌
+```
+
+**M4 已冻结产出：**
+
+| 资产 | 状态 |
+|------|------|
+| `docs/m4-policy-design-review.md` | ✅ |
+| `docs/m4-consumer-boundary-review.md` | ✅ |
+| `docs/m4-decision-contract.md` | ✅ → Source of Truth |
+| `src/main/core/evaluation/GuardrailTypes.ts` — PolicyInput, DecisionIdentity | ✅ |
+| `src/main/core/evaluation/GuardrailPolicy.ts` — evaluate(input) | ✅ |
+| `src/main/core/evaluation/__tests__/m4-1-contract-production-verification.test.ts` — V-P1b, V-P3b/c, V-P4a/b | ✅ |
+| evaluation suite: 103/103 passing | ✅ |
 
 ### History（按 Commit 级别）
 
@@ -182,7 +194,58 @@ Shared Evolution
 
 **Every shared capability must first become a shared abstraction before becoming a shared implementation.**
 
-### 修改优先级
+#### 资产体系与治理链
+
+Program Baseline v2 将系统资产定义为四类，职责不重叠：
+
+| 资产 | 回答的问题 | 生命周期 | 修改频率 |
+|------|-----------|----------|---------|
+| **Observation / Analysis** | 证据是什么？ | 可重放 | 随实验增长 |
+| **ADR** | 为什么这样设计？ | 永久 | 基本不改 |
+| **Baseline (Constitution)** | 系统遵循什么不变量？ | 长期 | 极低 |
+| **Execution** | 当前做到哪一步？ | 短期 | 高频 |
+
+治理链为单向依赖：
+
+```text
+Observation
+     ↓
+Analysis
+     ↓
+ADR
+     ↓
+Baseline
+     ↓
+Execution
+```
+
+约束：**Execution 永远不能修改 Baseline；Execution 只能在 Baseline 定义的空间内推进。**
+
+即：Observation 可以推翻 ADR（满足 Revisit Criteria），ADR 可以修改 Baseline（极少发生），Baseline 决定 Execution 的边界——反向不允许。
+
+### Evidence Hierarchy（证据层级）
+
+```text
+Observation  >  Analysis  >  ADR  >  Implementation
+```
+
+Implementation 永远不是证据。遇到实现困难时，不允许直接修改协议。正确流程必须是：
+
+```text
+Implementation 遇到问题
+        ↓
+Observation（收集新证据）
+        ↓
+Analysis（分析根因）
+        ↓
+ADR Revisit（满足条件）
+        ↓
+修改协议
+```
+
+这条层级是 Observation-first 方法论的最终闭环。
+
+## 修改优先级
 
 稳定性不是平均分布的，而是向上递增的：**越靠近共享抽象，越难修改；越靠近具体实现，越容易演化。**
 
@@ -195,7 +258,8 @@ Shared Evolution
 | Implementation | ★☆☆☆☆ | 最容易迭代 |
 
 ### 阶段映射
-|------|----------|----------|----------|
+
+| 阶段 | 共享能力 | 共享对象 | 完成标志 |
 | Evaluation | Shared Facts | EvaluationEvent | 所有 Runtime 行为可重放为不可变事件 |
 | Progress | Shared Meaning | ProgressSnapshot | 所有 Consumer 共享同一推进语义 |
 | **M3 →** | **Shared Observer** | **ProgressObserver** | **所有 Runtime 通过统一 Observer 获取 Progress** |
@@ -295,7 +359,7 @@ M3 中禁止：
 
 ADR 不变成规范手册，Baseline 不变成设计历史。ADR 记录了"通往规则的过程"；Baseline 记录"当前生效的规则"。两者不互相替代。
 
-### History（按 Commit 级别）
+### 历史沿革
 
 以下组件已冻结，修改前需经 Decision Gate + 新 ADR：
 
