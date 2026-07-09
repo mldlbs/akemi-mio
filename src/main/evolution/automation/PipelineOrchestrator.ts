@@ -6,6 +6,11 @@
  *   2. 从 Queue pop() 最高优先级问题
  *   3. 主执行器修复，失败则尝试备用
  *   4. 结果写回 Queue
+ *
+ * 【MCP 模式迁移】
+ * - 集成 ProblemFixCache：执行前检查缓存，跳过已知不可修复问题
+ * - 集成 ProblemErrorType：markFailed() 时传递错误消息用于分类
+ * - 集成 AutomationRegistry：registerBuiltins() 通过注册表注册
  */
 
 import { log } from '../../logger/Logger'
@@ -17,6 +22,21 @@ import { TestCollector } from './TestCollector'
 import { EslintCollector } from './EslintCollector'
 import { ClaudeCodeExecutor } from './ClaudeCodeExecutor'
 import { DeepSeekExecutor } from './DeepSeekExecutor'
+import { AsrLogCollector } from './AsrLogCollector'
+import { AsrOptimizationExecutor } from './AsrOptimizationExecutor'
+import { PlanLogCollector } from './PlanLogCollector'
+import { AutoPatchExecutor } from './AutoPatchExecutor'
+import { ToolEvolutionCollector } from './ToolEvolutionCollector'
+import { ToolEvolutionExecutor } from './ToolEvolutionExecutor'
+import { TtsPreferenceCollector } from './TtsPreferenceCollector'
+import { TtsConfigOptimizationExecutor } from './TtsConfigOptimizationExecutor'
+import {
+  registerCollector,
+  registerExecutor,
+  getAllCollectors,
+  getAllExecutors,
+  getExecutorsBySource,
+} from './registry'
 
 export interface PipelineConfig {
   projectRoot: string
@@ -57,13 +77,60 @@ export class PipelineOrchestrator {
     this.executors.push(executor)
   }
 
+  /**
+   * 初始化内置 Collector 和 Executor
+   *
+   * 两阶段初始化：
+   * 1. 先注册到中央注册表（使 getCollectors/getExecutors 发现）
+   * 2. 再添加到本地列表
+   *
+   * 【MCP 模式迁移】通过注册表统一管理，替代分散的 new 调用。
+   * 后续新增 Collector/Executor 只需在 registerBuiltins 中注册，
+   * 消费侧通过 getAllCollectors() / getAllExecutors() 发现。
+   */
   initDefaults(mcpManager?: any): void {
-    this.addCollector(new TscCollector(this.config.projectRoot))
-    this.addCollector(new TestCollector(this.config.projectRoot))
-    this.addCollector(new EslintCollector(this.config.projectRoot))
-    this.addExecutor(new ClaudeCodeExecutor())
+    // Stage 1: 创建内置采集器
+    const tscCollector = new TscCollector(this.config.projectRoot)
+    const testCollector = new TestCollector(this.config.projectRoot)
+    const eslintCollector = new EslintCollector(this.config.projectRoot)
+    const asrLogCollector = new AsrLogCollector()
+    const planLogCollector = new PlanLogCollector()
+    const toolEvolutionCollector = new ToolEvolutionCollector()
+    const ttsPreferenceCollector = new TtsPreferenceCollector()
+
+    // Stage 2: 注册到中央注册表
+    registerCollector(tscCollector)
+    registerCollector(testCollector)
+    registerCollector(eslintCollector)
+    registerCollector(asrLogCollector)
+    registerCollector(planLogCollector)
+    registerCollector(toolEvolutionCollector)
+    registerCollector(ttsPreferenceCollector)
+
+    // Stage 3: 从注册表加载到本地
+    for (const c of getAllCollectors()) {
+      this.addCollector(c)
+    }
+
+    // Stage 4: 创建并注册内置执行器
+    const claudeCodeExecutor = new ClaudeCodeExecutor()
+    const asrOptimizationExecutor = new AsrOptimizationExecutor()
+    const autoPatchExecutor = new AutoPatchExecutor()
+    const toolEvolutionExecutor = new ToolEvolutionExecutor()
+    const ttsConfigOptExecutor = new TtsConfigOptimizationExecutor()
+
+    registerExecutor(claudeCodeExecutor)
+    registerExecutor(asrOptimizationExecutor)
+    registerExecutor(autoPatchExecutor)
+    registerExecutor(toolEvolutionExecutor)
+    registerExecutor(ttsConfigOptExecutor)
     if (mcpManager) {
-      this.addExecutor(new DeepSeekExecutor(mcpManager))
+      registerExecutor(new DeepSeekExecutor(mcpManager))
+    }
+
+    // Stage 5: 从注册表加载到本地
+    for (const e of getAllExecutors()) {
+      this.addExecutor(e)
     }
   }
 
@@ -95,6 +162,12 @@ export class PipelineOrchestrator {
       for (const { source, problems } of collectResults) {
         const freshIds = new Set(problems.map((p) => p.id))
         this.queue.reconcile(source as import('./types').ProblemSource, freshIds)
+      }
+
+      // Phase 1.75: 【MCP 模式迁移】跳过已知不可修复的缓存问题
+      const skippedCount = this.queue.skipCachedUnfixable()
+      if (skippedCount > 0) {
+        log('INFO', 'pipeline_skipped_cached_unfixable', { count: skippedCount })
       }
 
       // Phase 2: Execute
@@ -139,7 +212,8 @@ export class PipelineOrchestrator {
           fixed++
           this.totalFixed++
         } else {
-          this.queue.markFailed(problem.id)
+          // 【MCP 模式迁移】传递错误消息给 markFailed 用于错误分类
+          this.queue.markFailed(problem.id, result.error || result.summary)
           failed++
           this.totalFailed++
         }
@@ -173,6 +247,7 @@ export class PipelineOrchestrator {
 
   /** 按优先级尝试主+备用执行器 */
   private async tryFix(problem: import('./types').AssignedProblem): Promise<FixResult> {
+    // 【MCP 模式迁移】优先通过注册表查询匹配的执行器
     const matching = this.executors.filter((e) => (e.supportedSources as string[]).includes(problem.source))
 
     // 没有支持此类型问题的执行器 → 直接丢弃（不重试）

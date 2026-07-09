@@ -27,6 +27,7 @@ import { eventBus, EventBus } from '../core/EventBus'
 import { AsyncLock } from '../utils/AsyncLock'
 import { PlanIntegrityChecker } from './PlanIntegrityChecker'
 import { EVOLUTION_SAFETY_MODE, WORKSPACE } from '../config'
+import { asrEvolutionManager } from '../asr/AsrEvolutionManager'
 import type { AgentService } from '../agent/AgentService'
 import type { PlanManagerLike } from './types'
 import type { ISubsystem, HealthCheckResult, SubsystemState } from '../core/lifecycle/types'
@@ -358,6 +359,23 @@ export class SelfEvolutionService implements ISubsystem {
         // 周期成功 → 重置失败计数
         if (success && this.recoveryCooldownUntil > 0) {
           this.recoveryCooldownUntil = 0
+        }
+
+        // ASR 自进化评估：对比上一轮变更的纠错率变化
+        if (success) {
+          try {
+            const evalResult = asrEvolutionManager.evaluateAndDecide()
+            if (evalResult.verdict !== 'not_found') {
+              const actionLabel = evalResult.action === 'keep' ? '✅ 保留' : evalResult.action === 'rollback' ? '⚠️ 回滚' : '➡️ 无操作'
+              log('INFO', 'asr_evolution_cycle_eval', {
+                verdict: evalResult.verdict,
+                action: evalResult.action,
+              })
+              summary += `\n\n【ASR 自进化】${actionLabel}（${evalResult.verdict === 'improved' ? '纠错率下降' : evalResult.verdict === 'worsened' ? '纠错率上升' : '基本不变'}）`
+            }
+          } catch (evalErr) {
+            log('WARN', 'asr_evolution_eval_error', { error: String(evalErr) })
+          }
         }
 
         this.eventBus.emit('evolution.cycle.completed' as any, {

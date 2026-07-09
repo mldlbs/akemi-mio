@@ -5,11 +5,16 @@
  * 1. 去重（相同 file:line:message 只保留一个 Problem）
  * 2. 按价值排序（severity × occurrenceCount / estimatedCost）
  * 3. 持久化（跨重启保留）
+ * 4. 【MCP 模式迁移】集成 ProblemErrorType + ProblemFixCache：
+ *    - markFailed() 时分类错误类型，不可修复类型直接丢弃
+ *    - 可缓存类型记入 ProblemFixCache 避免重复尝试
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { log } from '../../logger/Logger'
+import { classifyProblemError, shouldRetryOnError, shouldCacheErrorType, ProblemErrorType } from './ProblemErrorType'
+import { problemFixCache } from './ProblemFixCache'
 import type { Problem, ProblemSource, Severity, AssignedProblem } from './types'
 
 const QUEUE_FILE = 'problem_queue.json'
@@ -20,6 +25,9 @@ const SEVERITY_WEIGHT: Record<Severity, number> = {
   warning: 3,
   info: 1,
 }
+
+/** 修复失败时的默认错误消息（无显式错误时使用） */
+const DEFAULT_FAIL_MESSAGE = 'Fix attempt failed with no specific error'
 
 export class ProblemQueue {
   private problems: Problem[] = []
@@ -78,17 +86,52 @@ export class ProblemQueue {
     this.save()
   }
 
-  /** 标记问题失败（可重试） */
-  markFailed(problemId: string): void {
+  /**
+   * 标记问题失败（可重试）
+   *
+   * 【MCP 模式迁移】集成错误分类逻辑：
+   * - 使用 classifyProblemError() 判断错误类型
+   * - UNFIXABLE/ENVIRONMENT 类型 → 直接丢弃，不浪费重试
+   * - 可缓存类型 → 记入 ProblemFixCache 避免后续重复尝试
+   * - TRANSIENT/TIMEOUT → 按原有重试策略
+   * - REGRESSION → 丢弃（应走回滚路径，不在队列重试）
+   *
+   * @param problemId 问题 ID
+   * @param errorMessage 失败错误消息（可选，用于错误分类）
+   */
+  markFailed(problemId: string, errorMessage?: string): void {
     const original = this.findProblemById(problemId) || this.processingProblems.get(problemId)
     // 从处理中缓存移除
     this.processingProblems.delete(problemId)
+
+    // 分类错误类型
+    const errMsg = errorMessage || original?.context?.raw || DEFAULT_FAIL_MESSAGE
+    const errorType = classifyProblemError(errMsg)
+
+    // 检查缓存：记录不可修复类型到 ProblemFixCache
+    if (shouldCacheErrorType(errorType) && original) {
+      problemFixCache.record(original.source, original.title, errMsg)
+    }
+
+    // 不可重试类型 → 直接丢弃（不浪费重试次数）
+    if (!shouldRetryOnError(errorType)) {
+      this.completedIds.add(problemId)
+      this.failedIds.delete(problemId)
+      log('INFO', 'problem_dropped_unfixable', {
+        problemId,
+        errorType,
+        reason: errMsg.slice(0, 120),
+      })
+      this.save()
+      return
+    }
+
     const retries = (this.failedIds.get(problemId) || 0) + 1
     if (retries >= 3) {
       // 超过重试上限，丢弃
       this.completedIds.add(problemId)
       this.failedIds.delete(problemId)
-      log('WARN', 'problem_dropped_after_retries', { problemId, retries })
+      log('WARN', 'problem_dropped_after_retries', { problemId, retries, errorType })
     } else {
       this.failedIds.set(problemId, retries)
       if (original) {
@@ -153,6 +196,44 @@ export class ProblemQueue {
   /** 按来源获取等待中的问题列表 */
   getPendingBySource(source: ProblemSource): Problem[] {
     return this.problems.filter((p) => p.source === source)
+  }
+
+  /**
+   * 【MCP 模式迁移】清除已知不可修复的问题
+   *
+   * 检查 ProblemFixCache 缓存，移除所有匹配的待处理问题。
+   * 应在 pop() 之前调用，避免尝试修复已知的不可修复问题。
+   *
+   * @returns 移除的问题数量
+   */
+  skipCachedUnfixable(): number {
+    const before = this.problems.length
+    const toRemove: string[] = []
+
+    for (const p of this.problems) {
+      const cacheReason = problemFixCache.check(p.source, p.title, p.context.raw || '')
+      if (cacheReason !== null) {
+        toRemove.push(p.id)
+        log('INFO', 'problem_skipped_cached', {
+          problemId: p.id,
+          source: p.source,
+          title: p.title.slice(0, 60),
+          reason: cacheReason,
+        })
+      }
+    }
+
+    for (const id of toRemove) {
+      this.completedIds.add(id)
+    }
+    this.problems = this.problems.filter((p) => !toRemove.includes(p.id))
+
+    if (toRemove.length > 0) {
+      log('INFO', 'problem_queue_skipped_unfixable', { count: toRemove.length })
+      this.save()
+    }
+
+    return toRemove.length
   }
 
   /**

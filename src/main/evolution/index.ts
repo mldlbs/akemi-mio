@@ -44,6 +44,60 @@ export type {
   IReviewer,
 } from './pipeline/types'
 
+// ═══════════════════════════════════════════
+//  Evolution Plugin System — Plugin 契约 + ServiceLoader
+// ═══════════════════════════════════════════
+//
+// EvolutionPlugin 是 Evolution 能力的插件化接口。
+// 插件通过 PluginServiceLoader 注册，Evolution 在运行时通过
+// ServiceLoader 发现并加载插件，插件无需关心 Evolution 内部调度。
+//
+// 当前内置插件：
+//   - WallpaperPlugin — 壁纸检测与优化
+
+export {
+  PluginServiceLoader,
+  PluginCollectorAdapter,
+  PluginExecutorAdapter,
+  WallpaperPlugin,
+} from './plugin'
+
+export type {
+  EvolutionPlugin,
+  EvolutionPluginManifest,
+  EvolutionCapability,
+  PluginProblem,
+  PluginFixResult,
+} from './plugin'
+
+// ═══════════════════════════════════════════
+//  UserBehavior Layer — 可选的上层增强层
+// ═══════════════════════════════════════════
+//
+// 通过环境变量 USER_BEHAVIOR_FEATURES 控制激活。
+// 启用后，在 evolutionService 之上创建 UserBehaviorLayer 实例
+// 作为装饰器，拦截 evolution 的输入输出进行预处理/后处理增强。
+//
+// 示例：
+//   USER_BEHAVIOR_FEATURES=summary_enhance,metrics_enrich
+//
+// 所有特性默认关闭，仅在显式声明后激活。
+//
+// UserBehaviorLayer 不会修改核心 evolution 逻辑，
+// 而是通过钩子机制在外部增强其行为。
+
+export { UserBehaviorLayer } from '../user-behavior/UserBehaviorLayer'
+export { parseFeaturesFromEnv } from '../user-behavior/types'
+export type {
+  UserBehaviorFeature,
+  UserBehaviorConfig,
+  PreProcessContext,
+  PostProcessContext,
+  PostProcessResult,
+  PreProcessHook,
+  PostProcessHook,
+} from '../user-behavior/types'
+
 export const planManager = new DrizzlePlanManager()
 export let evolutionService: SelfEvolutionService | null = null
 
