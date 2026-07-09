@@ -1,6 +1,25 @@
+/**
+ * 记忆情感标签 — 存储对话时的情感分析结果
+ * 序列化为 JSON 存储在 structuredData 中（key="emotion"）
+ */
+export interface MemoryEmotionTag {
+  /** 情感极性 */
+  polarity: 'positive' | 'negative' | 'neutral'
+  /** 置信度 0–1 */
+  score: number
+  /** 情感标签：happy / sad / angry / calm / anxious / neutral */
+  label: string
+  /** 内容类型：weather / error / success / news / code / data / chat / info */
+  contentType: string
+  /** 匹配到的情感关键词（前 5 个） */
+  matchedWords: string[]
+  /** 分析时间戳 */
+  timestamp: number
+}
+
 export interface MemoryEntry {
   id: string
-  type: 'user_fact' | 'interaction' | 'task_state' | 'user_profile' | 'fictional' | 'writing_feedback'
+  type: 'user_fact' | 'interaction' | 'task_state' | 'user_profile' | 'fictional' | 'writing_feedback' | 'polishing_decision'
   content: string
   confidence: number
   createdAt: number
@@ -9,7 +28,7 @@ export interface MemoryEntry {
   tier: 'permanent' | 'semi' | 'ephemeral'
   /** 强化次数（用于自动晋升） */
   reinforceCount: number
-  /** 结构化附加数据（JSON 字符串），用于 task_state / user_profile */
+  /** 结构化附加数据（JSON 字符串），用于 task_state / user_profile / emotion */
   structuredData?: string | null
   /** 行为驱动重要性得分 (0-1)，初始 0.5 */
   behaviorScore: number
@@ -23,6 +42,15 @@ export interface MemoryEntry {
   manualScoreOverride: number | null
   /** 主题标签（用于行为驱动加权检索） */
   topics?: string[]
+  /** ── 效用跟踪字段 ── */
+  /** 效用分数 (0-1)，表示记忆在 Agent 决策中的实际使用价值，初始 0.5 */
+  utilityScore: number
+  /** Agent 引用该记忆的次数（由效用跟踪器记录） */
+  agentReferenceCount: number
+  /** 用户明确确认有用的次数 */
+  userConfirmedUsefulCount: number
+  /** 上次效用评估时间 */
+  lastUtilityUpdateAt: number
 }
 
 export interface InteractionRecord {

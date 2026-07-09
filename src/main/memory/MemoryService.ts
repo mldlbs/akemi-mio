@@ -8,8 +8,11 @@ import { MetaController } from './MetaController'
 import { UnifiedMemoryQuery } from './UnifiedMemoryQuery'
 import { InteractionTracker } from './InteractionTracker'
 import { BehaviorWeightingService } from './BehaviorWeightingService'
+import { TopicTransitionPredictor } from './TopicTransitionPredictor'
 import { adaptToPlugin } from './IMemoryPlugin'
 import { FictionalMemoryGenerator } from './FictionalMemoryGenerator'
+import { MemoryUtilityTracker } from './MemoryUtilityTracker'
+import { MemoryCleaner } from './MemoryCleaner'
 import type { MemoryEntry } from './types'
 import type { InterestProfile } from './BehaviorWeightingService'
 import type { SummaryLLM } from './MetaController'
@@ -21,6 +24,12 @@ import {
   BEHAVIOR_WEIGHT_MIN_STRENGTH,
   BEHAVIOR_WEIGHT_UPDATE_INTERVAL,
   BEHAVIOR_REINFORCE_BOOST,
+  TOPIC_TRANSITION_WINDOW_SIZE,
+  TOPIC_TRANSITION_MIN_FREQUENCY,
+  TOPIC_TRANSITION_PREFETCH_MIN_PROB,
+  TOPIC_TRANSITION_PREFETCH_MAX_ENTRIES,
+  TOPIC_TRANSITION_PREFETCH_TTL_MS,
+  TOPIC_TRANSITION_PREFETCH_CACHE_MAX,
 } from '../config'
 
 // ===== 任务状态 & 用户画像类型 =====
@@ -85,6 +94,9 @@ const CONFIDENCE_WEIGHT = 0.3
 // 后台衰减检查间隔（毫秒）
 const DECAY_CHECK_INTERVAL = 30 * 60 * 1000 // 每 30 分钟
 
+// 效用清理检查间隔（毫秒），每 24 小时执行一次完整清理
+const UTILITY_CLEANUP_INTERVAL = 24 * 60 * 60 * 1000
+
 let idCounter = 0
 function nextId(): string {
   return 'mem_' + Date.now() + '_' + ++idCounter
@@ -108,6 +120,7 @@ export class MemoryService {
   private lastUserText: string = ''
   private removedIds = new Set<string>()
   private decayTimer: ReturnType<typeof setInterval> | null = null
+  private lastCleanupTime: number = 0
 
   readonly summary: SummaryMemory
   readonly vector: VectorMemory
@@ -118,7 +131,10 @@ export class MemoryService {
   readonly unifiedQuery: UnifiedMemoryQuery
   readonly interactionTracker: InteractionTracker
   readonly behaviorWeighting: BehaviorWeightingService
+  readonly topicTransitionPredictor: TopicTransitionPredictor
   readonly fictionalGenerator: FictionalMemoryGenerator
+  readonly utilityTracker: MemoryUtilityTracker
+  readonly cleaner: MemoryCleaner
 
   constructor() {
     this.summary = new SummaryMemory()
@@ -127,6 +143,9 @@ export class MemoryService {
     this.engineering = new EngineeringMemory()
     this.decisionStore = new DecisionStore()
     this.fictionalGenerator = new FictionalMemoryGenerator()
+    this.utilityTracker = new MemoryUtilityTracker()
+    this.cleaner = new MemoryCleaner(this.utilityTracker)
+    this.lastCleanupTime = Date.now() // 初始化清理计时器
     this.metaController = new MetaController()
     this.metaController.setDeps({
       summary: this.summary,
@@ -152,9 +171,19 @@ export class MemoryService {
       minInterestStrength: BEHAVIOR_WEIGHT_MIN_STRENGTH,
       updateIntervalMs: BEHAVIOR_WEIGHT_UPDATE_INTERVAL,
     })
+    this.topicTransitionPredictor = new TopicTransitionPredictor({
+      windowSize: TOPIC_TRANSITION_WINDOW_SIZE,
+      minTransitionFrequency: TOPIC_TRANSITION_MIN_FREQUENCY,
+      prefetchMinProbability: TOPIC_TRANSITION_PREFETCH_MIN_PROB,
+      prefetchMaxEntries: TOPIC_TRANSITION_PREFETCH_MAX_ENTRIES,
+      prefetchTtlMs: TOPIC_TRANSITION_PREFETCH_TTL_MS,
+      prefetchCacheMax: TOPIC_TRANSITION_PREFETCH_CACHE_MAX,
+    })
     this.load()
     this.interactionTracker.load()
-    // 启动定期衰减任务
+    // 从 InteractionTracker 中加载历史数据到话题转移预测器
+    this.topicTransitionPredictor.loadFromInteractionRecords(this.interactionTracker.getAll())
+    // 启动定期衰减任务（同时管理效用衰减和清理）
     this.startDecayTimer()
     log('INFO', 'memory_loaded', {
       entries: this.entries.length,
@@ -186,6 +215,10 @@ export class MemoryService {
             accessCount: obj.access_count || 0,
             isPinned: obj.is_pinned === 1 || obj.is_pinned === true,
             manualScoreOverride: obj.manual_score_override ?? null,
+            utilityScore: obj.utility_score ?? 0.5,
+            agentReferenceCount: obj.agent_reference_count || 0,
+            userConfirmedUsefulCount: obj.user_confirmed_useful_count || 0,
+            lastUtilityUpdateAt: obj.last_utility_update_at || 0,
             createdAt: obj.created_at,
             updatedAt: obj.updated_at,
             structuredData: obj.structured_data || null,
@@ -248,6 +281,10 @@ export class MemoryService {
       accessCount: 0,
       isPinned: false,
       manualScoreOverride: null,
+      utilityScore: BEHAVIOR_SCORE_INITIAL,
+      agentReferenceCount: 0,
+      userConfirmedUsefulCount: 0,
+      lastUtilityUpdateAt: Date.now(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
       topics: this.extractTopics(content),
@@ -320,6 +357,21 @@ export class MemoryService {
         isExplicitRemember,
         rementionedMemoryIds: rementionedIds,
       })
+
+      // ── 话题转移预测与记忆预取 ──
+      // 记录当前话题到转移矩阵，并触发下一话题预测和预取
+      if (topics.length > 0) {
+        this.topicTransitionPredictor.recordTopics(topics)
+        const predictions = this.topicTransitionPredictor.predictNextTopics(topics, 3)
+        if (predictions.length > 0) {
+          this.topicTransitionPredictor.prefetchMemories(predictions, (topic, limit) =>
+            this.entries
+              .filter((e) => e.type === 'user_fact' && e.topics && e.topics.includes(topic))
+              .sort((a, b) => this.getBehaviorWeightedScore(b) - this.getBehaviorWeightedScore(a))
+              .slice(0, limit),
+          )
+        }
+      }
 
       // 新交互到来，清除行为加权缓存以触发重新计算
       this.behaviorWeighting.invalidateCache()
@@ -443,6 +495,10 @@ export class MemoryService {
         accessCount: 1,
         isPinned: false,
         manualScoreOverride: null,
+        utilityScore: BEHAVIOR_SCORE_INITIAL,
+        agentReferenceCount: 0,
+        userConfirmedUsefulCount: 0,
+        lastUtilityUpdateAt: Date.now(),
         createdAt: Date.now(),
         updatedAt: Date.now(),
         topics: [...topics],
@@ -572,9 +628,19 @@ export class MemoryService {
         decayed++
       }
     }
-    if (decayed > 0) {
-      log('INFO', 'behavior_score_decayed', { decayed, total: this.entries.length })
+
+    // 同时应用效用衰减
+    const utilityDecayed = this.utilityTracker.applyDecayToAll(this.entries)
+
+    if (decayed > 0 || utilityDecayed > 0) {
+      log('INFO', 'behavior_score_decayed', { behaviorDecayed: decayed, utilityDecayed, total: this.entries.length })
       this.prune()
+    }
+
+    // 定期效用清理（每 24 小时检查一次）
+    if (now - this.lastCleanupTime >= UTILITY_CLEANUP_INTERVAL) {
+      this.lastCleanupTime = now
+      this.cleaner.runCleanup(this.entries, this.removedIds)
     }
   }
 
@@ -671,6 +737,40 @@ export class MemoryService {
     return parts.join('\n')
   }
 
+  // ══════════════════════════════════════════
+  //  话题转移预测与记忆预取
+  // ══════════════════════════════════════════
+
+  /**
+   * 获取话题转移预测的预取上下文（用于注入 system prompt）。
+   * 基于当前最后一条用户消息的话题，预测下一话题并返回预取缓存中
+   * 的相关记忆。如果预取缓存已命中，直接使用缓存结果。
+   */
+  getPredictedTopicPreloadContext(): string {
+    if (!this.lastUserText) return ''
+    const topics = this.extractTopics(this.lastUserText)
+    if (topics.length === 0) return ''
+    return this.topicTransitionPredictor.getPrefetchContext(topics)
+  }
+
+  /**
+   * 快速查询预取缓存：如果目标话题已被预测并预取，直接返回缓存内容。
+   * 用于对外提供低延迟的记忆检索路径。
+   *
+   * @param topic 要查询的话题标签
+   * @returns 缓存条目（含记忆列表和来源标记），或 null
+   */
+  queryPrefetchedMemory(topic: string): { entries: MemoryEntry[]; source: 'cache' } | null {
+    return this.topicTransitionPredictor.queryPrefetched(topic)
+  }
+
+  /**
+   * 获取话题转移统计摘要。
+   */
+  getTopicTransitionStats(): ReturnType<TopicTransitionPredictor['getStats']> {
+    return this.topicTransitionPredictor.getStats()
+  }
+
   getInteractionCount(): number {
     return this.messageCount
   }
@@ -740,6 +840,10 @@ export class MemoryService {
         accessCount: 0,
         isPinned: false,
         manualScoreOverride: null,
+        utilityScore: 0.3,
+        agentReferenceCount: 0,
+        userConfirmedUsefulCount: 0,
+        lastUtilityUpdateAt: Date.now(),
         createdAt: Date.now(),
         updatedAt: Date.now(),
         topics: selectedTraits,
@@ -846,6 +950,13 @@ export class MemoryService {
       parts.push(preloadCtx)
     }
 
+    // 话题转移预测预取（基于当前话题预测下一话题并预取相关记忆）
+    const predictedCtx = this.getPredictedTopicPreloadContext()
+    if (predictedCtx) {
+      parts.push('')
+      parts.push(predictedCtx)
+    }
+
     // 短期行为驱动加权：显示与当前兴趣最匹配的记忆
     const topInterests = this.behaviorWeighting.getTopInterests(profile)
     if (topInterests.length > 0) {
@@ -857,7 +968,64 @@ export class MemoryService {
       }
     }
 
+    // 效用驱动的上下文优先级：高效用记忆（经常被 Agent 引用或用户确认有用）
+    const highUtilityEntries = this.entries
+      .filter((e) => e.type === 'user_fact' && e.tier !== 'permanent' && this.utilityTracker.isHighUtility(e))
+      .sort((a, b) => b.utilityScore - a.utilityScore)
+      .slice(0, 3)
+    if (highUtilityEntries.length > 0) {
+      parts.push('')
+      parts.push('【高效用记忆】以下记忆在实际对话中被频繁引用，具有较高价值：')
+      highUtilityEntries.forEach((e) => parts.push('- ' + e.content))
+    }
+
     return parts.length > 0 ? parts.join('\n') : ''
+  }
+
+  // ══════════════════════════════════════════
+  //  效用跟踪集成
+  // ══════════════════════════════════════════
+
+  /**
+   * 在 Agent 回复后检测被引用的记忆并更新效用分数。
+   * 由 ChatExecutor 在每次 toolLoop 结束后调用。
+   *
+   * @param agentReply Agent 生成的回复文本
+   * @returns 被引用的记忆 ID 列表
+   */
+  recordAgentReference(agentReply: string): string[] {
+    if (!agentReply || this.entries.length === 0) return []
+    const referencedIds = this.utilityTracker.recordAgentReference(this.entries, agentReply)
+    // 持久化被引用的记忆
+    for (const id of referencedIds) {
+      const entry = this.entries.find((e) => e.id === id)
+      if (entry) this.upsertInDb(entry)
+    }
+    return referencedIds
+  }
+
+  /** 获取效用统计摘要 */
+  getUtilityStats() {
+    return this.utilityTracker.getStats(this.entries)
+  }
+
+  /**
+   * 获取清理候选列表（预览，不删除）。
+   */
+  getCleanupCandidates() {
+    return this.cleaner.getCleanupCandidates(this.entries)
+  }
+
+  /**
+   * 用户确认清理候选记忆。
+   */
+  confirmCleanup(confirmIds?: string[]) {
+    return this.cleaner.confirmCleanup(this.entries, this.removedIds, confirmIds)
+  }
+
+  /** 拒绝所有待清理候选 */
+  rejectCleanup() {
+    this.cleaner.rejectCleanup()
   }
 
   /** 按行为驱动得分排序（用于上下文注入，优先返回高价值记忆） */
@@ -882,6 +1050,7 @@ export class MemoryService {
       clearInterval(this.decayTimer)
       this.decayTimer = null
     }
+    this.cleaner.stop()
     this.flush()
   }
 
@@ -950,6 +1119,10 @@ export class MemoryService {
       accessCount: 0,
       isPinned: false,
       manualScoreOverride: null,
+      utilityScore: BEHAVIOR_SCORE_INITIAL,
+      agentReferenceCount: 0,
+      userConfirmedUsefulCount: 0,
+      lastUtilityUpdateAt: Date.now(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
       structuredData,
@@ -1106,6 +1279,10 @@ export class MemoryService {
       accessCount: 0,
       isPinned: false,
       manualScoreOverride: null,
+      utilityScore: BEHAVIOR_SCORE_INITIAL,
+      agentReferenceCount: 0,
+      userConfirmedUsefulCount: 0,
+      lastUtilityUpdateAt: Date.now(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
       structuredData,
@@ -1216,7 +1393,7 @@ export class MemoryService {
     try {
       const db = getRawDb()
       db.run(
-        'INSERT OR REPLACE INTO memories (id, type, content, confidence, tier, reinforce_count, behavior_score, last_accessed_at, access_count, is_pinned, manual_score_override, created_at, updated_at, structured_data, topics) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT OR REPLACE INTO memories (id, type, content, confidence, tier, reinforce_count, behavior_score, last_accessed_at, access_count, is_pinned, manual_score_override, created_at, updated_at, structured_data, topics, utility_score, agent_reference_count, user_confirmed_useful_count, last_utility_update_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           entry.id,
           entry.type,
@@ -1233,6 +1410,10 @@ export class MemoryService {
           entry.updatedAt,
           entry.structuredData ?? null,
           JSON.stringify(entry.topics || []),
+          entry.utilityScore,
+          entry.agentReferenceCount,
+          entry.userConfirmedUsefulCount,
+          entry.lastUtilityUpdateAt,
         ],
       )
       markDirty()

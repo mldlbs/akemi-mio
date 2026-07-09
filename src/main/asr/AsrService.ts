@@ -2,7 +2,9 @@ import { log, createRequestId } from '../logger/Logger'
 import { WhisperGpuEngine } from './WhisperGpuEngine'
 import { WhisperEngine } from './WhisperEngine'
 import { BaiduEngine } from './BaiduEngine'
-import type { AsrConversationContext } from './types'
+import type { AsrConversationContext, VoiceEmotion } from './types'
+import { audioFeatureExtractor } from '../audio/AudioFeatureExtractor'
+import { voiceEmotionClassifier } from './VoiceEmotionClassifier'
 import {
   buildContextualHotwords,
   buildContextualPrompt,
@@ -11,6 +13,8 @@ import {
 } from './AsrContextBuilder'
 import { asrHotwordManager } from './AsrHotwordManager'
 import type { VocabEntry, DomainStats } from './AsrHotwordManager'
+import { asrLogStore } from './AsrLogStore'
+import { SpeechPluginRegistry, WhisperGpuAsrPlugin, WhisperCpuAsrPlugin, BaiduAsrPlugin } from '../speech'
 
 /** 检查识别结果是否有意义：有效字符占比过低则判定为乱码 */
 function isGarbled(text: string): boolean {
@@ -74,6 +78,8 @@ export class AsrService {
   private _pendingRequests = 0
   /** 当前对话上下文（用于动态热词/提示词），null=使用静态配置 */
   private conversationContext: AsrConversationContext | null = null
+  /** 最近一次识别的语音情感分析结果 */
+  private _lastVoiceEmotion: VoiceEmotion | null = null
 
   constructor(gpuEngine: WhisperGpuEngine, baiduEngine: BaiduEngine) {
     this.gpuEngine = gpuEngine
@@ -272,7 +278,55 @@ export class AsrService {
     return this._pendingRequests
   }
 
-  async transcribe(audioBuffer: ArrayBuffer, requestId?: string): Promise<{ text: string; request_id: string; error?: string }> {
+  /** 获取最近一次识别的语音情感分析结果（供 ChatExecutor 使用） */
+  getLastVoiceEmotion(): VoiceEmotion | null {
+    return this._lastVoiceEmotion
+  }
+
+  /**
+   * 记录当前 ASR 识别日志到 AsrLogStore。
+   * 不阻塞主流程。
+   */
+  private recordRecognition(engine: 'whisper_gpu' | 'whisper_cpu' | 'baidu', rawText: string, requestId: string, audioDurationSec: number, inferenceMs: number): void {
+    try {
+      asrLogStore.recordRecognition({
+        id: `rec_${requestId}`,
+        timestamp: Date.now(),
+        engine,
+        rawText,
+        requestId,
+        audioDurationSec,
+        inferenceMs,
+        hasHotwordHit: false,
+      })
+    } catch {
+      // 日志记录不阻塞主流程
+    }
+  }
+
+  /**
+   * 用户反馈：报告 ASR 识别错误并提供正确文本。
+   * 调用后自动更新热词管理器，使后续识别更准确。
+   *
+   * @param requestId 原始识别的 request_id
+   * @param originalText ASR 识别出的原文
+   * @param correctedText 用户修正后的正确文本
+   */
+  feedback(requestId: string, originalText: string, correctedText: string): void {
+    // 记录纠正到日志存储
+    asrLogStore.recordUserFix(`rec_${requestId}`, originalText, correctedText)
+
+    // 将修正后的文本喂入热词管理器，让系统学习正确词汇
+    this.feedUserTextToHotwords(correctedText)
+
+    log('INFO', 'asr_user_feedback', {
+      request_id: requestId,
+      original: originalText.slice(0, 50),
+      corrected: correctedText.slice(0, 50),
+    })
+  }
+
+  async transcribe(audioBuffer: ArrayBuffer, requestId?: string): Promise<{ text: string; request_id: string; error?: string; voiceEmotion?: VoiceEmotion }> {
     const rid = requestId || createRequestId()
     this._pendingRequests++
 
@@ -290,12 +344,34 @@ export class AsrService {
         })
       }
 
+      // ── 统一转 Float32 并提取声学特征 / 语音情感 ──
+      const samples = new Int16Array(audioBuffer)
+      const float32 = new Float32Array(samples.length)
+      for (let i = 0; i < samples.length; i++) float32[i] = samples[i] / 32768
+
+      // 语音情感分析（从声学特征推断）
+      let voiceEmotion: VoiceEmotion | undefined
+      try {
+        if (float32.length >= 512) {
+          // 512 samples = 32ms @16kHz，AudioFeatureExtractor 最小帧大小
+          const features = audioFeatureExtractor.extractFromFloat32(float32)
+          voiceEmotion = voiceEmotionClassifier.classify(features)
+          this._lastVoiceEmotion = voiceEmotion
+          log('DEBUG', 'asr_voice_emotion', {
+            label: voiceEmotion.label,
+            confidence: voiceEmotion.confidence,
+            energy: voiceEmotion.features.energy,
+            pitchHz: voiceEmotion.features.pitchHz,
+          })
+        }
+      } catch (ee) {
+        // 情感分析失败不应阻塞 ASR
+        log('WARN', 'asr_voice_emotion_failed', { error: String(ee) })
+      }
+
       // 1. GPU Whisper（Vulkan 加速，RTX 3060）
       if (this.gpuEngine.getStatus().loaded) {
         try {
-          const samples = new Int16Array(audioBuffer)
-          const float32 = new Float32Array(samples.length)
-          for (let i = 0; i < samples.length; i++) float32[i] = samples[i] / 32768
           const result = await this.gpuEngine.transcribe(float32, 15000)
 
           // GPU 输出编码损坏时降级到 CPU whisper 重新识别
@@ -309,7 +385,8 @@ export class AsrService {
               await this.initCpuFallback()
               if (this.cpuEngine) {
                 const cpuResult = await this.cpuEngine.transcribe(float32, 20000, rid)
-                return { text: cpuResult.text, request_id: rid }
+                this.recordRecognition('whisper_cpu', cpuResult.text, rid, parseFloat((samples.length / 16000).toFixed(1)), cpuResult.duration)
+                return { text: cpuResult.text, request_id: rid, voiceEmotion }
               }
             } catch (cpuErr) {
               log('WARN', 'cpu_asr_fallback_failed', {
@@ -321,10 +398,11 @@ export class AsrService {
 
           if (isNoise(result.text)) {
             log('INFO', 'asr_noise_filtered', { request_id: rid, text: result.text })
-            return { text: '', request_id: rid }
+            return { text: '', request_id: rid, voiceEmotion }
           }
 
-          return { text: result.text, request_id: rid }
+          this.recordRecognition('whisper_gpu', result.text, rid, parseFloat((samples.length / 16000).toFixed(1)), result.duration || 0)
+          return { text: result.text, request_id: rid, voiceEmotion }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           log('WARN', 'gpu_asr_fallback_to_baidu', { request_id: rid, error: msg })
@@ -334,7 +412,6 @@ export class AsrService {
       // 2. 后备：百度 ASR（云端）
       if (this.useBaidu) {
         try {
-          const samples = new Int16Array(audioBuffer)
           const audioLen = parseFloat((samples.length / 16000).toFixed(1))
           const t0 = Date.now()
           const text = await Promise.race([
@@ -348,17 +425,55 @@ export class AsrService {
             asr_inference_ms: Date.now() - t0,
             engine: 'baidu',
           })
-          return { text, request_id: rid }
+          this.recordRecognition('baidu', text, rid, audioLen, Date.now() - t0)
+          return { text, request_id: rid, voiceEmotion }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           log('ERROR', 'asr_all_failed', { request_id: rid, error: msg })
-          return { text: '', request_id: rid, error: msg }
+          return { text: '', request_id: rid, error: msg, voiceEmotion }
         }
       }
 
-      return { text: '', request_id: rid, error: 'no ASR engine available' }
+      return { text: '', request_id: rid, error: 'no ASR engine available', voiceEmotion }
     } finally {
       decrement()
     }
+  }
+
+  /**
+   * 将内部引擎注册为 SpeechPluginRegistry 中的 AsrPlugin。
+   *
+   * 调用此方法后，外部代码可通过 SpeechPluginRegistry 发现本服务的 ASR 引擎。
+   * 不会影响现有的 transcribe 逻辑。
+   *
+   * 应在 AsrService 初始化完成后（引擎就绪后）调用。
+   */
+  registerPlugins(): void {
+    const registry = SpeechPluginRegistry.getInstance()
+
+    // GPU Whisper 引擎
+    const gpuPlugin = new WhisperGpuAsrPlugin(this.gpuEngine)
+    registry.registerAsr(gpuPlugin)
+
+    // CPU Whisper 引擎（如果已初始化）
+    if (this.cpuEngine) {
+      const cpuPlugin = new WhisperCpuAsrPlugin()
+      // 将现有引擎实例注入适配器，避免重新初始化
+      ;(cpuPlugin as any).engine = this.cpuEngine
+      registry.registerAsr(cpuPlugin)
+    }
+
+    // 百度引擎
+    const baiduPlugin = new BaiduAsrPlugin(this.baiduEngine)
+    if (this.baiduApiKey && this.baiduSecretKey) {
+      baiduPlugin.setCredentials(this.baiduApiKey, this.baiduSecretKey)
+    }
+    registry.registerAsr(baiduPlugin)
+
+    log('INFO', 'asr_plugins_registered', {
+      gpu: true,
+      cpu: !!this.cpuEngine,
+      baidu: !!this.baiduApiKey,
+    })
   }
 }

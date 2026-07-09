@@ -36,7 +36,27 @@ export const PROMPT_WRITING = `【小说创作工具】
      分类可选：emotion_preference | setting_disagreement | style_feedback | plot_suggestion | general
 
 查询已有反馈（调试/查看用）：
-  4. writing_memory action=search_feedback storyName="故事名"`
+  4. writing_memory action=search_feedback storyName="故事名"
+
+【润色记忆驱动风格一致性】
+润色每个段落后，使用 polishing_memory 工具记录决策，确保长期风格统一：
+  1. polishing_memory action=get_context storyId="故事名" [chapterTitle="章节名"]
+     → 获取历史润色决策摘要，包含修改类型分布和高频规则，附加到 system prompt 底部
+  2. 开始新章节前先调用 get_context，了解之前的润色风格取向
+  3. 每完成一段润色 → polishing_memory action=store_decision storyId="故事名" chapterTitle="章节名" paragraphIndex=段落序号 modifications='[...]'
+  4. 每完成一个章节 → polishing_memory action=extract_rules storyId="故事名"
+
+【排版规则自适应记忆】
+使用 typography_memory 工具管理公众号等平台的排版偏好，使排版风格自适应优化：
+  1. 开始新章节排版前 → typography_memory action=load_preferences storyId="故事名" platformTag="公众号" [chapterNumber=章节号]
+     → 获取该故事在公众号平台的历史排版偏好（断句密度、引用样式、导语长度等），自动调整排版参数
+  2. 排版完成用户确认后 → typography_memory action=save_preferences storyId="故事名" platformTag="公众号" chapterNumber=章节号 chapterTitle="章节名" parameters='{"sentenceDensity":"normal","citationStyle":"blockquote",...}' [userCorrections="用户修正内容"] [confirmedExcerpt="确认版本片段"] [source="auto"]
+     → 保存本次排版参数，后续章节自动参考
+  3. 跨章节趋势分析 → typography_memory action=analyze_trends [storyId="故事名"] [platformTag="公众号"]
+     → 分析排版参数在跨章节中的变化趋势，输出建议默认值
+
+注意：排版偏好与润色风格不同，排版管的是"视觉效果"（段落间距、引用格式、强调方式），
+润色管的是"文字质量"（用词、句式、节奏）。两者互补，分别使用 typography_memory 和 polishing_memory。`
 
 // ─── 写作意图检测 ───
 

@@ -42,6 +42,22 @@ export class UnifiedMemoryQuery {
     return [...this.plugins.keys()]
   }
 
+  /**
+   * 获取已注册的插件实例（按名）。
+   * 用于外部适配（如知识源统一查询引擎）。
+   */
+  getPlugin(name: string): IMemoryPlugin | undefined {
+    return this.plugins.get(name)
+  }
+
+  /**
+   * 获取所有已注册的插件条目（名+实例）。
+   * 用于批量适配到其他接口。
+   */
+  getAllPlugins(): IMemoryPlugin[] {
+    return Array.from(this.plugins.values())
+  }
+
   async query(text: string, options?: MemoryQueryOptions): Promise<QueryResult[]> {
     const topK = options?.topK || 5
     const results: QueryResult[] = []

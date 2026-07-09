@@ -10,6 +10,8 @@ import { CapabilityEngine } from '../capability/CapabilityEngine'
 import { MemoryAwareInterceptor } from './MemoryAwareInterceptor'
 import type { MemoryService } from '../memory/MemoryService'
 import { MemoryRetriever, ToolMemoryDefaults } from './ToolMemoryDefaults'
+import { MEMORY_TOOL_PERSONALIZATION, BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE } from '../config'
+import { behaviorPredictor } from './BehaviorPredictor'
 
 const FILE_WRITE_TOOLS = new Set(['write_file', 'edit_file'])
 const FILE_READ_TOOLS = new Set(['read_file', 'list_files', 'grep'])
@@ -107,6 +109,7 @@ export class ServerManager {
     this.memoryInterceptor.setMemoryService(ms)
     this.memoryRetriever.setMemoryService(ms)
     this.memoryInterceptor.setToolDefaults(this.toolDefaults)
+    this.memoryInterceptor.setPersonalizationLevel(MEMORY_TOOL_PERSONALIZATION)
   }
 
   /** 获取 ToolMemoryDefaults 注册表，用于注册工具参数默认值映射 */
@@ -117,6 +120,11 @@ export class ServerManager {
   /** 获取 MemoryRetriever，用于直接检索用户偏好和工具调用历史 */
   getMemoryRetriever(): MemoryRetriever {
     return this.memoryRetriever
+  }
+
+  /** 获取 MemoryAwareInterceptor，用于动态调整个性化设置或记录反馈 */
+  getMemoryInterceptor(): MemoryAwareInterceptor {
+    return this.memoryInterceptor
   }
 
   /** 从 mcp_servers.json 自动恢复持久化的 MCP 服务器 */
@@ -255,7 +263,7 @@ export class ServerManager {
     }
   }> {
     const allDefs = this.getAllDefinitions()
-    return allDefs.map((def) => ({
+    const schemas = allDefs.map((def) => ({
       type: 'function' as const,
       function: {
         name: def.name,
@@ -267,6 +275,30 @@ export class ServerManager {
         },
       },
     }))
+
+    // ★ 记忆驱动的工具优先级排序
+    // 根据 Memory 中的调用频次和成功率提升高频/高成功工具的排名，
+    // 使 LLM 更倾向于选择用户常用的工具。
+    const priorities = this.memoryInterceptor.getToolPriorities()
+    if (priorities.length > 0) {
+      // 构建工具名 → boost 查找表
+      const boostMap = new Map(priorities.map((p) => [p.toolName, p.boost]))
+
+      // 稳定排序：高 boost 的工具排前面，其余保持原顺序
+      schemas.sort((a, b) => {
+        const boostA = boostMap.get(a.function.name) ?? 0
+        const boostB = boostMap.get(b.function.name) ?? 0
+        // 降序（高 boost 在前），boost 相同时保持原顺序
+        return boostB - boostA || 0
+      })
+
+      log('INFO', 'memory_tool_prioritized', {
+        boostedCount: priorities.filter((p) => p.boost > 0).length,
+        topBoosted: priorities.slice(0, 5).map((p) => `${p.toolName}(+${p.boost})`).join(', '),
+      })
+    }
+
+    return schemas
   }
 
   getAllDefinitions(): MCPToolDefinition[] {
@@ -308,6 +340,19 @@ export class ServerManager {
     const meta = this.toolMap.get(name)
     if (!meta) {
       throw new Error(`未知工具: ${name}`)
+    }
+
+    // ★ 行为预激活：检查预加载缓存中是否有该工具+参数的结果
+    const cacheKey = behaviorPredictor.buildCacheKey(name, args)
+    const cachedResult = behaviorPredictor.getCachedResult(cacheKey)
+    if (cachedResult !== null) {
+      log('INFO', 'behavior_predictor_cache_used', { tool: name, cacheKey })
+      // 缓存命中时仍记录调用（验证预测有效），更新模式库
+      behaviorPredictor.recordCall(name, args, 0, true)
+      this.memoryInterceptor.postCall(name, args, cachedResult, true)
+      // 记录后预测下一步，触发后续工具的预加载
+      this.recordAndPredict(name, args, cachedResult, meta.serverName)
+      return cachedResult
     }
 
     // ★ Memory-aware 拦截：工具调用前检索相关记忆
@@ -373,11 +418,19 @@ export class ServerManager {
 
       // ★ Memory-aware 拦截：工具调用成功后存储结果摘要
       this.memoryInterceptor.postCall(name, args, result, true)
+
+      // ★ 行为驱动预激活：记录本次调用并预测下一步
+      this.recordAndPredict(name, args, result, meta.serverName)
+
       return result
     } catch (err: any) {
       success = false
       // ★ Memory-aware 拦截：工具调用失败也记录（低置信度）
       this.memoryInterceptor.postCall(name, args, err.message || String(err), false)
+
+      // ★ 行为驱动预激活：即使调用失败也记录行为（但 success=false）
+      behaviorPredictor.recordCall(name, args, 0, false)
+
       throw err
     }
   }
@@ -707,5 +760,121 @@ export class ServerManager {
     if (toolName.startsWith('mcp_')) return 'mcp.call'
     if (toolName.startsWith('evolution_')) return 'evolution.analyze'
     return 'mcp.call'
+  }
+
+  // ══════════════════════════════════════════
+  //  行为驱动预激活：记录 + 预测 + 预加载
+  // ══════════════════════════════════════════
+
+  /**
+   * 记录工具调用到 BehaviorPredictor，然后预测后续工具并触发异步预加载。
+   *
+   * 预加载条件：
+   * - 预测置信度 >= BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE 阈值
+   * - 预测工具存在于 toolMap 中
+   * - 预测工具有对应的服务器可用
+   *
+   * 预加载策略：
+   * - 只读工具（read/grep/list）优先预加载（副作用小）
+   * - 写入/命令类工具跳过预加载（避免意外副作用）
+   * - 异步执行，不阻塞当前请求
+   */
+  private recordAndPredict(
+    currentTool: string,
+    args: Record<string, any>,
+    result: string,
+    serverName: string,
+  ): void {
+    // 记录当前调用
+    behaviorPredictor.recordCall(currentTool, args, 0, true)
+
+    // 预测后续工具
+    const predictions = behaviorPredictor.predict(currentTool)
+
+    // 对高置信度预测触发预加载
+    for (const prediction of predictions) {
+      if (prediction.confidence < BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE) continue
+
+      const predictedTool = prediction.toolName
+
+      // 写入/命令类工具跳过预加载（避免意外副作用）
+      if (FILE_WRITE_TOOLS.has(predictedTool) || SHELL_TOOLS.has(predictedTool)) {
+        log('DEBUG', 'behavior_predictor_skip_write_tool', { tool: predictedTool })
+        continue
+      }
+
+      // 查找工具所在服务器
+      const predictedMeta = this.toolMap.get(predictedTool)
+      if (!predictedMeta) continue
+
+      // 异步预加载（不阻塞）
+      this.triggerPreload(predictedTool, predictedMeta.serverName)
+    }
+  }
+
+  /**
+   * 触发单个工具的异步预加载。
+   *
+   * 预加载策略（按优先级）：
+   * 1. 无必需参数的工具 → 用空参数预执行并缓存结果（如 list_* 工具）
+   * 2. 外部 MCP 服务器 → 探活 + 连接预热（降低冷启动延迟）
+   * 3. 有必需参数的工具 → 跳过（无法预测参数值）
+   * 4. 管理工具 → 跳过
+   *
+   * 预加载结果缓存键使用空参数构建，因此只有无必需参数的
+   * 只读工具（list_files 等）能命中缓存。对有参数需求的工具，
+   * 预加载效果体现在 MCP 服务器连接预热上。
+   */
+  private triggerPreload(
+    toolName: string,
+    serverName: string,
+  ): void {
+    if (serverName === MGR) return
+
+    // 查询工具定义，判断是否有必需参数
+    const defs = this.getAllDefinitions()
+    const toolDef = defs.find((d) => d.name === toolName)
+    const hasRequiredParams = toolDef && toolDef.required.length > 0
+
+    if (serverName === this.local.name) {
+      if (!hasRequiredParams && FILE_READ_TOOLS.has(toolName)) {
+        // 无必需参数的只读工具：用空参数预执行并缓存
+        const noArgCacheKey = behaviorPredictor.buildCacheKey(toolName, {})
+        behaviorPredictor.preloadTool(
+          noArgCacheKey,
+          serverName,
+          toolName,
+          {},
+          async (name, preloadArgs) => {
+            const toolResult = await this.local.callTool(name, preloadArgs)
+            return this.formatResult(toolResult)
+          },
+        ).catch(() => { /* 预加载失败不抛出 */ })
+      }
+      // 有必需参数的工具跳过预执行，仅通过行为记录预热
+    } else {
+      // 外部 MCP 服务器：连接预热（先确保初始化完成）
+      const client = this.servers.get(serverName)
+      if (client && !client.isInitialized()) {
+        client.initialize().catch(() => {
+          log('WARN', 'behavior_predictor_prewarm_failed', { server: serverName })
+        })
+      }
+
+      // 无必需参数的只读工具：可安全预执行
+      if (client && client.isInitialized() && !hasRequiredParams && FILE_READ_TOOLS.has(toolName)) {
+        const noArgCacheKey = behaviorPredictor.buildCacheKey(toolName, {})
+        behaviorPredictor.preloadTool(
+          noArgCacheKey,
+          serverName,
+          toolName,
+          {},
+          async (name, preloadArgs) => {
+            const toolResult = await client.callTool(name, preloadArgs)
+            return this.formatResult(toolResult)
+          },
+        ).catch(() => { /* 预加载失败不抛出 */ })
+      }
+    }
   }
 }

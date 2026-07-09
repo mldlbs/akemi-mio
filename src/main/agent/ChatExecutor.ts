@@ -14,13 +14,14 @@ import { ConversationContext, Message, buildSystemPrompt, trimOrphanedToolCallsF
 import { validateToolCallChain, rollbackToLastKnownGood } from './ContextIntegrityChecker'
 import type { MemoryService } from '../memory/MemoryService'
 import { ChatResult } from '../llm/types'
-import { eventBus } from '../core/EventBus'
+import { eventBus, type EventPayload } from '../core/EventBus'
 import type { PlanManagerLike } from '../evolution/types'
 import { SubAgentPool } from './SubAgentPool'
 import { ReflectLoop } from './ReflectLoop'
 import { Guardrail } from './Guardrail'
 import { ProgressGuardrail } from './ProgressGuardrail'
 import { GuardrailPipeline } from '../core/evaluation/GuardrailPipeline'
+import type { EvaluationEmitter } from '../core/evaluation/EvaluationEmitter'
 import { GoalGuardrail } from '../governance/GoalGuardrail'
 import { ToolScheduler, type ToolResult } from './ToolScheduler'
 import type { TokenAccount } from '../cognitive/TokenEconomy'
@@ -42,6 +43,7 @@ import { evaluateMilestone } from './CheckpointScheduler'
 import { ResourceBudget } from '../core/ResourceBudget'
 import type { ProceduralMemory } from './ProceduralMemory'
 import type { FailureAnalyzer } from './FailureAnalyzer'
+import type { UnifiedKnowledgeQuery } from '../knowledge/UnifiedKnowledgeQuery'
 import { runObserve } from './ObserveStage'
 import { runThink } from './ThinkStage'
 import { runReflect } from './ReflectStage'
@@ -52,6 +54,9 @@ import { setPersonaStateManager } from '../tool/deps'
 import { PersonaDriftControlSystem, DRIFT_CORRECTION_PROMPT } from './PersonaDriftControlSystem'
 import { classifyContent } from './ContentClassifier'
 import { userBehaviorAnalyzer } from './UserBehaviorAnalyzer'
+import { behaviorStateMachine } from '../behavior/BehaviorStateMachine'
+import type { BehaviorMode } from '../behavior/BehaviorStateMachine'
+import { buildTtsNeed } from '../behavior/UserBehaviorTtsContract'
 import { asrHotwordManager } from '../asr/AsrHotwordManager'
 import { sentimentAnalyzer } from '../tts/SentimentAnalyzer'
 import { emotionToneMap } from '../tts/EmotionToneMap'
@@ -62,13 +67,20 @@ import { toneProfileCache } from '../tts/UserToneProfileCache'
 import { voiceStyleMap } from '../tts/VoiceStyleMap'
 import { behaviorEmotionDetector } from '../tts/BehaviorEmotionDetector'
 import { contextualTtsAdvisor } from '../tts/ContextualTtsAdvisor'
+import { memoryEmotionBridge } from '../tts/MemoryEmotionBridge'
+import { userContextClassifier } from '../tts/UserContextClassifier'
 import { implicitFeedbackTracker } from '../tts/ImplicitFeedbackTracker'
 import type {
   BehaviorEmotionResult,
   BehaviorMetrics,
   InteractionContext,
+  ContextClassificationResult,
+  ContextOverrideMode,
   PreferenceRecommendation,
+  VoiceEmotionLabel,
 } from '../tts/types'
+import { VOICE_EMOTION_TTS_MAP } from '../tts/types'
+import type { VoiceEmotion } from '../asr/types'
 
 export class ChatExecutor {
   private llmService: LlmService
@@ -97,6 +109,8 @@ export class ChatExecutor {
   private runContext: RunContext | null = null
   private proceduralMemory: ProceduralMemory | null = null
   private failureAnalyzer: FailureAnalyzer | null = null
+  /** 统一知识源查询引擎（Memory + Agent 跨源查询） */
+  private knowledgeQuery: UnifiedKnowledgeQuery | null = null
   private thinkStageCount = 0
   private obsLogger: ObservabilityLogger | null = null
   private lastUserText = ''
@@ -115,6 +129,8 @@ export class ChatExecutor {
   private executionGovernor = new ExecutionGovernor()
   /** Guardrail Pipeline — Trace 级别进展检测（可选注入） */
   private guardrailPipeline: GuardrailPipeline | null = null
+  /** Evaluation Emitter — 用于写入 Guardrail Delivery Trace 事件 */
+  private evaluationEmitter: EvaluationEmitter | null = null
 
   constructor(
     llmService: LlmService,
@@ -156,6 +172,11 @@ export class ChatExecutor {
     this.guardrailPipeline = pipeline
   }
 
+  /** 注入 EvaluationEmitter（启动时由 AppRuntime 调用，用于写入 Delivery Trace） */
+  setEvaluationEmitter(emitter: EvaluationEmitter): void {
+    this.evaluationEmitter = emitter
+  }
+
   setMainWindow(win: BrowserWindow | null): void {
     this.mainWindow = win
   }
@@ -169,6 +190,7 @@ export class ChatExecutor {
     identityContext?: string
     proceduralMemory?: ProceduralMemory | null
     failureAnalyzer?: FailureAnalyzer | null
+    knowledgeQuery?: UnifiedKnowledgeQuery | null
   }): void {
     if (deps.memoryService !== undefined) this.memoryService = deps.memoryService
     if (deps.skillManager !== undefined) this.skillManager = deps.skillManager
@@ -178,6 +200,7 @@ export class ChatExecutor {
     if (deps.identityContext !== undefined) this.identityContext = deps.identityContext
     if (deps.proceduralMemory !== undefined) this.proceduralMemory = deps.proceduralMemory
     if (deps.failureAnalyzer !== undefined) this.failureAnalyzer = deps.failureAnalyzer
+    if (deps.knowledgeQuery !== undefined) this.knowledgeQuery = deps.knowledgeQuery
   }
 
   getContext(): ConversationContext {
@@ -207,9 +230,13 @@ export class ChatExecutor {
 
   private refreshMemory(): void {
     if (!this.memoryService) return
+
+    // TODO(v3): 切换为 this.knowledgeQuery.getCombinedContext() 统一获取，
+    // 当前保持传统同步路径（getFormattedContext 均为同步调用）
     const memCtx = this.memoryService.getFormattedContext()
     this.obsLogger?.logMemory(this.lastUserText, memCtx)
     const reflectCtx = this.reflectLoop.getFormattedContext()
+
     // 按需注入：根据用户输入匹配外部技能
     const skillModules = this.lastUserText
       ? this.skillManager?.getMatchedPromptModules(this.lastUserText) || []
@@ -289,10 +316,46 @@ export class ChatExecutor {
   private contextualTtsEnabled = true
   /** 上次交互情境推荐结果 */
   private lastContextualContext: InteractionContext | null = null
+  /** 用户情境自适应语音是否启用 */
+  private userContextClassifierEnabled = true
+  /** 上次用户情境分类结果（用于混合 + UI 展示） */
+  private lastUserContext: ContextClassificationResult | null = null
   /** 隐式反馈驱动的语音自适应是否启用 */
   private implicitFeedbackEnabled = true
   /** 上次隐式反馈推荐结果 */
   private lastImplicitFeedback: PreferenceRecommendation | null = null
+
+  // ══════════════════════════════════════════
+  //  UserBehavior → TTS 消费者合同
+  // ══════════════════════════════════════════
+
+  /** 缓存用户行为状态（从 EventBus 订阅，用于 buildTtsNeed） */
+  private cachedBehaviorState: {
+    activityState: string
+    fullscreen: boolean
+    focused: boolean
+    idleTimeMs: number
+  } | null = null
+  /** 行为状态订阅是否已初始化 */
+  private behaviorStateSubscribed = false
+
+  // ══════════════════════════════════════════
+  //  语音情感（从 ASR 声学特征推断）
+  // ══════════════════════════════════════════
+
+  /** 语音情感自适应是否启用 */
+  private voiceEmotionEnabled = true
+  /** 最新的用户语音情感分析结果（由 ASR 识别后通过 IPC 更新） */
+  private userVoiceEmotion: VoiceEmotion | null = null
+
+  // ══════════════════════════════════════════
+  //  记忆情感上下文（从 Memory 对话历史情感分析驱动）
+  // ══════════════════════════════════════════
+
+  /** 记忆情感自适应语音是否启用 */
+  private memoryEmotionEnabled = true
+  /** 缓存的记忆情感上下文（供 IPC 展示） */
+  private lastMemoryEmotionContext: import('../tts/MemoryEmotionBridge').AggregatedEmotionContext | null = null
 
   async run(
     text: string,
@@ -311,6 +374,12 @@ export class ChatExecutor {
       }
       behaviorEmotionDetector.start(this.mainWindow ?? undefined)
     }
+    // 用户情境分类器懒启动（首次 run 时开始轮询活跃窗口）
+    if (this.userContextClassifierEnabled) {
+      userContextClassifier.start()
+    }
+    // 行为状态订阅懒初始化（首次 run 时绑定 EventBus）
+    this.ensureBehaviorStateSubscription()
     const rid = requestId || createRequestId()
     const t0 = Date.now()
     this.memoryService?.recordInteraction(text)
@@ -337,6 +406,10 @@ export class ChatExecutor {
     if (this.contextualTtsEnabled) {
       contextualTtsAdvisor.recordInteraction()
     }
+    // 用户情境：记录交互时间用于 idle 检测
+    if (this.userContextClassifierEnabled) {
+      userContextClassifier.recordInteraction()
+    }
     // 语气记忆：懒初始化 + 增量更新用户语气画像
     this.ensureToneProfileInit()
     if (this.toneProfileEnabled) {
@@ -358,6 +431,14 @@ export class ChatExecutor {
       } catch (err) {
         // 语气分析失败不应影响对话
         log('WARN', 'tone_profile_update_error', { error: String(err) })
+      }
+    }
+    // ── 记忆情感：分析用户消息情感并写入 Memory ──
+    if (this.memoryEmotionEnabled && this.memoryService) {
+      try {
+        memoryEmotionBridge.recordUserMessageEmotion(text, this.memoryService)
+      } catch (err) {
+        log('WARN', 'memory_emotion_record_error', { error: String(err) })
       }
     }
     // Persona 仲裁：检测意图 → 路由人格
@@ -471,6 +552,54 @@ export class ChatExecutor {
     }
   }
 
+  // ── M4.2 Action Delivery Trace ──
+
+  /** 写入 guardrail.action_delivered — Policy 决策已被 Runtime 成功执行 */
+  private emitActionDelivered(
+    decisionId: string,
+    traceId: string,
+    actionType: 'TERMINATE' | 'WARNING' | 'CONTINUE',
+    policyVersion: string,
+  ): void {
+    if (!this.evaluationEmitter) return
+    this.evaluationEmitter.emit(
+      'guardrail.action_delivered' as any,
+      {
+        type: 'guardrail.action_delivered',
+        decisionId,
+        traceId,
+        actionType,
+        policyVersion,
+        timestamp: Date.now(),
+      },
+      { traceId },
+    )
+  }
+
+  /** 写入 guardrail.action_delivery_failed — Policy 决策未能被 Runtime 执行 */
+  private emitActionDeliveryFailed(
+    decisionId: string,
+    traceId: string,
+    intendedAction: 'TERMINATE' | 'WARNING' | 'CONTINUE',
+    policyVersion: string,
+    errorCode: string,
+  ): void {
+    if (!this.evaluationEmitter) return
+    this.evaluationEmitter.emit(
+      'guardrail.action_delivery_failed' as any,
+      {
+        type: 'guardrail.action_delivery_failed',
+        decisionId,
+        traceId,
+        intendedAction,
+        policyVersion,
+        timestamp: Date.now(),
+        errorCode,
+      },
+      { traceId },
+    )
+  }
+
   stop(): void {
     this.runContext?.interrupt('user_stop')
     this.runContext = null
@@ -483,6 +612,8 @@ export class ChatExecutor {
     this.progressGuardrail.reset()
     // 停止行为情绪检测器的鼠标采样（释放定时器）
     behaviorEmotionDetector.stop()
+    // 停止用户情境分类器轮询
+    userContextClassifier.stop()
   }
 
   private async toolLoop(messages: Message[], ctx: RunContext, requestId: string, source: string): Promise<string> {
@@ -674,10 +805,12 @@ export class ChatExecutor {
                 case 'TERMINATE':
                   log('WARN', 'chat_guardrail_kernel_terminate', { step: i, reason: result.decision.reason, traceId: requestId })
                   eventBus.emit('guardrail.progress_stagnation', { consecutiveRounds: i, step: i })
+                  this.emitActionDelivered(result.decisionId, requestId, 'TERMINATE', result.decision.policyVersion)
                   ctx.guardrailStop = true
                   break
                 case 'WARNING':
                   log('WARN', 'chat_guardrail_kernel_warning', { step: i, reason: result.decision.reason, traceId: requestId })
+                  this.emitActionDelivered(result.decisionId, requestId, 'WARNING', result.decision.policyVersion)
                   break
                 case 'CONTINUE':
                   // 不干预
@@ -717,6 +850,10 @@ export class ChatExecutor {
         ctx.transition(RunState.COMPLETED)
         const finalReply = result.reply || ''
         if (!finalReply) this.obsLogger?.logExit('empty_llm_reply', `step=${i}`)
+        // 效用跟踪：检测 Agent 回复中是否引用了记忆
+        if (finalReply && this.memoryService) {
+          this.memoryService.recordAgentReference(finalReply)
+        }
         return finalReply
       }
     } finally {
@@ -913,86 +1050,93 @@ export class ChatExecutor {
         finalParams = toneToVoiceMapper.blend(this.lastToneBaseline, finalParams)
       }
 
-      // 如果启用了行为情绪，混合行为情绪参数（20% 权重，温和修正）
+      // ── 语音情感混合（从 ASR 声学特征推断的用户情绪，约 20% 权重）──
+      if (this.voiceEmotionEnabled && this.userVoiceEmotion && this.userVoiceEmotion.confidence > 0.3) {
+        const voiceEmotionLabel = this.userVoiceEmotion.label as VoiceEmotionLabel
+        const voiceEmotionParams = VOICE_EMOTION_TTS_MAP[voiceEmotionLabel]
+        if (voiceEmotionParams && voiceEmotionLabel !== 'neutral') {
+          const currentRate = parseInt(finalParams.rate.replace(/[^0-9-]/g, '')) || 0
+          const emotionRate = parseInt(voiceEmotionParams.rate.replace(/[^0-9-]/g, '')) || 0
+          const currentPitch = parseInt(finalParams.pitch.replace(/[^0-9-]/g, '')) || 0
+          const emotionPitch = parseInt(voiceEmotionParams.pitch.replace(/[^0-9-]/g, '')) || 0
+
+          const blendedRate = Math.round(currentRate * 0.8 + emotionRate * 0.2)
+          const blendedPitch = Math.round(currentPitch * 0.8 + emotionPitch * 0.2)
+
+          finalParams = {
+            voice: finalParams.voice,
+            rate: `${blendedRate >= 0 ? '+' : ''}${blendedRate}%`,
+            pitch: `${blendedPitch >= 0 ? '+' : ''}${blendedPitch}Hz`,
+            label: `${finalParams.label}·${voiceEmotionParams.label}`,
+          }
+        }
+      }
+
+      // ── 记忆情感混合（从 Memory 对话历史情感分析驱动，约 30% 权重）──
+      if (this.memoryEmotionEnabled && this.memoryService) {
+        try {
+          const emotionContext = memoryEmotionBridge.getRecentEmotionContext(this.memoryService)
+          this.lastMemoryEmotionContext = emotionContext
+          if (emotionContext.recentEmotions.length > 0) {
+            finalParams = memoryEmotionBridge.blendWithTtsParams(finalParams, emotionContext)
+            log('INFO', 'memory_emotion_applied_to_tts', {
+              dominantLabel: emotionContext.stats.dominantLabel,
+              entries: emotionContext.stats.totalEntries,
+              trend: emotionContext.stats.trend,
+              rateDelta: emotionContext.adjustment.rateDelta,
+              pitchDelta: emotionContext.adjustment.pitchDelta,
+            })
+          }
+        } catch (err) {
+          log('WARN', 'memory_emotion_tts_blend_error', { error: String(err) })
+        }
+      }
+
+      // ── [UserBehavior → TTS 消费者合同] ──
+      //
+      // 重构前：ChatExecutor 手动读取 6+ 行为源 → 逐层混合 rate/pitch → setEmotion
+      // 重构后：UserBehavior 集体声明需求 → buildTtsNeed 聚合 → applyBehaviorNeed
+      //
+      // 消费者视角的优势:
+      //   - BehaviorEmotionDetector 声明"用户焦躁→需要轻柔TTS"
+      //   - ContextualTtsAdvisor 声明"急迫节奏→需要低延迟"
+      //   - UserContextClassifier 声明"休息情境→需要安静"
+      //   - TtsService 负责"如何满足"这些需求
+
+      // 记录各分析器的结果（供 IPC 展示 + 后续 read 用）
       if (this.behaviorEmotionEnabled) {
-        const behaviorResult = behaviorEmotionDetector.getEmotion()
-        this.lastBehaviorEmotion = behaviorResult
-        if (behaviorResult.emotion !== 'neutral' && behaviorResult.confidence > 0.3) {
-          const behaviorParams = behaviorResult.ttsParams
-          // 混合：保留 voice 不变，rate/pitch 加入 20% 的行为情绪影响
-          const currentRate = parseInt(finalParams.rate.replace(/[^0-9-]/g, '')) || 0
-          const behaviorRate = parseInt(behaviorParams.rate.replace(/[^0-9-]/g, '')) || 0
-          const currentPitch = parseInt(finalParams.pitch.replace(/[^0-9-]/g, '')) || 0
-          const behaviorPitch = parseInt(behaviorParams.pitch.replace(/[^0-9-]/g, '')) || 0
-
-          const blendedRate = Math.round(currentRate * 0.8 + behaviorRate * 0.2)
-          const blendedPitch = Math.round(currentPitch * 0.8 + behaviorPitch * 0.2)
-
-          finalParams = {
-            voice: finalParams.voice, // voice 保持不变
-            rate: `${blendedRate >= 0 ? '+' : ''}${blendedRate}%`,
-            pitch: `${blendedPitch >= 0 ? '+' : ''}${blendedPitch}Hz`,
-            label: `${finalParams.label}·${behaviorParams.label}`,
-          }
-        }
+        this.lastBehaviorEmotion = behaviorEmotionDetector.getEmotion()
       }
-
-      // 如果启用了交互情境自适应，混合情境参数（15% 权重，温和修正）
       if (this.contextualTtsEnabled) {
-        const contextualResult = contextualTtsAdvisor.getRecommendation()
-        this.lastContextualContext = contextualResult
-        if (contextualResult.confidence > 0.2) {
-          const contextualParams = contextualResult.ttsParams
-          const currentRate = parseInt(finalParams.rate.replace(/[^0-9-]/g, '')) || 0
-          const contextualRate = parseInt(contextualParams.rate.replace(/[^0-9-]/g, '')) || 0
-          const currentPitch = parseInt(finalParams.pitch.replace(/[^0-9-]/g, '')) || 0
-          const contextualPitch = parseInt(contextualParams.pitch.replace(/[^0-9-]/g, '')) || 0
-
-          // 混合：情境影响 15%，保留其他层级的 85%
-          const blendedRate = Math.round(currentRate * 0.85 + contextualRate * 0.15)
-          const blendedPitch = Math.round(currentPitch * 0.85 + contextualPitch * 0.15)
-
-          finalParams = {
-            voice: finalParams.voice, // voice 保持不变
-            rate: `${blendedRate >= 0 ? '+' : ''}${blendedRate}%`,
-            pitch: `${blendedPitch >= 0 ? '+' : ''}${blendedPitch}Hz`,
-            label: `${finalParams.label}·${contextualParams.label}`,
-          }
-        }
+        this.lastContextualContext = contextualTtsAdvisor.getRecommendation()
       }
-
-      // ── [隐式反馈] 混合隐式偏好学习的参数推荐（10-15% 权重，渐进调整）──
+      if (this.userContextClassifierEnabled) {
+        this.lastUserContext = userContextClassifier.getClassification()
+      }
       if (this.implicitFeedbackEnabled) {
-        const prefRec = implicitFeedbackTracker.getRecommendation()
-        this.lastImplicitFeedback = prefRec
-        if (prefRec.confidence > 0.2 && prefRec.totalSamples >= 5) {
-          const prefParams = prefRec.params
-          const currentRate = parseInt(finalParams.rate.replace(/[^0-9-]/g, '')) || 0
-          const prefRate = parseInt(prefParams.rate.replace(/[^0-9-]/g, '')) || 0
-          const currentPitch = parseInt(finalParams.pitch.replace(/[^0-9-]/g, '')) || 0
-          const prefPitch = parseInt(prefParams.pitch.replace(/[^0-9-]/g, '')) || 0
-
-          // 隐式反馈权重：置信度越高，影响越大（0.1~0.15）
-          const feedbackWeight = Math.min(0.15, 0.08 + prefRec.confidence * 0.08)
-          const blendedRate = Math.round(currentRate * (1 - feedbackWeight) + prefRate * feedbackWeight)
-          const blendedPitch = Math.round(currentPitch * (1 - feedbackWeight) + prefPitch * feedbackWeight)
-
-          finalParams = {
-            voice: finalParams.voice, // voice 保持之前多层决策的结果
-            rate: `${blendedRate >= 0 ? '+' : ''}${blendedRate}%`,
-            pitch: `${blendedPitch >= 0 ? '+' : ''}${blendedPitch}Hz`,
-            label: `${finalParams.label}·${prefParams.label}`,
-          }
-        }
+        this.lastImplicitFeedback = implicitFeedbackTracker.getRecommendation()
       }
 
-      // 避免重复设置相同参数
-      if (this.lastEmotionParams && !emotionToneMap.isDifferent(this.lastEmotionParams, finalParams)) {
-        return
+      // 通过 buildTtsNeed 聚合行为需求
+      const behaviorNeed = buildTtsNeed(
+        this.buildMinimalEnrichedState(),
+        this.behaviorEmotionEnabled ? this.lastBehaviorEmotion : null,
+        this.behaviorEmotionEnabled ? behaviorEmotionDetector.getMetrics() : null,
+        this.contextualTtsEnabled ? this.lastContextualContext : null,
+        this.userContextClassifierEnabled ? this.lastUserContext : null,
+      )
+
+      // 将行为需求应用到 TTS（TtsService 内部自动根据 need 调整 rate/pitch/路由）
+      this.ttsService.applyBehaviorNeed(behaviorNeed, finalParams)
+
+      // 同步 UserContext 的语音配置到 TtsService（供 PiperOrchestrator 等查询）
+      if (this.userContextClassifierEnabled) {
+        const smoothedConfig = userContextClassifier.getSmoothedParams()
+        this.ttsService.setContextVoiceConfig(smoothedConfig)
       }
 
-      this.lastEmotionParams = finalParams
-      this.ttsService.setEmotion(finalParams)
+      // 记录最后应用的参数供 IPC 展示
+      this.lastEmotionParams = this.ttsService.getEmotionParams()
 
       // 发送完整语音风格信息到渲染进程（供 UI 展示/调试）
       this.mainWindow?.webContents.send('tts:emotion', {
@@ -1026,6 +1170,28 @@ export class ChatExecutor {
                 },
               }
             : null,
+        // ── VoiceEmotion（从 ASR 声学特征推断）字段 ──
+        voiceEmotion:
+          this.voiceEmotionEnabled && this.userVoiceEmotion
+            ? {
+                label: this.userVoiceEmotion.label,
+                confidence: this.userVoiceEmotion.confidence,
+                scores: this.userVoiceEmotion.scores,
+                features: this.userVoiceEmotion.features,
+              }
+            : null,
+        // ── MemoryEmotion（从对话历史情感分析驱动）字段 ──
+        memoryEmotion:
+          this.memoryEmotionEnabled && this.lastMemoryEmotionContext
+            ? {
+                dominantLabel: this.lastMemoryEmotionContext.stats.dominantLabel,
+                dominantPolarity: this.lastMemoryEmotionContext.stats.dominantPolarity,
+                trend: this.lastMemoryEmotionContext.stats.trend,
+                entries: this.lastMemoryEmotionContext.stats.totalEntries,
+                adjustment: this.lastMemoryEmotionContext.adjustment,
+                labelDistribution: this.lastMemoryEmotionContext.stats.labelCounts,
+              }
+            : null,
         // ── ContextualTts 字段 ──
         contextualTts:
           this.contextualTtsEnabled && this.lastContextualContext
@@ -1036,6 +1202,19 @@ export class ChatExecutor {
                 description: this.lastContextualContext.description,
                 meanIntervalSec: this.lastContextualContext.intervalStats.meanIntervalSec,
                 rapidBurstCount: this.lastContextualContext.intervalStats.rapidBurstCount,
+              }
+            : null,
+        // ── UserContext 字段 ──
+        userContext:
+          this.userContextClassifierEnabled && this.lastUserContext
+            ? {
+                context: this.lastUserContext.context,
+                confidence: this.lastUserContext.confidence,
+                description: this.lastUserContext.description,
+                activeWindowTitle: this.lastUserContext.indicators.activeWindowTitle,
+                activeProcessName: this.lastUserContext.indicators.activeProcessName,
+                idleSeconds: this.lastUserContext.indicators.idleSeconds,
+                apm: this.lastUserContext.indicators.apm,
               }
             : null,
         // ── [隐式反馈] 偏好学习字段 ──
@@ -1178,6 +1357,45 @@ export class ChatExecutor {
   }
 
   // ══════════════════════════════════════════
+  //  用户情境自适应语音
+  // ══════════════════════════════════════════
+
+  /** 切换用户情境自适应语音开关（供 IPC 调用） */
+  toggleUserContextClassifier(enabled: boolean): void {
+    this.userContextClassifierEnabled = enabled
+    userContextClassifier.setEnabled(enabled)
+    if (!enabled) {
+      userContextClassifier.stop()
+      this.lastUserContext = null
+    } else {
+      userContextClassifier.start()
+    }
+    this.mainWindow?.webContents.send('tts:userContext:enabled', { enabled })
+  }
+
+  /** 设置用户情境手动覆盖模式（供 IPC/系统托盘调用） */
+  setUserContextOverride(mode: ContextOverrideMode): void {
+    userContextClassifier.setOverrideMode(mode)
+    log('INFO', 'user_context_override_changed', { mode })
+  }
+
+  /** 获取当前用户情境自适应状态（供 IPC/调试） */
+  getUserContextState(): {
+    enabled: boolean
+    result: ContextClassificationResult | null
+  } {
+    return {
+      enabled: this.userContextClassifierEnabled,
+      result: this.lastUserContext,
+    }
+  }
+
+  /** 重置用户情境分类器过渡状态 */
+  resetUserContextTransition(): void {
+    userContextClassifier.resetTransition()
+  }
+
+  // ══════════════════════════════════════════
   //  隐式反馈驱动的语音自适应
   // ══════════════════════════════════════════
 
@@ -1224,5 +1442,120 @@ export class ChatExecutor {
     implicitFeedbackTracker.reset()
     this.lastImplicitFeedback = null
     log('INFO', 'implicit_feedback_reset')
+  }
+
+  // ══════════════════════════════════════════
+  //  语音情感自适应（从 ASR 声学特征推断的用户情绪 → TTS 参数）
+  // ══════════════════════════════════════════
+
+  /**
+   * 设置来自 ASR 的用户语音情感分析结果。
+   * 由 IPC handler（asr:transcribe 成功后）调用。
+   * 在下一轮 applySentimentToTts() 中自动融合到 TTS 参数。
+   */
+  setUserVoiceEmotion(emotion: VoiceEmotion | null): void {
+    this.userVoiceEmotion = emotion
+    if (emotion) {
+      log('INFO', 'voice_emotion_set', {
+        label: emotion.label,
+        confidence: emotion.confidence,
+        energy: emotion.features.energy,
+        pitchHz: emotion.features.pitchHz,
+      })
+    }
+  }
+
+  /** 获取当前用户语音情感（供调试/UI） */
+  getUserVoiceEmotion(): VoiceEmotion | null {
+    return this.userVoiceEmotion
+  }
+
+  /** 切换语音情感自适应开关 */
+  toggleVoiceEmotionTts(enabled: boolean): void {
+    this.voiceEmotionEnabled = enabled
+    if (!enabled) {
+      this.userVoiceEmotion = null
+    }
+    this.mainWindow?.webContents.send('tts:voiceEmotion:enabled', { enabled })
+  }
+
+  /** 获取语音情感自适应状态 */
+  getVoiceEmotionState(): { enabled: boolean; emotion: VoiceEmotion | null } {
+    return {
+      enabled: this.voiceEmotionEnabled,
+      emotion: this.voiceEmotionEnabled ? this.userVoiceEmotion : null,
+    }
+  }
+
+  // ══════════════════════════════════════════
+  //  记忆情感自适应（从 Memory 对话历史情感分析驱动）
+  // ══════════════════════════════════════════
+
+  /** 切换记忆情感自适应语音开关（供 IPC 调用） */
+  toggleMemoryEmotionTts(enabled: boolean): void {
+    this.memoryEmotionEnabled = enabled
+    if (!enabled) {
+      this.lastMemoryEmotionContext = null
+    }
+    log('INFO', 'memory_emotion_tts_enabled', { enabled })
+  }
+
+  /** 获取记忆情感自适应状态 */
+  getMemoryEmotionState(): {
+    enabled: boolean
+    context: import('../tts/MemoryEmotionBridge').AggregatedEmotionContext | null
+  } {
+    return {
+      enabled: this.memoryEmotionEnabled,
+      context: this.memoryEmotionEnabled ? this.lastMemoryEmotionContext : null,
+    }
+  }
+
+  // ══════════════════════════════════════════
+  //  UserBehavior → TTS 消费者合同
+  // ══════════════════════════════════════════
+
+  /**
+   * 懒初始化行为状态订阅（通过 EventBus 获取 UserBehaviorService 的最新状态）。
+   * 只订阅一次，重复调用无害。
+   */
+  private ensureBehaviorStateSubscription(): void {
+    if (this.behaviorStateSubscribed) return
+    this.behaviorStateSubscribed = true
+    try {
+      eventBus.on('behavior.state.updated', (state: EventPayload['behavior.state.updated']) => {
+        if (state && typeof state === 'object') {
+          this.cachedBehaviorState = {
+            activityState: state.activityState ?? 'active',
+            fullscreen: state.fullscreen ?? false,
+            focused: state.focused ?? true,
+            idleTimeMs: state.idleTimeMs ?? 0,
+          }
+        }
+      })
+    } catch (err) {
+      log('WARN', 'behavior_state_subscribe_error', { error: String(err) })
+    }
+  }
+
+  /**
+   * 从缓存的行为状态 + BehaviorStateMachine 构建最小 EnrichedBehaviorState
+   * 供 buildTtsNeed 消费。当订阅尚未收到数据时返回 null（buildTtsNeed 会优雅降级）。
+   */
+  private buildMinimalEnrichedState(): {
+    mode: BehaviorMode
+    activityState: string
+    fullscreen: boolean
+    focused: boolean
+    idleTimeMs: number
+  } | null {
+    if (!this.cachedBehaviorState) return null
+    return {
+      mode: behaviorStateMachine.getCurrentMode(),
+      activityState: this.cachedBehaviorState.activityState,
+      fullscreen: this.cachedBehaviorState.fullscreen,
+      focused: this.cachedBehaviorState.focused,
+      idleTimeMs: this.cachedBehaviorState.idleTimeMs,
+    }
   }
 }

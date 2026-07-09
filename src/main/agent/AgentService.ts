@@ -30,8 +30,11 @@ import { classify as classifyError } from './ErrorClassifier'
 import { TaskExecutor } from './TaskExecutor'
 import { ChatExecutor } from './ChatExecutor'
 import type { GuardrailPipeline } from '../core/evaluation/GuardrailPipeline'
+import type { EvaluationEmitter } from '../core/evaluation/EvaluationEmitter'
 import { ProceduralMemory } from './ProceduralMemory'
-import { setProceduralMemory, setTtsService } from '../tool/deps'
+import { setProceduralMemory, setTtsService, setAsrService } from '../tool/deps'
+import { UnifiedKnowledgeQuery, MemoryPluginAdapter, adaptProceduralMemory, adaptReflectLoop, adaptFailureAnalyzer } from '../knowledge'
+import { agentPluginRegistry, ObserveStagePluginAdapter, ThinkStagePluginAdapter, ReflectStagePluginAdapter } from './plugin'
 
 export class AgentService {
   private llmService: LlmService
@@ -87,6 +90,10 @@ export class AgentService {
   /** 身份上下文缓存（由 CognitiveService.identity 提供） */
   private identityContext = ''
 
+  // ── 统一知识源查询引擎 ──
+  /** KnowledgeQuery — 跨 Memory/Agent 统一查询 */
+  readonly knowledgeQuery: UnifiedKnowledgeQuery
+
   // ── v2 架构 ──
   /** ChatExecutor — Chat 运行时（独立 context + toolLoop） */
   private chatExecutor: ChatExecutor | null = null
@@ -128,6 +135,15 @@ export class AgentService {
       log('INFO', 'agent_service_plan_tracked', { plan_id: p.planId, title: p.title })
     })
 
+    // ── 统一知识源查询引擎 ──
+    // 注册 Memory 和 Agent 侧所有知识源的适配器
+    this.knowledgeQuery = new UnifiedKnowledgeQuery()
+    // Agent 侧知识源（注册为策略模式实现）
+    this.knowledgeQuery.register(adaptProceduralMemory(this.proceduralMemory))
+    this.knowledgeQuery.register(adaptReflectLoop(this.reflectLoop))
+    this.knowledgeQuery.register(adaptFailureAnalyzer(this.failureAnalyzer))
+    log('INFO', 'knowledge_query_initialized', { sources: this.knowledgeQuery.getSourceNames() })
+
     // ── v2 架构初始化 ──
     // ChatExecutor: 独立 context + toolLoop
     this.chatExecutor = new ChatExecutor(
@@ -151,8 +167,60 @@ export class AgentService {
     setProceduralMemory(this.proceduralMemory)
     // 注册 TTS 服务到工具依赖（供 PiperTTS 工具调用）
     setTtsService(this.ttsService)
+    // 注册 ASR 服务到工具依赖（供 TypographyVerification 工具调用）
+    setAsrService(this.asrService)
 
     this.taskExecutor = new TaskExecutor(this.llmService, this.toolScheduler, this.guardrail, this.planManager, this.resourceBudget)
+
+    // ── 注册内置 Agent 插件到 AgentPluginRegistry ──
+    // 模式迁移：ASR 的 SpeechPluginRegistry ServiceLoader 模式
+    // （src/main/speech/）迁移到 Agent 认知管线
+    this.registerBuiltinPlugins()
+  }
+
+  // ══════════════════════════════════════════
+  //  Agent Plugin Registry（源自 ASR 的 SpeechPluginRegistry 模式）
+  // ══════════════════════════════════════════
+
+  /**
+   * 注册内置 Agent 插件到 AgentPluginRegistry。
+   *
+   * 模式迁移：ASR 的 SpeechPluginRegistry ServiceLoader 模式
+   * （src/main/speech/）迁移到 Agent 认知管线。
+   *
+   * 当前注册：
+   * - ObserveStagePluginAdapter — 包装 runObserve
+   * - ThinkStagePluginAdapter — 包装 runThink
+   * - ReflectStagePluginAdapter — 包装 runReflect
+   *
+   * 后续可在此注册更多认知阶段插件、行为分析插件等。
+   */
+  private registerBuiltinPlugins(): void {
+    // Observe 阶段插件（需要注入 ProceduralMemory 和 FailureAnalyzer 引用）
+    const observePlugin = new ObserveStagePluginAdapter()
+    observePlugin.setDeps({
+      proceduralMemory: this.proceduralMemory,
+      failureAnalyzer: this.failureAnalyzer,
+    })
+    agentPluginRegistry.register(observePlugin)
+
+    // Think 阶段插件（无状态，不需要依赖注入）
+    agentPluginRegistry.register(new ThinkStagePluginAdapter())
+
+    // Reflect 阶段插件（无状态，不需要依赖注入）
+    agentPluginRegistry.register(new ReflectStagePluginAdapter())
+
+    log('INFO', 'agent_builtin_plugins_registered', {
+      count: 3,
+      capabilities: ['cognitive_stage'],
+    })
+  }
+
+  /**
+   * 获取 AgentPluginRegistry 实例（供外部访问）。
+   */
+  getPluginRegistry(): typeof agentPluginRegistry {
+    return agentPluginRegistry
   }
 
   getMcpManager(): ServerManager {
@@ -224,31 +292,61 @@ export class AgentService {
       tokenAccount: this.tokenAccount,
       identityContext: this.identityContext || undefined,
       failureAnalyzer: this.failureAnalyzer,
+      knowledgeQuery: this.knowledgeQuery,
     })
   }
 
   setMemoryService(memoryService: MemoryService): void {
     this.memoryService = memoryService
     this.guardrail.updateDeps({ memoryService })
+    // 注册 Memory 侧知识源到统一查询引擎
+    // MemoryPluginAdapter 将 IMemoryPlugin 适配为 IKnowledgeSource
+    for (const plugin of memoryService.unifiedQuery.getAllPlugins()) {
+      this.knowledgeQuery.register(new MemoryPluginAdapter(plugin))
+    }
+    log('INFO', 'memory_plugins_registered_to_knowledge', { pluginCount: memoryService.unifiedQuery.getAllPlugins().length })
     this.refreshMemoryInContext()
     this.updateRuntimeDeps()
+
+    // 初始化 Agent 插件（内存服务就绪后触发，不阻塞主流程）
+    // 模式迁移：ASR 的 SpeechPluginRegistry.loadAll() 在引擎就绪后调用
+    agentPluginRegistry.loadAll().catch((err) => {
+      log('WARN', 'agent_plugin_load_all_failed', { error: String(err) })
+    })
   }
 
   /** 刷新 ConversationContext 中的静态记忆片段，确保 remember_fact 写入后立即可见 */
   private refreshMemoryInContext(lastUserText?: string): void {
     if (!this.memoryService) return
-    const memCtx = this.memoryService.getFormattedContext()
-    const reflectCtx = this.reflectLoop.getFormattedContext()
-    const procCtx = this.proceduralMemory.getFormattedContext()
+
+    // 使用统一知识源查询引擎获取合并上下文
+    // 策略模式：统一接口隐藏了 Memory + Agent 侧各知识源的差异
+    const getCombinedContext = (): string => {
+      // Memory 上下文（核心记忆）
+      const memCtx = this.memoryService!.getFormattedContext()
+      // 尝试从统一知识源获取 agent 侧上下文
+      const reflectCtx = this.reflectLoop.getFormattedContext()
+      const procCtx = this.proceduralMemory.getFormattedContext()
+      const failCtx = this.failureAnalyzer?.getFormattedContext() ?? ''
+
+      return [memCtx, procCtx, reflectCtx, failCtx].filter(Boolean).join('\n\n')
+    }
+
     const skillModules = lastUserText
       ? this.skillManager?.getMatchedPromptModules(lastUserText) || []
       : this.skillManager?.getEnabledPromptModules() || []
     const extraModules = skillModules.length > 0 ? skillModules : undefined
     const allExtraModules = extraModules
-    const allContextParts = [memCtx, procCtx, reflectCtx, this.failureAnalyzer.getFormattedContext()].filter(Boolean)
-    const combinedContext = allContextParts.join('\n\n')
+    const combinedContext = getCombinedContext()
+
     if (combinedContext || allExtraModules) {
-      this.context = new ConversationContext(combinedContext || undefined, 2000, allExtraModules, undefined, reflectCtx)
+      this.context = new ConversationContext(
+        combinedContext || undefined,
+        2000,
+        allExtraModules,
+        undefined,
+        this.reflectLoop.getFormattedContext(),
+      )
     }
   }
 
@@ -270,6 +368,11 @@ export class AgentService {
   /** 注入 GuardrailPipeline（启动时由 AppRuntime 调用） */
   setGuardrailPipeline(pipeline: GuardrailPipeline): void {
     this.chatExecutor?.setGuardrailPipeline(pipeline)
+  }
+
+  /** 注入 EvaluationEmitter（启动时由 AppRuntime 调用） */
+  setEvaluationEmitter(emitter: EvaluationEmitter): void {
+    this.chatExecutor?.setEvaluationEmitter(emitter)
   }
 
   getContext(): ConversationContext {

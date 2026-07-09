@@ -4,7 +4,7 @@ import { AgentService } from '../agent/AgentService'
 import { StateManager } from '../core/StateManager'
 import { TtsService } from '../tts/TtsService'
 import { SelfEvolutionService } from '../evolution'
-import { EvolutionDashboardService } from '../wallpaper/WallpaperService'
+import { EvolutionDashboardService, MemoryContextService } from '../wallpaper/WallpaperService'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import { WAKE_WORDS, LLM_API_URL, LLM_CODE_API_URL, LLM_TEXT_API_URL, LLM_VISION_API_URL, WORKSPACE } from '../config'
 import { monitorEventLoopDelay } from 'perf_hooks'
@@ -16,11 +16,18 @@ import { workflowStore } from '../workflow/WorkflowStoreV2'
 import { getWorkflowScheduler } from '../workflow/WorkflowScheduler'
 import { createAgentWindow, closeAgentWindow } from '../core/Lifecycle'
 import { join } from 'path'
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'fs'
 import { eventBus } from '../core/EventBus'
 import { VoiceToolOrchestrator } from '../tool/VoiceToolOrchestrator'
 import { extractContextFromSummaries } from '../asr/AsrContextBuilder'
 import { asrHotwordManager } from '../asr/AsrHotwordManager'
+import { inspirationService } from '../writing/InspirationService'
+import { voiceContinuationService } from '../writing/VoiceContinuationService'
+import { audioFeatureExtractor } from '../audio/AudioFeatureExtractor'
+import { atmosphereMapper } from '../audio/AtmosphereMapper'
+import {
+  typographyVerificationService,
+} from '../typing/TypographyVerificationService'
 
 /** 打开的沙盒窗口表，防止重复打开 */
 const sandboxWindows = new Map<string, BrowserWindow>()
@@ -77,6 +84,7 @@ export function registerHandlers(
   evolutionRef?: ServiceRef<SelfEvolutionService>,
   metricsCollector?: MetricsCollector,
   dashboardRef?: ServiceRef<EvolutionDashboardService>,
+  memoryContextRef?: ServiceRef<MemoryContextService>,
 ): void {
   ipcMain.handle('window:close', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -141,6 +149,14 @@ export function registerHandlers(
 
       // 2. 执行转录
       const result = await asr.transcribe(audioBuffer)
+
+      // 2.5 将语音情感分析结果传递给 ChatExecutor（用于 TTS 情感自适应）
+      if (result.voiceEmotion) {
+        const chatExecutor = agentService.getChatExecutor()
+        if (chatExecutor) {
+          chatExecutor.setUserVoiceEmotion(result.voiceEmotion)
+        }
+      }
 
       // 3. 识别后新文本并入 Memory（记录交互、提取主题）
       if (memoryService && result.text && result.text.trim()) {
@@ -443,6 +459,47 @@ export function registerHandlers(
       }
     } catch (err) {
       log('ERROR', 'tts_router_state_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  // ══════════════════════════════════════════
+  //  用户情境自适应语音
+  // ══════════════════════════════════════════
+
+  ipcMain.handle('tts:userContext:toggle', async (_event, enabled: boolean) => {
+    try {
+      agentService.getChatExecutor()?.toggleUserContextClassifier(enabled)
+      log('INFO', 'tts_user_context_toggle_ipc', { enabled })
+      return { success: true, enabled }
+    } catch (err) {
+      log('ERROR', 'tts_user_context_toggle_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('tts:userContext:state', async () => {
+    try {
+      const chatExec = agentService.getChatExecutor()
+      if (chatExec) {
+        return { success: true, ...chatExec.getUserContextState() }
+      }
+      return { success: true, enabled: false, result: null }
+    } catch (err) {
+      log('ERROR', 'tts_user_context_state_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('tts:userContext:override', async (_event, mode: string) => {
+    try {
+      const valid = mode === 'auto' || mode === 'manual_work' || mode === 'manual_leisure' || mode === 'manual_rest'
+      if (!valid) return { success: false, error: `无效的情境覆盖模式: ${mode}` }
+      agentService.getChatExecutor()?.setUserContextOverride(mode as any)
+      log('INFO', 'tts_user_context_override_ipc', { mode })
+      return { success: true, mode }
+    } catch (err) {
+      log('ERROR', 'tts_user_context_override_failed', { error: String(err) })
       return { success: false }
     }
   })
@@ -878,6 +935,288 @@ export function registerHandlers(
       }
     } catch {
       return { stories: [], totalStories: 0, totalScenes: 0 }
+    }
+  })
+
+  // ── 音频特征提取与氛围映射 ──
+
+  ipcMain.handle('audio:analyzeFeatures', async (_event, audioBuffer: ArrayBuffer) => {
+    try {
+      const samples = new Int16Array(audioBuffer)
+      if (samples.length < 512) {
+        return { success: false, error: '音频过短，无法提取特征' }
+      }
+      const features = audioFeatureExtractor.extract(samples)
+      const atmosphere = atmosphereMapper.map(features)
+      return { success: true, features, atmosphere }
+    } catch (err) {
+      log('ERROR', 'audio_analyze_features_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // ── 语音灵感捕获与情节引导 ──
+
+  ipcMain.handle('writing:inspiration:process', async (_event, text: string) => {
+    try {
+      const result = await inspirationService.process(text)
+      return result
+    } catch (err) {
+      log('ERROR', 'writing_inspiration_process_failed', { error: String(err) })
+      return {
+        rawText: text,
+        entities: { characters: [], events: [], emotions: [], plotTurns: [] },
+        guidedPrompt: text,
+        processingMs: 0,
+        hasContent: false,
+      }
+    }
+  })
+
+  ipcMain.handle('writing:inspiration:hotwords', async () => {
+    try {
+      return { hotwords: inspirationService.getWritingHotwords() }
+    } catch (err) {
+      log('ERROR', 'writing_inspiration_hotwords_failed', { error: String(err) })
+      return { hotwords: [] }
+    }
+  })
+
+  // ── 语音引导的剧情续写 ──
+
+  ipcMain.handle('writing:continuation:execute', async (_event, params: {
+    storyName: string
+    chapterNum: number
+    userVoiceText?: string
+    atmosphere?: import('../audio/types').StoryAtmosphere | null
+  }) => {
+    try {
+      const result = await voiceContinuationService.execute(
+        params.storyName,
+        params.chapterNum,
+        params.userVoiceText,
+        params.atmosphere,
+      )
+      return result
+    } catch (err) {
+      log('ERROR', 'continuation_execute_failed', { error: String(err), storyName: params.storyName })
+      return {
+        success: false,
+        chapterTitle: `第${params.chapterNum}章`,
+        content: '',
+        sceneId: null,
+        userVoiceText: params.userVoiceText || '',
+        atmosphere: params.atmosphere || null,
+        error: String(err),
+        processingMs: 0,
+      }
+    }
+  })
+
+  ipcMain.handle('writing:continuation:init', async (_event, params: {
+    storyName: string
+    chapterNum: number
+  }) => {
+    try {
+      const ctx = await voiceContinuationService.initializeContext(params.storyName, params.chapterNum)
+      return ctx
+    } catch (err) {
+      log('ERROR', 'continuation_init_failed', { error: String(err), storyName: params.storyName })
+      return {
+        storyName: params.storyName,
+        chapterNum: params.chapterNum,
+        storyId: null,
+        previousChapter: null,
+        totalChapters: 0,
+        readerExpectations: '',
+      }
+    }
+  })
+
+  // ── 行为感知壁纸配置 ──
+
+  ipcMain.handle('wallpaper:getConfig', async () => {
+    const getNum = (key: string, fallback: number) => {
+      const v = credentialsManager.get(key)
+      if (v === null || v === undefined) return fallback
+      const n = parseFloat(v)
+      return isNaN(n) ? fallback : n
+    }
+
+    return {
+      enabled: credentialsManager.get('wp_enabled') !== 'false',
+      idleOverlay: credentialsManager.get('wp_idle_overlay') !== 'false',
+      adaptiveOpacity: credentialsManager.get('wp_adaptive_opacity') !== 'false',
+      normalOpacity: getNum('wp_normal_opacity', 0.95),
+      codeOpacity: getNum('wp_code_opacity', 0.25),
+      fullscreenOpacity: getNum('wp_fullscreen_opacity', 0.15),
+      idleOpacity: getNum('wp_idle_opacity', 0.55),
+      evoLocked: credentialsManager.get('wp_evo_locked') === 'true',
+    }
+  })
+
+  ipcMain.handle('wallpaper:setConfig', async (_event, config: Record<string, unknown>) => {
+    try {
+      for (const [key, value] of Object.entries(config)) {
+        const credKey = key
+          .replace(/([A-Z])/g, '_$1')
+          .toLowerCase()
+          .replace(/^/, 'wp_')
+        credentialsManager.set(credKey, String(value))
+      }
+      return { success: true }
+    } catch (err: any) {
+      log('WARN', 'wallpaper_config_set_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  // ── 自进化壁纸锁定 ──
+  ipcMain.handle('wallpaper:getEvoLock', async () => {
+    const locked = credentialsManager.get('wp_evo_locked') === 'true'
+    return { locked }
+  })
+
+  ipcMain.handle('wallpaper:setEvoLock', async (_event, locked: boolean) => {
+    credentialsManager.set('wp_evo_locked', locked ? 'true' : 'false')
+    log('INFO', 'wallpaper_evo_lock_set', { locked })
+    return { success: true, locked }
+  })
+
+  // ── 壁纸 CSS 热重载 ──
+  ipcMain.handle('wallpaper:reloadStyles', async (_event, css: string) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('wallpaper:styles-updated', css)
+    }
+    return { success: true }
+  })
+
+  // ── 进化计划进度查询 ──
+  ipcMain.handle('evolution:planStatus', async () => {
+    try {
+      const plan = planManagerImport.getActivePlan()
+      if (!plan) {
+        return { hasActivePlan: false, planTitle: '', totalSteps: 0, completedSteps: 0, percentComplete: 0, currentStep: '' }
+      }
+      const completedSteps = plan.steps.filter((s: any) => s.status === 'done' || s.status === 'completed').length
+      const totalSteps = plan.steps.length
+      const currentStep = plan.steps.find((s: any) => s.status === 'in_progress')
+      return {
+        hasActivePlan: true,
+        planTitle: plan.title,
+        totalSteps,
+        completedSteps,
+        percentComplete: totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0,
+        currentStep: currentStep?.description || '',
+      }
+    } catch {
+      return { hasActivePlan: false, planTitle: '', totalSteps: 0, completedSteps: 0, percentComplete: 0, currentStep: '' }
+    }
+  })
+
+  // ══════════════════════════════════════════
+  //  排版内容语音校验与预览
+  // ══════════════════════════════════════════
+
+  ipcMain.handle('typing:verify', async (_event, formattedText: string) => {
+    try {
+      const asr = agentService.getAsrService()
+
+      typographyVerificationService.setTranscribeFn(async (pcmInt16: Int16Array) => {
+        const result = await asr.transcribe(pcmInt16.buffer as ArrayBuffer)
+        return result.text
+      })
+
+      const report = await typographyVerificationService.verify(formattedText)
+
+      // 播放合成音频到渲染进程，10s 后清理临时文件
+      if (report.audioFile) {
+        const wins = BrowserWindow.getAllWindows()
+        for (const win of wins) {
+          win.webContents.send('tts:play_audio', report.audioFile)
+        }
+        const tempFile = report.audioFile
+        setTimeout(() => {
+          try { unlinkSync(tempFile) } catch { /* already cleaned */ }
+        }, 10000)
+      }
+
+      return { success: true, report }
+    } catch (err) {
+      log('ERROR', 'typing_verify_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('typing:readAloud', async (_event, text: string) => {
+    try {
+      const result = await typographyVerificationService.readAloud(text)
+      if (result.success && result.audioFile) {
+        const wins = BrowserWindow.getAllWindows()
+        for (const win of wins) {
+          win.webContents.send('tts:play_audio', result.audioFile)
+        }
+        const tempFile = result.audioFile
+        setTimeout(() => {
+          try { unlinkSync(tempFile) } catch { /* already cleaned */ }
+        }, 10000)
+      }
+      return result
+    } catch (err) {
+      log('ERROR', 'typing_read_aloud_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // ── 系统资源监控（由 MonitoringService 定时 push，这里注册 invoke 供按需查询） ──
+  ipcMain.handle('health:metrics', async () => {
+    const mem = process.memoryUsage()
+    return {
+      heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
+      heapTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
+      rssMB: Math.round(mem.rss / 1024 / 1024),
+      uptime: Math.round(process.uptime()),
+      timestamp: Date.now(),
+    }
+  })
+
+  // ── 桌面记忆浮窗配置 ──
+  ipcMain.handle('wallpaper:memoryContextConfig:get', async () => {
+    try {
+      const svc = memoryContextRef?.current
+      if (!svc) return { enabled: true, displayType: 'all', pollIntervalMs: 600000, maxCards: 5, mouseThrough: true }
+      return svc.getConfig()
+    } catch (err: any) {
+      log('WARN', 'memory_context_config_get_failed', { error: String(err) })
+      return { enabled: true, displayType: 'all', pollIntervalMs: 600000, maxCards: 5, mouseThrough: true }
+    }
+  })
+
+  ipcMain.handle('wallpaper:memoryContextConfig:set', async (_event, patch: Record<string, unknown>) => {
+    try {
+      const svc = memoryContextRef?.current
+      if (!svc) return { success: false, error: 'MemoryContextService not initialized' }
+      svc.saveConfig(patch as any)
+      // 配置变更后刷新推送间隔
+      svc.stop()
+      svc.start()
+      return { success: true }
+    } catch (err: any) {
+      log('WARN', 'memory_context_config_set_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('wallpaper:memoryContext:refresh', async () => {
+    try {
+      const svc = memoryContextRef?.current
+      if (!svc) return { success: false, error: 'MemoryContextService not initialized' }
+      svc.refresh()
+      return { success: true }
+    } catch (err: any) {
+      log('WARN', 'memory_context_refresh_failed', { error: String(err) })
+      return { success: false, error: String(err) }
     }
   })
 }

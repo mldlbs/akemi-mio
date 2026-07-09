@@ -104,6 +104,10 @@ const TOOL_TOPIC_MAP: Record<string, string> = {
 export interface ToolCallRecord {
   name: string
   timestamp: number
+  /** 调用是否成功 */
+  success?: boolean
+  /** 失败时的错误信息（截断） */
+  error?: string
 }
 
 export interface BehaviorPattern {
@@ -176,12 +180,59 @@ export class UserBehaviorAnalyzer {
 
   // ── 数据采集 ──
 
-  /** 记录一次工具调用 */
+  /** 记录一次工具调用（仅跟踪频率） */
   recordToolCall(name: string): void {
     this.recentToolCalls.push({ name, timestamp: Date.now() })
     if (this.recentToolCalls.length > this.maxRecords) {
       this.recentToolCalls = this.recentToolCalls.slice(-this.maxRecords)
     }
+  }
+
+  /**
+   * 记录一次工具调用的结果（含质量信息）。
+   * 供 ToolFeedbackLoop 等反馈回路使用。
+   */
+  recordToolCallResult(name: string, success: boolean, error?: string): void {
+    this.recentToolCalls.push({
+      name,
+      timestamp: Date.now(),
+      success,
+      error: error ? error.slice(0, 500) : undefined,
+    })
+    if (this.recentToolCalls.length > this.maxRecords) {
+      this.recentToolCalls = this.recentToolCalls.slice(-this.maxRecords)
+    }
+  }
+
+  /**
+   * 获取指定工具在分析窗口内的质量指标。
+   * 返回成功率、总调用次数的快照，供反馈回路消费。
+   */
+  getToolQualityMetrics(windowSize?: number): Map<string, { successRate: number; totalCalls: number; lastSuccess: boolean }> {
+    const size = windowSize ?? ANALYSIS_WINDOW
+    const recent = this.recentToolCalls.slice(-size)
+    const perTool = new Map<string, { ok: number; total: number; lastOk: boolean }>()
+
+    for (const tc of recent) {
+      let entry = perTool.get(tc.name)
+      if (!entry) {
+        entry = { ok: 0, total: 0, lastOk: true }
+        perTool.set(tc.name, entry)
+      }
+      entry.total++
+      if (tc.success !== false) entry.ok++ // undefined → true (backward compat)
+      if (tc.success !== undefined) entry.lastOk = tc.success
+    }
+
+    const result = new Map<string, { successRate: number; totalCalls: number; lastSuccess: boolean }>()
+    for (const [name, stats] of perTool) {
+      result.set(name, {
+        successRate: stats.total > 0 ? stats.ok / stats.total : 1,
+        totalCalls: stats.total,
+        lastSuccess: stats.lastOk,
+      })
+    }
+    return result
   }
 
   /** 记录一条用户消息 */
@@ -462,6 +513,15 @@ export class UserBehaviorAnalyzer {
   confirmTool(toolName: string): void {
     this.confirmedTools.add(toolName)
     log('INFO', 'behavior_tool_confirmed', { tool: toolName })
+  }
+
+  /**
+   * 取消对某工具的确认（恢复普通优先级）。
+   * 供 ToolFeedbackLoop 在成功率下降时调用。
+   */
+  unconfirmTool(toolName: string): void {
+    this.confirmedTools.delete(toolName)
+    log('INFO', 'behavior_tool_unconfirmed', { tool: toolName })
   }
 
   /**

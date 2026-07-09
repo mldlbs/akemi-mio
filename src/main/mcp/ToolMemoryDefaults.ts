@@ -115,6 +115,13 @@ export class MemoryRetriever {
  * ## 用户确认优先级
  *   仅填充用户未提供的参数。若用户显式传入了 city='上海'，
  *   则不会用默认值覆盖。
+ *
+ * ## 个性化强度
+ *   fill() 方法接受可选的 personalizationLevel 参数：
+ *   - 'off': 不填充任何默认值
+ *   - 'conservative': 仅填充置信度 > 0.8 的默认值
+ *   - 'balanced': 填充置信度 > 0.5 的默认值
+ *   - 'aggressive': 填充所有可用的默认值（置信度 > 0.2）
  */
 export class ToolMemoryDefaults {
   private registry: ToolParamDefaults = {}
@@ -163,14 +170,30 @@ export class ToolMemoryDefaults {
    * 仅填充用户未显式提供的参数（即 args 中不存在的 key）。
    * 若用户已提供该参数，即使值相同也不会被覆盖。
    *
+   * 根据 personalizationLevel 控制填充强度：
+   * - 'off': 不填充
+   * - 'conservative': 仅填充置信度 > 0.8 的默认值
+   * - 'balanced': 填充置信度 > 0.5 的默认值
+   * - 'aggressive': 填充所有可用的默认值（置信度 > 0.2）
+   *
    * @param toolName 工具名
    * @param args 用户提供的参数
+   * @param level 个性化强度级别（可选，默认 'balanced'）
    * @returns 填充后的参数副本，以及填充日志
    */
-  fill(toolName: string, args: Record<string, any>): {
+  fill(
+    toolName: string,
+    args: Record<string, any>,
+    level?: 'off' | 'conservative' | 'balanced' | 'aggressive',
+  ): {
     args: Record<string, any>
     filled: Array<{ param: string; value: string; source: string; confidence: number }>
   } {
+    if (level === 'off') return { args: { ...args }, filled: [] }
+
+    // 根据级别确定置信度阈值
+    const confidenceThreshold = this.getConfidenceThreshold(level)
+
     const filled: Array<{ param: string; value: string; source: string; confidence: number }> = []
     const enriched = { ...args }
 
@@ -182,7 +205,7 @@ export class ToolMemoryDefaults {
       if (param in args) continue
 
       const pref = this.memoryRetriever.getPreference(prefKey)
-      if (pref) {
+      if (pref && pref.confidence >= confidenceThreshold) {
         enriched[param] = pref.value
         filled.push({
           param,
@@ -215,5 +238,20 @@ export class ToolMemoryDefaults {
    */
   hasDefaults(toolName: string): boolean {
     return Object.keys(this.registry).some((k) => k.startsWith(`${toolName}.`))
+  }
+
+  /**
+   * 根据个性化强度级别获取对应的置信度阈值。
+   * - conservative: 0.8 — 仅在高置信度时填充
+   * - balanced: 0.5 — 中等置信度（默认）
+   * - aggressive: 0.2 — 低置信度也填充
+   */
+  private getConfidenceThreshold(level?: 'off' | 'conservative' | 'balanced' | 'aggressive'): number {
+    switch (level) {
+      case 'conservative': return 0.8
+      case 'balanced': return 0.5
+      case 'aggressive': return 0.2
+      default: return 0.5
+    }
   }
 }

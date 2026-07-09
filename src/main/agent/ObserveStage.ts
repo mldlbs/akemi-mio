@@ -4,6 +4,9 @@
  * 在 LLM 返回 toolCalls 后、Guardrail 之前运行。
  * 查询 ProceduralMemory 和 FailureAnalyzer 获取与当前工具相关的上下文。
  * 纯本地逻辑，无额外 LLM 调用，<50ms。
+ *
+ * v2: 支持 IKnowledgeSource 统一接口（策略模式），
+ * 回退到传统具体类型以保持向后兼容。
  */
 
 import type { ToolCallInfo } from '../llm/LlmService'

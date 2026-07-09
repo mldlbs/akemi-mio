@@ -10,10 +10,12 @@ import { LlmService } from '../llm/LlmService'
 import { WhisperGpuEngine } from '../asr/WhisperGpuEngine'
 import { BaiduEngine } from '../asr/BaiduEngine'
 import { AsrService } from '../asr/AsrService'
+import { asrEvolutionManager } from '../asr/AsrEvolutionManager'
 import { TtsService } from '../tts/TtsService'
 import { AgentService } from '../agent/AgentService'
 import { MemoryService } from '../memory/MemoryService'
 import { registerHandlers, createServiceRef } from '../ipc/handlers'
+import type { ServiceRef } from '../ipc/handlers'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import { initEvolution, evolutionService, planManager, SelfEvolutionService } from '../evolution'
 import { PipelineOrchestrator, CreativityCollector, CreativityExecutor, MemoryAnalysisCollector } from '../evolution/automation'
@@ -32,9 +34,11 @@ import { PluginLoader, toolRegistry } from '../plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '../skill'
 import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
 import { setupStartupLogging, createWindow, setupWallpaperListener, getMainWindow } from '../core/Lifecycle'
-import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle } from '../core/TrayManager'
+import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle, setUserContextOverride } from '../core/TrayManager'
 import { initUpdater, setUpdateWindow } from '../updater/UpdaterService'
-import { EvolutionDashboardService } from '../wallpaper/WallpaperService'
+import { EvolutionDashboardService, MemoryContextService } from '../wallpaper/WallpaperService'
+import { MonitoringService } from '../monitoring/MonitoringService'
+import { WallpaperEventBridge } from '../wallpaper/WallpaperEventBridge'
 import { initDatabase, closeDatabase } from '../db/connection'
 import { ConstitutionEngine } from '../constitution'
 import { CapabilityEngine, freezeDefaults } from '../capability'
@@ -72,6 +76,10 @@ import { RepositoryEventIterator } from '../core/evaluation/RepositoryEventItera
 import { MetricsEngineImpl } from '../core/evaluation/MetricsEngine'
 import { ToolEventBridge } from '../core/evaluation/ToolEventBridge'
 import { GuardrailPipeline } from '../core/evaluation/GuardrailPipeline'
+import { GuardrailProgressConsumer } from '../core/evaluation/progress-consumers/GuardrailProgressConsumer'
+import { ProgressObserver } from '../core/evaluation/ProgressObserver'
+import { GuardrailProgressAnalyzer } from '../core/evaluation/GuardrailProgressAnalyzer'
+import { type ToolEventBridge } from '../core/evaluation/ToolEventBridge'
 import type { MetricSnapshot, TimeWindow } from '../core/evaluation/types'
 
 /**
@@ -104,10 +112,14 @@ export class AppRuntime {
   private evaluationStore?: EvaluationStore
   private evaluationEmitter?: EvaluationEmitter
   private toolEventBridge?: ToolEventBridge
+  private progressObserver?: ProgressObserver
   private metricsEngine?: MetricsEngineImpl
   private comfyUI?: ComfyUIManager
   private pipeline?: PipelineOrchestrator
   private dashboardService?: EvolutionDashboardService
+  private monitoringService?: MonitoringService
+  private memoryContextService?: MemoryContextService
+  private memoryContextRef: ServiceRef<MemoryContextService> = createServiceRef<MemoryContextService>()
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
     this.crashGuard = crashGuard ?? { flushMemory: null }
@@ -148,6 +160,10 @@ export class AppRuntime {
     const asrService = new AsrService(gpuEngine, baiduEngine)
     // 初始化长时个性化词表（从持久化存储加载）
     asrService.initVocabulary()
+    // 将 ASR 服务注入进化管理器（供 ASR 自优化使用）
+    asrEvolutionManager.setAsrService(asrService)
+    // 将 ASR 引擎注册为 SpeechPluginRegistry 插件
+    asrService.registerPlugins()
 
     this.registerCoreEventBus()
     this.logModelConfig(llmKey)
@@ -186,6 +202,8 @@ export class AppRuntime {
       // 凭据存储可能尚未就绪
       log('DEBUG', 'tts_preference_restore_skipped', { error: String(err).slice(0, 60) })
     }
+    // 将 TTS 引擎注册为 SpeechPluginRegistry 插件
+    ttsService.registerPlugins()
 
     // ── 预检测网络状态（后台异步，不阻塞启动） ──
     import('../tts/NetworkMonitor').then(({ networkMonitor }) => {
@@ -271,10 +289,23 @@ export class AppRuntime {
     llmService.setEvaluationEmitter(this.evaluationEmitter)
     this.toolEventBridge = new ToolEventBridge(this.evaluationEmitter, eventBus)
     this.toolEventBridge.start()
-    // GuardrailPipeline — 注入 ChatExecutor 的 GuardrailPipeline（需要 evaluationStore + emitter 就绪）
-    const guardrailPipeline = new GuardrailPipeline(this.evaluationStore, undefined, undefined, this.evaluationEmitter)
+    // GuardrailPipeline — 注入 ChatExecutor 的 GuardrailPipeline（需要 emitter 就绪）
+    const guardrailPipeline = new GuardrailPipeline(undefined, undefined, this.evaluationEmitter)
     agentService.setGuardrailPipeline(guardrailPipeline)
-    log('INFO', 'evaluation_ready', { sessionId })
+    // 注入 EvaluationEmitter 用于写入 Delivery Trace 事件
+    agentService.setEvaluationEmitter(this.evaluationEmitter)
+
+    // GuardrailProgressConsumer 接入 ProgressObserver
+    // ADR-004 Option A: Consumer 通过 callback 将 GuardrailDecision 交付给 Pipeline
+    const guardrailConsumer = new GuardrailProgressConsumer(undefined, (decision) => {
+      guardrailPipeline.onGuardrailDecision(decision)
+    })
+
+    // ProgressObserver — Event Pipeline Observer（单例）
+    this.progressObserver = new ProgressObserver(this.evaluationStore, new GuardrailProgressAnalyzer(this.evaluationStore))
+    this.progressObserver.register(guardrailConsumer)
+    this.progressObserver.start()
+    log('INFO', 'evaluation_ready', { sessionId, guardrailConsumerReady: true })
 
     const win = createWindow(stateManager)
     agentService.setMainWindow(win)
@@ -414,7 +445,7 @@ export class AppRuntime {
     // === Stage 5: Handler 注册 & 宪法 ===
     const evolutionRef = createServiceRef<SelfEvolutionService>()
     const dashboardRef = createServiceRef<EvolutionDashboardService>()
-    registerHandlers(agentService, stateManager, ttsService, evolutionRef, undefined, dashboardRef)
+    registerHandlers(agentService, stateManager, ttsService, evolutionRef, undefined, dashboardRef, this.memoryContextRef)
 
     const constitutionEngine = new ConstitutionEngine()
     await constitutionEngine.initialize(join(WORKSPACE.evolution, 'constitution'))
@@ -704,6 +735,7 @@ export class AppRuntime {
     this.taskRunner?.stop()
     await this.comfyUI?.stop().catch(() => {})
     this.toolEventBridge?.stop()
+    this.progressObserver?.stop()
     await this.evaluationStore?.shutdown().catch(() => {})
     this.memoryService?.shutdown()
     this.memoryIndexer?.stop()
@@ -712,6 +744,7 @@ export class AppRuntime {
     insightService?.stop()
     creativityService?.stop()
     this.dashboardService?.destroy()
+    this.memoryContextService?.destroy()
     this.lazyInit?.cancel()
     this.subs.dispose()
     closeDatabase()
@@ -816,8 +849,35 @@ export class AppRuntime {
         })
         // 注册基础 collector 和 executor（先不传 mcpManager，备用执行器延迟注入）
         pipeline.initDefaults()
+        // 注册 Evolution 插件（ServiceLoader 模式）
+        const { PluginServiceLoader, WallpaperPlugin, PluginCollectorAdapter, PluginExecutorAdapter } = await import('../evolution/plugin')
+        const pluginLoader = PluginServiceLoader.getInstance()
+        const wallpaperPlugin = new WallpaperPlugin(process.cwd())
+        pluginLoader.register(wallpaperPlugin)
+        await pluginLoader.loadAll()
+        // 将插件适配为管道 Collector / Executor 并注册
+        const collectPlugins = pluginLoader.getByCapability('collect')
+        for (const p of collectPlugins) {
+          pipeline.addCollector(new PluginCollectorAdapter(p))
+        }
+        const optimizePlugins = pluginLoader.getByCapability('optimize')
+        for (const p of optimizePlugins) {
+          pipeline.addExecutor(new PluginExecutorAdapter(p))
+        }
+        log('INFO', 'evolution_plugins_wired', {
+          registered: pluginLoader.getAll().length,
+          collectors: collectPlugins.length,
+          executors: optimizePlugins.length,
+        })
         // 注册记忆分析采集器（从对话记录中检测用户不满意模式）
         pipeline.addCollector(new MemoryAnalysisCollector())
+        // 注册行为特征采集器和优化执行器（行为驱动自进化）
+        const { BehaviorCollector, BehaviorOptimizationExecutor } = await import('../evolution/automation')
+        pipeline.addCollector(new BehaviorCollector())
+        pipeline.addExecutor(new BehaviorOptimizationExecutor())
+        // 注册行为记录钩子（增强时序数据采集）
+        const { registerBehaviorRecordHook } = await import('../user-behavior/BehaviorFeatureExtractor')
+        registerBehaviorRecordHook()
         // 附加到进化系统（SelfEvolutionService 将消费管道指标）
         evolution.setPipeline(pipeline)
         this.pipeline = pipeline
@@ -993,17 +1053,100 @@ export class AppRuntime {
             chatExec.toggleContextualTts(!currentState.enabled)
           }
         })
+        // 用户情境语音覆盖回调（系统托盘菜单）
+        setUserContextOverride((mode: string) => {
+          const chatExec = agentService.getChatExecutor()
+          if (chatExec) {
+            chatExec.setUserContextOverride(mode as any)
+          }
+        })
         log('INFO', 'evolution_dashboard_started')
       },
     })
 
-    // 壁纸监听
+    // 自进化监控服务 — 定期推送系统指标和进化状态到壁纸
+    this.lazyInit!.add({
+      name: 'monitoring',
+      priority: 'normal',
+      delayMs: 300,
+      fn: async () => {
+        const monitoring = new MonitoringService()
+        const win = getMainWindow()
+        if (win && !win.isDestroyed()) {
+          monitoring.setWindow(win)
+        }
+        monitoring.start()
+        this.monitoringService = monitoring
+        log('INFO', 'monitoring_service_started')
+      },
+    })
+
+    // 桌面记忆浮窗 — 定期从 Memory 获取高关联记忆推送到桌面 overlay
+    this.lazyInit!.add({
+      name: 'memory-context',
+      priority: 'normal',
+      delayMs: 500,
+      fn: async () => {
+        const memoryCtx = new MemoryContextService()
+        const win = getMainWindow()
+        if (win && !win.isDestroyed()) {
+          memoryCtx.setWindow(win)
+        }
+        memoryCtx.start()
+        this.memoryContextService = memoryCtx
+        this.memoryContextRef.current = memoryCtx
+        log('INFO', 'memory_context_service_started')
+      },
+    })
+
+    // 壁纸事件总线桥接器 — 将壁纸状态变化以标准化 Schema 转发到 EventBus
+    // Plan:TypeScript 执行器通过订阅这些事件实现松耦合响应
+    this.lazyInit!.add({
+      name: 'wallpaper-event-bridge',
+      priority: 'normal',
+      delayMs: 400,
+      fn: async () => {
+        const bridge = new WallpaperEventBridge()
+        if (this.monitoringService) {
+          bridge.start(this.monitoringService)
+        } else {
+          bridge.start()
+        }
+        // 同时订阅 PlanTypeScriptExecutor 到壁纸事件
+        const { planTypeScriptExecutor } = await import('../learning/PlanTypeScriptExecutor')
+        planTypeScriptExecutor.subscribeToWallpaperEvents()
+        log('INFO', 'wallpaper_event_bridge_wired', {
+          monitoringConnected: !!this.monitoringService,
+        })
+      },
+    })
+
+    // 壁纸监听 + CSS 热重载
     this.lazyInit!.add({
       name: 'wallpaper-listener',
       priority: 'background',
       delayMs: 3000,
       fn: async () => {
         setupWallpaperListener(stateManager)
+        // 启动 CSS 热重载监听
+        const { startWallpaperCssWatcher } = await import('../wallpaper/WallpaperService')
+        const win = getMainWindow()
+        if (win) {
+          startWallpaperCssWatcher(process.cwd(), [win])
+        }
+      },
+    })
+
+    // 用户行为追踪 — 驱动行为感知壁纸
+    this.lazyInit!.add({
+      name: 'user-behavior',
+      priority: 'normal',
+      delayMs: 2000,
+      fn: async () => {
+        const { UserBehaviorService } = await import('../behavior/UserBehaviorService')
+        const behavior = new UserBehaviorService()
+        behavior.start()
+        log('INFO', 'user_behavior_service_started')
       },
     })
 
