@@ -8,6 +8,7 @@ const TRAY_ICON_BASE64 =
 let tray: Tray | null = null
 let dashboardToggleCb: (() => void) | null = null
 let contextualTtsToggleCb: (() => void) | null = null
+let userContextOverrideCb: ((mode: string) => void) | null = null
 
 /** 注册仪表盘切换回调（由 AppRuntime 在仪表盘服务就绪后调用） */
 export function setDashboardToggle(cb: () => void): void {
@@ -17,6 +18,11 @@ export function setDashboardToggle(cb: () => void): void {
 /** 注册交互情境语音切换回调（由 AppRuntime 调用） */
 export function setContextualTtsToggle(cb: () => void): void {
   contextualTtsToggleCb = cb
+}
+
+/** 注册用户情境语音覆盖回调（由 AppRuntime 调用） */
+export function setUserContextOverride(cb: (mode: string) => void): void {
+  userContextOverrideCb = cb
 }
 
 export function initTray(mainWindow: () => BrowserWindow | null): void {
@@ -59,6 +65,27 @@ export function initTray(mainWindow: () => BrowserWindow | null): void {
         click: () => {
           contextualTtsToggleCb?.()
         },
+      },
+      {
+        label: '语音情境覆盖',
+        submenu: [
+          {
+            label: '自动(自适应)',
+            click: () => userContextOverrideCb?.('auto'),
+          },
+          {
+            label: '工作模式',
+            click: () => userContextOverrideCb?.('manual_work'),
+          },
+          {
+            label: '休闲模式',
+            click: () => userContextOverrideCb?.('manual_leisure'),
+          },
+          {
+            label: '休息模式',
+            click: () => userContextOverrideCb?.('manual_rest'),
+          },
+        ],
       },
       { type: 'separator' },
       {

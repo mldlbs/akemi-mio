@@ -16,6 +16,11 @@
  * - 所有合成请求排队处理，防止并发 Piper 进程导致音频重叠
  * - 模型回退链：用户指定模型 → 任务标签推荐模型 → 默认模型
  * - 容错不抛异常：失败时回退到默认模型继续合成
+ *
+ * 重构说明：
+ * - 队列管理委托给 AsyncQueue（core/patterns），消除手动 QueuedTask[] + processQueue 样板代码
+ * - 内部操作使用 Result<T, E>（core/patterns），替代 ad-hoc {success, error} 模式
+ * - 模型解析保持独立（领域特定逻辑，不适合泛化）
  */
 
 import { execFile } from 'child_process'
@@ -25,6 +30,7 @@ import { tmpdir } from 'os'
 import { log } from '../logger/Logger'
 import { PIPER_SCRIPT, PIPER_MODEL } from '../config'
 import { cleanTTS } from './TtsService'
+import { AsyncQueue, ok, err, type Result } from '../core/patterns'
 
 // ══════════════════════════════════════════
 //  类型定义
@@ -78,12 +84,6 @@ export interface PiperSynthesizeResult {
   fallbackUsed: boolean
 }
 
-/** 队列中的合成任务 */
-interface QueuedTask {
-  request: PiperSynthesizeRequest
-  resolve: (result: PiperSynthesizeResult) => void
-}
-
 // ══════════════════════════════════════════
 //  模型目录
 // ══════════════════════════════════════════
@@ -127,6 +127,32 @@ export const DEFAULT_PIPER_MODEL = 'zh_CN-huayan-medium'
 const VALID_MODELS = Object.keys(PIPER_MODEL_CATALOG)
 
 // ══════════════════════════════════════════
+//  合成统计数据（供 TtsPiperBridge 使用）
+// ══════════════════════════════════════════
+
+/** 单模型的合成统计 */
+export interface PiperModelSynthesisStat {
+  /** 总合成请求数 */
+  totalRequests: number
+  /** 成功数 */
+  successCount: number
+  /** 失败数 */
+  failureCount: number
+  /** 总延迟（毫秒，用于计算平均） */
+  totalLatencyMs: number
+  /** 平均延迟（毫秒） */
+  avgLatencyMs: number
+}
+
+/** 合成统计聚合 */
+export interface PiperSynthesisStats {
+  /** 各模型的统计 */
+  perModel: Record<string, PiperModelSynthesisStat>
+  /** 总计数据 */
+  total: { requests: number; success: number; failure: number }
+}
+
+// ══════════════════════════════════════════
 //  PiperOrchestrator
 // ══════════════════════════════════════════
 
@@ -134,20 +160,27 @@ export class PiperOrchestrator {
   /** 当前用户选择的模型（可通过 switchModel 切换） */
   private currentModel: string = DEFAULT_PIPER_MODEL
 
-  /** 请求队列 */
-  private queue: QueuedTask[] = []
-
-  /** 是否正在处理 */
-  private isProcessing = false
-
-  /** 是否已停止 */
-  private stopped = false
-
-  /** 最大队列长度（防止无限堆积） */
-  private readonly MAX_QUEUE_SIZE = 50
-
-  /** 单次合成超时（毫秒） */
+  /** 单次合成超时（毫秒），同时用于 AsyncQueue 超时和 execFile 超时 */
   private readonly SYNTHESIS_TIMEOUT_MS = 30000
+
+  /** 各模型的合成统计（供 TtsPiperBridge 反馈使用） */
+  private readonly synthesisStats: Record<string, PiperModelSynthesisStat> = {}
+
+  /**
+   * 通用异步串行队列 — 替代手动 QueuedTask[] + processQueue + isProcessing/stopped。
+   * 配置：最大 50 项，每项超时 30s。
+   */
+  private readonly queue: AsyncQueue<PiperSynthesizeRequest, PiperSynthesizeResult>
+
+  // ── 构造 ──
+
+  constructor() {
+    this.queue = new AsyncQueue<PiperSynthesizeRequest, PiperSynthesizeResult>({
+      processor: (request) => this.processOneWithResult(request),
+      maxSize: 50,
+      timeoutMs: this.SYNTHESIS_TIMEOUT_MS,
+    })
+  }
 
   // ── 模型管理 ──
 
@@ -206,111 +239,127 @@ export class PiperOrchestrator {
   /**
    * 提交合成请求（异步，自动排队）。
    *
-   * 如果队列已满，返回错误结果而非排队。
+   * 内部委托给 AsyncQueue.enqueue()，将 Result 转换为 PiperSynthesizeResult。
+   * 失败时的 model 字段回退到请求中的 model 或默认模型。
    */
   async synthesize(request: PiperSynthesizeRequest): Promise<PiperSynthesizeResult> {
-    if (this.stopped) {
-      return {
-        success: false,
-        model: request.model || DEFAULT_PIPER_MODEL,
-        error: 'Piper 编排器已停止',
-        durationMs: 0,
-        fallbackUsed: false,
-      }
+    const result = await this.queue.enqueue(request)
+
+    if (result.ok) {
+      return result.value
     }
 
-    if (this.queue.length >= this.MAX_QUEUE_SIZE) {
-      return {
-        success: false,
-        model: request.model || DEFAULT_PIPER_MODEL,
-        error: `请求队列已满 (${this.MAX_QUEUE_SIZE})，请稍后重试`,
-        durationMs: 0,
-        fallbackUsed: false,
-      }
+    // AsyncQueue 层错误（队列满、已停止、超时）
+    return {
+      success: false,
+      model: request.model || DEFAULT_PIPER_MODEL,
+      error: result.error,
+      durationMs: 0,
+      fallbackUsed: false,
     }
-
-    return new Promise((resolve) => {
-      this.queue.push({ request, resolve })
-      if (!this.isProcessing) {
-        this.processQueue()
-      }
-    })
   }
 
   /**
-   * 清空队列并停止处理。
+   * 停止队列：清空所有等待中的请求，停止处理后续请求。
    */
   stop(): void {
-    this.stopped = true
-    // 拒绝所有排队请求
-    while (this.queue.length > 0) {
-      const task = this.queue.shift()!
-      task.resolve({
-        success: false,
-        model: DEFAULT_PIPER_MODEL,
-        error: 'Piper 编排器已停止',
-        durationMs: 0,
-        fallbackUsed: false,
-      })
-    }
-    this.isProcessing = false
+    this.queue.stop()
+    log('INFO', 'piper_orchestrator_stopped')
   }
 
   /**
-   * 重置停止状态（恢复处理）。
+   * 重置停止状态，允许继续处理。
    */
   reset(): void {
-    this.stopped = false
+    this.queue.reset()
+    log('INFO', 'piper_orchestrator_reset')
   }
 
   /** 获取当前队列状态 */
   getQueueStatus(): { queueSize: number; isProcessing: boolean; currentModel: string } {
+    const status = this.queue.getStatus()
     return {
-      queueSize: this.queue.length,
-      isProcessing: this.isProcessing,
+      queueSize: status.pending,
+      isProcessing: status.isProcessing,
       currentModel: this.currentModel,
     }
   }
 
-  // ── 私有：队列处理 ──
-
   /**
-   * 串行处理队列中的合成请求。
-   *
-   * 每个请求独立合成，失败时自动回退到默认模型重试一次。
+   * 获取各模型的合成统计数据（供 TtsPiperBridge 消费）。
    */
-  private async processQueue(): Promise<void> {
-    if (this.isProcessing || this.stopped) return
-    this.isProcessing = true
+  getSynthesisStats(): PiperSynthesisStats {
+    const stats = this.synthesisStats
+    const models = Object.keys(stats)
+    const total = models.reduce(
+      (acc, m) => {
+        acc.requests += stats[m].totalRequests
+        acc.success += stats[m].successCount
+        acc.failure += stats[m].failureCount
+        return acc
+      },
+      { requests: 0, success: 0, failure: 0 },
+    )
 
-    try {
-      while (this.queue.length > 0 && !this.stopped) {
-        const task = this.queue.shift()!
-        const result = await this.processOne(task.request)
-        task.resolve(result)
-      }
-    } finally {
-      this.isProcessing = false
-      // 处理期间可能有新任务入队
-      if (this.queue.length > 0 && !this.stopped) {
-        this.processQueue()
-      }
+    return {
+      perModel: { ...stats },
+      total,
     }
   }
 
   /**
-   * 处理单个合成请求（含回退逻辑）。
+   * 重置合成统计数据。
    */
-  private async processOne(request: PiperSynthesizeRequest): Promise<PiperSynthesizeResult> {
+  resetSynthesisStats(): void {
+    for (const key of Object.keys(this.synthesisStats)) {
+      delete this.synthesisStats[key]
+    }
+  }
+
+  /**
+   * 记录一次合成统计。
+   */
+  private recordSynthesisStat(model: string, success: boolean, durationMs: number): void {
+    if (!this.synthesisStats[model]) {
+      this.synthesisStats[model] = {
+        totalRequests: 0,
+        successCount: 0,
+        failureCount: 0,
+        totalLatencyMs: 0,
+        avgLatencyMs: 0,
+      }
+    }
+    const stat = this.synthesisStats[model]
+    stat.totalRequests++
+    if (success) {
+      stat.successCount++
+    } else {
+      stat.failureCount++
+    }
+    stat.totalLatencyMs += durationMs
+    stat.avgLatencyMs = Math.round(stat.totalLatencyMs / stat.totalRequests)
+  }
+
+  // ── 私有：合成处理 ──
+
+  /**
+   * 处理单个合成请求（含回退逻辑），返回完整的 PiperSynthesizeResult。
+   *
+   * 这是 AsyncQueue.processor 的实际实现。
+   * 将领域逻辑与队列调度分离：此方法只关心"如何合成"，不关心"何时合成"。
+   */
+  private async processOneWithResult(request: PiperSynthesizeRequest): Promise<PiperSynthesizeResult> {
     const text = cleanTTS(request.text || '')
     if (!text || text.length < 2) {
-      return {
+      const result: PiperSynthesizeResult = {
         success: false,
         model: request.model || DEFAULT_PIPER_MODEL,
         error: '文本太短或清理后为空',
         durationMs: 0,
         fallbackUsed: false,
       }
+      this.recordSynthesisStat(result.model, result.success, result.durationMs)
+      return result
     }
 
     const primaryModel = this.resolveModel(request)
@@ -319,27 +368,31 @@ export class PiperOrchestrator {
 
     // 验证参数范围
     if (speed < 0.5 || speed > 2.0) {
-      return {
+      const result: PiperSynthesizeResult = {
         success: false,
         model: primaryModel,
         error: `语速超出范围: ${speed}。应在 0.5-2.0 之间。`,
         durationMs: 0,
         fallbackUsed: false,
       }
+      this.recordSynthesisStat(result.model, result.success, result.durationMs)
+      return result
     }
 
     const t0 = Date.now()
 
     // 第一次尝试：使用选定的模型
     const firstResult = await this.synthesizeWithModel(text, primaryModel, speed, pitch)
-    if (firstResult.success) {
-      return {
+    if (firstResult.ok) {
+      const result: PiperSynthesizeResult = {
         success: true,
         model: primaryModel,
-        audioFile: firstResult.audioFile,
+        audioFile: firstResult.value,
         durationMs: Date.now() - t0,
         fallbackUsed: false,
       }
+      this.recordSynthesisStat(result.model, result.success, result.durationMs)
+      return result
     }
 
     // 回退逻辑：如果主模型失败且不是默认模型，尝试默认模型
@@ -357,45 +410,54 @@ export class PiperOrchestrator {
         pitch,
       )
 
-      if (fallbackResult.success) {
-        return {
+      if (fallbackResult.ok) {
+        const result: PiperSynthesizeResult = {
           success: true,
           model: DEFAULT_PIPER_MODEL,
-          audioFile: fallbackResult.audioFile,
+          audioFile: fallbackResult.value,
           durationMs: Date.now() - t0,
           fallbackUsed: true,
         }
+        this.recordSynthesisStat(result.model, result.success, result.durationMs)
+        return result
       }
 
       // 默认模型也失败
-      return {
+      const result: PiperSynthesizeResult = {
         success: false,
         model: primaryModel,
         error: `主模型 (${primaryModel}) 和默认模型 (${DEFAULT_PIPER_MODEL}) 均失败: ${fallbackResult.error}`,
         durationMs: Date.now() - t0,
         fallbackUsed: true,
       }
+      this.recordSynthesisStat(result.model, result.success, result.durationMs)
+      return result
     }
 
     // 已经是默认模型，直接返回失败
-    return {
+    const result: PiperSynthesizeResult = {
       success: false,
       model: primaryModel,
       error: firstResult.error,
       durationMs: Date.now() - t0,
       fallbackUsed: false,
     }
+    this.recordSynthesisStat(result.model, result.success, result.durationMs)
+    return result
   }
 
   /**
    * 使用指定模型合成语音。
+   *
+   * 重构为 Result<string, string> 替代 ad-hoc {success, audioFile?, error?} 模式。
+   * Ok 分支携带音频文件路径，Err 分支携带错误描述。
    */
   private synthesizeWithModel(
     text: string,
     model: string,
     speed: number,
     pitch: number,
-  ): Promise<{ success: boolean; audioFile?: string; error?: string }> {
+  ): Promise<Result<string, string>> {
     const tempFile = join(tmpdir(), `akemi-mio-piper-${Date.now()}.wav`)
 
     return new Promise((resolve) => {
@@ -434,15 +496,9 @@ export class PiperOrchestrator {
             if (err) {
               // 清理可能不完整的文件
               try { unlinkSync(tempFile) } catch { /* ignore */ }
-              resolve({
-                success: false,
-                error: err.message || String(err),
-              })
+              resolve(err(err.message || String(err)))
             } else {
-              resolve({
-                success: true,
-                audioFile: tempFile,
-              })
+              resolve(ok(tempFile))
             }
           },
         )
@@ -452,10 +508,7 @@ export class PiperOrchestrator {
           log('DEBUG', 'piper_orchestrator_stderr', { msg: d.toString().trim() })
         })
       } catch (err) {
-        resolve({
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
-        })
+        resolve(err(err instanceof Error ? err.message : String(err)))
       }
     })
   }

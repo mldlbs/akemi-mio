@@ -12,6 +12,14 @@ export function setMemoryService(ms: any): void {
 }
 
 /**
+ * 获取 LocalProviderAdapter 实例，用于运行时工具热替换。
+ * 主要用于 Evolution 自动优化工具后的实时生效。
+ */
+export function getLocalProviderAdapter(): LocalProviderAdapter {
+  return _adapter
+}
+
+/**
  * LocalProvider — 向后兼容适配器。
  * 所有工具实现已迁移到 src/main/tool/definitions/ 下独立文件，
  * 通过 LocalProviderAdapter 统一派发。

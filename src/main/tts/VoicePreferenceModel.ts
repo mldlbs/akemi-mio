@@ -341,6 +341,11 @@ export class VoicePreferenceModel {
     return this.history.length
   }
 
+  /** 获取完整历史记录（供实验钩子 A/B 分析使用） */
+  getHistory(): TtsOutputRecord[] {
+    return [...this.history]
+  }
+
   /** 获取总样本数 */
   getTotalSamples(): number {
     return this.totalSamples

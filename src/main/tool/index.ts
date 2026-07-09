@@ -28,6 +28,7 @@ import {
 import { listSkillsTool, enableSkillTool, disableSkillTool } from './definitions/SkillTools'
 import { writingSystemTool } from './definitions/WritingTool'
 import { writingMemoryTool } from './definitions/WritingMemoryTool'
+import { polishingMemoryTool } from './definitions/PolishingMemoryTool'
 import { generateImageTool } from './definitions/ImageGenerationTool'
 import { cardGeneratorTool } from './definitions/CardGeneratorTool'
 import { rememberProcedureTool, listProceduresTool } from './definitions/ProceduralMemoryTool'
@@ -35,8 +36,19 @@ import { saveTaskStateTool, queryTasksTool, saveUserPreferenceTool, getUserPrefe
 import { centosExecTool, centosReadFileTool, centosWriteFileTool, centosGrepTool, centosSearchFilesTool } from './definitions/SshTools'
 import { spawnSkillAgentTool } from './definitions/SkillAgentTools'
 import { socialPipelineTool } from './definitions/SocialPipelineTool'
+import {
+  polishStyleScanTool,
+  polishDialogueEvalTool,
+  polishAiDetectTool,
+  polishRhythmAnalyzeTool,
+} from './definitions/PolishTools'
 import { queryTrendsTool } from './definitions/TrendQueryTool'
+import { typographyMemoryTool } from './definitions/TypographyMemoryTool'
 import { speakWithPiperTool, switchPiperModelTool, listPiperModelsTool } from './definitions/PiperTtsTool'
+import {
+  verifyTypographyTool,
+  readAloudSegmentTool,
+} from './definitions/TypographyVerificationTool'
 import {
   moveFileTool,
   copyFileTool,
@@ -88,6 +100,7 @@ export function getAllTools(): Tool[] {
     spawnSkillAgentTool as Tool,
     writingSystemTool as Tool,
     writingMemoryTool as Tool,
+    polishingMemoryTool as Tool,
     generateImageTool as Tool,
     cardGeneratorTool as Tool,
     rememberProcedureTool as Tool,
@@ -106,6 +119,8 @@ export function getAllTools(): Tool[] {
     speakWithPiperTool as Tool,
     switchPiperModelTool as Tool,
     listPiperModelsTool as Tool,
+    // 排版记忆工具
+    typographyMemoryTool as Tool,
     // 文件操作增强
     moveFileTool as Tool,
     copyFileTool as Tool,
@@ -114,7 +129,16 @@ export function getAllTools(): Tool[] {
     searchFilesGlobTool as Tool,
     appendFileTool as Tool,
     readMultipleFilesTool as Tool,
+    // 润色工具箱
+    polishStyleScanTool as Tool,
+    polishDialogueEvalTool as Tool,
+    polishAiDetectTool as Tool,
+    polishRhythmAnalyzeTool as Tool,
+    // 排版语音校验
+    verifyTypographyTool as Tool,
+    readAloudSegmentTool as Tool,
   ]
 }
 
 export { buildTool, type Tool, type ToolDef, toMCPToolDefinition, toMCPToolSchema, formatToolResult, formatToolError } from './types'
+export { ToolStatsTracker, toolStatsTracker, type ToolCallSummary, type ProblematicTool } from './ToolStatsTracker'

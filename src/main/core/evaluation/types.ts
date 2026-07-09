@@ -67,6 +67,9 @@ export type EventType =
   // ── Guardrail Action Delivery（Runtime 执行事实） ──
   | 'guardrail.action_delivered'
   | 'guardrail.action_delivery_failed'
+  // ── Guardrail Config Versioning（配置生命周期） ──
+  | 'guardrail.config.activated'
+  | 'guardrail.config.rollback'
 
 // ══════════════════════════════════════════════
 // 任务类别
@@ -275,6 +278,37 @@ export interface GuardrailActionDeliveryFailedPayload {
   errorCode: string
 }
 
+// ══════════════════════════════════════════════
+// Guardrail Config Versioning Payloads（配置生命周期）
+//
+// guardrail.config.activated  — 新版本上线（由 Config Store 生产）
+// guardrail.config.rollback   — 版本回退（由 Config Store 生产）
+//
+// 这些事件不属于 Delivery Trace（不关联具体 Decision），
+// 也与 guardrail.checked / guardrail.terminated 正交。
+// ══════════════════════════════════════════════
+
+/** Rollback 触发源分类，限定 Metrics 聚合维度 */
+export type RollbackTrigger = 'manual' | 'automated_guardrail' | 'deployment_failure'
+
+export interface GuardrailConfigActivatedPayload {
+  /** 新上线的版本 Identity */
+  version: string
+  /** Config 实际生效时间戳（可能与 Event.timestamp 不同） */
+  activatedAt: number
+}
+
+export interface GuardrailConfigRollbackPayload {
+  /** 回滚前版本（被废弃的版本） */
+  fromVersion: string
+  /** 回滚目标版本（恢复到的版本） */
+  toVersion: string
+  /** 回滚来源分类，仅表示触发原因分类，不表示执行命令 */
+  trigger: RollbackTrigger
+  /** 回滚原因，人工或系统说明，可选 */
+  reason?: string
+}
+
 export type EventPayload =
   | ({ type: 'task.started' } & TaskStartedPayload)
   | ({ type: 'task.completed' } & TaskCompletedPayload)
@@ -291,6 +325,8 @@ export type EventPayload =
   | ({ type: 'guardrail.terminated' } & GuardrailTerminatedPayload)
   | ({ type: 'guardrail.action_delivered' } & GuardrailActionDeliveredPayload)
   | ({ type: 'guardrail.action_delivery_failed' } & GuardrailActionDeliveryFailedPayload)
+  | ({ type: 'guardrail.config.activated' } & GuardrailConfigActivatedPayload)
+  | ({ type: 'guardrail.config.rollback' } & GuardrailConfigRollbackPayload)
 
 // ══════════════════════════════════════════════
 // 事件消费者接口（供 Metrics / Fitness / Evolution 使用）

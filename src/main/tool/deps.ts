@@ -128,3 +128,16 @@ export function setTtsService(ts: TtsService | null): void {
 export function getTtsService(): TtsService | null {
   return _ttsService
 }
+
+// ── ASR 服务（供 TypographyVerification 工具调用）──
+import type { AsrService } from '../asr/AsrService'
+
+let _asrService: AsrService | null = null
+
+export function setAsrService(as: AsrService | null): void {
+  _asrService = as
+}
+
+export function getAsrService(): AsrService | null {
+  return _asrService
+}

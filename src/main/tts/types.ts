@@ -1,3 +1,5 @@
+import type { VoiceEmotionLabel } from '../asr/types'
+
 export type TtsStateCallback = (state: Partial<{ ttsPlaying: boolean }>) => void
 
 /** 情感极性 */
@@ -182,6 +184,66 @@ export const BEHAVIOR_EMOTION_TTS_MAP: Record<BehaviorEmotion, EmotionTtsParams>
     rate: '+10%',
     pitch: '+8Hz',
     label: '中性·行为',
+  },
+}
+
+// ══════════════════════════════════════════
+//  语音情感 — 从 ASR 声学特征（音高/能量/语速）推断的用户情绪
+// ══════════════════════════════════════════
+
+/**
+ * 语音情感标签（从用户语音的声学特征分析得出）。
+ * 与文本情感 SentimentPolarity 和行为情感 BehaviorEmotion 互补。
+ *
+ * 三层情感系统对比：
+ *   - SentimentPolarity（文本情感）: LLM 回复说了什么 → 正面/负面/中性
+ *   - BehaviorEmotion（行为情感）: 用户怎么操作 → 焦躁/平静/专注/中性
+ *   - VoiceEmotionLabel（语音情感）: 用户怎么说 → 开心/悲伤/生气/平静/焦虑/中性
+ */
+
+/** 语音情感 → TTS 参数预设映射表 */
+export const VOICE_EMOTION_TTS_MAP: Record<VoiceEmotionLabel, EmotionTtsParams> = {
+  /** 中性 — 常规交流，使用默认参数 */
+  neutral: {
+    voice: 'zh-CN-XiaoxiaoNeural',
+    rate: '+10%',
+    pitch: '+8Hz',
+    label: '常规·语音',
+  },
+  /** 开心 — 匹配用户的高涨情绪，语速稍快、音调偏高 */
+  happy: {
+    voice: 'zh-CN-XiaoxiaoNeural',
+    rate: '+15%',
+    pitch: '+12Hz',
+    label: '共鸣·开心',
+  },
+  /** 悲伤 — 匹配用户的低沉情绪，语速放缓、音调偏低，温柔安慰 */
+  sad: {
+    voice: 'zh-CN-XiaoyiNeural',
+    rate: '-5%',
+    pitch: '-4Hz',
+    label: '安抚·悲伤',
+  },
+  /** 生气 — 匹配用户的愤怒情绪，语速适中偏缓、音调降低（以柔克刚） */
+  angry: {
+    voice: 'zh-CN-YunjianNeural',
+    rate: '-3%',
+    pitch: '-3Hz',
+    label: '平和·生气',
+  },
+  /** 平静 — 匹配用户的平静状态，保持自然语速和语调 */
+  calm: {
+    voice: 'zh-CN-YunxiNeural',
+    rate: '+5%',
+    pitch: '+2Hz',
+    label: '同步·平静',
+  },
+  /** 焦虑 — 匹配用户的焦虑情绪，语速降低、语调柔和（起安抚作用） */
+  anxious: {
+    voice: 'zh-CN-XiaoyiNeural',
+    rate: '-8%',
+    pitch: '-5Hz',
+    label: '安抚·焦虑',
   },
 }
 
@@ -385,6 +447,25 @@ export const DEFAULT_TTS_ROUTER_CONFIG: TtsRouterConfig = {
 }
 
 // ══════════════════════════════════════════
+//  TTS × PiperTTS — Piper 性能信息（供 TtsRouter 使用）
+// ══════════════════════════════════════════
+
+/**
+ * Piper 本地引擎的近期性能信息。
+ *
+ * 由 TtsPiperBridge 从 PiperOrchestrator 采集，注入 TtsRouter 的路由决策，
+ * 使路由层能感知本地引擎的实时表现，做出更明智的 cloud/local 选择。
+ */
+export interface PiperPerformanceInfo {
+  /** 最近合成的平均延迟（毫秒），-1 表示无数据 */
+  recentLatencyMs: number
+  /** 是否有任何模型近期失败率过高 */
+  anyModelFailed: boolean
+  /** 当前队列深度（等待中的合成数） */
+  queueDepth: number
+}
+
+// ══════════════════════════════════════════
 //  隐式反馈驱动的语音自适应
 // ══════════════════════════════════════════
 
@@ -466,3 +547,190 @@ export const DEFAULT_IMPLICIT_FEEDBACK_CONFIG: ImplicitFeedbackConfig = {
   maxHistorySize: 200,
   enabled: true,
 }
+
+// ══════════════════════════════════════════
+//  用户情境上下文 (work / leisure / rest)
+// ══════════════════════════════════════════
+
+/**
+ * 用户行为情境标签 — 基于活跃窗口、时间段、交互模式分类。
+ *
+ * 与 BehaviorEmotion（情绪状态）和 InteractionCadence（交流节奏）互补：
+ *   - BehaviorEmotion: 用户怎么操作 → 焦躁/平静/专注
+ *   - InteractionCadence: 用户交流节奏 → 急迫/正常/低频
+ *   - UserContext: 用户当前活动类型 → 工作/休闲/休息
+ */
+export type UserContext = 'work' | 'leisure' | 'rest'
+
+/** 情境感知的语音配置（含 edge-tts 参数 + Piper 模型推荐） */
+export interface ContextVoiceConfig {
+  /** edge-tts 语音角色 */
+  voice: string
+  /** 语速, e.g. '+12%' */
+  rate: string
+  /** 音调偏移, e.g. '+4Hz' */
+  pitch: string
+  /** 音量 0.0–1.0（仅本地播放有效） */
+  volume: number
+  /** Piper 推荐模型名 */
+  piperModel: string
+  /** Piper 语速因子 (0.5–2.0) */
+  piperSpeed: number
+  /** Piper 音调因子 */
+  piperPitch: number
+  /** 人类可读标签 */
+  label: string
+}
+
+/** 情境 → 语音配置映射表 */
+export const CONTEXT_VOICE_MAP: Record<UserContext, ContextVoiceConfig> = {
+  /** 工作模式：语速稍快、音调清晰高效，音量适中 */
+  work: {
+    voice: 'zh-CN-YunyangNeural',
+    rate: '+12%',
+    pitch: '+4Hz',
+    volume: 0.85,
+    piperModel: 'zh_CN-huayan-medium',
+    piperSpeed: 1.1,
+    piperPitch: 1.0,
+    label: '工作·高效',
+  },
+  /** 休闲模式：语速自然、音调温暖亲切，音量正常 */
+  leisure: {
+    voice: 'zh-CN-XiaoxiaoNeural',
+    rate: '+8%',
+    pitch: '+6Hz',
+    volume: 0.9,
+    piperModel: 'zh_CN-ling_ling-medium',
+    piperSpeed: 0.95,
+    piperPitch: 1.05,
+    label: '休闲·放松',
+  },
+  /** 休息模式：语速放缓、音调轻柔，音量降低 */
+  rest: {
+    voice: 'zh-CN-XiaoyiNeural',
+    rate: '-5%',
+    pitch: '-3Hz',
+    volume: 0.7,
+    piperModel: 'zh_CN-ling_ling-medium',
+    piperSpeed: 0.8,
+    piperPitch: 0.9,
+    label: '休息·轻柔',
+  },
+}
+
+/** 情境分类原始指标 */
+export interface ContextIndicators {
+  /** 活跃窗口标题 */
+  activeWindowTitle: string | null
+  /** 活跃进程名（不含路径） */
+  activeProcessName: string | null
+  /** 距上次交互的秒数 */
+  idleSeconds: number
+  /** 当前时段 */
+  dayPeriod: DayPeriod
+  /** 每分钟动作数（来自 BehaviorEmotionDetector） */
+  apm: number
+}
+
+/** 情境分类结果 */
+export interface ContextClassificationResult {
+  /** 当前情境 */
+  context: UserContext
+  /** 置信度 0–1 */
+  confidence: number
+  /** 对应的语音配置 */
+  voiceConfig: ContextVoiceConfig
+  /** 人类可读描述 */
+  description: string
+  /** 原始分类指标 */
+  indicators: ContextIndicators
+}
+
+/** 情境手动覆盖模式 */
+export type ContextOverrideMode = 'auto' | 'manual_work' | 'manual_leisure' | 'manual_rest'
+
+/** 情境覆盖模式 → UserContext 映射 */
+export const CONTEXT_OVERRIDE_MAP: Record<ContextOverrideMode, UserContext | null> = {
+  auto: null,
+  manual_work: 'work',
+  manual_leisure: 'leisure',
+  manual_rest: 'rest',
+}
+
+/** 平滑过渡配置 */
+export interface SmoothTransitionConfig {
+  /** 过渡持续时间（秒） */
+  durationSec: number
+  /** 过渡是否启用 */
+  enabled: boolean
+}
+
+/** 默认平滑过渡配置 */
+export const DEFAULT_SMOOTH_TRANSITION: SmoothTransitionConfig = {
+  durationSec: 20,
+  enabled: true,
+}
+
+/** 默认 UserContextClassifier 配置 */
+export const DEFAULT_USER_CONTEXT_CLASSIFIER_CONFIG = {
+  /** 活跃窗口轮询间隔（毫秒） */
+  pollIntervalMs: 5000,
+  /** 交互超时判定（秒）：超过此时间无交互视为 idle */
+  idleThresholdSec: 120,
+  /** 最小置信度阈值：低于此值回退到默认情境 */
+  minConfidence: 0.3,
+  /** 分类去抖时间（秒）：同一分类持续此时间后才切换，防止频繁抖动 */
+  debounceSec: 30,
+  /** 分类缓存有效期（毫秒） */
+  cacheTtlMs: 10000,
+}
+
+// ══════════════════════════════════════════
+//  工作相关进程关键词（用于 UserContextClassifier）
+// ══════════════════════════════════════════
+
+/** 工作类窗口标题/进程名关键词列表 */
+export const WORK_PROCESS_PATTERNS: RegExp[] = [
+  // 开发工具
+  /\bcode\b|vscode|visual.?studio/i,
+  /intellij|webstorm|pycharm|clion|goland|idea/i,
+  /terminal|cmd|powershell|git.?bash|wsl|conemu|alacritty|kitty|wezterm/i,
+  /sublime|atom|notepad\+\+|vim|neovim|emacs/i,
+  /eclipse|netbeans|android.?studio|xcode/i,
+  /docker|kubernetes|k9s|lens|rancher/i,
+  /postman|insomnia|bruno|httpie/i,
+  // 办公协作
+  /outlook|thunderbird|mail/i,
+  /slack|teams|discord|zoom|meet|teams/i,
+  /excel|word|powerpoint|onenote|office/i,
+  /jira|confluence|notion|linear|asana|trello|click.?up/i,
+  /figma|sketch|adobe.?xd|photoshop|illustrator/i,
+  // 数据库
+  /pgadmin|datagrip|mysql.?workbench|dbeaver|heidisql|navicat|redis.?desktop/i,
+  // 远程
+  /putty|ssh|mobaxterm|winSCP|filezilla/i,
+  // 代码仓库
+  /github|gitlab|bitbucket|source.?tree/i,
+  // 终端中的常见工作目录特征
+  /node|npm|yarn|pnpm|python|java|gcc|make|cmake|dotnet|rustc|go\b|deno|bun/i,
+  /dev|src|project|workspace|code.*dir/i,
+]
+
+/** 休闲类窗口标题/进程名关键词列表 */
+export const LEISURE_PROCESS_PATTERNS: RegExp[] = [
+  // 媒体娱乐
+  /spotify|itunes|music|netease|qq.?music|foobar|winamp/i,
+  /youtube|bilibili|netflix|hbo|disney\+|prime.?video|crunchyroll/i,
+  /vlc|mpv|media.?player|potplayer|kmplayer/i,
+  /steam|epic|battle\.net|gog|origin|uplay|xbox|playstation/i,
+  /game|minecraft|lol|dota|csgo|valorant|overwatch|apex|genshin/i,
+  // 社交
+  /wechat|qq\b|telegram|whatsapp|line|messenger|signal/i,
+  /reddit|twitter|x\.com|instagram|facebook|tiktok|discord/i,
+  // 阅读
+  /kindle|calibre|ebook|reader|pocket/i,
+  // 购物
+  /taobao|jd|amazon|shopee|lazada|ebay|pinduoduo/i,
+  /browser.*(?:shop|mall|buy|cart)/i,
+]
