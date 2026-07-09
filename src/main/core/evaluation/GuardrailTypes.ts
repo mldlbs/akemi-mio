@@ -14,6 +14,11 @@
  * - GuardrailAction 当前限定 continue / warning / terminate
  * - 后续加入 Retry / Replan / Escalate 需升级 Runtime 状态机
  * - 不依赖 EventBus，只依赖 EvaluationRepository.getTrace()
+ *
+ * 变更记录：
+ *   M4 (2026-07-09): PolicyContract Freeze — evaluate() 签名改为 PolicyInput 单入口；
+ *                     PolicyConfig 新增 version 字段；
+ *                     新增 DecisionIdentity 用于 Replay 等值性比较。
  */
 
 import type { ProgressSnapshot } from './progress'
@@ -62,6 +67,23 @@ export interface GuardrailDecision {
   signals: SignalState[]
   /** 产生该决策的原始快照 */
   snapshot: ProgressSnapshot
+  /** Policy 版本标识 */
+  policyVersion: string
+}
+
+/**
+ * DecisionIdentity — 参与 Replay 等值性比较的字段。
+ *
+ * 排除 decidedAt（Date.now()）、reason（自然语言，随阈值/措辞变化）、
+ * 和 snapshot（输入，不在输出等值性中）。
+ *
+ * action + signals + policyVersion 已完全覆盖语义等值性。
+ * replay 比较 → identity；runtime logging → full GuardrailDecision。
+ */
+export interface DecisionIdentity {
+  action: GuardrailAction
+  signals: SignalState[]
+  policyVersion: string
 }
 
 export interface SignalState {
@@ -71,15 +93,25 @@ export interface SignalState {
 }
 
 /**
- * GuardrailPolicy — 基于 ProgressSnapshot 做出决策
+ * PolicyInput — Policy 的完整输入。
  *
- * 职责：
- * - 接收 ProgressSnapshot，返回 GuardrailDecision
- * - 无内部状态，纯函数
- * - 阈值可配置
+ * 单一入口确保 replay 输入完全从参数确定，
+ * 不依赖构造函数、环境变量或运行时状态。
+ */
+export interface PolicyInput {
+  snapshot: ProgressSnapshot
+  config: GuardrailPolicyConfig
+}
+
+/**
+ * GuardrailPolicy — 基于 ProgressSnapshot 做出决策。
+ *
+ * evaluate(input) 是纯函数：
+ * - 同一 PolicyInput → 同一 DecisionIdentity
+ * - 不依赖 Date.now()、随机数、外部 I/O、Runtime 状态
  */
 export interface GuardrailPolicy {
-  evaluate(snapshot: ProgressSnapshot): GuardrailDecision
+  evaluate(input: PolicyInput): GuardrailDecision
 }
 
 // ══════════════════════════════════════════════
@@ -87,6 +119,8 @@ export interface GuardrailPolicy {
 // ══════════════════════════════════════════════
 
 export interface GuardrailPolicyConfig {
+  /** 配置版本标识 */
+  version: string
   stateChange: {
     /** 连续无变化轮次超过此值→degrading */
     degrading: number
@@ -112,6 +146,7 @@ export interface GuardrailPolicyConfig {
 }
 
 export const DEFAULT_GUARDRAIL_POLICY_CONFIG: GuardrailPolicyConfig = {
+  version: '1.0.0',
   stateChange: { degrading: 3, stalled: 8 },
   informationGain: { lowOutputDegrading: 3, lowOutputStalled: 8, repeatedContentDegrading: 2, repeatedContentStalled: 5 },
   goalProgress: { degrading: 4, stalled: 10 },

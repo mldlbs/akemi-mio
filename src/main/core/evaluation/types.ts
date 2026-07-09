@@ -64,6 +64,9 @@ export type EventType =
   // ── Guardrail（干预记录 —— 不可逆事实） ──
   | 'guardrail.checked'
   | 'guardrail.terminated'
+  // ── Guardrail Action Delivery（Runtime 执行事实） ──
+  | 'guardrail.action_delivered'
+  | 'guardrail.action_delivery_failed'
 
 // ══════════════════════════════════════════════
 // 任务类别
@@ -233,8 +236,44 @@ export interface GuardrailTerminatedPayload {
 }
 
 // ══════════════════════════════════════════════
-// 联合类型
+// Guardrail Action Delivery Payloads（Runtime 执行事实）
+//
+// Decision 层与 Delivery 层职责分离：
+//   guardrail.terminated         — Policy 决定终止（但尚未执行）
+//   guardrail.action_delivered   — 决策已被 Runtime 成功执行
+//   guardrail.action_delivery_failed — 决策未能被 Runtime 执行
+//
+// Delivery Event 必须通过 decisionId 引用 GuardrailDecision，
+// 不允许嵌入 Snapshot、PolicyInput、evaluationSignals 等 Policy 计算输入。
 // ══════════════════════════════════════════════
+
+export interface GuardrailActionDeliveredPayload {
+  /** 决策 ID，与 GuardrailDecision 关联 */
+  decisionId: string
+  /** 关联 traceId */
+  traceId: string
+  /** 实际生效的 RuntimeAction */
+  actionType: 'TERMINATE' | 'WARNING' | 'CONTINUE'
+  /** Policy 版本 */
+  policyVersion: string
+  /** 投递时间戳 */
+  timestamp: number
+}
+
+export interface GuardrailActionDeliveryFailedPayload {
+  /** 决策 ID，与 GuardrailDecision 关联 */
+  decisionId: string
+  /** 关联 traceId */
+  traceId: string
+  /** Policy 期望的 RuntimeAction */
+  intendedAction: 'TERMINATE' | 'WARNING' | 'CONTINUE'
+  /** Policy 版本 */
+  policyVersion: string
+  /** 投递时间戳 */
+  timestamp: number
+  /** 失败原因 */
+  errorCode: string
+}
 
 export type EventPayload =
   | ({ type: 'task.started' } & TaskStartedPayload)
@@ -250,6 +289,8 @@ export type EventPayload =
   | ({ type: 'workflow.completed' } & WorkflowCompletedPayload)
   | ({ type: 'guardrail.checked' } & GuardrailCheckedPayload)
   | ({ type: 'guardrail.terminated' } & GuardrailTerminatedPayload)
+  | ({ type: 'guardrail.action_delivered' } & GuardrailActionDeliveredPayload)
+  | ({ type: 'guardrail.action_delivery_failed' } & GuardrailActionDeliveryFailedPayload)
 
 // ══════════════════════════════════════════════
 // 事件消费者接口（供 Metrics / Fitness / Evolution 使用）

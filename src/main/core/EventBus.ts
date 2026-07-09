@@ -50,6 +50,8 @@ export type EventName =
   | 'recovery.recovery.started'
   | 'recovery.recovery.completed'
   | 'recovery.context.compress'
+  | 'behavior.state.updated'
+  | 'behavior.mode.switch'
   | 'stability.score.updated'
   | 'stability.status.changed'
   | 'budget.exhausted'
@@ -79,6 +81,19 @@ export type EventName =
   | 'workflow.run.updated'
   | 'workflow.run.step'
   | 'workflow.def.created'
+
+  // ── Wallpaper 事件（版本化 Schema，用于 Wallpaper ↔ Plan 事件总线） ──
+  | 'wallpaper.mode.changed'
+  | 'wallpaper.config.changed'
+  | 'wallpaper.lock.changed'
+  | 'wallpaper.css.reloaded'
+
+  // ── Plan:TypeScript 学习计划事件（版本化 Schema，用于 Wallpaper ↔ Plan 事件总线） ──
+  | 'plan.ts.step.completed'
+  | 'plan.ts.difficulty.recorded'
+  | 'plan.ts.strategy.adjusted'
+  | 'plan.ts.progress.updated'
+  | 'plan.ts.focus.synced'
 
 export interface EventPayload {
   'task.lifecycle': { taskId: string; type: string; status: string; durationMs?: number; error?: string }
@@ -160,6 +175,21 @@ export interface EventPayload {
   'recovery.recovery.started': { oldRunId: string; error: string }
   'recovery.recovery.completed': { newRunId: string; success: boolean }
   'recovery.context.compress': { beforeTokens: number; afterTokens: number }
+  'behavior.state.updated': {
+    activityState: string
+    fullscreen: boolean
+    focused: boolean
+    appCategory: string
+    windowTitle: string
+    idleTimeMs: number
+  }
+  'behavior.mode.switch': {
+    fromMode: string
+    toMode: string
+    reason: string
+    confidence: number
+    timestamp: number
+  }
   'skill.installed': { name: string; version: string; tools: number }
   'skill.uninstalled': { name: string }
   'skill.enabled': { name: string }
@@ -197,7 +227,20 @@ export interface EventPayload {
   }
   'workflow.run.updated': { runId: string; status?: string; stepId?: string; error?: string; agentResult?: string }
   'workflow.run.step': { runId: string; stepId: string; status?: string; error?: string; agentResult?: any }
-  'workflow.def.created': { workflowDefId: string; name: string }
+  'workflow.def.created'
+
+  // ── Wallpaper 事件（版本化 Schema，用于 Wallpaper ↔ Plan 事件总线） ──
+  'wallpaper.mode.changed'
+  'wallpaper.config.changed'
+  'wallpaper.lock.changed'
+  'wallpaper.css.reloaded'
+
+  // ── Plan:TypeScript 学习计划事件（版本化 Schema，用于 Wallpaper ↔ Plan 事件总线） ──
+  'plan.ts.step.completed'
+  'plan.ts.difficulty.recorded'
+  'plan.ts.strategy.adjusted'
+  'plan.ts.progress.updated'
+  'plan.ts.focus.synced': { workflowDefId: string; name: string }
   'stability.score.updated': { score: number; trend: string; status: string }
   'stability.status.changed': { previous: string; current: string; score: number }
   'budget.exhausted': { resource: string; utilization: number }
@@ -238,6 +281,90 @@ export interface EventPayload {
     taskScore: number
     modelScore: number
     recommendedActions: string[]
+    timestamp: number
+  }
+
+  // ── Wallpaper 事件（版本化 Schema） ──
+
+  /** 壁纸行为模式变化：version=1 时包含模式、情境和置信度 */
+  'wallpaper.mode.changed': {
+    version: 1
+    mode: 'focus' | 'multitasking' | 'break'
+    context: 'coding' | 'browsing' | 'resting'
+    confidence: number
+    timestamp: number
+  }
+
+  /** 壁纸配置变化：version=1 时包含变更字段列表 */
+  'wallpaper.config.changed': {
+    version: 1
+    changes: Array<{ key: string; oldValue: unknown; newValue: unknown }>
+    timestamp: number
+  }
+
+  /** 壁纸进化锁定状态切换：version=1 时包含锁定状态 */
+  'wallpaper.lock.changed': {
+    version: 1
+    locked: boolean
+    previous: boolean
+    timestamp: number
+  }
+
+  /** 壁纸 CSS 热重载：version=1 时包含 CSS 元信息 */
+  'wallpaper.css.reloaded': {
+    version: 1
+    filename: string
+    cssSize: number
+    timestamp: number
+  }
+
+  // ── Plan:TypeScript 学习计划事件（版本化 Schema） ──
+
+  /** 学习步骤完成：version=1 时包含步骤描述、成功状态和涉及知识点 */
+  'plan.ts.step.completed': {
+    version: 1
+    stepDescription: string
+    success: boolean
+    concepts?: string[]
+    focusCategories?: string[]
+    timestamp: number
+  }
+
+  /** 困难记录：version=1 时包含知识点名称、描述和当前频次 */
+  'plan.ts.difficulty.recorded': {
+    version: 1
+    conceptName: string
+    description: string
+    frequency: number
+    category: string
+    timestamp: number
+  }
+
+  /** 学习策略调整：version=1 时包含策略列表和触发原因 */
+  'plan.ts.strategy.adjusted': {
+    version: 1
+    strategies: Array<{ type: string; description: string }>
+    triggerReason: string
+    timestamp: number
+  }
+
+  /** 学习进度更新：version=1 时包含掌握度和各项统计数据 */
+  'plan.ts.progress.updated': {
+    version: 1
+    overallMastery: number
+    masteredCount: number
+    learningCount: number
+    totalItems: number
+    overallAccuracy: number
+    timestamp: number
+  }
+
+  /** 学习焦点同步：version=1 时包含当前关注的分类和步骤信息 */
+  'plan.ts.focus.synced': {
+    version: 1
+    focusCategories: string[]
+    recentConcepts: string[]
+    currentStepDescription?: string
     timestamp: number
   }
 }

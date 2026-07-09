@@ -595,6 +595,15 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE memories ADD COLUMN topics TEXT NOT NULL DEFAULT '[]';
     `,
   },
+  {
+    version: 30,
+    sql: `
+      ALTER TABLE memories ADD COLUMN utility_score REAL NOT NULL DEFAULT 0.5;
+      ALTER TABLE memories ADD COLUMN agent_reference_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE memories ADD COLUMN user_confirmed_useful_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE memories ADD COLUMN last_utility_update_at INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ]
 
 export function runMigrations(sqlite: SqlJsDatabase): void {

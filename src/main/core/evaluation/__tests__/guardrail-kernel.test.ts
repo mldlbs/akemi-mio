@@ -14,6 +14,7 @@ import { DefaultGuardrailPolicy } from '../GuardrailPolicy'
 import { GuardrailPipeline } from '../GuardrailPipeline'
 import { InMemoryEvaluationRepository } from '../__test_support__'
 import { DEFAULT_GUARDRAIL_POLICY_CONFIG } from '../GuardrailTypes'
+import type { GuardrailDecision, PolicyInput } from '../GuardrailTypes'
 
 // ══════════════════════════════════════════════
 // Helpers: 快速构造 EvaluationEvent
@@ -250,6 +251,31 @@ describe('GuardrailProgressAnalyzer.compute()', () => {
     // read same_content 重复了 6 次
     expect(snap.informationGain.repeatedToolResultCount).toBeGreaterThanOrEqual(5)
   })
+
+  it('Replay Consistency — 同一事件流两次 compute() 输出完全一致', () => {
+    const events = [
+      modelInvoked(),
+      toolInvoked('search'),
+      toolCompleted('search', 'result_a'),
+      modelCompleted(100, 'found info'),
+      modelInvoked(),
+      taskCompleted(),
+      modelCompleted(50, 'done'),
+      modelInvoked(),
+      toolInvoked('read'),
+      toolCompleted('read', 'same_content'),
+      modelCompleted(5, 'ok'),
+      modelInvoked(),
+      toolInvoked('search'),
+      toolCompleted('search', 'new_result'),
+      modelCompleted(100, 'found new'),
+    ]
+    const snap1 = GuardrailProgressAnalyzer.compute('trace1', events)
+    const snap2 = GuardrailProgressAnalyzer.compute('trace1', events)
+
+    // 全部字段必须一致（包括 observedAt 不再依赖 wall-clock）
+    expect(snap2).toEqual(snap1)
+  })
 })
 
 // ══════════════════════════════════════════════
@@ -284,16 +310,19 @@ function healthySnapshot(overrides?: any): any {
 }
 
 describe('DefaultGuardrailPolicy.evaluate()', () => {
-  it('所有信号 healthy → continue', () => {
+  function evaluate(snapshot: any) {
     const policy = new DefaultGuardrailPolicy()
-    const decision = policy.evaluate(healthySnapshot())
+    return policy.evaluate({ snapshot, config: DEFAULT_GUARDRAIL_POLICY_CONFIG })
+  }
+
+  it('所有信号 healthy → continue', () => {
+    const decision = evaluate(healthySnapshot())
     expect(decision.action).toBe('continue')
     expect(decision.reason).toBe('All signals healthy')
   })
 
   it('stateChange degrading → warning', () => {
-    const policy = new DefaultGuardrailPolicy()
-    const decision = policy.evaluate(
+    const decision = evaluate(
       healthySnapshot({
         stateChange: {
           hasNewToolResult: false,
@@ -310,8 +339,7 @@ describe('DefaultGuardrailPolicy.evaluate()', () => {
   })
 
   it('stateChange stalled → terminate', () => {
-    const policy = new DefaultGuardrailPolicy()
-    const decision = policy.evaluate(
+    const decision = evaluate(
       healthySnapshot({
         stateChange: {
           hasNewToolResult: false,
@@ -328,8 +356,7 @@ describe('DefaultGuardrailPolicy.evaluate()', () => {
   })
 
   it('informationGain 低输出 degrading → warning', () => {
-    const policy = new DefaultGuardrailPolicy()
-    const decision = policy.evaluate(
+    const decision = evaluate(
       healthySnapshot({
         informationGain: {
           consecutiveLowOutputTurns: 4,
@@ -345,8 +372,7 @@ describe('DefaultGuardrailPolicy.evaluate()', () => {
   })
 
   it('informationGain 低输出 stalled → terminate', () => {
-    const policy = new DefaultGuardrailPolicy()
-    const decision = policy.evaluate(
+    const decision = evaluate(
       healthySnapshot({
         informationGain: {
           consecutiveLowOutputTurns: 10,
@@ -362,8 +388,7 @@ describe('DefaultGuardrailPolicy.evaluate()', () => {
   })
 
   it('informationGain 重复内容 degrading → warning', () => {
-    const policy = new DefaultGuardrailPolicy()
-    const decision = policy.evaluate(
+    const decision = evaluate(
       healthySnapshot({
         informationGain: {
           consecutiveLowOutputTurns: 0,
@@ -379,8 +404,7 @@ describe('DefaultGuardrailPolicy.evaluate()', () => {
   })
 
   it('goalProgress degrading → warning', () => {
-    const policy = new DefaultGuardrailPolicy()
-    const decision = policy.evaluate(
+    const decision = evaluate(
       healthySnapshot({
         goalProgress: { completedSubtasks: 1, hasPhaseTransition: false, stagnantTurnCount: 5, summary: 'no progress' },
       }),
@@ -390,8 +414,7 @@ describe('DefaultGuardrailPolicy.evaluate()', () => {
   })
 
   it('goalProgress stalled → terminate', () => {
-    const policy = new DefaultGuardrailPolicy()
-    const decision = policy.evaluate(
+    const decision = evaluate(
       healthySnapshot({
         goalProgress: { completedSubtasks: 1, hasPhaseTransition: false, stagnantTurnCount: 12, summary: 'very stalled' },
       }),
@@ -401,8 +424,7 @@ describe('DefaultGuardrailPolicy.evaluate()', () => {
   })
 
   it('两个信号 degrading → warning（不是 terminate）', () => {
-    const policy = new DefaultGuardrailPolicy()
-    const decision = policy.evaluate(
+    const decision = evaluate(
       healthySnapshot({
         stateChange: {
           hasNewToolResult: false,
@@ -426,12 +448,14 @@ describe('DefaultGuardrailPolicy.evaluate()', () => {
   })
 
   it('自定义阈值覆盖默认值', () => {
-    const policy = new DefaultGuardrailPolicy({
+    const policy = new DefaultGuardrailPolicy()
+    const customConfig = {
+      ...DEFAULT_GUARDRAIL_POLICY_CONFIG,
       stateChange: { degrading: 10, stalled: 20 },
-    })
+    }
     // 5 轮停滞，但阈值是 10，所以应该是 healthy
-    const decision = policy.evaluate(
-      healthySnapshot({
+    const decision = policy.evaluate({
+      snapshot: healthySnapshot({
         stateChange: {
           hasNewToolResult: false,
           hasNewAssistantContent: false,
@@ -441,37 +465,79 @@ describe('DefaultGuardrailPolicy.evaluate()', () => {
           summary: '5 turns stagnant',
         },
       }),
-    )
+      config: customConfig,
+    })
     expect(decision.action).toBe('continue')
     expect(decision.signals[0].status).toBe('healthy')
   })
 
   it('traceId 正确传递到决策结果', () => {
-    const policy = new DefaultGuardrailPolicy()
-    const decision = policy.evaluate(healthySnapshot({ traceId: 'my_trace_42' }))
+    const decision = evaluate(healthySnapshot({ traceId: 'my_trace_42' }))
     expect(decision.traceId).toBe('my_trace_42')
   })
 })
 
 // ══════════════════════════════════════════════
-// C. GuardrailPipeline 集成测试
+// C. GuardrailPipeline 集成测试（Step D — 纯 callback 路径）
 // ══════════════════════════════════════════════
 
 describe('GuardrailPipeline', () => {
+  function makeDecision(
+    traceId: string = 'test_trace',
+    action: 'continue' | 'terminate' | 'warning' = 'continue',
+    overrides?: Partial<GuardrailDecision>,
+  ): GuardrailDecision {
+    return {
+      action,
+      reason: action === 'terminate' ? 'stalled' : 'healthy',
+      decidedAt: Date.now(),
+      traceId,
+      signals: [],
+      policyVersion: '1.0.0',
+      snapshot: {
+        traceId,
+        sessionId: 'test_session',
+        version: 1,
+        totalTurns: 5,
+        elapsedMs: 500,
+        observedAt: Date.now(),
+        stateChange: {
+          hasNewToolResult: true,
+          hasNewAssistantContent: true,
+          hasPlanningStateChange: false,
+          stagnantTurnCount: 0,
+          lastChangeTurn: 3,
+          summary: '',
+        },
+        informationGain: {
+          consecutiveLowOutputTurns: 0,
+          repeatedOutputCount: 0,
+          repeatedToolResultCount: 0,
+          toolResultNovelty: 1,
+          summary: '',
+        },
+        goalProgress: {
+          completedSubtasks: 1,
+          hasPhaseTransition: false,
+          stagnantTurnCount: 0,
+          summary: '',
+        },
+      },
+      ...overrides,
+    }
+  }
+
   it('minTurnsBeforeCheck = 5 时，turn 2 返回 null', async () => {
-    const repo = new InMemoryEvaluationRepository()
-    const pipeline = new GuardrailPipeline(repo, undefined, { minTurnsBeforeCheck: 5, checkIntervalTurns: 3 })
+    const pipeline = new GuardrailPipeline(undefined, { minTurnsBeforeCheck: 5, checkIntervalTurns: 3 })
     const result = await pipeline.check('trace_a', 2)
     expect(result).toBeNull()
   })
 
   it('checkIntervalTurns = 3 时，连续检查跳过', async () => {
-    const repo = new InMemoryEvaluationRepository()
-    // 添加一些事件使 analyze 返回有效结果
-    repo.append(modelInvoked())
-    repo.append(modelCompleted(100, 'hello'))
+    const pipeline = new GuardrailPipeline(undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 3 })
 
-    const pipeline = new GuardrailPipeline(repo, undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 3 })
+    // Inject callback Decision before first check
+    pipeline.onGuardrailDecision(makeDecision('test_trace'))
 
     // Turn 0 应该触发
     const r1 = await pipeline.check('test_trace', 0)
@@ -488,65 +554,57 @@ describe('GuardrailPipeline', () => {
   })
 
   it('reset() 清除 throttle 状态', async () => {
-    const repo = new InMemoryEvaluationRepository()
-    repo.append(modelInvoked())
-    repo.append(modelCompleted(50, 'hi'))
+    const pipeline = new GuardrailPipeline(undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 5 })
 
-    const pipeline = new GuardrailPipeline(repo, undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 5 })
+    pipeline.onGuardrailDecision(makeDecision('test_trace'))
     await pipeline.check('test_trace', 0) // triggers
+
+    // Inject updated decision for after reset
     await pipeline.check('test_trace', 2) // throttled
     expect(await pipeline.check('test_trace', 2)).toBeNull()
 
     pipeline.reset()
+    pipeline.onGuardrailDecision(makeDecision('test_trace')) // re-inject after reset
     // reset 后应该可以立即检测
     const r = await pipeline.check('test_trace', 2)
     expect(r).not.toBeNull()
   })
 
   it('带停滞 trace 的完整流 → terminate', async () => {
-    const repo = new InMemoryEvaluationRepository()
-    // 10 轮全部空转（无工具调用、无回复）
-    for (let i = 0; i < 10; i++) {
-      repo.append(
-        makeEvent({ type: 'model.invoked', traceId: 'stuck_trace', payload: { type: 'model.invoked', modelName: 'm', promptLength: 10 } }),
-      )
-      repo.append(
-        makeEvent({
-          type: 'model.completed',
-          traceId: 'stuck_trace',
-          payload: { type: 'model.completed', modelName: 'm', durationMs: 100, inputTokens: 10, outputTokens: 1, responseLength: 0 },
-        }),
-      )
-    }
+    const pipeline = new GuardrailPipeline(undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 1 })
 
-    const pipeline = new GuardrailPipeline(repo, undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 1 })
+    // Inject TERMINATE decision (simulating Consumer detecting stagnation)
+    pipeline.onGuardrailDecision(makeDecision('stuck_trace', 'terminate'))
+
     const result = await pipeline.check('stuck_trace', 10)
     expect(result).not.toBeNull()
     expect(result!.runtimeAction).toBe('TERMINATE')
     expect(result!.decision.reason).toContain('stalled')
   })
 
-  it('存储异常时优雅降级（返回 null）', async () => {
-    // 使用一个会抛错的 source
-    const brokenSource = {
-      getTrace: async () => {
-        throw new Error('db down')
-      },
-    }
-    const pipeline = new GuardrailPipeline(brokenSource, undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 1 })
+  it('无 callback Decision 时返回 null（skip）', async () => {
+    const pipeline = new GuardrailPipeline(undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 1 })
     const result = await pipeline.check('any', 5)
+    // No callback Decision was delivered → check() returns null
+    expect(result).toBeNull()
+  })
+
+  it('callback Decision traceId 不匹配时返回 null', async () => {
+    const pipeline = new GuardrailPipeline(undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 1 })
+
+    // Decision for trace "alpha", checking for trace "beta"
+    pipeline.onGuardrailDecision(makeDecision('alpha'))
+    const result = await pipeline.check('beta', 5)
+
     expect(result).toBeNull()
   })
 
   it('guardrail.checked 事件通过 emitter 写入', async () => {
-    const repo = new InMemoryEvaluationRepository()
-    repo.append(modelInvoked())
-    repo.append(modelCompleted(100, 'hello'))
-
     const events: any[] = []
     const mockEmitter = { emit: (type: string, payload: any, meta?: any) => events.push({ type, payload, meta }) } as any
-    const pipeline = new GuardrailPipeline(repo, undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 1 }, mockEmitter)
+    const pipeline = new GuardrailPipeline(undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 1 }, mockEmitter)
 
+    pipeline.onGuardrailDecision(makeDecision('test_trace'))
     const result = await pipeline.check('test_trace', 0)
     expect(result).not.toBeNull()
 
@@ -561,24 +619,11 @@ describe('GuardrailPipeline', () => {
   })
 
   it('terminate 时写入 guardrail.terminated', async () => {
-    const repo = new InMemoryEvaluationRepository()
-    for (let i = 0; i < 10; i++) {
-      repo.append(
-        makeEvent({ type: 'model.invoked', traceId: 'stuck2', payload: { type: 'model.invoked', modelName: 'm', promptLength: 10 } }),
-      )
-      repo.append(
-        makeEvent({
-          type: 'model.completed',
-          traceId: 'stuck2',
-          payload: { type: 'model.completed', modelName: 'm', durationMs: 100, inputTokens: 10, outputTokens: 1, responseLength: 0 },
-        }),
-      )
-    }
-
     const events: any[] = []
     const mockEmitter = { emit: (type: string, payload: any, meta?: any) => events.push({ type, payload, meta }) } as any
-    const pipeline = new GuardrailPipeline(repo, undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 1 }, mockEmitter)
+    const pipeline = new GuardrailPipeline(undefined, { minTurnsBeforeCheck: 0, checkIntervalTurns: 1 }, mockEmitter)
 
+    pipeline.onGuardrailDecision(makeDecision('stuck2', 'terminate'))
     const result = await pipeline.check('stuck2', 10)
     expect(result).not.toBeNull()
     expect(result!.runtimeAction).toBe('TERMINATE')

@@ -227,3 +227,180 @@ export const BEHAVIOR_REPEAT_SIMILARITY_THRESHOLD = parseFloat(process.env.BEHAV
 
 /** 行为强化记忆巩固：重复检测窗口大小（最近 N 条消息）。Override via BEHAVIOR_REPEAT_DETECTION_WINDOW env. */
 export const BEHAVIOR_REPEAT_DETECTION_WINDOW = parseInt(process.env.BEHAVIOR_REPEAT_DETECTION_WINDOW || '8', 10)
+
+// ══════════════════════════════════════════
+//  记忆驱动工具调用引擎配置
+// ══════════════════════════════════════════
+
+/**
+ * 记忆驱动工具个性化强度级别。
+ * - 'off'：禁用记忆驱动的工具推荐
+ * - 'conservative'：保守策略，仅在高置信度时影响（默认）
+ * - 'balanced'：平衡策略，中等记忆影响工具排序和参数填充
+ * - 'aggressive'：激进策略，最大限度利用记忆优化工具选择
+ *
+ * Override via MEMORY_TOOL_PERSONALIZATION env.
+ */
+export const MEMORY_TOOL_PERSONALIZATION: 'off' | 'conservative' | 'balanced' | 'aggressive' = (
+  ['off', 'conservative', 'balanced', 'aggressive'].includes(process.env.MEMORY_TOOL_PERSONALIZATION || '')
+    ? process.env.MEMORY_TOOL_PERSONALIZATION as any
+    : 'conservative'
+)
+
+/**
+ * 记忆驱动工具推荐的最小数据量阈值。
+ * 当工具调用记录数低于此值时，使用保守策略以避免噪声推荐。
+ * Override via MEMORY_TOOL_MIN_RECORDS env.
+ */
+export const MEMORY_TOOL_MIN_RECORDS = parseInt(process.env.MEMORY_TOOL_MIN_RECORDS || '5', 10)
+
+/**
+ * 记忆驱动工具推荐中最高优先级 boost 倍数。
+ * 高频工具在工具列表中的排序偏移量（影响 LLM 的选择倾向）。
+ * Override via MEMORY_TOOL_BOOST_FACTOR env.
+ */
+export const MEMORY_TOOL_BOOST_FACTOR = parseInt(process.env.MEMORY_TOOL_BOOST_FACTOR || '3', 10)
+
+/**
+ * 工具调用成功率统计窗口大小（最近 N 次调用）。
+ * Override via MEMORY_TOOL_STAT_WINDOW env.
+ */
+export const MEMORY_TOOL_STAT_WINDOW = parseInt(process.env.MEMORY_TOOL_STAT_WINDOW || '50', 10)
+
+// ══════════════════════════════════════════
+//  记忆效用跟踪与动态清理配置
+// ══════════════════════════════════════════
+
+/**
+ * 效用跟踪：Agent 引用检测的相似度阈值（bigram Jaccard）。
+ * Override via UTILITY_REFERENCE_SIMILARITY env.
+ */
+export const UTILITY_REFERENCE_SIMILARITY = parseFloat(process.env.UTILITY_REFERENCE_SIMILARITY || '0.3')
+
+/**
+ * 效用跟踪：Agent 每次引用的效用增量。
+ * Override via UTILITY_AGENT_REFERENCE_BOOST env.
+ */
+export const UTILITY_AGENT_REFERENCE_BOOST = parseFloat(process.env.UTILITY_AGENT_REFERENCE_BOOST || '0.08')
+
+/**
+ * 效用跟踪：用户确认有用的效用增量。
+ * Override via UTILITY_USER_CONFIRM_BOOST env.
+ */
+export const UTILITY_USER_CONFIRM_BOOST = parseFloat(process.env.UTILITY_USER_CONFIRM_BOOST || '0.15')
+
+/**
+ * 效用跟踪：每日效用衰减率。
+ * Override via UTILITY_DAILY_DECAY env.
+ */
+export const UTILITY_DAILY_DECAY = parseFloat(process.env.UTILITY_DAILY_DECAY || '0.02')
+
+/**
+ * 效用跟踪：低效用阈值（低于此值可被清理）。
+ * Override via UTILITY_LOW_THRESHOLD env.
+ */
+export const UTILITY_LOW_THRESHOLD = parseFloat(process.env.UTILITY_LOW_THRESHOLD || '0.15')
+
+/**
+ * 效用跟踪：清理检查间隔（毫秒），默认 24 小时。
+ * Override via UTILITY_CLEANUP_INTERVAL env.
+ */
+export const UTILITY_CLEANUP_INTERVAL = parseInt(process.env.UTILITY_CLEANUP_INTERVAL || String(24 * 60 * 60 * 1000), 10)
+
+/**
+ * 效用跟踪：每次清理最多删除的记忆数。
+ * Override via UTILITY_MAX_CLEANUP env.
+ */
+export const UTILITY_MAX_CLEANUP = parseInt(process.env.UTILITY_MAX_CLEANUP || '20', 10)
+
+// ══════════════════════════════════════════
+//  行为驱动工具预激活配置
+// ══════════════════════════════════════════
+
+/**
+ * 行为预激活引擎：滑动窗口大小（最近 N 次工具调用）。
+ * Override via BEHAVIOR_PREDICTOR_WINDOW_SIZE env.
+ */
+export const BEHAVIOR_PREDICTOR_WINDOW_SIZE = parseInt(process.env.BEHAVIOR_PREDICTOR_WINDOW_SIZE || '12', 10)
+
+/**
+ * 行为预激活引擎：最小序列长度（小于此值不构成有意义模式）。
+ * Override via BEHAVIOR_PREDICTOR_MIN_SEQUENCE_LENGTH env.
+ */
+export const BEHAVIOR_PREDICTOR_MIN_SEQUENCE_LENGTH = parseInt(process.env.BEHAVIOR_PREDICTOR_MIN_SEQUENCE_LENGTH || '2', 10)
+
+/**
+ * 行为预激活引擎：模式被认定有效的最小出现次数。
+ * Override via BEHAVIOR_PREDICTOR_MIN_PATTERN_FREQUENCY env.
+ */
+export const BEHAVIOR_PREDICTOR_MIN_PATTERN_FREQUENCY = parseInt(process.env.BEHAVIOR_PREDICTOR_MIN_PATTERN_FREQUENCY || '2', 10)
+
+/**
+ * 行为预激活引擎：触发预加载的置信度阈值 (0-1)。
+ * Override via BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE env.
+ */
+export const BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE = parseFloat(process.env.BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE || '0.35')
+
+/**
+ * 行为预激活引擎：预加载结果 TTL（毫秒）。
+ * Override via BEHAVIOR_PREDICTOR_PRELOAD_TTL_MS env.
+ */
+export const BEHAVIOR_PREDICTOR_PRELOAD_TTL_MS = parseInt(process.env.BEHAVIOR_PREDICTOR_PRELOAD_TTL_MS || '120000', 10)
+
+/**
+ * 行为预激活引擎：预加载缓存最大条目数。
+ * Override via BEHAVIOR_PREDICTOR_PRELOAD_CACHE_MAX env.
+ */
+export const BEHAVIOR_PREDICTOR_PRELOAD_CACHE_MAX = parseInt(process.env.BEHAVIOR_PREDICTOR_PRELOAD_CACHE_MAX || '50', 10)
+
+/**
+ * 行为预激活引擎：异步预加载超时（毫秒）。
+ * Override via BEHAVIOR_PREDICTOR_PRELOAD_TIMEOUT_MS env.
+ */
+export const BEHAVIOR_PREDICTOR_PRELOAD_TIMEOUT_MS = parseInt(process.env.BEHAVIOR_PREDICTOR_PRELOAD_TIMEOUT_MS || '10000', 10)
+
+/**
+ * 行为预激活引擎：最大并发预加载任务数。
+ * Override via BEHAVIOR_PREDICTOR_MAX_CONCURRENT_PRELOADS env.
+ */
+export const BEHAVIOR_PREDICTOR_MAX_CONCURRENT_PRELOADS = parseInt(process.env.BEHAVIOR_PREDICTOR_MAX_CONCURRENT_PRELOADS || '3', 10)
+
+// ══════════════════════════════════════════
+//  话题转移预测与记忆预取配置
+// ══════════════════════════════════════════
+
+/**
+ * 话题转移预测器：分析窗口大小（最近 N 次交互用于话题序列）。
+ * Override via TOPIC_TRANSITION_WINDOW_SIZE env.
+ */
+export const TOPIC_TRANSITION_WINDOW_SIZE = parseInt(process.env.TOPIC_TRANSITION_WINDOW_SIZE || '32', 10)
+
+/**
+ * 话题转移预测器：最小转移出现次数（低于此值不构成有效模式）。
+ * Override via TOPIC_TRANSITION_MIN_FREQUENCY env.
+ */
+export const TOPIC_TRANSITION_MIN_FREQUENCY = parseInt(process.env.TOPIC_TRANSITION_MIN_FREQUENCY || '2', 10)
+
+/**
+ * 话题转移预测器：触发预取的最小概率 (0-1)。
+ * Override via TOPIC_TRANSITION_PREFETCH_MIN_PROB env.
+ */
+export const TOPIC_TRANSITION_PREFETCH_MIN_PROB = parseFloat(process.env.TOPIC_TRANSITION_PREFETCH_MIN_PROB || '0.15')
+
+/**
+ * 话题转移预测器：每次预取最多返回的记忆数。
+ * Override via TOPIC_TRANSITION_PREFETCH_MAX_ENTRIES env.
+ */
+export const TOPIC_TRANSITION_PREFETCH_MAX_ENTRIES = parseInt(process.env.TOPIC_TRANSITION_PREFETCH_MAX_ENTRIES || '5', 10)
+
+/**
+ * 话题转移预测器：预取缓存 TTL（毫秒）。
+ * Override via TOPIC_TRANSITION_PREFETCH_TTL_MS env.
+ */
+export const TOPIC_TRANSITION_PREFETCH_TTL_MS = parseInt(process.env.TOPIC_TRANSITION_PREFETCH_TTL_MS || '60000', 10)
+
+/**
+ * 话题转移预测器：预取缓存最大条目数。
+ * Override via TOPIC_TRANSITION_PREFETCH_CACHE_MAX env.
+ */
+export const TOPIC_TRANSITION_PREFETCH_CACHE_MAX = parseInt(process.env.TOPIC_TRANSITION_PREFETCH_CACHE_MAX || '20', 10)

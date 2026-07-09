@@ -10,13 +10,7 @@
  */
 
 import type { EvaluationEvent } from './types'
-import type {
-  ProgressAnalyzer,
-  ProgressSnapshot,
-  StateChangeSignal,
-  InformationGainSignal,
-  GoalProgressSignal,
-} from './progress'
+import type { ProgressAnalyzer, ProgressSnapshot, StateChangeSignal, InformationGainSignal, GoalProgressSignal } from './progress'
 import { PROGRESS_VERSION } from './progress'
 import type { TraceEventSource } from './GuardrailTypes'
 
@@ -326,7 +320,7 @@ export class GuardrailProgressAnalyzer implements ProgressAnalyzer {
       version: PROGRESS_VERSION,
       totalTurns: turns.length,
       elapsedMs,
-      observedAt: Date.now(),
+      observedAt: sorted.length > 0 ? sorted[sorted.length - 1].timestamp : 0,
       stateChange: computeStateChange(turns),
       informationGain: computeInformationGain(turns),
       goalProgress: computeGoalProgress(turns),

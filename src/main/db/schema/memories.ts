@@ -15,6 +15,11 @@ export const memories = sqliteTable('memories', {
   topics: text('topics').notNull().default('[]'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
+  // ── 效用跟踪字段 ──
+  utilityScore: real('utility_score').notNull().default(0.5),
+  agentReferenceCount: integer('agent_reference_count').notNull().default(0),
+  userConfirmedUsefulCount: integer('user_confirmed_useful_count').notNull().default(0),
+  lastUtilityUpdateAt: integer('last_utility_update_at').notNull().default(0),
 })
 
 export const memoryArchive = sqliteTable('memory_archive', {

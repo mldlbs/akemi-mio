@@ -2,32 +2,27 @@
  * GuardrailPolicy — 基于 ProgressSnapshot 做出决策的纯函数
  *
  * 职责：
- * - 接收 ProgressSnapshot，返回 GuardrailDecision
- * - 无内部状态（stateless），阈值通过构造函数配置
+ * - evaluate(input) 是纯函数：同一 PolicyInput → 同一 DecisionIdentity
+ * - 不持有 config 实例状态，config 通过 PolicyInput 传入
  * - 决策逻辑：任意 signal stalled → terminate；任意 signal degrading → warning；其余 → continue
  *
  * 不依赖 EventBus / Runtime / 存储。
+ *
+ * 变更记录：
+ *   M4 (2026-07-09): evaluate() 签名改为 PolicyInput 单入口；
+ *                     移除构造函数 config 存储，config 通过 PolicyInput 传入；
+ *                     新增 policyVersion 写入 Decision。
  */
 
-import type { GuardrailPolicy, GuardrailDecision, GuardrailPolicyConfig, SignalState, ProgressSnapshot } from './GuardrailTypes'
-import { DEFAULT_GUARDRAIL_POLICY_CONFIG } from './GuardrailTypes'
+import type { GuardrailPolicy, GuardrailDecision, GuardrailPolicyConfig, SignalState, PolicyInput } from './GuardrailTypes'
 
 export class DefaultGuardrailPolicy implements GuardrailPolicy {
-  private config: GuardrailPolicyConfig
-
-  constructor(config?: Partial<GuardrailPolicyConfig>) {
-    this.config = {
-      stateChange: { ...DEFAULT_GUARDRAIL_POLICY_CONFIG.stateChange, ...config?.stateChange },
-      informationGain: { ...DEFAULT_GUARDRAIL_POLICY_CONFIG.informationGain, ...config?.informationGain },
-      goalProgress: { ...DEFAULT_GUARDRAIL_POLICY_CONFIG.goalProgress, ...config?.goalProgress },
-    }
-  }
-
-  evaluate(snapshot: ProgressSnapshot): GuardrailDecision {
+  evaluate(input: PolicyInput): GuardrailDecision {
+    const { snapshot, config } = input
     const signals: SignalState[] = [
-      this.evaluateStateChange(snapshot),
-      this.evaluateInformationGain(snapshot),
-      this.evaluateGoalProgress(snapshot),
+      this.evaluateStateChange(snapshot, config),
+      this.evaluateInformationGain(snapshot, config),
+      this.evaluateGoalProgress(snapshot, config),
     ]
 
     const stalled = signals.filter((s) => s.status === 'stalled')
@@ -47,11 +42,19 @@ export class DefaultGuardrailPolicy implements GuardrailPolicy {
       reason = 'All signals healthy'
     }
 
-    return { action, reason, decidedAt: Date.now(), traceId: snapshot.traceId, signals, snapshot }
+    return {
+      action,
+      reason,
+      decidedAt: Date.now(),
+      traceId: snapshot.traceId,
+      signals,
+      snapshot,
+      policyVersion: config.version,
+    }
   }
 
-  private evaluateStateChange(snapshot: ProgressSnapshot): SignalState {
-    const cfg = this.config.stateChange
+  private evaluateStateChange(snapshot: GuardrailDecision['snapshot'], config: GuardrailPolicyConfig): SignalState {
+    const cfg = config.stateChange
     const sc = snapshot.stateChange
 
     if (sc.stagnantTurnCount >= cfg.stalled) {
@@ -63,8 +66,8 @@ export class DefaultGuardrailPolicy implements GuardrailPolicy {
     return { name: 'state_change', status: 'healthy', detail: '最近轮次有状态变化' }
   }
 
-  private evaluateInformationGain(snapshot: ProgressSnapshot): SignalState {
-    const cfg = this.config.informationGain
+  private evaluateInformationGain(snapshot: GuardrailDecision['snapshot'], config: GuardrailPolicyConfig): SignalState {
+    const cfg = config.informationGain
     const ig = snapshot.informationGain
 
     if (ig.consecutiveLowOutputTurns >= cfg.lowOutputStalled) {
@@ -98,8 +101,8 @@ export class DefaultGuardrailPolicy implements GuardrailPolicy {
     return { name: 'information_gain', status: 'healthy', detail: '信息增益正常' }
   }
 
-  private evaluateGoalProgress(snapshot: ProgressSnapshot): SignalState {
-    const cfg = this.config.goalProgress
+  private evaluateGoalProgress(snapshot: GuardrailDecision['snapshot'], config: GuardrailPolicyConfig): SignalState {
+    const cfg = config.goalProgress
     const gp = snapshot.goalProgress
 
     if (gp.stagnantTurnCount >= cfg.stalled) {

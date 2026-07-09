@@ -8,3 +8,36 @@ export { SystemBus, systemBus } from './SystemBus'
 export type { QueryChannel, CommandChannel, QueryContext, AggregatedResult, CommandResult } from './SystemBus'
 import { SyscallBus, HealthChecker } from './lifecycle/index'
 export type { ISubsystem, IModule, SubsystemState, HealthCheckResult } from './lifecycle/types'
+
+// ── 通用模式库（无偏见核心抽象） ──
+export {
+  ok,
+  err,
+  isOk,
+  isErr,
+  map,
+  mapErr,
+  flatMap,
+  tryCatch,
+  tryCatchAsync,
+  unwrapOr,
+  unwrapOrElse,
+  collectOk,
+  all,
+  AsyncQueue,
+  FallbackChain,
+  DebounceGate,
+} from './patterns'
+export type {
+  Result,
+  Success,
+  Failure,
+  AsyncQueueOptions,
+  QueueStatus,
+  Resolver,
+  ResolveAttempt,
+  ResolveResult,
+  FallbackChainOptions,
+  DebounceGateOptions,
+  GateStatus,
+} from './patterns'
