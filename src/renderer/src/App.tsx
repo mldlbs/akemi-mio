@@ -1,4 +1,5 @@
 import { VoiceInput } from './components/VoiceInput'
+import { WritingInspirationCapture } from './components/WritingInspirationCapture'
 import { TopBar } from './components/TopBar'
 import { Sidebar } from './components/Sidebar'
 import { MainArea } from './components/MainArea'
@@ -13,6 +14,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { SettingsModal } from './components/SettingsModal'
 import { EvolutionDashboard } from './components/EvolutionDashboard'
 import { DesktopToolbar } from './components/DesktopToolbar'
+import { WallpaperOverlay } from './components/WallpaperOverlay'
 import { useSlots } from './slots/SlotContext'
 import { useSessions, useAIOutput, useTools, useDeviceStatus, usePlans, useWorkflowDefinitions } from './hooks'
 import { useSessionStore } from './store/sessionStore'
@@ -58,10 +60,19 @@ function App() {
           )}
         </MainArea>
       </div>
-      <InputBar onSend={handleResult} voiceSlot={<VoiceInput onResult={handleResult} />} />
+      <InputBar
+        onSend={handleResult}
+        voiceSlot={
+          <div className="inputbar-voice-group">
+            <VoiceInput onResult={handleResult} />
+            <WritingInspirationCapture onSendInspiration={handleResult} />
+          </div>
+        }
+      />
       <SettingsModal />
       <EvolutionDashboard />
       <DesktopToolbar />
+      <WallpaperOverlay />
     </div>
   )
 }

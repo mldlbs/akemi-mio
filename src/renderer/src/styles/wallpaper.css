@@ -1,0 +1,1489 @@
+/* ═══════════════════════════════════════
+   Behavior-Aware Wallpaper Overlay
+   行为感知动态壁纸覆层
+   ═══════════════════════════════════════ */
+
+/* ─── CSS 变量（默认值 → tokens.css 会覆盖） ─── */
+:root {
+  --wallpaper-overlay-opacity: 0.95;
+  --wallpaper-transition-duration: 0.6s;
+  --wallpaper-idle-text: oklch(0.98 0.002 12);
+}
+/* ─── 壁纸优化变量（由进化系统生成） ─── */
+:root {
+  --wp-bg-glass: oklch(0 0 0 / 0.25);
+  --wp-bg-glass-strong: oklch(0 0 0 / 0.3);
+  --wp-bg-glass-mid: oklch(0 0 0 / 0.2);
+  --wp-border-glass: oklch(1 0 0 / 0.08);
+  --wp-border-glass-light: oklch(1 0 0 / 0.06);
+  --wp-bg-glass-light: oklch(1 0 0 / 0.04);
+}
+
+
+/* ─── 壁纸覆层容器 ─── */
+.wallpaper-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none; /* 让点击穿透到底层 UI */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  will-change: opacity;
+}
+
+/* ─── 空闲信息面板 ─── */
+.wallpaper-idle-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm, 8px);
+  padding: var(--space-xl, 24px);
+  background: var(--wp-bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 16px;
+  border: 1px solid var(--wp-border-glass);
+  animation: wp-idle-in 0.6s var(--ease-glass, ease) both;
+  max-width: 360px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@keyframes wp-idle-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ─── 时间 ─── */
+.wallpaper-time {
+  font-size: 56px;
+  font-weight: 300;
+  color: var(--wallpaper-idle-text, oklch(0.98 0.002 12));
+  letter-spacing: 0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.wallpaper-date {
+  font-size: var(--fs-body, 14px);
+  font-weight: 400;
+  color: oklch(0.85 0.002 12);
+  margin-bottom: var(--space-md, 12px);
+}
+
+/* ─── 天气 ─── */
+.wallpaper-weather {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm, 8px);
+  padding: var(--space-sm, 8px) var(--space-md, 12px);
+  background: var(--wp-border-glass-light);
+  border-radius: 20px;
+}
+
+.wallpaper-weather-icon {
+  font-size: 22px;
+}
+
+.wallpaper-weather-temp {
+  font-size: var(--fs-heading, 16px);
+  font-weight: 500;
+  color: var(--wallpaper-idle-text, oklch(0.98 0.002 12));
+}
+
+.wallpaper-weather-condition {
+  font-size: var(--fs-small, 12px);
+  color: oklch(0.85 0.002 12);
+}
+
+/* ─── 待办事项 ─── */
+.wallpaper-todos {
+  width: 100%;
+  margin-top: var(--space-sm, 8px);
+}
+
+.wallpaper-todos-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs, 4px);
+  font-size: var(--fs-small, 12px);
+  font-weight: 500;
+  color: oklch(0.85 0.002 12);
+  margin-bottom: var(--space-xs, 4px);
+}
+
+.wallpaper-todos-title i {
+  font-size: 14px;
+}
+
+.wallpaper-todos-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.wallpaper-todo-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs, 4px);
+  font-size: var(--fs-body, 14px);
+  color: var(--wallpaper-idle-text, oklch(0.98 0.002 12));
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background 0.2s ease;
+}
+
+.wallpaper-todo-item i {
+  font-size: 12px;
+  color: oklch(0.85 0.002 12);
+  flex-shrink: 0;
+}
+
+.wallpaper-todo-item:hover {
+  background: var(--wp-border-glass-light);
+}
+
+/* ─── 状态标签 ─── */
+.wallpaper-status-label {
+  position: fixed;
+  bottom: var(--space-lg, 16px);
+  right: var(--space-lg, 16px);
+  font-size: var(--fs-caption, 11px);
+  font-weight: 400;
+  color: oklch(0.5 0.005 12);
+  letter-spacing: 0.03em;
+  opacity: 0.5;
+  transition: opacity 0.3s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.wallpaper-status-label:hover {
+  opacity: 0.8;
+}
+
+/* ═══════════════════════════════════════
+   BehaviorDash — 行为专注仪表盘
+   ═══════════════════════════════════════ */
+
+.bdash-container {
+  position: fixed;
+  bottom: var(--space-lg, 16px);
+  left: var(--space-lg, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  min-width: 140px;
+  max-width: 220px;
+  background: var(--wp-bg-glass-mid);
+  border: 1px solid var(--wp-border-glass);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none; /* 鼠标穿透 */
+  animation: bdash-in 0.5s var(--ease-glass, ease) both;
+}
+
+@keyframes bdash-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ─── 进度条轨道 ─── */
+.bdash-track {
+  width: 100%;
+  height: 4px;
+  background: var(--wp-border-glass);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+/* ─── 进度条 ─── */
+.bdash-bar {
+  height: 100%;
+  border-radius: 2px;
+  will-change: width, background;
+}
+
+/* ─── 休息提醒脉冲动画 ─── */
+.bdash-rest-pulse {
+  animation: bdash-pulse 2s ease-in-out infinite;
+}
+
+@keyframes bdash-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ─── 文字标签行 ─── */
+.bdash-labels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bdash-label {
+  font-size: var(--fs-caption, 11px);
+  font-weight: 500;
+  color: oklch(0.85 0.002 12);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  transition: color 0.6s ease;
+}
+
+.bdash-label-rest {
+  font-weight: 600;
+}
+
+.bdash-score {
+  font-size: var(--fs-caption, 11px);
+  font-weight: 500;
+  color: oklch(0.6 0.005 12);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* ─── 休息提醒详情 ─── */
+.bdash-rest-text {
+  font-size: 10px;
+  color: oklch(0.5 0.005 12);
+  line-height: 1.4;
+  animation: bdash-rest-in 0.4s ease both;
+}
+
+@keyframes bdash-rest-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ═══════════════════════════════════════
+   Settings — 壁纸设置项
+   ═══════════════════════════════════════ */
+
+.wallpaper-settings-section {
+  margin-top: var(--space-lg, 16px);
+}
+
+.wallpaper-settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm, 8px) 0;
+}
+
+.wallpaper-settings-toggle-label {
+  font-size: var(--fs-body, 14px);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.wallpaper-settings-slider-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md, 12px);
+  padding: var(--space-xs, 4px) 0;
+}
+
+.wallpaper-settings-slider-row label {
+  font-size: var(--fs-small, 12px);
+  color: var(--text-secondary);
+  min-width: 100px;
+  flex-shrink: 0;
+}
+
+.wallpaper-settings-slider-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 4px;
+  cursor: pointer;
+}
+
+.wallpaper-settings-slider-value {
+  font-size: var(--fs-small, 12px);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 32px;
+  text-align: right;
+}
+
+/* ─── 开关样式 ─── */
+.wp-toggle-switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: var(--bg-glass-strong);
+  border-radius: 10px;
+  border: 1px solid var(--border-glass);
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-glass);
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
+}
+
+.wp-toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: all var(--duration-normal) var(--ease-glass);
+}
+
+.wp-toggle-switch:checked {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+}
+
+.wp-toggle-switch:checked::after {
+  left: 18px;
+  background: var(--accent);
+}
+
+/* ─── 分隔线 ─── */
+.wp-divider {
+  height: 1px;
+  background: var(--border-glass);
+  margin: var(--space-md, 12px) 0;
+  border: none;
+}
+
+/* ═══════════════════════════════════════
+   Evolution Monitor — 自进化监控面板
+   ═══════════════════════════════════════ */
+
+/* ─── 监控面板容器（右下角） ─── */
+.wp-mon-panel {
+  position: fixed;
+  bottom: var(--space-lg, 16px);
+  right: var(--space-lg, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 10px 12px;
+  background: var(--wp-bg-glass-strong);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--wp-border-glass);
+  border-radius: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: auto;
+  animation: wp-mon-in 0.4s var(--ease-glass, ease) both;
+  z-index: 10;
+}
+
+@keyframes wp-mon-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ─── 折叠状态 ─── */
+.wp-mon-collapsed {
+  position: fixed;
+  bottom: var(--space-lg, 16px);
+  right: var(--space-lg, 16px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+.wp-mon-toggle {
+  background: var(--wp-bg-glass-mid);
+  border: 1px solid var(--wp-border-glass-light);
+  border-radius: 6px;
+  color: oklch(0.7 0.005 12);
+  font-size: 10px;
+  padding: 2px 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  pointer-events: auto;
+}
+
+.wp-mon-toggle:hover {
+  background: oklch(1 0 0 / 0.1);
+  color: oklch(0.9 0.005 12);
+}
+
+.wp-mon-toggle--collapsed {
+  padding: 4px 8px;
+}
+
+.wp-mon-toggle-icon {
+  display: inline-block;
+  font-size: 8px;
+}
+
+.wp-mon-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  animation: wp-mon-pulse 2s ease-in-out infinite;
+}
+
+@keyframes wp-mon-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ─── 进化状态子面板 ─── */
+.wp-evo-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wp-evo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wp-evo-title {
+  font-size: var(--fs-caption, 11px);
+  font-weight: 600;
+  color: oklch(0.85 0.002 12);
+  letter-spacing: 0.03em;
+}
+
+.wp-evo-badge {
+  font-size: 9px;
+  font-weight: 500;
+  color: #000;
+  padding: 1px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+/* ─── 进化进度条 ─── */
+.wp-evo-progress-track {
+  width: 100%;
+  height: 3px;
+  background: var(--wp-border-glass);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.wp-evo-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease, background 0.6s ease;
+}
+
+/* ─── 进化摘要 ─── */
+.wp-evo-summary {
+  font-size: 10px;
+  color: oklch(0.7 0.005 12);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ─── 进化统计 ─── */
+.wp-evo-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.wp-evo-stat {
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.wp-evo-stat--good {
+  color: #22c55e;
+}
+
+.wp-evo-stat--bad {
+  color: #ef4444;
+}
+
+/* ─── 计划进度面板 ─── */
+.wp-plan-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  background: var(--wp-bg-glass-light);
+  border-radius: 8px;
+  border: 1px solid var(--wp-bg-glass-light);
+}
+
+.wp-plan-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: oklch(0.85 0.002 12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wp-plan-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wp-plan-track {
+  flex: 1;
+  height: 3px;
+  background: var(--wp-border-glass);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.wp-plan-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #60a5fa, #22c55e);
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+.wp-plan-percent {
+  font-size: 9px;
+  font-weight: 600;
+  color: #22c55e;
+  font-variant-numeric: tabular-nums;
+  min-width: 28px;
+  text-align: right;
+}
+
+.wp-plan-steps {
+  font-size: 9px;
+  color: oklch(0.6 0.005 12);
+}
+
+.wp-plan-current {
+  font-size: 9px;
+  color: oklch(0.7 0.005 12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── 系统资源面板 ─── */
+.wp-resource-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wp-resource-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+}
+
+.wp-resource-label {
+  color: oklch(0.6 0.005 12);
+  min-width: 24px;
+  flex-shrink: 0;
+}
+
+.wp-resource-track {
+  flex: 1;
+  height: 3px;
+  background: var(--wp-border-glass);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.wp-resource-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease, background 0.6s ease;
+}
+
+.wp-resource-value {
+  color: oklch(0.8 0.005 12);
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ─── 文件变更列表 ─── */
+.wp-changes-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wp-changes-title {
+  font-size: 9px;
+  font-weight: 600;
+  color: oklch(0.65 0.005 12);
+  margin-bottom: 1px;
+}
+
+.wp-change-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+}
+
+.wp-change-type {
+  font-weight: 700;
+  flex-shrink: 0;
+  width: 10px;
+  text-align: center;
+}
+
+.wp-change-type--new {
+  color: #22c55e;
+}
+
+.wp-change-type--modified {
+  color: #f59e0b;
+}
+
+.wp-change-type--deleted {
+  color: #ef4444;
+}
+
+.wp-change-file {
+  color: oklch(0.7 0.005 12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── 锁定按钮 ─── */
+.wp-lock-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+  pointer-events: auto;
+}
+
+.wp-lock-btn:hover {
+  opacity: 1;
+}
+
+.wp-lock-btn--locked {
+  opacity: 1;
+}
+
+/* ═══════════════════════════════════════
+   Context Badge — 活动情境标签
+   ═══════════════════════════════════════ */
+
+.wp-context-badge {
+  position: fixed;
+  top: var(--space-lg, 16px);
+  right: var(--space-lg, 16px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--wp-bg-glass-mid);
+  border: 1px solid var(--wp-border-glass);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+  animation: wp-badge-in 0.4s var(--ease-glass, ease) both;
+  z-index: 5;
+}
+
+.wp-context-badge-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.wp-context-badge-label {
+  font-size: var(--fs-caption, 11px);
+  font-weight: 500;
+  color: oklch(0.85 0.002 12);
+  letter-spacing: 0.03em;
+}
+
+/* ═══════════════════════════════════════
+   Context Panels — 情境感知浮动面板
+   ═══════════════════════════════════════ */
+
+.wp-context-panel {
+  position: fixed;
+  left: var(--space-lg, 16px);
+  bottom: 50%;
+  transform: translateY(50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 12px 14px;
+  background: var(--wp-bg-glass-strong);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--wp-border-glass);
+  border-radius: 14px;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+  animation: wp-context-panel-in 0.5s var(--ease-glass, ease) both;
+  z-index: 5;
+}
+
+@keyframes wp-context-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(55%) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(50%) scale(1);
+  }
+}
+
+.wp-context-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.wp-context-panel-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.wp-context-panel-title {
+  font-size: var(--fs-caption, 11px);
+  font-weight: 600;
+  color: oklch(0.85 0.002 12);
+  letter-spacing: 0.03em;
+}
+
+/* ─── 快捷键面板（coding） ─── */
+
+.wp-shortcuts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+}
+
+.wp-shortcut-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 2px;
+}
+
+.wp-shortcut-keys {
+  font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', monospace);
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--wp-border-glass);
+  color: oklch(0.9 0.005 12);
+  padding: 2px 5px;
+  border-radius: 4px;
+  border: 1px solid oklch(1 0 0 / 0.1);
+  white-space: nowrap;
+  min-width: 48px;
+  text-align: center;
+}
+
+.wp-shortcut-desc {
+  font-size: 10px;
+  color: oklch(0.7 0.005 12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── RSS 信息摘要面板（browsing） ─── */
+
+.wp-rss-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.wp-rss-section + .wp-rss-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--wp-border-glass-light);
+}
+
+.wp-rss-section-title {
+  font-size: 9px;
+  font-weight: 600;
+  color: oklch(0.65 0.005 12);
+  letter-spacing: 0.02em;
+  margin-bottom: 2px;
+}
+
+.wp-rss-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  transition: background 0.2s ease;
+}
+
+.wp-rss-item:hover {
+  background: var(--wp-bg-glass-light);
+}
+
+.wp-rss-item-icon {
+  font-size: 10px;
+  color: oklch(0.6 0.005 12);
+  flex-shrink: 0;
+}
+
+.wp-rss-item-text {
+  color: oklch(0.8 0.005 12);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wp-rss-item-source {
+  font-size: 8px;
+  color: oklch(0.55 0.005 12);
+  background: oklch(1 0 0 / 0.05);
+  padding: 1px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.wp-rss-item-time {
+  font-size: 8px;
+  color: oklch(0.5 0.005 12);
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════
+   Nature Animation — 自然动画背景（resting）
+   ═══════════════════════════════════════ */
+
+.wp-nature-animation {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.wp-nature-particle {
+  position: absolute;
+  border-radius: 50%;
+  background: oklch(0.8 0.05 160 / 0.3);
+  animation: wp-nature-float 8s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@keyframes wp-nature-float {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    opacity: var(--particle-opacity, 0.2);
+  }
+  25% {
+    transform: translateY(-20px) scale(1.1);
+    opacity: calc(var(--particle-opacity, 0.2) * 1.5);
+  }
+  50% {
+    transform: translateY(-10px) scale(0.95);
+    opacity: var(--particle-opacity, 0.2);
+  }
+  75% {
+    transform: translateY(-30px) scale(1.05);
+    opacity: calc(var(--particle-opacity, 0.2) * 1.2);
+  }
+}
+
+/* ═══════════════════════════════════════
+   Mode Badge — 行为模式徽章
+   ═══════════════════════════════════════ */
+
+.wp-mode-badge {
+  position: fixed;
+  top: var(--space-lg, 16px);
+  left: var(--space-lg, 16px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--wp-bg-glass-mid);
+  border: 1px solid var(--wp-border-glass);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+  animation: wp-badge-in 0.4s var(--ease-glass, ease) both;
+  z-index: 5;
+}
+
+@keyframes wp-badge-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.wp-mode-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: wp-badge-pulse 2s ease-in-out infinite;
+}
+
+@keyframes wp-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.wp-mode-badge-label {
+  font-size: var(--fs-caption, 11px);
+  font-weight: 500;
+  color: oklch(0.85 0.002 12);
+  letter-spacing: 0.03em;
+}
+
+/* ═══════════════════════════════════════
+   Focus Mode — 专注模式
+   ═══════════════════════════════════════ */
+
+.wp-mode-focus {
+  /* 专注模式下 wallper-overlay 的额外样式 */
+}
+
+.wp-mode-focus .wallpaper-idle-panel,
+.wp-mode-focus .wp-mon-panel,
+.wp-mode-focus .wp-mon-collapsed,
+.wp-mode-focus .bdash-container,
+.wp-mode-focus .wallpaper-status-label,
+.wp-mode-focus .wp-context-badge,
+.wp-mode-focus .wp-context-panel,
+.wp-mode-focus .wp-nature-animation {
+  display: none !important;
+}
+
+/* 专注模式: 只显示 mode badge */
+.wp-mode-focus .wp-mode-badge {
+  display: flex;
+}
+
+/* ═══════════════════════════════════════
+   Multitasking Mode — 多任务模式
+   ═══════════════════════════════════════ */
+
+.wp-mode-multitasking .wallpaper-idle-panel {
+  display: none;
+}
+
+/* 多任务模式下隐藏情境面板（任务切换器已足够） */
+.wp-mode-multitasking .wp-context-panel {
+  display: none;
+}
+
+/* ═══════════════════════════════════════
+   Break Mode — 休息/隐私模式
+   ═══════════════════════════════════════ */
+
+.wp-mode-break-privacy {
+  /* 额外的隐私淡化层级由 inline style 控制 */
+}
+
+/* ─── 隐私模糊层 ─── */
+.wp-privacy-blur {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  transition: opacity 1s ease, backdrop-filter 1s ease;
+}
+
+/* ═══════════════════════════════════════
+   Task Switcher — 多任务切换器
+   ═══════════════════════════════════════ */
+
+.wp-task-switcher {
+  position: fixed;
+  bottom: 50%;
+  left: 50%;
+  transform: translate(-50%, 50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  min-width: 180px;
+  max-width: 260px;
+  background: oklch(0 0 0 / 0.35);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid oklch(1 0 0 / 0.1);
+  border-radius: 16px;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none; /* 鼠标穿透 */
+  animation: wp-ts-in 0.4s var(--ease-glass, ease) both;
+  z-index: 5;
+}
+
+@keyframes wp-ts-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 55%) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 50%) scale(1);
+  }
+}
+
+.wp-ts-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.wp-ts-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #f59e0b;
+  animation: wp-badge-pulse 1.5s ease-in-out infinite;
+}
+
+.wp-ts-label {
+  font-size: var(--fs-caption, 11px);
+  font-weight: 600;
+  color: oklch(0.8 0.005 12);
+  letter-spacing: 0.03em;
+}
+
+/* ─── 当前切换高亮 ─── */
+.wp-ts-current {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--wp-border-glass-light);
+  border-radius: 10px;
+}
+
+.wp-ts-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.wp-ts-arrow {
+  font-size: 12px;
+  color: oklch(0.6 0.005 12);
+}
+
+.wp-ts-text {
+  font-size: var(--fs-small, 12px);
+  font-weight: 500;
+  color: oklch(0.9 0.005 12);
+  margin-left: 2px;
+}
+
+/* ─── 历史切换列表 ─── */
+.wp-ts-history {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--wp-border-glass-light);
+}
+
+.wp-ts-history-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  transition: background 0.2s ease;
+}
+
+.wp-ts-history-item:hover {
+  background: var(--wp-bg-glass-light);
+}
+
+.wp-ts-icon-sm {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.wp-ts-arrow-sm {
+  font-size: 9px;
+  color: oklch(0.5 0.005 12);
+}
+
+.wp-ts-text-sm {
+  font-size: 10px;
+  color: oklch(0.7 0.005 12);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   记忆浮窗 — MemoryContextWidget
+   在桌面 overlay 上显示高关联记忆卡片列表
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* 主面板 */
+.wp-mem-panel {
+  position: fixed;
+  left: 20px;
+  bottom: 100px;
+  width: 320px;
+  max-height: 420px;
+  background: oklch(0.15 0.005 280 / 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--wp-border-glass);
+  border-radius: 12px;
+  padding: 10px 12px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: all 0.3s ease;
+  user-select: none;
+}
+
+.wp-mem-panel--loading,
+.wp-mem-panel--empty,
+.wp-mem-panel--error {
+  cursor: default;
+  min-height: 40px;
+  justify-content: center;
+  align-items: center;
+}
+
+/* 折叠状态 */
+.wp-mem-panel--collapsed {
+  position: fixed;
+  left: 20px;
+  bottom: 100px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: oklch(0.15 0.005 280 / 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid oklch(1 0 0 / 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 100;
+}
+
+.wp-mem-panel--collapsed:hover {
+  background: oklch(0.2 0.005 280 / 0.8);
+  transform: scale(1.05);
+}
+
+.wp-mem-collapsed-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  background: #60a5fa;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+/* 标题栏 */
+.wp-mem-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--wp-border-glass-light);
+}
+
+.wp-mem-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: oklch(0.9 0.005 280);
+  cursor: pointer;
+}
+
+.wp-mem-panel-subtitle {
+  font-size: 10px;
+  font-weight: 400;
+  color: oklch(0.6 0.005 280);
+}
+
+.wp-mem-panel-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.wp-mem-panel-count {
+  font-size: 10px;
+  font-weight: 400;
+  color: oklch(0.6 0.005 280);
+  background: var(--wp-border-glass-light);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.wp-mem-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wp-mem-config-btn,
+.wp-mem-collapse-btn {
+  background: none;
+  border: none;
+  color: oklch(0.6 0.005 280);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: all 0.2s ease;
+}
+
+.wp-mem-config-btn:hover,
+.wp-mem-collapse-btn:hover {
+  background: var(--wp-border-glass);
+  color: oklch(0.8 0.005 280);
+}
+
+/* 配置下拉面板 */
+.wp-mem-config-dropdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px;
+  background: oklch(0.12 0.005 280 / 0.8);
+  border-radius: 8px;
+  border: 1px solid var(--wp-border-glass-light);
+}
+
+.wp-mem-config-option {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--wp-border-glass);
+  background: var(--wp-bg-glass-light);
+  color: oklch(0.7 0.005 280);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wp-mem-config-option:hover {
+  background: oklch(1 0 0 / 0.1);
+  color: oklch(0.9 0.005 280);
+}
+
+.wp-mem-config-option--active {
+  background: #60a5fa;
+  color: #fff;
+  border-color: #60a5fa;
+}
+
+/* 卡片列表 */
+.wp-mem-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: 300px;
+  scrollbar-width: thin;
+  scrollbar-color: oklch(1 0 0 / 0.1) transparent;
+}
+
+.wp-mem-card-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.wp-mem-card-list::-webkit-scrollbar-thumb {
+  background: oklch(1 0 0 / 0.1);
+  border-radius: 2px;
+}
+
+/* 单条卡片 */
+.wp-mem-card {
+  padding: 8px 10px;
+  background: var(--wp-bg-glass-light);
+  border: 1px solid oklch(1 0 0 / 0.05);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.wp-mem-card:not(.wp-mem-card--last) {
+  margin-bottom: 2px;
+}
+
+.wp-mem-card:hover {
+  background: var(--wp-border-glass);
+  border-color: oklch(1 0 0 / 0.1);
+}
+
+/* 卡片头部 */
+.wp-mem-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.wp-mem-card-type {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--wp-border-glass-light);
+  color: oklch(0.65 0.005 280);
+}
+
+.wp-mem-card-tier {
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.wp-mem-card-pinned {
+  font-size: 10px;
+  line-height: 1;
+  margin-left: auto;
+}
+
+/* 卡片内容 */
+.wp-mem-card-content {
+  font-size: 11px;
+  line-height: 1.5;
+  color: oklch(0.85 0.005 280);
+  margin-bottom: 4px;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 卡片底部 */
+.wp-mem-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wp-mem-card-confidence {
+  font-size: 9px;
+  color: oklch(0.55 0.005 280);
+}
+
+.wp-mem-card-topics {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.wp-mem-card-topic {
+  font-size: 9px;
+  color: #60a5fa;
+  opacity: 0.8;
+}
+
+/* 错误状态 */
+.wp-mem-error {
+  font-size: 11px;
+  color: #ef4444;
+}
+
+/* 底部 */
+.wp-mem-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 4px;
+  border-top: 1px solid var(--wp-bg-glass-light);
+  margin-top: auto;
+}
+
+.wp-mem-refresh-time {
+  font-size: 9px;
+  color: oklch(0.5 0.005 280);
+}
+
+.wp-mem-through-hint {
+  font-size: 9px;
+  color: oklch(0.5 0.005 280);
+}

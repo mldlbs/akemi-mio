@@ -430,6 +430,97 @@ export function createElectronAPI(ipc: IpcRenderer) {
     // ── Writing Status ──
     getWritingStatus: (): Promise<{ stories: any[]; totalStories: number; totalScenes: number }> => ipc.invoke('writing:getStatus'),
 
+    // ── 音频特征分析与氛围映射 ──
+    analyzeAudioFeatures: (audio: ArrayBuffer): Promise<{
+      success: boolean
+      features?: {
+        energy: number
+        energyVariance: number
+        energyTrend: number
+        pitchHz: number
+        pitchVariance: number
+        pitchRange: number
+        avgZeroCrossingRate: number
+        zcrVariance: number
+        speechRate: number
+        silenceRatio: number
+        voiceSegmentCount: number
+        durationSec: number
+      }
+      atmosphere?: {
+        tension: number
+        joy: number
+        sadness: number
+        calmness: number
+        mystery: number
+        romance: number
+        dominantLabel: string
+        confidence: number
+        description: string
+      }
+      error?: string
+    }> => ipc.invoke('audio:analyzeFeatures', audio),
+
+    // ── 语音灵感捕获与情节引导 ──
+    processWritingInspiration: (text: string): Promise<{
+      rawText: string
+      entities: { characters: string[]; events: string[]; emotions: string[]; plotTurns: string[] }
+      guidedPrompt: string
+      processingMs: number
+      hasContent: boolean
+    }> => ipc.invoke('writing:inspiration:process', text),
+
+    getWritingHotwords: (): Promise<{ hotwords: string[] }> => ipc.invoke('writing:inspiration:hotwords'),
+
+    // ── 语音引导的剧情续写 ──
+    initVoiceContinuation: (params: {
+      storyName: string
+      chapterNum: number
+    }): Promise<{
+      storyName: string
+      chapterNum: number
+      storyId: string | null
+      previousChapter: { title: string; content: string } | null
+      totalChapters: number
+      readerExpectations: string
+    }> => ipc.invoke('writing:continuation:init', params),
+
+    executeVoiceContinuation: (params: {
+      storyName: string
+      chapterNum: number
+      userVoiceText?: string
+      atmosphere?: {
+        tension: number
+        joy: number
+        sadness: number
+        calmness: number
+        mystery: number
+        romance: number
+        dominantLabel: string
+        confidence: number
+        description: string
+      } | null
+    }): Promise<{
+      success: boolean
+      chapterTitle: string
+      content: string
+      sceneId: string | null
+      userVoiceText: string
+      atmosphere?: {
+        tension: number
+        joy: number
+        sadness: number
+        calmness: number
+        mystery: number
+        romance: number
+        dominantLabel: string
+        confidence: number
+        description: string
+      } | null
+      error?: string
+      processingMs: number
+    }> => ipc.invoke('writing:continuation:execute', params),
+
     // ── Evolution ──
     evolutionStatus: (): Promise<{ lastRun: number | null; consecutiveFailures: number; isBusy: boolean }> =>
       ipc.invoke('evolution:status'),
@@ -465,6 +556,198 @@ export function createElectronAPI(ipc: IpcRenderer) {
     // ── Desktop Toolbar (桌面任务控制浮层) ──
     invokeDesktopTool: (toolName: string, args: Record<string, string>): Promise<{ success: boolean; result?: string; error?: string }> =>
       ipc.invoke('desktop:invokeTool', toolName, args),
+
+    // ── 排版内容语音校验与预览 ──
+    verifyTypography: (text: string): Promise<{
+      success: boolean
+      report?: {
+        formattedText: string
+        plainText: string
+        recognizedText: string
+        sentences: Array<{
+          originalSentence: string
+          recognizedSentence: string
+          editDistance: number
+          length: number
+          diffRate: number
+          suspicious: boolean
+          diffSegments: Array<{
+            type: 'match' | 'substitution' | 'deletion' | 'insertion'
+            original: string
+            recognized: string
+            start: number
+            end: number
+          }>
+        }>
+        summary: {
+          totalSentences: number
+          suspiciousSentences: number
+          totalDiffRate: number
+          hasDiscrepancies: boolean
+          audioDurationMs: number
+          verificationMs: number
+        }
+        audioFile?: string
+      }
+      error?: string
+    }> => ipc.invoke('typing:verify', text),
+
+    readAloudTypography: (text: string): Promise<{
+      success: boolean
+      audioFile?: string
+      durationMs: number
+      error?: string
+    }> => ipc.invoke('typing:readAloud', text),
+
+    // ── 行为感知壁纸 ──
+    onBehaviorState: (
+      callback: (state: {
+        activityState: string
+        fullscreen: boolean
+        focused: boolean
+        appCategory: string
+        windowTitle: string
+        idleTimeMs: number
+        mode: string
+        context: string
+        thresholds: {
+          idleThresholdMs: number
+          focusThresholdMs: number
+          multitaskingSwitchCount: number
+          multitaskingWindowMs: number
+          privacyFadeDelayMs: number
+        }
+        modeDurationMs: number
+        confidence: number
+        breakElapsedMs: number
+        recentSwitches: Array<{
+          fromCategory: string
+          toCategory: string
+        }>
+      }) => void,
+    ) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        state: any,
+      ) => callback(state)
+      ipc.on('behavior:state', handler)
+      return () => {
+        ipc.removeListener('behavior:state', handler)
+      }
+    },
+
+    getWallpaperConfig: (): Promise<{
+      enabled: boolean
+      idleOverlay: boolean
+      adaptiveOpacity: boolean
+      normalOpacity: number
+      codeOpacity: number
+      fullscreenOpacity: number
+      idleOpacity: number
+      evoLocked: boolean
+    }> => ipc.invoke('wallpaper:getConfig'),
+
+    setWallpaperConfig: (
+      config: Partial<{
+        enabled: boolean
+        idleOverlay: boolean
+        adaptiveOpacity: boolean
+        normalOpacity: number
+        codeOpacity: number
+        fullscreenOpacity: number
+        idleOpacity: number
+        evoLocked: boolean
+      }>,
+    ): Promise<{ success: boolean }> => ipc.invoke('wallpaper:setConfig', config),
+
+    // ── 自进化系统监控 ──
+    onMonitoringMetrics: (
+      callback: (data: {
+        system: { heapUsedMB: number; heapTotalMB: number; rssMB: number; eventLoopLagMs: number; cpuUsage: number; uptime: number; timestamp: number }
+        evolution: { stage: string; progress: number; summary: string; errorCount: number; fixedCount: number; queueSize: number; lastRunAt: number | null; schedulerState: string; consecutiveFailures: number } | null
+        plan: { hasActivePlan: boolean; planTitle: string; totalSteps: number; completedSteps: number; percentComplete: number; currentStep: string } | null
+        recentChanges: Array<{ filePath: string; type: string; timestamp: number; summary: string }>
+        evoLocked: boolean
+      }) => void,
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('monitoring:metrics', handler)
+      return () => {
+        ipc.removeListener('monitoring:metrics', handler)
+      }
+    },
+
+    getEvolutionPlanStatus: (): Promise<{
+      hasActivePlan: boolean
+      planTitle: string
+      totalSteps: number
+      completedSteps: number
+      percentComplete: number
+      currentStep: string
+    }> => ipc.invoke('evolution:planStatus'),
+
+    getEvoLock: (): Promise<{ locked: boolean }> => ipc.invoke('wallpaper:getEvoLock'),
+
+    setEvoLock: (locked: boolean): Promise<{ success: boolean; locked: boolean }> => ipc.invoke('wallpaper:setEvoLock', locked),
+
+    // ── 壁纸 CSS 热重载 ──
+    onWallpaperStylesUpdated: (callback: (css: string, filename?: string) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, css: string, filename?: string) => callback(css, filename)
+      ipc.on('wallpaper:styles-updated', handler)
+      return () => {
+        ipc.removeListener('wallpaper:styles-updated', handler)
+      }
+    },
+
+    reloadWallpaperStyles: (css: string): Promise<{ success: boolean }> => ipc.invoke('wallpaper:reloadStyles', css),
+
+    // ── 桌面记忆浮窗 ──
+    onMemoryContextData: (
+      callback: (data: {
+        cards: Array<{
+          id: string
+          content: string
+          type: string
+          confidence: number
+          tier: string
+          topics: string[]
+          behaviorScore: number
+          isPinned: boolean
+          createdAt: number
+          updatedAt: number
+        }>
+        updatedAt: number
+        hasData: boolean
+        displayType: string
+        error?: string
+      }) => void,
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('wallpaper:memoryContext', handler)
+      return () => {
+        ipc.removeListener('wallpaper:memoryContext', handler)
+      }
+    },
+
+    getMemoryContextConfig: (): Promise<{
+      enabled: boolean
+      displayType: string
+      pollIntervalMs: number
+      maxCards: number
+      mouseThrough: boolean
+    }> => ipc.invoke('wallpaper:memoryContextConfig:get'),
+
+    setMemoryContextConfig: (
+      config: Partial<{
+        enabled: boolean
+        displayType: string
+        pollIntervalMs: number
+        maxCards: number
+        mouseThrough: boolean
+      }>,
+    ): Promise<{ success: boolean; error?: string }> => ipc.invoke('wallpaper:memoryContextConfig:set', config),
+
+    refreshMemoryContext: (): Promise<{ success: boolean; error?: string }> => ipc.invoke('wallpaper:memoryContext:refresh'),
   }
 }
 

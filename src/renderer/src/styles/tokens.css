@@ -61,6 +61,11 @@
   --space-xl: 24px;
   --space-xxl: 32px;
 
+  /* ─── 壁纸覆层 ─── */
+  --wallpaper-overlay-opacity: 0.95;
+  --wallpaper-transition-duration: 0.6s;
+  --wallpaper-idle-text: oklch(0.98 0.002 12);
+
   /* ─── 动画 ─── */
   --ease-glass: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
