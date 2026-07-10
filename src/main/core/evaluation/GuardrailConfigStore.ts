@@ -1,31 +1,37 @@
 /**
- * GuardrailConfigStore — PolicyConfig 版本管理
+ * GuardrailConfigStore — PolicyConfig Event Projection
+ *
+ * M4.4 重构：从 Producer 改为 Event Projection。
  *
  * 职责：
- * - 单调版本生成（v1 → v2 → v3，只增不降）
- * - 版本激活与存储
- * - 版本回滚（含回滚前提校验）
- * - getActiveConfig() 供 Consumer/Policy 消费当前 config
+ * - 通过 applyActivated / applyRollback 消费 Event 维护内存 Projection
+ * - loadFromEvents() 启动时从 EvaluationEvent 日志重建 state
+ * - allocateVersion() 作为辅助工具方法
+ * - getActiveConfig() 供 Consumer/Policy 读取当前 config
  *
- * 不负责：
- * - emit EvaluationEvent（调用方负责发射 activation/rollback event）
- * - 持久化（M4.3 为内存版本，后续可加持久化）
- * - Config UI / 自动版本调整（M5+）
- *
- * 关键约定：
- * - version 由 ConfigStore 管理，Policy 消费但不生产
- * - Config 切换在下一个 consume() 边界生效（不中断 in-flight Decision）
- * - Replay 可仅从 Event 重建版本迁移图（ConfigStore 是运行时优化，非 truth source）
+ * ConfigStore 是纯 Consumer（Projection），不控制 Event lifecycle。
+ * Truth Source 是 EvaluationEvent log，ConfigStore 是运行时优化。
  */
-
 import type { GuardrailPolicyConfig } from './GuardrailTypes'
 import { DEFAULT_GUARDRAIL_POLICY_CONFIG } from './GuardrailTypes'
-import type { RollbackTrigger } from './types'
+import type { EvaluationEvent, RollbackTrigger } from './types'
+import { migrateConfigPayload, CONFIG_EVENT_TYPES } from './EvaluationEventSchema'
 
 export interface ConfigRecord {
   version: string
   config: GuardrailPolicyConfig
   activatedAt: number
+  /** M7.3: 触发该 activation 的 recommendationId（可选） */
+  recommendationId?: string
+}
+
+export interface RollbackRecord {
+  fromVersion: string
+  toVersion: string
+  trigger: RollbackTrigger
+  reason?: string
+  /** M7.3: 发起该回滚的 recommendationId（可选） */
+  sourceRecommendationId?: string
 }
 
 export interface ActiveConfigState {
@@ -33,61 +39,115 @@ export interface ActiveConfigState {
   config: GuardrailPolicyConfig
 }
 
-export interface ActivationResult {
-  version: string
-  activatedAt: number
-}
-
-export interface RollbackResult {
-  fromVersion: string
-  toVersion: string
-}
-
 export class GuardrailConfigStore {
   private records: Map<string, ConfigRecord> = new Map()
   private activeVersion: string | null = null
   private versionCounter = 0
+  private rollbackHistory: RollbackRecord[] = []
 
-  constructor(seedConfig?: GuardrailPolicyConfig) {
-    if (seedConfig) {
-      this.activateConfig(seedConfig)
-    }
-  }
+  constructor() {}
+
+  // ══════════════════════════════════════════════
+  // Projection API — 纯 Consumer 行为
+  // ══════════════════════════════════════════════
 
   /**
-   * 激活新版本。
-   * 生成单调 version，存储 config，设为 active。
-   * 返回 { version, activatedAt } 供调用方 emit event。
+   * 追加一条 activated 记录到 projection。
+   * 不 emit event，不生成 version。version 由 Producer 提供。
    */
-  activateConfig(config: GuardrailPolicyConfig): ActivationResult {
-    const version = this.generateVersion()
-    const activatedAt = Date.now()
-    this.records.set(version, { version, config: { ...config, version }, activatedAt })
+  applyActivated(version: string, config: GuardrailPolicyConfig, activatedAt: number, recommendationId?: string): void {
+    this.records.set(version, { version, config: { ...config, version }, activatedAt, recommendationId })
     this.activeVersion = version
-    return { version, activatedAt }
   }
 
   /**
-   * 回滚到历史版本。
-   * 前提：toVersion !== activeVersion，且 toVersion 存在于 records。
-   * 返回 { fromVersion, toVersion } 供调用方 emit event。
+   * 追加一条 rollback 记录到 projection。
+   * 切换 activeVersion 到 toVersion。
+   * Throws 如果 toVersion 不存在于 records。
    */
-  rollback(toVersion: string, _trigger: RollbackTrigger, _reason?: string): RollbackResult {
+  applyRollback(
+    fromVersion: string,
+    toVersion: string,
+    _trigger: RollbackTrigger,
+    _reason?: string,
+    sourceRecommendationId?: string,
+  ): void {
     if (this.activeVersion === toVersion) {
       throw new Error(`Version ${toVersion} is already active`)
     }
     if (!this.records.has(toVersion)) {
-      throw new Error(`Version ${toVersion} not found in config history`)
+      throw new Error(`Cannot rollback to unknown version ${toVersion}`)
     }
-    const fromVersion = this.activeVersion!
+    this.rollbackHistory.push({ fromVersion, toVersion, trigger: _trigger, reason: _reason, sourceRecommendationId })
     this.activeVersion = toVersion
-    return { fromVersion, toVersion }
   }
 
   /**
-   * 当前 active config。
-   * 无 seed config 且未 activate 时，返回 DEFAULT_GUARDRAIL_POLICY_CONFIG。
+   * 从 EvaluationEvent 日志全量重建 state。
+   *
+   * Throws 条件:
+   * - 回滚目标版本不存在（fracture）
+   * - 第一个 config event 是 rollback（空 timeline 无法回滚）
+   *
+   * 0 config events → 静默返回（不抛出，不 fallback）。
+   * Caller 应通过 getVersionHistory().length === 0 判断是否需要 seed。
+   *
+   * 支持 eventSchemaVersion 迁移：
+   * - 旧事件缺失 eventSchemaVersion → 默认 v1
+   * - 读取前调用 migrateConfigPayload 确保 Config 结构完整
    */
+  loadFromEvents(events: EvaluationEvent[]): void {
+    this.records.clear()
+    this.activeVersion = null
+
+    const configEvents = events
+      .filter((e): e is EvaluationEvent & { type: keyof typeof import('./EvaluationEventSchema').EVENT_SCHEMA_VERSIONS } =>
+        CONFIG_EVENT_TYPES.has(e.type),
+      )
+      .sort((a, b) => a.timestamp - b.timestamp)
+
+    if (configEvents.length === 0) {
+      return
+    }
+
+    for (const event of configEvents) {
+      if (event.type === 'guardrail.config.activated' || event.type === 'guardrail.config.initialized') {
+        const rawPayload = event.payload as Record<string, unknown>
+        const fromVersion = (rawPayload.eventSchemaVersion as number) ?? 1
+        const migrated = migrateConfigPayload(event.type, rawPayload as any, fromVersion)
+        this.applyActivated(
+          migrated.version as string,
+          migrated.config as GuardrailPolicyConfig,
+          migrated.activatedAt as number,
+          rawPayload.recommendationId as string | undefined,
+        )
+      } else {
+        // type === 'guardrail.config.rollback'
+        const p = event.payload as { fromVersion: string; toVersion: string; trigger: RollbackTrigger; reason?: string }
+        if (!this.records.has(p.toVersion)) {
+          throw new Error(`Timeline fracture: rollback to unknown version ${p.toVersion}`)
+        }
+        this.applyRollback(
+          p.fromVersion,
+          p.toVersion,
+          p.trigger,
+          p.reason,
+          (event.payload as any).sourceRecommendationId as string | undefined,
+        )
+      }
+    }
+
+    // Post-replay guard: events were processed but nothing became active
+    if (this.activeVersion === null) {
+      throw new Error('Timeline fracture: first config event is a rollback, no activation found')
+    }
+  }
+
+  // ══════════════════════════════════════════════
+  // Query API
+  // ══════════════════════════════════════════════
+
+  /** 当前 active config。无 active version 时返回 DEFAULT。 */
   getActiveConfig(): ActiveConfigState {
     if (this.activeVersion === null) {
       return { version: DEFAULT_GUARDRAIL_POLICY_CONFIG.version, config: DEFAULT_GUARDRAIL_POLICY_CONFIG }
@@ -111,12 +171,30 @@ export class GuardrailConfigStore {
     return Array.from(this.records.values()).sort((a, b) => a.activatedAt - b.activatedAt)
   }
 
-  /** 预览下一个版本号（不激活） */
+  /** M7.3: 查询指定 version 的 activation recommendationId */
+  getActivationRecommendationId(version: string): string | undefined {
+    return this.records.get(version)?.recommendationId
+  }
+
+  /** M7.3: 获取回滚历史记录 */
+  getRollbackHistory(): RollbackRecord[] {
+    return [...this.rollbackHistory]
+  }
+
+  // ══════════════════════════════════════════════
+  // Helper — Producer 侧的辅助工具方法
+  // ══════════════════════════════════════════════
+
+  /** 预览下一个版本号（不推进计数器） */
   peekNextVersion(): string {
     return `v${this.versionCounter + 1}`
   }
 
-  private generateVersion(): string {
+  /**
+   * 分配下一个单调版本号。
+   * 仅作为辅助工具，不表示最终事实。Producer 可自行生成 version 字符串。
+   */
+  allocateVersion(): string {
     this.versionCounter++
     return `v${this.versionCounter}`
   }

@@ -43,6 +43,21 @@ async function safeConsume(consumer: ProgressConsumer, snapshot: ProgressSnapsho
   }
 }
 
+/** 按 traceId 分组事件 */
+function groupByTraceId(events: EvaluationEvent[]): Map<string, EvaluationEvent[]> {
+  const groups = new Map<string, EvaluationEvent[]>()
+  for (const ev of events) {
+    if (!ev.traceId) continue
+    const list = groups.get(ev.traceId) ?? []
+    list.push(ev)
+    groups.set(ev.traceId, list)
+  }
+  return groups
+}
+
+/** 启动 catch-up 窗口（毫秒），只重放可能错过的近期事件 */
+const STARTUP_CATCHUP_MS = 60_000
+
 export class ProgressObserver {
   private analyzer: ProgressAnalyzer
   private consumers: ProgressConsumer[] = []
@@ -51,6 +66,7 @@ export class ProgressObserver {
   constructor(
     private store: EvaluationRepository,
     analyzer: ProgressAnalyzer,
+    private replayWindowMs: number = STARTUP_CATCHUP_MS,
   ) {
     this.analyzer = analyzer
   }
@@ -66,14 +82,32 @@ export class ProgressObserver {
     if (idx >= 0) this.consumers.splice(idx, 1)
   }
 
-  /** 启动 Observer（订阅事件流） */
-  start(): void {
+  /** 启动 Observer（订阅事件流 + catch-up 重启前的尾巴） */
+  async start(): Promise<void> {
     if (this.unsubscribe) {
       log('WARN', 'progress_observer_already_started')
       return
     }
     this.unsubscribe = this.store.subscribe((event) => this.onEvent(event))
     log('INFO', 'progress_observer_started', { consumerCount: this.consumers.length })
+
+    // 非阻塞 catch-up：重放重启前可能错过的事件
+    try {
+      const now = Date.now()
+      const catchupEvents = await this.store.query({ since: now - this.replayWindowMs })
+      const traceGroups = groupByTraceId(catchupEvents)
+      let replayCount = 0
+      for (const [traceId, events] of traceGroups) {
+        await this.handleTrace(traceId, events)
+        replayCount++
+      }
+      if (replayCount > 0) {
+        log('INFO', 'progress_observer_catchup_complete', { traceCount: replayCount, eventCount: catchupEvents.length })
+      }
+    } catch (err: any) {
+      // catch-up 失败不影响后续 live processing
+      log('WARN', 'progress_observer_catchup_failed', { error: err.message })
+    }
   }
 
   /** 停止 Observer（取消订阅） */
@@ -102,14 +136,18 @@ export class ProgressObserver {
     })
   }
 
+  /** 单事件入口：获取完整 trace 后 compute */
   private async handleEvent(event: EvaluationEvent): Promise<void> {
     if (!event.traceId) return
-
-    // 每次事件触发 Pure Replay 计算（协议要求）
     const events = await this.store.getTrace(event.traceId)
-    const snapshot = this.analyzer.compute(event.traceId, events)
+    await this.handleTrace(event.traceId, events)
+  }
 
-    // 并行分发到所有 Consumer，错误隔离
+  /** 核心处理逻辑：compute + 分发 */
+  private async handleTrace(traceId: string, events: EvaluationEvent[]): Promise<void> {
+    if (events.length === 0) return
+    const snapshot = this.analyzer.compute(traceId, events)
+
     const results = await Promise.allSettled(this.consumers.map((consumer) => safeConsume(consumer, snapshot)))
 
     for (let i = 0; i < results.length; i++) {

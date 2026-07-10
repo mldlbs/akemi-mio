@@ -21,6 +21,14 @@ type RawDb = {
 
 const BATCH_INTERVAL_MS = 1000
 const MAX_BATCH_SIZE = 50
+const DEFAULT_QUERY_LIMIT = 1000
+
+/** 传给 query() options.limit 的哨兵值，表示"无限制查询"。
+ *  Replay / Projection / Audit 路径使用此值确保完整性。 */
+export const QUERY_NO_LIMIT = -1 as const
+
+/** seq 分配的批次大小：每 N 事件更新一次 seq counter 的持久化记录 */
+const SEQ_PERSIST_INTERVAL = 500
 
 export class EvaluationStore implements EvaluationRepository {
   private db: SqliteRemoteDatabase<typeof schema> | null = null
@@ -29,6 +37,10 @@ export class EvaluationStore implements EvaluationRepository {
   private batch: EvaluationEvent[] = []
   private batchTimer: ReturnType<typeof setTimeout> | null = null
   private subscribers: Set<(event: EvaluationEvent) => void> = new Set()
+  /** R2-A: 单调递增 seq 计数器。flush 时分配，非 append。 */
+  private seqCounter = 0
+  /** 是否支持 seq 列。首次 flush 失败时检测降级。 */
+  private hasSeqColumn: boolean | null = null
 
   constructor(externalDb?: SqliteRemoteDatabase<typeof schema>, rawDb?: RawDb) {
     if (externalDb) {
@@ -60,7 +72,14 @@ export class EvaluationStore implements EvaluationRepository {
       },
     }
     this.dbReady = true
-    log('INFO', 'evaluation_store_ready')
+    // R2-A: 从 DB 恢复 seq counter
+    try {
+      const rows = this.raw.query('SELECT COALESCE(MAX(seq), 0) AS max_seq FROM evaluation_events')
+      this.seqCounter = Number(rows[0]?.max_seq ?? 0)
+    } catch {
+      this.seqCounter = 0
+    }
+    log('INFO', 'evaluation_store_ready', { seqCounter: this.seqCounter })
   }
 
   // ── Append ──
@@ -84,18 +103,7 @@ export class EvaluationStore implements EvaluationRepository {
     if (events.length === 0) return
     if (!this.dbReady || !this.db) return
     try {
-      await this.db.insert(schema.evaluationEvents).values(
-        events.map((e) => ({
-          id: e.id,
-          timestamp: e.timestamp,
-          traceId: e.traceId,
-          sessionId: e.sessionId,
-          source: e.source,
-          type: e.type,
-          payload: JSON.stringify(e.payload),
-          parentEventId: e.parentEventId,
-        })),
-      )
+      await this.doInsert(events)
     } catch (err: any) {
       log('WARN', 'evaluation_store_flush_failed', { count: events.length, error: err.message })
     }
@@ -109,24 +117,66 @@ export class EvaluationStore implements EvaluationRepository {
     // 绕过 flush 的 try/catch 以暴露真实错误
     if (!this.dbReady || !this.db) return
     const events = this.batch.splice(0)
-    await this.db.insert(schema.evaluationEvents).values(
-      events.map((e) => ({
-        id: e.id,
-        timestamp: e.timestamp,
-        traceId: e.traceId,
-        sessionId: e.sessionId,
-        source: e.source,
-        type: e.type,
-        payload: JSON.stringify(e.payload),
-        parentEventId: e.parentEventId,
-      })),
-    )
+    await this.doInsert(events)
   }
 
-  async query(range: { since: number; until?: number; type?: string }): Promise<EvaluationEvent[]> {
+  /** 统一插入逻辑：检测 seq 列支持并在降级时静默重试。 */
+  private async doInsert(events: EvaluationEvent[]): Promise<void> {
+    if (this.hasSeqColumn === false) {
+      this.rawInsert(events, false)
+      return
+    }
+
+    try {
+      this.rawInsert(events, true)
+      this.seqCounter += events.length
+      this.hasSeqColumn = true
+    } catch (err: any) {
+      const msg = err.message ?? ''
+      const cause = err.cause?.message ?? err.cause?.toString?.() ?? ''
+      const noSeqCol = msg.includes('has no column named seq') || cause.includes('has no column named seq')
+      if (this.hasSeqColumn === null && noSeqCol) {
+        this.hasSeqColumn = false
+        this.rawInsert(events, false)
+      } else {
+        throw err
+      }
+    }
+  }
+
+  /** 使用原始 SQL 批量插入（绕过 drizzle ORM 的静态列列表）。 */
+  private rawInsert(events: EvaluationEvent[], withSeq: boolean): void {
+    if (!this.raw) return
+    const cols = withSeq
+      ? '(id, timestamp, trace_id, session_id, source, type, payload, parent_event_id, seq)'
+      : '(id, timestamp, trace_id, session_id, source, type, payload, parent_event_id)'
+    const placeholders = events.map((_, i) => {
+      const base = i * (withSeq ? 9 : 8)
+      if (withSeq) return `(${Array.from({ length: 9 }, (_, j) => `?`).join(', ')})`
+      return `(${Array.from({ length: 8 }, (_, j) => `?`).join(', ')})`
+    })
+
+    const params: any[] = []
+    for (const e of events) {
+      params.push(e.id, e.timestamp, e.traceId, e.sessionId, e.source, e.type, JSON.stringify(e.payload), e.parentEventId ?? null)
+      if (withSeq) {
+        this.seqCounter++
+        params.push(this.seqCounter)
+      }
+    }
+
+    this.raw.run(`INSERT INTO evaluation_events ${cols} VALUES ${placeholders.join(', ')}`, params)
+  }
+
+  async query(range: { since: number; until?: number; type?: string }, options?: { limit?: number }): Promise<EvaluationEvent[]> {
     if (!this.dbReady) return []
     await this.forceFlush()
     try {
+      const limit = options?.limit ?? DEFAULT_QUERY_LIMIT
+
+      // QUERY_NO_LIMIT 用于 Replay / Projection / Audit 路径
+      const noLimit = limit === QUERY_NO_LIMIT
+
       let sql = 'SELECT * FROM evaluation_events WHERE timestamp >= ?'
       const params: any[] = [range.since]
       if (range.until) {
@@ -137,8 +187,20 @@ export class EvaluationStore implements EvaluationRepository {
         sql += ' AND type = ?'
         params.push(range.type)
       }
-      sql += ' ORDER BY timestamp ASC LIMIT 1000'
+      sql += ' ORDER BY timestamp ASC'
+
+      if (!noLimit) {
+        sql += ' LIMIT ?'
+        params.push(limit + 1) // +1 to detect silent truncation
+      }
+
       const rows = this.raw?.query(sql, params) ?? []
+
+      if (!noLimit && rows.length > limit) {
+        log('WARN', 'evaluation_store_query_truncated', { limit, actual: rows.length, since: range.since })
+        rows.pop()
+      }
+
       return rows.map(this.deserialize)
     } catch {
       return []
@@ -156,7 +218,46 @@ export class EvaluationStore implements EvaluationRepository {
     }
   }
 
+  /**
+   * 分页读取 trace 事件。
+   * 与 getTrace 共享相同的复合索引 (trace_id, timestamp)。
+   */
+  async getTraceEvents(traceId: string, options?: { limit?: number; offset?: number }): Promise<EvaluationEvent[]> {
+    if (!this.dbReady) return []
+    await this.forceFlush()
+    try {
+      const limit = options?.limit ?? 1000
+      const offset = options?.offset ?? 0
+      const rows =
+        this.raw?.query('SELECT * FROM evaluation_events WHERE trace_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?', [
+          traceId,
+          limit,
+          offset,
+        ]) ?? []
+      return rows.map(this.deserialize)
+    } catch {
+      return []
+    }
+  }
+
   // ── Subscribe (EventStream) ──
+
+  /** R2-A: 基于 seq 的游标查询。用于 Replay / Projection / Audit 的有界迭代。
+   *  不调用 forceFlush（预期调用者在需要读后写一致性时自行处理）。 */
+  async queryBySeq(afterSeq: number, limit: number = 1000): Promise<EvaluationEvent[]> {
+    if (!this.dbReady) return []
+    try {
+      const rows = this.raw?.query('SELECT * FROM evaluation_events WHERE seq > ? ORDER BY seq ASC LIMIT ?', [afterSeq, limit]) ?? []
+      return rows.map(this.deserialize)
+    } catch {
+      return []
+    }
+  }
+
+  /** 返回当前最大 seq 值（用于 checkpoint）。 */
+  getCurrentSeq(): number {
+    return this.seqCounter
+  }
 
   subscribe(handler: (event: EvaluationEvent) => void): () => void {
     this.subscribers.add(handler)
@@ -192,6 +293,7 @@ export class EvaluationStore implements EvaluationRepository {
       type: row.type,
       payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload,
       parentEventId: row.parent_event_id ?? row.parentEventId ?? undefined,
+      seq: row.seq !== undefined ? Number(row.seq) : undefined,
     }
   }
 }

@@ -30,6 +30,7 @@ import type { GuardrailPolicy, GuardrailDecision } from '../GuardrailTypes'
 import { DefaultGuardrailPolicy } from '../GuardrailPolicy'
 import { DEFAULT_GUARDRAIL_POLICY_CONFIG } from '../GuardrailTypes'
 import type { GuardrailConfigStore } from '../GuardrailConfigStore'
+import { log } from '../../../logger/Logger'
 
 export class GuardrailProgressConsumer implements ProgressConsumer {
   private policy: GuardrailPolicy
@@ -43,10 +44,12 @@ export class GuardrailProgressConsumer implements ProgressConsumer {
   }
 
   async consume(snapshot: ProgressSnapshot): Promise<void> {
-    const { config } = this.configStore
-      ? this.configStore.getActiveConfig()
-      : { config: DEFAULT_GUARDRAIL_POLICY_CONFIG }
-    const decision = this.policy.evaluate({ snapshot, config })
-    this.onDecision(decision)
+    try {
+      const { config } = this.configStore ? this.configStore.getActiveConfig() : { config: DEFAULT_GUARDRAIL_POLICY_CONFIG }
+      const decision = this.policy.evaluate({ snapshot, config })
+      this.onDecision(decision)
+    } catch (err: any) {
+      log('WARN', 'guardrail_consumer_evaluate_failed', { traceId: snapshot.traceId, error: err.message })
+    }
   }
 }

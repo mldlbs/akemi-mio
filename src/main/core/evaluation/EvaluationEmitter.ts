@@ -12,6 +12,8 @@
 import { randomUUID } from 'crypto'
 import type { EvaluationEvent, EventType, EventPayload } from './types'
 import type { EvaluationRepository } from './types'
+import { EVENT_SCHEMA_STAMPED_TYPES, getCurrentSchemaVersion } from './EvaluationEventSchema'
+import { ENVELOPE_SCHEMA_VERSION } from './types'
 
 export class EvaluationEmitter {
   private store: EvaluationRepository
@@ -33,16 +35,30 @@ export class EvaluationEmitter {
       parentEventId?: string
     },
   ): void {
+    // 对 config-related events 自动 stamp eventSchemaVersion
+    let finalPayload: Record<string, unknown> = payload as any
+    if (EVENT_SCHEMA_STAMPED_TYPES.has(type)) {
+      finalPayload = { ...finalPayload, eventSchemaVersion: getCurrentSchemaVersion(type) }
+    }
+
     const event: EvaluationEvent = {
       id: randomUUID(),
+      schemaVersion: ENVELOPE_SCHEMA_VERSION,
       timestamp: Date.now(),
       traceId: meta?.traceId ?? '',
       sessionId: meta?.sessionId ?? this.defaultSessionId,
       source: this.source,
       type,
-      payload: payload as any,
+      payload: finalPayload as any,
       parentEventId: meta?.parentEventId,
     }
     this.store.append(event)
+  }
+
+  /** R4-A P0: 强制刷入未持久化事件。P0 事件（guardrail.terminated）在 emit 后调用。 */
+  async forceFlush(): Promise<void> {
+    if ('forceFlush' in this.store && typeof (this.store as any).forceFlush === 'function') {
+      await (this.store as any).forceFlush()
+    }
   }
 }

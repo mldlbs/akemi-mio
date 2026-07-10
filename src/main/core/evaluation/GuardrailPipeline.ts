@@ -68,6 +68,7 @@ import { toRuntimeAction } from './GuardrailTypes'
 import type { GuardrailPolicy } from './GuardrailTypes'
 import { DefaultGuardrailPolicy } from './GuardrailPolicy'
 import type { EvaluationEmitter } from './EvaluationEmitter'
+import type { GuardrailDecisionStore } from './GuardrailDecisionStore'
 import { randomUUID } from 'crypto'
 
 export interface GuardrailPipelineConfig {
@@ -93,6 +94,7 @@ export class GuardrailPipeline {
   private policy: GuardrailPolicy
   private config: GuardrailPipelineConfig
   private emitter?: EvaluationEmitter
+  private decisionStore?: GuardrailDecisionStore
 
   /** 上次检测时的总轮次数，用于 throttle。负值确保首次检测不被 throttle */
   private lastCheckedTurn: number = -Infinity
@@ -105,10 +107,16 @@ export class GuardrailPipeline {
   /** 最近一次从 Decision 生成的 decisionId（用于 Delivery Trace 关联） */
   private latestDecisionId: string | null = null
 
-  constructor(policy?: GuardrailPolicy, config?: Partial<GuardrailPipelineConfig>, emitter?: EvaluationEmitter) {
+  constructor(
+    policy?: GuardrailPolicy,
+    config?: Partial<GuardrailPipelineConfig>,
+    emitter?: EvaluationEmitter,
+    decisionStore?: GuardrailDecisionStore,
+  ) {
     this.policy = policy ?? new DefaultGuardrailPolicy()
     this.config = { ...DEFAULT_PIPELINE_CONFIG, ...config }
     this.emitter = emitter
+    this.decisionStore = decisionStore
   }
 
   /**
@@ -145,6 +153,9 @@ export class GuardrailPipeline {
     const runtimeAction = this.latestRuntimeAction!
     const result: PipelineResult = { decisionId, runtimeAction, decision: this.latestDecision }
 
+    // 持久化 Decision（不阻塞）
+    this.decisionStore?.record(decisionId, this.latestDecision, runtimeAction, traceId, currentTurn)
+
     // 写入 Evaluation Event（保留 — 见 AOR-001 O-2 Narrowed）
     this.emitGuardrailEvents(traceId, currentTurn, result)
 
@@ -166,7 +177,7 @@ export class GuardrailPipeline {
       { traceId },
     )
 
-    // guardrail.terminated：仅终止时记录
+    // guardrail.terminated：仅终止时记录。R4-A P0：强制 flush 确保持久化
     if (result.runtimeAction === 'TERMINATE') {
       this.emitter.emit(
         'guardrail.terminated' as any,
@@ -178,6 +189,10 @@ export class GuardrailPipeline {
         },
         { traceId },
       )
+      // R4-A P0: 强制刷入以确保 terminate 事件被持久化（mock 可能无 forceFlush）
+      if (typeof (this.emitter as any).forceFlush === 'function') {
+        ;(this.emitter as any).forceFlush().catch(() => {})
+      }
     }
   }
 

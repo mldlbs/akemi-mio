@@ -13,6 +13,7 @@ import type { EvaluationEvent } from './types'
 import type { ProgressAnalyzer, ProgressSnapshot, StateChangeSignal, InformationGainSignal, GoalProgressSignal } from './progress'
 import { PROGRESS_VERSION } from './progress'
 import type { TraceEventSource } from './GuardrailTypes'
+import { CONFIG_EVENT_TYPES } from './EvaluationEventSchema'
 
 // ══════════════════════════════════════════════
 // Turn 分组
@@ -51,10 +52,14 @@ const LOW_OUTPUT_THRESHOLD = 20
 function groupByTurns(events: EvaluationEvent[]): TurnGroup[] {
   // 按时间排序
   const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp)
+
+  // 过滤 config lifecycle events（它们不影响 ProgressSignal 计算）
+  const filtered = sorted.filter((e) => !CONFIG_EVENT_TYPES.has(e.type))
+
   const turns: TurnGroup[] = []
   let currentTurn: EvaluationEvent[] = []
 
-  for (const ev of sorted) {
+  for (const ev of filtered) {
     if (ev.type === 'model.invoked' && currentTurn.length > 0) {
       turns.push(buildTurn(turns.length, currentTurn))
       currentTurn = [ev]

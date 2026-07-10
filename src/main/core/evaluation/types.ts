@@ -17,12 +17,23 @@
  */
 
 // ══════════════════════════════════════════════
+// Envelope Schema Version（M7.1）
+// ══════════════════════════════════════════════
+
+/** 当前 Envelope Schema 版本号。
+ *  属于 Event 信封层，与 payload 内部的 eventSchemaVersion 正交。
+ *  新事件可选填充，缺省 = 1，向后兼容。 */
+export const ENVELOPE_SCHEMA_VERSION = 1
+
+// ══════════════════════════════════════════════
 // Event 外壳
 // ══════════════════════════════════════════════
 
 export interface EvaluationEvent {
   /** 全局唯一事件 ID（UUIDv4） */
   id: string
+  /** Envelope schema 版本，缺省 = 1（向后兼容）。与 payload 内的 eventSchemaVersion 正交 */
+  schemaVersion?: number
   /** Unix 毫秒时间戳 */
   timestamp: number
   /** 一次请求的全链路追踪 ID */
@@ -37,6 +48,8 @@ export interface EvaluationEvent {
   payload: EventPayload
   /** 父事件 ID，用于构建因果链 */
   parentEventId?: string
+  /** R2-A: Replay 游标序号。flush 时分配，已有行可为 undefined */
+  seq?: number
 }
 
 // ══════════════════════════════════════════════
@@ -68,8 +81,27 @@ export type EventType =
   | 'guardrail.action_delivered'
   | 'guardrail.action_delivery_failed'
   // ── Guardrail Config Versioning（配置生命周期） ──
+  | 'guardrail.config.initialized'
   | 'guardrail.config.activated'
   | 'guardrail.config.rollback'
+  // ── Guardrail Outcome Observation（反馈回路） ──
+  | 'guardrail.outcome.observed'
+  // ── Guardrail Governance（M7 — 治理操作）
+  | 'guardrail.recommendation.created'
+  | 'guardrail.recommendation.approved'
+  | 'guardrail.recommendation.dismissed'
+  | 'guardrail.config.validation_failed'
+  | 'guardrail.projection.rebuilt'
+  | 'guardrail.projection.error'
+  // ── Audit（系统操作审计）
+  | 'guardrail.health.check'
+  // ── Guardrail Governance M7.3（Policy Lifecycle）
+  | 'guardrail.recommendation.approval_requested'
+  | 'guardrail.recommendation.approval_accepted'
+  | 'guardrail.recommendation.approval_rejected'
+  | 'guardrail.recommendation.expired'
+  // ── Guardrail Config Lifecycle（M7.3 — Config Termination）
+  | 'guardrail.config.terminated'
 
 // ══════════════════════════════════════════════
 // 任务类别
@@ -291,12 +323,30 @@ export interface GuardrailActionDeliveryFailedPayload {
 /** Rollback 触发源分类，限定 Metrics 聚合维度 */
 export type RollbackTrigger = 'manual' | 'automated_guardrail' | 'deployment_failure'
 
-export interface GuardrailConfigActivatedPayload {
-  /** 新上线的版本 Identity */
+/**
+ * 共享的 Config Snapshot Payload 接口。
+ * 用于 guardrail.config.initialized / guardrail.config.activated / guardrail.config.rollback。
+ * eventSchemaVersion 嵌入 payload JSON 而非 Event 信封，
+ * 这样无需改 DB schema 即可支持 payload schema evolution。
+ */
+export interface GuardrailConfigSnapshotPayload {
+  /** 策略配置实例 Identity */
   version: string
+  /** Payload schema 版本（旧事件可能缺失此字段 → 默认 1） */
+  eventSchemaVersion: number
+  /** 完整 Policy Config snapshot — Replay 自包含 */
+  config: import('./GuardrailTypes').GuardrailPolicyConfig
   /** Config 实际生效时间戳（可能与 Event.timestamp 不同） */
   activatedAt: number
+  /** M7.3: 触发该 activation 的 recommendationId（可选，人工activation可能无关联推荐） */
+  recommendationId?: string
 }
+
+/** guardrail.config.initialized — 首次建立 config state（不计入 activation metrics） */
+export type GuardrailConfigInitializedPayload = GuardrailConfigSnapshotPayload
+
+/** guardrail.config.activated — 新版本上线（由 Config Store 投影） */
+export type GuardrailConfigActivatedPayload = GuardrailConfigSnapshotPayload
 
 export interface GuardrailConfigRollbackPayload {
   /** 回滚前版本（被废弃的版本） */
@@ -307,6 +357,131 @@ export interface GuardrailConfigRollbackPayload {
   trigger: RollbackTrigger
   /** 回滚原因，人工或系统说明，可选 */
   reason?: string
+  /** M7.3: 发起该回滚的 recommendationId（可选），关联回滚到批准该配置的推荐 */
+  sourceRecommendationId?: string
+}
+
+// ══════════════════════════════════════════════
+// Outcome Observation（M6.4 — 反馈回路）
+// ══════════════════════════════════════════════
+
+export type Outcome = 'effective' | 'ineffective' | 'inconclusive'
+
+export type OutcomeConfidence = 'high' | 'medium' | 'low'
+
+export type OutcomeSource = 'auto' | 'manual'
+
+export interface OutcomeObservedPayload {
+  decisionId: string
+  traceId: string
+  policyVersion: string
+  outcome: Outcome
+  confidence: OutcomeConfidence
+  source: OutcomeSource
+  falsePositive?: boolean
+  falseNegative?: boolean
+  detail: string
+  observedAt: number
+}
+
+// ══════════════════════════════════════════════
+// Governance Payloads（M7 — 治理操作）
+// ══════════════════════════════════════════════
+
+export type RecommendationStatus = 'open' | 'pending_approval' | 'accepted' | 'dismissed' | 'expired'
+
+export interface GuardrailRecommendationCreatedPayload {
+  recommendationId: string
+  policyId: string
+  type: 'threshold_adjust' | 'policy_review' | 'no_change'
+  confidence: OutcomeConfidence
+  evidence: string[]
+  detail: string
+  triggeredByOutcomeIds: string[]
+}
+
+export interface GuardrailRecommendationApprovedPayload {
+  recommendationId: string
+  policyId: string
+  approver: string
+  note?: string
+}
+
+export interface GuardrailRecommendationDismissedPayload {
+  recommendationId: string
+  policyId: string
+  reason: string
+  dismissedBy: string
+}
+
+export interface GuardrailConfigValidationFailedPayload {
+  policyId: string
+  version?: string
+  reason: string
+  payload: Record<string, unknown>
+}
+
+export interface GuardrailProjectionRebuiltPayload {
+  projectionName: string
+  status: 'completed' | 'partial' | 'failed'
+  durationMs: number
+  eventCount: number
+  windowCount: number
+  errorCount: number
+}
+
+export interface GuardrailProjectionErrorPayload {
+  projectionName: string
+  error: string
+  eventCount: number
+}
+
+export interface GuardrailHealthCheckPayload {
+  status: 'HEALTHY' | 'STALE' | 'DEGRADED' | 'UNAVAILABLE'
+  componentCount: number
+  degradedComponents: string[]
+  detail: string
+}
+
+// ══════════════════════════════════════════════
+// M7.3 — Policy Lifecycle Governance Payloads
+// ══════════════════════════════════════════════
+
+export interface GuardrailApprovalRequestedPayload {
+  recommendationId: string
+  policyId: string
+  requestedBy: string
+  reason: string
+  requestedAt: number
+}
+
+export interface GuardrailApprovalAcceptedPayload {
+  recommendationId: string
+  policyId: string
+  approver: string
+  note?: string
+  decidedAt: number
+}
+
+export interface GuardrailApprovalRejectedPayload {
+  recommendationId: string
+  policyId: string
+  rejectedBy: string
+  reason: string
+  decidedAt: number
+}
+
+export interface GuardrailRecommendationExpiredPayload {
+  recommendationId: string
+  policyId: string
+  reason: string
+  expiredAt: number
+}
+
+export interface GuardrailConfigTerminatedPayload {
+  version: string
+  reason: string
+  terminatedAt: number
 }
 
 export type EventPayload =
@@ -325,8 +500,24 @@ export type EventPayload =
   | ({ type: 'guardrail.terminated' } & GuardrailTerminatedPayload)
   | ({ type: 'guardrail.action_delivered' } & GuardrailActionDeliveredPayload)
   | ({ type: 'guardrail.action_delivery_failed' } & GuardrailActionDeliveryFailedPayload)
+  | ({ type: 'guardrail.config.initialized' } & GuardrailConfigInitializedPayload)
   | ({ type: 'guardrail.config.activated' } & GuardrailConfigActivatedPayload)
   | ({ type: 'guardrail.config.rollback' } & GuardrailConfigRollbackPayload)
+  | ({ type: 'guardrail.outcome.observed' } & OutcomeObservedPayload)
+  // M7 — Governance
+  | ({ type: 'guardrail.recommendation.created' } & GuardrailRecommendationCreatedPayload)
+  | ({ type: 'guardrail.recommendation.approved' } & GuardrailRecommendationApprovedPayload)
+  | ({ type: 'guardrail.recommendation.dismissed' } & GuardrailRecommendationDismissedPayload)
+  | ({ type: 'guardrail.config.validation_failed' } & GuardrailConfigValidationFailedPayload)
+  | ({ type: 'guardrail.projection.rebuilt' } & GuardrailProjectionRebuiltPayload)
+  | ({ type: 'guardrail.projection.error' } & GuardrailProjectionErrorPayload)
+  | ({ type: 'guardrail.health.check' } & GuardrailHealthCheckPayload)
+  // M7.3 — Policy Lifecycle Governance
+  | ({ type: 'guardrail.recommendation.approval_requested' } & GuardrailApprovalRequestedPayload)
+  | ({ type: 'guardrail.recommendation.approval_accepted' } & GuardrailApprovalAcceptedPayload)
+  | ({ type: 'guardrail.recommendation.approval_rejected' } & GuardrailApprovalRejectedPayload)
+  | ({ type: 'guardrail.recommendation.expired' } & GuardrailRecommendationExpiredPayload)
+  | ({ type: 'guardrail.config.terminated' } & GuardrailConfigTerminatedPayload)
 
 // ══════════════════════════════════════════════
 // 事件消费者接口（供 Metrics / Fitness / Evolution 使用）
@@ -361,6 +552,10 @@ export interface EvaluationRepository extends EventStream {
   init(): Promise<void>
   /** 优雅关闭 */
   shutdown(): Promise<void>
+  /** R2-A: 基于 seq 的游标查询。用于 Replay / Projection / Audit 的有界迭代 */
+  queryBySeq(afterSeq: number, limit?: number): Promise<EvaluationEvent[]>
+  /** R2-A: 返回当前最大 seq 值（用于 checkpoint） */
+  getCurrentSeq(): number
 }
 
 // ══════════════════════════════════════════════
