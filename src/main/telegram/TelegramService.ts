@@ -3,7 +3,7 @@ import { log } from '../logger/Logger'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import { eventBus } from '../core/EventBus'
 import { insertOutbox, type OutboxCategory } from '../db/outbox'
-import { WORKSPACE, TELEGRAM_SERVER_URL, TELEGRAM_CHAT_ID } from '../config'
+import { WORKSPACE, TELEGRAM_SERVER_URL, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED } from '../config'
 import { writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 
@@ -156,6 +156,14 @@ export class TelegramService {
   }
 
   async initialize(): Promise<void> {
+    // 检查启用状态：优先 credentialsManager，回退 config/env
+    const enabledFlag = credentialsManager.get('telegram_enabled')
+    const isEnabled = enabledFlag !== null ? enabledFlag === 'true' : TELEGRAM_ENABLED
+    if (!isEnabled) {
+      log('INFO', 'telegram_disabled', { msg: 'Telegram 功能未启用，跳过初始化' })
+      return
+    }
+
     const url = credentialsManager.get('telegram_server_url') || TELEGRAM_SERVER_URL
     this.baseUrl = url.replace(/\/+$/, '')
 

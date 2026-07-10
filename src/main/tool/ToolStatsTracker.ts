@@ -34,6 +34,8 @@ export interface ToolCallSummary {
   lastCallAt: number
   /** 窗口内平均调用间隔毫秒 */
   avgIntervalMs: number
+  /** 窗口内平均延迟毫秒（仅成功调用） */
+  avgLatencyMs: number
 }
 
 export interface ProblematicTool {
@@ -45,15 +47,15 @@ export interface ProblematicTool {
   suggestion: ToolImprovementSuggestion
 }
 
-export type ToolImprovementSuggestion = 'retry' | 'timeout' | 'parameter_validation' | 'error_handling' | 'general'
+export type ToolImprovementSuggestion = 'retry' | 'timeout' | 'parameter_validation' | 'error_handling' | 'cache' | 'general'
 
 // =============================================================================
 // 配置常量
 // =============================================================================
 
 const DEFAULT_CONFIG = {
-  /** 错误率阈值：超过此值视为问题工具 */
-  ERROR_RATE_THRESHOLD: 0.25,
+  /** 错误率阈值：超过此值视为问题工具（80% 成功率 = 20% 错误率） */
+  ERROR_RATE_THRESHOLD: 0.20,
   /** 最小调用次数：少于此次数不视为问题（样本不足） */
   MIN_CALLS_THRESHOLD: 5,
   /** 优化后冷却时间（毫秒）：同一工具不重复优化 */
@@ -116,6 +118,13 @@ export class ToolStatsTracker {
         avgIntervalMs = totalInterval / (timestamps.length - 1)
       }
 
+      // 计算平均延迟（从 BehaviorPredictor 记录中读取 durationMs）
+      let avgLatencyMs = 0
+      const toolCalls = recentCalls.filter((c) => c.toolName === toolName && c.success && c.durationMs > 0)
+      if (toolCalls.length > 0) {
+        avgLatencyMs = Math.round(toolCalls.reduce((s, c) => s + c.durationMs, 0) / toolCalls.length)
+      }
+
       summaries.push({
         toolName,
         totalCalls,
@@ -124,6 +133,7 @@ export class ToolStatsTracker {
         errorRate,
         lastCallAt,
         avgIntervalMs,
+        avgLatencyMs,
       })
     }
 
@@ -214,6 +224,9 @@ function buildSuggestionReason(summary: ToolCallSummary, suggestion: ToolImprove
       break
     case 'error_handling':
       parts.push('错误处理不完善，建议改进异常捕获和降级逻辑')
+      break
+    case 'cache':
+      parts.push('重复调用频繁，建议添加缓存机制减少重复执行')
       break
     default:
       parts.push('建议优化错误处理和健壮性')

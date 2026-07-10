@@ -58,6 +58,16 @@ export type {
 } from './LearningProgressTracker'
 
 // ═══════════════════════════════════════════
+//  类型挑战生成器 + 编译器服务导出
+// ═══════════════════════════════════════════
+
+export { TypeChallengeGenerator, typeChallengeGenerator } from './TypeChallengeGenerator'
+export type { GeneratedChallenge, ChallengeResult } from './TypeChallengeGenerator'
+
+export { TypeScriptCompilerService, typeScriptCompilerService } from './TypeScriptCompilerService'
+export type { CompileResult, CompileDiagnostic, CompileOptions } from './TypeScriptCompilerService'
+
+// ═══════════════════════════════════════════
 //  混合流水线导出
 // ═══════════════════════════════════════════
 

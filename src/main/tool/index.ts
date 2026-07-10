@@ -53,6 +53,9 @@ import {
   learningQueryTool,
   oralCodeGenerateTool,
   learningSummaryTool,
+  typeChallengeNewTool,
+  typeChallengeSubmitTool,
+  typeChallengeSolutionTool,
 } from './definitions/LearningTools'
 import {
   moveFileTool,
@@ -63,6 +66,7 @@ import {
   appendFileTool,
   readMultipleFilesTool,
 } from './definitions/FileOpsTools'
+import { typeHealthTool } from './definitions/TypeHealthTool'
 
 export function getAllTools(): Tool[] {
   return [
@@ -146,8 +150,18 @@ export function getAllTools(): Tool[] {
     learningQueryTool as Tool,
     oralCodeGenerateTool as Tool,
     learningSummaryTool as Tool,
+    // 类型挑战工具
+    typeChallengeNewTool as Tool,
+    typeChallengeSubmitTool as Tool,
+    typeChallengeSolutionTool as Tool,
+    // 类型健康工具
+    typeHealthTool as Tool,
   ]
 }
 
 export { buildTool, type Tool, type ToolDef, toMCPToolDefinition, toMCPToolSchema, formatToolResult, formatToolError } from './types'
 export { ToolStatsTracker, toolStatsTracker, type ToolCallSummary, type ProblematicTool } from './ToolStatsTracker'
+export { ToolCallLogStore, toolCallLogStore, type ToolCallRecord, type CallLogQuery, type CallLogStats } from './ToolCallLogStore'
+export { FailurePatternAnalyzer, failurePatternAnalyzer, type FailurePattern, type FailurePatternType, type FixTemplateType, type ArgPatternMatch } from './FailurePatternAnalyzer'
+export { FixTemplateRegistry, fixTemplateRegistry, type FixTemplate } from './FixTemplateRegistry'
+export { ToolAnalytics, toolAnalytics, type ToolAnalyticsReport, type ToolAnalyticsSummary, type LatencyPercentiles, type SuccessRateTrend, type PriorityRecommendation } from './ToolAnalytics'

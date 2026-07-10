@@ -86,9 +86,7 @@ export function WallpaperOverlay() {
   // ── 订阅 CSS 热重载 ──
   useEffect(() => {
     const unsub = window.electronAPI.onWallpaperStylesUpdated((css, filename) => {
-      const styleId = filename
-        ? `wp-hot-reload-${filename.replace(/\.css$/, '')}`
-        : 'wp-evo-hot-reload'
+      const styleId = filename ? `wp-hot-reload-${filename.replace(/\.css$/, '')}` : 'wp-evo-hot-reload'
       let styleEl = document.getElementById(styleId) as HTMLStyleElement
       if (!styleEl) {
         styleEl = document.createElement('style')
@@ -164,19 +162,13 @@ export function WallpaperOverlay() {
       )}
 
       {/* ── Badge 区（模式徽章 + 情境标签） ── */}
-      {behavior && (
-        <WallpaperWidgetHost zone="badge" ctx={widgetCtx} />
-      )}
+      {behavior && <WallpaperWidgetHost zone="badge" ctx={widgetCtx} />}
 
       {/* ── Decoration 区（自然动画等装饰性元素） ── */}
-      {!hideDecoration && (
-        <WallpaperWidgetHost zone="decoration" ctx={widgetCtx} />
-      )}
+      {!hideDecoration && <WallpaperWidgetHost zone="decoration" ctx={widgetCtx} />}
 
       {/* ── Overlay 区（快捷键指南等上下文面板） ── */}
-      {!hideDecoration && (
-        <WallpaperWidgetHost zone="overlay" ctx={widgetCtx} />
-      )}
+      {!hideDecoration && <WallpaperWidgetHost zone="overlay" ctx={widgetCtx} />}
 
       {/* ── 空闲信息面板（专注模式隐藏） ── */}
       {showIdleOverlay && !hideDecoration && (
@@ -200,9 +192,7 @@ export function WallpaperOverlay() {
       )}
 
       {/* ── 多任务任务切换器 ── */}
-      {showTaskSwitcher && (
-        <TaskSwitcher switches={recentSwitches} visible={true} />
-      )}
+      {showTaskSwitcher && <TaskSwitcher switches={recentSwitches} visible={true} />}
 
       {/* ── 状态标签 ── */}
       <div className="wallpaper-status-label">{statusLabel}</div>

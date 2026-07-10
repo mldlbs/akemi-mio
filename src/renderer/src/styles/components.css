@@ -660,33 +660,7 @@
   border: 1px solid oklch(0.56 0.10 50 / 0.25);
 }
 
-/* ─── Agent 面板切换按钮 ─── */
-.cap-toggle-btn {
-  width: 32px; height: 32px; min-width: 32px;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 15px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all var(--duration-fast) var(--ease-glass);
-}
-
-.cap-toggle-btn:hover {
-  color: var(--text-secondary);
-  border-color: var(--border-glass);
-  background: var(--bg-glass);
-}
-
-.cap-toggle-btn.active {
-  color: var(--accent);
-  border-color: var(--accent-glow);
-  background: var(--accent-glow);
-  box-shadow: 0 0 8px var(--accent-glow);
-}
+/* ─── (cap-toggle-btn moved to topbar-slot-dropdown in layout.css) ─── */
 
 /* ─── Agent 状态指示 ─── */
 .agent-indicator {
@@ -4134,6 +4108,84 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ─── 记忆 Tab ─── */
+.sd-mem-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sd-mem-card {
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-card);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+
+.sd-mem-card:hover {
+  background: var(--bg-glass-strong);
+  border-color: var(--border-glass-hover);
+}
+
+.sd-mem-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+}
+
+.sd-mem-type {
+  color: var(--text-muted);
+  background: var(--bg-glass);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.sd-mem-tier {
+  font-weight: 500;
+}
+
+.sd-mem-pinned {
+  font-size: 10px;
+}
+
+.sd-mem-content {
+  font-size: var(--fs-small);
+  color: var(--text-secondary);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.sd-mem-card-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.sd-mem-conf {
+  color: var(--text-muted);
+}
+
+.sd-mem-topics {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.sd-mem-topic {
+  color: var(--accent);
+  opacity: 0.7;
 }
 
 /* ═══════════════════════════════════════

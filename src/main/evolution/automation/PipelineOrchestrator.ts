@@ -24,6 +24,8 @@ import { ClaudeCodeExecutor } from './ClaudeCodeExecutor'
 import { DeepSeekExecutor } from './DeepSeekExecutor'
 import { AsrLogCollector } from './AsrLogCollector'
 import { AsrOptimizationExecutor } from './AsrOptimizationExecutor'
+import { AsrVocabEvolutionExecutor } from './AsrVocabEvolutionExecutor'
+import { AsrAcousticOptimizationExecutor } from './AsrAcousticOptimizationExecutor'
 import { PlanLogCollector } from './PlanLogCollector'
 import { AutoPatchExecutor } from './AutoPatchExecutor'
 import { ToolEvolutionCollector } from './ToolEvolutionCollector'
@@ -32,6 +34,8 @@ import { TtsPreferenceCollector } from './TtsPreferenceCollector'
 import { TtsConfigOptimizationExecutor } from './TtsConfigOptimizationExecutor'
 import { TtsTypographyCollector } from './TtsTypographyCollector'
 import { TtsTypographyExecutor } from './TtsTypographyExecutor'
+import { TypeHealthCollector } from '../typehealth/TypeHealthCollector'
+import { TypeRefactorExecutor } from '../typehealth/TypeRefactorExecutor'
 import {
   registerCollector,
   registerExecutor,
@@ -100,6 +104,7 @@ export class PipelineOrchestrator {
     const toolEvolutionCollector = new ToolEvolutionCollector()
     const ttsPreferenceCollector = new TtsPreferenceCollector()
     const ttsTypographyCollector = new TtsTypographyCollector()
+    const typeHealthCollector = new TypeHealthCollector()
 
     // Stage 2: 注册到中央注册表
     registerCollector(tscCollector)
@@ -110,6 +115,7 @@ export class PipelineOrchestrator {
     registerCollector(toolEvolutionCollector)
     registerCollector(ttsPreferenceCollector)
     registerCollector(ttsTypographyCollector)
+    registerCollector(typeHealthCollector)
 
     // Stage 3: 从注册表加载到本地
     for (const c of getAllCollectors()) {
@@ -119,17 +125,23 @@ export class PipelineOrchestrator {
     // Stage 4: 创建并注册内置执行器
     const claudeCodeExecutor = new ClaudeCodeExecutor()
     const asrOptimizationExecutor = new AsrOptimizationExecutor()
+    const asrVocabEvolutionExecutor = new AsrVocabEvolutionExecutor()
+    const asrAcousticOptimizationExecutor = new AsrAcousticOptimizationExecutor()
     const autoPatchExecutor = new AutoPatchExecutor()
     const toolEvolutionExecutor = new ToolEvolutionExecutor()
     const ttsConfigOptExecutor = new TtsConfigOptimizationExecutor()
     const ttsTypographyExecutor = new TtsTypographyExecutor()
+    const typeRefactorExecutor = new TypeRefactorExecutor()
 
     registerExecutor(claudeCodeExecutor)
     registerExecutor(asrOptimizationExecutor)
+    registerExecutor(asrVocabEvolutionExecutor)
+    registerExecutor(asrAcousticOptimizationExecutor)
     registerExecutor(autoPatchExecutor)
     registerExecutor(toolEvolutionExecutor)
     registerExecutor(ttsConfigOptExecutor)
     registerExecutor(ttsTypographyExecutor)
+    registerExecutor(typeRefactorExecutor)
     if (mcpManager) {
       registerExecutor(new DeepSeekExecutor(mcpManager))
     }

@@ -1,13 +1,36 @@
+import { useState, useRef, useEffect } from 'react'
 import { useSlots } from '../slots/SlotContext'
 import { StatusBar } from './StatusBar'
-import { useDeviceStore } from '../store/deviceStore'
 
 interface TopBarProps {
   onOpenSettings?: () => void
 }
 
+const SLOT_META: Record<string, { label: string; icon: string }> = {
+  chat: { label: '会话', icon: 'ri-chat-1-line' },
+  tool: { label: '工具', icon: 'ri-tools-line' },
+  preview: { label: '预览', icon: 'ri-eye-line' },
+  workflow: { label: '工作流', icon: 'ri-flow-chart' },
+  devplan: { label: '开发计划', icon: 'ri-code-s-slash-line' },
+  otpar: { label: 'OTPAR 认知循环', icon: 'ri-brain-line' },
+}
+
 export function TopBar({ onOpenSettings }: TopBarProps) {
   const { uiState, toggleSidebar, setActiveSlot } = useSlots()
+  const [slotMenuOpen, setSlotMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setSlotMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const currentSlot = SLOT_META[uiState.activeSlot] || SLOT_META.chat
 
   return (
     <header className="topbar">
@@ -21,35 +44,34 @@ export function TopBar({ onOpenSettings }: TopBarProps) {
       </div>
 
       <div className="topbar-actions">
-        <button
-          className={`cap-toggle-btn${uiState.activeSlot === 'chat' ? ' active' : ''}`}
-          onClick={() => setActiveSlot('chat')}
-          title="会话"
-        >
-          <i className="ri-chat-1-line" />
-        </button>
-        <button
-          className={`cap-toggle-btn${uiState.activeSlot === 'otpar' ? ' active' : ''}`}
-          onClick={() => setActiveSlot(uiState.activeSlot === 'otpar' ? 'chat' : 'otpar')}
-          title="OTPAR 认知循环"
-        >
-          <i className="ri-brain-line" />
-        </button>
-        <button
-          className={`cap-toggle-btn${uiState.activeSlot === 'devplan' ? ' active' : ''}`}
-          onClick={() => setActiveSlot(uiState.activeSlot === 'devplan' ? 'chat' : 'devplan')}
-          title="开发计划"
-        >
-          <i className="ri-code-s-slash-line" />
-        </button>
-        <button
-          className={`cap-toggle-btn${uiState.activeSlot === 'workflow' ? ' active' : ''}`}
-          onClick={() => setActiveSlot(uiState.activeSlot === 'workflow' ? 'chat' : 'workflow')}
-          title="工作流"
-        >
-          <i className="ri-flow-chart" />
-        </button>
-        <button className="cap-toggle-btn" onClick={onOpenSettings} title="设置">
+        {/* ── Slot 切换下拉菜单 ── */}
+        <div className="topbar-slot-dropdown" ref={menuRef}>
+          <button className="topbar-slot-trigger" onClick={() => setSlotMenuOpen((o) => !o)} title={`当前: ${currentSlot.label}`}>
+            <i className={currentSlot.icon} />
+            <span className="topbar-slot-label">{currentSlot.label}</span>
+            <i className={`ri-arrow-${slotMenuOpen ? 'up' : 'down'}-s-line`} />
+          </button>
+          {slotMenuOpen && (
+            <div className="topbar-slot-menu">
+              {Object.entries(SLOT_META).map(([key, meta]) => (
+                <button
+                  key={key}
+                  className={`topbar-slot-option${key === uiState.activeSlot ? ' active' : ''}`}
+                  onClick={() => {
+                    setActiveSlot(key as any)
+                    setSlotMenuOpen(false)
+                  }}
+                >
+                  <i className={meta.icon} />
+                  <span>{meta.label}</span>
+                  {key === uiState.activeSlot && <i className="ri-check-line" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <button className="topbar-btn" onClick={onOpenSettings} title="设置">
           <i className="ri-settings-3-line" />
         </button>
         <button className="topbar-window-btn" onClick={() => window.electronAPI.minimizeWindow()} title="最小化">

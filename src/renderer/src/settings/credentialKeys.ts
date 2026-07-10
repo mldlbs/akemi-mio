@@ -26,6 +26,9 @@ export const CRED_KEYS = {
   OVERLAY_OPACITY_MIN: 'overlay_opacity_min',
   OVERLAY_OPACITY_MAX: 'overlay_opacity_max',
   OVERLAY_IDLE_THRESHOLD: 'overlay_idle_threshold',
+  TELEGRAM_SERVER_URL: 'telegram_server_url',
+  TELEGRAM_CHAT_ID: 'telegram_chat_id',
+  TELEGRAM_ENABLED: 'telegram_enabled',
 } as const
 
 export const ALL_SETTING_KEYS: readonly string[] = Object.values(CRED_KEYS)

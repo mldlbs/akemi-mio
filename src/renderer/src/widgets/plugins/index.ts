@@ -18,6 +18,7 @@ import { natureAnimationWidget } from './NatureAnimationWidget'
 import { shortcutsGuideWidget } from './ShortcutsGuideWidget'
 import { rssSummaryWidget } from './RssSummaryWidget'
 import { memoryContextWidget } from './MemoryContextWidget'
+import { memoryFlashWidget } from './MemoryFlashWidget'
 
 /**
  * 注册所有内置 wallpaper widget 插件。
@@ -36,7 +37,8 @@ export function registerAllWidgets(): void {
   // overlay 区
   wallpaperWidgetRegistry.register(shortcutsGuideWidget)
   wallpaperWidgetRegistry.register(rssSummaryWidget)
-  wallpaperWidgetRegistry.register(memoryContextWidget)
+  // memoryContextWidget 已移至 SystemDock
+  wallpaperWidgetRegistry.register(memoryFlashWidget)
 
   // monitor 区
   wallpaperWidgetRegistry.register(evolutionStatusWidget)

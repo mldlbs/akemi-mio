@@ -43,7 +43,8 @@ export function Sidebar() {
   const sessions = useSessionStore((s) => s.sessions)
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
   const handleSelectChat = useSessionStore((s) => s.selectChat)
-  const { setActiveSlot } = useSlots()
+  const { uiState, setActiveSlot } = useSlots()
+  const collapsed = !uiState.sidebarOpen
 
   const onSelectChat = useCallback(
     (sessionId: string) => {
@@ -71,6 +72,25 @@ export function Sidebar() {
       groups: groupSessions(grouped.get(cat)!.sort((a, b) => b.lastActivityAt - a.lastActivityAt)),
     }))
   }, [grouped])
+
+  if (collapsed) {
+    return (
+      <aside className="sidebar collapsed">
+        <div className="sidebar-content">
+          {CATEGORY_ORDER.filter((c) => grouped.has(c)).map((cat) => (
+            <button
+              key={cat}
+              className="sidebar-collapsed-icon"
+              title={CATEGORY_META[cat]?.label || cat}
+              onClick={() => onSelectChat(grouped.get(cat)![0]?.id || '')}
+            >
+              <i className={CATEGORY_META[cat]?.icon || 'ri-chat-1-line'} />
+            </button>
+          ))}
+        </div>
+      </aside>
+    )
+  }
 
   if (sessions.length === 0) {
     return (

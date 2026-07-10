@@ -37,3 +37,20 @@ export { DebounceGate } from './DebounceGate'
 export type { DebounceGateOptions, GateStatus } from './DebounceGate'
 
 export { SlidingWindow } from './SlidingWindow'
+
+export { ServiceRegistry } from './ServiceRegistry'
+export type {
+  ServiceManifest,
+  ServicePlugin,
+  ServiceRegistryOptions,
+  CapabilityReader,
+} from './ServiceRegistry'
+
+export { computeBackoff, retryWithBackoff, retryWithBackoffOrThrow } from './RetryBackoff'
+export type { RetryOptions } from './RetryBackoff'
+
+export {
+  ThresholdTracker,
+  createThresholdTracker,
+} from './ThresholdTracker'
+export type { ThresholdAction, ThresholdTrackerOptions } from './ThresholdTracker'

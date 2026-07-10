@@ -112,6 +112,9 @@ export const FFPLAY_PATHS = process.env.FFPLAY_PATH ? [process.env.FFPLAY_PATH] 
 //  Telegram — 代理服务器 & 推送配置
 // ══════════════════════════════════════════
 
+/** Telegram 功能总开关（默认关闭）。Override via TELEGRAM_ENABLED env. */
+export const TELEGRAM_ENABLED = process.env.TELEGRAM_ENABLED === 'true'
+
 /** Telegram 代理服务器地址。Override via TELEGRAM_SERVER_URL env. */
 export const TELEGRAM_SERVER_URL = process.env.TELEGRAM_SERVER_URL || 'https://skills.crlkcloud.cyou/telegram'
 

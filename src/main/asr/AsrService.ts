@@ -14,6 +14,9 @@ import {
 import { asrHotwordManager } from './AsrHotwordManager'
 import type { VocabEntry, DomainStats } from './AsrHotwordManager'
 import { asrLogStore } from './AsrLogStore'
+import type { LowConfidenceSegment } from './AsrLogStore'
+import { asrConfidenceScorer, DEFAULT_CONFIDENCE_THRESHOLD } from './AsrConfidenceScorer'
+import { acousticEnvClassifier } from './AsrAcousticEnvironmentClassifier'
 import { SpeechPluginRegistry, WhisperGpuAsrPlugin, WhisperCpuAsrPlugin, BaiduAsrPlugin } from '../speech'
 
 /** 检查识别结果是否有意义：有效字符占比过低则判定为乱码 */
@@ -287,7 +290,14 @@ export class AsrService {
    * 记录当前 ASR 识别日志到 AsrLogStore。
    * 不阻塞主流程。
    */
-  private recordRecognition(engine: 'whisper_gpu' | 'whisper_cpu' | 'baidu', rawText: string, requestId: string, audioDurationSec: number, inferenceMs: number): void {
+  private recordRecognition(
+    engine: 'whisper_gpu' | 'whisper_cpu' | 'baidu',
+    rawText: string,
+    requestId: string,
+    audioDurationSec: number,
+    inferenceMs: number,
+    options?: { environment?: string; confidence?: number },
+  ): void {
     try {
       asrLogStore.recordRecognition({
         id: `rec_${requestId}`,
@@ -298,9 +308,49 @@ export class AsrService {
         audioDurationSec,
         inferenceMs,
         hasHotwordHit: false,
+        environment: options?.environment,
+        confidence: options?.confidence,
       })
     } catch {
       // 日志记录不阻塞主流程
+    }
+  }
+
+  /**
+   * 如果识别文本的置信度低于阈值，记录到低置信度片段存储。
+   * 供后续 Evolution 分析提取未登录词。
+   */
+  private recordLowConfidenceIfNeeded(
+    text: string,
+    engine: 'whisper_gpu' | 'whisper_cpu' | 'baidu',
+    requestId: string,
+    audioDurationSec: number,
+    confidence: number,
+  ): void {
+    if (confidence >= DEFAULT_CONFIDENCE_THRESHOLD) return
+    if (!text || text.trim().length === 0) return
+
+    try {
+      const segment: LowConfidenceSegment = {
+        id: `lowconf_${requestId}`,
+        timestamp: Date.now(),
+        engine,
+        text: text.trim(),
+        confidence,
+        threshold: DEFAULT_CONFIDENCE_THRESHOLD,
+        requestId,
+        audioDurationSec,
+        wasCorrected: false,
+      }
+      asrLogStore.recordLowConfidenceSegment(segment)
+      log('INFO', 'asr_low_confidence_segment', {
+        request_id: requestId,
+        text: text.slice(0, 40),
+        confidence: Math.round(confidence * 100),
+        threshold: DEFAULT_CONFIDENCE_THRESHOLD,
+      })
+    } catch {
+      // 不阻塞主流程
     }
   }
 
@@ -315,6 +365,15 @@ export class AsrService {
   feedback(requestId: string, originalText: string, correctedText: string): void {
     // 记录纠正到日志存储
     asrLogStore.recordUserFix(`rec_${requestId}`, originalText, correctedText)
+
+    // 标记关联的低置信度片段为已纠正
+    const lowConfSegments = asrLogStore.getLowConfidenceSegmentsSince(0)
+    const matchingSegment = lowConfSegments.find(
+      (s) => s.requestId === requestId || s.text === originalText,
+    )
+    if (matchingSegment) {
+      asrLogStore.markLowConfSegmentCorrected(matchingSegment.id)
+    }
 
     // 将修正后的文本喂入热词管理器，让系统学习正确词汇
     this.feedUserTextToHotwords(correctedText)
@@ -344,29 +403,39 @@ export class AsrService {
         })
       }
 
-      // ── 统一转 Float32 并提取声学特征 / 语音情感 ──
+      // ── 统一转 Float32 并提取声学特征 / 语音情感 / 环境分类 ──
       const samples = new Int16Array(audioBuffer)
       const float32 = new Float32Array(samples.length)
       for (let i = 0; i < samples.length; i++) float32[i] = samples[i] / 32768
 
-      // 语音情感分析（从声学特征推断）
+      let audioFeatures: import('../audio/types').AudioFeatures | undefined
       let voiceEmotion: VoiceEmotion | undefined
+      let environment: string | undefined
+      const audioDurationSec = parseFloat((samples.length / 16000).toFixed(1))
+
       try {
         if (float32.length >= 512) {
-          // 512 samples = 32ms @16kHz，AudioFeatureExtractor 最小帧大小
-          const features = audioFeatureExtractor.extractFromFloat32(float32)
-          voiceEmotion = voiceEmotionClassifier.classify(features)
+          audioFeatures = audioFeatureExtractor.extractFromFloat32(float32)
+
+          // 语音情感分析
+          voiceEmotion = voiceEmotionClassifier.classify(audioFeatures)
           this._lastVoiceEmotion = voiceEmotion
+
+          // 声学环境分类
+          const envResult = acousticEnvClassifier.classify(audioFeatures)
+          environment = envResult.environment
+
           log('DEBUG', 'asr_voice_emotion', {
             label: voiceEmotion.label,
             confidence: voiceEmotion.confidence,
             energy: voiceEmotion.features.energy,
             pitchHz: voiceEmotion.features.pitchHz,
+            environment,
           })
         }
       } catch (ee) {
-        // 情感分析失败不应阻塞 ASR
-        log('WARN', 'asr_voice_emotion_failed', { error: String(ee) })
+        // 特征分析失败不应阻塞 ASR
+        log('WARN', 'asr_feature_analysis_failed', { error: String(ee) })
       }
 
       // 1. GPU Whisper（Vulkan 加速，RTX 3060）
@@ -385,7 +454,12 @@ export class AsrService {
               await this.initCpuFallback()
               if (this.cpuEngine) {
                 const cpuResult = await this.cpuEngine.transcribe(float32, 20000, rid)
-                this.recordRecognition('whisper_cpu', cpuResult.text, rid, parseFloat((samples.length / 16000).toFixed(1)), cpuResult.duration)
+                const cpuConfidence = asrConfidenceScorer.score(cpuResult.text, audioFeatures)
+                this.recordRecognition('whisper_cpu', cpuResult.text, rid, audioDurationSec, cpuResult.duration, {
+                  environment,
+                  confidence: cpuConfidence,
+                })
+                this.recordLowConfidenceIfNeeded(cpuResult.text, 'whisper_cpu', rid, audioDurationSec, cpuConfidence)
                 return { text: cpuResult.text, request_id: rid, voiceEmotion }
               }
             } catch (cpuErr) {
@@ -401,7 +475,12 @@ export class AsrService {
             return { text: '', request_id: rid, voiceEmotion }
           }
 
-          this.recordRecognition('whisper_gpu', result.text, rid, parseFloat((samples.length / 16000).toFixed(1)), result.duration || 0)
+          const gpuConfidence = asrConfidenceScorer.score(result.text, audioFeatures)
+          this.recordRecognition('whisper_gpu', result.text, rid, audioDurationSec, result.duration || 0, {
+            environment,
+            confidence: gpuConfidence,
+          })
+          this.recordLowConfidenceIfNeeded(result.text, 'whisper_gpu', rid, audioDurationSec, gpuConfidence)
           return { text: result.text, request_id: rid, voiceEmotion }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
@@ -412,20 +491,25 @@ export class AsrService {
       // 2. 后备：百度 ASR（云端）
       if (this.useBaidu) {
         try {
-          const audioLen = parseFloat((samples.length / 16000).toFixed(1))
           const t0 = Date.now()
           const text = await Promise.race([
             this.baiduEngine.transcribe(Buffer.from(audioBuffer), this.baiduApiKey!, this.baiduSecretKey!),
             new Promise<never>((_, reject) => setTimeout(() => reject(new Error('baidu asr timeout')), 20000)),
           ])
+          const baiduConfidence = asrConfidenceScorer.score(text, audioFeatures)
           log('INFO', 'transcription', {
             request_id: rid,
             text,
-            audio_len_s: audioLen,
+            audio_len_s: audioDurationSec,
             asr_inference_ms: Date.now() - t0,
             engine: 'baidu',
+            confidence: Math.round(baiduConfidence * 100),
           })
-          this.recordRecognition('baidu', text, rid, audioLen, Date.now() - t0)
+          this.recordRecognition('baidu', text, rid, audioDurationSec, Date.now() - t0, {
+            environment,
+            confidence: baiduConfidence,
+          })
+          this.recordLowConfidenceIfNeeded(text, 'baidu', rid, audioDurationSec, baiduConfidence)
           return { text, request_id: rid, voiceEmotion }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)

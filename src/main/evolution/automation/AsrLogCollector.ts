@@ -14,7 +14,8 @@
 
 import { log } from '../../logger/Logger'
 import { asrLogStore } from '../../asr/AsrLogStore'
-import type { AsrErrorPattern } from '../../asr/AsrLogStore'
+import { asrConfidenceScorer, DEFAULT_CONFIDENCE_THRESHOLD } from '../../asr/AsrConfidenceScorer'
+import type { AsrErrorPattern, LowConfidenceSegment } from '../../asr/AsrLogStore'
 import type { SignalCollector, Problem } from './types'
 
 // =============================================================================
@@ -27,8 +28,14 @@ const MIN_CORRECTIONS_TO_ANALYZE = 3
 const HIGH_FREQ_THRESHOLD = 3
 /** 分析窗口（毫秒）— 默认 2 小时 */
 const ANALYSIS_WINDOW_MS = 2 * 60 * 60 * 1000
-/** 单次采集最大生成的问题数 */
+/** 单次采集最大生成的问题数（纠正模式） */
 const MAX_PROBLEMS_PER_COLLECT = 5
+/** 低置信度片段额外生成的最大问题数 */
+const MAX_LOW_CONF_PROBLEMS = 3
+/** 低置信度片段中视为"新兴词候补"的最小文本长度 */
+const MIN_CANDIDATE_WORD_LENGTH = 2
+/** 低置信度片段成为候补的最大文本长度（过长视为整句而非新词） */
+const MAX_CANDIDATE_WORD_LENGTH = 6
 
 // =============================================================================
 // AsrLogCollector
@@ -87,7 +94,14 @@ export class AsrLogCollector implements SignalCollector {
         if (problem) problems.push(problem)
       }
 
-      // 5. 检查待评估的快照（为下一轮评估提供数据）
+      // 5. 处理低置信度识别片段 → 提取新兴/未登录词候补
+      const lowConfProblems = this.collectLowConfidenceProblems(since)
+      for (const p of lowConfProblems) {
+        if (problems.length >= MAX_PROBLEMS_PER_COLLECT + MAX_LOW_CONF_PROBLEMS) break
+        problems.push(p)
+      }
+
+      // 6. 检查待评估的快照（为下一轮评估提供数据）
       const pendingSnapshots = asrLogStore.getPendingSnapshots()
       if (pendingSnapshots.length > 0) {
         log('INFO', 'asr_log_collector_pending_eval', {
@@ -96,7 +110,11 @@ export class AsrLogCollector implements SignalCollector {
         })
       }
 
-      log('INFO', 'asr_log_collector_result', { problems_generated: problems.length })
+      log('INFO', 'asr_log_collector_result', {
+        problems_generated: problems.length,
+        from_corrections: problems.length - lowConfProblems.length,
+        from_low_confidence: lowConfProblems.length,
+      })
     } catch (err) {
       log('ERROR', 'asr_log_collector_error', { error: String(err) })
     }
@@ -178,9 +196,91 @@ export class AsrLogCollector implements SignalCollector {
       partial_match: '部分匹配',
       incomplete: '识别不完整',
       noise: '噪声',
+      low_confidence: '低置信度',
+      candidate_word: '新词候选',
       unknown: '未分类',
     }
     return labels[category] || category
+  }
+
+  // ── 低置信度片段处理 ──
+
+  /**
+   * 从低置信度识别片段中提取新兴/未登录词候补。
+   *
+   * 策略：
+   * 1. 筛选出窗口中低置信（< threshold）且未被纠正的识别片段
+   * 2. 对文本进行分词，提取长度 2–6 字的候选词
+   * 3. 过滤停用词、纯数字、纯标点
+   * 4. 按文本去重，每个唯一文本生成一个问题
+   */
+  private collectLowConfidenceProblems(since: number): Problem[] {
+    const segments = asrLogStore.getUncorrectedLowConfidenceSegments(since)
+    if (segments.length === 0) return []
+
+    log('INFO', 'asr_log_collector_low_conf', {
+      total_segments: segments.length,
+      window_since: new Date(since).toISOString(),
+    })
+
+    const problems: Problem[] = []
+    const seenTexts = new Set<string>()
+
+    for (const seg of segments) {
+      if (problems.length >= MAX_LOW_CONF_PROBLEMS) break
+
+      const text = seg.text.trim()
+      if (text.length < MIN_CANDIDATE_WORD_LENGTH) continue
+      if (text.length > MAX_CANDIDATE_WORD_LENGTH && !text.includes(' ')) continue
+      if (/^\d+$/.test(text)) continue // 纯数字
+      if (seenTexts.has(text)) continue
+
+      // 检查是否已存在于纠正记录中（已通过其他渠道修复）
+      const recentPatterns = asrLogStore.getErrorPatterns(since)
+      const alreadyKnown = recentPatterns.some(
+        (p) => p.original === text || p.corrected === text,
+      )
+      if (alreadyKnown) continue
+
+      seenTexts.add(text)
+
+      const id = `asr_lowconf_${text}`
+        .replace(/[^a-zA-Z0-9_一-鿿]/g, '_')
+        .slice(0, 64)
+
+      problems.push({
+        id,
+        source: 'log',
+        severity: 'info',
+        title: `ASR 低置信度: "${text}"`,
+        description: [
+          `【ASR 新词候补 — 低置信度识别】`,
+          ``,
+          `- 识别文本: "${text}"`,
+          `- 置信度: ${Math.round(seg.confidence * 100)}%`,
+          `- 引擎: ${seg.engine}`,
+          `- 片段长度: ${text.length} 字`,
+          ``,
+          `该片段置信度低于 ${Math.round(seg.threshold * 100)}%，可能包含`,
+          `新兴词汇、未登录词或领域术语。建议将其添加为热词以提升后续识别率。`,
+        ].join('\n'),
+        estimatedCostChars: 200,
+        lastSeen: seg.timestamp,
+        occurrenceCount: 1,
+        context: {
+          raw: JSON.stringify(seg),
+          metadata: {
+            asr_original: text,
+            asr_corrected: text,
+            asr_category: 'candidate_word',
+            asr_confidence: String(Math.round(seg.confidence * 100)),
+            asr_segment_id: seg.id,
+          },
+        },
+      })
+    }
+
+    return problems
   }
 }
 

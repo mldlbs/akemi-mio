@@ -15,12 +15,18 @@
  * 3. createEvalSnapshot() → createSnapshot() — 创建进度快照
  * 4. evaluateSnapshot() → evaluateSnapshot() — 前后对比评估
  * 5. getCorrectionRate() → getAccuracyRate() — 获取正确率
+ *
+ * 重构说明：
+ * - 快照基线管理委托给 SnapshotExperiment（core/experiment），
+ *   消除重复的 createSnapshot → evaluate → keep/rollback 模式
+ * - 保留领域特有的困难追踪和持久化逻辑
  */
 
 import { log } from '../logger/Logger'
 import { WORKSPACE } from '../config'
 import { join } from 'path'
 import { JsonStore } from '../core/persistence/JsonStore'
+import { SnapshotManager } from '../core/experiment/SnapshotExperiment'
 import type {
   LearningItem,
   LearningDifficulty,
@@ -63,11 +69,18 @@ export interface LearningStrategyChange {
   params: Record<string, unknown>
 }
 
+/** 快照基线数据类型 */
+export interface LearningBaselineData {
+  mastery: number
+  accuracy: number
+}
+
 // ── LearningProgressTracker ──
 
 export class LearningProgressTracker {
   private difficulties: LearningDifficulty[] = []
-  private snapshots: LearningEvalSnapshot[] = []
+  /** 持久化快照存储（与 SnapshotManager 同步） */
+  private persistedSnapshots: LearningEvalSnapshot[] = []
   private changeLog: Array<{
     strategy: LearningStrategyChange
     snapshotId: string
@@ -78,6 +91,26 @@ export class LearningProgressTracker {
 
   /** 外部注入的知识点查询函数 */
   private getItemsFn: (() => LearningItem[]) | null = null
+
+  /**
+   * 快照基线管理 — 委托给 SnapshotExperiment（core/experiment）。
+   * 处理从创建基线到评估判定（keep/rollback）的完整生命周期。
+   */
+  private readonly snapshotManager = new SnapshotManager<LearningBaselineData>({
+    comparator: (before, after) => {
+      const masteryChange = after.mastery - before.mastery
+      const accuracyChange = after.accuracy - before.accuracy
+
+      // 掌握度提升 > 5% 或 正确率提升 > 10% → 改进
+      if (masteryChange > 0.05 || accuracyChange > 0.1) return 'improved'
+      // 掌握度下降 > 5% 或 正确率下降 > 10% → 恶化
+      if (masteryChange < -0.05 || accuracyChange < -0.1) return 'worsened'
+      return 'unchanged'
+    },
+    loggerName: 'learning_tracker',
+    maxSnapshots: MAX_SNAPSHOTS,
+    minSamples: 3,
+  })
 
   /**
    * 设置知识点查询回调（注入 LearningVocabularyManager 的查询能力）。
@@ -91,12 +124,47 @@ export class LearningProgressTracker {
   load(): void {
     if (this.loaded) return
     this.difficulties = DIFFICULTIES_STORE.load()
-    this.snapshots = SNAPSHOTS_STORE.load()
+
+    // 从持久化存储恢复快照到 SnapshotManager
+    this.persistedSnapshots = SNAPSHOTS_STORE.load()
+    const restored = this.persistedSnapshots.map((p) => ({
+      id: p.id,
+      timestamp: p.timestamp,
+      baseline: { mastery: p.beforeMastery, accuracy: p.beforeAccuracy },
+      after: p.afterMastery !== undefined
+        ? { mastery: p.afterMastery, accuracy: p.afterAccuracy ?? p.beforeAccuracy }
+        : undefined,
+      status: p.status as 'pending' | 'kept' | 'rolled_back',
+      appliedChanges: p.appliedChanges,
+      verdict: undefined,
+    }))
+    this.snapshotManager.restoreSnapshots(restored)
+
     this.loaded = true
     log('INFO', 'learning_tracker_loaded', {
       difficulties: this.difficulties.length,
-      snapshots: this.snapshots.length,
+      snapshots: this.persistedSnapshots.length,
     })
+  }
+
+  // ==================== 快照持久化 ====================
+
+  /**
+   * 将 SnapshotManager 的快照同步到持久化存储。
+   */
+  private persistSnapshots(): void {
+    const coreSnapshots = this.snapshotManager.getSnapshots()
+    this.persistedSnapshots = coreSnapshots.map((s) => ({
+      id: s.id,
+      timestamp: s.timestamp,
+      beforeMastery: s.baseline.mastery,
+      beforeAccuracy: s.baseline.accuracy,
+      afterMastery: s.after?.mastery,
+      afterAccuracy: s.after?.accuracy,
+      appliedChanges: s.appliedChanges,
+      status: s.status,
+    }))
+    SNAPSHOTS_STORE.save(this.persistedSnapshots)
   }
 
   // ==================== 困难记录（对应 AsrLogStore 的纠正记录） ====================
@@ -175,15 +243,12 @@ export class LearningProgressTracker {
     }
   }
 
-  // ==================== 评估快照（对应 AsrLogStore/AsrEvolutionManager 的快照机制） ====================
+  // ==================== 获取当前基线数据 ====================
 
   /**
-   * 创建进度评估快照（策略变更前拍下基线）。
-   * 对应 AsrLogStore.createEvalSnapshot()。
+   * 从 LearningVocabularyManager 获取当前掌握度和正确率。
    */
-  createSnapshot(appliedChanges: string[], lookbackMs = DEFAULT_LOOKBACK_MS): LearningEvalSnapshot {
-    this.load()
-
+  private getCurrentBaselineData(): LearningBaselineData {
     const items = this.getItemsFn?.() || []
     const totalMastery = items.length > 0
       ? items.reduce((s, i) => s + i.mastery, 0) / items.length
@@ -192,79 +257,63 @@ export class LearningProgressTracker {
     const totalCorrect = items.reduce((s, i) => s + i.correctCount, 0)
     const accuracy = totalAttempts > 0 ? totalCorrect / totalAttempts : 0
 
-    const snapshot: LearningEvalSnapshot = {
-      id: `learn_eval_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      timestamp: Date.now(),
-      beforeMastery: Math.round(totalMastery * 100) / 100,
-      beforeAccuracy: Math.round(accuracy * 100) / 100,
+    return {
+      mastery: Math.round(totalMastery * 100) / 100,
+      accuracy: Math.round(accuracy * 100) / 100,
+    }
+  }
+
+  // ==================== 评估快照（对应 AsrLogStore/AsrEvolutionManager 的快照机制） ====================
+
+  /**
+   * 创建进度评估快照（策略变更前拍下基线）。
+   * 委托给 SnapshotManager，同时持久化到 JsonStore。
+   * 对应 AsrLogStore.createEvalSnapshot()。
+   */
+  createSnapshot(appliedChanges: string[], _lookbackMs = DEFAULT_LOOKBACK_MS): LearningEvalSnapshot {
+    this.load()
+    const data = this.getCurrentBaselineData()
+    const coreSnap = this.snapshotManager.createSnapshot(data, appliedChanges)
+
+    this.persistSnapshots()
+
+    // 转换为 LearningEvalSnapshot 保持对外接口兼容
+    return {
+      id: coreSnap.id,
+      timestamp: coreSnap.timestamp,
+      beforeMastery: data.mastery,
+      beforeAccuracy: data.accuracy,
       appliedChanges,
       status: 'pending',
     }
-
-    this.snapshots.push(snapshot)
-    if (this.snapshots.length > MAX_SNAPSHOTS) {
-      this.snapshots = this.snapshots.slice(-MAX_SNAPSHOTS)
-    }
-    SNAPSHOTS_STORE.save(this.snapshots)
-
-    log('INFO', 'learning_snapshot_created', {
-      snapshotId: snapshot.id,
-      beforeMastery: snapshot.beforeMastery,
-      beforeAccuracy: snapshot.beforeAccuracy,
-      changes: appliedChanges.length,
-    })
-
-    return snapshot
   }
 
   /**
    * 评估快照：对比当前进度与快照基线。
+   * 委托给 SnapshotManager 的 comparator。
    * 对应 AsrLogStore.evaluateSnapshot()。
    */
   evaluateSnapshot(
     snapshotId: string,
   ): 'improved' | 'worsened' | 'unchanged' | 'not_found' {
     this.load()
-    const snapshot = this.snapshots.find((s) => s.id === snapshotId)
-    if (!snapshot) return 'not_found'
+    const data = this.getCurrentBaselineData()
+    const result = this.snapshotManager.evaluate(snapshotId, data)
 
-    const items = this.getItemsFn?.() || []
-    const totalMastery = items.length > 0
-      ? items.reduce((s, i) => s + i.mastery, 0) / items.length
-      : 0
-    const totalAttempts = items.reduce((s, i) => s + i.totalAttempts, 0)
-    const totalCorrect = items.reduce((s, i) => s + i.correctCount, 0)
-    const currentAccuracy = totalAttempts > 0 ? totalCorrect / totalAttempts : 0
+    if (result.verdict === 'not_found') return 'not_found'
 
-    const afterMastery = Math.round(totalMastery * 100) / 100
-    const afterAccuracy = Math.round(currentAccuracy * 100) / 100
-
-    snapshot.afterMastery = afterMastery
-    snapshot.afterAccuracy = afterAccuracy
-    SNAPSHOTS_STORE.save(this.snapshots)
-
-    // 数据不足则无法判断
-    if (items.length < 3) return 'unchanged'
-
-    const masteryChange = afterMastery - snapshot.beforeMastery
-    const accuracyChange = afterAccuracy - snapshot.beforeAccuracy
-
-    // 掌握度提升 > 5% 或 正确率提升 > 10% → 改进
-    if (masteryChange > 0.05 || accuracyChange > 0.1) return 'improved'
-    // 掌握度下降 > 5% 或 正确率下降 > 10% → 恶化
-    if (masteryChange < -0.05 || accuracyChange < -0.1) return 'worsened'
-    return 'unchanged'
+    this.persistSnapshots()
+    return result.verdict
   }
 
   /**
    * 标记快照为保留或回滚。
+   * 委托给 SnapshotManager。
    */
   updateSnapshotStatus(snapshotId: string, status: 'kept' | 'rolled_back'): boolean {
-    const snapshot = this.snapshots.find((s) => s.id === snapshotId)
-    if (!snapshot) return false
-    snapshot.status = status
-    SNAPSHOTS_STORE.save(this.snapshots)
-    return true
+    const ok = this.snapshotManager.updateSnapshotStatus(snapshotId, status)
+    if (ok) this.persistSnapshots()
+    return ok
   }
 
   /**
@@ -272,7 +321,8 @@ export class LearningProgressTracker {
    */
   getPendingSnapshots(): LearningEvalSnapshot[] {
     this.load()
-    return this.snapshots.filter((s) => s.status === 'pending')
+    const pending = this.snapshotManager.getPendingSnapshots()
+    return pending.map((s) => this.toEvalSnapshot(s))
   }
 
   /**
@@ -280,7 +330,23 @@ export class LearningProgressTracker {
    */
   getSnapshots(): LearningEvalSnapshot[] {
     this.load()
-    return [...this.snapshots]
+    return this.snapshotManager.getSnapshots().map((s) => this.toEvalSnapshot(s))
+  }
+
+  /**
+   * 将 SnapshotManager 的快照转换为外部 LearningEvalSnapshot 格式。
+   */
+  private toEvalSnapshot(s: { id: string; timestamp: number; baseline: LearningBaselineData; after?: LearningBaselineData; status: string; appliedChanges: string[] }): LearningEvalSnapshot {
+    return {
+      id: s.id,
+      timestamp: s.timestamp,
+      beforeMastery: s.baseline.mastery,
+      beforeAccuracy: s.baseline.accuracy,
+      afterMastery: s.after?.mastery,
+      afterAccuracy: s.after?.accuracy,
+      appliedChanges: s.appliedChanges,
+      status: s.status as LearningEvalSnapshot['status'],
+    }
   }
 
   // ==================== 策略变更（对应 AsrEvolutionManager.applyPatches） ====================
@@ -317,58 +383,40 @@ export class LearningProgressTracker {
 
   /**
    * 评估上一次策略变更的效果并决定保留还是回滚。
+   * 委托给 SnapshotManager 的 evaluateAndDecide。
    * 对应 AsrEvolutionManager.evaluateAndDecide()。
    */
   evaluateAndDecide(snapshotId?: string): {
     verdict: 'improved' | 'worsened' | 'unchanged' | 'not_found'
     action: 'keep' | 'rollback' | 'no_action'
   } {
-    // 如果没有指定 snapshotId，找最近一个 pending 的
-    const targetId = snapshotId || this.findPendingSnapshotId()
-    if (!targetId) {
-      return { verdict: 'not_found', action: 'no_action' }
-    }
+    this.load()
+    const data = this.getCurrentBaselineData()
+    const result = this.snapshotManager.evaluateAndDecide(snapshotId, data)
 
-    const verdict = this.evaluateSnapshot(targetId)
-
-    let action: 'keep' | 'rollback' | 'no_action'
-    switch (verdict) {
-      case 'improved':
-        this.updateSnapshotStatus(targetId, 'kept')
-        action = 'keep'
-        break
-      case 'worsened':
-        this.updateSnapshotStatus(targetId, 'rolled_back')
-        action = 'rollback'
-        break
-      default:
-        this.updateSnapshotStatus(targetId, 'kept')
-        action = 'no_action'
-        break
-    }
+    this.persistSnapshots()
 
     // 更新变更日志
-    const logEntry = this.changeLog.find((c) => c.snapshotId === targetId)
-    if (logEntry) {
-      logEntry.outcome = verdict
+    if (result.verdict !== 'not_found') {
+      const logEntry = this.changeLog.find((c) => c.snapshotId === result.snapshotId)
+      if (logEntry) {
+        logEntry.outcome = result.verdict
+      }
     }
 
     log('INFO', 'learning_strategy_evaluated', {
-      snapshotId: targetId,
-      verdict,
-      action,
+      snapshotId: result.snapshotId,
+      verdict: result.verdict,
+      action: result.action,
     })
 
-    return { verdict, action }
+    return {
+      verdict: result.verdict,
+      action: result.action,
+    }
   }
 
   // ==================== 内部方法 ====================
-
-  private findPendingSnapshotId(): string | null {
-    const pending = this.getPendingSnapshots()
-    if (pending.length === 0) return null
-    return pending[0].id
-  }
 
   /**
    * 合并相同知识点+描述的困难记录（去重 + 累加频次）。
@@ -414,7 +462,9 @@ export class LearningProgressTracker {
     const before = this.difficulties.length
     this.difficulties = this.difficulties.filter((d) => d.lastSeen >= cutoff)
     const removed = before - this.difficulties.length
-    if (removed > 0) this.saveDifficulties()
+    if (removed > 0) {
+      DIFFICULTIES_STORE.save(this.difficulties)
+    }
     return { removedDifficulties: removed }
   }
 
@@ -423,7 +473,7 @@ export class LearningProgressTracker {
     this.load()
     return {
       totalDifficulties: this.difficulties.length,
-      pendingSnapshots: this.getPendingSnapshots().length,
+      pendingSnapshots: this.snapshotManager.getPendingSnapshots().length,
       changes: this.changeLog.length,
     }
   }

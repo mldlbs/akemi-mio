@@ -23,6 +23,7 @@
 
 import { log } from '../logger/Logger'
 import { networkMonitor } from './NetworkMonitor'
+import { shallowMerge } from '../core/utils/configMerge'
 import type {
   TtsEngine,
   TtsUserPreference,
@@ -43,7 +44,7 @@ export class TtsRouter {
   private piperPerformance: PiperPerformanceInfo | null = null
 
   constructor(config?: Partial<TtsRouterConfig>) {
-    this.config = { ...DEFAULT_TTS_ROUTER_CONFIG, ...config }
+    this.config = shallowMerge(DEFAULT_TTS_ROUTER_CONFIG, config)
   }
 
   // ── 用户偏好 ──

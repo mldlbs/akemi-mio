@@ -11,6 +11,7 @@ import {
   TELEGRAM_SERVER_URL,
   TELEGRAM_POLL_INTERVAL_MS,
   TELEGRAM_OUTBOX_COOLDOWN_MS,
+  TELEGRAM_ENABLED,
 } from '../config'
 import { ServerManager } from '../mcp/ServerManager'
 import { LlmService } from '../llm/LlmService'
@@ -813,15 +814,19 @@ export class AppRuntime {
     )
 
     // 注册 Telegram outbox worker（在 taskRunner 启动前注册，start 后生效）
-    const outboxUrl = credentialsManager.get('telegram_server_url') || TELEGRAM_SERVER_URL
-    const outboxWorker = new OutboxWorker(outboxUrl)
-    this.taskRunner.register('telegram.outbox', () => outboxWorker.tick(), TELEGRAM_POLL_INTERVAL_MS, {
-      cooldownMs: TELEGRAM_OUTBOX_COOLDOWN_MS,
-    })
-    // 当 TelegramService 写入新 outbox 消息时，自动恢复被禁用的 outbox 任务
-    telegramService.setReactivateOutbox(() => {
-      this.taskRunner?.reactivate('telegram.outbox')
-    })
+    const telegramEnabledFlag = credentialsManager.get('telegram_enabled')
+    const isTelegramEnabled = telegramEnabledFlag !== null ? telegramEnabledFlag === 'true' : TELEGRAM_ENABLED
+    if (isTelegramEnabled) {
+      const outboxUrl = credentialsManager.get('telegram_server_url') || TELEGRAM_SERVER_URL
+      const outboxWorker = new OutboxWorker(outboxUrl)
+      this.taskRunner.register('telegram.outbox', () => outboxWorker.tick(), TELEGRAM_POLL_INTERVAL_MS, {
+        cooldownMs: TELEGRAM_OUTBOX_COOLDOWN_MS,
+      })
+      // 当 TelegramService 写入新 outbox 消息时，自动恢复被禁用的 outbox 任务
+      telegramService.setReactivateOutbox(() => {
+        this.taskRunner?.reactivate('telegram.outbox')
+      })
+    }
 
     // 社交平台自动发布（每分钟检查 content_calendar.yaml）
     const socialDir = join(WORKSPACE.evolution, 'social')

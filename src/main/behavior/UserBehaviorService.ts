@@ -5,15 +5,16 @@ import { eventBus, type EventPayload } from '../core/EventBus'
 import { behaviorStateMachine, type BehaviorMode, type AdaptiveThresholds } from './BehaviorStateMachine'
 import { dualModeController, type ModeType } from './DualModeController'
 import { planTypeScriptExecutor } from '../learning/PlanTypeScriptExecutor'
+import { AppWindowPolling } from './app-window-polling'
+import type { AppCategory } from './app-window-polling'
+// Re-export AppCategory for backward compatibility (external consumers import via behavior/index.ts)
+export type { AppCategory } from './app-window-polling'
 
 // =============================================================================
 // 类型定义
 // =============================================================================
 
 export type ActivityState = 'active' | 'idle' | 'away'
-
-/** 应用类别 — 通过窗口标题启发式判断 */
-export type AppCategory = 'code' | 'browser' | 'media' | 'communication' | 'other'
 
 /**
  * 活动情境 — 由 UserBehaviorService 根据窗口类别、空闲状态及行为模式综合判定。
@@ -82,29 +83,6 @@ const DEFAULT_STATE: UserBehaviorState = {
 }
 
 // =============================================================================
-// 应用类别检测（通过窗口标题关键词匹配）
-// =============================================================================
-
-const CODE_PATTERNS = [
-  /code|vs ?code|visual\s*studio|editor|ide|vim|neovim|jetbrains|intellij|pycharm|webstorm|sublime|atom/i,
-  /\.(ts|js|tsx|jsx|py|go|rs|java|cpp|c|h|cs|vue|svelte|md)\b/i,
-]
-const BROWSER_PATTERNS = [/chrome|firefox|edge|safari|opera|brave|browser/i]
-const MEDIA_PATTERNS = [
-  /music|spotify|player|video|youtube|bilibili|netflix|hbo|disney\+|media\s*player/i,
-]
-const COMM_PATTERNS = [/wechat|微信|telegram|discord|slack|teams|skype|zoom|meeting|chat/i]
-
-function detectAppCategory(title: string): AppCategory {
-  const lower = title
-  if (COMM_PATTERNS.some((p) => p.test(lower))) return 'communication'
-  if (CODE_PATTERNS.some((p) => p.test(lower))) return 'code'
-  if (BROWSER_PATTERNS.some((p) => p.test(lower))) return 'browser'
-  if (MEDIA_PATTERNS.some((p) => p.test(lower))) return 'media'
-  return 'other'
-}
-
-// =============================================================================
 // UserBehaviorService — 用户行为追踪与状态发布
 // =============================================================================
 //
@@ -128,7 +106,7 @@ export class UserBehaviorService {
   private state: UserBehaviorState = { ...DEFAULT_STATE }
   private lastActivityTime = Date.now()
   private idleCheckTimer: ReturnType<typeof setInterval> | null = null
-  private appPollTimer: ReturnType<typeof setInterval> | null = null
+  private readonly appPolling: AppWindowPolling
   private mainWindow: BrowserWindow | null = null
   private lastComputedMode: BehaviorMode = 'focus'
 
@@ -142,13 +120,17 @@ export class UserBehaviorService {
   // ── 阈值常量 ──
   private static readonly AWAY_THRESHOLD_MS = 300_000 // 5min → away
   private static readonly CHECK_INTERVAL_MS = 2_000 // idle 检查间隔
-  private static readonly APP_POLL_INTERVAL_MS = 5_000 // 前台应用轮询间隔
 
   // ── 全屏检测状态（避免重复事件） ──
   private lastFullscreenState: boolean = false
 
   constructor() {
     this.mainWindow = getMainWindow()
+    this.appPolling = new AppWindowPolling({
+      pollIntervalMs: 5_000,
+      // 窗口聚焦时不轮询（用户在用我们的应用时，不需要检测前台窗口变化）
+      shouldPoll: () => !this.state.focused,
+    })
   }
 
   // ==================== 生命周期 ====================
@@ -156,7 +138,11 @@ export class UserBehaviorService {
   start(): void {
     this.setupWindowListeners()
     this.startIdleChecker()
-    this.startAppPolling()
+    this.appPolling.start((title, category) => {
+      if (title !== this.state.windowTitle) {
+        this.updateState({ windowTitle: title, appCategory: category })
+      }
+    })
     this.setupPlanEventSubscriptions()
     this.lastActivityTime = Date.now()
     log('INFO', 'behavior_service_started', {
@@ -167,9 +153,8 @@ export class UserBehaviorService {
 
   stop(): void {
     this.clearTimer(this.idleCheckTimer)
-    this.clearTimer(this.appPollTimer)
+    this.appPolling.stop()
     this.idleCheckTimer = null
-    this.appPollTimer = null
     this.disposeEventSubscriptions()
     log('INFO', 'behavior_service_stopped')
   }
@@ -341,75 +326,6 @@ export class UserBehaviorService {
         }
       }
     }, UserBehaviorService.CHECK_INTERVAL_MS)
-  }
-
-  // ==================== 前台应用轮询 ====================
-
-  private startAppPolling(): void {
-    // 只在 Windows 上启用前台应用检测
-    if (process.platform !== 'win32') return
-
-    this.appPollTimer = setInterval(() => {
-      // 窗口未聚焦时才轮询前台应用
-      if (!this.state.focused) {
-        this.pollForegroundWindow()
-      }
-    }, UserBehaviorService.APP_POLL_INTERVAL_MS)
-  }
-
-  private async pollForegroundWindow(): Promise<void> {
-    try {
-      const title = await this.getForegroundWindowTitle()
-      if (title && title !== this.state.windowTitle) {
-        this.updateState({
-          windowTitle: title,
-          appCategory: detectAppCategory(title),
-        })
-      }
-    } catch {
-      // 静默失败 — 前台检测是辅助功能
-    }
-  }
-
-  /**
-   * 通过 PowerShell 获取当前前台窗口标题。
-   * 使用 Add-Type 编译一行 C# 代码调用 user32.dll。
-   */
-  private async getForegroundWindowTitle(): Promise<string> {
-    const { exec } = require('child_process')
-    const { promisify } = require('util')
-    const execAsync = promisify(exec)
-
-    const script = `
-      Add-Type @'
-        using System;
-        using System.Runtime.InteropServices;
-        using System.Text;
-        public class ForegroundWin {
-          [DllImport("user32.dll")]
-          public static extern IntPtr GetForegroundWindow();
-          [DllImport("user32.dll")]
-          public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-          public static string GetTitle() {
-            IntPtr hWnd = GetForegroundWindow();
-            StringBuilder sb = new StringBuilder(256);
-            GetWindowText(hWnd, sb, 256);
-            return sb.ToString();
-          }
-        }
-'@
-      [ForegroundWin]::GetTitle()
-    `
-
-    try {
-      const { stdout } = await execAsync(
-        `powershell -NoProfile -NonInteractive -Command "${script.replace(/"/g, '\\"').replace(/\n/g, '; ')}"`,
-        { timeout: 2000, windowsHide: true },
-      )
-      return (stdout || '').trim()
-    } catch {
-      return ''
-    }
   }
 
   // ==================== 内部方法 ====================

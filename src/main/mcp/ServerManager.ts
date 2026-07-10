@@ -12,6 +12,8 @@ import type { MemoryService } from '../memory/MemoryService'
 import { MemoryRetriever, ToolMemoryDefaults } from './ToolMemoryDefaults'
 import { MEMORY_TOOL_PERSONALIZATION, BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE } from '../config'
 import { behaviorPredictor } from './BehaviorPredictor'
+import { toolCallLogStore } from '../tool/ToolCallLogStore'
+import { toolAnalytics } from '../tool/ToolAnalytics'
 
 const FILE_WRITE_TOOLS = new Set(['write_file', 'edit_file'])
 const FILE_READ_TOOLS = new Set(['read_file', 'list_files', 'grep'])
@@ -280,10 +282,10 @@ export class ServerManager {
     // 根据 Memory 中的调用频次和成功率提升高频/高成功工具的排名，
     // 使 LLM 更倾向于选择用户常用的工具。
     const priorities = this.memoryInterceptor.getToolPriorities()
-    if (priorities.length > 0) {
-      // 构建工具名 → boost 查找表
-      const boostMap = new Map(priorities.map((p) => [p.toolName, p.boost]))
+    // 构建工具名 → boost 查找表（在 if 外部声明，供后续分析驱动调整使用）
+    const boostMap = new Map(priorities.map((p) => [p.toolName, p.boost]))
 
+    if (priorities.length > 0) {
       // 稳定排序：高 boost 的工具排前面，其余保持原顺序
       schemas.sort((a, b) => {
         const boostA = boostMap.get(a.function.name) ?? 0
@@ -296,6 +298,36 @@ export class ServerManager {
         boostedCount: priorities.filter((p) => p.boost > 0).length,
         topBoosted: priorities.slice(0, 5).map((p) => `${p.toolName}(+${p.boost})`).join(', '),
       })
+    }
+
+    // ★ 分析驱动的工具优先级调整
+    // 根据 ToolAnalytics 的成功率和延迟数据动态调整工具排名
+    try {
+      const recommendations = toolAnalytics.getPriorityRecommendations()
+      if (recommendations.length > 0) {
+        const analyticsBoostMap = new Map(recommendations.map((r) => [r.toolName, r.delta]))
+
+        // 在内存优先级基础上叠加分析驱动调整
+        schemas.sort((a, b) => {
+          const boostA = boostMap.get(a.function.name) ?? 0
+          const boostB = boostMap.get(b.function.name) ?? 0
+          const analyticsBoostA = analyticsBoostMap.get(a.function.name) ?? 0
+          const analyticsBoostB = analyticsBoostMap.get(b.function.name) ?? 0
+          // 综合排名 = 记忆优先级 + 分析驱动调整
+          const totalA = boostA + analyticsBoostA
+          const totalB = boostB + analyticsBoostB
+          return totalB - totalA || 0
+        })
+
+        const adjusted = recommendations.filter((r) => r.delta !== 0)
+        log('INFO', 'analytics_tool_prioritized', {
+          adjustedCount: adjusted.length,
+          topIncreased: adjusted.filter((r) => r.delta > 0).slice(0, 3).map((r) => `${r.toolName}(+${r.delta})`).join(', '),
+          topDecreased: adjusted.filter((r) => r.delta < 0).slice(0, 3).map((r) => `${r.toolName}(${r.delta})`).join(', '),
+        })
+      }
+    } catch (err: any) {
+      log('WARN', 'analytics_priority_failed', { error: err.message })
     }
 
     return schemas
@@ -337,8 +369,10 @@ export class ServerManager {
   }
 
   async callTool(name: string, args: Record<string, any>): Promise<string> {
+    const startedAt = Date.now()
     const meta = this.toolMap.get(name)
     if (!meta) {
+      toolCallLogStore.record(name, args, null, `未知工具: ${name}`, Date.now() - startedAt, false)
       throw new Error(`未知工具: ${name}`)
     }
 
@@ -350,6 +384,7 @@ export class ServerManager {
       // 缓存命中时仍记录调用（验证预测有效），更新模式库
       behaviorPredictor.recordCall(name, args, 0, true)
       this.memoryInterceptor.postCall(name, args, cachedResult, true)
+      toolCallLogStore.record(name, args, cachedResult, null, Date.now() - startedAt, true)
       // 记录后预测下一步，触发后续工具的预加载
       this.recordAndPredict(name, args, cachedResult, meta.serverName)
       return cachedResult
@@ -419,6 +454,9 @@ export class ServerManager {
       // ★ Memory-aware 拦截：工具调用成功后存储结果摘要
       this.memoryInterceptor.postCall(name, args, result, true)
 
+      // ★ 详细调用日志记录
+      toolCallLogStore.record(name, args, result, null, Date.now() - startedAt, true)
+
       // ★ 行为驱动预激活：记录本次调用并预测下一步
       this.recordAndPredict(name, args, result, meta.serverName)
 
@@ -427,6 +465,9 @@ export class ServerManager {
       success = false
       // ★ Memory-aware 拦截：工具调用失败也记录（低置信度）
       this.memoryInterceptor.postCall(name, args, err.message || String(err), false)
+
+      // ★ 详细调用日志记录（失败）
+      toolCallLogStore.record(name, args, null, err.message || String(err), Date.now() - startedAt, false)
 
       // ★ 行为驱动预激活：即使调用失败也记录行为（但 success=false）
       behaviorPredictor.recordCall(name, args, 0, false)

@@ -3,18 +3,24 @@
  *
  * 职责：
  * 1. 读取 ToolStatsTracker 的问题工具列表
- * 2. 将高错误率工具转化为管道可消费的 Problem
- * 3. 附带工具调用上下文，供 Executor 生成针对性优化
+ * 2. 使用 FailurePatternAnalyzer 分析具体失败模式
+ * 3. 将识别到的模式转化为管道可消费的 Problem，附带具体参数上下文
  *
  * 触发条件：
  * - 某工具错误率超过阈值（默认 25%）
  * - 调用次数超过最小样本数（默认 5 次）
  * - 该工具不在冷却列表中（24h 内未优化过）
+ *
+ * v2 增强：
+ * - 使用 FailurePatternAnalyzer 发现具体参数模式
+ * - Problem 上下文中包含具体失败参数值和建议修复模板
+ * - 为 ToolEvolutionExecutor 提供更精确的修复指导
  */
 
 import { log } from '../../logger/Logger'
 import type { SignalCollector, Problem } from './types'
 import { toolStatsTracker } from '../../tool/ToolStatsTracker'
+import { failurePatternAnalyzer } from '../../tool/FailurePatternAnalyzer'
 
 export class ToolEvolutionCollector implements SignalCollector {
   readonly name = 'tool-evolution-collector'
@@ -36,6 +42,7 @@ export class ToolEvolutionCollector implements SignalCollector {
     const problems: Problem[] = []
 
     try {
+      // ── 阶段 1：从 ToolStatsTracker 获取问题工具列表 ──
       const problematicTools = toolStatsTracker.getProblematicTools()
 
       if (problematicTools.length === 0) {
@@ -56,6 +63,30 @@ export class ToolEvolutionCollector implements SignalCollector {
           this.reportedToolIds.add(problemId)
         }
 
+        // ── 阶段 2：使用 FailurePatternAnalyzer 进行深度模式分析 ──
+        const patterns = failurePatternAnalyzer.analyzeTool(pt.toolName)
+
+        // 构建增强的上下文描述
+        let patternDetail = ''
+        let suggestedFix = pt.suggestion
+        let affectedParams = ''
+
+        if (patterns.length > 0) {
+          const topPattern = patterns[0]
+          patternDetail = `\n失败模式: ${topPattern.description}`
+          if (topPattern.argPatterns.length > 0) {
+            const argDesc = topPattern.argPatterns
+              .map((ap) => `${ap.param}=${ap.valuePattern} (失败率 ${(ap.failureRate * 100).toFixed(0)}%, 样本 ${ap.sampleCount} 次)`)
+              .join('; ')
+            patternDetail += `\n参数模式: ${argDesc}`
+            affectedParams = topPattern.affectedParams.join(',')
+          }
+          if (topPattern.sampleErrors.length > 0) {
+            patternDetail += `\n样本错误: ${topPattern.sampleErrors.slice(0, 2).join(' | ')}`
+          }
+          suggestedFix = topPattern.suggestedFix
+        }
+
         problems.push({
           id: problemId,
           source: 'tool',
@@ -66,12 +97,14 @@ export class ToolEvolutionCollector implements SignalCollector {
           lastSeen: Date.now(),
           occurrenceCount: isSeen ? 2 : 1,
           context: {
-            raw: `工具错误率分析:\n工具名: ${pt.toolName}\n错误率: ${(pt.errorRate * 100).toFixed(1)}%\n总调用: ${pt.totalCalls}\n建议优化类型: ${pt.suggestion}`,
+            raw: `工具错误率分析:\n工具名: ${pt.toolName}\n错误率: ${(pt.errorRate * 100).toFixed(1)}%\n总调用: ${pt.totalCalls}\n建议优化类型: ${suggestedFix}${patternDetail}`,
             metadata: {
               toolName: pt.toolName,
               errorRate: String(pt.errorRate),
               totalCalls: String(pt.totalCalls),
-              suggestion: pt.suggestion,
+              suggestion: suggestedFix,
+              affectedParams,
+              patternCount: String(patterns.length),
             },
           },
         })

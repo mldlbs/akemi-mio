@@ -36,7 +36,7 @@
   color: var(--text-primary);
   letter-spacing: 0.04em;
   -webkit-app-region: no-drag;
-  margin-right: var(--space-lg);
+  margin-right: var(--space-sm);
 }
 
 .topbar-center {
@@ -109,6 +109,86 @@
   gap: var(--space-xs);
   margin-left: auto;
   -webkit-app-region: no-drag;
+}
+
+/* ─── Slot 下拉菜单 ─── */
+.topbar-slot-dropdown {
+  position: relative;
+}
+
+.topbar-slot-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-glass);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-glass);
+  font-family: inherit;
+  -webkit-app-region: no-drag;
+}
+
+.topbar-slot-trigger:hover {
+  background: var(--bg-glass-strong);
+  color: var(--text-primary);
+  border-color: var(--border-glass-hover);
+}
+
+.topbar-slot-label {
+  margin: 0 2px;
+}
+
+.topbar-slot-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 180px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-card);
+  box-shadow: 0 8px 24px oklch(0 0 0 / 0.1);
+  padding: var(--space-xs);
+  z-index: 30;
+  animation: slot-menu-in 0.15s var(--ease-glass);
+}
+
+@keyframes slot-menu-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.topbar-slot-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+
+.topbar-slot-option:hover {
+  background: var(--bg-glass);
+  color: var(--text-primary);
+}
+
+.topbar-slot-option.active {
+  color: var(--accent);
+}
+
+.topbar-slot-option i:last-child {
+  margin-left: auto;
 }
 
 /* ─── Body: Sidebar + Main ─── */
@@ -190,6 +270,49 @@
   /* 底部淡出提示还有更多 */
   mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent 100%);
+}
+
+/* ─── Sidebar 折叠态：icon-only ─── */
+.sidebar.collapsed {
+  width: 48px;
+  min-width: 48px;
+  overflow: visible;
+}
+
+.sidebar.collapsed .sidebar-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-sm) 0;
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+
+.sidebar.collapsed::after {
+  opacity: 0.3;
+}
+
+.sidebar-collapsed-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+  font-family: inherit;
+}
+
+.sidebar-collapsed-icon:hover {
+  color: var(--text-secondary);
+  background: var(--bg-glass);
+  border-color: var(--border-glass);
 }
 
 .sidebar-item {

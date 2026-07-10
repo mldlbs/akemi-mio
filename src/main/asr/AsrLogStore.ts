@@ -39,6 +39,10 @@ export interface RecognitionRecord {
   inferenceMs: number
   /** 是否存在热词命中 */
   hasHotwordHit: boolean
+  /** 声学环境分类（由 AsrAcousticEnvironmentClassifier 给出，可选） */
+  environment?: string
+  /** 识别置信度（由 AsrConfidenceScorer 估计，可选） */
+  confidence?: number
 }
 
 export interface CorrectionRecord {
@@ -73,6 +77,34 @@ export interface AsrErrorPattern {
 }
 
 /**
+ * ASR 低置信度识别片段
+ *
+ * 当 ASR 引擎对某段识别的置信度低于阈值（默认 0.7）时，
+ * 记录该片段供后续 Evolution 分析，
+ * 用于提取高频未登录词和优化热词表。
+ */
+export interface LowConfidenceSegment {
+  /** 唯一标识 */
+  id: string
+  /** 记录时间戳 */
+  timestamp: number
+  /** ASR 引擎 */
+  engine: 'whisper_gpu' | 'whisper_cpu' | 'baidu'
+  /** 识别文本 */
+  text: string
+  /** 估计置信度 (0–1) */
+  confidence: number
+  /** 置信度阈值（低于此值触发记录） */
+  threshold: number
+  /** 关联的识别请求 ID */
+  requestId: string
+  /** 音频时长（秒） */
+  audioDurationSec: number
+  /** 该段文本是否已被纠正（用户在后续反馈中修正过） */
+  wasCorrected: boolean
+}
+
+/**
  * ASR 进化评估快照（用于前后对比决定保留/回滚）
  */
 export interface AsrEvalSnapshot {
@@ -97,6 +129,7 @@ export interface AsrEvalSnapshot {
 const RECOGNITIONS_FILE = join(WORKSPACE.cache, 'asr-recognitions.json')
 const CORRECTIONS_FILE = join(WORKSPACE.cache, 'asr-corrections.json')
 const SNAPSHOTS_FILE = join(WORKSPACE.cache, 'asr-eval-snapshots.json')
+const LOW_CONF_SEGMENTS_FILE = join(WORKSPACE.cache, 'asr-low-confidence-segments.json')
 
 /** 保留最近 N 条识别记录 */
 const MAX_RECOGNITIONS = 5000
@@ -104,6 +137,8 @@ const MAX_RECOGNITIONS = 5000
 const MAX_CORRECTIONS = 2000
 /** 保留最近 N 个评估快照 */
 const MAX_SNAPSHOTS = 50
+/** 保留最近 N 条低置信度片段 */
+const MAX_LOW_CONF_SEGMENTS = 1000
 
 // =============================================================================
 // AsrLogStore
@@ -113,6 +148,7 @@ export class AsrLogStore {
   private recognitions: RecognitionRecord[] = []
   private corrections: CorrectionRecord[] = []
   private snapshots: AsrEvalSnapshot[] = []
+  private lowConfSegments: LowConfidenceSegment[] = []
   private loaded = false
 
   // ==================== 初始化 ====================
@@ -122,11 +158,13 @@ export class AsrLogStore {
     this.loadRecognitions()
     this.loadCorrections()
     this.loadSnapshots()
+    this.loadLowConfSegments()
     this.loaded = true
     log('INFO', 'asr_log_store_loaded', {
       recognitions: this.recognitions.length,
       corrections: this.corrections.length,
       snapshots: this.snapshots.length,
+      low_conf_segments: this.lowConfSegments.length,
     })
   }
 
@@ -199,6 +237,29 @@ export class AsrLogStore {
     }
   }
 
+  private loadLowConfSegments(): void {
+    try {
+      if (!existsSync(LOW_CONF_SEGMENTS_FILE)) return
+      const raw = readFileSync(LOW_CONF_SEGMENTS_FILE, 'utf-8')
+      const data = JSON.parse(raw)
+      if (Array.isArray(data)) {
+        this.lowConfSegments = data as LowConfidenceSegment[]
+      }
+    } catch (err) {
+      log('WARN', 'asr_log_load_low_conf_failed', { error: String(err) })
+    }
+  }
+
+  private saveLowConfSegments(): void {
+    try {
+      const dir = dirname(LOW_CONF_SEGMENTS_FILE)
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+      writeFileSync(LOW_CONF_SEGMENTS_FILE, JSON.stringify(this.lowConfSegments, null, 2), 'utf-8')
+    } catch (err) {
+      log('WARN', 'asr_log_save_low_conf_failed', { error: String(err) })
+    }
+  }
+
   // ==================== 记录写入 ====================
 
   /**
@@ -243,6 +304,55 @@ export class AsrLogStore {
       corrected: correctedText,
       isUserCorrection: true,
     })
+  }
+
+  // ==================== 低置信度片段记录 ====================
+
+  /**
+   * 记录一条低置信度识别片段。
+   * 在 AsrService transcribe 完成后，对置信度 < 阈值的结果调用。
+   */
+  recordLowConfidenceSegment(segment: LowConfidenceSegment): void {
+    this.load()
+    this.lowConfSegments.push(segment)
+    if (this.lowConfSegments.length > MAX_LOW_CONF_SEGMENTS) {
+      this.lowConfSegments = this.lowConfSegments.slice(-MAX_LOW_CONF_SEGMENTS)
+    }
+    this.saveLowConfSegments()
+  }
+
+  /**
+   * 获取指定时间范围内的低置信度片段。
+   */
+  getLowConfidenceSegmentsSince(timestamp: number): LowConfidenceSegment[] {
+    this.load()
+    return this.lowConfSegments.filter((s) => s.timestamp >= timestamp)
+  }
+
+  /**
+   * 获取所有未纠正的低置信度片段（尚未被用户反馈修正过）。
+   * 这些是 Evolution 系统提取新词汇的候选。
+   */
+  getUncorrectedLowConfidenceSegments(since?: number): LowConfidenceSegment[] {
+    this.load()
+    const filtered = this.lowConfSegments.filter((s) => !s.wasCorrected)
+    if (since) {
+      return filtered.filter((s) => s.timestamp >= since)
+    }
+    return filtered
+  }
+
+  /**
+   * 标记低置信度片段已被纠正。
+   * 当用户反馈修正了某次识别的错误后调用。
+   */
+  markLowConfSegmentCorrected(segmentId: string): boolean {
+    this.load()
+    const seg = this.lowConfSegments.find((s) => s.id === segmentId)
+    if (!seg) return false
+    seg.wasCorrected = true
+    this.saveLowConfSegments()
+    return true
   }
 
   // ==================== 查询接口 ====================
@@ -455,12 +565,13 @@ export class AsrLogStore {
   }
 
   /** 获取日志统计摘要 */
-  getStats(): { totalRecognitions: number; totalCorrections: number; activeSnapshots: number } {
+  getStats(): { totalRecognitions: number; totalCorrections: number; activeSnapshots: number; lowConfSegments: number } {
     this.load()
     return {
       totalRecognitions: this.recognitions.length,
       totalCorrections: this.corrections.length,
       activeSnapshots: this.snapshots.filter((s) => s.status === 'pending').length,
+      lowConfSegments: this.lowConfSegments.length,
     }
   }
 }

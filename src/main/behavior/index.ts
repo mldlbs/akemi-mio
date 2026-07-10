@@ -1,6 +1,10 @@
 export { UserBehaviorService } from './UserBehaviorService'
 export type { UserBehaviorState, ActivityState, AppCategory, ActivityContext, EnrichedBehaviorState } from './UserBehaviorService'
 
+// ── App Window Polling（前台窗口轮询子模块）──
+export { AppWindowPolling, detectAppCategory } from './app-window-polling'
+export type { AppWindowPollingOptions, WindowUpdateCallback } from './app-window-polling'
+
 export { BehaviorStateMachine, behaviorStateMachine } from './BehaviorStateMachine'
 export type { BehaviorMode, BehaviorModeSnapshot, AdaptiveThresholds, InteractionRecord, BehaviorStats } from './BehaviorStateMachine'
 

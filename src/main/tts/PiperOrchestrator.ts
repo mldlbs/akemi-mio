@@ -31,6 +31,7 @@ import { log } from '../logger/Logger'
 import { PIPER_SCRIPT, PIPER_MODEL } from '../config'
 import { cleanTTS } from './TtsService'
 import { AsyncQueue, ok, err, type Result } from '../core/patterns'
+import { MetricsCollector } from '../core/metrics/MetricsCollector'
 import type { IEngineService, EngineStatus, EngineMetrics } from '../engine/types'
 
 // ══════════════════════════════════════════
@@ -170,8 +171,19 @@ export class PiperOrchestrator implements IEngineService {
   /** 单次合成超时（毫秒），同时用于 AsyncQueue 超时和 execFile 超时 */
   private readonly SYNTHESIS_TIMEOUT_MS = 30000
 
-  /** 各模型的合成统计（供 TtsPiperBridge 反馈使用） */
-  private readonly synthesisStats: Record<string, PiperModelSynthesisStat> = {}
+  /**
+   * 各模型延迟指标收集器。
+   * 替代手动 synthesisStats 的累积逻辑，同时提供滑动窗口统计。
+   * 成功合成时记录延迟数值；失败计数通过 failureCounts 独立追踪，
+   * 避免 0 值污染平均延迟。
+   */
+  private readonly latencyMetrics = new MetricsCollector<string>({
+    slidingWindowSize: 10,
+    loggerName: 'piper_latency',
+  })
+
+  /** 各模型失败次数（独立追踪，避免影响延迟统计） */
+  private readonly failureCounts = new Map<string, number>()
 
   /**
    * 通用异步串行队列 — 替代手动 QueuedTask[] + processQueue + isProcessing/stopped。
@@ -296,33 +308,38 @@ export class PiperOrchestrator implements IEngineService {
 
   /**
    * 获取各模型的合成统计数据（供 TtsPiperBridge 消费）。
+   * 数据来源：latencyMetrics（成功合成延迟）+ failureCounts（失败计数）。
    */
   getSynthesisStats(): PiperSynthesisStats {
-    const stats = this.synthesisStats
-    const models = Object.keys(stats)
-    const total = models.reduce(
-      (acc, m) => {
-        acc.requests += stats[m].totalRequests
-        acc.success += stats[m].successCount
-        acc.failure += stats[m].failureCount
-        return acc
-      },
-      { requests: 0, success: 0, failure: 0 },
-    )
+    const allModels = new Set([...this.latencyMetrics.getKeys(), ...this.failureCounts.keys()])
+    const perModel: Record<string, PiperModelSynthesisStat> = {}
+    let total = { requests: 0, success: 0, failure: 0 }
 
-    return {
-      perModel: { ...stats },
-      total,
+    for (const model of allModels) {
+      const stat = this.latencyMetrics.getStats(model)
+      const failures = this.failureCounts.get(model) ?? 0
+      const requests = stat.count + failures
+      perModel[model] = {
+        totalRequests: requests,
+        successCount: stat.count,
+        failureCount: failures,
+        totalLatencyMs: Math.round(stat.sum),
+        avgLatencyMs: stat.count > 0 ? Math.round(stat.avg) : 0,
+      }
+      total.requests += requests
+      total.success += stat.count
+      total.failure += failures
     }
+
+    return { perModel, total }
   }
 
   /**
    * 重置合成统计数据。
    */
   resetSynthesisStats(): void {
-    for (const key of Object.keys(this.synthesisStats)) {
-      delete this.synthesisStats[key]
-    }
+    this.latencyMetrics.clear()
+    this.failureCounts.clear()
   }
 
   // ══════════════════════════════════════════
@@ -413,38 +430,28 @@ export class PiperOrchestrator implements IEngineService {
 
   /**
    * 计算所有模型的平均延迟。
+   * 委托给 MetricsCollector.getAvg()。
    */
   private calcAverageLatency(): number | undefined {
-    const stats = this.synthesisStats
-    const models = Object.keys(stats)
+    const models = this.latencyMetrics.getKeys()
     if (models.length === 0) return undefined
-    const totalLatency = models.reduce((sum, m) => sum + stats[m].totalLatencyMs, 0)
-    const totalReq = models.reduce((sum, m) => sum + stats[m].totalRequests, 0)
+    const totalLatency = models.reduce((sum, m) => sum + this.latencyMetrics.getStats(m).sum, 0)
+    const totalReq = models.reduce((sum, m) => sum + this.latencyMetrics.getStats(m).count, 0)
     return totalReq > 0 ? Math.round(totalLatency / totalReq) : undefined
   }
 
   /**
    * 记录一次合成统计。
+   * 委托给 MetricsCollector + failureCounts。
+   * - 成功：记录延迟到 latencyMetrics（含滑动窗口统计）
+   * - 失败：递增 failureCounts（不影响平均延迟计算）
    */
   private recordSynthesisStat(model: string, success: boolean, durationMs: number): void {
-    if (!this.synthesisStats[model]) {
-      this.synthesisStats[model] = {
-        totalRequests: 0,
-        successCount: 0,
-        failureCount: 0,
-        totalLatencyMs: 0,
-        avgLatencyMs: 0,
-      }
-    }
-    const stat = this.synthesisStats[model]
-    stat.totalRequests++
     if (success) {
-      stat.successCount++
+      this.latencyMetrics.record(model, durationMs)
     } else {
-      stat.failureCount++
+      this.failureCounts.set(model, (this.failureCounts.get(model) ?? 0) + 1)
     }
-    stat.totalLatencyMs += durationMs
-    stat.avgLatencyMs = Math.round(stat.totalLatencyMs / stat.totalRequests)
   }
 
   // ── 私有：合成处理 ──

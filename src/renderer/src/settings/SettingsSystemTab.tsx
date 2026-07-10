@@ -38,6 +38,52 @@ export function SettingsSystemTab({ values, onSetCredential }: SettingsTabProps)
           <span className="settings-help">审查模式下进化仅生成计划不会自动执行</span>
         </div>
       </div>
+
+      <div className="settings-section">
+        <span className="settings-section-title">Telegram</span>
+        <div className="settings-field">
+          <span className="settings-label">启用 Telegram</span>
+          <div className="settings-toggle">
+            <button
+              type="button"
+              className={`settings-toggle-btn${values[CRED_KEYS.TELEGRAM_ENABLED] === 'true' ? ' active' : ''}`}
+              onClick={() => onSetCredential(CRED_KEYS.TELEGRAM_ENABLED, 'true')}
+            >
+              开启
+            </button>
+            <button
+              type="button"
+              className={`settings-toggle-btn${values[CRED_KEYS.TELEGRAM_ENABLED] !== 'true' ? ' active' : ''}`}
+              onClick={() => onSetCredential(CRED_KEYS.TELEGRAM_ENABLED, 'false')}
+            >
+              禁用
+            </button>
+          </div>
+          <span className="settings-help">默认禁用，开启后需配置下方代理地址（需重启生效）</span>
+        </div>
+        <div className="settings-field">
+          <span className="settings-label">代理服务器地址</span>
+          <input
+            type="text"
+            className="settings-input"
+            placeholder="https://skills.crlkcloud.cyou/telegram"
+            value={values[CRED_KEYS.TELEGRAM_SERVER_URL] || ''}
+            onChange={(e) => onSetCredential(CRED_KEYS.TELEGRAM_SERVER_URL, e.target.value)}
+          />
+          <span className="settings-help">Telegram 代理服务器地址，留空使用默认值</span>
+        </div>
+        <div className="settings-field">
+          <span className="settings-label">推送 Chat ID</span>
+          <input
+            type="text"
+            className="settings-input"
+            placeholder="例如 8878140402"
+            value={values[CRED_KEYS.TELEGRAM_CHAT_ID] || ''}
+            onChange={(e) => onSetCredential(CRED_KEYS.TELEGRAM_CHAT_ID, e.target.value)}
+          />
+          <span className="settings-help">设置后启用系统事件推送，留空关闭推送</span>
+        </div>
+      </div>
     </>
   )
 }
