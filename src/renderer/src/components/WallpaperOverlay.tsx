@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useBehaviorAwareWallpaper } from '../hooks/useBehaviorAwareWallpaper'
 import { useFocusScore } from '../hooks/useFocusScore'
 import { BehaviorDash } from './BehaviorDash'
@@ -6,28 +6,19 @@ import { TaskSwitcher } from './TaskSwitcher'
 import { WallpaperWidgetHost } from '../widgets/WallpaperWidgetHost'
 import { wallpaperWidgetRegistry } from '../widgets/WallpaperWidgetRegistry'
 import { registerAllWidgets } from '../widgets/plugins'
-import type { MonitoringData, WallpaperWidgetContext } from '../widgets/types'
+import type { WallpaperWidgetContext } from '../widgets/types'
 
 // =============================================================================
-// WallpaperOverlay — 行为感知壁纸覆层（增强版）
+// WallpaperOverlay — 行为感知壁纸覆层（精简版）
 // =============================================================================
 //
 // 根据用户活动状态自适应调整透明度和显示内容。
 // 支持三种行为模式:
-//
-//   专注模式 focus:     隐藏所有装饰，极低透明度 → 最大程度减少干扰
+//   专注模式 focus:     隐藏所有装饰，极低透明度
 //   多任务 multitasking: 显示浮动任务切换器，中等透明度
 //   休息 break:         隐私淡入保护屏幕内容
 //
-// 行为:
-//   - 透明覆盖层，通过 CSS 变量控制整体透明度
-//   - 空闲时显示浅色信息面板（时间 + 待办事项 + 进化状态）
-//   - 全屏/编码时大幅降低透明度，最大限度减少视觉干扰
-//   - 过渡动画由 CSS transition 控制
-//   - 右下角显示自进化系统状态（阶段、进度、资源占用）
-//   - 提供锁定开关阻止进化系统修改壁纸
-//   - Widget 插件系统：面板组件通过 IWallpaperWidget 接口注册，
-//     由 WallpaperWidgetHost 统一渲染（模式来源: Memory IMemoryPlugin）
+// 监控面板已移入 SystemDock 组件。
 //
 // =============================================================================
 
@@ -36,28 +27,6 @@ interface WeatherData {
   temp: string
   condition: string
   icon: string
-}
-
-// =============================================================================
-// 子组件: 锁定开关
-// =============================================================================
-
-function LockToggle({
-  locked,
-  onToggle,
-}: {
-  locked: boolean
-  onToggle: (locked: boolean) => void
-}) {
-  return (
-    <button
-      className={`wp-lock-btn ${locked ? 'wp-lock-btn--locked' : ''}`}
-      onClick={() => onToggle(!locked)}
-      title={locked ? '壁纸已锁定，禁止进化修改' : '壁纸未锁定，允许进化优化'}
-    >
-      {locked ? '🔒' : '🔓'}
-    </button>
-  )
 }
 
 // =============================================================================
@@ -84,11 +53,8 @@ export function WallpaperOverlay() {
   const focus = useFocusScore(behavior)
   const [currentTime, setCurrentTime] = useState(new Date())
   const [weather, setWeather] = useState<WeatherData | null>(null)
-  const [monitoring, setMonitoring] = useState<MonitoringData | null>(null)
-  const [evoLocked, setEvoLocked] = useState(config.evoLocked)
-  const [showMonPanel, setShowMonPanel] = useState(true)
 
-  // ── Widget 插件初始化（模式来源: Memory UnifiedMemoryQuery.registerPlugin） ──
+  // ── Widget 插件初始化 ──
   useEffect(() => {
     registerAllWidgets()
     return () => {
@@ -117,15 +83,6 @@ export function WallpaperOverlay() {
     loadWeather()
   }, [])
 
-  // ── 订阅监控指标推送 ──
-  useEffect(() => {
-    const unsub = window.electronAPI.onMonitoringMetrics((data) => {
-      setMonitoring(data)
-      setEvoLocked(data.evoLocked)
-    })
-    return unsub
-  }, [])
-
   // ── 订阅 CSS 热重载 ──
   useEffect(() => {
     const unsub = window.electronAPI.onWallpaperStylesUpdated((css, filename) => {
@@ -143,21 +100,6 @@ export function WallpaperOverlay() {
     return unsub
   }, [])
 
-  // ── 锁定切换 ──
-  const handleLockToggle = useCallback(async (locked: boolean) => {
-    try {
-      const result = await window.electronAPI.setEvoLock(locked)
-      if (result.success) {
-        setEvoLocked(result.locked)
-      }
-    } catch {}
-  }, [])
-
-  // ── 监控面板折叠切换 ──
-  const toggleMonPanel = useCallback(() => {
-    setShowMonPanel((prev) => !prev)
-  }, [])
-
   if (!config.enabled) return null
 
   // ── 格式化时间 ──
@@ -171,14 +113,14 @@ export function WallpaperOverlay() {
     day: 'numeric',
   })
 
-  // ── 构建 Widget 上下文（模式来源: Memory IMemoryPlugin.retrieve 中的 query context） ──
+  // ── 构建 Widget 上下文 ──
   const widgetCtx: WallpaperWidgetContext = {
     mode,
     context,
     config,
     behavior,
-    monitoring,
-    evoLocked,
+    monitoring: null,
+    evoLocked: false,
     hideDecoration,
     opacity,
     privacyFade,
@@ -203,14 +145,13 @@ export function WallpaperOverlay() {
     transition: `opacity var(--wallpaper-transition-duration, 0.6s) ease`,
   }
 
-  // 隐私淡入：break 模式下增加深色背景层
   if (privacyFade > 0) {
     overlayStyle.background = `oklch(0 0 0 / ${privacyFade * 0.6})`
   }
 
   return (
     <div className={overlayClasses} style={overlayStyle}>
-      {/* ── 隐私模糊层（break 模式 + 隐私淡入启用） ── */}
+      {/* ── 隐私模糊层（break 模式） ── */}
       {privacyFade > 0 && config.privacyBlurEnabled && (
         <div
           className="wp-privacy-blur"
@@ -232,7 +173,7 @@ export function WallpaperOverlay() {
         <WallpaperWidgetHost zone="decoration" ctx={widgetCtx} />
       )}
 
-      {/* ── Overlay 区（快捷键指南、信息摘要等上下文面板） ── */}
+      {/* ── Overlay 区（快捷键指南等上下文面板） ── */}
       {!hideDecoration && (
         <WallpaperWidgetHost zone="overlay" ctx={widgetCtx} />
       )}
@@ -253,88 +194,18 @@ export function WallpaperOverlay() {
             </div>
           )}
 
-          {/* 计划进度（空闲时也显示） */}
-          {monitoring?.plan?.hasActivePlan && (
-            <WallpaperWidgetHost zone="monitor" ctx={widgetCtx} />
-          )}
+          {/* 行为专注仪表盘 */}
+          {focus.config.enabled && <BehaviorDash focus={focus} />}
         </div>
       )}
 
-      {/* ── 多任务任务切换器（多任务模式显示） ── */}
+      {/* ── 多任务任务切换器 ── */}
       {showTaskSwitcher && (
         <TaskSwitcher switches={recentSwitches} visible={true} />
       )}
 
-      {/* ── 右下角监控面板（专注模式隐藏） ── */}
-      {monitoring && showMonPanel && !hideDecoration && (
-        <div className="wp-mon-panel">
-          {/* 折叠按钮 */}
-          <button className="wp-mon-toggle" onClick={toggleMonPanel} title="折叠监控面板">
-            <span className="wp-mon-toggle-icon">▼</span>
-          </button>
-
-          {/* 锁定开关 */}
-          <LockToggle locked={evoLocked} onToggle={handleLockToggle} />
-
-          {/* 监控区 Widget（进化状态、计划进度、系统资源等） */}
-          <WallpaperWidgetHost zone="monitor" ctx={widgetCtx} />
-
-          {/* 最近文件变更（本地 UI 逻辑，保持内联） */}
-          {monitoring.recentChanges.length > 0 && (
-            <div className="wp-changes-panel">
-              <div className="wp-changes-title">最近变更</div>
-              {monitoring.recentChanges.slice(0, 3).map((change, i) => (
-                <div key={i} className="wp-change-item">
-                  <span className={`wp-change-type wp-change-type--${change.type}`}>
-                    {change.type === 'new' ? '+' : change.type === 'deleted' ? '-' : '~'}
-                  </span>
-                  <span className="wp-change-file" title={change.filePath}>
-                    {change.filePath.split('/').pop() || change.filePath}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── 折叠状态：仅显示锁定状态和活动指示器（专注模式隐藏） ── */}
-      {monitoring && !showMonPanel && !hideDecoration && (
-        <div className="wp-mon-collapsed">
-          <button className="wp-mon-toggle wp-mon-toggle--collapsed" onClick={toggleMonPanel} title="展开监控面板">
-            <span className="wp-mon-toggle-icon">▲</span>
-          </button>
-          <LockToggle locked={evoLocked} onToggle={handleLockToggle} />
-          {monitoring.evolution && monitoring.evolution.stage !== 'idle' && (
-            <span
-              className="wp-mon-dot"
-              style={{
-                background:
-                  monitoring.evolution.stage === 'collecting' || monitoring.evolution.stage === 'analyzing'
-                    ? '#60a5fa'
-                    : monitoring.evolution.stage === 'fixing'
-                    ? '#f59e0b'
-                    : monitoring.evolution.stage === 'verifying'
-                    ? '#22c55e'
-                    : monitoring.evolution.stage === 'cooldown'
-                    ? '#f97316'
-                    : monitoring.evolution.stage === 'error'
-                    ? '#ef4444'
-                    : '#888',
-              }}
-              title={monitoring.evolution.stage}
-            />
-          )}
-        </div>
-      )}
-
       {/* ── 状态标签 ── */}
-      <div className="wallpaper-status-label">
-        {evoLocked && '🔒 '}{statusLabel}
-      </div>
-
-      {/* ── 行为专注仪表盘（专注模式隐藏） ── */}
-      {focus.config.enabled && !hideDecoration && <BehaviorDash focus={focus} />}
+      <div className="wallpaper-status-label">{statusLabel}</div>
     </div>
   )
 }

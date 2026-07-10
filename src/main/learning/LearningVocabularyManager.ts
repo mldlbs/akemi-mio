@@ -18,8 +18,9 @@
 
 import { log } from '../logger/Logger'
 import { WORKSPACE } from '../config'
-import { join, dirname } from 'path'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { join } from 'path'
+import { JsonStore } from '../core/persistence/JsonStore'
+import { SlidingWindow } from '../core/patterns/SlidingWindow'
 import type {
   LearningItem,
   LearningCategory,
@@ -39,9 +40,6 @@ const MASTERY_THRESHOLD = 0.8
 /** 学习中阈值（>= 此值视为学习中） */
 const LEARNING_THRESHOLD = 0.2
 
-/** 长期知识表持久化路径 */
-const VOCABULARY_FILE = join(WORKSPACE.cache, 'learning-vocabulary.json')
-
 /** 最大关注项数量（避免关注过多降低学习效率） */
 const MAX_FOCUS_ITEMS = 20
 
@@ -50,6 +48,12 @@ const MAX_LONG_TERM_ITEMS = 200
 
 /** 高掌握度持久化阈值：掌握度 >= 此值才持久化 */
 const HIGH_MASTERY_PERSIST_THRESHOLD = 0.3
+
+/** 学习词表持久化存储 */
+const VOCABULARY_STORE = new JsonStore<LearningItem>(
+  join(WORKSPACE.cache, 'learning-vocabulary.json'),
+  { loggerName: 'learning_vocab' },
+)
 
 /** 掌握度衰减率（每天衰减比例，模拟遗忘曲线） */
 const MASTERY_DECAY_RATE = 0.05
@@ -158,7 +162,7 @@ export class LearningVocabularyManager {
   private enabled = true
 
   /** 滑动窗口内的交互记录 */
-  private recentInteractions: string[] = []
+  private readonly recentInteractions = new SlidingWindow<string>(WINDOW_SIZE)
 
   /** 总交互次数 */
   private totalInteractions = 0
@@ -169,12 +173,7 @@ export class LearningVocabularyManager {
   /** 长期积累知识表（跨会话持久化） */
   private longTermItems: Map<string, LearningItem> = new Map()
 
-  /** 持久化文件路径 */
-  private vocabFilePath: string
-
-  constructor(vocabFilePath?: string) {
-    this.vocabFilePath = vocabFilePath || VOCABULARY_FILE
-  }
+  constructor() {}
 
   // ── 初始化 ──
 
@@ -204,91 +203,23 @@ export class LearningVocabularyManager {
     }
 
     // 从持久化恢复（覆盖预定义项中已有的掌握度）
-    this.loadPersistedVocabulary()
+    const loaded = VOCABULARY_STORE.mergeInto(
+      this.longTermItems,
+      (existing, persisted) => ({
+        ...existing,
+        encounterCount: Math.max(existing.encounterCount, persisted.encounterCount),
+        correctCount: Math.max(existing.correctCount, persisted.correctCount),
+        totalAttempts: Math.max(existing.totalAttempts, persisted.totalAttempts),
+        mastery: Math.max(existing.mastery, persisted.mastery),
+        lastSeenAt: Math.max(existing.lastSeenAt, persisted.lastSeenAt),
+      }),
+    )
 
     log('INFO', 'learning_vocab_initialized', {
       predefined: TYPESCRIPT_LEARNING_ITEMS.length,
       long_term: this.longTermItems.size,
+      loaded_persisted: loaded,
     })
-  }
-
-  /**
-   * 从持久化存储加载长期知识表。
-   */
-  loadPersistedVocabulary(): void {
-    try {
-      if (!existsSync(this.vocabFilePath)) return
-      const raw = readFileSync(this.vocabFilePath, 'utf-8')
-      const data: Array<Record<string, unknown>> = JSON.parse(raw)
-      if (!Array.isArray(data)) return
-
-      let loaded = 0
-      for (const rawItem of data) {
-        if (!rawItem.id || typeof rawItem.id !== 'string') continue
-        const existing = this.longTermItems.get(rawItem.id)
-        if (existing) {
-          // 合并持久化数据到预定义项
-          existing.encounterCount = (rawItem.encounterCount as number) || existing.encounterCount
-          existing.correctCount = (rawItem.correctCount as number) || existing.correctCount
-          existing.totalAttempts = (rawItem.totalAttempts as number) || existing.totalAttempts
-          existing.mastery = (rawItem.mastery as number) || existing.mastery
-          existing.lastSeenAt = (rawItem.lastSeenAt as number) || existing.lastSeenAt
-        } else {
-          // 恢复预定义清单中未覆盖的自定义项
-          this.longTermItems.set(rawItem.id as string, {
-            id: rawItem.id as string,
-            name: (rawItem.name as string) || (rawItem.id as string),
-            category: (rawItem.category as LearningCategory) || '其他',
-            difficulty: (rawItem.difficulty as ConceptDifficulty) || 'medium',
-            mastery: (rawItem.mastery as number) || 0,
-            encounterCount: (rawItem.encounterCount as number) || 0,
-            correctCount: (rawItem.correctCount as number) || 0,
-            totalAttempts: (rawItem.totalAttempts as number) || 0,
-            firstSeenAt: (rawItem.firstSeenAt as number) || Date.now(),
-            lastSeenAt: (rawItem.lastSeenAt as number) || Date.now(),
-            tags: (rawItem.tags as string[]) || [],
-          })
-        }
-        loaded++
-      }
-
-      log('INFO', 'learning_vocab_loaded', {
-        count: loaded,
-        total: this.longTermItems.size,
-      })
-    } catch (err) {
-      log('WARN', 'learning_vocab_load_failed', { error: String(err) })
-    }
-  }
-
-  /**
-   * 将长期知识表持久化到磁盘。
-   */
-  savePersistedVocabulary(): void {
-    try {
-      const data = Array.from(this.longTermItems.values())
-        .sort((a, b) => b.mastery - a.mastery)
-        .slice(0, MAX_LONG_TERM_ITEMS)
-        .map((item) => ({
-          id: item.id,
-          name: item.name,
-          category: item.category,
-          difficulty: item.difficulty,
-          mastery: Math.round(item.mastery * 100) / 100,
-          encounterCount: item.encounterCount,
-          correctCount: item.correctCount,
-          totalAttempts: item.totalAttempts,
-          firstSeenAt: item.firstSeenAt,
-          lastSeenAt: item.lastSeenAt,
-          tags: item.tags,
-        }))
-
-      const dir = dirname(this.vocabFilePath)
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-      writeFileSync(this.vocabFilePath, JSON.stringify(data, null, 2), 'utf-8')
-    } catch (err) {
-      log('WARN', 'learning_vocab_save_failed', { error: String(err) })
-    }
   }
 
   // ── 交互记录 ──
@@ -306,11 +237,8 @@ export class LearningVocabularyManager {
     const normalized = this.normalizeConceptId(conceptName)
 
     // 滑动窗口记录
-    this.recentInteractions.push(normalized)
+    this.recentInteractions.add(normalized)
     this.totalInteractions++
-    while (this.recentInteractions.length > WINDOW_SIZE) {
-      this.recentInteractions.shift()
-    }
 
     // 更新或创建知识点
     let item = this.longTermItems.get(normalized)
@@ -357,7 +285,7 @@ export class LearningVocabularyManager {
 
     // 高掌握度持久化
     if (item.mastery >= HIGH_MASTERY_PERSIST_THRESHOLD) {
-      this.savePersistedVocabulary()
+      this.saveToStore()
     }
 
     log('INFO', 'learning_vocab_interaction', {
@@ -373,7 +301,8 @@ export class LearningVocabularyManager {
    * 批处理：从已有的交互文本序列重建统计数据。
    */
   loadFromInteractions(interactions: string[]): void {
-    this.recentInteractions = interactions.slice(-WINDOW_SIZE)
+    this.recentInteractions.clear()
+    this.recentInteractions.addAll(interactions)
     this.totalInteractions = interactions.length
     this.rebuildWindowStats()
   }
@@ -505,7 +434,7 @@ export class LearningVocabularyManager {
     }
 
     if (decayedCount > 0) {
-      this.savePersistedVocabulary()
+      this.saveToStore()
       log('INFO', 'learning_vocab_decay', { decayedCount })
     }
   }
@@ -519,7 +448,7 @@ export class LearningVocabularyManager {
     const id = this.normalizeConceptId(conceptName)
     const existed = this.longTermItems.delete(id)
     if (existed) {
-      this.savePersistedVocabulary()
+      this.saveToStore()
       log('INFO', 'learning_vocab_item_deleted', { concept: conceptName })
     }
     return existed
@@ -530,9 +459,9 @@ export class LearningVocabularyManager {
    */
   clearAll(): void {
     this.longTermItems.clear()
-    this.recentInteractions = []
+    this.recentInteractions.clear()
     this.items = []
-    this.savePersistedVocabulary()
+    this.saveToStore()
     log('INFO', 'learning_vocab_all_cleared')
   }
 
@@ -560,6 +489,17 @@ export class LearningVocabularyManager {
   // ── 内部方法 ──
 
   /**
+   * 将当前长期知识表持久化到存储。
+   * 排序后截取前 MAX_LONG_TERM_ITEMS 项，减少磁盘占用。
+   */
+  private saveToStore(): void {
+    const items = Array.from(this.longTermItems.values())
+      .sort((a, b) => b.mastery - a.mastery)
+      .slice(0, MAX_LONG_TERM_ITEMS)
+    VOCABULARY_STORE.save(items)
+  }
+
+  /**
    * 知识点 ID 归一化（小写 + trim）。
    */
   private normalizeConceptId(name: string): string {
@@ -584,11 +524,7 @@ export class LearningVocabularyManager {
    * 从滑动窗口重建频次映射。
    */
   private buildFreqMap(): Map<string, number> {
-    const freqMap = new Map<string, number>()
-    for (const interaction of this.recentInteractions) {
-      freqMap.set(interaction, (freqMap.get(interaction) || 0) + 1)
-    }
-    return freqMap
+    return this.recentInteractions.getFrequency()
   }
 
   /**

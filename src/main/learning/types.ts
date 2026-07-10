@@ -264,3 +264,70 @@ export const ALL_LEARNING_CATEGORIES: LearningCategory[] = [
   '模板字面量类型', '工具类型', '类型守卫', '类型推断',
   '声明文件', '模块', '其他',
 ]
+
+// ══════════════════════════════════════════
+//  口述代码（Oral Code）类型
+// ══════════════════════════════════════════
+
+/** 口述代码模式分类 */
+export type OralCodePattern =
+  | 'generic_function'       // 泛型函数
+  | 'generic_interface'      // 泛型接口
+  | 'generic_class'          // 泛型类
+  | 'generic_constraint'     // 泛型约束
+  | 'conditional_type'       // 条件类型
+  | 'conditional_infer'      // 条件类型 + infer
+  | 'distributive_conditional' // 分布式条件类型
+  | 'mapped_type'            // 映射类型
+  | 'mapped_type_modifiers'  // 映射类型 + 修饰符
+  | 'mapped_key_remap'      // 映射类型 + 键重映射
+  | 'template_literal'       // 模板字面量类型
+  | 'utility_pick'           // Pick<T, K>
+  | 'utility_omit'           // Omit<T, K>
+  | 'utility_partial'        // Partial<T>
+  | 'utility_record'         // Record<K, T>
+  | 'utility_exclude'        // Exclude<T, U>
+  | 'type_guard'             // 类型守卫
+  | 'assertion_function'     // 断言函数
+  | 'union_type'             // 联合类型
+  | 'intersection_type'      // 交叉类型
+  | 'recursive_type'         // 递归类型
+  | 'unknown'                // 未知模式
+
+/** 口述代码输入 */
+export interface OralCodeInput {
+  /** 用户的自然语言描述 */
+  description: string
+}
+
+/** 口述代码结果 */
+export interface OralCodeResult {
+  /** 是否成功 */
+  success: boolean
+  /** 匹配的模式 */
+  pattern: OralCodePattern
+  /** 生成的 TypeScript 代码 */
+  code: string
+  /** 代码的解释说明（用于 TTS 播报） */
+  explanation: string
+  /** 代码的简要标签 */
+  label: string
+  /** 验证状态 */
+  verification: 'passed' | 'failed' | 'skipped'
+  /** 验证错误（如果有） */
+  verificationError?: string
+}
+
+/** 口述代码模式定义 */
+export interface OralCodePatternDef {
+  /** 模式标识 */
+  pattern: OralCodePattern
+  /** 模式名称 */
+  name: string
+  /** 触发关键词列表 */
+  keywords: string[]
+  /** 代码模板生成函数 */
+  generate: (params: Record<string, string>) => { code: string; label: string; explanation: string }
+  /** 示例描述 */
+  examples: string[]
+}

@@ -30,6 +30,8 @@ import { ToolEvolutionCollector } from './ToolEvolutionCollector'
 import { ToolEvolutionExecutor } from './ToolEvolutionExecutor'
 import { TtsPreferenceCollector } from './TtsPreferenceCollector'
 import { TtsConfigOptimizationExecutor } from './TtsConfigOptimizationExecutor'
+import { TtsTypographyCollector } from './TtsTypographyCollector'
+import { TtsTypographyExecutor } from './TtsTypographyExecutor'
 import {
   registerCollector,
   registerExecutor,
@@ -97,6 +99,7 @@ export class PipelineOrchestrator {
     const planLogCollector = new PlanLogCollector()
     const toolEvolutionCollector = new ToolEvolutionCollector()
     const ttsPreferenceCollector = new TtsPreferenceCollector()
+    const ttsTypographyCollector = new TtsTypographyCollector()
 
     // Stage 2: 注册到中央注册表
     registerCollector(tscCollector)
@@ -106,6 +109,7 @@ export class PipelineOrchestrator {
     registerCollector(planLogCollector)
     registerCollector(toolEvolutionCollector)
     registerCollector(ttsPreferenceCollector)
+    registerCollector(ttsTypographyCollector)
 
     // Stage 3: 从注册表加载到本地
     for (const c of getAllCollectors()) {
@@ -118,12 +122,14 @@ export class PipelineOrchestrator {
     const autoPatchExecutor = new AutoPatchExecutor()
     const toolEvolutionExecutor = new ToolEvolutionExecutor()
     const ttsConfigOptExecutor = new TtsConfigOptimizationExecutor()
+    const ttsTypographyExecutor = new TtsTypographyExecutor()
 
     registerExecutor(claudeCodeExecutor)
     registerExecutor(asrOptimizationExecutor)
     registerExecutor(autoPatchExecutor)
     registerExecutor(toolEvolutionExecutor)
     registerExecutor(ttsConfigOptExecutor)
+    registerExecutor(ttsTypographyExecutor)
     if (mcpManager) {
       registerExecutor(new DeepSeekExecutor(mcpManager))
     }

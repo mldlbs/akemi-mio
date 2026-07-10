@@ -108,6 +108,22 @@ export const LLM_IMAGE_MODEL = process.env.LLM_IMAGE_MODEL || 'cogview-3-flash'
  *  The 'ffplay' bare entry at the end relies on PATH resolution. */
 export const FFPLAY_PATHS = process.env.FFPLAY_PATH ? [process.env.FFPLAY_PATH] : ['ffplay', 'C:\\ffmpeg\\bin\\ffplay.exe']
 
+// ══════════════════════════════════════════
+//  Telegram — 代理服务器 & 推送配置
+// ══════════════════════════════════════════
+
+/** Telegram 代理服务器地址。Override via TELEGRAM_SERVER_URL env. */
+export const TELEGRAM_SERVER_URL = process.env.TELEGRAM_SERVER_URL || 'https://skills.crlkcloud.cyou/telegram'
+
+/** Telegram 推送 Chat ID（可选，设置后启用系统事件推送）。Override via TELEGRAM_CHAT_ID env. */
+export const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID ? parseInt(process.env.TELEGRAM_CHAT_ID, 10) : null
+
+/** Telegram outbox 轮询间隔（ms）。Override via TELEGRAM_POLL_INTERVAL_MS env. */
+export const TELEGRAM_POLL_INTERVAL_MS = parseInt(process.env.TELEGRAM_POLL_INTERVAL_MS || '2000', 10)
+
+/** Telegram outbox 任务冷却时间（ms）。Override via TELEGRAM_OUTBOX_COOLDOWN_MS env. */
+export const TELEGRAM_OUTBOX_COOLDOWN_MS = parseInt(process.env.TELEGRAM_OUTBOX_COOLDOWN_MS || '10000', 10)
+
 /** Path to the Piper TTS Python script. Override via PIPER_SCRIPT env. */
 export const PIPER_SCRIPT = process.env.PIPER_SCRIPT || resolve(join(WORKSPACE_ROOT, 'scripts', 'piper_speak.py'))
 /** Path to the Piper TTS model. Override via PIPER_MODEL env. */
@@ -165,6 +181,33 @@ export const ASR_HOTWORDS = process.env.ASR_HOTWORDS
       '享受',
       '密钥',
       '字幕',
+      // ── TypeScript 高级类型术语 ──
+      '泛型',
+      '条件类型',
+      '映射类型',
+      '类型守卫',
+      '类型推断',
+      '工具类型',
+      '模板字面量类型',
+      'Generic',
+      'Conditional Types',
+      'Mapped Types',
+      'Type Guards',
+      'Utility Types',
+      'Infer',
+      'Keyof',
+      'Typeof',
+      'Partial',
+      'Required',
+      'Pick',
+      'Omit',
+      'Record',
+      'Exclude',
+      'Extract',
+      'ReturnType',
+      'Parameters',
+      'Awaited',
+      'Template Literal Types',
     ]
 
 /** Target sample rate for ASR audio processing (Hz). */
@@ -191,7 +234,8 @@ export const INITIAL_HOTWORDS = process.env.HOTWORDS
   : ['贝斯', '音阶', '空弦', '指型', '把位', '小确幸', '巴赫', '轻音', '和弦', '旋律', '节奏', '密钥', 'DeepSeek', '字幕']
 
 /** Initial prompt for Whisper ASR to bias recognition towards domain terms. Override via ASR_INITIAL_PROMPT env. */
-export const ASR_INITIAL_PROMPT = process.env.ASR_INITIAL_PROMPT || '以下是关于泵站设备、音乐练习、日常陪伴和API密钥的语音对话'
+export const ASR_INITIAL_PROMPT =
+  process.env.ASR_INITIAL_PROMPT || '以下是关于泵站设备、音乐练习、日常陪伴、API密钥和TypeScript高级类型学习的语音对话'
 
 /** 行为驱动热词增强：分析窗口大小（最近 N 次交互）。Override via ASR_HOTWORD_WINDOW_SIZE env. */
 export const ASR_HOTWORD_WINDOW_SIZE = parseInt(process.env.ASR_HOTWORD_WINDOW_SIZE || '16', 10)
@@ -241,11 +285,14 @@ export const BEHAVIOR_REPEAT_DETECTION_WINDOW = parseInt(process.env.BEHAVIOR_RE
  *
  * Override via MEMORY_TOOL_PERSONALIZATION env.
  */
-export const MEMORY_TOOL_PERSONALIZATION: 'off' | 'conservative' | 'balanced' | 'aggressive' = (
-  ['off', 'conservative', 'balanced', 'aggressive'].includes(process.env.MEMORY_TOOL_PERSONALIZATION || '')
-    ? process.env.MEMORY_TOOL_PERSONALIZATION as any
-    : 'conservative'
-)
+export const MEMORY_TOOL_PERSONALIZATION: 'off' | 'conservative' | 'balanced' | 'aggressive' = [
+  'off',
+  'conservative',
+  'balanced',
+  'aggressive',
+].includes(process.env.MEMORY_TOOL_PERSONALIZATION || '')
+  ? (process.env.MEMORY_TOOL_PERSONALIZATION as any)
+  : 'conservative'
 
 /**
  * 记忆驱动工具推荐的最小数据量阈值。

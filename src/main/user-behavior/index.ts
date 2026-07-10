@@ -15,11 +15,19 @@
  *
  * 环境变量控制：
  *   USER_BEHAVIOR_FEATURES=summary_enhance,metrics_enrich
+ *
+ * @module user-behavior
  */
 
 export { UserBehaviorLayer } from './UserBehaviorLayer'
 export { parseFeaturesFromEnv } from './types'
 export { BehaviorFeatureExtractor, behaviorFeatureExtractor, registerBehaviorRecordHook } from './BehaviorFeatureExtractor'
+export { BehaviorHeatmapService, behaviorHeatmapService } from './BehaviorHeatmapService'
+
+// ── MCP ↔ UserBehavior 强化回路 ──
+export { MCPFeedbackLoopService, createMCPFeedbackLoop } from './feedback-loop'
+export type { MCPFeedbackLoopConfig } from './feedback-loop'
+
 export type {
   UserBehaviorFeature,
   UserBehaviorConfig,
@@ -28,6 +36,10 @@ export type {
   PostProcessResult,
   PreProcessHook,
   PostProcessHook,
+  ModuleHeatmap,
+  ModuleHeatmapEntry,
+  ModuleTrend,
+  ModulePriority,
 } from './types'
 export type {
   BehavioralFeatures,
@@ -37,3 +49,19 @@ export type {
   OptimizationSuggestion,
   OptimizationType,
 } from './BehaviorFeatureExtractor'
+
+// ── 反馈回路类型 ──
+export type {
+  ToolExecutionQuality,
+  ToolQualitySnapshot,
+  BehaviorParameterSet,
+  ParameterAdjustment,
+  ParameterAdjustmentType,
+  DampingState,
+  ConvergenceMetrics,
+  ConvergenceState,
+  FeedbackLoopMode,
+  FeedbackLoopState,
+  FeedbackLoopStateChangePayload,
+  ParameterAdjustmentPayload,
+} from './feedback-loop/types'

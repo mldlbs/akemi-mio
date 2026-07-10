@@ -53,7 +53,7 @@ import { PersonaStateManager } from './PersonaStateManager'
 import { setPersonaStateManager } from '../tool/deps'
 import { PersonaDriftControlSystem, DRIFT_CORRECTION_PROMPT } from './PersonaDriftControlSystem'
 import { classifyContent } from './ContentClassifier'
-import { userBehaviorAnalyzer } from './UserBehaviorAnalyzer'
+import { userBehaviorAnalyzer, type SceneLabel, type ResponseMode, type InteractionDetail } from './UserBehaviorAnalyzer'
 import { behaviorStateMachine } from '../behavior/BehaviorStateMachine'
 import type { BehaviorMode } from '../behavior/BehaviorStateMachine'
 import { buildTtsNeed } from '../behavior/UserBehaviorTtsContract'
@@ -125,6 +125,16 @@ export class ChatExecutor {
 
   /** 当前加载的 session，用于切换 session 时重建上下文 */
   private currentSessionId: string | null = null
+
+  // ── 行为自适应对话策略 ──
+  /** 当前轮检测到的场景标签 */
+  private currentScene: SceneLabel = 'unknown'
+  /** 当前生效的回复模式 */
+  private currentResponseMode: ResponseMode = 'warm_chat'
+  /** 当前场景允许的工具集（undefined = 不限制） */
+  private sceneAllowedTools: string[] | undefined = undefined
+  /** 当前轮用户消息的领域标签（供 InteractionDetail 使用） */
+  private currentDomainLabel = ''
   /** 执行决策门 — 每轮 tool batch 后强制决策 */
   private executionGovernor = new ExecutionGovernor()
   /** Guardrail Pipeline — Trace 级别进展检测（可选注入） */
@@ -216,6 +226,30 @@ export class ChatExecutor {
     return this.runContext?.running ?? false
   }
 
+  /**
+   * 从用户文本中提取领域标签（用于 InteractionDetail.domainLabel）。
+   * 复用 UserBehaviorAnalyzer 的 TOPIC_PATTERNS 逻辑做轻量匹配。
+   */
+  private _extractDomainLabel(text: string): string {
+    if (!text || text.length < 2) return 'chat'
+    // 简单规则：看是否包含代码/技术相关关键词
+    const codePatterns = [/代码|编程|实现|函数|class|interface|type|import|export|const|let|var|function/]
+    for (const p of codePatterns) {
+      if (p.test(text)) return 'code'
+    }
+    const writingPatterns = [/写.*故事|写.*小说|创作|章节|角色|剧情|描写/]
+    for (const p of writingPatterns) {
+      if (p.test(text)) return 'writing'
+    }
+    const evolutionPatterns = [/进化|自我.*改进|自我.*优化|evolve|evolution/]
+    for (const p of evolutionPatterns) {
+      if (p.test(text)) return 'evolution'
+    }
+    // 短消息通常为聊天/问答
+    if (text.length < 30) return 'qa'
+    return 'chat'
+  }
+
   private resolvePersonaFor(text: string): void {
     const result = this.personaManager.update(text)
     if (result.transitionSignal) {
@@ -257,6 +291,13 @@ export class ChatExecutor {
     const behaviorPattern = userBehaviorAnalyzer.analyze()
     if (behaviorPattern.hasSufficientData && behaviorPattern.suggestedToolHints.length > 0) {
       extraModules.push(...behaviorPattern.suggestedToolHints)
+    }
+    // 行为自适应对话策略：注入场景感知 Prompt
+    if (this.currentScene !== 'unknown' || behaviorPattern.hasSufficientData) {
+      const scenePrompt = userBehaviorAnalyzer.getScenePrompt()
+      if (scenePrompt) {
+        extraModules.push(scenePrompt)
+      }
     }
     // 行为强化记忆巩固：检测重复提问模式，自动强化相关记忆条目
     if (this.lastUserText) {
@@ -387,6 +428,27 @@ export class ChatExecutor {
     this.lastUserText = text
     // 行为分析：记录用户消息用于模式检测
     userBehaviorAnalyzer.recordUserMessage(text)
+    // 行为自适应对话策略：记录交互详情并分析场景
+    this.currentDomainLabel = this._extractDomainLabel(text)
+    userBehaviorAnalyzer.recordInteractionDetail({
+      type: 'user_message',
+      length: text.length,
+      domainLabel: this.currentDomainLabel,
+      timestamp: Date.now(),
+      text,
+    })
+    const sceneResult = userBehaviorAnalyzer.analyzeScene()
+    this.currentScene = sceneResult.scene
+    this.currentResponseMode = sceneResult.responseMode
+    this.sceneAllowedTools = userBehaviorAnalyzer.getSceneToolFilter()
+    log('INFO', 'behavior_adaptive_scene', {
+      scene: sceneResult.scene,
+      mode: sceneResult.responseMode,
+      confidence: sceneResult.confidence,
+      topics: sceneResult.dominantTopics,
+      avgLen: sceneResult.avgUserMessageLength,
+      restrictedTools: this.sceneAllowedTools?.length ?? 'all',
+    })
     // ── [隐式反馈] 用户发送新消息 → 标记"继续对话"（接受当前 TTS 质量）──
     if (this.implicitFeedbackEnabled) {
       implicitFeedbackTracker.onUserContinuedConversation()
@@ -531,6 +593,16 @@ export class ChatExecutor {
         // 修正信号在下一轮注入（本轮已结束）
         this.pendingDriftSignal = messageSignal
       }
+      // 行为自适应：记录助手回复的交互详情
+      if (reply) {
+        userBehaviorAnalyzer.recordInteractionDetail({
+          type: 'user_message', // 作为「完整交互轮次」记录，type 记为 user_message 供场景分析用
+          length: reply.length,
+          domainLabel: this.currentDomainLabel,
+          timestamp: Date.now(),
+          text: reply.slice(0, 200),
+        })
+      }
       // P0→P1 沉淀（MetaController.onInteractionEnd）
       if (reply && this.memoryService) {
         this.memoryService.metaController.onInteractionEnd({
@@ -665,7 +737,19 @@ export class ChatExecutor {
         this.obsLogger?.logPrompt(messages)
         const tBeforeLlm = Date.now()
         const msgsBeforeCall = messages.length // 锚定：LLM 可能在 messages 中推入 assistant(tool_calls)
-        const result = await this.llmService.chatWithTools(messages, requestId, 120000, onToken)
+        // 行为自适应：根据场景限制可用工具集
+        // 每 5 轮重新评估场景（刷新 memory 时同步更新）
+        if (i > 0 && i % 5 === 0) {
+          const reScene = userBehaviorAnalyzer.analyzeScene()
+          this.currentScene = reScene.scene
+          this.currentResponseMode = reScene.responseMode
+          this.sceneAllowedTools = userBehaviorAnalyzer.getSceneToolFilter()
+        }
+        const result = await this.llmService.chatWithTools(
+          messages, requestId, 120000, onToken,
+          undefined, // externalSignal
+          this.sceneAllowedTools, // allowedToolNames — 场景工具过滤
+        )
         const llmMs = Date.now() - tBeforeLlm
         this.obsLogger?.logLlmTrace(
           'result',
@@ -737,6 +821,13 @@ export class ChatExecutor {
               this.proceduralMemory?.recordHit(tr.name)
               // 行为分析：记录工具调用模式
               userBehaviorAnalyzer.recordToolCall(tr.name)
+              // 行为自适应：记录工具调用交互详情
+              userBehaviorAnalyzer.recordInteractionDetail({
+                type: 'tool_call',
+                length: tr.content.length,
+                domainLabel: this.currentDomainLabel,
+                timestamp: Date.now(),
+              })
               // 行为情绪：记录工具调用用于 APM 计算
               if (this.behaviorEmotionEnabled) {
                 behaviorEmotionDetector.recordAction()

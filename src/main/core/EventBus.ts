@@ -95,6 +95,10 @@ export type EventName =
   | 'plan.ts.progress.updated'
   | 'plan.ts.focus.synced'
 
+  // ── MCP ↔ UserBehavior 强化回路事件 ──
+  | 'feedback_loop.state_changed'
+  | 'feedback_loop.parameter_adjusted'
+
 export interface EventPayload {
   'task.lifecycle': { taskId: string; type: string; status: string; durationMs?: number; error?: string }
   'task.registered': { type: string; label: string }
@@ -366,6 +370,22 @@ export interface EventPayload {
     recentConcepts: string[]
     currentStepDescription?: string
     timestamp: number
+  }
+
+  // ── MCP ↔ UserBehavior 强化回路事件 ──
+  'feedback_loop.state_changed': {
+    mode: 'monitor' | 'auto'
+    convergenceState: 'diverging' | 'exploring' | 'converging' | 'converged'
+    totalAdjustments: number
+    totalObservations: number
+    dampingFactor: number
+  }
+  'feedback_loop.parameter_adjusted': {
+    type: string
+    previousValue: number
+    newValue: number
+    dampingFactor: number
+    reason: string
   }
 }
 

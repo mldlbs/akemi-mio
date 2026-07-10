@@ -10,7 +10,8 @@ export function createElectronAPI(ipc: IpcRenderer) {
 
     // ── ASR 热词管理 ──
     toggleAsrHotwords: (enabled: boolean): Promise<{ enabled: boolean }> => ipc.invoke('asr:toggle-hotwords', enabled),
-    getAsrHotwordState: (): Promise<{ enabled: boolean; entryCount: number; hotwords: string[]; totalInputs: number }> => ipc.invoke('asr:hotword-state'),
+    getAsrHotwordState: (): Promise<{ enabled: boolean; entryCount: number; hotwords: string[]; totalInputs: number }> =>
+      ipc.invoke('asr:hotword-state'),
 
     // ── ASR 个性化词表管理 ──
     getVocabState: (): Promise<{
@@ -27,7 +28,9 @@ export function createElectronAPI(ipc: IpcRenderer) {
     refreshVocabContext: (): Promise<{ success: boolean; error?: string }> => ipc.invoke('asr:context:refresh'),
 
     // ── 语音工具编排 ──
-    matchVoiceIntent: (text: string): Promise<{
+    matchVoiceIntent: (
+      text: string,
+    ): Promise<{
       matched: boolean
       intent?: {
         name: string
@@ -57,8 +60,7 @@ export function createElectronAPI(ipc: IpcRenderer) {
     stopSpeaking: (): Promise<void> => ipc.invoke('tts:stop'),
 
     // ── 情感自适应语音 ──
-    toggleEmotionTts: (enabled: boolean): Promise<{ success: boolean; enabled: boolean }> =>
-      ipc.invoke('tts:emotion:toggle', enabled),
+    toggleEmotionTts: (enabled: boolean): Promise<{ success: boolean; enabled: boolean }> => ipc.invoke('tts:emotion:toggle', enabled),
 
     getEmotionTtsState: (): Promise<{ success: boolean; enabled: boolean; params: Record<string, unknown> | null }> =>
       ipc.invoke('tts:emotion:state'),
@@ -95,8 +97,12 @@ export function createElectronAPI(ipc: IpcRenderer) {
     toggleBehaviorEmotion: (enabled: boolean): Promise<{ success: boolean; enabled: boolean }> =>
       ipc.invoke('tts:behaviorEmotion:toggle', enabled),
 
-    getBehaviorEmotionState: (): Promise<{ success: boolean; enabled: boolean; result: Record<string, unknown> | null; metrics: Record<string, unknown> | null }> =>
-      ipc.invoke('tts:behaviorEmotion:state'),
+    getBehaviorEmotionState: (): Promise<{
+      success: boolean
+      enabled: boolean
+      result: Record<string, unknown> | null
+      metrics: Record<string, unknown> | null
+    }> => ipc.invoke('tts:behaviorEmotion:state'),
 
     onBehaviorEmotionEnabled: (callback: (data: { enabled: boolean }) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, data: { enabled: boolean }) => callback(data)
@@ -110,8 +116,7 @@ export function createElectronAPI(ipc: IpcRenderer) {
     setEnginePreference: (pref: string): Promise<{ success: boolean; preference?: string; error?: string }> =>
       ipc.invoke('tts:engine-preference:set', pref),
 
-    getEnginePreference: (): Promise<{ success: boolean; preference?: string }> =>
-      ipc.invoke('tts:engine-preference:get'),
+    getEnginePreference: (): Promise<{ success: boolean; preference?: string }> => ipc.invoke('tts:engine-preference:get'),
 
     getTtsRouterState: (): Promise<{
       success: boolean
@@ -413,11 +418,9 @@ export function createElectronAPI(ipc: IpcRenderer) {
       status: { modelInitialized: boolean; totalSamples: number; historySize: number }
     }> => ipc.invoke('tts:implicitFeedback:state'),
 
-    triggerImplicitFeedbackUpdate: (): Promise<{ success: boolean }> =>
-      ipc.invoke('tts:implicitFeedback:updateModel'),
+    triggerImplicitFeedbackUpdate: (): Promise<{ success: boolean }> => ipc.invoke('tts:implicitFeedback:updateModel'),
 
-    resetImplicitFeedback: (): Promise<{ success: boolean }> =>
-      ipc.invoke('tts:implicitFeedback:reset'),
+    resetImplicitFeedback: (): Promise<{ success: boolean }> => ipc.invoke('tts:implicitFeedback:reset'),
 
     onImplicitFeedbackEnabled: (callback: (data: { enabled: boolean }) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, data: { enabled: boolean }) => callback(data)
@@ -431,7 +434,9 @@ export function createElectronAPI(ipc: IpcRenderer) {
     getWritingStatus: (): Promise<{ stories: any[]; totalStories: number; totalScenes: number }> => ipc.invoke('writing:getStatus'),
 
     // ── 音频特征分析与氛围映射 ──
-    analyzeAudioFeatures: (audio: ArrayBuffer): Promise<{
+    analyzeAudioFeatures: (
+      audio: ArrayBuffer,
+    ): Promise<{
       success: boolean
       features?: {
         energy: number
@@ -462,7 +467,9 @@ export function createElectronAPI(ipc: IpcRenderer) {
     }> => ipc.invoke('audio:analyzeFeatures', audio),
 
     // ── 语音灵感捕获与情节引导 ──
-    processWritingInspiration: (text: string): Promise<{
+    processWritingInspiration: (
+      text: string,
+    ): Promise<{
       rawText: string
       entities: { characters: string[]; events: string[]; emotions: string[]; plotTurns: string[] }
       guidedPrompt: string
@@ -550,15 +557,16 @@ export function createElectronAPI(ipc: IpcRenderer) {
       }
     },
 
-    toggleEvolutionDashboard: (): Promise<{ success: boolean; visible: boolean }> =>
-      ipc.invoke('evolution:dashboard:toggle'),
+    toggleEvolutionDashboard: (): Promise<{ success: boolean; visible: boolean }> => ipc.invoke('evolution:dashboard:toggle'),
 
     // ── Desktop Toolbar (桌面任务控制浮层) ──
     invokeDesktopTool: (toolName: string, args: Record<string, string>): Promise<{ success: boolean; result?: string; error?: string }> =>
       ipc.invoke('desktop:invokeTool', toolName, args),
 
     // ── 排版内容语音校验与预览 ──
-    verifyTypography: (text: string): Promise<{
+    verifyTypography: (
+      text: string,
+    ): Promise<{
       success: boolean
       report?: {
         formattedText: string
@@ -592,7 +600,9 @@ export function createElectronAPI(ipc: IpcRenderer) {
       error?: string
     }> => ipc.invoke('typing:verify', text),
 
-    readAloudTypography: (text: string): Promise<{
+    readAloudTypography: (
+      text: string,
+    ): Promise<{
       success: boolean
       audioFile?: string
       durationMs: number
@@ -626,10 +636,7 @@ export function createElectronAPI(ipc: IpcRenderer) {
         }>
       }) => void,
     ) => {
-      const handler = (
-        _event: Electron.IpcRendererEvent,
-        state: any,
-      ) => callback(state)
+      const handler = (_event: Electron.IpcRendererEvent, state: any) => callback(state)
       ipc.on('behavior:state', handler)
       return () => {
         ipc.removeListener('behavior:state', handler)
@@ -663,9 +670,34 @@ export function createElectronAPI(ipc: IpcRenderer) {
     // ── 自进化系统监控 ──
     onMonitoringMetrics: (
       callback: (data: {
-        system: { heapUsedMB: number; heapTotalMB: number; rssMB: number; eventLoopLagMs: number; cpuUsage: number; uptime: number; timestamp: number }
-        evolution: { stage: string; progress: number; summary: string; errorCount: number; fixedCount: number; queueSize: number; lastRunAt: number | null; schedulerState: string; consecutiveFailures: number } | null
-        plan: { hasActivePlan: boolean; planTitle: string; totalSteps: number; completedSteps: number; percentComplete: number; currentStep: string } | null
+        system: {
+          heapUsedMB: number
+          heapTotalMB: number
+          rssMB: number
+          eventLoopLagMs: number
+          cpuUsage: number
+          uptime: number
+          timestamp: number
+        }
+        evolution: {
+          stage: string
+          progress: number
+          summary: string
+          errorCount: number
+          fixedCount: number
+          queueSize: number
+          lastRunAt: number | null
+          schedulerState: string
+          consecutiveFailures: number
+        } | null
+        plan: {
+          hasActivePlan: boolean
+          planTitle: string
+          totalSteps: number
+          completedSteps: number
+          percentComplete: number
+          currentStep: string
+        } | null
         recentChanges: Array<{ filePath: string; type: string; timestamp: number; summary: string }>
         evoLocked: boolean
       }) => void,
@@ -748,6 +780,58 @@ export function createElectronAPI(ipc: IpcRenderer) {
     ): Promise<{ success: boolean; error?: string }> => ipc.invoke('wallpaper:memoryContextConfig:set', config),
 
     refreshMemoryContext: (): Promise<{ success: boolean; error?: string }> => ipc.invoke('wallpaper:memoryContext:refresh'),
+
+    // ── M6.3 Guardrail Metrics Query API ──
+
+    getGuardrailMetricsSummary: (): Promise<{
+      totalChecked: number
+      totalWarning: number
+      totalTerminated: number
+      totalContinue: number
+      totalSignalsHealthy: number
+      totalSignalsDegrading: number
+      totalSignalsStalled: number
+      windowCount: number
+    }> => ipc.invoke('guardrail:metrics:summary'),
+
+    queryGuardrailMetrics: (
+      since: number,
+      until: number,
+    ): Promise<
+      Array<{
+        id: string
+        windowSince: number
+        windowUntil: number
+        checkedCount: number
+        warningCount: number
+        terminatedCount: number
+        continueCount: number
+        totalSignalsHealthy: number
+        totalSignalsDegrading: number
+        totalSignalsStalled: number
+        updatedAt: number
+      }>
+    > => ipc.invoke('guardrail:metrics:query', since, until),
+
+    getGuardrailMetricsLatest: (): Promise<{
+      id: string
+      windowSince: number
+      windowUntil: number
+      checkedCount: number
+      warningCount: number
+      terminatedCount: number
+      continueCount: number
+      totalSignalsHealthy: number
+      totalSignalsDegrading: number
+      totalSignalsStalled: number
+      updatedAt: number
+    } | null> => ipc.invoke('guardrail:metrics:latest'),
+
+    getGuardrailProjectionState: (): Promise<
+      | { status: 'READY'; lastBuiltAt: number; windowCount: number }
+      | { status: 'REBUILDING'; startedAt: number; windowsBuilt: number }
+      | { status: 'UNAVAILABLE'; reason: string }
+    > => ipc.invoke('guardrail:metrics:state'),
   }
 }
 

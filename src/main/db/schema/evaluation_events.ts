@@ -9,6 +9,8 @@ export const evaluationEvents = sqliteTable('evaluation_events', {
   type: text('type').notNull(),
   payload: text('payload').notNull(), // JSON serialized
   parentEventId: text('parent_event_id'),
+  /** Replay 游标序号（R2-A）。flush 时分配，非 append。已有行可 NULL。 */
+  seq: integer('seq'),
 })
 
 export type EvaluationEventRow = typeof evaluationEvents.$inferSelect

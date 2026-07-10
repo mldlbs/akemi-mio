@@ -131,8 +131,8 @@ describe('V-P3: Callback 生命周期稳定', () => {
     const consumer = new GuardrailProgressConsumer(throwingPolicy, onDecision)
     const snapshot = makeSnapshot()
 
-    // consume 应传播 evaluate 的错误
-    await expect(consumer.consume(snapshot)).rejects.toThrow('evaluate crash')
+    // M5.4 R-2: consume 内部 catch 异常，不向上传播
+    await expect(consumer.consume(snapshot)).resolves.toBeUndefined()
 
     // callback 不应被调用
     expect(onDecision).not.toHaveBeenCalled()

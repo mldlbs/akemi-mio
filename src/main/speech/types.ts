@@ -8,9 +8,14 @@
  *
  * 对照现有的 EvolutionPlugin 模式，本模块提供了类似的 ServiceLoader 架构，
  * 但独立于 evolution 系统，专用于语音处理领域。
+ *
+ * 扩展自 Plugin Registry 统一抽象层（src/main/plugin/registry/types.ts）：
+ * - SpeechPluginManifest 扩展 IPluginManifest（增加 capability 字段）
+ * - AsrPlugin / TtsPlugin 结构兼容 IPlugin 接口（可通过适配器使用）
  */
 
 import type { AsrResult, ProgressCallback } from '../asr/types'
+import type { IPluginManifest } from '../plugin/registry/types'
 
 // ══════════════════════════════════════════
 //  插件元数据
@@ -19,8 +24,11 @@ import type { AsrResult, ProgressCallback } from '../asr/types'
 /** 插件能力类型 — ASR（语音识别）或 TTS（语音合成） */
 export type SpeechCapability = 'asr' | 'tts'
 
-/** 插件元数据 */
-export interface SpeechPluginManifest {
+/**
+ * 插件元数据。
+ * 扩展自 IPluginManifest（统一抽象层），增加 capability 字段。
+ */
+export interface SpeechPluginManifest extends IPluginManifest {
   /** 唯一标识名，例如 'whisper_gpu', 'baidu_asr', 'piper_tts', 'edge_tts' */
   name: string
   /** 语义版本 */
@@ -39,11 +47,21 @@ export interface SpeechPluginManifest {
 //  ASR 插件契约
 // ══════════════════════════════════════════
 
-/** ASR 引擎状态 */
+/**
+ * ASR 引擎状态。
+ * 结构兼容 IPluginStatus（统一抽象层）：
+ * - ready 等价于 loaded（语义相同，字段名不同）
+ * - loading / error 字段与 IPluginStatus 一致
+ */
 export interface AsrPluginStatus {
+  /** 是否已加载就绪（兼容 IPluginStatus.ready） */
   loaded: boolean
+  /** 是否正在加载中 */
   loading: boolean
+  /** 错误信息（有错误时非 null） */
   error: string | null
+  /** 统一状态字段 — 等价于 loaded，用于 IPluginStatus 兼容 */
+  readonly ready: boolean
 }
 
 /** ASR 转录选项 */
@@ -75,6 +93,10 @@ export interface AsrTranscribeResult {
  * 实现此接口的类将成为 SpeechPluginRegistry 可发现的 ASR 引擎。
  * 插件只需关注音频 → 文本的转换逻辑，不需要了解 AsrService 的调度策略、
  * 降级回退或上下文注入细节。
+ *
+ * 结构兼容统一抽象层 IPlugin（src/main/plugin/registry/types.ts）：
+ * - getModelInfo() → IPlugin.getInfo()（语义相同，方法名不同）
+ * - getStatus() → IPlugin.getStatus()（返回类型结构兼容）
  */
 export interface AsrPlugin {
   /** 插件元数据 */
@@ -95,8 +117,15 @@ export interface AsrPlugin {
 
   /**
    * 获取引擎信息（供调试/UI 展示）。
+   * 兼容 IPlugin.getInfo()。
    */
   getModelInfo(): string
+
+  /**
+   * 获取引擎信息（统一接口别名）。
+   * 与 IPlugin.getInfo() 对齐，默认委托给 getModelInfo()。
+   */
+  getInfo(): string
 
   // ── 生命周期钩子（可选） ──
 
@@ -131,9 +160,16 @@ export interface AsrPlugin {
 //  TTS 插件契约
 // ══════════════════════════════════════════
 
-/** TTS 引擎状态 */
+/**
+ * TTS 引擎状态。
+ * 结构兼容 IPluginStatus（统一抽象层）：
+ * - available → ready（语义对应：available = 可用的）
+ * - error 字段与 IPluginStatus 一致
+ */
 export interface TtsPluginStatus {
+  /** 引擎是否可用（兼容 IPluginStatus.ready） */
   available: boolean
+  /** 错误信息（有错误时非 null） */
   error: string | null
 }
 
@@ -175,6 +211,10 @@ export interface TtsSynthesizeResult {
  * 实现此接口的类将成为 SpeechPluginRegistry 可发现的 TTS 引擎。
  * 插件只需关注文本 → 音频的转换逻辑，不需要了解 TtsService 的路由策略、
  * 队列管理或情感参数混合细节。
+ *
+ * 结构兼容统一抽象层 IPlugin（src/main/plugin/registry/types.ts）：
+ * - getInfo() 直接实现 IPlugin.getInfo()
+ * - getStatus() 返回类型结构兼容 IPluginStatus
  */
 export interface TtsPlugin {
   /** 插件元数据 */
@@ -192,6 +232,18 @@ export interface TtsPlugin {
    * 获取当前引擎状态。
    */
   getStatus(): TtsPluginStatus
+
+  /**
+   * 获取引擎信息（供调试/UI 展示）。
+   * 兼容 IPlugin.getInfo()。
+   */
+  getModelInfo(): string
+
+  /**
+   * 获取引擎信息（统一接口别名）。
+   * 与 IPlugin.getInfo() 对齐，默认委托给 getModelInfo()。
+   */
+  getInfo(): string
 
   // ── 生命周期钩子（可选） ──
 

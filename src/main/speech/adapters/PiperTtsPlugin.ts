@@ -46,6 +46,14 @@ export class PiperTtsPlugin implements TtsPlugin {
     }
   }
 
+  getModelInfo(): string {
+    return 'piper_tts (local, ONNX)'
+  }
+
+  getInfo(): string {
+    return this.getModelInfo()
+  }
+
   getStatus(): TtsPluginStatus {
     // PiperOrchestrator 始终可用（没有初始化要求）
     return {

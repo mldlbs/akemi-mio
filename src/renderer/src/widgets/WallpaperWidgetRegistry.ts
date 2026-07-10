@@ -14,9 +14,16 @@
  * - getWidgets() → UnifiedMemoryQuery.query()
  * - getWidgetsByZone() → 按区域筛选（类似按 type 筛选记忆存储）
  * - clear() → 统一清理（类似 UnifiedMemoryQuery 的 dispose）
+ *
+ * 统一抽象层（src/renderer/src/widgets/registry-types.ts）：
+ *   本类方法与 IPluginRegistry 结构兼容，支持通过统一接口操作。
+ *   - getAll() / get() / has() / count → IPluginRegistryReadonly 查询
+ *   - register() / unregister() / clear() → IPluginRegistry 写操作
+ *   - loadAll() / unloadAll() → 声明周期管理（Widget 无异步初始化，为此处空实现）
  */
 
 import type { IWallpaperWidgetDefinition, WallpaperWidgetContext, WallpaperWidgetZone } from './types'
+import type { IRegistryStats } from './registry-types'
 
 // =============================================================================
 // WallpaperWidgetRegistry
@@ -25,6 +32,9 @@ import type { IWallpaperWidgetDefinition, WallpaperWidgetContext, WallpaperWidge
 /**
  * Wallpaper Widget 注册表。
  * 管理所有 widget 插件的注册、查询和生命周期。
+ *
+ * 方法签名与 IPluginRegistry<IWallpaperWidgetDefinition> 兼容，
+ * 调用方可通过统一抽象层接口操作。
  */
 export class WallpaperWidgetRegistry {
   /** 已注册的 widget 插件（按 id 索引） */
@@ -37,11 +47,11 @@ export class WallpaperWidgetRegistry {
 
   /**
    * 注册一个 widget 插件。
-   * 类似 UnifiedMemoryQuery.registerPlugin()。
+   * 类似 UnifiedMemoryQuery.registerPlugin() 和 IPluginRegistry.register()。
    * 调用插件的 onInit 回调（如果定义了）。
    *
    * @param widget 要注册的 widget 定义
-   * @param ctx 初始化上下文
+   * @param ctx 初始化上下文（可选，Widget 特有参数）
    * @throws 如果 widget id 已存在
    */
   register(widget: IWallpaperWidgetDefinition, ctx?: WallpaperWidgetContext): void {
@@ -109,7 +119,7 @@ export class WallpaperWidgetRegistry {
 
   /**
    * 获取所有已注册的 widget 定义。
-   * 类似 UnifiedMemoryQuery.getAllPlugins()。
+   * 类似 UnifiedMemoryQuery.getAllPlugins() 和 IPluginRegistryReadonly.getAll()。
    */
   getAll(): IWallpaperWidgetDefinition[] {
     return Array.from(this.widgets.values())
@@ -117,9 +127,43 @@ export class WallpaperWidgetRegistry {
 
   /**
    * 按 id 获取 widget 定义。
+   * 类似 IPluginRegistryReadonly.get()。
    */
   get(id: string): IWallpaperWidgetDefinition | undefined {
     return this.widgets.get(id)
+  }
+
+  /**
+   * 检查指定 id 的 widget 是否已注册。
+   * 兼容 IPluginRegistryReadonly.has()。
+   */
+  has(id: string): boolean {
+    return this.widgets.has(id)
+  }
+
+  /**
+   * 获取已注册的 widget 数量。
+   * 兼容 IPluginRegistryReadonly.count。
+   */
+  get count(): number {
+    return this.widgets.size
+  }
+
+  /**
+   * 获取注册表统计信息。
+   * 兼容 IPluginRegistryReadonly.getStats()。
+   */
+  getStats(): IRegistryStats {
+    const plugins = Array.from(this.widgets.values()).map((w) => ({
+      name: w.id,
+      version: '1.0.0',
+      description: w.name,
+      priority: w.priority,
+    }))
+    return {
+      total: plugins.length,
+      plugins,
+    }
   }
 
   /**
@@ -154,18 +198,30 @@ export class WallpaperWidgetRegistry {
     return Array.from(this.zoneOrder.keys())
   }
 
+  // ==================== 生命周期（IPluginRegistry 兼容） ====================
+
   /**
-   * 获取已注册的 widget 数量。
+   * 初始化所有已注册的 widget。
+   * 兼容 IPluginRegistry.loadAll()。
+   * Widget 插件的初始化已在 register() 时完成，此方法为空实现。
    */
-  get count(): number {
-    return this.widgets.size
+  async loadAll(): Promise<void> {
+    // Widget 插件的 onInit 已在 register() 时调用
   }
 
-  // ==================== 生命周期 ====================
+  /**
+   * 卸载所有已注册的 widget。
+   * 兼容 IPluginRegistry.unloadAll()。
+   * 代理到 clear()。
+   */
+  async unloadAll(): Promise<void> {
+    this.clear()
+  }
 
   /**
    * 清理所有已注册的 widget。
    * 类似 UnifiedMemoryQuery 在系统关闭时的清理。
+   * 兼容 IPluginRegistry.clear()。
    */
   clear(): void {
     // 按注册顺序逆序销毁

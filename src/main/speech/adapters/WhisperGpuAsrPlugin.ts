@@ -46,11 +46,16 @@ export class WhisperGpuAsrPlugin implements AsrPlugin {
   }
 
   getStatus(): AsrPluginStatus {
-    return this.engine.getStatus()
+    const s = this.engine.getStatus()
+    return { ...s, ready: s.loaded }
   }
 
   getModelInfo(): string {
     return this.engine.getModelInfo()
+  }
+
+  getInfo(): string {
+    return this.getModelInfo()
   }
 
   async initialize(config?: { model?: string }): Promise<void> {

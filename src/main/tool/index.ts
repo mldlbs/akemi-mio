@@ -50,6 +50,11 @@ import {
   readAloudSegmentTool,
 } from './definitions/TypographyVerificationTool'
 import {
+  learningQueryTool,
+  oralCodeGenerateTool,
+  learningSummaryTool,
+} from './definitions/LearningTools'
+import {
   moveFileTool,
   copyFileTool,
   deleteFileTool,
@@ -137,6 +142,10 @@ export function getAllTools(): Tool[] {
     // 排版语音校验
     verifyTypographyTool as Tool,
     readAloudSegmentTool as Tool,
+    // 学习系统工具
+    learningQueryTool as Tool,
+    oralCodeGenerateTool as Tool,
+    learningSummaryTool as Tool,
   ]
 }
 

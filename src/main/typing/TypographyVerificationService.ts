@@ -9,13 +9,13 @@
  * 5. 支持仅朗读指定段落（不校验）
  *
  * 集成：
- * - PiperOrchestrator（单例）：合成语音，产 WAV
+ * - PiperTypographyAdapter（适配层）：将排版参数映射为 PiperTTS 参数后调用合成
  * - AsrService：由调用方传入的 transcribe 回调驱动
  * - 编辑距离：基于字符级 Needleman–Wunsch / 贪心对齐
  */
 import { promises as fsp } from 'fs'
 import { log } from '../logger/Logger'
-import { piperOrchestrator } from '../tts/PiperOrchestrator'
+import { piperTypographyAdapter } from './PiperTypographyAdapter'
 import { cleanTTS } from '../tts/TtsService'
 
 // ══════════════════════════════════════════
@@ -389,9 +389,10 @@ export class TypographyVerificationService {
 
     // 2. 调用 PiperTTS 合成语音 → WAV
     log('INFO', 'typography_verify_tts_start', { text_len: plainText.length })
-    const synthResult = await piperOrchestrator.synthesize({
+    const synthResult = await piperTypographyAdapter.synthesize({
       text: plainText,
-      taskTag: 'story',
+      platformTag: '公众号',
+      contentCategory: 'article',
     })
     if (!synthResult.success || !synthResult.audioFile) {
       log('ERROR', 'typography_verify_tts_failed', { error: synthResult.error })
@@ -512,9 +513,10 @@ export class TypographyVerificationService {
     }
 
     log('INFO', 'typography_read_aloud', { text_len: cleaned.length })
-    const synthResult = await piperOrchestrator.synthesize({
+    const synthResult = await piperTypographyAdapter.synthesize({
       text: cleaned,
-      taskTag: 'story',
+      platformTag: '公众号',
+      contentCategory: 'article',
     })
 
     if (!synthResult.success || !synthResult.audioFile) {

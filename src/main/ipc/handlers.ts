@@ -25,9 +25,9 @@ import { inspirationService } from '../writing/InspirationService'
 import { voiceContinuationService } from '../writing/VoiceContinuationService'
 import { audioFeatureExtractor } from '../audio/AudioFeatureExtractor'
 import { atmosphereMapper } from '../audio/AtmosphereMapper'
-import {
-  typographyVerificationService,
-} from '../typing/TypographyVerificationService'
+import type { DecisionQueryService } from '../core/evaluation/DecisionQueryService'
+import type { GuardrailMetricsQueryService } from '../core/evaluation/GuardrailMetricsQueryService'
+import { typographyVerificationService } from '../typing/TypographyVerificationService'
 
 /** 打开的沙盒窗口表，防止重复打开 */
 const sandboxWindows = new Map<string, BrowserWindow>()
@@ -85,6 +85,8 @@ export function registerHandlers(
   metricsCollector?: MetricsCollector,
   dashboardRef?: ServiceRef<EvolutionDashboardService>,
   memoryContextRef?: ServiceRef<MemoryContextService>,
+  decisionQueryRef?: ServiceRef<DecisionQueryService>,
+  metricsQueryRef?: ServiceRef<GuardrailMetricsQueryService>,
 ): void {
   ipcMain.handle('window:close', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -501,6 +503,83 @@ export function registerHandlers(
     } catch (err) {
       log('ERROR', 'tts_user_context_override_failed', { error: String(err) })
       return { success: false }
+    }
+  })
+
+  // ── TTS 重听与循环播放 IPC ──
+  ipcMain.handle('tts:replay', async () => {
+    try {
+      const success = await ttsService.replay()
+      return { success }
+    } catch (err) {
+      log('ERROR', 'tts_replay_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('tts:replay:hasContent', async () => {
+    return { hasContent: ttsService.hasReplayContent() }
+  })
+
+  ipcMain.handle('tts:loop:set', async (_event, enabled: boolean, intervalMs?: number, maxCount?: number) => {
+    try {
+      ttsService.setLoopMode(enabled, intervalMs, maxCount)
+      return { success: true, enabled, intervalMs, maxCount }
+    } catch (err) {
+      log('ERROR', 'tts_loop_set_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('tts:loop:state', async () => {
+    return {
+      enabled: ttsService.isLoopMode(),
+      hasReplayContent: ttsService.hasReplayContent(),
+    }
+  })
+
+  // ── 学习查询 IPC ──
+  ipcMain.handle('learning:query', async (_event, transcribedText: string) => {
+    try {
+      const { learningAsrBridge } = await import('../learning/LearningAsrBridge')
+      const result = learningAsrBridge.matchQuery(transcribedText)
+      return result
+    } catch (err) {
+      log('ERROR', 'learning_query_failed', { error: String(err) })
+      return { matched: false, items: [], categories: [], explanation: String(err), query: transcribedText }
+    }
+  })
+
+  ipcMain.handle('learning:summary', async () => {
+    try {
+      const { learningAsrBridge } = await import('../learning/LearningAsrBridge')
+      return { summary: learningAsrBridge.getLearningSummary() }
+    } catch (err) {
+      log('ERROR', 'learning_summary_failed', { error: String(err) })
+      return { summary: '' }
+    }
+  })
+
+  // ── 口述代码 IPC ──
+  ipcMain.handle('oral:code', async (_event, description: string) => {
+    try {
+      const { oralCodeService } = await import('../learning/OralCodeService')
+      const result = oralCodeService.process({ description })
+      return result
+    } catch (err) {
+      log('ERROR', 'oral_code_failed', { error: String(err) })
+      return { success: false, pattern: 'unknown', code: '', explanation: String(err), label: '错误', verification: 'failed' }
+    }
+  })
+
+  ipcMain.handle('oral:patterns', async () => {
+    try {
+      const { oralCodeService } = await import('../learning/OralCodeService')
+      const patterns = oralCodeService.getSupportedPatterns()
+      return { patterns }
+    } catch (err) {
+      log('ERROR', 'oral_patterns_failed', { error: String(err) })
+      return { patterns: [] }
     }
   })
 
@@ -984,54 +1063,61 @@ export function registerHandlers(
 
   // ── 语音引导的剧情续写 ──
 
-  ipcMain.handle('writing:continuation:execute', async (_event, params: {
-    storyName: string
-    chapterNum: number
-    userVoiceText?: string
-    atmosphere?: import('../audio/types').StoryAtmosphere | null
-  }) => {
-    try {
-      const result = await voiceContinuationService.execute(
-        params.storyName,
-        params.chapterNum,
-        params.userVoiceText,
-        params.atmosphere,
-      )
-      return result
-    } catch (err) {
-      log('ERROR', 'continuation_execute_failed', { error: String(err), storyName: params.storyName })
-      return {
-        success: false,
-        chapterTitle: `第${params.chapterNum}章`,
-        content: '',
-        sceneId: null,
-        userVoiceText: params.userVoiceText || '',
-        atmosphere: params.atmosphere || null,
-        error: String(err),
-        processingMs: 0,
+  ipcMain.handle(
+    'writing:continuation:execute',
+    async (
+      _event,
+      params: {
+        storyName: string
+        chapterNum: number
+        userVoiceText?: string
+        atmosphere?: import('../audio/types').StoryAtmosphere | null
+      },
+    ) => {
+      try {
+        const result = await voiceContinuationService.execute(params.storyName, params.chapterNum, params.userVoiceText, params.atmosphere)
+        return result
+      } catch (err) {
+        log('ERROR', 'continuation_execute_failed', { error: String(err), storyName: params.storyName })
+        return {
+          success: false,
+          chapterTitle: `第${params.chapterNum}章`,
+          content: '',
+          sceneId: null,
+          userVoiceText: params.userVoiceText || '',
+          atmosphere: params.atmosphere || null,
+          error: String(err),
+          processingMs: 0,
+        }
       }
-    }
-  })
+    },
+  )
 
-  ipcMain.handle('writing:continuation:init', async (_event, params: {
-    storyName: string
-    chapterNum: number
-  }) => {
-    try {
-      const ctx = await voiceContinuationService.initializeContext(params.storyName, params.chapterNum)
-      return ctx
-    } catch (err) {
-      log('ERROR', 'continuation_init_failed', { error: String(err), storyName: params.storyName })
-      return {
-        storyName: params.storyName,
-        chapterNum: params.chapterNum,
-        storyId: null,
-        previousChapter: null,
-        totalChapters: 0,
-        readerExpectations: '',
+  ipcMain.handle(
+    'writing:continuation:init',
+    async (
+      _event,
+      params: {
+        storyName: string
+        chapterNum: number
+      },
+    ) => {
+      try {
+        const ctx = await voiceContinuationService.initializeContext(params.storyName, params.chapterNum)
+        return ctx
+      } catch (err) {
+        log('ERROR', 'continuation_init_failed', { error: String(err), storyName: params.storyName })
+        return {
+          storyName: params.storyName,
+          chapterNum: params.chapterNum,
+          storyId: null,
+          previousChapter: null,
+          totalChapters: 0,
+          readerExpectations: '',
+        }
       }
-    }
-  })
+    },
+  )
 
   // ── 行为感知壁纸配置 ──
 
@@ -1138,7 +1224,11 @@ export function registerHandlers(
         }
         const tempFile = report.audioFile
         setTimeout(() => {
-          try { unlinkSync(tempFile) } catch { /* already cleaned */ }
+          try {
+            unlinkSync(tempFile)
+          } catch {
+            /* already cleaned */
+          }
         }, 10000)
       }
 
@@ -1159,7 +1249,11 @@ export function registerHandlers(
         }
         const tempFile = result.audioFile
         setTimeout(() => {
-          try { unlinkSync(tempFile) } catch { /* already cleaned */ }
+          try {
+            unlinkSync(tempFile)
+          } catch {
+            /* already cleaned */
+          }
         }, 10000)
       }
       return result
@@ -1219,4 +1313,63 @@ export function registerHandlers(
       return { success: false, error: String(err) }
     }
   })
+
+  // ── Evaluation Decision Query API (M5.3) ──
+
+  if (decisionQueryRef) {
+    ipcMain.handle('evaluation:getDecision', async (_event, decisionId: string) => {
+      const svc = decisionQueryRef.current
+      if (!svc) return { state: 'UNAVAILABLE' }
+      return svc.getDecision(decisionId)
+    })
+
+    ipcMain.handle('evaluation:listByTrace', async (_event, traceId: string) => {
+      const svc = decisionQueryRef.current
+      if (!svc) return []
+      return svc.listByTrace(traceId)
+    })
+  }
+
+  // ── M6.3 Guardrail Metrics Query API ──
+
+  if (metricsQueryRef) {
+    ipcMain.handle('guardrail:metrics:summary', async () => {
+      const svc = metricsQueryRef.current
+      if (!svc) return emptyMetricsSummary()
+      return svc.getSummary()
+    })
+
+    ipcMain.handle('guardrail:metrics:query', async (_event, since: number, until: number) => {
+      const svc = metricsQueryRef.current
+      if (!svc) return { windows: [], totalWindows: 0, queryRangeMs: until - since }
+      const windows = await svc.queryTimeRange(since, until)
+      return { windows, totalWindows: windows.length, queryRangeMs: until - since }
+    })
+
+    ipcMain.handle('guardrail:metrics:latest', async () => {
+      const svc = metricsQueryRef.current
+      if (!svc) return null
+      return svc.getLatest()
+    })
+
+    // ── 独立的状态 API ──
+    ipcMain.handle('guardrail:metrics:state', async () => {
+      const svc = metricsQueryRef.current
+      if (!svc) return { status: 'UNAVAILABLE', reason: 'GuardrailMetricsQueryService not initialized' }
+      return svc.getProjectionState()
+    })
+  }
+}
+
+function emptyMetricsSummary(): any {
+  return {
+    totalChecked: 0,
+    totalWarning: 0,
+    totalTerminated: 0,
+    totalContinue: 0,
+    totalSignalsHealthy: 0,
+    totalSignalsDegrading: 0,
+    totalSignalsStalled: 0,
+    windowCount: 0,
+  }
 }

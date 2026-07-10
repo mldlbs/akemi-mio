@@ -110,6 +110,14 @@ export class EdgeTtsPlugin implements TtsPlugin {
     }
   }
 
+  getModelInfo(): string {
+    return `edge_tts (cloud, Microsoft Edge TTS)`
+  }
+
+  getInfo(): string {
+    return this.getModelInfo()
+  }
+
   getStatus(): TtsPluginStatus {
     return {
       available: this.available,

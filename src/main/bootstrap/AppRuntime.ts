@@ -4,7 +4,14 @@ import { promises as fsp, readFileSync } from 'fs'
 import { log, initLogFile, getLogFilePath, sanitizeForLog } from '../logger/Logger'
 import { StateManager } from '../core/StateManager'
 import { eventBus, SubscriptionTracker } from '../core/EventBus'
-import { INITIAL_HOTWORDS, WORKSPACE, RUNTIME_ROOT } from '../config'
+import {
+  INITIAL_HOTWORDS,
+  WORKSPACE,
+  RUNTIME_ROOT,
+  TELEGRAM_SERVER_URL,
+  TELEGRAM_POLL_INTERVAL_MS,
+  TELEGRAM_OUTBOX_COOLDOWN_MS,
+} from '../config'
 import { ServerManager } from '../mcp/ServerManager'
 import { LlmService } from '../llm/LlmService'
 import { WhisperGpuEngine } from '../asr/WhisperGpuEngine'
@@ -12,8 +19,10 @@ import { BaiduEngine } from '../asr/BaiduEngine'
 import { AsrService } from '../asr/AsrService'
 import { asrEvolutionManager } from '../asr/AsrEvolutionManager'
 import { TtsService } from '../tts/TtsService'
+import { ttsTypographyFeedbackLoop } from '../tts/TtsTypographyFeedbackLoop'
 import { AgentService } from '../agent/AgentService'
 import { MemoryService } from '../memory/MemoryService'
+import { memoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
 import { registerHandlers, createServiceRef } from '../ipc/handlers'
 import type { ServiceRef } from '../ipc/handlers'
 import { credentialsManager } from '../credentials/CredentialsManager'
@@ -78,6 +87,7 @@ import { ToolEventBridge } from '../core/evaluation/ToolEventBridge'
 import { GuardrailPipeline } from '../core/evaluation/GuardrailPipeline'
 import { GuardrailProgressConsumer } from '../core/evaluation/progress-consumers/GuardrailProgressConsumer'
 import { GuardrailConfigStore } from '../core/evaluation/GuardrailConfigStore'
+import { GuardrailDecisionStore } from '../core/evaluation/GuardrailDecisionStore'
 import { DEFAULT_GUARDRAIL_POLICY_CONFIG } from '../core/evaluation/GuardrailTypes'
 import { ProgressObserver } from '../core/evaluation/ProgressObserver'
 import { GuardrailProgressAnalyzer } from '../core/evaluation/GuardrailProgressAnalyzer'
@@ -118,10 +128,15 @@ export class AppRuntime {
   private metricsEngine?: MetricsEngineImpl
   private comfyUI?: ComfyUIManager
   private pipeline?: PipelineOrchestrator
+  private feedbackLoop?: import('../user-behavior/feedback-loop').MCPFeedbackLoopService
   private dashboardService?: EvolutionDashboardService
   private monitoringService?: MonitoringService
   private memoryContextService?: MemoryContextService
   private memoryContextRef: ServiceRef<MemoryContextService> = createServiceRef<MemoryContextService>()
+  private metricsStore?: import('../core/evaluation/GuardrailMetricsStore').GuardrailMetricsStore
+  private metricsProjection?: import('../core/evaluation/GuardrailMetricsProjection').GuardrailMetricsProjection
+  private metricsQueryRef: ServiceRef<import('../core/evaluation/GuardrailMetricsQueryService').GuardrailMetricsQueryService> =
+    createServiceRef()
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
     this.crashGuard = crashGuard ?? { flushMemory: null }
@@ -162,6 +177,14 @@ export class AppRuntime {
     const asrService = new AsrService(gpuEngine, baiduEngine)
     // 初始化长时个性化词表（从持久化存储加载）
     asrService.initVocabulary()
+    // 将 TypeScript 学习知识点注入 ASR 热词管理器
+    import('../learning/LearningAsrBridge')
+      .then(({ learningAsrBridge }) => {
+        learningAsrBridge.seedLearningVocab()
+      })
+      .catch((err) => {
+        log('WARN', 'seed_learning_vocab_failed', { error: String(err) })
+      })
     // 将 ASR 服务注入进化管理器（供 ASR 自优化使用）
     asrEvolutionManager.setAsrService(asrService)
     // 将 ASR 引擎注册为 SpeechPluginRegistry 插件
@@ -292,25 +315,104 @@ export class AppRuntime {
     this.toolEventBridge = new ToolEventBridge(this.evaluationEmitter, eventBus)
     this.toolEventBridge.start()
     // GuardrailPipeline — 注入 ChatExecutor 的 GuardrailPipeline（需要 emitter 就绪）
-    const guardrailPipeline = new GuardrailPipeline(undefined, undefined, this.evaluationEmitter)
+    const guardrailDecisionStore = new GuardrailDecisionStore()
+    const guardrailPipeline = new GuardrailPipeline(undefined, undefined, this.evaluationEmitter, guardrailDecisionStore)
     agentService.setGuardrailPipeline(guardrailPipeline)
     // 注入 EvaluationEmitter 用于写入 Delivery Trace 事件
     agentService.setEvaluationEmitter(this.evaluationEmitter)
 
-    // GuardrailConfigStore — 版本管理
-    const guardrailConfigStore = new GuardrailConfigStore(DEFAULT_GUARDRAIL_POLICY_CONFIG)
+    // GuardrailConfigStore — 从 EvaluationEvent 日志重建 Event Projection
+    const guardrailConfigStore = new GuardrailConfigStore()
+
+    // 启动时扫描 config events 重建 state
+    try {
+      const activatedEvents = await this.evaluationStore.query({ since: 0, type: 'guardrail.config.activated' })
+      const initializedEvents = await this.evaluationStore.query({ since: 0, type: 'guardrail.config.initialized' })
+      const rollbackEvents = await this.evaluationStore.query({ since: 0, type: 'guardrail.config.rollback' })
+      // 合并并按 timestamp 排序
+      const allConfigEvents = [...activatedEvents, ...initializedEvents, ...rollbackEvents].sort((a, b) => a.timestamp - b.timestamp)
+
+      guardrailConfigStore.loadFromEvents(allConfigEvents)
+
+      if (guardrailConfigStore.getVersionHistory().length === 0) {
+        // 首次启动，无历史 config — seed 并 emit 初始事件
+        const version = guardrailConfigStore.allocateVersion()
+        guardrailConfigStore.applyActivated(version, DEFAULT_GUARDRAIL_POLICY_CONFIG, Date.now())
+        this.evaluationEmitter.emit('guardrail.config.initialized', {
+          type: 'guardrail.config.initialized',
+          version,
+          config: DEFAULT_GUARDRAIL_POLICY_CONFIG,
+          activatedAt: Date.now(),
+        })
+        log('INFO', 'guardrail_config_seeded', { version })
+      } else {
+        log('INFO', 'guardrail_config_reconstructed', {
+          version: guardrailConfigStore.getActiveConfig().version,
+          eventCount: allConfigEvents.length,
+        })
+      }
+    } catch (err: any) {
+      log('WARN', 'guardrail_config_reconstruction_failed', {
+        error: err.message,
+        fallback: 'DEFAULT_GUARDRAIL_POLICY_CONFIG',
+      })
+      // 重建失败时 fallback 到 DEFAULT（init 跳过 seed，getActiveConfig 自动回退 DEFAULT）
+    }
 
     // GuardrailProgressConsumer 接入 ProgressObserver
     // ADR-004 Option A: Consumer 通过 callback 将 GuardrailDecision 交付给 Pipeline
-    const guardrailConsumer = new GuardrailProgressConsumer(undefined, (decision) => {
-      guardrailPipeline.onGuardrailDecision(decision)
-    }, guardrailConfigStore)
+    const guardrailConsumer = new GuardrailProgressConsumer(
+      undefined,
+      (decision) => {
+        guardrailPipeline.onGuardrailDecision(decision)
+      },
+      guardrailConfigStore,
+    )
+
+    // M5.4: replayWindowMs 从环境变量读取（默认 60000ms）
+    const replayWindowMsRaw = parseInt(process.env.GUARDRAIL_REPLAY_WINDOW_MS ?? '60000', 10)
+    const replayWindowMs = Number.isFinite(replayWindowMsRaw) && replayWindowMsRaw >= 1000 ? replayWindowMsRaw : 60000
 
     // ProgressObserver — Event Pipeline Observer（单例）
-    this.progressObserver = new ProgressObserver(this.evaluationStore, new GuardrailProgressAnalyzer(this.evaluationStore))
+    this.progressObserver = new ProgressObserver(this.evaluationStore, new GuardrailProgressAnalyzer(this.evaluationStore), replayWindowMs)
     this.progressObserver.register(guardrailConsumer)
     this.progressObserver.start()
     log('INFO', 'evaluation_ready', { sessionId, guardrailConsumerReady: true })
+
+    // ── M6.2 Metrics Projection Startup ──
+    const { GuardrailMetricsStore } = await import('../core/evaluation/GuardrailMetricsStore')
+    const { GuardrailMetricsProjection } = await import('../core/evaluation/GuardrailMetricsProjection')
+    this.metricsStore = new GuardrailMetricsStore()
+    this.metricsProjection = new GuardrailMetricsProjection(this.evaluationStore, this.metricsStore)
+
+    const GUARDRAIL_METRICS_REBUILD = process.env.GUARDRAIL_METRICS_REBUILD === 'true'
+    try {
+      if (GUARDRAIL_METRICS_REBUILD) {
+        await this.metricsProjection.rebuild()
+        log('INFO', 'guardrail_metrics_rebuilt')
+      } else {
+        const lastUpdate = await this.metricsStore.getLastUpdateTimestamp()
+        if (lastUpdate !== null) {
+          await this.metricsProjection.build(lastUpdate)
+          log('INFO', 'guardrail_metrics_built', { since: lastUpdate })
+        } else {
+          await this.metricsProjection.rebuild()
+          log('INFO', 'guardrail_metrics_initial_build')
+        }
+      }
+    } catch (err: any) {
+      log('WARN', 'guardrail_metrics_startup_failed', { error: err.message })
+      // Metrics projection 启动失败 → degrade（不阻塞 runtime）
+    }
+
+    // M6.3: GuardrailMetricsQueryService — 只读查询层
+    const { GuardrailMetricsQueryService } = await import('../core/evaluation/GuardrailMetricsQueryService')
+    this.metricsQueryRef.current = new GuardrailMetricsQueryService(this.metricsStore, this.metricsProjection)
+
+    // DecisionQueryService — 只读查询层（M5.3）
+    const { DecisionQueryService } = await import('../core/evaluation/DecisionQueryService')
+    const decisionQueryRef = createServiceRef<DecisionQueryService>()
+    decisionQueryRef.current = new DecisionQueryService(guardrailDecisionStore)
 
     const win = createWindow(stateManager)
     agentService.setMainWindow(win)
@@ -334,6 +436,8 @@ export class AppRuntime {
     const memoryService = new MemoryService()
     this.memoryService = memoryService
     this.crashGuard.flushMemory = () => memoryService.flush()
+    // Memory × Evolution 深度融合桥接器：注入 MemoryService 引用
+    memoryEvolutionBridge.setMemoryService(memoryService)
     const skillManager = new SkillManager()
     await skillManager.initialize()
     agentService.setSkillManager(skillManager)
@@ -342,6 +446,57 @@ export class AppRuntime {
     setMemoryService(memoryService)
     setPlanManager(planManager)
     setToolSkillManager(skillManager)
+
+    // ── Plan:工业颂歌 公众号排版处理 上层增强层（由 GONGYE_SONGE_FEATURES 控制）──
+    try {
+      const { IndustrialOdeLayer } = await import('../gongye-songge/IndustrialOdeLayer')
+      const { parseFeaturesFromEnv } = await import('../gongye-songge/types')
+      const gongyeFeatures = parseFeaturesFromEnv()
+      if (gongyeFeatures.length > 0) {
+        const preHooks: any[] = []
+        const postHooks: any[] = []
+
+        // 预处理：检测排版需求
+        if (gongyeFeatures.includes('style_inject')) {
+          preHooks.push(IndustrialOdeLayer.createDetectNeedPreHook())
+          preHooks.push(IndustrialOdeLayer.createStyleInjectPreHook())
+        } else if (gongyeFeatures.includes('content_format') || gongyeFeatures.includes('publish_ready')) {
+          preHooks.push(IndustrialOdeLayer.createDetectNeedPreHook())
+        }
+
+        // 后处理：公众号排版格式化
+        if (gongyeFeatures.includes('content_format')) {
+          postHooks.push(IndustrialOdeLayer.createFormatPostHook())
+        }
+        if (gongyeFeatures.includes('publish_ready')) {
+          // publish_ready 强制对所有内容添加发布就绪标记
+          postHooks.push(IndustrialOdeLayer.createFormatPostHook())
+        }
+        if (gongyeFeatures.includes('summary_format') && llmService) {
+          postHooks.push(
+            IndustrialOdeLayer.createLlmFormatPostHook({
+              chatJson: (prompt: string, opts?: any) => llmService.chatJson(prompt, opts),
+            }),
+          )
+        }
+
+        const industrialOdeLayer = new IndustrialOdeLayer({
+          features: gongyeFeatures,
+          preHooks: preHooks.length > 0 ? preHooks : undefined,
+          postHooks: postHooks.length > 0 ? postHooks : undefined,
+          llmService: llmService
+            ? {
+                chatJson: (prompt: string, opts?: any) => llmService.chatJson(prompt, opts),
+              }
+            : undefined,
+          debug: process.env.GONGYE_SONGE_DEBUG === 'true',
+        })
+
+        agentService.setIndustrialOdeLayer(industrialOdeLayer)
+      }
+    } catch (err) {
+      log('WARN', 'industrial_ode_layer_init_failed', { error: String(err) })
+    }
 
     // Phase 4: Kernel 升级 — init() / start() 生命周期
     const kernel = Kernel.getInstance()
@@ -450,7 +605,17 @@ export class AppRuntime {
     // === Stage 5: Handler 注册 & 宪法 ===
     const evolutionRef = createServiceRef<SelfEvolutionService>()
     const dashboardRef = createServiceRef<EvolutionDashboardService>()
-    registerHandlers(agentService, stateManager, ttsService, evolutionRef, undefined, dashboardRef, this.memoryContextRef)
+    registerHandlers(
+      agentService,
+      stateManager,
+      ttsService,
+      evolutionRef,
+      undefined,
+      dashboardRef,
+      this.memoryContextRef,
+      decisionQueryRef,
+      this.metricsQueryRef,
+    )
 
     const constitutionEngine = new ConstitutionEngine()
     await constitutionEngine.initialize(join(WORKSPACE.evolution, 'constitution'))
@@ -648,10 +813,11 @@ export class AppRuntime {
     )
 
     // 注册 Telegram outbox worker（在 taskRunner 启动前注册，start 后生效）
-    const outboxUrl =
-      credentialsManager.get('telegram_server_url') || process.env.TELEGRAM_SERVER_URL || 'https://skills.crlkcloud.cyou/telegram'
+    const outboxUrl = credentialsManager.get('telegram_server_url') || TELEGRAM_SERVER_URL
     const outboxWorker = new OutboxWorker(outboxUrl)
-    this.taskRunner.register('telegram.outbox', () => outboxWorker.tick(), 2000, { cooldownMs: 10000 })
+    this.taskRunner.register('telegram.outbox', () => outboxWorker.tick(), TELEGRAM_POLL_INTERVAL_MS, {
+      cooldownMs: TELEGRAM_OUTBOX_COOLDOWN_MS,
+    })
     // 当 TelegramService 写入新 outbox 消息时，自动恢复被禁用的 outbox 任务
     telegramService.setReactivateOutbox(() => {
       this.taskRunner?.reactivate('telegram.outbox')
@@ -687,6 +853,9 @@ export class AppRuntime {
     this.lazyInit.start()
     this.taskRunner.start()
     log('INFO', 'task_runtime_started')
+
+    // === Stage 8: Retention & Archive（R1） ===
+    this.initRetentionScheduler()
 
     // === Stage 8: GPU ASR（异步） ===
     this.initGpuAsync(stateManager, gpuEngine, asrService)
@@ -742,9 +911,11 @@ export class AppRuntime {
     this.toolEventBridge?.stop()
     this.progressObserver?.stop()
     await this.evaluationStore?.shutdown().catch(() => {})
+    ttsTypographyFeedbackLoop.stop()
     this.memoryService?.shutdown()
     this.memoryIndexer?.stop()
     await this.evaluationStore?.shutdown().catch(() => {})
+    this.feedbackLoop?.dispose()
     evolutionService?.stop()
     insightService?.stop()
     creativityService?.stop()
@@ -754,6 +925,93 @@ export class AppRuntime {
     this.subs.dispose()
     closeDatabase()
     log('INFO', 'memory_flushed_on_quit')
+  }
+
+  /**
+   * 启动每日归档 + retention 调度。
+   * R1: 使用 setTimeout 模式，免改 TaskRunner。
+   */
+  private initRetentionScheduler(): void {
+    try {
+      const { EventArchiver } = require('../core/evaluation/EventArchiver')
+      const { RetentionScheduler } = require('../core/evaluation/RetentionScheduler')
+      const { getRawDb } = require('../db/connection')
+      const { WORKSPACE_ROOT } = require('../config')
+      const rawDb = getRawDb()
+
+      const raw: { run: (sql: string, params?: any[]) => void; query: (sql: string, params?: any[]) => Record<string, any>[] } = {
+        run: (s, p) => rawDb.run(s, p),
+        query: (s, p) => {
+          const stmt = rawDb.prepare(s)
+          p && stmt.bind(p)
+          const rows: any[] = []
+          while (stmt.step()) rows.push(stmt.getAsObject())
+          stmt.free()
+          return rows
+        },
+      }
+
+      const archiver = new EventArchiver(this.evaluationStore!, raw, WORKSPACE_ROOT)
+      const scheduler = new RetentionScheduler(
+        archiver,
+        raw,
+        this.evaluationStore!,
+        this.evaluationStore!,
+        this.metricsStore!,
+        WORKSPACE_ROOT,
+      )
+
+      const scheduleNext = () => {
+        const now = Date.now()
+        const next = new Date()
+        next.setHours(2, 0, 0, 0) // 02:00 local
+        if (next.getTime() <= now) next.setDate(next.getDate() + 1)
+        setTimeout(async () => {
+          try {
+            const result = await scheduler.runCycle()
+            if (result.archive.length > 0 || result.retention.some((r) => r.deletedCount > 0)) {
+              const { markDirty } = require('../../db/connection')
+              markDirty()
+            }
+            log('INFO', 'retention_cycle_completed', {
+              archive: result.archive.length,
+              decisionsDeleted: result.retention[0]?.deletedCount ?? 0,
+              metricsDeleted: result.retention[1]?.deletedCount ?? 0,
+            })
+          } catch (err: any) {
+            log('WARN', 'retention_cycle_failed', { error: err.message })
+          }
+          scheduleNext()
+        }, next.getTime() - now)
+      }
+
+      // 首次启动检查：如果归档目录没有今日文件，立即执行
+      const { existsSync } = require('fs')
+      const { join } = require('path')
+      const today = new Date()
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+      const todayArchive = join(WORKSPACE_ROOT, 'archive', 'evaluation_events', `evaluation_events_${todayStr}.ndjson.gz`)
+      if (!existsSync(todayArchive)) {
+        log('INFO', 'retention_first_run_no_today_archive')
+        scheduler
+          .runCycle()
+          .then((result: any) => {
+            log('INFO', 'retention_first_run_completed', {
+              archive: result.archive.length,
+              decisionsDeleted: result.retention[0]?.deletedCount ?? 0,
+              metricsDeleted: result.retention[1]?.deletedCount ?? 0,
+            })
+          })
+          .catch((err: any) => {
+            log('WARN', 'retention_first_run_failed', { error: err.message })
+          })
+      }
+
+      scheduleNext()
+      log('INFO', 'retention_scheduler_initialized')
+    } catch (err: any) {
+      log('WARN', 'retention_scheduler_init_failed', { error: err.message })
+    }
   }
 
   private registerCoreEventBus(): void {
@@ -859,6 +1117,9 @@ export class AppRuntime {
         const pluginLoader = PluginServiceLoader.getInstance()
         const wallpaperPlugin = new WallpaperPlugin(process.cwd())
         pluginLoader.register(wallpaperPlugin)
+        // 注册 Evolution × PiperTTS 深度融合插件
+        const { PiperEvolutionPlugin } = await import('../evolution/piper')
+        pluginLoader.register(new PiperEvolutionPlugin())
         await pluginLoader.loadAll()
         // 将插件适配为管道 Collector / Executor 并注册
         const collectPlugins = pluginLoader.getByCapability('collect')
@@ -880,14 +1141,93 @@ export class AppRuntime {
         const { BehaviorCollector, BehaviorOptimizationExecutor } = await import('../evolution/automation')
         pipeline.addCollector(new BehaviorCollector())
         pipeline.addExecutor(new BehaviorOptimizationExecutor())
+        // 启动 TTS↔排版强化回路（初始为 manual 模式，collector/executor 已在 initDefaults 中注册）
+        ttsTypographyFeedbackLoop.start()
+
+        // ── [反 ASR 原型] 排版计划上下文 → ASR 热词增强 ──
+        // 反转假设：排版计划不再只是 ASR 输出结果的被动消费者，
+        // 而是通过播种领域词汇热词来主动影响 ASR 的识别倾向。
+        import('../typing/TypographyAsrBridge')
+          .then(({ typographyAsrBridge }) => {
+            typographyAsrBridge.seedFromActiveTypography()
+          })
+          .catch((err) => {
+            log('WARN', 'seed_typography_asr_failed', { error: String(err) })
+          })
+
         // 注册行为记录钩子（增强时序数据采集）
         const { registerBehaviorRecordHook } = await import('../user-behavior/BehaviorFeatureExtractor')
         registerBehaviorRecordHook()
         // 附加到进化系统（SelfEvolutionService 将消费管道指标）
         evolution.setPipeline(pipeline)
+        // Memory × Evolution 深度融合：注入桥接器
+        evolution.setMemoryBridge(memoryEvolutionBridge)
         this.pipeline = pipeline
         evolution.scheduleEvolution(2)
         if (evolutionRef) evolutionRef.current = evolution
+        // 创建 UserBehavior 上层增强层（由环境变量 USER_BEHAVIOR_FEATURES 控制）
+        const { UserBehaviorLayer } = await import('../user-behavior/UserBehaviorLayer')
+        const { parseFeaturesFromEnv } = await import('../user-behavior/types')
+        const features = parseFeaturesFromEnv()
+        if (features.length > 0) {
+          const preHooks: any[] = []
+          const postHooks: any[] = []
+
+          if (features.includes('summary_enhance')) {
+            preHooks.push(UserBehaviorLayer.createSummaryEnhancePreHook())
+            postHooks.push(UserBehaviorLayer.createSummaryEnhancePostHook())
+          }
+          if (features.includes('metrics_enrich')) {
+            postHooks.push(UserBehaviorLayer.createMetricsEnrichPostHook())
+          }
+          if (features.includes('dynamic_pipeline_tuning')) {
+            postHooks.push(UserBehaviorLayer.createDynamicTuningPostHook())
+          }
+          if (features.includes('behavior_driven_optimization') || features.includes('behavior_sequence_analysis')) {
+            preHooks.push(UserBehaviorLayer.createBehaviorFeaturePreHook())
+            postHooks.push(UserBehaviorLayer.createBehaviorAnalysisPostHook())
+          }
+
+          const userBehaviorLayer = new UserBehaviorLayer(evolution, {
+            features,
+            preHooks: preHooks.length > 0 ? preHooks : undefined,
+            postHooks: postHooks.length > 0 ? postHooks : undefined,
+            debug: process.env.USER_BEHAVIOR_DEBUG === 'true',
+          })
+
+          evolution.setUserBehaviorLayer(userBehaviorLayer)
+        }
+
+        // ── MCP ↔ UserBehavior 强化回路 ──
+        // 由 USER_BEHAVIOR_FEATURES 中的 mcp_feedback_loop 特性控制
+        if (features.includes('mcp_feedback_loop')) {
+          const { createMCPFeedbackLoop } = await import('../user-behavior/feedback-loop')
+          const loopDebug = process.env.MCP_FEEDBACK_LOOP_DEBUG === 'true'
+          this.feedbackLoop = createMCPFeedbackLoop({ initialMode: 'monitor', debug: loopDebug })
+          // 如果启用了自动切换，监听收敛事件自动切到 auto
+          if (features.includes('feedback_loop_auto_switch')) {
+            eventBus.track(
+              'feedback_loop.state_changed',
+              (payload: any) => {
+                if (payload.convergenceState === 'converged' && this.feedbackLoop?.getMode() === 'monitor') {
+                  this.feedbackLoop?.setMode('auto')
+                  log('INFO', 'mcp_feedback_loop_auto_switched', {
+                    from: 'monitor',
+                    to: 'auto',
+                    adjustments: payload.totalAdjustments,
+                  })
+                }
+              },
+              this.subs,
+              'runtime:feedback_loop_auto_switch',
+            )
+          }
+          log('INFO', 'mcp_feedback_loop_initialized', {
+            features,
+            autoSwitch: features.includes('feedback_loop_auto_switch'),
+            debug: loopDebug,
+          })
+        }
         log('INFO', 'evolution_service_started', { interval_hours: 2 })
       },
     })

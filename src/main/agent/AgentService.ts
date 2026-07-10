@@ -35,8 +35,12 @@ import { ProceduralMemory } from './ProceduralMemory'
 import { setProceduralMemory, setTtsService, setAsrService } from '../tool/deps'
 import { UnifiedKnowledgeQuery, MemoryPluginAdapter, adaptProceduralMemory, adaptReflectLoop, adaptFailureAnalyzer } from '../knowledge'
 import { agentPluginRegistry, ObserveStagePluginAdapter, ThinkStagePluginAdapter, ReflectStagePluginAdapter } from './plugin'
+import type { IndustrialOdeLayer } from '../gongye-songge'
+import type { IEngineService, EngineStatus, EngineMetrics } from '../engine/types'
 
-export class AgentService {
+export class AgentService implements IEngineService {
+  /** IEngineService 引擎名 */
+  readonly name = 'agent'
   private llmService: LlmService
   private asrService: AsrService
   private ttsService: TtsService
@@ -89,6 +93,10 @@ export class AgentService {
 
   /** 身份上下文缓存（由 CognitiveService.identity 提供） */
   private identityContext = ''
+
+  // ── Plan:工业颂歌 公众号排版处理 上层增强层 ──
+  /** IndustrialOdeLayer — 非侵入式预处理/后处理增强 */
+  private industrialOdeLayer: IndustrialOdeLayer | null = null
 
   // ── 统一知识源查询引擎 ──
   /** KnowledgeQuery — 跨 Memory/Agent 统一查询 */
@@ -225,6 +233,19 @@ export class AgentService {
 
   getMcpManager(): ServerManager {
     return this.mcpManager
+  }
+
+  /** 设置 IndustrialOdeLayer（Plan:工业颂歌 公众号排版处理） */
+  setIndustrialOdeLayer(layer: IndustrialOdeLayer | null): void {
+    this.industrialOdeLayer = layer
+    if (layer) {
+      log('INFO', 'industrial_ode_layer_set', { features: layer.getActiveFeatures() })
+    }
+  }
+
+  /** 获取 IndustrialOdeLayer 实例 */
+  getIndustrialOdeLayer(): IndustrialOdeLayer | null {
+    return this.industrialOdeLayer
   }
 
   registerIntentHandler(handler: IntentHandler): void {
@@ -457,11 +478,50 @@ export class AgentService {
     }
 
     try {
+      // ── Plan:工业颂歌 公众号排版处理 — 预处理 ──
+      let processedText = text
+      let needsFormatting = false
+      let preProcessData: Record<string, unknown> = {}
+      if (this.industrialOdeLayer && this.industrialOdeLayer.getActiveFeatures().length > 0) {
+        const preCtx = await this.industrialOdeLayer.preProcess({
+          rawText: text,
+          source,
+          requestId: rid,
+          processedText: text,
+          needsFormatting: false,
+        })
+        processedText = preCtx.processedText
+        needsFormatting = preCtx.needsFormatting
+        preProcessData = { needsFormatting, ...(processedText !== text ? { textModified: true } : {}) }
+      }
+
       // v2: 委托 ChatExecutor 执行，传入 sessionId 用于加载历史
-      const reply = await this.chatExecutor!.run(text, rid, source, extra, sessionId, noTts)
+      const reply = await this.chatExecutor!.run(processedText, rid, source, extra, sessionId, noTts)
       if (!reply || reply.error) return reply || { error: 'NO_REPLY' }
-      log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: reply.reply?.length || 0 })
-      return reply
+
+      // ── Plan:工业颂歌 公众号排版处理 — 后处理 ──
+      let finalReply = reply
+      if (this.industrialOdeLayer && this.industrialOdeLayer.getActiveFeatures().length > 0 && reply.reply) {
+        const postCtx = await this.industrialOdeLayer.postProcess({
+          rawReply: reply.reply,
+          formattedReply: reply.reply,
+          formatted: false,
+          requestId: rid,
+          preProcessData,
+        })
+        if (postCtx.formatted && postCtx.text !== reply.reply) {
+          finalReply = { ...reply, reply: postCtx.text }
+          log('INFO', 'industrial_ode_post_formatted', {
+            request_id: rid,
+            original_len: reply.reply.length,
+            formatted_len: postCtx.text.length,
+            description: postCtx.description,
+          })
+        }
+      }
+
+      log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: finalReply.reply?.length || 0 })
+      return finalReply
     } catch (err) {
       this.eventBus.emit('agent.error', { error: String(err), requestId: rid })
       log('ERROR', 'chat_handler_error', { request_id: rid, error: String(err) })
@@ -478,6 +538,14 @@ export class AgentService {
     // 停止 TTS 播放
     this.ttsService.stop()
     log('INFO', 'conversation_stopped_by_user')
+  }
+
+  /**
+   * 停止引擎处理（IEngineService）。
+   * 等效于 stopConversation()。
+   */
+  async stop(): Promise<void> {
+    await this.stopConversation()
   }
 
   isBusy(): boolean {
@@ -510,6 +578,74 @@ export class AgentService {
   /** 是否处于暂停状态 */
   isPaused(): boolean {
     return this._paused
+  }
+
+  // ══════════════════════════════════════════
+  //  IEngineService — 统一引擎接口
+  // ══════════════════════════════════════════
+
+  /**
+   * 获取引擎运行状态（IEngineService）。
+   *
+   * 返回 Agent 当前的工作状态：是否忙碌、是否暂停、自任务运行状态等。
+   */
+  getStatus(): EngineStatus {
+    const busy = this.isBusy()
+    const circuitSnapshots = this.circuitBreaker.getSnapshot()
+    const hasError = Object.values(circuitSnapshots).some((s) => s.state === 'open')
+    return {
+      name: this.name,
+      state: this._paused ? 'paused' : hasError ? 'error' : busy ? 'running' : 'idle',
+      busy,
+      queueSize: this.chatExecutor?.isBusy() ? 1 : 0,
+      processing: busy,
+      startedAt: this.selfTaskStartTime || undefined,
+      uptimeMs: this.selfTaskStartTime ? Date.now() - this.selfTaskStartTime : undefined,
+      error: hasError ? '熔断器已打开' : undefined,
+    }
+  }
+
+  /**
+   * 获取引擎性能指标（IEngineService）。
+   *
+   * 汇总 Agent 运行数据：对话请求数（通过 resourceBudget 推导）、
+   * 熔断器状态等。
+   */
+  getMetrics(): EngineMetrics {
+    const budgetSnapshot = this.resourceBudget.getSnapshot()
+    const circuitSnapshots = this.circuitBreaker.getSnapshot()
+    const llmCalls = (budgetSnapshot.chatLlmCalls as number) ?? 0
+    const evolutionCalls = (budgetSnapshot.evolutionLlmCalls as number) ?? 0
+    const totalCalls = llmCalls + evolutionCalls
+    const openBreakers = Object.values(circuitSnapshots).filter((s) => s.state === 'open')
+
+    return {
+      totalRequests: totalCalls,
+      successCount: Math.max(0, totalCalls - openBreakers.reduce((s, b) => s + b.failures, 0)),
+      failureCount: openBreakers.reduce((s, b) => s + b.failures, 0),
+      reliability: totalCalls > 0
+        ? Math.max(0, 1 - openBreakers.reduce((s, b) => s + b.failures, 0) / totalCalls)
+        : 1,
+    }
+  }
+
+  /**
+   * 获取引擎描述信息（IEngineService）。
+   */
+  getInfo(): string {
+    return 'Akemi Mio AI Agent — 认知对话引擎, 支持 Chat/Task/Evolution 三种运行模式, 多子 Agent 并发, 本地 TTS/ASR'
+  }
+
+  /**
+   * 重置引擎状态（IEngineService）。
+   *
+   * 等效于 clearContext() + stopConversation()，清除上下文并停止当前处理。
+   */
+  reset(): void | Promise<void> {
+    this.clearContext()
+    this.stopConversation()
+    this.circuitBreaker.reset()
+    log('INFO', 'agent_engine_reset')
   }
 
   /** 设置/清除强制续行抑制。在 tryRun 前设为 true，防止 toolLoop 注入"停止读取"等干扰提示 */

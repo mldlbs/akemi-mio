@@ -241,8 +241,8 @@ describe('V-3: Producer Boundary', () => {
     const instanceKeys = Object.keys(
       new ProgressObserver(new InMemoryEvaluationRepository(), new GuardrailProgressAnalyzer(new InMemoryEvaluationRepository())),
     )
-    // 只应包含: store, analyzer, consumers, unsubscribe
-    expect(instanceKeys.length).toBeLessThanOrEqual(4)
+    // 只应包含: store, analyzer, consumers, unsubscribe, replayWindowMs
+    expect(instanceKeys.length).toBeLessThanOrEqual(5)
     expect(instanceKeys).not.toContain('cache')
     expect(instanceKeys).not.toContain('throttle')
     expect(instanceKeys).not.toContain('buffer')

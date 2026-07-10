@@ -12,8 +12,7 @@ import { DevPlanSlot } from './components/DevPlanSlot'
 import { OtparSlot } from './components/OtparSlot'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { SettingsModal } from './components/SettingsModal'
-import { EvolutionDashboard } from './components/EvolutionDashboard'
-import { DesktopToolbar } from './components/DesktopToolbar'
+import { SystemDock } from './components/SystemDock'
 import { WallpaperOverlay } from './components/WallpaperOverlay'
 import { useSlots } from './slots/SlotContext'
 import { useSessions, useAIOutput, useTools, useDeviceStatus, usePlans, useWorkflowDefinitions } from './hooks'
@@ -70,8 +69,7 @@ function App() {
         }
       />
       <SettingsModal />
-      <EvolutionDashboard />
-      <DesktopToolbar />
+      <SystemDock />
       <WallpaperOverlay />
     </div>
   )

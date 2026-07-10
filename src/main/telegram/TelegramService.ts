@@ -3,7 +3,7 @@ import { log } from '../logger/Logger'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import { eventBus } from '../core/EventBus'
 import { insertOutbox, type OutboxCategory } from '../db/outbox'
-import { WORKSPACE } from '../config'
+import { WORKSPACE, TELEGRAM_SERVER_URL, TELEGRAM_CHAT_ID } from '../config'
 import { writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 
@@ -156,14 +156,14 @@ export class TelegramService {
   }
 
   async initialize(): Promise<void> {
-    const url = credentialsManager.get('telegram_server_url') || process.env.TELEGRAM_SERVER_URL || 'https://skills.crlkcloud.cyou/telegram'
+    const url = credentialsManager.get('telegram_server_url') || TELEGRAM_SERVER_URL
     this.baseUrl = url.replace(/\/+$/, '')
 
     // 所有 DebouncedEditor 共享 baseUrl
     DebouncedEditor.prototype.setBaseUrl(this.baseUrl)
 
     // push chatId 不论 health 是否可达都读取（push 路径走本地发送）
-    const rawChatId = credentialsManager.get('telegram_chat_id') || process.env.TELEGRAM_CHAT_ID
+    const rawChatId = credentialsManager.get('telegram_chat_id') || (TELEGRAM_CHAT_ID ? String(TELEGRAM_CHAT_ID) : undefined)
     if (rawChatId) {
       this.pushChatId = parseInt(rawChatId, 10)
       if (isNaN(this.pushChatId)) {

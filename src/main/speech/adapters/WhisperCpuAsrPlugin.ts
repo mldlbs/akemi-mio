@@ -56,14 +56,19 @@ export class WhisperCpuAsrPlugin implements AsrPlugin {
 
   getStatus(): AsrPluginStatus {
     if (!this.engine) {
-      return { loaded: false, loading: false, error: null }
+      return { loaded: false, loading: false, error: null, ready: false }
     }
-    return this.engine.getStatus()
+    const s = this.engine.getStatus()
+    return { ...s, ready: s.loaded }
   }
 
   getModelInfo(): string {
     if (!this.engine) return 'not loaded'
     return this.engine.getModelInfo()
+  }
+
+  getInfo(): string {
+    return this.getModelInfo()
   }
 
   async initialize(config?: { model?: string; onProgress?: ProgressCallback }): Promise<void> {

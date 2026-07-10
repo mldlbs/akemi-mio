@@ -98,6 +98,53 @@ export type {
   PostProcessHook,
 } from '../user-behavior/types'
 
+// ═══════════════════════════════════════════
+//  Evolution × PiperTTS 深度融合
+// ═══════════════════════════════════════════
+//
+// 通过 EvolutionPiperBridge 将 Evolution 的状态变化同步到 PiperTTS，
+// 同时将 PiperTTS 的性能反馈作为 Evolution 的新输入维度。
+//
+// 导出：
+//   - EvolutionPiperBridge / evolutionPiperBridge — 桥接器单例
+//   - PiperEvolutionPlugin — Evolution 插件
+//   - 所有共享类型
+
+export {
+  EvolutionPiperBridge,
+  evolutionPiperBridge,
+  PiperEvolutionPlugin,
+} from './piper'
+
+export type {
+  EvolutionToPiperState,
+  PiperToEvolutionFeedback,
+  EvolutionPiperSharedContext,
+  EvolutionPiperBridgeConfig,
+  EvolutionSchedulerExposure,
+  EvolutionSafetyExposure,
+  PiperModelPerformanceSnapshot,
+  PiperProblemDescriptor,
+  PiperProblemCategory,
+} from './piper'
+
+export { DEFAULT_EVOLUTION_PIPER_BRIDGE_CONFIG } from './piper'
+
+// ═══════════════════════════════════════════
+//  Memory × Evolution 深度融合桥接器
+// ═══════════════════════════════════════════
+//
+// MemoryEvolutionBridge 是 Memory 和 Evolution 之间的统一接口层。
+// 通过 setMemoryBridge() 注入到 SelfEvolutionService，
+// 实现双向往来数据融合：
+//   - Memory → Evolution：长时记忆上下文注入
+//   - Evolution → Memory：进化结果持久化
+//
+// 桥接器单例定义在 src/main/memory/MemoryEvolutionBridge.ts
+
+export type { MemoryEvolutionBridge, EvolutionMemoryContext, MemoryEvolutionResult } from '../memory/MemoryEvolutionBridge'
+export { memoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
+
 export const planManager = new DrizzlePlanManager()
 export let evolutionService: SelfEvolutionService | null = null
 

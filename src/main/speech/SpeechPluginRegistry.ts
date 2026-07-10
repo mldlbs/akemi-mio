@@ -19,6 +19,17 @@
  *   const asrPlugins = registry.getAsrPlugins()
  *   const ttsPlugins = registry.getTtsPlugins()
  *
+ * 统一抽象层（src/main/plugin/registry/）：
+ *   本类通过 .asr / .tts 属性暴露 IPluginRegistry 接口，
+ *   调用方可通过统一接口操作用户语音插件，无需区分 ASR/TTS 具体类型。
+ *
+ *   示例：
+ *     const registry = SpeechPluginRegistry.getInstance()
+ *     // 通过统一接口操作 ASR 插件
+ *     const asrRegistry = registry.asr
+ *     asrRegistry.register(whisperPlugin)
+ *     console.log(asrRegistry.count)
+ *
  * 对照 EvolutionPlugin 的 PluginServiceLoader，本类使用相同的 ServiceLoader 模式，
  * 但独立演化，专注于语音领域。
  */
@@ -29,6 +40,95 @@ import type {
   TtsPlugin,
   SpeechPluginManifest,
 } from './types'
+import type { IPluginRegistry } from '../plugin/registry/types'
+
+// ════════════════════════════════════════════════════════════════
+//  内部适配器：将 SpeechPluginRegistry 的 ASR/TTS 子集
+//  暴露为 IPluginRegistry 统一接口
+//
+//  注意：适配器不能直接引用 SpeechPluginRegistry 的 private 字段，
+//  因此通过回调闭包间接操作内部状态。
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * 创建 ASR 插件注册表适配器。
+ * 通过闭包引用内部 Map，避免适配器直接访问 private 字段。
+ */
+function createAsrRegistryAdapter(
+  getPlugins: () => AsrPlugin[],
+  getPlugin: (name: string) => AsrPlugin | undefined,
+  hasPlugin: (name: string) => boolean,
+  registerPlugin: (plugin: AsrPlugin) => void,
+  unloadPlugin: (name: string) => Promise<boolean>,
+  loadAllPlugins: () => Promise<void>,
+  unloadAllPlugins: () => Promise<void>,
+  clearPlugins: () => void,
+): IPluginRegistry<AsrPlugin> {
+  return {
+    get count(): number {
+      return getPlugins().length
+    },
+    getAll: () => getPlugins(),
+    get: (name: string) => getPlugin(name),
+    has: (name: string) => hasPlugin(name),
+    getStats: () => {
+      const plugins = getPlugins().map((p) => p.manifest)
+      return { total: plugins.length, plugins }
+    },
+    register: (plugin: AsrPlugin) => registerPlugin(plugin),
+    unregister: (name: string) => {
+      unloadPlugin(name).catch((err) => {
+        log('WARN', 'asr_registry_adapter_unload_failed', { name, error: String(err) })
+      })
+      return !hasPlugin(name)
+    },
+    loadAll: () => loadAllPlugins(),
+    unloadAll: () => unloadAllPlugins(),
+    clear: () => clearPlugins(),
+  }
+}
+
+/**
+ * 创建 TTS 插件注册表适配器。
+ * 通过闭包引用内部 Map，避免适配器直接访问 private 字段。
+ */
+function createTtsRegistryAdapter(
+  getPlugins: () => TtsPlugin[],
+  getPlugin: (name: string) => TtsPlugin | undefined,
+  hasPlugin: (name: string) => boolean,
+  registerPlugin: (plugin: TtsPlugin) => void,
+  unloadPlugin: (name: string) => Promise<boolean>,
+  loadAllPlugins: () => Promise<void>,
+  unloadAllPlugins: () => Promise<void>,
+  clearPlugins: () => void,
+): IPluginRegistry<TtsPlugin> {
+  return {
+    get count(): number {
+      return getPlugins().length
+    },
+    getAll: () => getPlugins(),
+    get: (name: string) => getPlugin(name),
+    has: (name: string) => hasPlugin(name),
+    getStats: () => {
+      const plugins = getPlugins().map((p) => p.manifest)
+      return { total: plugins.length, plugins }
+    },
+    register: (plugin: TtsPlugin) => registerPlugin(plugin),
+    unregister: (name: string) => {
+      unloadPlugin(name).catch((err) => {
+        log('WARN', 'tts_registry_adapter_unload_failed', { name, error: String(err) })
+      })
+      return !hasPlugin(name)
+    },
+    loadAll: () => loadAllPlugins(),
+    unloadAll: () => unloadAllPlugins(),
+    clear: () => clearPlugins(),
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  SpeechPluginRegistry
+// ════════════════════════════════════════════════════════════════
 
 export class SpeechPluginRegistry {
   private static instance: SpeechPluginRegistry
@@ -42,6 +142,11 @@ export class SpeechPluginRegistry {
   /** 是否已执行 loadAll */
   private loaded = false
 
+  /** 懒初始化的 ASR 适配器 */
+  private _asrAdapter: IPluginRegistry<AsrPlugin> | null = null
+  /** 懒初始化的 TTS 适配器 */
+  private _ttsAdapter: IPluginRegistry<TtsPlugin> | null = null
+
   private constructor() {
     // 单例，不允许外部 new
   }
@@ -51,6 +156,46 @@ export class SpeechPluginRegistry {
       SpeechPluginRegistry.instance = new SpeechPluginRegistry()
     }
     return SpeechPluginRegistry.instance
+  }
+
+  /**
+   * 获取 ASR 插件注册表的统一接口视图。
+   * 实现 IPluginRegistry<AsrPlugin>，可通过统一抽象层操作。
+   */
+  get asr(): IPluginRegistry<AsrPlugin> {
+    if (!this._asrAdapter) {
+      this._asrAdapter = createAsrRegistryAdapter(
+        () => this.getAsrPlugins(),
+        (name) => this.getAsrPlugin(name),
+        (name) => this.hasAsrPlugin(name),
+        (plugin) => this.registerAsr(plugin),
+        (name) => this.unloadAsr(name),
+        () => this.loadAll(),
+        () => this.unloadAll(),
+        () => { this.asrPlugins.clear() },
+      )
+    }
+    return this._asrAdapter
+  }
+
+  /**
+   * 获取 TTS 插件注册表的统一接口视图。
+   * 实现 IPluginRegistry<TtsPlugin>，可通过统一抽象层操作。
+   */
+  get tts(): IPluginRegistry<TtsPlugin> {
+    if (!this._ttsAdapter) {
+      this._ttsAdapter = createTtsRegistryAdapter(
+        () => this.getTtsPlugins(),
+        (name) => this.getTtsPlugin(name),
+        (name) => this.hasTtsPlugin(name),
+        (plugin) => this.registerTts(plugin),
+        (name) => this.unloadTts(name),
+        () => this.loadAll(),
+        () => this.unloadAll(),
+        () => { this.ttsPlugins.clear() },
+      )
+    }
+    return this._ttsAdapter
   }
 
   // ==================== 注册 ====================

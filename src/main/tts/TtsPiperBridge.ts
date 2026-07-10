@@ -36,6 +36,7 @@ import { log } from '../logger/Logger'
 import type { EmotionTtsParams, ContextVoiceConfig } from './types'
 import type { PreferenceRecommendation } from './types'
 import type { UserBehaviorTtsNeed } from '../behavior/UserBehaviorTtsContract'
+import { SlidingWindow } from '../core/patterns/SlidingWindow'
 import { piperOrchestrator, type PiperSynthesizeResult, type PiperSynthesizeRequest } from './PiperOrchestrator'
 
 // ══════════════════════════════════════════
@@ -122,7 +123,7 @@ function createDefaultContext(): TtsPiperSharedContext {
 }
 
 /** 用于记录最近延迟的滑动窗口大小 */
-const RECENT_LATENCY_WINDOW = 10
+const RECENT_LATENCY_WINDOW_SIZE = 10
 
 // ══════════════════════════════════════════
 //  TtsPiperBridge
@@ -133,7 +134,7 @@ export class TtsPiperBridge {
   private context: TtsPiperSharedContext = createDefaultContext()
 
   /** 最近合成延迟的滑动窗口（用于计算 piperRecentLatencyMs） */
-  private recentLatencies: number[] = []
+  private readonly recentLatencies = new SlidingWindow<number>(RECENT_LATENCY_WINDOW_SIZE)
 
   /** 上下文变更回调（用于测试/调试） */
   private onContextChange: ((ctx: Readonly<TtsPiperSharedContext>) => void) | null = null
@@ -348,13 +349,8 @@ export class TtsPiperBridge {
     )
 
     // ── 更新延迟滑动窗口 ──
-    this.recentLatencies.push(output.latencyMs)
-    if (this.recentLatencies.length > RECENT_LATENCY_WINDOW) {
-      this.recentLatencies.shift()
-    }
-    const avgLatency = this.recentLatencies.length > 0
-      ? Math.round(this.recentLatencies.reduce((s, v) => s + v, 0) / this.recentLatencies.length)
-      : -1
+    this.recentLatencies.add(output.latencyMs)
+    const avgLatency = this.recentLatencies.getAverage()
     this.context.piperRecentLatencyMs = avgLatency
 
     // ── 更新最后合成记录 ──
@@ -430,7 +426,7 @@ export class TtsPiperBridge {
    */
   resetStats(): void {
     this.context = createDefaultContext()
-    this.recentLatencies = []
+    this.recentLatencies.clear()
     this.notifyContextChange()
     log('INFO', 'tts_piper_bridge_stats_reset')
   }

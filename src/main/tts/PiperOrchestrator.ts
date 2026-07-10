@@ -31,6 +31,7 @@ import { log } from '../logger/Logger'
 import { PIPER_SCRIPT, PIPER_MODEL } from '../config'
 import { cleanTTS } from './TtsService'
 import { AsyncQueue, ok, err, type Result } from '../core/patterns'
+import type { IEngineService, EngineStatus, EngineMetrics } from '../engine/types'
 
 // ══════════════════════════════════════════
 //  类型定义
@@ -156,7 +157,13 @@ export interface PiperSynthesisStats {
 //  PiperOrchestrator
 // ══════════════════════════════════════════
 
-export class PiperOrchestrator {
+export class PiperOrchestrator implements IEngineService {
+  /** IEngineService 引擎名 */
+  readonly name = 'piper-tts'
+
+  /** 暂停状态标志（pause() 设置，resume() 清除） */
+  private _paused = false
+
   /** 当前用户选择的模型（可通过 switchModel 切换） */
   private currentModel: string = DEFAULT_PIPER_MODEL
 
@@ -260,17 +267,19 @@ export class PiperOrchestrator {
   }
 
   /**
-   * 停止队列：清空所有等待中的请求，停止处理后续请求。
+   * 停止队列：清空所有等待中的请求，停止处理后续请求（IEngineService）。
    */
   stop(): void {
+    this._paused = true
     this.queue.stop()
     log('INFO', 'piper_orchestrator_stopped')
   }
 
   /**
-   * 重置停止状态，允许继续处理。
+   * 重置停止状态，允许继续处理（IEngineService）。
    */
   reset(): void {
+    this._paused = false
     this.queue.reset()
     log('INFO', 'piper_orchestrator_reset')
   }
@@ -314,6 +323,104 @@ export class PiperOrchestrator {
     for (const key of Object.keys(this.synthesisStats)) {
       delete this.synthesisStats[key]
     }
+  }
+
+  // ══════════════════════════════════════════
+  //  IEngineService — 统一引擎接口
+  // ══════════════════════════════════════════
+
+  /**
+   * 获取引擎运行状态（IEngineService）。
+   *
+   * 返回 Piper TTS 当前的工作状态，包括队列深度、活跃模型等。
+   */
+  getStatus(): EngineStatus {
+    const qs = this.getQueueStatus()
+    const err = this.queue.getStatus().stopped ? '队列已停止' : undefined
+    return {
+      name: this.name,
+      state: this._paused ? 'paused' : qs.isProcessing ? 'running' : qs.queueSize > 0 ? 'running' : 'idle',
+      busy: qs.isProcessing || qs.queueSize > 0,
+      queueSize: qs.queueSize,
+      processing: qs.isProcessing,
+      startedAt: undefined,
+      uptimeMs: undefined,
+      error: err,
+      activeModel: qs.currentModel || this.currentModel,
+    }
+  }
+
+  /**
+   * 获取引擎性能指标（IEngineService）。
+   *
+   * 汇总所有模型的合成统计数据：总请求数、成功率、平均延迟等。
+   */
+  getMetrics(): EngineMetrics {
+    const stats = this.getSynthesisStats()
+    const total = stats.total
+    return {
+      totalRequests: total.requests,
+      successCount: total.success,
+      failureCount: total.failure,
+      avgLatencyMs: this.calcAverageLatency(),
+      reliability: total.requests > 0 ? total.success / total.requests : 1,
+      extra: {
+        perModel: stats.perModel,
+      },
+    }
+  }
+
+  /**
+   * 获取引擎描述信息（IEngineService）。
+   */
+  getInfo(): string {
+    const models = this.getAvailableModels()
+    const current = this.getCurrentModel()
+    const displayName = PIPER_MODEL_CATALOG[current]?.displayName || current
+    return `PiperTTS 本地语音引擎 (${displayName}), ${models.length} 个可用模型, 离线低延迟`
+  }
+
+  /**
+   * 暂停合成处理（IEngineService）。
+   *
+   * 等效于 stop() + 设置暂停标志，后续合成的首个请求自动触发 resume。
+   */
+  pause(): void {
+    if (this._paused) return
+    this._paused = true
+    this.queue.stop()
+    log('INFO', 'piper_orchestrator_paused')
+  }
+
+  /**
+   * 恢复合成处理（IEngineService）。
+   *
+   * 等效于 reset() + 清除暂停标志。
+   */
+  resume(): void {
+    if (!this._paused) return
+    this._paused = false
+    this.queue.reset()
+    log('INFO', 'piper_orchestrator_resumed')
+  }
+
+  /**
+   * 是否处于暂停状态（IEngineService）。
+   */
+  isPaused(): boolean {
+    return this._paused
+  }
+
+  /**
+   * 计算所有模型的平均延迟。
+   */
+  private calcAverageLatency(): number | undefined {
+    const stats = this.synthesisStats
+    const models = Object.keys(stats)
+    if (models.length === 0) return undefined
+    const totalLatency = models.reduce((sum, m) => sum + stats[m].totalLatencyMs, 0)
+    const totalReq = models.reduce((sum, m) => sum + stats[m].totalRequests, 0)
+    return totalReq > 0 ? Math.round(totalLatency / totalReq) : undefined
   }
 
   /**

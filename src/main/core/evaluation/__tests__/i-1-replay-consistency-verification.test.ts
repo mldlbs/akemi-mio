@@ -45,6 +45,7 @@ import { describe, it, expect } from 'vitest'
 import { GuardrailProgressAnalyzer } from '../GuardrailProgressAnalyzer'
 import { DefaultGuardrailPolicy } from '../GuardrailPolicy'
 import { toRuntimeAction, DEFAULT_GUARDRAIL_POLICY_CONFIG } from '../GuardrailTypes'
+import { GuardrailConfigStore } from '../GuardrailConfigStore'
 import type { EvaluationEvent, EventType } from '../types'
 import type { ProgressSnapshot } from '../progress'
 import type { GuardrailDecision, RuntimeAction, GuardrailPolicyConfig } from '../GuardrailTypes'
@@ -363,6 +364,48 @@ describe('T-4: Unknown event isolation', () => {
     expect(unknownResult.snapshot.stateChange).toEqual(cleanResult.snapshot.stateChange)
     expect(unknownResult.snapshot.goalProgress).toEqual(cleanResult.snapshot.goalProgress)
   })
+
+  it('guardrail.config.activated 不影响 compute() 输出', () => {
+    const base = healthyTrace5()
+    const cleanResult = replay({ events: base })
+
+    const withConfigEvents = [
+      ...base.slice(0, 4),
+      makeEvent({
+        type: 'guardrail.config.activated' as any,
+        payload: { type: 'guardrail.config.activated', version: 'v2', config: DEFAULT_GUARDRAIL_POLICY_CONFIG, activatedAt: Date.now() },
+      }),
+      ...base.slice(4),
+    ]
+
+    const result = replay({ events: withConfigEvents })
+
+    expect(result.snapshot.totalTurns).toBe(cleanResult.snapshot.totalTurns)
+    expect(result.snapshot.stateChange).toEqual(cleanResult.snapshot.stateChange)
+    expect(result.snapshot.informationGain).toEqual(cleanResult.snapshot.informationGain)
+    expect(result.snapshot.goalProgress).toEqual(cleanResult.snapshot.goalProgress)
+  })
+
+  it('guardrail.config.rollback 不影响 compute() 输出', () => {
+    const base = healthyTrace5()
+    const cleanResult = replay({ events: base })
+
+    const withConfigEvents = [
+      ...base.slice(0, 3),
+      makeEvent({
+        type: 'guardrail.config.rollback' as any,
+        payload: { type: 'guardrail.config.rollback', fromVersion: 'v2', toVersion: 'v1', trigger: 'manual' as const },
+      }),
+      ...base.slice(3),
+    ]
+
+    const result = replay({ events: withConfigEvents })
+
+    expect(result.snapshot.totalTurns).toBe(cleanResult.snapshot.totalTurns)
+    expect(result.snapshot.stateChange).toEqual(cleanResult.snapshot.stateChange)
+    expect(result.snapshot.informationGain).toEqual(cleanResult.snapshot.informationGain)
+    expect(result.snapshot.goalProgress).toEqual(cleanResult.snapshot.goalProgress)
+  })
 })
 
 // ══════════════════════════════════════════════
@@ -403,5 +446,165 @@ describe('T-5: Multi-trace matrix', () => {
 
     // rStagnant 应该检测到停滞
     expect(rStagnant.snapshot.stateChange.stagnantTurnCount).toBeGreaterThan(3)
+  })
+})
+
+// ══════════════════════════════════════════════
+// T-6: ConfigStore reconstruction from events
+// ══════════════════════════════════════════════
+
+describe('T-6: ConfigStore reconstruction from events', () => {
+  function makeConfigEvent(
+    type: 'guardrail.config.initialized' | 'guardrail.config.activated' | 'guardrail.config.rollback',
+    payload: Record<string, unknown>,
+    timestamp: number,
+  ): EvaluationEvent {
+    return {
+      id: `replay_cfg_${timestamp}`,
+      timestamp,
+      traceId: 'config_replay',
+      sessionId: 'cfg_replay_session',
+      source: 'test',
+      type,
+      payload: { type, ...payload } as any,
+    }
+  }
+
+  it('activated event → loadFromEvents 正确重建 ConfigStore', () => {
+    const store = new GuardrailConfigStore()
+    const events = [
+      makeConfigEvent('guardrail.config.activated', { version: 'v1', config: DEFAULT_GUARDRAIL_POLICY_CONFIG, activatedAt: 1000 }, 1000),
+    ]
+    store.loadFromEvents(events)
+
+    const { version, config } = store.getActiveConfig()
+    expect(version).toBe('v1')
+    expect(config.stateChange).toEqual(DEFAULT_GUARDRAIL_POLICY_CONFIG.stateChange)
+  })
+
+  it('initialized event → loadFromEvents 正确重建 ConfigStore', () => {
+    const store = new GuardrailConfigStore()
+    const events = [
+      makeConfigEvent(
+        'guardrail.config.initialized',
+        { version: 'v1', eventSchemaVersion: 1, config: DEFAULT_GUARDRAIL_POLICY_CONFIG, activatedAt: 1000 },
+        1000,
+      ),
+    ]
+    store.loadFromEvents(events)
+
+    const { version, config } = store.getActiveConfig()
+    expect(version).toBe('v1')
+    expect(config.stateChange).toEqual(DEFAULT_GUARDRAIL_POLICY_CONFIG.stateChange)
+  })
+
+  it('activated + rollback events → replay 后 active 版本正确', () => {
+    const store = new GuardrailConfigStore()
+    const events = [
+      makeConfigEvent('guardrail.config.activated', { version: 'v1', config: DEFAULT_GUARDRAIL_POLICY_CONFIG, activatedAt: 1000 }, 1000),
+      makeConfigEvent('guardrail.config.activated', { version: 'v2', config: DEFAULT_GUARDRAIL_POLICY_CONFIG, activatedAt: 2000 }, 2000),
+      makeConfigEvent('guardrail.config.rollback', { fromVersion: 'v2', toVersion: 'v1', trigger: 'manual' }, 3000),
+    ]
+    store.loadFromEvents(events)
+
+    expect(store.getActiveConfig().version).toBe('v1')
+    expect(store.getVersionHistory()).toHaveLength(2)
+  })
+
+  it('initialized + activated events → timeline 正确 + 可作 replay 输入', () => {
+    const store = new GuardrailConfigStore()
+    const events = [
+      makeConfigEvent(
+        'guardrail.config.initialized',
+        { version: 'v1', eventSchemaVersion: 1, config: DEFAULT_GUARDRAIL_POLICY_CONFIG, activatedAt: 1000 },
+        1000,
+      ),
+      makeConfigEvent(
+        'guardrail.config.activated',
+        { version: 'v2', eventSchemaVersion: 1, config: DEFAULT_GUARDRAIL_POLICY_CONFIG, activatedAt: 2000 },
+        2000,
+      ),
+    ]
+    store.loadFromEvents(events)
+
+    expect(store.getActiveConfig().version).toBe('v2')
+    expect(store.getVersionHistory()).toHaveLength(2)
+  })
+
+  it('reconstructed config 可作为 replay() 的 policyConfig 输入', () => {
+    const store = new GuardrailConfigStore()
+    const events = [
+      makeConfigEvent('guardrail.config.activated', { version: 'v1', config: DEFAULT_GUARDRAIL_POLICY_CONFIG, activatedAt: 1000 }, 1000),
+    ]
+    store.loadFromEvents(events)
+
+    const { config } = store.getActiveConfig()
+
+    // reconstructed config → replay pipeline → consistent output
+    const r1 = replay({ events: healthyTrace5(), policyConfig: config })
+    const r2 = replay({ events: healthyTrace5(), policyConfig: config })
+    expectDecisionIdentityEqual(r2.decision, r1.decision)
+    expect(r2.runtimeAction).toBe(r1.runtimeAction)
+  })
+})
+
+// ══════════════════════════════════════════════
+// T-7: Schema version migration — event replay consistency
+// ══════════════════════════════════════════════
+
+describe('T-7: Schema version migration', () => {
+  it('guardrail.config.initialized 不影响 compute() 输出', () => {
+    const base = healthyTrace5()
+    const cleanResult = replay({ events: base })
+
+    const withInitEvent = [
+      ...base.slice(0, 4),
+      makeEvent({
+        type: 'guardrail.config.initialized' as any,
+        payload: {
+          type: 'guardrail.config.initialized',
+          version: 'v1',
+          eventSchemaVersion: 1,
+          config: DEFAULT_GUARDRAIL_POLICY_CONFIG,
+          activatedAt: Date.now(),
+        },
+      }),
+      ...base.slice(4),
+    ]
+
+    const result = replay({ events: withInitEvent })
+
+    expect(result.snapshot.totalTurns).toBe(cleanResult.snapshot.totalTurns)
+    expect(result.snapshot.stateChange).toEqual(cleanResult.snapshot.stateChange)
+    expect(result.snapshot.informationGain).toEqual(cleanResult.snapshot.informationGain)
+    expect(result.snapshot.goalProgress).toEqual(cleanResult.snapshot.goalProgress)
+  })
+
+  it('schema-version-migrated event → replay 正确', () => {
+    // Simulate: old event created at v1 schema → replayed after migration → should be identity
+    const store = new GuardrailConfigStore()
+    const events = [
+      {
+        ...makeEvent({
+          type: 'guardrail.config.activated' as any,
+          payload: { type: 'guardrail.config.activated', version: 'v1', config: DEFAULT_GUARDRAIL_POLICY_CONFIG, activatedAt: 1000 },
+        }),
+        // No eventSchemaVersion — simulating an event created before M4.5
+      } as EvaluationEvent,
+    ]
+    // Remove eventSchemaVersion from payload
+    delete (events[0].payload as any).eventSchemaVersion
+
+    store.loadFromEvents(events)
+
+    const { config } = store.getActiveConfig()
+    expect(config.stateChange).toEqual(DEFAULT_GUARDRAIL_POLICY_CONFIG.stateChange)
+    expect(config.informationGain).toEqual(DEFAULT_GUARDRAIL_POLICY_CONFIG.informationGain)
+    expect(config.goalProgress).toEqual(DEFAULT_GUARDRAIL_POLICY_CONFIG.goalProgress)
+
+    // Reconstructed config → replay pipeline → produces correct decision
+    const r = replay({ events: healthyTrace5(), policyConfig: config })
+    expect(r.snapshot).toBeDefined()
+    expect(r.decision).toBeDefined()
   })
 })

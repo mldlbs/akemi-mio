@@ -15,6 +15,19 @@ export {
 } from './LearningFocusBuilder'
 export { PlanTypeScriptExecutor, planTypeScriptExecutor } from './PlanTypeScriptExecutor'
 
+export { LearningAsrBridge, learningAsrBridge } from './LearningAsrBridge'
+export type { LearningMatchResult } from './LearningAsrBridge'
+
+export { OralCodeService, oralCodeService } from './OralCodeService'
+export type { OralCodeInput, OralCodeResult, OralCodePattern, OralCodePatternDef } from './types'
+
+// LearningTtsContract — Plan:TypeScript 对 TTS 的消费者合同
+// 定义 TTS 输出格式、响应速度和容错要求的消费者视角规格
+export * from './LearningTtsContract'
+
+// LearningTtsAdapter — Plan:TypeScript → TTS 适配器
+export { LearningTtsAdapter, learningTtsAdapter } from './LearningTtsAdapter'
+
 export type {
   LearningItem,
   LearningCategory,
@@ -33,6 +46,32 @@ export {
 } from './types'
 
 export type {
+  OralCodePattern,
+  OralCodeInput,
+  OralCodeResult,
+  OralCodePatternDef,
+} from './types'
+
+export type {
   LearningStrategyChange,
   LearningStrategyType,
 } from './LearningProgressTracker'
+
+// ═══════════════════════════════════════════
+//  混合流水线导出
+// ═══════════════════════════════════════════
+
+export { HybridPlanPipeline } from './HybridPlanPipeline'
+export { HybridArbitrator } from './HybridArbitrator'
+
+export type {
+  HybridPathOutput,
+  StepSuggestion,
+  DifficultyAssessmentOutput,
+  StrategySuggestion,
+  ProgressEvaluationOutput,
+  ConvergencePointName,
+  ConvergenceResult,
+  HybridPipelineConfig,
+  HybridPipelineMetrics,
+} from './HybridTypes'

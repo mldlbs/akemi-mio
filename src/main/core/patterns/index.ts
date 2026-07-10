@@ -35,3 +35,5 @@ export type {
 
 export { DebounceGate } from './DebounceGate'
 export type { DebounceGateOptions, GateStatus } from './DebounceGate'
+
+export { SlidingWindow } from './SlidingWindow'

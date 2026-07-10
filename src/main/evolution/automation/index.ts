@@ -20,6 +20,8 @@ export { ToolEvolutionCollector } from './ToolEvolutionCollector'
 export { ToolEvolutionExecutor } from './ToolEvolutionExecutor'
 export { TtsPreferenceCollector } from './TtsPreferenceCollector'
 export { TtsConfigOptimizationExecutor } from './TtsConfigOptimizationExecutor'
+export { TtsTypographyCollector } from './TtsTypographyCollector'
+export { TtsTypographyExecutor } from './TtsTypographyExecutor'
 
 // ═══════════════════════════════════════════
 //  MCP 模式迁移导出

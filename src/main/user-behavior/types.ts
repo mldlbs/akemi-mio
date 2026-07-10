@@ -34,6 +34,18 @@ export type UserBehaviorFeature =
   | 'behavior_sequence_analysis'
   /** 行为驱动的自动预加载优化 */
   | 'behavior_preload_optimization'
+  /** 模块热力图：在进化周期前生成模块级使用/错误热力图 */
+  | 'module_heatmap'
+  /** 热力图驱动的进化优先级：根据热力图调整进化分析重点 */
+  | 'heatmap_driven_priority'
+  /** 冷模块降频：低使用率模块降低分析频率 */
+  | 'cold_module_dampening'
+  /** 反馈回路：MCP ↔ UserBehavior 强化回路（核心开关） */
+  | 'mcp_feedback_loop'
+  /** 反馈回路阻尼：指数平滑参数调整（防止振荡发散） */
+  | 'feedback_loop_damping'
+  /** 反馈回路收敛自动切换：收敛后自动从 monitor 切到 auto */
+  | 'feedback_loop_auto_switch'
 
 export type UserBehaviorFeatureMap = ReadonlySet<UserBehaviorFeature>
 
@@ -100,6 +112,52 @@ export interface UserBehaviorConfig {
 
 // ==================== 特性注册表 ====================
 
+// ==================== 模块热力图类型 ====================
+
+/** 模块使用趋势 */
+export type ModuleTrend = 'rising' | 'stable' | 'declining'
+
+/** 模块优先级标签 */
+export type ModulePriority = 'high' | 'medium' | 'low'
+
+/** 模块热力图条目 */
+export interface ModuleHeatmapEntry {
+  /** 模块名称（如 agent, tts, asr 等） */
+  module: string
+  /** 窗口内的调用次数 */
+  usageCount: number
+  /** 窗口内的错误次数 */
+  errorCount: number
+  /** 成功率（0-1） */
+  successRate: number
+  /** 错误率（0-1） */
+  errorRate: number
+  /** 使用趋势 */
+  trend: ModuleTrend
+  /** 优化优先级 */
+  priority: ModulePriority
+  /** 模块中文描述 */
+  description: string
+}
+
+/** 模块热力图 — Evolution 的优先级输入 */
+export interface ModuleHeatmap {
+  /** 全量条目列表（按使用量降序） */
+  entries: ModuleHeatmapEntry[]
+  /** 高频模块（高优先级进化目标） */
+  hotModules: ModuleHeatmapEntry[]
+  /** 高错误模块（进化修复候选人） */
+  errorModules: ModuleHeatmapEntry[]
+  /** 低频模块（可降低进化频率） */
+  coldModules: ModuleHeatmapEntry[]
+  /** 数据是否足够做判断 */
+  hasSufficientData: boolean
+  /** 分析窗口内总工具调用数 */
+  totalToolCalls: number
+  /** 生成时间戳 */
+  generatedAt: number
+}
+
 /** 解析 USER_BEHAVIOR_FEATURES 环境变量为特性集合 */
 export function parseFeaturesFromEnv(): UserBehaviorFeature[] {
   const raw = process.env.USER_BEHAVIOR_FEATURES || ''
@@ -114,6 +172,12 @@ export function parseFeaturesFromEnv(): UserBehaviorFeature[] {
     'behavior_driven_optimization',
     'behavior_sequence_analysis',
     'behavior_preload_optimization',
+    'module_heatmap',
+    'heatmap_driven_priority',
+    'cold_module_dampening',
+    'mcp_feedback_loop',
+    'feedback_loop_damping',
+    'feedback_loop_auto_switch',
   ])
 
   return raw

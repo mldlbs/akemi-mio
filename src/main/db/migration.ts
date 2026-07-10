@@ -4,6 +4,14 @@ import { log } from '../logger/Logger'
 interface Migration {
   version: number
   sql: string
+  /** Revert SQL。对于 ADD COLUMN 等无操作场景设为空字符串。
+   *  注意：revert 不修改 _migrations 表（R5-C: append-only）。
+   *  回滚通过前向修正迁移实现。 */
+  revert?: string
+  /** Migration 分类标签 */
+  category?: 'schema' | 'data' | 'index' | 'backfill'
+  /** 标记该迁移不可逆转（如 DROP 列后的重建迁移） */
+  irreversible?: boolean
 }
 
 const MIGRATIONS: Migration[] = [
@@ -32,6 +40,8 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_plan_steps_plan_id ON plan_steps(plan_id);
       CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 2,
@@ -89,6 +99,8 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_insights_reported ON insights(reported);
       CREATE INDEX IF NOT EXISTS idx_hypotheses_status ON hypotheses(status);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 3,
@@ -123,6 +135,8 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
       CREATE INDEX IF NOT EXISTS idx_memories_content ON memories(content);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 4,
@@ -132,6 +146,8 @@ const MIGRATIONS: Migration[] = [
         value TEXT NOT NULL
       );
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 5,
@@ -139,6 +155,8 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE memories ADD COLUMN tier TEXT NOT NULL DEFAULT 'ephemeral';
       ALTER TABLE memories ADD COLUMN reinforce_count INTEGER NOT NULL DEFAULT 0;
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 6,
@@ -162,6 +180,8 @@ const MIGRATIONS: Migration[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_kg_entity ON knowledge_graph(entity);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 7,
@@ -202,6 +222,8 @@ const MIGRATIONS: Migration[] = [
         updated_at INTEGER NOT NULL
       );
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 8,
@@ -219,6 +241,8 @@ const MIGRATIONS: Migration[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_engmem_type ON engineering_memory(type);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 9,
@@ -248,6 +272,8 @@ const MIGRATIONS: Migration[] = [
         PRIMARY KEY (plugin_name, tool_name, permission)
       );
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 10,
@@ -270,6 +296,8 @@ const MIGRATIONS: Migration[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_token_txn_created ON token_transactions(created_at);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 11,
@@ -287,6 +315,8 @@ const MIGRATIONS: Migration[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_procedures_name ON procedures(name);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 12,
@@ -304,6 +334,8 @@ const MIGRATIONS: Migration[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 13,
@@ -324,6 +356,8 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_outbox_status ON telegram_outbox(status);
       CREATE INDEX IF NOT EXISTS idx_outbox_hash ON telegram_outbox(hash);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 14,
@@ -331,6 +365,8 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE telegram_outbox ADD COLUMN category TEXT NOT NULL DEFAULT 'dialogue';
       CREATE INDEX IF NOT EXISTS idx_outbox_category ON telegram_outbox(category);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 15,
@@ -375,6 +411,8 @@ const MIGRATIONS: Migration[] = [
         last_updated INTEGER NOT NULL
       );
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 16,
@@ -382,6 +420,8 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE procedures ADD COLUMN embedding TEXT;
       CREATE INDEX IF NOT EXISTS idx_procedures_updated_at ON procedures(updated_at);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 17,
@@ -397,6 +437,8 @@ const MIGRATIONS: Migration[] = [
         created_at INTEGER NOT NULL
       );
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 18,
@@ -411,6 +453,8 @@ const MIGRATIONS: Migration[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_events_channel_ts ON events(channel, timestamp);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 19,
@@ -431,6 +475,8 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_decisions_category ON decisions(category);
       CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 20,
@@ -448,6 +494,8 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(timestamp);
       CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 21,
@@ -457,12 +505,16 @@ const MIGRATIONS: Migration[] = [
         created_at INTEGER NOT NULL
       );
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 22,
     sql: `
       ALTER TABLE plans ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 23,
@@ -490,6 +542,30 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_outbox_hash ON telegram_outbox(hash);
       CREATE INDEX IF NOT EXISTS idx_outbox_category ON telegram_outbox(category);
     `,
+    revert: `
+      -- Reverse v23: recreate original schema, migrate data back, drop new table
+      DROP TABLE IF EXISTS telegram_outbox_old;
+      CREATE TABLE telegram_outbox_old (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id TEXT NOT NULL,
+        msg_type TEXT NOT NULL CHECK(msg_type IN ('send', 'edit', 'reply', 'action')),
+        message TEXT NOT NULL,
+        target_message_id INTEGER,
+        hash TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'sent', 'failed')),
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER
+      );
+      INSERT INTO telegram_outbox_old SELECT id, chat_id, msg_type, message, target_message_id, hash, status, retry_count, last_error, created_at, updated_at FROM telegram_outbox;
+      DROP TABLE telegram_outbox;
+      ALTER TABLE telegram_outbox_old RENAME TO telegram_outbox;
+      CREATE INDEX IF NOT EXISTS idx_outbox_status ON telegram_outbox(status);
+      CREATE INDEX IF NOT EXISTS idx_outbox_hash ON telegram_outbox(hash);
+    `,
+    category: 'schema',
+    irreversible: true,
   },
   {
     version: 24,
@@ -497,6 +573,8 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE messages ADD COLUMN session_id TEXT;
       CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 25,
@@ -504,6 +582,8 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE messages ADD COLUMN category TEXT NOT NULL DEFAULT 'chat';
       CREATE INDEX IF NOT EXISTS idx_messages_category ON messages(category);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 26,
@@ -548,6 +628,8 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_wf_runs_status ON workflow_runs(status);
       CREATE INDEX IF NOT EXISTS idx_wf_step_runs_run_id ON workflow_step_runs(run_id);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 27,
@@ -566,6 +648,8 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_ev_type ON evaluation_events(type);
       CREATE INDEX IF NOT EXISTS idx_ev_trace ON evaluation_events(trace_id);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 28,
@@ -588,12 +672,16 @@ const MIGRATIONS: Migration[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_interaction_log_ts ON interaction_log(timestamp);
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 29,
     sql: `
       ALTER TABLE memories ADD COLUMN topics TEXT NOT NULL DEFAULT '[]';
     `,
+    revert: '',
+    category: 'schema',
   },
   {
     version: 30,
@@ -603,8 +691,96 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE memories ADD COLUMN user_confirmed_useful_count INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE memories ADD COLUMN last_utility_update_at INTEGER NOT NULL DEFAULT 0;
     `,
+    revert: '',
+    category: 'schema',
+  },
+  {
+    version: 31,
+    sql: `
+      -- Composite index for trace replay queries (WHERE trace_id = ? ORDER BY timestamp ASC)
+      CREATE INDEX IF NOT EXISTS idx_ev_trace_ts ON evaluation_events(trace_id, timestamp);
+
+      -- Guardrail decision persistence for historical reproducibility
+      CREATE TABLE IF NOT EXISTS guardrail_decisions (
+        decision_id TEXT PRIMARY KEY,
+        trace_id TEXT NOT NULL,
+        turn INTEGER NOT NULL,
+        action TEXT NOT NULL,
+        runtime_action TEXT NOT NULL,
+        policy_version TEXT NOT NULL,
+        signals TEXT NOT NULL,
+        decided_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_gd_trace ON guardrail_decisions(trace_id);
+    `,
+    revert: '',
+    category: 'schema',
+  },
+  {
+    version: 32,
+    sql: `
+      -- Metrics projection for guardrail analytics (hourly windows)
+      CREATE TABLE IF NOT EXISTS guardrail_metrics (
+        id TEXT PRIMARY KEY,
+        window_since INTEGER NOT NULL,
+        window_until INTEGER NOT NULL,
+        checked_count INTEGER NOT NULL DEFAULT 0,
+        warning_count INTEGER NOT NULL DEFAULT 0,
+        terminated_count INTEGER NOT NULL DEFAULT 0,
+        continue_count INTEGER NOT NULL DEFAULT 0,
+        total_signals_healthy INTEGER NOT NULL DEFAULT 0,
+        total_signals_degrading INTEGER NOT NULL DEFAULT 0,
+        total_signals_stalled INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_gm_window ON guardrail_metrics(window_since, window_until);
+    `,
+    revert: '',
+    category: 'schema',
+  },
+  {
+    version: 33,
+    sql: `
+      -- R2-A: Replay sequence number for cursor-based iteration
+      ALTER TABLE evaluation_events ADD COLUMN seq INTEGER;
+      CREATE INDEX IF NOT EXISTS idx_ev_seq ON evaluation_events(seq);
+    `,
+    revert: '',
+    category: 'schema',
+  },
+  {
+    version: 34,
+    sql: `
+      -- R2-B: Projection checkpoint table for resumable rebuild
+      CREATE TABLE IF NOT EXISTS projection_checkpoints (
+        projection_name TEXT PRIMARY KEY,
+        last_seq INTEGER NOT NULL,
+        last_updated_at INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'idle'
+          CHECK(status IN ('idle', 'running', 'failed')),
+        error TEXT
+      );
+    `,
+    revert: 'DROP TABLE IF EXISTS projection_checkpoints;',
+    category: 'schema',
+  },
+  {
+    version: 35,
+    sql: `
+      -- R1-A: Retention DELETE indexes for guardrail_decisions and guardrail_metrics
+      CREATE INDEX IF NOT EXISTS idx_gd_decided_at ON guardrail_decisions(decided_at);
+      CREATE INDEX IF NOT EXISTS idx_gm_updated_at ON guardrail_metrics(updated_at);
+    `,
+    revert: `
+      DROP INDEX IF EXISTS idx_gd_decided_at;
+      DROP INDEX IF EXISTS idx_gm_updated_at;
+    `,
+    category: 'index',
   },
 ]
+
+// 导出迁移数组供测试验证
+export { MIGRATIONS }
 
 export function runMigrations(sqlite: SqlJsDatabase): void {
   sqlite.run('CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)')
@@ -619,4 +795,29 @@ export function runMigrations(sqlite: SqlJsDatabase): void {
       log('INFO', 'db_migration_applied', { version: m.version })
     }
   }
+}
+
+/**
+ * 应用单条迁移的 revert SQL（R5-C）。
+ *
+ * 注意：不修改 _migrations 表。回滚通过前向修正迁移实现。
+ * revert 是手动操作，只在需要撤销某条迁移时由运维触发。
+ */
+export function revertMigration(sqlite: SqlJsDatabase, version: number): void {
+  const m = MIGRATIONS.find((x) => x.version === version)
+  if (!m) {
+    log('WARN', 'db_migration_revert_not_found', { version })
+    return
+  }
+  if (m.irreversible) {
+    log('ERROR', 'db_migration_revert_irreversible', { version, detail: 'This migration cannot be reversed without data loss.' })
+    return
+  }
+  if (!m.revert || m.revert.length === 0) {
+    log('WARN', 'db_migration_revert_noop', { version, detail: 'Migration has no revert SQL (e.g. ADD COLUMN); schema change stays.' })
+    return
+  }
+  log('INFO', 'db_migration_revert_applying', { version })
+  sqlite.run(m.revert)
+  log('INFO', 'db_migration_revert_applied', { version })
 }

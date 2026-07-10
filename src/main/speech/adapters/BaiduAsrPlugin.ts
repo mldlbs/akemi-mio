@@ -68,11 +68,16 @@ export class BaiduAsrPlugin implements AsrPlugin {
       loaded: this.hasCredentials,
       loading: false,
       error: !this.hasCredentials ? 'Baidu ASR credentials not configured' : null,
+      ready: this.hasCredentials,
     }
   }
 
   getModelInfo(): string {
     return this.hasCredentials ? 'baidu_asr (cloud, REST API)' : 'not configured'
+  }
+
+  getInfo(): string {
+    return this.getModelInfo()
   }
 
   async initialize(config?: { apiKey?: string; secretKey?: string }): Promise<void> {

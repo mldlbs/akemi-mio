@@ -213,6 +213,48 @@ export const VOICE_INTENT_MAP: VoiceIntentDef[] = [
     ],
     confirmMessage: '将搜索 "{{slot.pattern}}" 并读取第一个匹配文件',
   },
+
+  // ── 学习查询 ──
+  {
+    intent: 'learning_query',
+    description: '查询 TypeScript 学习知识点',
+    patterns: [
+      '什么是', '解释', '说明', '学习', '知识点',
+      'what is', 'explain', 'tell me about',
+      '条件类型', '泛型', '映射类型', '类型守卫',
+      '类型推断', '工具类型', '模板字面量',
+      'Conditional Types', 'Mapped Types', 'Generic',
+    ],
+    slotExtractors: {
+      concept: /(?:什么是|解释|说明|学习|知识点|tell me about|what is|explain)\s*[""'']?(.+?)[""'']?(?:\s*$|\.|。)/,
+    },
+    tools: [
+      { tool: 'learning_query', args: { query: '{{slot.concept}}' } },
+    ],
+    confirmMessage: '将查询 TypeScript 知识点: {{slot.concept || "全部"}}',
+    requireConfirmation: false,
+  },
+
+  // ── 口述代码 ──
+  {
+    intent: 'oral_code',
+    description: '口述生成 TypeScript 类型代码',
+    patterns: [
+      '写', '生成', '代码', '类型',
+      'create', 'generate', 'make', 'code',
+      '一个泛型', '一个条件', '一个映射',
+      '写一个', '生成一个', '创建',
+      '函数', '接口', '类型',
+    ],
+    slotExtractors: {
+      description: /(?:写|生成|创建|make|create|generate)\s*(.+)/,
+    },
+    tools: [
+      { tool: 'oral_code_generate', args: { description: '{{slot.description}}' } },
+    ],
+    confirmMessage: '将生成类型代码描述: {{slot.description}}',
+    requireConfirmation: false,
+  },
 ]
 
 /**

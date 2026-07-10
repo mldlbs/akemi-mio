@@ -564,6 +564,52 @@ export class AsrHotwordManager {
     return this.exportVocabulary().slice(0, limit)
   }
 
+  // ── 种子词表（预设高优先级词汇） ──
+
+  /**
+   * 向热词管理器预置一批已知词汇（种子词表）。
+   *
+   * 用于在启动时直接注入已知的专业术语（如 TypeScript 高级类型名称），
+   * 使 ASR 在首次使用时就能准确识别这些词汇，无需等待用户交互积累。
+   *
+   * 种子词直接进入长时词表（跨会话保留），且给予初始频次阈值。
+   *
+   * @param words - 要预置的词汇列表，每个元素可以是字符串或 { word, domain? }
+   * @param initialCount - 初始频次（默认 freqThreshold，确保立即成为热词）
+   */
+  seedVocabulary(
+    words: Array<string | { word: string; domain?: DomainLabel }>,
+    initialCount?: number,
+  ): void {
+    const count = initialCount ?? this.freqThreshold
+    const now = Date.now()
+
+    for (const entry of words) {
+      const word = typeof entry === 'string' ? entry : entry.word
+      const domain = typeof entry === 'object' && entry.domain
+        ? entry.domain
+        : classifyDomain(word)
+      const lower = word.toLowerCase()
+
+      if (this.longTermVocab.has(lower)) continue
+
+      this.longTermVocab.set(lower, {
+        word: lower,
+        count,
+        domain,
+        firstSeenAt: now,
+        lastSeenAt: now,
+      })
+    }
+
+    this.savePersistedVocabulary()
+    log('INFO', 'asr_vocab_seeded', {
+      count: words.length,
+      threshold: count,
+      sample: words.slice(0, 5).map(w => typeof w === 'string' ? w : w.word),
+    })
+  }
+
   // ── 控制 ──
 
   /** 启用/禁用热词管理器 */

@@ -27,6 +27,7 @@ export {
   AsyncQueue,
   FallbackChain,
   DebounceGate,
+  SlidingWindow,
 } from './patterns'
 export type {
   Result,
@@ -41,3 +42,7 @@ export type {
   DebounceGateOptions,
   GateStatus,
 } from './patterns'
+
+// ── 持久化抽象层 ──
+export { JsonStore, IdentifiableJsonStore } from './persistence'
+export type { JsonStoreOptions } from './persistence'

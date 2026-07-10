@@ -19,8 +19,8 @@
 
 import { log } from '../logger/Logger'
 import { WORKSPACE } from '../config'
-import { join, dirname } from 'path'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { join } from 'path'
+import { JsonStore } from '../core/persistence/JsonStore'
 import type {
   LearningItem,
   LearningDifficulty,
@@ -30,10 +30,16 @@ import type {
   LearningProgress,
 } from './types'
 
-// ── 持久化路径 ──
+// ── 持久化存储 ──
 
-const DIFFICULTIES_FILE = join(WORKSPACE.cache, 'learning-difficulties.json')
-const SNAPSHOTS_FILE = join(WORKSPACE.cache, 'learning-eval-snapshots.json')
+const DIFFICULTIES_STORE = new JsonStore<LearningDifficulty>(
+  join(WORKSPACE.cache, 'learning-difficulties.json'),
+  { loggerName: 'learning_difficulties' },
+)
+const SNAPSHOTS_STORE = new JsonStore<LearningEvalSnapshot>(
+  join(WORKSPACE.cache, 'learning-eval-snapshots.json'),
+  { loggerName: 'learning_snapshots' },
+)
 
 /** 保留最近 N 条难点记录 */
 const MAX_DIFFICULTIES = 500
@@ -84,55 +90,13 @@ export class LearningProgressTracker {
 
   load(): void {
     if (this.loaded) return
-    this.loadDifficulties()
-    this.loadSnapshots()
+    this.difficulties = DIFFICULTIES_STORE.load()
+    this.snapshots = SNAPSHOTS_STORE.load()
     this.loaded = true
     log('INFO', 'learning_tracker_loaded', {
       difficulties: this.difficulties.length,
       snapshots: this.snapshots.length,
     })
-  }
-
-  private loadDifficulties(): void {
-    try {
-      if (!existsSync(DIFFICULTIES_FILE)) return
-      const raw = readFileSync(DIFFICULTIES_FILE, 'utf-8')
-      const data = JSON.parse(raw)
-      if (Array.isArray(data)) this.difficulties = data
-    } catch (err) {
-      log('WARN', 'learning_tracker_load_difficulties_failed', { error: String(err) })
-    }
-  }
-
-  private loadSnapshots(): void {
-    try {
-      if (!existsSync(SNAPSHOTS_FILE)) return
-      const raw = readFileSync(SNAPSHOTS_FILE, 'utf-8')
-      const data = JSON.parse(raw)
-      if (Array.isArray(data)) this.snapshots = data
-    } catch (err) {
-      log('WARN', 'learning_tracker_load_snapshots_failed', { error: String(err) })
-    }
-  }
-
-  private saveDifficulties(): void {
-    try {
-      const dir = dirname(DIFFICULTIES_FILE)
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-      writeFileSync(DIFFICULTIES_FILE, JSON.stringify(this.difficulties, null, 2), 'utf-8')
-    } catch (err) {
-      log('WARN', 'learning_tracker_save_difficulties_failed', { error: String(err) })
-    }
-  }
-
-  private saveSnapshots(): void {
-    try {
-      const dir = dirname(SNAPSHOTS_FILE)
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-      writeFileSync(SNAPSHOTS_FILE, JSON.stringify(this.snapshots, null, 2), 'utf-8')
-    } catch (err) {
-      log('WARN', 'learning_tracker_save_snapshots_failed', { error: String(err) })
-    }
   }
 
   // ==================== 困难记录（对应 AsrLogStore 的纠正记录） ====================
@@ -161,7 +125,7 @@ export class LearningProgressTracker {
     if (this.difficulties.length > MAX_DIFFICULTIES) {
       this.difficulties = this.difficulties.slice(-MAX_DIFFICULTIES)
     }
-    this.saveDifficulties()
+    DIFFICULTIES_STORE.save(this.difficulties)
   }
 
   /**
@@ -241,7 +205,7 @@ export class LearningProgressTracker {
     if (this.snapshots.length > MAX_SNAPSHOTS) {
       this.snapshots = this.snapshots.slice(-MAX_SNAPSHOTS)
     }
-    this.saveSnapshots()
+    SNAPSHOTS_STORE.save(this.snapshots)
 
     log('INFO', 'learning_snapshot_created', {
       snapshotId: snapshot.id,
@@ -277,7 +241,7 @@ export class LearningProgressTracker {
 
     snapshot.afterMastery = afterMastery
     snapshot.afterAccuracy = afterAccuracy
-    this.saveSnapshots()
+    SNAPSHOTS_STORE.save(this.snapshots)
 
     // 数据不足则无法判断
     if (items.length < 3) return 'unchanged'
@@ -299,7 +263,7 @@ export class LearningProgressTracker {
     const snapshot = this.snapshots.find((s) => s.id === snapshotId)
     if (!snapshot) return false
     snapshot.status = status
-    this.saveSnapshots()
+    SNAPSHOTS_STORE.save(this.snapshots)
     return true
   }
 

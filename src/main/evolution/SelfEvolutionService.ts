@@ -26,14 +26,18 @@ import { scheduler, Scheduler } from '../core/Scheduler'
 import { eventBus, EventBus } from '../core/EventBus'
 import { AsyncLock } from '../utils/AsyncLock'
 import { PlanIntegrityChecker } from './PlanIntegrityChecker'
+import { evolutionPiperBridge } from './piper/EvolutionPiperBridge'
 import { EVOLUTION_SAFETY_MODE, WORKSPACE } from '../config'
 import { asrEvolutionManager } from '../asr/AsrEvolutionManager'
 import type { AgentService } from '../agent/AgentService'
 import type { PlanManagerLike } from './types'
 import type { ISubsystem, HealthCheckResult, SubsystemState } from '../core/lifecycle/types'
 import type { PipelineOrchestrator, PipelineMetrics } from './automation'
+import type { UserBehaviorLayer } from '../user-behavior/UserBehaviorLayer'
+import type { PreProcessContext, PostProcessContext, PostProcessResult } from '../user-behavior/types'
 import { insertMessage, createMessageId } from '../db/messages'
 import { getMainWindow } from '../core/Lifecycle'
+import type { MemoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
 
 // =============================================================================
 // 调度状态机状态枚举
@@ -94,8 +98,23 @@ export class SelfEvolutionService implements ISubsystem {
   private readonly evolutionLock = new AsyncLock()
   private firstRunComplete = false
 
+  // ==================== 模块热力图相关 ====================
+  /** 最近的模块热力图（由预处理钩子生成） */
+  private lastHeatmap: any = null
+  /** 连续冷循环计数（所有模块均为低频时的跳过次数） */
+  private consecutiveColdCycles = 0
+  /** 最大连续冷循环跳过数（超过此值仍会执行一次检查） */
+  private static readonly MAX_COLD_CYCLES = 3
+
   // ==================== 最近管道指标缓存 ====================
   private lastPipelineMetrics: PipelineMetrics | null = null
+
+  // ==================== UserBehavior 上层增强层 ====================
+  private userBehaviorLayer: UserBehaviorLayer | null = null
+  private lastBehaviorResult: PostProcessResult | null = null
+
+  // ==================== Memory × Evolution 深度融合桥接器 ====================
+  private memoryBridge: MemoryEvolutionBridge | null = null
 
   // ==================== 状态持久化 ====================
   private stateFilePath: string
@@ -143,6 +162,7 @@ export class SelfEvolutionService implements ISubsystem {
       // 持续监听管道事件，更新缓存指标
       (this.eventBus.on as any)('pipeline.completed', (p: any) => {
         this.lastPipelineMetrics = this.pipeline?.getMetrics() ?? null
+        this.syncStateToPiperBridge()
       }) as any,
       // 将进化结果持久化为 UI 消息
       (this.eventBus.on as any)('evolution.cycle.completed', (p: any) => {
@@ -157,6 +177,30 @@ export class SelfEvolutionService implements ISubsystem {
   setPipeline(pipeline: PipelineOrchestrator): void {
     this.pipeline = pipeline
     log('INFO', 'evolution_pipeline_attached')
+  }
+
+  /** 附加 UserBehavior 上层增强层 */
+  setUserBehaviorLayer(layer: UserBehaviorLayer): void {
+    this.userBehaviorLayer = layer
+    log('INFO', 'evolution_user_behavior_attached', {
+      features: layer.getActiveFeatures(),
+    })
+  }
+
+  /** 注入 Memory × Evolution 桥接器 */
+  setMemoryBridge(bridge: MemoryEvolutionBridge): void {
+    this.memoryBridge = bridge
+    log('INFO', 'evolution_memory_bridge_attached')
+  }
+
+  /** 获取当前桥接器（供外部只读访问） */
+  getMemoryBridge(): MemoryEvolutionBridge | null {
+    return this.memoryBridge
+  }
+
+  /** 获取最近一次 UserBehavior 后处理结果 */
+  getLastBehaviorResult(): PostProcessResult | null {
+    return this.lastBehaviorResult
   }
 
   private eventCooldownUntil = 0
@@ -179,6 +223,10 @@ export class SelfEvolutionService implements ISubsystem {
 
   async start(): Promise<void> {
     this.state = 'running'
+
+    // 初始同步 Evolution 状态到 PiperTTS 桥接器
+    this.syncStateToPiperBridge()
+
     // 首次启动时立即执行一次管道
     // （如果管道已注入）
     if (this.pipeline) {
@@ -269,8 +317,28 @@ export class SelfEvolutionService implements ISubsystem {
     return { active: true, remainingMs: this.recoveryCooldownUntil - Date.now() }
   }
 
+  /**
+   * 将当前 Evolution 状态同步到 EvolutionPiperBridge，
+   * 使 PiperTTS 能感知 Evolution 的调度/安全/冷却状态。
+   */
+  private syncStateToPiperBridge(): void {
+    const cooldown = this.getRecoveryCooldown()
+    evolutionPiperBridge.syncEvolutionState({
+      schedulerState: this.schedulerState === EvolutionSchedulerState.ANALYZING ? 'analyzing' : this.schedulerState === EvolutionSchedulerState.COOLDOWN ? 'cooldown' : 'idle',
+      safetyMode: this.safetyMode === 'review' ? 'review' : 'auto',
+      executeFailures: this.tryRunFailures + this.executeFailures,
+      inCooldown: cooldown.active,
+      cooldownRemainingMs: cooldown.remainingMs,
+      userActive: this.mioActive,
+      lastRunAt: this.lastRun,
+      pipelineQueueSize: this.lastPipelineMetrics?.queueSize ?? 0,
+      timestamp: Date.now(),
+    })
+  }
+
   setSafetyMode(mode: SafetyMode): void {
     this.safetyMode = mode
+    this.syncStateToPiperBridge()
     log('INFO', 'evolution_safety_mode', { mode })
   }
 
@@ -290,6 +358,23 @@ export class SelfEvolutionService implements ISubsystem {
     if (Date.now() - this.lastUserInputTime < SelfEvolutionService.USER_COOLDOWN_MS) return
 
     if (this.agentService.isBusy()) return
+
+    // ★ 冷模块降频：如果最近一次热力图显示没有高频模块，跳过本次周期间隔检查
+    if (this.lastHeatmap && this.lastHeatmap.hasSufficientData) {
+      const hasHotModules = this.lastHeatmap.hotModules?.length > 0
+      if (!hasHotModules) {
+        this.consecutiveColdCycles++
+        if (this.consecutiveColdCycles < SelfEvolutionService.MAX_COLD_CYCLES) {
+          log('INFO', 'scheduler_tick_cold_module_skip', {
+            coldCycles: this.consecutiveColdCycles,
+            maxColdCycles: SelfEvolutionService.MAX_COLD_CYCLES,
+          })
+          return // 跳过本次周期：无高频模块需要优化
+        }
+      } else {
+        this.consecutiveColdCycles = 0 // 有热模块，重置冷计数
+      }
+    }
 
     // 冷却恢复
     if (this.recoveryCooldownUntil > 0) {
@@ -331,6 +416,70 @@ export class SelfEvolutionService implements ISubsystem {
       let success = false
       let summary = ''
       const startedAt = Date.now()
+
+      // ★ UserBehavior 预处理：在管道执行前注入行为上下文
+      let preProcessData: Record<string, unknown> | undefined
+      let heatmapChecked = false
+      if (this.userBehaviorLayer) {
+        const preCtx: PreProcessContext = {
+          timestamp: startedAt,
+          hoursSinceLastRun: this.lastRun > 0 ? (startedAt - this.lastRun) / (1000 * 60 * 60) : Infinity,
+          consecutiveFailures: this.tryRunFailures,
+          safetyMode: this.safetyMode,
+          userActive: this.mioActive,
+        }
+        const enhanced = await this.userBehaviorLayer.preProcess(preCtx)
+        // 提取扩展属性供后处理消费
+        const enhancedAny = enhanced as any
+        if (enhancedAny.behaviorFeatures) {
+          preProcessData = { userBehaviorFeatures: enhancedAny.behaviorFeatures }
+        }
+        // ★ 提取模块热力图数据
+        if (enhancedAny.heatmap) {
+          const heatmap = enhancedAny.heatmap
+          preProcessData = {
+            ...preProcessData,
+            heatmap,
+            heatmapSummary: enhancedAny.heatmapSummary || '',
+          }
+          heatmapChecked = true
+          log('INFO', 'evolution_heatmap_loaded', {
+            hotModules: heatmap.hotModules?.length ?? 0,
+            errorModules: heatmap.errorModules?.length ?? 0,
+            coldModules: heatmap.coldModules?.length ?? 0,
+          })
+        }
+        // ★ 冷模块降频标记（供管道 Collector 跳过冷模块分析）
+        if (enhancedAny.shouldDampenColdModules && enhancedAny.coldModules?.length > 0) {
+          preProcessData = {
+            ...preProcessData,
+            coldModules: enhancedAny.coldModules,
+            shouldDampenColdModules: true,
+          }
+          log('INFO', 'evolution_cold_module_dampening', {
+            coldModules: enhancedAny.coldModules,
+          })
+        }
+      }
+
+      // 缓存热力图供下次 scheduler tick 判断冷模块降频
+      if (heatmapChecked && (preProcessData as any)?.heatmap) {
+        this.lastHeatmap = (preProcessData as any).heatmap
+      }
+
+      // ★ Memory × Evolution 深度融合：在管道执行前注入长时记忆上下文
+      if (this.memoryBridge && this.memoryBridge.isReady()) {
+        const enhancedCtx = this.memoryBridge.getEnhancedAnalysisContext()
+        if (enhancedCtx) {
+          preProcessData = {
+            ...preProcessData,
+            memoryContext: enhancedCtx,
+          }
+          log('INFO', 'evolution_memory_context_injected', {
+            ctxLength: enhancedCtx.length,
+          })
+        }
+      }
 
       try {
         // 步骤 1：触发自动化管道（如果已注入）
@@ -378,6 +527,37 @@ export class SelfEvolutionService implements ISubsystem {
           }
         }
 
+        // ★ UserBehavior 后处理：在完整 summary 上附加行为增强
+        if (this.userBehaviorLayer && success) {
+          const postCtx: PostProcessContext = {
+            rawMetrics: this.lastPipelineMetrics,
+            success,
+            rawSummary: summary,
+            durationMs: Date.now() - startedAt,
+            preProcessData,
+          }
+          const postResult = await this.userBehaviorLayer.postProcess(postCtx)
+          this.lastBehaviorResult = postResult
+          if (postResult.enhancedSummary) {
+            summary = postResult.enhancedSummary
+          }
+        }
+
+        // ★ Memory × Evolution 深度融合：将进化周期结果持久化到记忆系统
+        if (this.memoryBridge && this.memoryBridge.isReady()) {
+          // 从 summary 中提取 [xxx] 标题作为洞察片段
+          const insightMatches = summary.match(/【[^】]+】/g)
+          const insights = insightMatches
+            ? [...new Set(insightMatches)].map(m => m.replace(/[【】]/g, '').trim()).slice(0, 3)
+            : summary.length > 50 ? [summary.slice(0, 100)] : undefined
+          this.memoryBridge.storeEvolutionResult({
+            summary,
+            metrics: this.lastPipelineMetrics,
+            success,
+            insights,
+          })
+        }
+
         this.eventBus.emit('evolution.cycle.completed' as any, {
           success,
           summary,
@@ -386,14 +566,27 @@ export class SelfEvolutionService implements ISubsystem {
           mode: 'auto',
           safetyMode: this.safetyMode,
           failures: this.tryRunFailures,
+          // 附加 UserBehavior 增强数据（由 feature flag 控制）
+          ...(this.lastBehaviorResult?.extraData ? { userBehavior: this.lastBehaviorResult.extraData } : {}),
+          ...(this.lastBehaviorResult?.messages?.length ? { behaviorMessages: this.lastBehaviorResult.messages } : {}),
         })
       } catch (err: any) {
         this.tryRunFailures++
         if (this.tryRunFailures >= this.maxFailures && this.recoveryCooldownUntil === 0) {
           this.recoveryCooldownUntil = Date.now() + Math.min(this.intervalMs, 30 * 60 * 1000)
+          this.syncStateToPiperBridge()
         }
 
         log('ERROR', 'evolution_cycle_error', { error: String(err), failures: this.tryRunFailures })
+
+        // ★ 即使失败，也将结果写入记忆系统（便于后续分析失败模式）
+        if (this.memoryBridge && this.memoryBridge.isReady()) {
+          this.memoryBridge.storeEvolutionResult({
+            summary: `Error: ${(err as Error).message}`,
+            metrics: this.lastPipelineMetrics,
+            success: false,
+          })
+        }
 
         this.eventBus.emit('evolution.cycle.completed' as any, {
           success: false,
@@ -487,6 +680,7 @@ export class SelfEvolutionService implements ISubsystem {
   private transitionState(newState: EvolutionSchedulerState, reason: string): void {
     const oldState = this.schedulerState
     this.schedulerState = newState
+    this.syncStateToPiperBridge()
     log('INFO', 'scheduler_state_transition', { from: oldState, to: newState, reason })
     this.eventBus.emit('evolution.scheduler.state' as any, { from: oldState, to: newState, reason, timestamp: Date.now() })
   }

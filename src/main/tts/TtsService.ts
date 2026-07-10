@@ -136,6 +136,23 @@ export class TtsService {
   /** 当前延迟权重 0-1 */
   private latencyWeight = 0.4
 
+  // ── 重听与循环播放 ──
+
+  /** 最近一次播报的原始文本（用于重听 replay） */
+  private lastSpokenText = ''
+  /** 最近一次播报的清理后文本（用于重听 replay） */
+  private lastSpokenCleanText = ''
+  /** 循环播放模式是否启用 */
+  private loopMode = false
+  /** 循环播放间隔（毫秒） */
+  private loopIntervalMs = 3000
+  /** 循环播放定时器 */
+  private loopTimer: ReturnType<typeof setTimeout> | null = null
+  /** 循环播放次数计数器 */
+  private loopCount = 0
+  /** 循环播放最大次数（0 = 无限） */
+  private loopMaxCount = 3
+
   constructor(onStateUpdate: TtsStateCallback, onAudioReady?: (filePath: string) => void) {
     this.onStateUpdate = onStateUpdate
     this.onAudioReady = onAudioReady ?? null
@@ -473,13 +490,21 @@ export class TtsService {
     this.ttsQueue = []
     this.sentenceBuf = ''
     this.isProcessing = false
+    this.clearLoopTimer()
     this.onStateUpdate({ ttsPlaying: false })
   }
 
   async speak(text: string): Promise<void> {
+    // 循环播放模式下，每播报一轮重置计数器
+    if (this.loopMode) {
+      this.loopCount = 0
+    }
+
     this.onStateUpdate({ ttsPlaying: true })
     try {
       await this.speakInternal(text)
+      // 播报完成后自动调度循环（如果启用了循环模式）
+      this.scheduleNextLoop()
     } catch (err) {
       log('ERROR', 'tts_speak_error', { error: String(err) })
     } finally {
@@ -487,9 +512,115 @@ export class TtsService {
     }
   }
 
+  // ══════════════════════════════════════════
+  //  重听（Replay）与循环播放（Loop）
+  // ══════════════════════════════════════════
+
+  /**
+   * 重听最后一次播报的内容。
+   * 如果没有已播报内容，返回 false。
+   */
+  async replay(): Promise<boolean> {
+    if (!this.lastSpokenCleanText) {
+      log('WARN', 'tts_replay_no_text')
+      return false
+    }
+
+    log('INFO', 'tts_replay', {
+      text_len: this.lastSpokenCleanText.length,
+      snippet: this.lastSpokenCleanText.slice(0, 50),
+    })
+    this.recordImplicitFeedback('REPLAY')
+    await this.speak(this.lastSpokenText)
+    return true
+  }
+
+  /**
+   * 获取上次播报的文本（供 UI 显示重听按钮状态）。
+   */
+  getLastSpokenText(): string {
+    return this.lastSpokenText
+  }
+
+  /**
+   * 是否有可重听的内容。
+   */
+  hasReplayContent(): boolean {
+    return this.lastSpokenCleanText.length > 0
+  }
+
+  /**
+   * 启用/禁用循环播放模式。
+   *
+   * 循环模式会在每次 speak() 完成后，间隔 loopIntervalMs 毫秒后自动重播。
+   * 适合学习类内容（如 TypeScript 知识点的反复收听）。
+   *
+   * @param enabled - 是否启用循环
+   * @param intervalMs - 循环间隔（毫秒，默认 3000）
+   * @param maxCount - 最大循环次数（0 = 无限，默认 3）
+   */
+  setLoopMode(enabled: boolean, intervalMs = 3000, maxCount = 3): void {
+    this.loopMode = enabled
+    this.loopIntervalMs = Math.max(1000, Math.min(30000, intervalMs))
+    this.loopMaxCount = maxCount
+    this.loopCount = 0
+
+    if (!enabled) {
+      this.clearLoopTimer()
+    }
+
+    log('INFO', 'tts_loop_mode', {
+      enabled,
+      intervalMs: this.loopIntervalMs,
+      maxCount: this.loopMaxCount,
+    })
+  }
+
+  /** 循环播放是否启用 */
+  isLoopMode(): boolean {
+    return this.loopMode
+  }
+
+  /**
+   * 播报完成后自动触发循环（由 processQueue 或 speakInternal 在播放结束后调用）。
+   */
+  private scheduleNextLoop(): void {
+    if (!this.loopMode) return
+    if (this.loopMaxCount > 0 && this.loopCount >= this.loopMaxCount) {
+      log('INFO', 'tts_loop_reached_max', { count: this.loopCount })
+      this.setLoopMode(false)
+      return
+    }
+
+    this.clearLoopTimer()
+    this.loopTimer = setTimeout(() => {
+      this.loopCount++
+      log('INFO', 'tts_loop_tick', {
+        count: this.loopCount,
+        max: this.loopMaxCount,
+      })
+      if (this.lastSpokenCleanText) {
+        this.speak(this.lastSpokenText)
+      }
+    }, this.loopIntervalMs)
+  }
+
+  /** 清除循环定时器 */
+  private clearLoopTimer(): void {
+    if (this.loopTimer) {
+      clearTimeout(this.loopTimer)
+      this.loopTimer = null
+    }
+  }
+
   private async speakInternal(text: string): Promise<void> {
     const clean = cleanTTS(text)
     if (!clean || clean.length < 15) return
+
+    // 记录最后播报文本（用于重听 replay）
+    this.lastSpokenText = text
+    this.lastSpokenCleanText = clean
+
     const tempFile = getTempFile()
     const t0 = Date.now()
 

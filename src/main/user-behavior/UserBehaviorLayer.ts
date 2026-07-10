@@ -30,6 +30,8 @@ import type {
 } from './types'
 import { parseFeaturesFromEnv } from './types'
 import { behaviorFeatureExtractor } from './BehaviorFeatureExtractor'
+import { behaviorHeatmapService } from './BehaviorHeatmapService'
+import type { ModuleHeatmap } from './types'
 
 const DEFAULT_CONFIG: Partial<UserBehaviorConfig> = {
   debug: false,
@@ -228,9 +230,7 @@ export class UserBehaviorLayer {
       const { rawMetrics } = ctx
 
       // 计算修复率 / 采集率等行为分析指标
-      const fixRate = rawMetrics.totalCollected > 0
-        ? ((rawMetrics.totalFixed / rawMetrics.totalCollected) * 100).toFixed(1)
-        : 'N/A'
+      const fixRate = rawMetrics.totalCollected > 0 ? ((rawMetrics.totalFixed / rawMetrics.totalCollected) * 100).toFixed(1) : 'N/A'
 
       return {
         extraData: {
@@ -256,9 +256,7 @@ export class UserBehaviorLayer {
       const { rawMetrics } = ctx
       if (rawMetrics.totalCollected === 0) return {}
 
-      const failureRate = rawMetrics.totalCollected > 0
-        ? rawMetrics.totalFailed / rawMetrics.totalCollected
-        : 0
+      const failureRate = rawMetrics.totalCollected > 0 ? rawMetrics.totalFailed / rawMetrics.totalCollected : 0
 
       // 失败率过高 → 建议降低并发修复数
       if (failureRate > 0.5 && rawMetrics.queueSize > 5) {
@@ -309,8 +307,161 @@ export class UserBehaviorLayer {
     }
   }
 
+  // ==================== 模块热力图钩子 ====================
+
   /**
-   * 后处理钩子：行为优化分析。
+   * 预处理钩子：模块热力图生成。
+   * 在 Evolution 周期前分析最近工具调用，生成模块级使用/错误热力图，
+   * 注入预处理上下文供后续阶段消费。
+   *
+   * 热力图数据用于：
+   * - 高频模块 → 进化优先级提升
+   * - 高错误模块 → 进化修复候选人
+   * - 低频模块 → 进化频率降低
+   *
+   * 依赖 feature flag: module_heatmap
+   */
+  static createHeatmapPreHook(): PreProcessHook {
+    return async (ctx) => {
+      try {
+        const heatmap = behaviorHeatmapService.generate(48)
+
+        if (!heatmap.hasSufficientData) return ctx
+
+        log('INFO', 'user_behavior_heatmap_generated', {
+          hotModules: heatmap.hotModules.length,
+          errorModules: heatmap.errorModules.length,
+          coldModules: heatmap.coldModules.length,
+          totalCalls: heatmap.totalToolCalls,
+        })
+
+        // 通过扩展属性注入热力图数据（SelfEvolutionService 中通过 `as any` 读取）
+        const enrichedCtx = ctx as any
+        enrichedCtx.heatmap = heatmap
+        enrichedCtx.heatmapSummary = behaviorHeatmapService.formatHeatmapSummary(heatmap)
+
+        return enrichedCtx as typeof ctx
+      } catch {
+        return ctx
+      }
+    }
+  }
+
+  /**
+   * 预处理钩子：冷模块降频标记。
+   * 检查热力图中的低频模块，生成"跳过冷模块分析"标记，
+   * 供 SelfEvolutionService 在管道执行前决策。
+   *
+   * 依赖 feature flag: cold_module_dampening
+   */
+  static createColdModuleDampeningPreHook(): PreProcessHook {
+    return async (ctx) => {
+      try {
+        const enrichedCtx = ctx as any
+        const heatmap: ModuleHeatmap | undefined = enrichedCtx.heatmap
+
+        if (!heatmap || !heatmap.hasSufficientData) return ctx
+
+        // 提取应降频的冷模块列表
+        const coldModules = heatmap.coldModules.map((e) => e.module)
+        if (coldModules.length === 0) return ctx
+
+        log('INFO', 'user_behavior_cold_modules_detected', {
+          coldModules,
+          count: coldModules.length,
+        })
+
+        // 注入冷模块列表，供管道 Collector/Executor 跳过
+        enrichedCtx.coldModules = coldModules
+        enrichedCtx.shouldDampenColdModules = true
+
+        return enrichedCtx as typeof ctx
+      } catch {
+        return ctx
+      }
+    }
+  }
+
+  /**
+   * 后处理钩子：热力图增强报告。
+   * 在 Evolution 周期后，如果热力图数据可用，附加热力图摘要。
+   *
+   * 依赖 feature flag: module_heatmap
+   */
+  static createHeatmapPostHook(): PostProcessHook {
+    return async (ctx) => {
+      try {
+        const preData = ctx.preProcessData
+        const heatmap: ModuleHeatmap | undefined = preData?.heatmap as any
+
+        if (!heatmap || !heatmap.hasSufficientData) return {}
+
+        const summary = behaviorHeatmapService.formatHeatmapSummary(heatmap)
+
+        const enhancedSummary = ctx.rawSummary ? `${ctx.rawSummary}\n\n---\n${summary}` : summary
+
+        return {
+          enhancedSummary,
+          extraData: {
+            heatmapSnapshot: {
+              hotModules: heatmap.hotModules.map((m) => m.module),
+              errorModules: heatmap.errorModules.map((m) => ({ module: m.module, errors: m.errorCount })),
+              coldModules: heatmap.coldModules.map((m) => m.module),
+              totalCalls: heatmap.totalToolCalls,
+            },
+          },
+          messages:
+            heatmap.hotModules.length > 0
+              ? [
+                  `🔥 模块热力图：${heatmap.hotModules.length} 个高频模块，${heatmap.errorModules.length} 个高错误模块，${heatmap.coldModules.length} 个低频模块`,
+                ]
+              : [],
+        }
+      } catch {
+        return {}
+      }
+    }
+  }
+
+  /**
+   * 后处理钩子：热力图驱动优先级总结。
+   * 在 Evolution 周期后，输出关于进化重点的简短建议。
+   *
+   * 依赖 feature flag: heatmap_driven_priority
+   */
+  static createHeatmapPriorityPostHook(): PostProcessHook {
+    return async (ctx) => {
+      try {
+        const preData = ctx.preProcessData
+        const heatmap: ModuleHeatmap | undefined = preData?.heatmap as any
+
+        if (!heatmap || !heatmap.hasSufficientData) return {}
+
+        const suggestions: string[] = []
+
+        if (heatmap.hotModules.length > 0) {
+          const top = heatmap.hotModules[0]
+          suggestions.push(`本周期进化重点推荐：「${top.module}」模块（${top.usageCount} 次调用，${top.description}）`)
+        }
+
+        if (heatmap.errorModules.length > 0) {
+          const worst = heatmap.errorModules[0]
+          const rate = ((worst.errorCount / Math.max(worst.usageCount, 1)) * 100).toFixed(0)
+          suggestions.push(`错误修复优先级：「${worst.module}」模块（错误率 ${rate}%）`)
+        }
+
+        if (suggestions.length === 0) return {}
+
+        return {
+          enhancedSummary: ctx.rawSummary ? `${ctx.rawSummary}\n\n📊 ${suggestions.join('；')}` : suggestions.join('；'),
+          messages: suggestions,
+        }
+      } catch {
+        return {}
+      }
+    }
+  }
+  /**
    * 在 Evolution 周期后附加行为分析结果。
    */
   static createBehaviorAnalysisPostHook(): PostProcessHook {
@@ -348,18 +499,22 @@ export class UserBehaviorLayer {
           lines.push('')
           lines.push('优化建议：')
           for (const sug of features.suggestions.slice(0, 3)) {
-            const tag = sug.type === 'preload_module' ? '📦' :
-              sug.type === 'optimize_response' ? '⚡' :
-              sug.type === 'add_cache' ? '💾' :
-              sug.type === 'improve_error' ? '🛡️' : '🔧'
+            const tag =
+              sug.type === 'preload_module'
+                ? '📦'
+                : sug.type === 'optimize_response'
+                  ? '⚡'
+                  : sug.type === 'add_cache'
+                    ? '💾'
+                    : sug.type === 'improve_error'
+                      ? '🛡️'
+                      : '🔧'
             lines.push(`  ${tag} ${sug.title}（${sug.expectedBenefit}）`)
           }
         }
 
         if (lines.length > 0) {
-          const enhancedSummary = ctx.rawSummary
-            ? `${ctx.rawSummary}\n\n---\n${lines.join('\n')}`
-            : lines.join('\n')
+          const enhancedSummary = ctx.rawSummary ? `${ctx.rawSummary}\n\n---\n${lines.join('\n')}` : lines.join('\n')
 
           return {
             enhancedSummary,
@@ -370,9 +525,7 @@ export class UserBehaviorLayer {
                 suggestionsGenerated: features.suggestions.length,
               },
             },
-            messages: features.suggestions.length > 0
-              ? [`🧠 行为分析：发现 ${features.suggestions.length} 个优化机会`]
-              : [],
+            messages: features.suggestions.length > 0 ? [`🧠 行为分析：发现 ${features.suggestions.length} 个优化机会`] : [],
           }
         }
 

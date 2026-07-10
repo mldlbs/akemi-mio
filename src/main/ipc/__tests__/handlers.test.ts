@@ -41,14 +41,53 @@ vi.mock('../../credentials/CredentialsManager', () => ({
   },
 }))
 
-vi.mock('../../config', () => ({
-  WAKE_WORDS: ['秋山澪', 'mio'],
+const configMock = vi.hoisted(() => ({
+  WAKE_WORDS: ['mio'],
   LLM_API_URL: 'https://api.example.com/chat',
   LLM_CODE_API_URL: 'https://api.example.com/code',
   LLM_TEXT_API_URL: 'https://api.example.com/text',
   LLM_VISION_API_URL: 'https://api.example.com/vision',
-  WORKSPACE: { evolution: process.cwd() },
+  WORKSPACE: { evolution: process.cwd(), cache: process.cwd() },
+  RUNTIME_ROOT: process.cwd(),
+  INITIAL_HOTWORDS: [],
+  EVOLUTION_SAFETY_MODE: 'review',
+  ASR_HOTWORDS: '',
+  WINDOW_WIDTH: 420,
+  WINDOW_HEIGHT: 640,
+  GGML_MODELS_DIR: '/dev/null',
+  ASR_SAMPLE_RATE: 16000,
+  ASR_MAX_AUDIO_SECONDS: 25,
+  ASR_INITIAL_PROMPT: '',
+  FFPLAY_PATHS: ['ffplay'],
+  PIPER_SCRIPT: '/dev/null',
+  PIPER_MODEL: '/dev/null',
+  USE_LOCAL_TTS: false,
+  DEV_PROJECT_ROOT: '',
+  LLM_MODEL: 'test-model',
+  LLM_KEY: '',
+  LLM_CHAT_MODEL: 'test-model',
+  LLM_CODE_MODEL: 'test-model',
+  LLM_VISION_MODEL: 'test-model',
+  LLM_VISION_KEY: '',
+  LLM_TEXT_MODEL: 'test-model',
+  LLM_TEXT_KEY: '',
+  LLM_IMAGE_API_URL: '',
+  LLM_IMAGE_KEY: '',
+  LLM_IMAGE_MODEL: '',
+  FFMPEG_PATHS: ['ffmpeg'],
+  WORKSPACE_ROOT: '/dev/null',
+  BEHAVIOR_PREDICTOR_WINDOW_SIZE: 12,
+  BEHAVIOR_PREDICTOR_MIN_SEQUENCE_LENGTH: 2,
+  BEHAVIOR_PREDICTOR_MIN_PATTERN_FREQUENCY: 2,
+  BEHAVIOR_PREDICTOR_PRELOAD_TTL_MS: 120000,
+  BEHAVIOR_PREDICTOR_PRELOAD_CACHE_MAX: 50,
+  BEHAVIOR_PREDICTOR_PRELOAD_TIMEOUT_MS: 10000,
+  BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE: 0.35,
+  BEHAVIOR_PREDICTOR_MAX_CONCURRENT_PRELOADS: 3,
+  ASR_HOTWORDS: [],
 }))
+
+vi.mock('../../config', () => configMock)
 
 vi.mock('../../core/EventBus', () => ({
   eventBus: {
@@ -62,22 +101,22 @@ import { registerHandlers } from '../handlers'
 import type { AgentService } from '../../agent/AgentService'
 import type { StateManager } from '../../core/StateManager'
 import type { TtsService } from '../../tts/TtsService'
-import type { SelfEvolutionService } from '../../evolution'
 
 describe('IPC handlers', () => {
   let agentService: any
   let stateManager: any
   let ttsService: any
   let evolutionService: any
+  let decisionQueryService: any
 
   beforeEach(() => {
     registeredHandlers.clear()
     registeredOns.clear()
 
     agentService = {
-      processTextInput: vi.fn().mockResolvedValue({ reply: '你好' }),
+      processTextInput: vi.fn().mockResolvedValue({ reply: 'test' }),
       getAsrService: vi.fn().mockReturnValue({
-        transcribe: vi.fn().mockResolvedValue('识别文本'),
+        transcribe: vi.fn().mockResolvedValue('test'),
       }),
       getMcpManager: vi.fn().mockReturnValue({
         listServers: vi.fn().mockReturnValue([{ name: 'server1', initialized: true }]),
@@ -108,7 +147,14 @@ describe('IPC handlers', () => {
       getConsecutiveFailures: vi.fn().mockReturnValue(0),
     }
 
-    registerHandlers(agentService, stateManager, ttsService, { current: evolutionService })
+    decisionQueryService = {
+      getDecision: vi.fn().mockResolvedValue({ state: 'RECORDED', record: { decisionId: 'd1', traceId: 't1' } }),
+      listByTrace: vi.fn().mockResolvedValue([]),
+    }
+
+    registerHandlers(agentService, stateManager, ttsService, { current: evolutionService }, undefined, undefined, undefined, {
+      current: decisionQueryService,
+    })
   })
 
   describe('handler 注册', () => {
@@ -306,6 +352,43 @@ describe('IPC handlers', () => {
       const mockEvent = { sender: {} }
       const result = await handler(mockEvent)
       expect(result).toEqual({ success: true })
+    })
+  })
+
+  describe('evaluation:getDecision (M5.3)', () => {
+    it('channel registered', () => {
+      expect(registeredHandlers.has('evaluation:getDecision')).toBe(true)
+    })
+
+    it('delegates to DecisionQueryService.getDecision', async () => {
+      const handler = registeredHandlers.get('evaluation:getDecision')!
+      const result = await handler({}, 'd1')
+      expect(decisionQueryService.getDecision).toHaveBeenCalledWith('d1')
+      expect(result.state).toBe('RECORDED')
+      expect(result.record.decisionId).toBe('d1')
+    })
+
+    it('no service returns UNAVAILABLE', async () => {
+      registeredHandlers.clear()
+      registeredOns.clear()
+      registerHandlers(agentService, stateManager, ttsService, { current: evolutionService }, undefined, undefined, undefined, undefined)
+      const handler = registeredHandlers.get('evaluation:getDecision')!
+      const result = await handler({}, 'd1')
+      expect(result.state).toBe('UNAVAILABLE')
+    })
+  })
+
+  describe('evaluation:listByTrace (M5.3)', () => {
+    it('channel registered', () => {
+      expect(registeredHandlers.has('evaluation:listByTrace')).toBe(true)
+    })
+
+    it('delegates to DecisionQueryService.listByTrace', async () => {
+      decisionQueryService.listByTrace.mockResolvedValue([{ decisionId: 'd1', traceId: 't1' }])
+      const handler = registeredHandlers.get('evaluation:listByTrace')!
+      const result = await handler({}, 't1')
+      expect(decisionQueryService.listByTrace).toHaveBeenCalledWith('t1')
+      expect(result.length).toBe(1)
     })
   })
 })
