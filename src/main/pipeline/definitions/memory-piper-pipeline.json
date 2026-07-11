@@ -1,0 +1,139 @@
+{
+  "pipelineId": "memory-to-piper",
+  "description": "Memory context → emotion analysis → text processing → TTS params → Piper synthesis",
+  "version": "1.0.0",
+  "stages": [
+    {
+      "id": "memory-context",
+      "stageType": "memory-context",
+      "description": "从 MemoryService 获取格式化上下文、用户画像、兴趣话题",
+      "dependsOn": [],
+      "config": {
+        "maxEntries": 5,
+        "includeEmotion": true,
+        "maxTextLength": 2000
+      },
+      "inputSchema": {
+        "type": "object",
+        "description": "本 Stage 无需上游依赖，配置项提供默认值",
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "contextText": { "type": "string", "description": "格式化记忆上下文文本" },
+          "rawEntries": { "type": "array", "description": "原始记忆条目列表" },
+          "interestTopics": { "type": "array", "description": "用户近期兴趣话题" },
+          "userProfileContext": { "type": "string", "description": "用户画像摘要" },
+          "lastUserText": { "type": "string", "description": "最近一条用户消息" }
+        }
+      }
+    },
+    {
+      "id": "emotion-analysis",
+      "stageType": "emotion-analysis",
+      "description": "复用 MemoryEmotionBridge 分析情感，输出标签与调整值",
+      "dependsOn": [],
+      "config": {
+        "emotionWindow": 10
+      },
+      "inputSchema": {
+        "type": "object",
+        "description": "直接访问 MemoryService，不依赖上游 stage",
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "dominantLabel": { "type": "string", "description": "主导情感标签" },
+          "dominantPolarity": { "type": "string", "description": "主导极性" },
+          "rateDelta": { "type": "number", "description": "语速调整值（百分比）" },
+          "pitchDelta": { "type": "number", "description": "音调调整值（Hz）" },
+          "trend": { "type": "string", "description": "情感变化趋势" }
+        }
+      }
+    },
+    {
+      "id": "text-processing",
+      "stageType": "text-processing",
+      "description": "清理记忆文本（复用 cleanTTS），提取关键词",
+      "dependsOn": ["memory-context"],
+      "config": {
+        "minTextLength": 15
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contextText": { "type": "string", "description": "来自 memory-context 的文本" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "cleanText": { "type": "string", "description": "清理后的文本" },
+          "charCount": { "type": "number", "description": "字符数" },
+          "keywords": { "type": "array", "description": "提取的关键词" }
+        }
+      }
+    },
+    {
+      "id": "tts-params",
+      "stageType": "tts-params",
+      "description": "将情感分析结果映射为 TTS 参数（voice/rate/pitch/model）",
+      "dependsOn": ["emotion-analysis"],
+      "config": {
+        "defaultVoice": "zh_CN-huayan-medium",
+        "emotionWeight": 0.3,
+        "baseRate": 10,
+        "basePitch": 8
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dominantLabel": { "type": "string" },
+          "rateDelta": { "type": "number" },
+          "pitchDelta": { "type": "number" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "voice": { "type": "string", "description": "edge-tts voice 名" },
+          "rate": { "type": "string", "description": "语速字符串" },
+          "pitch": { "type": "string", "description": "音调字符串" },
+          "model": { "type": "string", "description": "Piper 模型名" },
+          "piperSpeed": { "type": "number", "description": "Piper 语速因子" },
+          "piperPitch": { "type": "number", "description": "Piper 音调因子" }
+        }
+      }
+    },
+    {
+      "id": "piper-synthesis",
+      "stageType": "piper-synthesis",
+      "description": "通过 PiperOrchestrator 最终合成语音",
+      "dependsOn": ["text-processing", "tts-params"],
+      "config": {
+        "synthesisTimeoutMs": 30000
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cleanText": { "type": "string" },
+          "model": { "type": "string" },
+          "piperSpeed": { "type": "number" },
+          "piperPitch": { "type": "number" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "description": "合成是否成功" },
+          "audioFile": { "type": "string", "description": "音频文件路径" },
+          "model": { "type": "string", "description": "实际使用的模型" },
+          "synthesisDurationMs": { "type": "number", "description": "合成耗时" },
+          "fallbackUsed": { "type": "boolean", "description": "是否触发回退" }
+        }
+      }
+    }
+  ]
+}
