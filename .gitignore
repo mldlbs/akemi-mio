@@ -27,6 +27,8 @@ logs.*
 *.whl
 *.tar.gz
 *.wav
+.claude/projects/
+.claude/tool_call_log.json
 .claude-flow/
 .swarm/
 .playwright-mcp/
@@ -45,4 +47,5 @@ test-*.txt
 test_write.txt
 test*.json
 writing-ui/
+out/
 .ssh/
