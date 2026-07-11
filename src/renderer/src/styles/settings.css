@@ -11,8 +11,8 @@
   align-items: center;
   justify-content: center;
   background: oklch(0 0 0 / 0.3);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(var(--panel-blur));
+  -webkit-backdrop-filter: blur(var(--panel-blur));
   animation: fade-in 0.15s var(--ease-glass) both;
 }
 

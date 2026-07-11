@@ -53,6 +53,8 @@ export function SettingsAppearanceTab() {
   const [wp, setWp] = useState<WallpaperSettings>(DEFAULT_WP)
   const [loaded, setLoaded] = useState(false)
   const [focusConfig, setFocusConfig] = useState<FocusScoreConfig>(() => loadFocusConfig())
+  const [evoDashboardEnabled, setEvoDashboardEnabled] = useState(true)
+  const [evoDashboardOpacity, setEvoDashboardOpacity] = useState(0.85)
 
   // ── 加载壁纸配置 ──
   useEffect(() => {
@@ -62,6 +64,11 @@ export function SettingsAppearanceTab() {
       }
       setLoaded(true)
     })
+    // 加载实时仪表盘配置
+    window.electronAPI.getEvolutionDashboardLiveConfig().then((cfg) => {
+      setEvoDashboardEnabled(cfg.enabled)
+      setEvoDashboardOpacity(cfg.opacity)
+    }).catch(() => {})
   }, [])
 
   // ── 保存单项配置 ──
@@ -195,6 +202,72 @@ export function SettingsAppearanceTab() {
                   checked={wp.idleOverlay}
                   onChange={(e) => updateWp({ idleOverlay: e.target.checked })}
                 />
+              </div>
+            </div>
+          )}
+
+          <hr className="wp-divider" />
+
+          {/* ── 专注仪表盘 ── */}
+          <span className="settings-section-title">专注仪表盘</span>
+
+          <div className="wallpaper-settings-toggle">
+            <span className="wallpaper-settings-toggle-label">启用专注仪表盘</span>
+            <input
+              type="checkbox"
+              className="wp-toggle-switch"
+              checked={focusConfig.enabled}
+              onChange={(e) => {
+                const next = { ...focusConfig, enabled: e.target.checked }
+                setFocusConfig(next)
+                saveFocusConfig(next)
+              }}
+            />
+          </div>
+
+          <hr className="wp-divider" />
+
+          {/* ── 自进化实时仪表盘 ── */}
+          <span className="settings-section-title">自进化实时仪表盘</span>
+
+          <div className="wallpaper-settings-toggle">
+            <span className="wallpaper-settings-toggle-label">启用实时仪表盘</span>
+            <input
+              type="checkbox"
+              className="wp-toggle-switch"
+              checked={evoDashboardEnabled}
+              onChange={(e) => {
+                const v = e.target.checked
+                setEvoDashboardEnabled(v)
+                window.electronAPI.setEvolutionDashboardLiveConfig({ enabled: v })
+              }}
+            />
+          </div>
+
+          {evoDashboardEnabled && (
+            <div className="wallpaper-settings-section">
+              <div className="wallpaper-settings-slider-row">
+                <label>仪表盘透明度</label>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="1.0"
+                  step="0.05"
+                  value={evoDashboardOpacity}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    setEvoDashboardOpacity(v)
+                    window.electronAPI.setEvolutionDashboardLiveConfig({ opacity: v })
+                  }}
+                />
+                <span className="wallpaper-settings-slider-value">
+                  {Math.round(evoDashboardOpacity * 100)}%
+                </span>
+              </div>
+              <div className="wallpaper-settings-toggle" style={{ marginTop: 8 }}>
+                <span className="wallpaper-settings-toggle-label" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  鼠标穿透默认启用（仅展示，不干扰操作）
+                </span>
               </div>
             </div>
           )}

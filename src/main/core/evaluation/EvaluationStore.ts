@@ -57,13 +57,13 @@ export class EvaluationStore implements EvaluationRepository {
 
   async init(): Promise<void> {
     if (this.dbReady) return
-    const { getDatabase } = await import('../../db/connection')
-    const { getRawDb } = await import('../../db/connection')
-    this.db = getDatabase()
+    const { getEventDatabase } = await import('../../db/connection')
+    const { getEventRawDb } = await import('../../db/connection')
+    this.db = getEventDatabase() as any
     this.raw = {
-      run: (s, p) => getRawDb().run(s, p),
+      run: (s, p) => getEventRawDb().run(s, p),
       query: (s, p) => {
-        const stmt = getRawDb().prepare(s)
+        const stmt = getEventRawDb().prepare(s)
         p && stmt.bind(p)
         const rows: any[] = []
         while (stmt.step()) rows.push(stmt.getAsObject())

@@ -3,88 +3,110 @@ import { useSlots } from '../slots/SlotContext'
 import { useCallback, useMemo } from 'react'
 import type { SessionItem } from '../slots/types'
 
-const CATEGORY_META: Record<string, { label: string; icon: string }> = {
-  chat: { label: '聊天', icon: 'ri-chat-1-line' },
-  writing: { label: '写作', icon: 'ri-quill-pen-line' },
-  image_gen: { label: '生图', icon: 'ri-image-ai-line' },
-  evolution: { label: '进化', icon: 'ri-robot-2-line' },
-  creativity: { label: '创造力', icon: 'ri-lightbulb-line' },
-  dream: { label: '梦境', icon: 'ri-moon-line' },
+const COLLAPSED_ICONS: Record<string, string> = {
+  chat: 'ri-chat-1-line',
+  writing: 'ri-quill-pen-line',
+  image_gen: 'ri-image-ai-line',
+  evolution: 'ri-robot-2-line',
+  creativity: 'ri-lightbulb-line',
+  dream: 'ri-moon-line',
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  chat: '对话',
+  writing: '写作',
+  image_gen: '生图',
+  evolution: '进化',
+  creativity: '创意',
+  dream: '梦境',
 }
 
 const CATEGORY_ORDER = ['chat', 'writing', 'image_gen', 'evolution', 'creativity', 'dream'] as const
 
-function isSameDay(a: number, b: number): boolean {
-  const da = new Date(a),
-    db = new Date(b)
-  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate()
-}
-
-function formatGroupLabel(timestamp: number): string {
-  const now = Date.now()
-  if (isSameDay(timestamp, now)) return '今天'
-  if (isSameDay(timestamp, now - 86400000)) return '昨天'
-  return new Date(timestamp).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-}
-
-function groupSessions(sessions: SessionItem[]) {
-  const dateGroupMap = new Map<string, SessionItem[]>()
-  for (const s of sessions) {
-    const label = formatGroupLabel(s.lastActivityAt)
-    if (!dateGroupMap.has(label)) {
-      dateGroupMap.set(label, [])
-    }
-    dateGroupMap.get(label)!.push(s)
-  }
-  return Array.from(dateGroupMap.entries())
-}
-
 export function Sidebar() {
   const sessions = useSessionStore((s) => s.sessions)
+  const sessionsLoading = useSessionStore((s) => s.sessionsLoading)
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
   const handleSelectChat = useSessionStore((s) => s.selectChat)
-  const { uiState, setActiveSlot } = useSlots()
+  const { uiState, setActiveSlot, toggleSidebar } = useSlots()
   const collapsed = !uiState.sidebarOpen
 
   const onSelectChat = useCallback(
     (sessionId: string) => {
+      if (!sessionId) return
       handleSelectChat(sessionId)
       setActiveSlot('chat')
     },
     [handleSelectChat, setActiveSlot],
   )
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, SessionItem[]>()
-    for (const s of sessions) {
-      const cat = CATEGORY_META[s.category] ? s.category : 'chat'
-      if (!map.has(cat)) map.set(cat, [])
-      map.get(cat)!.push(s)
-    }
-    return map
+  const sorted = useMemo(() => {
+    return [...sessions].sort((a, b) => b.lastActivityAt - a.lastActivityAt)
   }, [sessions])
 
-  const panels = useMemo(() => {
-    const cats = Array.from(grouped.keys()).sort((a, b) => CATEGORY_ORDER.indexOf(a as any) - CATEGORY_ORDER.indexOf(b as any))
-    return cats.map((cat) => ({
-      cat,
-      meta: CATEGORY_META[cat] || { label: cat, icon: 'ri-chat-1-line' },
-      groups: groupSessions(grouped.get(cat)!.sort((a, b) => b.lastActivityAt - a.lastActivityAt)),
-    }))
-  }, [grouped])
+  const categorySet = useMemo(() => {
+    const set = new Set<string>()
+    for (const s of sessions) set.add(s.category)
+    return set
+  }, [sessions])
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, SessionItem[]>()
+    for (const cat of CATEGORY_ORDER) map.set(cat, [])
+    for (const s of sorted) {
+      const list = map.get(s.category)
+      if (list) list.push(s)
+    }
+    return map
+  }, [sorted])
+
+  const hasSessions = useMemo(() => {
+    for (const s of sessions) if (s) return true
+    return false
+  }, [sessions])
+
+  function formatTime(ts: number): string {
+    const now = Date.now()
+    const diff = now - ts
+    if (diff < 60000) return '刚刚'
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`
+    return new Date(ts).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  }
+
+  if (sessionsLoading) {
+    return (
+      <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
+        <div className="sidebar-content">
+          {collapsed ? (
+            <button className="sidebar-collapsed-icon" onClick={toggleSidebar} title="展开侧栏">
+              <i className="ri-menu-unfold-line" />
+            </button>
+          ) : (
+            <div className="sidebar-empty">
+              <i className="ri-loader-4-line ri-spin" />
+            </div>
+          )}
+        </div>
+      </aside>
+    )
+  }
 
   if (collapsed) {
     return (
       <aside className="sidebar collapsed">
         <div className="sidebar-content">
-          {CATEGORY_ORDER.filter((c) => grouped.has(c)).map((cat) => (
+          <button className="sidebar-collapsed-icon" onClick={toggleSidebar} title="展开侧栏">
+            <i className="ri-menu-unfold-line" />
+          </button>
+          {Array.from(categorySet).map((cat) => (
             <button
               key={cat}
               className="sidebar-collapsed-icon"
-              title={CATEGORY_META[cat]?.label || cat}
-              onClick={() => onSelectChat(grouped.get(cat)![0]?.id || '')}
+              title={cat}
+              onClick={() => onSelectChat(sorted.find((s) => s.category === cat)?.id || '')}
             >
-              <i className={CATEGORY_META[cat]?.icon || 'ri-chat-1-line'} />
+              <i className={COLLAPSED_ICONS[cat] || 'ri-chat-1-line'} />
             </button>
           ))}
         </div>
@@ -92,11 +114,11 @@ export function Sidebar() {
     )
   }
 
-  if (sessions.length === 0) {
+  if (!hasSessions) {
     return (
       <aside className="sidebar">
         <div className="sidebar-content">
-          <div className="sidebar-empty">暂无会话 · 输入文字或点击麦克风开始</div>
+          <div className="sidebar-empty">暂无对话</div>
         </div>
       </aside>
     )
@@ -105,31 +127,27 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-content">
-        {panels.map(({ cat, meta, groups }) => (
-          <div key={cat} className="sidebar-panel">
-            <div className="sidebar-panel-header">
-              <i className={meta.icon} />
-              <span>{meta.label}</span>
+        {CATEGORY_ORDER.map((cat) => {
+          const items = grouped.get(cat)
+          if (!items || items.length === 0) return null
+          return (
+            <div key={cat} className="sidebar-section">
+              <div className="sidebar-section-label">{CATEGORY_LABELS[cat] || cat}</div>
+              {items.map((s) => (
+                <button
+                  key={s.id}
+                  className={`sidebar-item${s.id === activeSessionId ? ' active' : ''}`}
+                  onClick={() => onSelectChat(s.id)}
+                >
+                  <span className="sidebar-item-label" title={s.label}>
+                    {s.label}
+                  </span>
+                  <span className="sidebar-item-time">{formatTime(s.lastActivityAt)}</span>
+                </button>
+              ))}
             </div>
-            {groups.map(([date, items]) => (
-              <div key={date}>
-                <div className="sidebar-date-header">{date}</div>
-                {items.map((s) => (
-                  <button
-                    key={s.id}
-                    className={`sidebar-item${s.id === activeSessionId ? ' active' : ''}`}
-                    onClick={() => onSelectChat(s.id)}
-                  >
-                    <span title={s.label}>{s.label}</span>
-                    <span className="sidebar-item-time">
-                      {new Date(s.lastActivityAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
-        ))}
+          )
+        })}
       </div>
     </aside>
   )

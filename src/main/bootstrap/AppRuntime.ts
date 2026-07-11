@@ -144,6 +144,8 @@ export class AppRuntime {
   }
 
   async start(): Promise<void> {
+    const startMs = Date.now()
+
     // === Stage 0: CLI flags & env ===
     setupStartupLogging()
     loadEnvFile()
@@ -296,14 +298,33 @@ export class AppRuntime {
 
     // === Stage 2: Electron 窗口 ===
     await app.whenReady()
+    log('PERF', 'startup_stage', { stage: 'app_ready', ms: Date.now() })
     initLogFile(WORKSPACE.logs)
     log('INFO', 'log_file_ready', { path: getLogFilePath() })
+
+    const win = createWindow(stateManager)
+    const t0 = Date.now()
+    agentService.setMainWindow(win)
+    ttsService.setAudioSink(async (filePath) => {
+      try {
+        const buf = await fsp.readFile(filePath)
+        win.webContents.send('tts:play_audio_buffer', buf)
+      } catch {
+        win.webContents.send('tts:play_audio', filePath)
+      }
+    })
+    initTray(() => getMainWindow())
+    const uiBridge = new UIBridge()
+    uiBridge.bind(win)
+    log('PERF', 'startup_stage', { stage: 'window_created', ms: Date.now() - t0, total: Date.now() - startMs })
+
+    // DB 初始化
     await initDatabase()
+    log('PERF', 'startup_stage', { stage: 'db_ready', ms: Date.now() - t0, total: Date.now() - startMs })
     log('INFO', 'database_ready')
     credentialsManager.migrate()
     log('INFO', 'credential_migration_done')
     setCredentialsManager(credentialsManager)
-    // 从凭据存储覆盖 env 配置，让设置界面填入的 LLM 参数生效
     llmService.refreshFromCredentials((key) => credentialsManager.get(key))
     log('INFO', 'llm_config_loaded_from_credentials')
 
@@ -415,23 +436,22 @@ export class AppRuntime {
     const decisionQueryRef = createServiceRef<DecisionQueryService>()
     decisionQueryRef.current = new DecisionQueryService(guardrailDecisionStore)
 
-    const win = createWindow(stateManager)
-    agentService.setMainWindow(win)
-    ttsService.setAudioSink(async (filePath) => {
-      try {
-        const buf = await fsp.readFile(filePath)
-        win.webContents.send('tts:play_audio_buffer', buf)
-      } catch {
-        win.webContents.send('tts:play_audio', filePath)
-      }
-    })
+    // evolutionRef/dashboardRef — 延迟注入
+    const evolutionRef = createServiceRef<SelfEvolutionService>()
+    const dashboardRef = createServiceRef<EvolutionDashboardService>()
 
-    // 系统托盘 — 关闭窗口时隐藏到托盘而非退出
-    initTray(() => getMainWindow())
-
-    // UIBridge: 将 EventBus 事件桥接到 Renderer 窗口
-    const uiBridge = new UIBridge()
-    uiBridge.bind(win)
+    // 注册 IPC Handler
+    registerHandlers(
+      agentService,
+      stateManager,
+      ttsService,
+      evolutionRef,
+      undefined,
+      dashboardRef,
+      this.memoryContextRef,
+      decisionQueryRef,
+      this.metricsQueryRef,
+    )
 
     // === Stage 3: 核心服务（内存、插件、技能） ===
     const memoryService = new MemoryService()
@@ -603,21 +623,7 @@ export class AppRuntime {
     log('INFO', 'mcp_ready', { servers: mcpManager.listServers().length, tools: mcpManager.listTools().length })
     telegramService.initialize()
 
-    // === Stage 5: Handler 注册 & 宪法 ===
-    const evolutionRef = createServiceRef<SelfEvolutionService>()
-    const dashboardRef = createServiceRef<EvolutionDashboardService>()
-    registerHandlers(
-      agentService,
-      stateManager,
-      ttsService,
-      evolutionRef,
-      undefined,
-      dashboardRef,
-      this.memoryContextRef,
-      decisionQueryRef,
-      this.metricsQueryRef,
-    )
-
+    // === Stage 5: 宪法 ===
     const constitutionEngine = new ConstitutionEngine()
     await constitutionEngine.initialize(join(WORKSPACE.evolution, 'constitution'))
     constitutionEngine.setEnforcementMode('enforce')
@@ -940,14 +946,15 @@ export class AppRuntime {
     try {
       const { EventArchiver } = require('../core/evaluation/EventArchiver')
       const { RetentionScheduler } = require('../core/evaluation/RetentionScheduler')
-      const { getRawDb } = require('../db/connection')
+      const { getRawDb, getEventRawDb } = require('../db/connection')
       const { WORKSPACE_ROOT } = require('../config')
-      const rawDb = getRawDb()
+      const mainRawDb = getRawDb()
+      const eventRawDb = getEventRawDb()
 
-      const raw: { run: (sql: string, params?: any[]) => void; query: (sql: string, params?: any[]) => Record<string, any>[] } = {
-        run: (s, p) => rawDb.run(s, p),
+      const mainRaw: { run: (sql: string, params?: any[]) => void; query: (sql: string, params?: any[]) => Record<string, any>[] } = {
+        run: (s, p) => mainRawDb.run(s, p),
         query: (s, p) => {
-          const stmt = rawDb.prepare(s)
+          const stmt = mainRawDb.prepare(s)
           p && stmt.bind(p)
           const rows: any[] = []
           while (stmt.step()) rows.push(stmt.getAsObject())
@@ -956,10 +963,22 @@ export class AppRuntime {
         },
       }
 
-      const archiver = new EventArchiver(this.evaluationStore!, raw, WORKSPACE_ROOT)
+      const eventRaw: { run: (sql: string, params?: any[]) => void; query: (sql: string, params?: any[]) => Record<string, any>[] } = {
+        run: (s, p) => eventRawDb.run(s, p),
+        query: (s, p) => {
+          const stmt = eventRawDb.prepare(s)
+          p && stmt.bind(p)
+          const rows: any[] = []
+          while (stmt.step()) rows.push(stmt.getAsObject())
+          stmt.free()
+          return rows
+        },
+      }
+
+      const archiver = new EventArchiver(this.evaluationStore!, eventRaw, WORKSPACE_ROOT)
       const scheduler = new RetentionScheduler(
         archiver,
-        raw,
+        mainRaw,
         this.evaluationStore!,
         this.evaluationStore!,
         this.metricsStore!,

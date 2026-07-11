@@ -147,8 +147,8 @@
   align-items: center;
   justify-content: center;
   background: oklch(0 0 0 / 0.3);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(var(--panel-blur));
+  -webkit-backdrop-filter: blur(var(--panel-blur));
   animation: overlay-fade-in 0.2s ease-out;
 }
 
@@ -2866,7 +2866,7 @@
   border-radius: var(--radius-card, 10px);
   padding: 4px;
   box-shadow: 0 4px 20px oklch(0 0 0 / 0.25);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(var(--panel-blur));
   animation: tool-in 0.12s var(--ease-glass) both;
 }
 .wf-context-menu-item {
@@ -3246,7 +3246,7 @@
   font-size: var(--fs-small);
   cursor: pointer;
   transition: all var(--duration-normal) var(--ease-glass);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(var(--panel-blur));
   font-family: inherit;
   white-space: nowrap;
 }
@@ -3274,7 +3274,7 @@
   font-size: var(--fs-small);
   cursor: pointer;
   transition: all var(--duration-normal) var(--ease-glass);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(var(--panel-blur));
   font-family: inherit;
   white-space: nowrap;
 }

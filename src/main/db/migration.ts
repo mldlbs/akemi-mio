@@ -1,5 +1,17 @@
-import type { Database as SqlJsDatabase } from 'sql.js'
 import { log } from '../logger/Logger'
+
+// sql.js 兼容接口（better-sqlite3 CompatDatabase 也实现此接口）
+type MigrationDatabase = {
+  run: (sql: string, params?: any[]) => void
+  exec: (sql: string) => Array<{ columns: string[]; values: any[][] }>
+  prepare: (sql: string) => {
+    bind: (params: any[]) => void
+    step: () => boolean
+    getAsObject: () => Record<string, any>
+    reset: () => void
+    free: () => void
+  }
+}
 
 interface Migration {
   version: number
@@ -782,7 +794,7 @@ const MIGRATIONS: Migration[] = [
 // 导出迁移数组供测试验证
 export { MIGRATIONS }
 
-export function runMigrations(sqlite: SqlJsDatabase): void {
+export function runMigrations(sqlite: MigrationDatabase): void {
   sqlite.run('CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)')
 
   const applied = new Set((sqlite.exec('SELECT version FROM _migrations') as any[]).flatMap((r) => r.values).map((v: any) => Number(v)))

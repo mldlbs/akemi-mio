@@ -12,6 +12,7 @@ import { wallpaperWidgetRegistry } from '../WallpaperWidgetRegistry'
 import { evolutionStatusWidget } from './EvolutionStatusWidget'
 import { planProgressWidget } from './PlanProgressWidget'
 import { systemResourceWidget } from './SystemResourceWidget'
+import { evolutionDashboardCanvasWidget } from './EvolutionDashboardCanvas'
 import { modeBadgeWidget } from './ModeBadgeWidget'
 import { contextBadgeWidget } from './ContextBadgeWidget'
 import { natureAnimationWidget } from './NatureAnimationWidget'
@@ -39,6 +40,9 @@ export function registerAllWidgets(): void {
   wallpaperWidgetRegistry.register(rssSummaryWidget)
   // memoryContextWidget 已移至 SystemDock
   wallpaperWidgetRegistry.register(memoryFlashWidget)
+
+  // overlay 区 — 实时 Canvas 仪表盘
+  wallpaperWidgetRegistry.register(evolutionDashboardCanvasWidget)
 
   // monitor 区
   wallpaperWidgetRegistry.register(evolutionStatusWidget)

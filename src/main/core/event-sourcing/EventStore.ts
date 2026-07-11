@@ -13,8 +13,8 @@ export class EventStore implements EventStoreEngine {
 
   async init(): Promise<void> {
     if (this.initialized) return
-    const { getDatabase } = await import('../../db/connection')
-    this.db = getDatabase()
+    const { getEventDatabase } = await import('../../db/connection')
+    this.db = getEventDatabase()
     this.initialized = true
     log('INFO', 'event_store_ready')
   }
@@ -29,8 +29,8 @@ export class EventStore implements EventStoreEngine {
     if (!this.initialized) return
     try {
       const { events } = await import('../../db/schema')
-      const { getDatabase } = await import('../../db/connection')
-      const db = getDatabase()
+      const { getEventDatabase } = await import('../../db/connection')
+      const db = getEventDatabase()
       await db.insert(events).values({
         channel: event.channel,
         payload: event.payload,
@@ -47,8 +47,8 @@ export class EventStore implements EventStoreEngine {
     if (!this.initialized) return []
     try {
       const { events } = await import('../../db/schema')
-      const { getDatabase } = await import('../../db/connection')
-      const db = getDatabase()
+      const { getEventDatabase } = await import('../../db/connection')
+      const db = getEventDatabase()
       const rows: any[] = (await db
         .select()
         .from(events)
@@ -64,8 +64,8 @@ export class EventStore implements EventStoreEngine {
     if (!this.initialized) return 0
     try {
       const { events } = await import('../../db/schema')
-      const { getDatabase } = await import('../../db/connection')
-      const db = getDatabase()
+      const { getEventDatabase } = await import('../../db/connection')
+      const db = getEventDatabase()
       const all = await db.select().from(events).all()
       const toDelete = all.filter((e: any) => e.timestamp < olderThan).map((e: any) => e.id)
       const deleted: any =

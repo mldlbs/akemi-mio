@@ -638,8 +638,36 @@ export function registerHandlers(
     })
   }
 
+  // ── 自进化实时仪表盘配置（高频 Canvas 仪表盘） ──
+  ipcMain.handle('evolution:dashboard:live:getConfig', async () => {
+    const enabled = credentialsManager.get('evo_dashboard_live_enabled')
+    const opacity = credentialsManager.get('evo_dashboard_live_opacity')
+    return {
+      enabled: enabled !== 'false', // 默认启用
+      opacity: opacity ? parseFloat(opacity) : 0.85,
+    }
+  })
+
+  ipcMain.handle('evolution:dashboard:live:setConfig', async (_event, config: { enabled?: boolean; opacity?: number }) => {
+    try {
+      if (config.enabled !== undefined) {
+        credentialsManager.set('evo_dashboard_live_enabled', String(config.enabled))
+      }
+      if (config.opacity !== undefined) {
+        credentialsManager.set('evo_dashboard_live_opacity', String(config.opacity))
+      }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false }
+    }
+  })
+
   ipcMain.handle('credentials:list', async () => {
     return credentialsManager.list()
+  })
+
+  ipcMain.handle('credentials:getAll', async () => {
+    return credentialsManager.getAll()
   })
 
   ipcMain.handle('credentials:get', async (_event, name: string) => {

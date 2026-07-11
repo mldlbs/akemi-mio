@@ -13,6 +13,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import type { IWallpaperWidgetDefinition, WallpaperWidgetContext } from '../types'
+import { useBatchSetter } from '../../hooks/useBatchSetter'
 
 // =============================================================================
 // 类型
@@ -97,10 +98,7 @@ const MAX_CONTENT_LENGTH = 100
 function MemoryCard({ card, isLast }: { card: MemoryCardData; isLast: boolean }) {
   const tierColor = TIER_COLORS[card.tier] || '#888'
   const typeLabel = TYPE_LABELS[card.type] || card.type
-  const displayContent =
-    card.content.length > MAX_CONTENT_LENGTH
-      ? card.content.slice(0, MAX_CONTENT_LENGTH - 3) + '...'
-      : card.content
+  const displayContent = card.content.length > MAX_CONTENT_LENGTH ? card.content.slice(0, MAX_CONTENT_LENGTH - 3) + '...' : card.content
 
   return (
     <div className={`wp-mem-card ${isLast ? 'wp-mem-card--last' : ''}`}>
@@ -110,7 +108,11 @@ function MemoryCard({ card, isLast }: { card: MemoryCardData; isLast: boolean })
         <span className="wp-mem-card-tier" style={{ color: tierColor }}>
           {TIER_LABELS[card.tier] || card.tier}
         </span>
-        {card.isPinned && <span className="wp-mem-card-pinned" title="已固定">📌</span>}
+        {card.isPinned && (
+          <span className="wp-mem-card-pinned" title="已固定">
+            📌
+          </span>
+        )}
       </div>
 
       {/* 内容 */}
@@ -120,13 +122,13 @@ function MemoryCard({ card, isLast }: { card: MemoryCardData; isLast: boolean })
 
       {/* 底部：置信度 + 主题标签 */}
       <div className="wp-mem-card-footer">
-        <span className="wp-mem-card-confidence">
-          置信度 {Math.round(card.confidence * 100)}%
-        </span>
+        <span className="wp-mem-card-confidence">置信度 {Math.round(card.confidence * 100)}%</span>
         {card.topics.length > 0 && (
           <span className="wp-mem-card-topics">
             {card.topics.slice(0, 3).map((t, i) => (
-              <span key={i} className="wp-mem-card-topic">#{t}</span>
+              <span key={i} className="wp-mem-card-topic">
+                #{t}
+              </span>
             ))}
           </span>
         )}
@@ -161,18 +163,21 @@ function MemoryContextPanel({ ctx }: { ctx: WallpaperWidgetContext }) {
     loadConfig()
   }, [])
 
-  // 订阅记忆上下文推送
+  // 订阅记忆上下文推送（rAF 批量合并）
+  const setBatchedPayload = useBatchSetter<MemoryContextPayload>((d) => {
+    setPayload(d)
+    if (d.error) {
+      setError(d.error)
+    } else {
+      setError(null)
+    }
+  })
   useEffect(() => {
     const unsub = window.electronAPI.onMemoryContextData((data) => {
-      setPayload(data as MemoryContextPayload)
-      if ((data as MemoryContextPayload).error) {
-        setError((data as MemoryContextPayload).error!)
-      } else {
-        setError(null)
-      }
+      setBatchedPayload(data as MemoryContextPayload)
     })
     return unsub
-  }, [])
+  }, [setBatchedPayload])
 
   // 切换显示类型
   const handleDisplayTypeChange = useCallback(async (newType: MemoryContextDisplayType) => {
@@ -255,18 +260,10 @@ function MemoryContextPanel({ ctx }: { ctx: WallpaperWidgetContext }) {
           <span className="wp-mem-panel-count">{payload.cards.length}</span>
         </div>
         <div className="wp-mem-panel-actions">
-          <button
-            className="wp-mem-config-btn"
-            onClick={toggleConfig}
-            title="切换显示类型"
-          >
+          <button className="wp-mem-config-btn" onClick={toggleConfig} title="切换显示类型">
             ⚙️
           </button>
-          <button
-            className="wp-mem-collapse-btn"
-            onClick={toggleCollapsed}
-            title="折叠"
-          >
+          <button className="wp-mem-collapse-btn" onClick={toggleCollapsed} title="折叠">
             −
           </button>
         </div>
@@ -290,19 +287,13 @@ function MemoryContextPanel({ ctx }: { ctx: WallpaperWidgetContext }) {
       {/* 卡片列表 */}
       <div className="wp-mem-card-list">
         {payload.cards.map((card, i) => (
-          <MemoryCard
-            key={card.id}
-            card={card}
-            isLast={i === payload.cards.length - 1}
-          />
+          <MemoryCard key={card.id} card={card} isLast={i === payload.cards.length - 1} />
         ))}
       </div>
 
       {/* 底部信息 */}
       <div className="wp-mem-panel-footer">
-        <span className="wp-mem-refresh-time">
-          {formatTime(payload.updatedAt)}
-        </span>
+        <span className="wp-mem-refresh-time">{formatTime(payload.updatedAt)}</span>
         {config?.mouseThrough && (
           <span className="wp-mem-through-hint" title="鼠标穿透已启用">
             🖱️ 穿透

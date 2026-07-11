@@ -9,13 +9,13 @@ export function useSettings(open: boolean) {
 
   useEffect(() => {
     if (!open) return
-    Promise.all(
-      ALL_SETTING_KEYS.map(async (key) => {
-        const v = await window.electronAPI.getCredential(key)
-        return [key, v ?? ''] as const
-      }),
-    ).then((entries) => {
-      setValues(Object.fromEntries(entries))
+    window.electronAPI.getAllCredentials().then((creds) => {
+      // 确保所有已知 key 都有默认值
+      const entries: Record<string, string> = {}
+      for (const key of ALL_SETTING_KEYS) {
+        entries[key] = creds[key] ?? ''
+      }
+      setValues(entries)
     })
   }, [open])
 

@@ -44,8 +44,8 @@ export function createWindow(stateManager: StateManager): BrowserWindow {
       ? join(process.resourcesPath || '', 'icon.png')
       : join(app.getAppPath(), 'icon.png'),
     frame: false,
-    transparent: true,
-    backgroundColor: '#00000000',
+    transparent: false,
+    backgroundColor: '#f5f0eb',
     hasShadow: true,
     resizable: true,
     alwaysOnTop: false,
@@ -105,10 +105,13 @@ export function createWindow(stateManager: StateManager): BrowserWindow {
 
   mainWindow.setTitle(' ')
 
-  // Windows DWM 透明窗口失焦白边修复 (#DWM-blur-fix)
-  // DwmSetWindowAttribute 禁用非客户区渲染，根本阻止 DWM 绘制白边
+  // Mica 效果（Windows 11 原生背景模糊，代替 transparent: true 的 CPU 软件渲染）
   if (process.platform === 'win32') {
-    disableNCRendering(mainWindow)
+    try {
+      if (mainWindow.setBackgroundMaterial) {
+        mainWindow.setBackgroundMaterial('mica')
+      }
+    } catch {}
   }
 
   mainWindow.on('enter-full-screen', () => {

@@ -21,6 +21,20 @@ import type { MessageItem } from './slots/types'
 
 export type { MessageItem } from './slots/types'
 
+// ── 启动性能诊断 ──
+const PERF_MARKS: Record<string, number> = {}
+function mark(name: string) {
+  PERF_MARKS[name] = performance.now()
+}
+function dumpMarks(label: string) {
+  const entries = Object.entries(PERF_MARKS)
+  if (entries.length < 2) return
+  entries.sort((a, b) => a[1] - b[1])
+  const base = entries[0][1]
+  const lines = entries.map(([n, t]) => `  ${n}: +${(t - base).toFixed(1)}ms`).join('\n')
+  console.log(`[PERF] ${label}\n${lines}`)
+}
+
 function App() {
   // 初始化 IPC 监听器（hooks 内部负责注册事件并写入 store）
   useSessions()

@@ -71,6 +71,7 @@ export function createMockIPC(overrides?: Partial<MockedElectronAPI>): MockedEle
 
     // Credentials
     getCredential: vi.fn<[string], Promise<string | null>>().mockResolvedValue(null),
+    getAllCredentials: vi.fn<[], Promise<Record<string, string>>>().mockResolvedValue({}),
     setCredential: vi.fn<[string, string], Promise<true>>().mockResolvedValue(true as const),
     deleteCredential: vi.fn<[string], Promise<true>>().mockResolvedValue(true as const),
 
@@ -218,7 +219,9 @@ export function createMockIPC(overrides?: Partial<MockedElectronAPI>): MockedEle
 
     // 隐式反馈驱动的语音自适应
     recordImplicitFeedback: vi.fn<[string], Promise<{ success: boolean; error?: string }>>().mockResolvedValue({ success: true }),
-    toggleImplicitFeedback: vi.fn<[boolean], Promise<{ success: boolean; enabled: boolean }>>().mockResolvedValue({ success: true, enabled: true }),
+    toggleImplicitFeedback: vi
+      .fn<[boolean], Promise<{ success: boolean; enabled: boolean }>>()
+      .mockResolvedValue({ success: true, enabled: true }),
     getImplicitFeedbackState: vi
       .fn<
         [],

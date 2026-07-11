@@ -78,6 +78,10 @@ export interface WallpaperWidgetContext {
   privacyFade: number
   modeLabel: string
   contextLabel: string
+  /** 是否启用进化实时仪表盘（Canvas 模式） */
+  evoDashboardEnabled?: boolean
+  /** 进化仪表盘透明度覆盖 */
+  evoDashboardOpacity?: number
 }
 
 /**

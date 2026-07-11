@@ -28,6 +28,7 @@ export const RUNTIME_ROOT = getProjectRoot()
 export const WORKSPACE_ROOT = userDataDir
 /** Layer 2 — 工作区子目录 */
 export const WORKSPACE = {
+  databases: join(WORKSPACE_ROOT, 'databases'),
   projects: join(WORKSPACE_ROOT, 'projects'),
   memory: join(WORKSPACE_ROOT, 'memory'),
   knowledge: join(WORKSPACE_ROOT, 'knowledge'),

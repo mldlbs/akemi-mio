@@ -173,6 +173,8 @@ export function createElectronAPI(ipc: IpcRenderer) {
 
     getCredential: (key: string): Promise<string | null> => ipc.invoke('credentials:get', key),
 
+    getAllCredentials: (): Promise<Record<string, string>> => ipc.invoke('credentials:getAll'),
+
     setCredential: (key: string, value: string): Promise<true> => ipc.invoke('credentials:set', key, value),
 
     deleteCredential: (key: string): Promise<true> => ipc.invoke('credentials:delete', key),
@@ -557,7 +559,66 @@ export function createElectronAPI(ipc: IpcRenderer) {
       }
     },
 
+    // ── 自进化实时仪表盘（高频 1Hz 推送） ──
+    onEvolutionDashboardLive: (
+      callback: (data: {
+        current: {
+          schedulerState: string
+          currentStage: string
+          progress: number
+          summary: string
+          errorCount: number
+          fixedCount: number
+          queueSize: number
+          consecutiveFailures: number
+          lastRunAt: number | null
+          plan: {
+            hasActive: boolean
+            title: string
+            completedSteps: number
+            totalSteps: number
+            percentComplete: number
+            currentStep: string
+          } | null
+          timestamp: number
+        }
+        history: Array<{
+          schedulerState: string
+          currentStage: string
+          progress: number
+          summary: string
+          errorCount: number
+          fixedCount: number
+          queueSize: number
+          consecutiveFailures: number
+          lastRunAt: number | null
+          plan: {
+            hasActive: boolean
+            title: string
+            completedSteps: number
+            totalSteps: number
+            percentComplete: number
+            currentStep: string
+          } | null
+          timestamp: number
+        }>
+        active: boolean
+      }) => void,
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('evolution:dashboard:live', handler)
+      return () => {
+        ipc.removeListener('evolution:dashboard:live', handler)
+      }
+    },
+
     toggleEvolutionDashboard: (): Promise<{ success: boolean; visible: boolean }> => ipc.invoke('evolution:dashboard:toggle'),
+
+    // ── 自进化实时仪表盘控制 ──
+    getEvolutionDashboardLiveConfig: (): Promise<{ enabled: boolean; opacity: number }> => ipc.invoke('evolution:dashboard:live:getConfig'),
+
+    setEvolutionDashboardLiveConfig: (config: Partial<{ enabled: boolean; opacity: number }>): Promise<{ success: boolean }> =>
+      ipc.invoke('evolution:dashboard:live:setConfig', config),
 
     // ── Desktop Toolbar (桌面任务控制浮层) ──
     invokeDesktopTool: (toolName: string, args: Record<string, string>): Promise<{ success: boolean; result?: string; error?: string }> =>

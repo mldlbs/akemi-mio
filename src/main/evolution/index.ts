@@ -14,6 +14,8 @@ import type { Proposal, ProposalValidation } from './ProposalValidator'
 
 export { EvolutionHistoryManager } from './EvolutionHistory'
 export type { EvolutionHistoryEntry, EvolutionHistory } from './EvolutionHistory'
+export { StateBroadcaster } from './StateBroadcaster'
+export type { DashboardLiveSnapshot, DashboardLivePayload } from './StateBroadcaster'
 export { EvolutionStateManager } from './EvolutionStateManager'
 export { EvolutionGitOps } from './EvolutionGitOps'
 export { RollbackLevel } from './EvolutionGitOps'
