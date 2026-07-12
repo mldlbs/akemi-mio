@@ -19,3 +19,4 @@ export type { BehaviorState, WallpaperConfig, WallpaperState, ActivityContext, B
 export { useFocusScore } from './useFocusScore'
 export type { FocusScoreConfig, FocusScoreState } from './useFocusScore'
 export { DEFAULT_FOCUS_CONFIG } from './useFocusScore'
+export { useQuickTasks } from './useQuickTasks'

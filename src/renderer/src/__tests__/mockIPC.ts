@@ -259,6 +259,43 @@ export function createMockIPC(overrides?: Partial<MockedElectronAPI>): MockedEle
       .fn<[], Promise<{ lastRun: number | null; consecutiveFailures: number; isBusy: boolean }>>()
       .mockResolvedValue({ lastRun: null, consecutiveFailures: 0, isBusy: false }),
     evolutionTrigger: vi.fn<[], Promise<{ success: boolean; error?: string }>>().mockResolvedValue({ success: true }),
+
+    // ── 快捷任务编排（QuickTask） ──
+    getQuickTasks: vi
+      .fn<[], Promise<{ success: boolean; tasks: any[]; error?: string }>>()
+      .mockResolvedValue({ success: true, tasks: [] }),
+    quickTaskRecommendNow: vi
+      .fn<[], Promise<{ success: boolean; tasks: any[]; error?: string }>>()
+      .mockResolvedValue({ success: true, tasks: [] }),
+    quickTaskExecute: vi
+      .fn<[string], Promise<{ success: boolean; task?: any; error?: string }>>()
+      .mockResolvedValue({ success: true }),
+    quickTaskDismiss: vi
+      .fn<[string], Promise<{ success: boolean; task?: any; error?: string }>>()
+      .mockResolvedValue({ success: true }),
+    quickTaskSnooze: vi
+      .fn<[string], Promise<{ success: boolean; task?: any; error?: string }>>()
+      .mockResolvedValue({ success: true }),
+    quickTaskEdit: vi
+      .fn<[string, Array<{ tool: string; label: string; args?: Record<string, unknown> }>], Promise<{ success: boolean; task?: any; error?: string }>>()
+      .mockResolvedValue({ success: true }),
+    getQuickTaskSnapshot: vi
+      .fn<[], Promise<{ success: boolean; snapshot?: any; error?: string }>>()
+      .mockResolvedValue({ success: true, snapshot: null }),
+    quickTaskSetSensitivity: vi
+      .fn<[number], Promise<{ success: boolean; error?: string }>>()
+      .mockResolvedValue({ success: true }),
+    quickTaskAnalyze: vi
+      .fn<[], Promise<{ success: boolean; tasks: any[]; error?: string }>>()
+      .mockResolvedValue({ success: true, tasks: [] }),
+    quickTaskStart: vi
+      .fn<[], Promise<{ success: boolean; error?: string }>>()
+      .mockResolvedValue({ success: true }),
+    quickTaskStop: vi
+      .fn<[], Promise<{ success: boolean; error?: string }>>()
+      .mockResolvedValue({ success: true }),
+    onQuickTaskRecommend: vi.fn<[(data: { tasks: any[]; timestamp: number }) => void], () => void>().mockReturnValue(vi.fn()),
+    onQuickTaskUpdate: vi.fn<[(data: { task: any; action: string; timestamp: number }) => void], () => void>().mockReturnValue(vi.fn()),
   }
 
   return { ...mock, ...overrides } as MockedElectronAPI

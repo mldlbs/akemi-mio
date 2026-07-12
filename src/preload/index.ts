@@ -937,6 +937,48 @@ export function createElectronAPI(ipc: IpcRenderer) {
       | { status: 'REBUILDING'; startedAt: number; windowsBuilt: number }
       | { status: 'UNAVAILABLE'; reason: string }
     > => ipc.invoke('guardrail:metrics:state'),
+
+    // ── 快捷任务编排（QuickTask） ──
+
+    getQuickTasks: (): Promise<{ success: boolean; tasks: any[]; error?: string }> => ipc.invoke('quickTask:getAll'),
+
+    quickTaskRecommendNow: (): Promise<{ success: boolean; tasks: any[]; error?: string }> => ipc.invoke('quickTask:recommendNow'),
+
+    quickTaskExecute: (taskId: string): Promise<{ success: boolean; task?: any; error?: string }> => ipc.invoke('quickTask:execute', taskId),
+
+    quickTaskDismiss: (taskId: string): Promise<{ success: boolean; task?: any; error?: string }> => ipc.invoke('quickTask:dismiss', taskId),
+
+    quickTaskSnooze: (taskId: string): Promise<{ success: boolean; task?: any; error?: string }> => ipc.invoke('quickTask:snooze', taskId),
+
+    quickTaskEdit: (taskId: string, steps: Array<{ tool: string; label: string; args?: Record<string, unknown> }>): Promise<{ success: boolean; task?: any; error?: string }> => ipc.invoke('quickTask:edit', taskId, steps),
+
+    getQuickTaskSnapshot: (): Promise<{ success: boolean; snapshot?: any; error?: string }> => ipc.invoke('quickTask:getSnapshot'),
+
+    quickTaskSetSensitivity: (threshold: number): Promise<{ success: boolean; error?: string }> => ipc.invoke('quickTask:setSensitivity', threshold),
+
+    quickTaskAnalyze: (): Promise<{ success: boolean; tasks: any[]; error?: string }> => ipc.invoke('quickTask:analyze'),
+
+    quickTaskStart: (): Promise<{ success: boolean; error?: string }> => ipc.invoke('quickTask:start'),
+
+    quickTaskStop: (): Promise<{ success: boolean; error?: string }> => ipc.invoke('quickTask:stop'),
+
+    // ── 快捷任务推送事件（主→渲染） ──
+
+    onQuickTaskRecommend: (callback: (data: { tasks: any[]; timestamp: number }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: { tasks: any[]; timestamp: number }) => callback(data)
+      ipc.on('quick_task:recommend', handler)
+      return () => {
+        ipc.removeListener('quick_task:recommend', handler)
+      }
+    },
+
+    onQuickTaskUpdate: (callback: (data: { task: any; action: string; timestamp: number }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: { task: any; action: string; timestamp: number }) => callback(data)
+      ipc.on('quick_task:update', handler)
+      return () => {
+        ipc.removeListener('quick_task:update', handler)
+      }
+    },
   }
 }
 
