@@ -48,6 +48,10 @@ export interface VoiceIntentDef {
  * 2. 工具序列短（2-4步），避免复杂度爆炸
  * 3. 每步都有确认，防止误操作
  * 4. 所有处理本地完成，不发送到云端
+ *
+ * 动态意图：BehaviorSequenceLearner 生成的学习模式通过
+ *   registerDynamicIntent / unregisterDynamicIntent 在此处注册，
+ *   与静态意图共存，匹配时合并处理。
  */
 export const VOICE_INTENT_MAP: VoiceIntentDef[] = [
   // ── 文件操作 ──
@@ -255,7 +259,150 @@ export const VOICE_INTENT_MAP: VoiceIntentDef[] = [
     confirmMessage: '将生成类型代码描述: {{slot.description}}',
     requireConfirmation: false,
   },
+
+  // ── 文件整理操作 ──
+  {
+    intent: 'organize_file',
+    description: '语音整理文件 — 将文件移动到指定类别目录',
+    patterns: [
+      '整理', '归类', '分类', '移到', '移动到', '搬', '搬到',
+      '归档', '放到', '放入', '放进',
+      'organize', 'move to', 'put in', 'classify', 'archive',
+      '把.*放到', '把.*移到', '把.*归类',
+      '这个.*放到', '这个.*移到',
+      '这份.*放到', '那些.*放到',
+    ],
+    slotExtractors: {
+      targetCategory: /(?:到|去|进|放入|移到|归到|放到|归档到)\s*["']?([^\s"'"]{2,})["']?/,
+      targetFile: /(?:把|将|拿)\s*["']?([^\s"']+)["']?\s*(?:放到|移到|归类到|整理到|归档到)/,
+    },
+    tools: [
+      { tool: 'organize_file_with_voice', args: { category: '{{slot.targetCategory}}', fileDescription: '{{slot.targetFile}}' } },
+    ],
+    confirmMessage: '将文件整理到: {{slot.targetCategory}}',
+  },
+
+  {
+    intent: 'move_file_to',
+    description: '语音移动文件到指定目录',
+    patterns: [
+      '移到', '移动到', '搬到', '搬去', '挪到',
+      'move', 'move file', 'mv',
+      '把这个.*到', '把这个.*移到',
+      '拖到', '拖入',
+    ],
+    slotExtractors: {
+      targetPath: /(?:到|去|入)\s*["']?([^\s"']{2,})["']?/,
+      fileName: /(?:把|将)\s*["']?([^\s"']+\.[a-zA-Z]+)["']?/,
+    },
+    tools: [
+      { tool: 'move_file', args: { source: '{{slot.fileName}}', target: '{{slot.targetPath}}' } },
+    ],
+    confirmMessage: '将移动文件 {{slot.fileName}} 到 {{slot.targetPath}}',
+    requireConfirmation: true,
+  },
+
+  {
+    intent: 'list_categories',
+    description: '查询可用的文件类别建议',
+    patterns: [
+      '有哪些类别', '分类', '类别', '归类建议',
+      'categories', 'suggestions', 'folder ideas',
+      '整理成什么', '怎么归类', '文件夹建议',
+    ],
+    tools: [
+      { tool: 'query_file_categories', args: {} },
+    ],
+    confirmMessage: '将查询文件整理类别建议',
+    requireConfirmation: false,
+  },
+
+  {
+    intent: 'confirm_file_operation',
+    description: '确认高风险文件操作',
+    patterns: [
+      '确认', '是的', '对的', '没错', '确定', '执行',
+      '是', '好', '行', '可以', '没问题',
+      'confirm', 'yes', 'ok', 'sure', 'go ahead', 'do it',
+    ],
+    tools: [
+      { tool: 'confirm_voice_operation', args: {} },
+    ],
+    confirmMessage: '确认执行操作',
+    requireConfirmation: false,
+  },
+
+  {
+    intent: 'cancel_file_operation',
+    description: '取消高风险文件操作',
+    patterns: [
+      '取消', '取消操作', '不要', '不', '不行', '错了',
+      '算了', '撤回', '停止', '停下',
+      'cancel', 'no', 'stop', 'abort', 'never mind',
+    ],
+    tools: [
+      { tool: 'cancel_voice_operation', args: {} },
+    ],
+    confirmMessage: '取消操作',
+    requireConfirmation: false,
+  },
 ]
+
+// =============================================================================
+// 动态意图注册（由 BehaviorSequenceLearner 管理）
+// =============================================================================
+
+/**
+ * 动态注册的语音意图 — 由行为序列学习器生成。
+ * 与静态 VOICE_INTENT_MAP 并列，匹配时合并处理。
+ * 动态意图的优先级低于静态意图。
+ */
+const DYNAMIC_VOICE_INTENTS: Map<string, VoiceIntentDef> = new Map()
+
+/**
+ * 注册一条动态语音意图。
+ * 如果相同 intent id 已存在，会被替换。
+ *
+ * @param id 意图唯一标识（如 "bp_grep_read_file_edit_file"）
+ * @param def 意图定义
+ */
+export function registerDynamicIntent(id: string, def: VoiceIntentDef): void {
+  DYNAMIC_VOICE_INTENTS.set(id, def)
+}
+
+/**
+ * 注销一条动态语音意图。
+ * @returns true 如果确实找到了并删除了
+ */
+export function unregisterDynamicIntent(id: string): boolean {
+  return DYNAMIC_VOICE_INTENTS.delete(id)
+}
+
+/**
+ * 清空所有动态语音意图。
+ */
+export function clearDynamicIntents(): void {
+  DYNAMIC_VOICE_INTENTS.clear()
+}
+
+/**
+ * 获取所有已注册的动态意图列表（用于调试/展示）。
+ */
+export function getAllDynamicIntents(): VoiceIntentDef[] {
+  return Array.from(DYNAMIC_VOICE_INTENTS.values())
+}
+
+/**
+ * 在静态和动态意图中查找指定 intent id 的定义。
+ * 静态意图优先匹配。
+ */
+export function findIntentById(id: string): VoiceIntentDef | undefined {
+  // 先查静态
+  const staticMatch = VOICE_INTENT_MAP.find((d) => d.intent === id)
+  if (staticMatch) return staticMatch
+  // 再查动态
+  return DYNAMIC_VOICE_INTENTS.get(id)
+}
 
 /**
  * 从用户文本中提取槽位值
@@ -284,25 +431,54 @@ export function matchKeywords(text: string, patterns: string[]): boolean {
 }
 
 /**
- * 从用户文本匹配所有意图，返回匹配的意图列表（按 patterns 匹配数排序）
+ * 从用户文本匹配所有意图（静态 + 动态），返回匹配的意图列表。
+ *
+ * 匹配逻辑：
+ * 1. 静态意图（VOICE_INTENT_MAP）先匹配，按 patterns 匹配数排序
+ * 2. 动态意图（DYNAMIC_VOICE_INTENTS）追加，分数相同但排在静态之后
+ * 3. 分数 = 关键词长度之和（更长关键词优先）
  */
 export function matchIntents(text: string): VoiceIntentDef[] {
-  const matches: { def: VoiceIntentDef; score: number }[] = []
+  const matches: { def: VoiceIntentDef; score: number; isDynamic?: boolean }[] = []
   const lower = text.toLowerCase()
 
+  // 1. 静态意图匹配
   for (const def of VOICE_INTENT_MAP) {
-    let score = 0
-    for (const p of def.patterns) {
-      if (lower.includes(p.toLowerCase())) {
-        score += p.length // 更长的关键词匹配 = 更高的分数
-      }
-    }
+    const score = scoreIntent(lower, def)
     if (score > 0) {
-      matches.push({ def, score })
+      matches.push({ def, score, isDynamic: false })
     }
   }
 
-  // 按分数降序排列
-  matches.sort((a, b) => b.score - a.score)
+  // 2. 动态意图匹配（优先级低于静态）
+  for (const def of DYNAMIC_VOICE_INTENTS.values()) {
+    const score = scoreIntent(lower, def)
+    if (score > 0) {
+      matches.push({ def, score, isDynamic: true })
+    }
+  }
+
+  // 按分数降序排列，同分时静态优先
+  matches.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score
+    // 同分：静态优先于动态
+    if (a.isDynamic !== b.isDynamic) return a.isDynamic ? 1 : -1
+    return 0
+  })
   return matches.map((m) => m.def)
+}
+
+/**
+ * 计算一段文本对一个意图定义的匹配分数。
+ */
+function scoreIntent(lowerText: string, def: VoiceIntentDef): number {
+  let score = 0
+  for (const p of def.patterns) {
+    if (lowerText.includes(p.toLowerCase())) {
+      // 更长的关键词匹配 = 更高的分数（更精确）
+      // 动态意图的短语可能较长，加分使其被恰当匹配
+      score += p.length
+    }
+  }
+  return score
 }

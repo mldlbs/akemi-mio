@@ -1,5 +1,6 @@
 import { MCPToolDefinition, MCPToolResult, MCPToolSchema } from '../mcp/types'
 import type { CapabilityAction } from '../capability/types'
+import { applyDefaults } from '../core/patterns'
 
 // ===== Tool 核心接口 =====
 
@@ -36,16 +37,18 @@ export type ToolDef<I = Record<string, any>, O = MCPToolResult> = {
 
 // ===== buildTool() 工厂 =====
 
+const TOOL_DEFAULTS = {
+  serverName: '@builtin/core' as const,
+  isReadOnly: false,
+  isEnabled: true,
+}
+
+/**
+ * 从 ToolDef 构建完整 Tool 对象。
+ * 使用 core/patterns 的 applyDefaults 补全默认值。
+ */
 export function buildTool<I = Record<string, any>, O = MCPToolResult>(def: ToolDef<I, O>): Tool<I, O> {
-  return {
-    name: def.name,
-    description: def.description,
-    inputJSONSchema: def.inputJSONSchema,
-    handler: def.handler,
-    serverName: def.serverName ?? '@builtin/core',
-    isReadOnly: def.isReadOnly ?? false,
-    isEnabled: def.isEnabled ?? true,
-  }
+  return applyDefaults(def as Tool<I, O>, TOOL_DEFAULTS)
 }
 
 // ===== 向后兼容转换 =====

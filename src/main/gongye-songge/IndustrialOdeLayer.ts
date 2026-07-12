@@ -13,12 +13,23 @@
  *     ├── preProcess()  — 调用前预处理（注入风格提示、检测排版需求）
  *     ├── postProcess() — 调用后后处理（公众号格式化回复）
  *     └── feature flags → 控制哪些钩子生效
+ *
+ * 【模式抽取】
+ * 通用逻辑已抽取到 core/patterns：
+ * - HookChain / MapHookChain → 钩子链执行器
+ * - FeatureFlagSet → 特性开关管理
+ * - applyDefaults → 配置默认值合并
  */
 
 import { log } from '../logger/Logger'
+import {
+  HookChain,
+  MapHookChain,
+  FeatureFlagSet,
+  applyDefaults,
+} from '../core/patterns'
 import type {
   GongyeSonggeFeature,
-  GongyeSonggeFeatureMap,
   PreProcessContext,
   PostProcessContext,
   PostProcessResult,
@@ -34,17 +45,17 @@ const DEFAULT_CONFIG: Partial<IndustrialOdeLayerConfig> = {
 }
 
 export class IndustrialOdeLayer {
-  /** 启用的 feature 集合 */
-  private features: GongyeSonggeFeatureMap
+  /** 启用的 feature 集合（使用通用 FeatureFlagSet） */
+  private features: FeatureFlagSet<GongyeSonggeFeature>
 
   /** 配置 */
   private config: Required<Pick<IndustrialOdeLayerConfig, 'debug'>>
 
-  /** 注册的预处理钩子（按注册顺序执行） */
-  private preHooks: PreProcessHook[] = []
+  /** 预处理钩子链（使用通用 HookChain） */
+  private preChain: HookChain<PreProcessContext>
 
-  /** 注册的后处理钩子（按注册顺序执行） */
-  private postHooks: PostProcessHook[] = []
+  /** 后处理钩子链（使用通用 MapHookChain） */
+  private postChain: MapHookChain<PostProcessContext, PostProcessResult>
 
   /** 上一次后处理结果缓存 */
   private lastPostResult: PostProcessResult | null = null
@@ -53,23 +64,47 @@ export class IndustrialOdeLayer {
   private llmService: { chatJson(prompt: string, opts?: unknown): Promise<unknown> } | null = null
 
   constructor(config?: IndustrialOdeLayerConfig) {
-    this.features = new Set(config?.features ?? parseFeaturesFromEnv())
-    this.config = {
-      debug: config?.debug ?? DEFAULT_CONFIG.debug ?? false,
-    }
+    this.features = new FeatureFlagSet<GongyeSonggeFeature>(config?.features ?? parseFeaturesFromEnv())
+    this.config = applyDefaults(
+      { debug: config?.debug ?? false },
+      DEFAULT_CONFIG,
+    ) as Required<Pick<IndustrialOdeLayerConfig, 'debug'>>
 
     if (config?.llmService) {
       this.llmService = config.llmService
     }
 
-    if (config?.preHooks) this.preHooks.push(...config.preHooks)
-    if (config?.postHooks) this.postHooks.push(...config.postHooks)
+    // 初始化钩子链
+    this.preChain = new HookChain<PreProcessContext>({
+      loggerName: 'industrial_ode_pre',
+      debug: this.config.debug,
+    })
+    this.postChain = new MapHookChain<PostProcessContext, PostProcessResult>(
+      {
+        merge: this.mergePostResults.bind(this),
+      },
+      {
+        loggerName: 'industrial_ode_post',
+        debug: this.config.debug,
+      },
+    )
+
+    if (config?.preHooks) {
+      for (const hook of config.preHooks) {
+        this.preChain.add(hook)
+      }
+    }
+    if (config?.postHooks) {
+      for (const hook of config.postHooks) {
+        this.postChain.add(hook)
+      }
+    }
 
     if (this.features.size > 0) {
       log('INFO', 'industrial_ode_active', {
-        features: Array.from(this.features),
-        preHooks: this.preHooks.length,
-        postHooks: this.postHooks.length,
+        features: this.features.getActive(),
+        preHooks: this.preChain.size,
+        postHooks: this.postChain.size,
         llmAvailable: !!this.llmService,
       })
     }
@@ -84,7 +119,7 @@ export class IndustrialOdeLayer {
 
   /** 获取当前启用的特性列表 */
   getActiveFeatures(): GongyeSonggeFeature[] {
-    return Array.from(this.features)
+    return this.features.getActive()
   }
 
   /** 获取最后的后处理结果 */
@@ -102,14 +137,14 @@ export class IndustrialOdeLayer {
 
   /** 注册预处理钩子 */
   addPreHook(hook: PreProcessHook): void {
-    this.preHooks.push(hook)
-    log('INFO', 'industrial_ode_pre_hook_added', { total: this.preHooks.length })
+    this.preChain.add(hook)
+    log('INFO', 'industrial_ode_pre_hook_added', { total: this.preChain.size })
   }
 
   /** 注册后处理钩子 */
   addPostHook(hook: PostProcessHook): void {
-    this.postHooks.push(hook)
-    log('INFO', 'industrial_ode_post_hook_added', { total: this.postHooks.length })
+    this.postChain.add(hook)
+    log('INFO', 'industrial_ode_post_hook_added', { total: this.postChain.size })
   }
 
   // ==================== 预处理 ====================
@@ -121,16 +156,8 @@ export class IndustrialOdeLayer {
   async preProcess(ctx: PreProcessContext): Promise<PreProcessContext> {
     if (this.features.size === 0) return ctx
 
-    let current = ctx
-    for (const hook of this.preHooks) {
-      try {
-        current = await hook(current)
-      } catch (err: any) {
-        log('WARN', 'industrial_ode_pre_hook_error', {
-          error: err.message,
-        })
-      }
-    }
+    // 使用通用 HookChain 执行，自动处理错误隔离
+    const current = await this.preChain.execute(ctx)
 
     if (this.config.debug) {
       log('DEBUG', 'industrial_ode_pre_process_done', {
@@ -155,17 +182,8 @@ export class IndustrialOdeLayer {
       return empty
     }
 
-    let result: PostProcessResult = { text: ctx.rawReply, formatted: false }
-    for (const hook of this.postHooks) {
-      try {
-        const partial = await hook(ctx)
-        result = this.mergePostResults(result, partial)
-      } catch (err: any) {
-        log('WARN', 'industrial_ode_post_hook_error', {
-          error: err.message,
-        })
-      }
-    }
+    // 使用通用 MapHookChain 执行，自动处理结果合并与错误隔离
+    const result = await this.postChain.execute(ctx)
 
     this.lastPostResult = result
 
@@ -180,10 +198,14 @@ export class IndustrialOdeLayer {
     return result
   }
 
-  private mergePostResults(base: PostProcessResult, incoming: PostProcessResult): PostProcessResult {
+  /**
+   * 合并后处理结果（供 MapHookChain 使用的合并策略）
+   * IndustrialOde 特有：使用 formatted 而非 enhanced 字段
+   */
+  private mergePostResults(base: PostProcessResult, incoming: Partial<PostProcessResult>): PostProcessResult {
     return {
-      text: incoming.text ?? base.text,
-      formatted: incoming.formatted || base.formatted,
+      text: incoming.text ?? base.text ?? '',
+      formatted: incoming.formatted ?? base.formatted ?? false,
       description: incoming.description ?? base.description,
     }
   }

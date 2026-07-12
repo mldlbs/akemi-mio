@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { log } from '../logger/Logger'
-import { withTimeout } from '../utils/async'
+import { withTimeout, execAsync } from '../utils/async'
 import { DEV_PROJECT_ROOT } from '../config'
 import type { WorkerPool } from '../core/WorkerPool'
 
@@ -108,16 +108,22 @@ export class VerificationRunner {
 
   private async runCompileCheck(): Promise<CheckResult> {
     try {
-      const { execSync } = require('child_process')
+      const { exec } = require('child_process')
       const output = await withTimeout(
         async () => {
           try {
-            return execSync('npx tsc --noEmit --pretty false 2>&1', {
-              cwd: PROJECT_ROOT || process.cwd(),
-              timeout: 60000,
-              encoding: 'utf-8',
-              windowsHide: true,
-            }) as string
+            return await new Promise<string>((resolve) => {
+              exec(
+                'node_modules/.bin/tsc --noEmit --pretty false 2>&1',
+                {
+                  cwd: PROJECT_ROOT || process.cwd(),
+                  timeout: 60000,
+                  encoding: 'utf-8',
+                  windowsHide: true,
+                },
+                (_e: any, stdout: string) => resolve(stdout || ''),
+              )
+            })
           } catch (e: any) {
             return e.stdout || e.message || ''
           }

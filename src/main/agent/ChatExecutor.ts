@@ -68,6 +68,7 @@ import { voiceStyleMap } from '../tts/VoiceStyleMap'
 import { behaviorEmotionDetector } from '../tts/BehaviorEmotionDetector'
 import { contextualTtsAdvisor } from '../tts/ContextualTtsAdvisor'
 import { memoryEmotionBridge } from '../tts/MemoryEmotionBridge'
+import { memoryTtsBridge } from '../tts/MemoryTtsBridge'
 import { userContextClassifier } from '../tts/UserContextClassifier'
 import { implicitFeedbackTracker } from '../tts/ImplicitFeedbackTracker'
 import type {
@@ -81,6 +82,7 @@ import type {
 } from '../tts/types'
 import { VOICE_EMOTION_TTS_MAP } from '../tts/types'
 import type { VoiceEmotion } from '../asr/types'
+import type { McpAgentHybridPipeline } from '../hybrid/McpAgentHybridPipeline'
 
 export class ChatExecutor {
   private llmService: LlmService
@@ -122,6 +124,8 @@ export class ChatExecutor {
   private pendingDriftSignal: string | null = null
   /** 当前轮 user 消息的 content category */
   private currentCategory = 'chat'
+  /** MCP-Agent 混合流水线（可选注入）*/
+  private hybridPipeline: McpAgentHybridPipeline | null = null
 
   /** 当前加载的 session，用于切换 session 时重建上下文 */
   private currentSessionId: string | null = null
@@ -185,6 +189,15 @@ export class ChatExecutor {
   /** 注入 EvaluationEmitter（启动时由 AppRuntime 调用，用于写入 Delivery Trace） */
   setEvaluationEmitter(emitter: EvaluationEmitter): void {
     this.evaluationEmitter = emitter
+  }
+
+  /** 注入 MCP-Agent 混合流水线 */
+  setHybridPipeline(pipeline: McpAgentHybridPipeline): void {
+    this.hybridPipeline = pipeline
+    log('INFO', 'chat_executor_hybrid_pipeline_set', {
+      enabled: pipeline.isEnabled(),
+      points: pipeline.getConfig().points,
+    })
   }
 
   setMainWindow(win: BrowserWindow | null): void {
@@ -573,6 +586,12 @@ export class ChatExecutor {
       // ── [EMOTION] 最终回复情感分析 ──
       this.applySentimentToTts(reply)
       if (!this.noTts) this.ttsService.flushBuffer()
+      // ── [Memory × TTS 深度融合] 检测记忆状态变化 ← TTS 适应 ──
+      // 在每轮交互完成后检测记忆是否发生了值得通知 TTS 的显著变化
+      const memoryChange = memoryTtsBridge.detectMemoryChangeForTts()
+      if (memoryChange) {
+        log('INFO', 'memory_tts_change_detected', { change: memoryChange })
+      }
       if (reply) {
         const assistMsg: StoredMessage = {
           id: createMessageId(),
@@ -783,6 +802,39 @@ export class ChatExecutor {
             proceduralMemory: this.proceduralMemory,
             failureAnalyzer: this.failureAnalyzer,
           })
+          // ── [MCP-AGENT HYBRID] 工具选择验证 ──
+          if (this.hybridPipeline?.isPointEnabled('tool_selection')) {
+            const contextText = this.buildHybridContextText(messages)
+            const arbResult = await this.hybridPipeline.validateToolSelection(
+              result.toolCalls,
+              contextText,
+              requestId,
+            )
+            if (arbResult && arbResult.arbitratedOutput.assessment !== 'approved') {
+              const rejected = arbResult.arbitratedOutput.rejectedTools
+              const suggested = arbResult.arbitratedOutput.suggestedAdditionalTools
+              const parts: string[] = []
+              if (rejected.length > 0) {
+                parts.push(`【MCP 验证】以下工具被建议拦截: ${rejected.join(', ')}`)
+              }
+              if (suggested.length > 0) {
+                parts.push(`【MCP 建议】以下工具被建议补充: ${suggested.join(', ')}`)
+              }
+              parts.push(`仲裁依据: ${arbResult.arbitratedOutput.rationale}`)
+              messages.push({ role: 'user', content: parts.join('\n') })
+              log('INFO', 'hybrid_tool_selection_intervention', {
+                request_id: requestId,
+                step: i,
+                rejected: rejected.length,
+                suggested: suggested.length,
+                method: arbResult.arbitrationMethod,
+              })
+              // MCP 拒绝了所有工具 → 直接跳过执行轮，让 LLM 重新考虑
+              if (arbResult.arbitratedOutput.assessment === 'rejected') {
+                continue
+              }
+            }
+          }
           // ── [THINK] 大量静默工具调用时注入策略提示 ──
           if (this.thinkStageCount < 3) {
             const thinkResult = runThink(result.toolCalls, result.reply, messages, ctx)
@@ -841,6 +893,40 @@ export class ChatExecutor {
             let c = tr.content || tr.error || ''
             if (c.length > 8000) c = c.slice(0, 8000) + `\n... [已截断，原长 ${c.length} 字符]`
             messages.push({ role: 'tool', tool_call_id: tr.id, content: c })
+          }
+          // ── [MCP-AGENT HYBRID] 工具结果验证 ──
+          if (this.hybridPipeline?.isPointEnabled('result_validation')) {
+            const contextText = this.buildHybridContextText(messages)
+            const arbResult = await this.hybridPipeline.validateResults(
+              toolResults,
+              contextText,
+              requestId,
+            )
+            if (arbResult && arbResult.arbitratedOutput.verdict !== 'consistent') {
+              const issues = arbResult.arbitratedOutput.issues
+              const additionalCtx = arbResult.arbitratedOutput.additionalContext
+              const parts: string[] = ['【MCP 结果验证】']
+              if (issues.length > 0) {
+                for (const issue of issues.slice(0, 3)) {
+                  parts.push(`- [${issue.severity}] ${issue.toolName}: ${issue.description}`)
+                }
+              }
+              if (additionalCtx) {
+                parts.push(additionalCtx)
+              }
+              messages.push({ role: 'user', content: parts.join('\n') })
+              log('INFO', 'hybrid_result_validation_intervention', {
+                request_id: requestId,
+                step: i,
+                issueCount: issues.length,
+                verdict: arbResult.arbitratedOutput.verdict,
+                method: arbResult.arbitrationMethod,
+              })
+              // 需要重新执行时，不继续 REFLECT 直接让 LLM 处理
+              if (arbResult.arbitratedOutput.needsReExecution) {
+                continue
+              }
+            }
           }
           // ── [EMOTION] 情感自适应：分析工具结果+LLM回复，调整TTS语调 ──
           this.applySentimentToTts(
@@ -945,6 +1031,33 @@ export class ChatExecutor {
         if (finalReply && this.memoryService) {
           this.memoryService.recordAgentReference(finalReply)
         }
+        // ── [MCP-AGENT HYBRID] 回复质量验证 ──
+        if (finalReply && this.hybridPipeline?.isPointEnabled('reply_quality')) {
+          const contextText = this.buildHybridContextText(messages)
+          const arbResult = await this.hybridPipeline.validateReplyQuality(
+            finalReply,
+            contextText,
+            requestId,
+          )
+          if (arbResult && arbResult.arbitratedOutput.needsRegeneration) {
+            const suggestion = arbResult.arbitratedOutput.suggestion
+            messages.push({
+              role: 'user',
+              content: `【MCP 质量验证】Agent 回复质量评估: ${arbResult.arbitratedOutput.verdict}\n${
+                suggestion ? `建议: ${suggestion}` : '请重新生成更准确完整的回复。'
+              }`,
+            })
+            // 从 COMPLETED 回到 READY（有效转换），下一轮 loop 自动转入 RUNNING
+            ctx.transition(RunState.READY)
+            log('INFO', 'hybrid_reply_quality_regeneration', {
+              request_id: requestId,
+              step: i,
+              verdict: arbResult.arbitratedOutput.verdict,
+              method: arbResult.arbitrationMethod,
+            })
+            continue
+          }
+        }
         return finalReply
       }
     } finally {
@@ -1010,6 +1123,33 @@ export class ChatExecutor {
       return 'continue'
     }
     return 'return'
+  }
+
+  /**
+   * 构建混合流水线的上下文摘要文本。
+   * 从 messages 中提取最近的 system/user/assistant 消息摘要，
+   * 供 MCP 路径独立分析使用。
+   */
+  private buildHybridContextText(messages: Message[]): string {
+    const parts: string[] = []
+    // 最近的几条消息
+    const recent = messages.slice(-6)
+    for (const m of recent) {
+      const role = m.role
+      const content = (m.content || '').slice(0, 200).replace(/\n/g, ' ')
+      if (m.tool_calls?.length) {
+        const tools = m.tool_calls.map((tc: any) => tc.function?.name || tc.name).join(', ')
+        parts.push(`[${role}] tools: ${tools}`)
+      } else if (content) {
+        parts.push(`[${role}] ${content}`)
+      }
+    }
+    // 消息统计
+    const totalMsgs = messages.length
+    const userCount = messages.filter((m) => m.role === 'user').length
+    const toolCount = messages.filter((m) => m.role === 'tool').length
+    parts.push(`(总 ${totalMsgs} 条消息: ${userCount} user, ${toolCount} tool)`)
+    return parts.join('\n')
   }
 
   private async handlePlanForceContinue(r: string, m: Message[], ctx: RunContext): Promise<'continue' | 'abandon' | 'done'> {
@@ -1180,6 +1320,48 @@ export class ChatExecutor {
           }
         } catch (err) {
           log('WARN', 'memory_emotion_tts_blend_error', { error: String(err) })
+        }
+      }
+
+      // ── [Memory × TTS 深度融合] 记忆驱动的 TTS 适应 ──
+      // 综合情感上下文（复用 MemoryEmotionBridge）、记忆活跃度、用户偏好，
+      // 提供情感之外的额外调整维度。
+      if (this.memoryService) {
+        try {
+          const memorySuggestion = memoryTtsBridge.getMemoryDrivenSuggestion(finalParams)
+          if (memorySuggestion.confidence > 0.2 && (memorySuggestion.rateDelta !== 0 || memorySuggestion.pitchDelta !== 0)) {
+            const currentRate = parseInt(finalParams.rate.replace(/[^0-9-]/g, '')) || 0
+            const currentPitch = parseInt(finalParams.pitch.replace(/[^0-9-]/g, '')) || 0
+            const newRate = Math.max(-50, Math.min(50, currentRate + memorySuggestion.rateDelta))
+            const newPitch = Math.max(-20, Math.min(20, currentPitch + memorySuggestion.pitchDelta))
+            finalParams = {
+              ...finalParams,
+              rate: `${newRate >= 0 ? '+' : ''}${newRate}%`,
+              pitch: `${newPitch >= 0 ? '+' : ''}${newPitch}Hz`,
+              label: `${finalParams.label}·忆驱动`,
+            }
+            log('INFO', 'memory_driven_tts_applied', {
+              rateDelta: memorySuggestion.rateDelta,
+              pitchDelta: memorySuggestion.pitchDelta,
+              reason: memorySuggestion.reason,
+              confidence: memorySuggestion.confidence,
+            })
+          }
+        } catch (err) {
+          log('WARN', 'memory_driven_tts_error', { error: String(err) })
+        }
+      }
+
+      // ── [显式反馈偏好持久化] 将隐式反馈推荐保存到 Memory 用户画像 ──
+      if (this.implicitFeedbackEnabled && this.lastImplicitFeedback && this.lastImplicitFeedback.confidence > 0.5) {
+        try {
+          memoryTtsBridge.recordUserTtsPreference(
+            this.lastImplicitFeedback.params,
+            this.lastImplicitFeedback.confidence,
+            this.lastImplicitFeedback.reason,
+          )
+        } catch (err) {
+          log('WARN', 'memory_tts_preference_record_error', { error: String(err) })
         }
       }
 

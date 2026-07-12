@@ -231,7 +231,7 @@ export class MemoryService {
     }
   }
 
-  addEntry(type: MemoryEntry['type'], content: string, confidence: number, options?: { tier?: MemoryEntry['tier'] }): void {
+  addEntry(type: MemoryEntry['type'], content: string, confidence: number, options?: { tier?: MemoryEntry['tier']; structuredData?: string | null }): void {
     if (confidence < MIN_CONFIDENCE) return
 
     // 1. 精确去重 → 强化计数 + 置信度提升
@@ -288,6 +288,7 @@ export class MemoryService {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       topics: this.extractTopics(content),
+      structuredData: options?.structuredData ?? null,
     }
     this.entries.push(entry)
     this.upsertInDb(entry)
@@ -686,6 +687,20 @@ export class MemoryService {
     entry.updatedAt = Date.now()
     this.upsertInDb(entry)
     log('INFO', 'memory_manual_score', { id, score, content: entry.content.slice(0, 50) })
+    return true
+  }
+
+  /**
+   * 设置/更新一条记忆条目的结构化数据（JSON 字符串）。
+   * 用于外部模块在不重新创建条目的情况下附加额外元数据。
+   * @returns true 如果找到并更新了条目
+   */
+  setEntryStructuredData(id: string, structuredData: string | null): boolean {
+    const entry = this.entries.find((e) => e.id === id)
+    if (!entry) return false
+    entry.structuredData = structuredData
+    entry.updatedAt = Date.now()
+    this.upsertInDb(entry)
     return true
   }
 

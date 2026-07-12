@@ -13,7 +13,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeName>('mio')
 
   useEffect(() => {
+    if (!window.electronAPI) return
     window.electronAPI.getCredential('theme').then((stored) => {
+      if (stored === null) return
       const t =
         stored === 'mio' ||
         stored === 'ocean' ||
@@ -32,7 +34,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const setTheme = useCallback((t: ThemeName) => {
     setThemeState(t)
     document.documentElement.dataset.theme = t
-    window.electronAPI.setCredential('theme', t).catch(() => {})
+    window.electronAPI?.setCredential('theme', t).catch(() => {})
   }, [])
 
   return <ThemeContext.Provider value={{ theme, setTheme }}>{children}</ThemeContext.Provider>

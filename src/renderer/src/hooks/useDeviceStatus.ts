@@ -4,13 +4,13 @@ import { useDeviceStore } from '../store/deviceStore'
 export function useDeviceStatus() {
   const store = useDeviceStore()
 
-  useIPCEvent(window.electronAPI.onStateUpdate, (s: Record<string, unknown>) => {
+  useIPCEvent(window.electronAPI?.onStateUpdate, (s: Record<string, unknown>) => {
     if (s.error) store.setError(s.error as string)
     if (s.ttsPlaying !== undefined) store.setTtsPlaying(s.ttsPlaying as boolean)
     if (s.sessionHealth) store.setSessionHealth(s.sessionHealth as string)
   })
 
-  useIPCEvent(window.electronAPI.onPersonaUpdated, (data: { level: string }) => {
+  useIPCEvent(window.electronAPI?.onPersonaUpdated, (data: { level: string }) => {
     store.setPersonaLevel(data.level)
   })
 

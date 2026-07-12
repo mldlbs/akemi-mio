@@ -3,6 +3,7 @@ import { useDeviceStore } from './deviceStore'
 import { useSessionStore } from './sessionStore'
 import { usePlansStore } from './plansStore'
 import { useWorkflowStore } from './workflowStore'
+import { useHistoryViewStore } from './historyViewStore'
 
 export function resetAllStores() {
   useAgentStore.setState({
@@ -38,5 +39,13 @@ export function resetAllStores() {
     definitions: [],
     workflowRuns: [],
     loading: true,
+  })
+  useHistoryViewStore.setState({
+    viewing: false,
+    sessionId: null,
+    sessionLabel: '',
+    messages: [],
+    loading: false,
+    error: null,
   })
 }

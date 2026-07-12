@@ -4,7 +4,7 @@
  * 运行 vitest run，解析输出中的 FAIL 行，报告失败文件。
  */
 
-import { execSync } from 'child_process'
+import { execAsync } from '../../utils/async'
 import { existsSync } from 'fs'
 import { log } from '../../logger/Logger'
 import type { Problem, SignalCollector } from './types'
@@ -30,12 +30,10 @@ export class TestCollector implements SignalCollector {
   async collect(): Promise<Problem[]> {
     this.lastRun = Date.now()
     try {
-      execSync('npx vitest run 2>&1', {
+      const stdout = await execAsync('npx vitest run 2>&1', {
         cwd: this.projectRoot,
         timeout: 120_000,
         windowsHide: true,
-        encoding: 'utf-8',
-        maxBuffer: 8 * 1024 * 1024,
       })
       return []
     } catch (err: any) {

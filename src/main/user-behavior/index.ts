@@ -65,3 +65,15 @@ export type {
   FeedbackLoopStateChangePayload,
   ParameterAdjustmentPayload,
 } from './feedback-loop/types'
+
+// ── Plan:实验42：并发Workflow隔离性测试 — 渐进式引入 ──
+export { PlanExperiment42Plugin } from './plan-experiment-42'
+export type {
+  ExperimentPhase,
+  PlanExperiment42Config,
+  ModeSwitchObservation,
+  ConcurrencyObservation,
+  EvolutionCycleObservation,
+  ExperimentReport,
+} from './plan-experiment-42'
+export { EXPERIMENT_PHASE_LABELS, DEFAULT_EXPERIMENT_CONFIG } from './plan-experiment-42'

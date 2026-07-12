@@ -70,9 +70,9 @@ export class CognitiveService {
         },
         '@meta',
       )
-      // 首次启动 60s 后跑一次初始评估
+      // 首次启动 600s 后跑一次初始评估（避免启动时 LLM 调用阻塞渲染 IPC）
       scheduler.once(
-        60 * 1000,
+        600 * 1000,
         async () => {
           await this.metaCycle.run()
           return ''

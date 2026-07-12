@@ -69,7 +69,7 @@ export class RegressionDetector {
 
   private async getCompileErrors(): Promise<number> {
     try {
-      const output = await execAsync('npx tsc --noEmit --pretty false 2>&1', {
+      const output = await execAsync('node_modules/.bin/tsc --noEmit --pretty false 2>&1', {
         cwd: PROJECT_ROOT || process.cwd(),
         timeout: 60000,
       })

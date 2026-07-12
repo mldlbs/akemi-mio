@@ -4,7 +4,7 @@ import { AgentService } from '../agent/AgentService'
 import { StateManager } from '../core/StateManager'
 import { TtsService } from '../tts/TtsService'
 import { SelfEvolutionService } from '../evolution'
-import { EvolutionDashboardService, MemoryContextService } from '../wallpaper/WallpaperService'
+import { EvolutionDashboardService, MemoryContextService, FileOrganizerProgressService } from '../wallpaper/WallpaperService'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import { WAKE_WORDS, LLM_API_URL, LLM_CODE_API_URL, LLM_TEXT_API_URL, LLM_VISION_API_URL, WORKSPACE } from '../config'
 import { monitorEventLoopDelay } from 'perf_hooks'
@@ -21,6 +21,7 @@ import { eventBus } from '../core/EventBus'
 import { VoiceToolOrchestrator } from '../tool/VoiceToolOrchestrator'
 import { extractContextFromSummaries } from '../asr/AsrContextBuilder'
 import { asrHotwordManager } from '../asr/AsrHotwordManager'
+import { memoryAsrHybridPipeline } from '../asr/MemoryAsrHybridPipeline'
 import { inspirationService } from '../writing/InspirationService'
 import { voiceContinuationService } from '../writing/VoiceContinuationService'
 import { audioFeatureExtractor } from '../audio/AudioFeatureExtractor'
@@ -87,6 +88,7 @@ export function registerHandlers(
   memoryContextRef?: ServiceRef<MemoryContextService>,
   decisionQueryRef?: ServiceRef<DecisionQueryService>,
   metricsQueryRef?: ServiceRef<GuardrailMetricsQueryService>,
+  organizerRef?: ServiceRef<FileOrganizerProgressService>,
 ): void {
   ipcMain.handle('window:close', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -109,6 +111,30 @@ export function registerHandlers(
     if (!win) return { success: false }
     win.minimize()
     return { success: true }
+  })
+
+  ipcMain.handle('window:maximize', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false, isMaximized: false }
+    if (win.isMaximized()) {
+      win.unmaximize()
+    } else {
+      win.maximize()
+    }
+    return { success: true, isMaximized: win.isMaximized() }
+  })
+
+  ipcMain.handle('window:isMaximized', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { isMaximized: false }
+    return { isMaximized: win.isMaximized() }
+  })
+
+  ipcMain.handle('window:fullscreen', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false, isFullScreen: false }
+    win.setFullScreen(!win.isFullScreen())
+    return { success: true, isFullScreen: win.isFullScreen() }
   })
 
   ipcMain.handle('ai:chat', async (_event, text: string, requestId?: string, sessionId?: string, noTts?: boolean) => {
@@ -140,35 +166,59 @@ export function registerHandlers(
       const asr = agentService.getAsrService()
       if (!asr) throw new Error('ASR service not initialized')
 
-      // 1. 从 Memory 获取最近对话上下文，注入到 ASR 引擎
+      // 1. 从 Memory 获取最近对话上下文
       const memoryService = agentService.getMemoryService()
+      let context: import('../asr/types').AsrConversationContext | null = null
+
       if (memoryService) {
         const recentSummaries = memoryService.summary.getRecentFull(3)
         const lastUserText = memoryService.getLastUserText()
-        const context = extractContextFromSummaries(recentSummaries, lastUserText || undefined)
+        context = extractContextFromSummaries(recentSummaries, lastUserText || undefined)
         asr.setConversationContext(context)
       }
 
-      // 2. 执行转录
-      const result = await asr.transcribe(audioBuffer)
-
-      // 2.5 将语音情感分析结果传递给 ChatExecutor（用于 TTS 情感自适应）
-      if (result.voiceEmotion) {
-        const chatExecutor = agentService.getChatExecutor()
-        if (chatExecutor) {
-          chatExecutor.setUserVoiceEmotion(result.voiceEmotion)
+      // 2. 配置混合流水线
+      memoryAsrHybridPipeline.setAsrService(asr)
+      if (memoryService) {
+        memoryAsrHybridPipeline.setMemoryService(memoryService)
+        // 注入 LLM 仲裁提供者（可选，用于深度语义仲裁）
+        try {
+          const llm = agentService.getLlmService()
+          memoryAsrHybridPipeline.setLlmProvider(llm)
+        } catch {
+          // LLM 不可用时不影响主流程
         }
       }
 
-      // 3. 识别后新文本并入 Memory（记录交互、提取主题）
-      if (memoryService && result.text && result.text.trim()) {
-        memoryService.recordInteraction(result.text)
-        memoryService.setLastUserText(result.text)
-        // ASR热词增强：将识别结果回灌到频率热词管理器
-        asrHotwordManager.feedUserText(result.text)
+      // 3. 执行混合流水线（Path A: ASR + Path B: Memory 预测 + 交叉验证 + 仲裁）
+      const hybridResult = await memoryAsrHybridPipeline.run(audioBuffer, context, undefined, undefined)
+
+      // 4. 将语音情感分析结果传递给 ChatExecutor（用于 TTS 情感自适应）
+      if (hybridResult.voiceEmotion) {
+        const chatExecutor = agentService.getChatExecutor()
+        if (chatExecutor) {
+          chatExecutor.setUserVoiceEmotion(hybridResult.voiceEmotion)
+        }
       }
 
-      return result
+      // 5. 识别后新文本并入 Memory（记录交互、提取主题）
+      if (memoryService && hybridResult.text && hybridResult.text.trim()) {
+        memoryService.recordInteraction(hybridResult.text)
+        memoryService.setLastUserText(hybridResult.text)
+        // ASR热词增强：将识别结果回灌到频率热词管理器
+        asrHotwordManager.feedUserText(hybridResult.text)
+      }
+
+      return {
+        text: hybridResult.text,
+        request_id: hybridResult.requestId,
+        voiceEmotion: hybridResult.voiceEmotion,
+        _hybrid: hybridResult.arbitrationTriggered ? {
+          source: hybridResult.source,
+          agreementLevel: hybridResult.agreementLevel,
+          asrText: hybridResult.asrText,
+        } : undefined,
+      }
     } catch (err) {
       log('ERROR', 'asr_transcribe_failed', { error: String(err) })
       throw err
@@ -242,6 +292,29 @@ export function registerHandlers(
       asr.refreshContext()
     }
     return { success: true }
+  })
+
+  // ── Memory-ASR 混合流水线 IPC ──
+
+  ipcMain.handle('asr:hybrid:toggle', async (_event, enabled: boolean) => {
+    memoryAsrHybridPipeline.setEnabled(enabled)
+    log('INFO', 'asr_hybrid_toggle', { enabled })
+    return { enabled: memoryAsrHybridPipeline.isReady() }
+  })
+
+  ipcMain.handle('asr:hybrid:state', async () => {
+    const config = memoryAsrHybridPipeline.getConfig()
+    return {
+      enabled: config.enabled,
+      ready: memoryAsrHybridPipeline.isReady(),
+      config,
+    }
+  })
+
+  ipcMain.handle('asr:hybrid:updateConfig', async (_event, partial: Record<string, unknown>) => {
+    memoryAsrHybridPipeline.updateConfig(partial as any)
+    log('INFO', 'asr_hybrid_config_updated', { partial })
+    return { success: true, config: memoryAsrHybridPipeline.getConfig() }
   })
 
   // ── 语音工具编排 IPC ──
@@ -1355,6 +1428,31 @@ export function registerHandlers(
       const svc = decisionQueryRef.current
       if (!svc) return []
       return svc.listByTrace(traceId)
+    })
+  }
+
+  // ── 文件整理进度可视化控制 ──
+
+  if (organizerRef) {
+    ipcMain.handle('organizer:pause', async () => {
+      const svc = organizerRef.current
+      if (!svc) return { success: false }
+      svc.pause()
+      return { success: true }
+    })
+
+    ipcMain.handle('organizer:resume', async () => {
+      const svc = organizerRef.current
+      if (!svc) return { success: false }
+      svc.resume()
+      return { success: true }
+    })
+
+    ipcMain.handle('organizer:skip', async () => {
+      const svc = organizerRef.current
+      if (!svc) return { success: false }
+      svc.skipCurrent()
+      return { success: true }
     })
   }
 

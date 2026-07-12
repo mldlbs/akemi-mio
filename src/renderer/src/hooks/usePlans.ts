@@ -17,18 +17,18 @@ export function usePlans() {
   }, [])
 
   // Subscribe to plan events
-  useIPCEvent(window.electronAPI.onPlanCreated, () => {
+  useIPCEvent(window.electronAPI?.onPlanCreated, () => {
     window.electronAPI.getActivePlan().then((plan) => store.setActivePlan(plan))
     window.electronAPI.listPlans().then((list) => {
       store.setPlanHistory(list.filter((p) => p.status !== 'active'))
     })
   })
 
-  useIPCEvent(window.electronAPI.onPlanStep, (data: { planId: string; stepIndex: number; status: string }) => {
+  useIPCEvent(window.electronAPI?.onPlanStep, (data: { planId: string; stepIndex: number; status: string }) => {
     store.updateActivePlanStep(data.stepIndex, data.status)
   })
 
-  useIPCEvent(window.electronAPI.onPlanCompleted, () => {
+  useIPCEvent(window.electronAPI?.onPlanCompleted, () => {
     store.completeActivePlan()
     window.electronAPI.listPlans().then((list) => {
       store.setPlanHistory(list.filter((p) => p.status !== 'active'))
@@ -37,7 +37,7 @@ export function usePlans() {
 
   // Subscribe to OTPAR stages — keep last 20
   useIPCEvent(
-    window.electronAPI.onAgentObserve,
+    window.electronAPI?.onAgentObserve,
     (data: { requestId: string; step: number; proceduresFound: number; patternsFound: number; durationMs: number }) => {
       store.addOtparStage({
         type: 'observe',
@@ -51,7 +51,7 @@ export function usePlans() {
   )
 
   useIPCEvent(
-    window.electronAPI.onAgentThink,
+    window.electronAPI?.onAgentThink,
     (data: { requestId: string; step: number; toolCallCount: number; strategyPrompted: boolean }) => {
       store.addOtparStage({
         type: 'think',
@@ -64,7 +64,7 @@ export function usePlans() {
   )
 
   useIPCEvent(
-    window.electronAPI.onAgentReflect,
+    window.electronAPI?.onAgentReflect,
     (data: { requestId: string; step: number; toolResults: number; successCount: number; summary: string; durationMs: number }) => {
       store.addOtparStage({
         type: 'reflect',

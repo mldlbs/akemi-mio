@@ -10,6 +10,13 @@ export function createMockIPC(overrides?: Partial<MockedElectronAPI>): MockedEle
     // Window
     closeWindow: vi.fn<[], Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
     minimizeWindow: vi.fn<[], Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
+    maximizeWindow: vi
+      .fn<[], Promise<{ success: boolean; isMaximized: boolean }>>()
+      .mockResolvedValue({ success: true, isMaximized: false }),
+    isMaximized: vi.fn<[], Promise<{ isMaximized: boolean }>>().mockResolvedValue({ isMaximized: false }),
+    toggleFullscreen: vi
+      .fn<[], Promise<{ success: boolean; isFullScreen: boolean }>>()
+      .mockResolvedValue({ success: true, isFullScreen: false }),
 
     // ASR / AI / TTS
     transcribe: vi.fn<[ArrayBuffer], Promise<{ text: string; request_id?: string; error?: string }>>().mockResolvedValue({ text: '' }),

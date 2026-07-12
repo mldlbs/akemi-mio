@@ -1,4 +1,5 @@
 import { exec } from 'child_process'
+import { log } from '../logger/Logger'
 
 /** Create an AbortController + auto-timeout timer. Clear the timer after use to avoid leaks. */
 export function createTimeoutSignal(timeoutMs: number): { controller: AbortController; timer: ReturnType<typeof setTimeout> } {
@@ -34,8 +35,11 @@ export function execAsync(
   cmd: string,
   options: { cwd?: string; timeout?: number; encoding?: string; windowsHide?: boolean; maxBuffer?: number } = {},
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    exec(
+  const cmdShort = cmd.length > 80 ? cmd.slice(0, 80) + '…' : cmd
+  log('DEBUG', 'exec_async_start', { cmd: cmdShort, timeout: options.timeout ?? 60000 })
+  const t0 = Date.now()
+  return new Promise<string>((resolve, reject) => {
+    const child = exec(
       cmd,
       {
         cwd: options.cwd || process.cwd(),
@@ -44,11 +48,14 @@ export function execAsync(
         windowsHide: options.windowsHide !== false,
       },
       (error, stdout, stderr) => {
+        const elapsed = Date.now() - t0
         if (error) {
+          log('WARN', 'exec_async_fail', { cmd: cmdShort, elapsed, error: error.message?.slice(0, 120) })
           ;(error as any).stdout = stdout
           ;(error as any).stderr = stderr
           reject(error)
         } else {
+          log('DEBUG', 'exec_async_done', { cmd: cmdShort, elapsed, size: stdout.length })
           resolve(stdout)
         }
       },

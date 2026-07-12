@@ -12,6 +12,7 @@ describe('SlotContext', () => {
   it('returns default state when inside provider', () => {
     const { result } = renderHook(() => useSlots(), { wrapper: SlotProvider })
     expect(result.current.uiState.sidebarOpen).toBe(true)
+    expect(result.current.uiState.rightPanelOpen).toBe(true)
     expect(result.current.uiState.activeSlot).toBe('chat')
   })
 
@@ -105,5 +106,35 @@ describe('SlotContext', () => {
       result.current.toggleSidebar()
     })
     expect(result.current.uiState.activeSlot).toBe('otpar')
+  })
+
+  it('toggleRightPanel flips rightPanelOpen to false', () => {
+    const { result } = renderHook(() => useSlots(), { wrapper: SlotProvider })
+    act(() => {
+      result.current.toggleRightPanel()
+    })
+    expect(result.current.uiState.rightPanelOpen).toBe(false)
+  })
+
+  it('toggleRightPanel flips rightPanelOpen back to true', () => {
+    const { result } = renderHook(() => useSlots(), { wrapper: SlotProvider })
+    act(() => {
+      result.current.toggleRightPanel()
+    })
+    act(() => {
+      result.current.toggleRightPanel()
+    })
+    expect(result.current.uiState.rightPanelOpen).toBe(true)
+  })
+
+  it('toggleRightPanel preserves activeSlot', () => {
+    const { result } = renderHook(() => useSlots(), { wrapper: SlotProvider })
+    act(() => {
+      result.current.setActiveSlot('workflow')
+    })
+    act(() => {
+      result.current.toggleRightPanel()
+    })
+    expect(result.current.uiState.activeSlot).toBe('workflow')
   })
 })

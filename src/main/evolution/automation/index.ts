@@ -10,6 +10,7 @@ export { CreativityExecutor } from './CreativityExecutor'
 export { MemoryAnalysisCollector } from './MemoryAnalysisCollector'
 export { AsrLogCollector } from './AsrLogCollector'
 export { AsrOptimizationExecutor } from './AsrOptimizationExecutor'
+export { AsrReasoningChainExecutor } from './AsrReasoningChainExecutor'
 export { AsrVocabEvolutionExecutor } from './AsrVocabEvolutionExecutor'
 export { AsrAcousticOptimizationExecutor } from './AsrAcousticOptimizationExecutor'
 export { WallpaperCollector } from './WallpaperCollector'
@@ -24,6 +25,8 @@ export { TtsPreferenceCollector } from './TtsPreferenceCollector'
 export { TtsConfigOptimizationExecutor } from './TtsConfigOptimizationExecutor'
 export { TtsTypographyCollector } from './TtsTypographyCollector'
 export { TtsTypographyExecutor } from './TtsTypographyExecutor'
+export { FileOrganizerCollector } from '../file-organizer/FileOrganizerCollector'
+export { FileOrganizerExecutor } from '../file-organizer/FileOrganizerExecutor'
 
 // ═══════════════════════════════════════════
 //  MCP 模式迁移导出
@@ -46,3 +49,4 @@ export {
 
 export type { CollectorDef, ExecutorDef } from './registry'
 export type { Problem, AssignedProblem, FixResult, SignalCollector, FixExecutor, ProblemSource, Severity, PipelineStats } from './types'
+export type { ReasoningStep, ReasoningStepStatus, ReasoningChain } from './types'

@@ -136,6 +136,19 @@ export class TtsService {
   /** 当前延迟权重 0-1 */
   private latencyWeight = 0.4
 
+  /** ── Memory × TTS 深度融合：合成记录回调 ── */
+  /** TTS 合成完成后的回调（由 MemoryTtsBridge 注册，用于记录合成历史到 Memory） */
+  private onSynthesisComplete: ((record: {
+    timestamp: number
+    textSnippet: string
+    textLength: number
+    durationMs: number
+    params: EmotionTtsParams
+    engine: string
+    success: boolean
+    label: string
+  }) => void) | null = null
+
   // ── 重听与循环播放 ──
 
   /** 最近一次播报的原始文本（用于重听 replay） */
@@ -162,6 +175,25 @@ export class TtsService {
 
   setAudioSink(cb: (filePath: string) => void): void {
     this.onAudioReady = cb
+  }
+
+  /**
+   * 注册 Memory × TTS 深度融合的合成完成回调。
+   * 由 MemoryTtsBridge 在 AppRuntime 初始化时注册。
+   * 每次合成完成后，回调被调用，将合成事件数据传递给桥接器，
+   * 由桥接器决定是否需要记录到记忆系统。
+   */
+  setOnSynthesisComplete(cb: (record: {
+    timestamp: number
+    textSnippet: string
+    textLength: number
+    durationMs: number
+    params: EmotionTtsParams
+    engine: string
+    success: boolean
+    label: string
+  }) => void): void {
+    this.onSynthesisComplete = cb
   }
 
   /** 更新情感 TTS 参数（由情感分析器驱动） */
@@ -642,7 +674,26 @@ export class TtsService {
         experiment_group: experimentGroupId,
       })
       await this._synthesize(clean, tempFile)
-      log('PERF', 'tts_synthesis_done', { duration_ms: Date.now() - t0, chars: clean.length })
+      const synthDurationMs = Date.now() - t0
+      log('PERF', 'tts_synthesis_done', { duration_ms: synthDurationMs, chars: clean.length })
+
+      // ── [Memory × TTS 深度融合] 记录合成完成事件到桥接器 ──
+      // 桥接器负责决定是否写入 Memory（采样记录），TtsService 不直接依赖 Memory
+      if (this.onSynthesisComplete) {
+        const lastDecision = ttsRouter.getLastDecision()
+        const engine = lastDecision?.engine ?? (USE_LOCAL_TTS ? 'piper' : 'edge-tts')
+        const synthParams = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS
+        this.onSynthesisComplete({
+          timestamp: Date.now(),
+          textSnippet: clean.slice(0, 80),
+          textLength: clean.length,
+          durationMs: synthDurationMs,
+          params: synthParams,
+          engine,
+          success: true,
+          label: synthParams.label,
+        })
+      }
 
       // ── [隐式反馈] 记录本次 TTS 输出参数 ──
       const effectiveParams = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS
@@ -671,6 +722,22 @@ export class TtsService {
         implicitFeedbackTracker.onTtsCompleted()
       }, estimatedDurationMs)
     } catch (err) {
+      // ── [Memory × TTS 深度融合] 记录合成失败事件 ──
+      if (this.onSynthesisComplete) {
+        const lastDecision = ttsRouter.getLastDecision()
+        const engine = lastDecision?.engine ?? (USE_LOCAL_TTS ? 'piper' : 'edge-tts')
+        const synthParams = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS
+        this.onSynthesisComplete({
+          timestamp: Date.now(),
+          textSnippet: clean.slice(0, 80),
+          textLength: clean.length,
+          durationMs: Date.now() - t0,
+          params: synthParams,
+          engine,
+          success: false,
+          label: synthParams.label,
+        })
+      }
       this._logError(err)
     } finally {
       // 恢复原始参数（如果是实验变体）

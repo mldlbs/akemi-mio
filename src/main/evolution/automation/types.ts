@@ -7,7 +7,7 @@
  */
 
 // ── 问题来源类型 ──
-export type ProblemSource = 'tsc' | 'test' | 'lint' | 'log' | 'git' | 'runtime' | 'feature' | 'behavior' | 'tool' | 'tts'
+export type ProblemSource = 'tsc' | 'test' | 'lint' | 'log' | 'git' | 'runtime' | 'feature' | 'behavior' | 'tool' | 'tts' | 'file_organizer'
 
 // ── 问题严重度 ──
 export type Severity = 'error' | 'warning' | 'info'
@@ -87,4 +87,49 @@ export interface PipelineStats {
   avgDurationMs: number
   lastRunAt: number
   bySource: Record<ProblemSource, { collected: number; fixed: number; failed: number }>
+}
+
+// ═══════════════════════════════════════════
+//  推理链类型（ASR 引导 Plan 的中间步骤链）
+// ═══════════════════════════════════════════
+
+/** 推理链中单个步骤的状态 */
+export type ReasoningStepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped'
+
+/** 推理链中的单个中间步骤 */
+export interface ReasoningStep {
+  /** 步骤标识（格式: step_{index}_{timestamp}） */
+  id: string
+  /** 步骤序号（从 0 开始） */
+  index: number
+  /** 步骤描述 */
+  description: string
+  /** 步骤详细说明（executor 填充的上下文） */
+  detail?: string
+  /** 当前状态 */
+  status: ReasoningStepStatus
+  /** 执行结果文本 */
+  result?: string
+  /** 执行耗时（毫秒） */
+  durationMs?: number
+  /** 该步骤产生的输出（如补丁 ID、快照 ID） */
+  output?: Record<string, string>
+}
+
+/** 完整的推理链（包含中间步骤集合） */
+export interface ReasoningChain {
+  /** 关联的问题 ID */
+  problemId: string
+  /** 推理链标题 */
+  title: string
+  /** 步骤列表 */
+  steps: ReasoningStep[]
+  /** 创建时间戳 */
+  createdAt: number
+  /** 完成时间戳 */
+  completedAt?: number
+  /** 最终结论摘要 */
+  conclusion?: string
+  /** 是否全部成功 */
+  allSucceeded: boolean
 }

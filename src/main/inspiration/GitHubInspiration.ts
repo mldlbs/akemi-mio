@@ -103,9 +103,7 @@ export class GitHubInspiration {
     const allRepos = new Map<string, RawRepoInfo>()
 
     // 并发搜索所有 query
-    const results = await Promise.allSettled(
-      SEARCH_QUERIES.map((q) => this.searchRepos(q)),
-    )
+    const results = await Promise.allSettled(SEARCH_QUERIES.map((q) => this.searchRepos(q)))
 
     for (const result of results) {
       if (result.status === 'fulfilled') {
@@ -120,9 +118,7 @@ export class GitHubInspiration {
     }
 
     // 按 star 排序取 top
-    const repos = [...allRepos.values()]
-      .sort((a, b) => b.stars - a.stars)
-      .slice(0, MAX_REPOS)
+    const repos = [...allRepos.values()].sort((a, b) => b.stars - a.stars).slice(0, MAX_REPOS)
 
     if (repos.length === 0) {
       log('WARN', 'inspiration_no_repos_found')
@@ -176,7 +172,7 @@ export class GitHubInspiration {
 
     const url = `${GITHUB_API}/search/repositories?q=${encodeURIComponent(query)}&sort=stars&order=desc&per_page=${TOP_N_PER_QUERY}`
 
-    const res = await fetch(url, { headers })
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) })
     if (!res.ok) {
       if (res.status === 403 || res.status === 429) {
         log('WARN', 'inspiration_rate_limited', { query })
@@ -225,7 +221,7 @@ export class GitHubInspiration {
 
     const url = `${GITHUB_API}/repos/${owner}/${repo}/readme`
 
-    const res = await fetch(url, { headers })
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) })
     if (!res.ok) {
       if (res.status === 403 || res.status === 429) return null
       return null
@@ -238,10 +234,7 @@ export class GitHubInspiration {
   /**
    * 从 README 提取关键信息
    */
-  private analyzeReadme(
-    repo: RawRepoInfo,
-    readme: string,
-  ): { features: string[]; architecture: string[] } {
+  private analyzeReadme(repo: RawRepoInfo, readme: string): { features: string[]; architecture: string[] } {
     const features: string[] = []
     const architecture: string[] = []
 
@@ -259,18 +252,14 @@ export class GitHubInspiration {
       const lower = line.toLowerCase()
 
       // 特性章节
-      if (
-        /^##+\s*(features?|特性|功能|highlights?|特点)/i.test(line)
-      ) {
+      if (/^##+\s*(features?|特性|功能|highlights?|特点)/i.test(line)) {
         inFeatureSection = true
         inArchSection = false
         continue
       }
 
       // 架构章节
-      if (
-        /^##+\s*(architecture|arch|技术架构|架构|structure|design|tech stack|技术栈)/i.test(line)
-      ) {
+      if (/^##+\s*(architecture|arch|技术架构|架构|structure|design|tech stack|技术栈)/i.test(line)) {
         inArchSection = false
         inArchSection = true
         continue
@@ -316,9 +305,7 @@ export class GitHubInspiration {
   /**
    * 将缓存条目转为 CreativitySource 格式
    */
-  private entriesToSources(
-    entries: InspirationEntry[],
-  ): Array<{ name: string; content: string; type: 'knowledge'; weight: number }> {
+  private entriesToSources(entries: InspirationEntry[]): Array<{ name: string; content: string; type: 'knowledge'; weight: number }> {
     const sources: Array<{ name: string; content: string; type: 'knowledge'; weight: number }> = []
 
     for (const entry of entries) {

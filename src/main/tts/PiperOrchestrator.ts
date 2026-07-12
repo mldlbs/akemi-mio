@@ -517,12 +517,7 @@ export class PiperOrchestrator implements IEngineService {
         error: firstResult.error,
       })
 
-      const fallbackResult = await this.synthesizeWithModel(
-        text,
-        DEFAULT_PIPER_MODEL,
-        speed,
-        pitch,
-      )
+      const fallbackResult = await this.synthesizeWithModel(text, DEFAULT_PIPER_MODEL, speed, pitch)
 
       if (fallbackResult.ok) {
         const result: PiperSynthesizeResult = {
@@ -566,12 +561,7 @@ export class PiperOrchestrator implements IEngineService {
    * 重构为 Result<string, string> 替代 ad-hoc {success, audioFile?, error?} 模式。
    * Ok 分支携带音频文件路径，Err 分支携带错误描述。
    */
-  private synthesizeWithModel(
-    text: string,
-    model: string,
-    speed: number,
-    pitch: number,
-  ): Promise<Result<string, string>> {
+  private synthesizeWithModel(text: string, model: string, speed: number, pitch: number): Promise<Result<string, string>> {
     const tempFile = join(tmpdir(), `akemi-mio-piper-${Date.now()}.wav`)
 
     return new Promise((resolve) => {
@@ -596,21 +586,30 @@ export class PiperOrchestrator implements IEngineService {
           'python',
           [
             PIPER_SCRIPT,
-            '--model', modelPath,
-            '--output_file', tempFile,
-            '--length_scale', lengthScale,
-            '--noise_scale', noiseScale,
-            '--noise_w', noiseW,
+            '--model',
+            modelPath,
+            '--output_file',
+            tempFile,
+            '--length_scale',
+            lengthScale,
+            '--noise_scale',
+            noiseScale,
+            '--noise_w',
+            noiseW,
           ],
           {
             timeout: this.SYNTHESIS_TIMEOUT_MS,
             windowsHide: true,
           },
-          (err) => {
-            if (err) {
+          (execErr) => {
+            if (execErr) {
               // 清理可能不完整的文件
-              try { unlinkSync(tempFile) } catch { /* ignore */ }
-              resolve(err(err.message || String(err)))
+              try {
+                unlinkSync(tempFile)
+              } catch {
+                /* ignore */
+              }
+              resolve(err(execErr.message || String(execErr)))
             } else {
               resolve(ok(tempFile))
             }

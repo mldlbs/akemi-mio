@@ -36,6 +36,7 @@ import { setProceduralMemory, setTtsService, setAsrService } from '../tool/deps'
 import { UnifiedKnowledgeQuery, MemoryPluginAdapter, adaptProceduralMemory, adaptReflectLoop, adaptFailureAnalyzer } from '../knowledge'
 import { agentPluginRegistry, ObserveStagePluginAdapter, ThinkStagePluginAdapter, ReflectStagePluginAdapter } from './plugin'
 import type { IndustrialOdeLayer } from '../gongye-songge'
+import type { WorkspaceCleanupLayer } from '../workspace-cleanup'
 import type { IEngineService, EngineStatus, EngineMetrics } from '../engine/types'
 
 export class AgentService implements IEngineService {
@@ -97,6 +98,10 @@ export class AgentService implements IEngineService {
   // ── Plan:工业颂歌 公众号排版处理 上层增强层 ──
   /** IndustrialOdeLayer — 非侵入式预处理/后处理增强 */
   private industrialOdeLayer: IndustrialOdeLayer | null = null
+
+  // ── Plan:清理工作区 - 整理文件目录 上层增强层 ──
+  /** WorkspaceCleanupLayer — 非侵入式预处理/后处理增强 */
+  private workspaceCleanupLayer: WorkspaceCleanupLayer | null = null
 
   // ── 统一知识源查询引擎 ──
   /** KnowledgeQuery — 跨 Memory/Agent 统一查询 */
@@ -246,6 +251,19 @@ export class AgentService implements IEngineService {
   /** 获取 IndustrialOdeLayer 实例 */
   getIndustrialOdeLayer(): IndustrialOdeLayer | null {
     return this.industrialOdeLayer
+  }
+
+  /** 设置 WorkspaceCleanupLayer（Plan:清理工作区 - 整理文件目录） */
+  setWorkspaceCleanupLayer(layer: WorkspaceCleanupLayer | null): void {
+    this.workspaceCleanupLayer = layer
+    if (layer) {
+      log('INFO', 'workspace_cleanup_layer_set', { features: layer.getActiveFeatures() })
+    }
+  }
+
+  /** 获取 WorkspaceCleanupLayer 实例 */
+  getWorkspaceCleanupLayer(): WorkspaceCleanupLayer | null {
+    return this.workspaceCleanupLayer
   }
 
   registerIntentHandler(handler: IntentHandler): void {
@@ -495,6 +513,26 @@ export class AgentService implements IEngineService {
         preProcessData = { needsFormatting, ...(processedText !== text ? { textModified: true } : {}) }
       }
 
+      // ── Plan:清理工作区 - 整理文件目录 — 预处理 ──
+      let needsCleanup = false
+      let workspacePreData: Record<string, unknown> = {}
+      if (this.workspaceCleanupLayer && this.workspaceCleanupLayer.getActiveFeatures().length > 0) {
+        const preCtx = await this.workspaceCleanupLayer.preProcess({
+          rawText: processedText,
+          source,
+          requestId: rid,
+          processedText,
+          needsCleanup: false,
+        })
+        processedText = preCtx.processedText
+        needsCleanup = preCtx.needsCleanup
+        workspacePreData = {
+          needsCleanup,
+          hasStats: !!preCtx.workspaceStats,
+          ...(preCtx.workspaceStats ? { workspaceStats: preCtx.workspaceStats } : {}),
+        }
+      }
+
       // v2: 委托 ChatExecutor 执行，传入 sessionId 用于加载历史
       const reply = await this.chatExecutor!.run(processedText, rid, source, extra, sessionId, noTts)
       if (!reply || reply.error) return reply || { error: 'NO_REPLY' }
@@ -514,6 +552,25 @@ export class AgentService implements IEngineService {
           log('INFO', 'industrial_ode_post_formatted', {
             request_id: rid,
             original_len: reply.reply.length,
+            formatted_len: postCtx.text.length,
+            description: postCtx.description,
+          })
+        }
+      }
+
+      // ── Plan:清理工作区 - 整理文件目录 — 后处理 ──
+      if (this.workspaceCleanupLayer && this.workspaceCleanupLayer.getActiveFeatures().length > 0 && finalReply.reply) {
+        const postCtx = await this.workspaceCleanupLayer.postProcess({
+          rawReply: finalReply.reply,
+          formattedReply: finalReply.reply,
+          requestId: rid,
+          preProcessData: workspacePreData,
+        })
+        if (postCtx.enhanced && postCtx.text !== finalReply.reply) {
+          finalReply = { ...finalReply, reply: postCtx.text }
+          log('INFO', 'workspace_cleanup_post_enhanced', {
+            request_id: rid,
+            original_len: finalReply.reply.length,
             formatted_len: postCtx.text.length,
             description: postCtx.description,
           })

@@ -133,12 +133,28 @@ export function createWindow(stateManager: StateManager): BrowserWindow {
   })
   mainWindow.on('unresponsive', () => {
     log('WARN', 'renderer_unresponsive', {})
+    let responded = false
+    const onResponsive = () => {
+      responded = true
+      mainWindow?.removeListener('responsive', onResponsive)
+      log('INFO', 'renderer_responsive_recovered', {})
+    }
+    mainWindow.on('responsive', onResponsive)
     setTimeout(() => {
-      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isCrashed()) return
-      log('ERROR', 'renderer_force_reload', {})
-      runGlobalDisposers()
-      app.relaunch()
-      app.exit(0)
+      mainWindow?.removeListener('responsive', onResponsive)
+      if (responded) return
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.isCrashed()) {
+        log('ERROR', 'renderer_force_reload', {})
+        runGlobalDisposers()
+        app.relaunch()
+        app.exit(0)
+      } else if (!responded) {
+        // 窗口未恢复也未崩溃 → 尝试 reload（不重启整个应用）
+        log('WARN', 'renderer_still_unresponsive_after_timeout', {})
+        try {
+          mainWindow?.webContents.reload()
+        } catch {}
+      }
     }, 10000)
   })
 
@@ -154,9 +170,12 @@ export function createWindow(stateManager: StateManager): BrowserWindow {
 
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
-    // mainWindow.webContents.openDevTools()
+    mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    mainWindow.webContents.once('did-finish-load', () => {
+      mainWindow.webContents.openDevTools()
+    })
   }
 
   return mainWindow

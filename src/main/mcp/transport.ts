@@ -203,6 +203,7 @@ export class HttpTransport implements Transport {
           ...this.headers,
         },
         signal: this.abortController.signal,
+        timeout: this.requestTimeoutMs,
       }
 
       const req = requestFn(options, (res) => {
@@ -230,6 +231,10 @@ export class HttpTransport implements Transport {
       })
 
       req.on('error', reject)
+      req.on('timeout', () => {
+        req.destroy()
+        reject(new Error('SSE connection timeout'))
+      })
       req.end()
     })
   }

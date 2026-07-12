@@ -20,6 +20,7 @@ import { shortcutsGuideWidget } from './ShortcutsGuideWidget'
 import { rssSummaryWidget } from './RssSummaryWidget'
 import { memoryContextWidget } from './MemoryContextWidget'
 import { memoryFlashWidget } from './MemoryFlashWidget'
+import { fileOrganizerProgressWidget } from './FileOrganizerProgressWidget'
 
 /**
  * 注册所有内置 wallpaper widget 插件。
@@ -40,6 +41,7 @@ export function registerAllWidgets(): void {
   wallpaperWidgetRegistry.register(rssSummaryWidget)
   // memoryContextWidget 已移至 SystemDock
   wallpaperWidgetRegistry.register(memoryFlashWidget)
+  wallpaperWidgetRegistry.register(fileOrganizerProgressWidget)
 
   // overlay 区 — 实时 Canvas 仪表盘
   wallpaperWidgetRegistry.register(evolutionDashboardCanvasWidget)

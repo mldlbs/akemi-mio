@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSlots } from '../slots/SlotContext'
 import { StatusBar } from './StatusBar'
 
@@ -16,8 +16,10 @@ const SLOT_META: Record<string, { label: string; icon: string }> = {
 }
 
 export function TopBar({ onOpenSettings }: TopBarProps) {
-  const { uiState, toggleSidebar, setActiveSlot } = useSlots()
+  const { uiState, toggleSidebar, toggleRightPanel, setActiveSlot } = useSlots()
   const [slotMenuOpen, setSlotMenuOpen] = useState(false)
+  const [isMaximized, setIsMaximized] = useState(false)
+  const [isFullScreen, setIsFullScreen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -28,6 +30,22 @@ export function TopBar({ onOpenSettings }: TopBarProps) {
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    ;(window as any).electronAPI?.isMaximized?.().then((r: any) => {
+      if (r) setIsMaximized(r.isMaximized)
+    })
+  }, [])
+
+  const handleMaximize = useCallback(async () => {
+    const r = await (window as any).electronAPI?.maximizeWindow?.()
+    if (r) setIsMaximized(r.isMaximized)
+  }, [])
+
+  const handleFullscreen = useCallback(async () => {
+    const r = await (window as any).electronAPI?.toggleFullscreen?.()
+    if (r) setIsFullScreen(r.isFullScreen)
   }, [])
 
   const currentSlot = SLOT_META[uiState.activeSlot] || SLOT_META.chat
@@ -73,6 +91,15 @@ export function TopBar({ onOpenSettings }: TopBarProps) {
 
         <button className="topbar-btn" onClick={onOpenSettings} title="设置">
           <i className="ri-settings-3-line" />
+        </button>
+        <button className="topbar-btn" onClick={toggleRightPanel} title={uiState.rightPanelOpen ? '收起右侧面板' : '展开右侧面板'}>
+          <i className={`ri-layout-right-2-${uiState.rightPanelOpen ? 'fill' : 'line'}`} />
+        </button>
+        <button className="topbar-btn" onClick={handleMaximize} title={isMaximized ? '还原窗口' : '最大化'}>
+          <i className={isMaximized ? 'ri-checkbox-multiple-blank-line' : 'ri-checkbox-line'} />
+        </button>
+        <button className="topbar-btn" onClick={handleFullscreen} title={isFullScreen ? '退出全屏' : '全屏'}>
+          <i className="ri-fullscreen-line" />
         </button>
         <button className="topbar-window-btn" onClick={() => window.electronAPI.minimizeWindow()} title="最小化">
           <i className="ri-subtract-line" />

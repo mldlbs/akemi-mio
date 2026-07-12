@@ -109,12 +109,12 @@ function getToolSourcePath(toolName: string): string | null {
 
   // 备选：使用静态映射表（部分常用工具）
   const staticMap: Record<string, string> = {
-    'read_file': 'ReadFileTool.ts',
-    'write_file': 'WriteFileTool.ts',
-    'edit_file': 'EditFileTool.ts',
-    'grep': 'GrepTool.ts',
-    'list_files': 'ListFilesTool.ts',
-    'run_command': 'RunCommandTool.ts',
+    read_file: 'ReadFileTool.ts',
+    write_file: 'WriteFileTool.ts',
+    edit_file: 'EditFileTool.ts',
+    grep: 'GrepTool.ts',
+    list_files: 'ListFilesTool.ts',
+    run_command: 'RunCommandTool.ts',
   }
 
   const defsDir = join(CONFIG.PROJECT_ROOT, CONFIG.DEFINITIONS_DIR)
@@ -131,12 +131,7 @@ function getToolSourcePath(toolName: string): string | null {
 // LLM 提示生成
 // =============================================================================
 
-function buildImprovementPrompt(
-  toolName: string,
-  sourceCode: string,
-  errorContext: string,
-  improvementType: ImprovementType,
-): string {
+function buildImprovementPrompt(toolName: string, sourceCode: string, errorContext: string, improvementType: ImprovementType): string {
   const improvementGuides: Record<ImprovementType, string> = {
     retry: `## 优化方向：添加重试机制
 - 在工具 handler 中对 TRANSIENT 类型错误添加自动重试（最多 3 次，指数退避）
@@ -253,11 +248,7 @@ interface AbTestResult {
  * 2. 新代码平均延迟不会显著超标（不超过旧代码 2 倍或超 10s 以上）
  * 3. 样本数 >= 2 才有统计意义
  */
-async function runAbTest(
-  toolName: string,
-  oldSourceCode: string,
-  newSourceCode: string,
-): Promise<AbTestResult> {
+async function runAbTest(toolName: string, oldSourceCode: string, newSourceCode: string): Promise<AbTestResult> {
   const historicalCalls = toolCallLogStore.getHistoricalSuccessfulCalls(toolName, 5)
   if (historicalCalls.length < 2) {
     return {
@@ -273,16 +264,12 @@ async function runAbTest(
   // ── 阶段 1：用旧代码建立基线 ──
   const baselineResults = await executeTestCalls(toolName, oldSourceCode, historicalCalls)
   const baselineSuccessRate = baselineResults.passed / baselineResults.total
-  const baselineAvgLatency = baselineResults.total > 0
-    ? Math.round(baselineResults.latencyTotal / baselineResults.total)
-    : 0
+  const baselineAvgLatency = baselineResults.total > 0 ? Math.round(baselineResults.latencyTotal / baselineResults.total) : 0
 
   // ── 阶段 2：用新代码执行候选 ──
   const candidateResults = await executeTestCalls(toolName, newSourceCode, historicalCalls)
   const candidateSuccessRate = candidateResults.passed / candidateResults.total
-  const candidateAvgLatency = candidateResults.total > 0
-    ? Math.round(candidateResults.latencyTotal / candidateResults.total)
-    : 0
+  const candidateAvgLatency = candidateResults.total > 0 ? Math.round(candidateResults.latencyTotal / candidateResults.total) : 0
 
   // ── 阶段 3：对比判定 ──
   let passed = true
@@ -300,9 +287,10 @@ async function runAbTest(
     reasons.push(`延迟显著增加: ${baselineAvgLatency}ms → ${candidateAvgLatency}ms`)
   }
 
-  const summary = reasons.length > 0
-    ? `A/B 测试失败: ${reasons.join('; ')}`
-    : `A/B 测试通过: 成功率 ${(candidateSuccessRate * 100).toFixed(0)}%, 延迟 ${candidateAvgLatency}ms`
+  const summary =
+    reasons.length > 0
+      ? `A/B 测试失败: ${reasons.join('; ')}`
+      : `A/B 测试通过: 成功率 ${(candidateSuccessRate * 100).toFixed(0)}%, 延迟 ${candidateAvgLatency}ms`
 
   log('INFO', 'tool_evolution_ab_test_result', {
     toolName,
@@ -331,15 +319,9 @@ interface TestCallsResult {
  * 用指定源码构建 handler 并执行一组测试调用
  * 通过 eval + Function 动态编译源码来模拟旧/新两个版本的 handler
  */
-function executeTestCalls(
-  toolName: string,
-  sourceCode: string,
-  testCalls: ToolCallRecord[],
-): TestCallsResult {
+function executeTestCalls(toolName: string, sourceCode: string, testCalls: ToolCallRecord[]): TestCallsResult {
   // 尝试从源码中提取 handler 函数体
-  const handlerMatch = sourceCode.match(
-    /handler:\s*(async)?\s*\([^)]*\)\s*(:\s*Promise[^\{]*)?\s*\{([\s\S]*?)\n\}/,
-  )
+  const handlerMatch = sourceCode.match(/handler:\s*(async)?\s*\([^)]*\)\s*(:\s*Promise[^\{]*)?\s*\{([\s\S]*?)\n\}/)
   if (!handlerMatch) {
     // 无法解析 handler 时，使用当前运行时的工具处理器
     log('WARN', 'tool_evolution_ab_parse_failed', { toolName })
@@ -359,7 +341,11 @@ function executeTestCalls(
     try {
       // 通过动态 Function 模拟执行
       // 实际我们无法完美重现场景，此处主要做结构验证
-      const fn = new Function('args', 'formatToolResult', 'formatToolError', `
+      const fn = new Function(
+        'args',
+        'formatToolResult',
+        'formatToolError',
+        `
         try {
           ${sourceCode}
           if (typeof handler === 'function') return handler(args)
@@ -367,7 +353,8 @@ function executeTestCalls(
         } catch (e: any) {
           return { _error: e.message }
         }
-      `)
+      `,
+      )
 
       const mockFormatResult = (v: any) => String(v)
       const mockFormatError = (e: string) => `error: ${e}`
@@ -390,10 +377,7 @@ function executeTestCalls(
 /**
  * 使用运行时工具处理器执行测试调用
  */
-function executeWithCurrentHandler(
-  toolName: string,
-  testCalls: ToolCallRecord[],
-): TestCallsResult {
+function executeWithCurrentHandler(toolName: string, testCalls: ToolCallRecord[]): TestCallsResult {
   const tools = getAllTools()
   const tool = tools.find((t) => t.name === toolName)
   if (!tool) {
@@ -608,9 +592,7 @@ export class ToolEvolutionExecutor implements FixExecutor {
 
     // 4a: 尝试 FixTemplateRegistry 确定性修复
     const patterns = failurePatternAnalyzer.analyzeTool(toolName)
-    const targetPattern = patterns.length > 0
-      ? patterns.find((p) => p.suggestedFix === suggestion) || patterns[0]
-      : null
+    const targetPattern = patterns.length > 0 ? patterns.find((p) => p.suggestedFix === suggestion) || patterns[0] : null
 
     if (targetPattern) {
       generatedCode = fixTemplateRegistry.generateFix(sourceCode, toolName, targetPattern)
@@ -852,7 +834,7 @@ erroRate: ${errorRate || '未知'}`,
    */
   private async runTscValidation(): Promise<{ passed: boolean; errors: string[] }> {
     try {
-      await execAsync('npx tsc --noEmit -p tsconfig.node.json 2>&1', {
+      await execAsync('node_modules/.bin/tsc --noEmit -p tsconfig.node.json 2>&1', {
         timeout: CONFIG.TSC_TIMEOUT_MS,
       })
 

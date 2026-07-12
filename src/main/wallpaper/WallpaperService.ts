@@ -135,3 +135,22 @@ export { EvolutionDashboardService, type EvolutionDashboardState } from './Evolu
 // =============================================================================
 
 export { MemoryContextService, type MemoryCardItem, type MemoryContextPayload, type MemoryContextConfig, type MemoryContextDisplayType } from './MemoryContextService'
+
+// =============================================================================
+// Re-export file organizer progress service
+// =============================================================================
+
+export { FileOrganizerProgressService, type OrganizerProgressPayload, type FileMoveEvent, type FileMoveResult, type FileMoveStatus, type SessionStatus } from './FileOrganizerProgressService'
+
+// =============================================================================
+// Re-export wallpaper plugin system
+// =============================================================================
+
+export { WallpaperPluginRegistry, UserBehaviorPluginAdapter } from './plugin'
+export type {
+  IWallpaperPlugin,
+  IBehaviorProvider,
+  WallpaperPluginManifest,
+  WallpaperPluginCapability,
+  WallpaperBehaviorSnapshot,
+} from './plugin'

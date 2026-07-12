@@ -5,6 +5,9 @@ export function createElectronAPI(ipc: IpcRenderer) {
   return {
     closeWindow: (): Promise<{ success: boolean }> => ipc.invoke('window:close'),
     minimizeWindow: (): Promise<{ success: boolean }> => ipc.invoke('window:minimize'),
+    maximizeWindow: (): Promise<{ success: boolean; isMaximized: boolean }> => ipc.invoke('window:maximize'),
+    isMaximized: (): Promise<{ isMaximized: boolean }> => ipc.invoke('window:isMaximized'),
+    toggleFullscreen: (): Promise<{ success: boolean; isFullScreen: boolean }> => ipc.invoke('window:fullscreen'),
 
     transcribe: (audio: ArrayBuffer): Promise<{ text: string; request_id?: string; error?: string }> => ipc.invoke('asr:transcribe', audio),
 
@@ -841,6 +844,47 @@ export function createElectronAPI(ipc: IpcRenderer) {
     ): Promise<{ success: boolean; error?: string }> => ipc.invoke('wallpaper:memoryContextConfig:set', config),
 
     refreshMemoryContext: (): Promise<{ success: boolean; error?: string }> => ipc.invoke('wallpaper:memoryContext:refresh'),
+
+    // ── 文件整理进度可视化 ──
+    onOrganizerProgress: (
+      callback: (data: {
+        status: string
+        totalFiles: number
+        completedFiles: number
+        failedFiles: number
+        skippedFiles: number
+        currentFile: string | null
+        currentTarget: string | null
+        percentComplete: number
+        recentMoves: Array<{
+          filePath: string
+          sourcePath: string
+          targetPath: string
+          ruleId: string
+          ruleSource: string
+          status: string
+          durationMs?: number
+          error?: string
+          reason?: string
+          timestamp: number
+        }>
+        startTime: number | null
+        endTime: number | null
+        summary: string
+        isPaused: boolean
+        updatedAt: number
+      }) => void,
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('organizer:progress', handler)
+      return () => {
+        ipc.removeListener('organizer:progress', handler)
+      }
+    },
+
+    organizerPause: (): Promise<{ success: boolean }> => ipc.invoke('organizer:pause'),
+    organizerResume: (): Promise<{ success: boolean }> => ipc.invoke('organizer:resume'),
+    organizerSkip: (): Promise<{ success: boolean }> => ipc.invoke('organizer:skip'),
 
     // ── M6.3 Guardrail Metrics Query API ──
 

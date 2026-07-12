@@ -18,6 +18,9 @@ import type { LowConfidenceSegment } from './AsrLogStore'
 import { asrConfidenceScorer, DEFAULT_CONFIDENCE_THRESHOLD } from './AsrConfidenceScorer'
 import { acousticEnvClassifier } from './AsrAcousticEnvironmentClassifier'
 import { SpeechPluginRegistry, WhisperGpuAsrPlugin, WhisperCpuAsrPlugin, BaiduAsrPlugin } from '../speech'
+import { MultiPathDecoderManager, multiPathDecoderManager } from './multipath/MultiPathDecoderManager'
+import { fusionEngine } from './multipath/FusionEngine'
+import type { MultiPathFusionResult, DecoderHealth } from './multipath/types'
 
 /** 检查识别结果是否有意义：有效字符占比过低则判定为乱码 */
 function isGarbled(text: string): boolean {
@@ -83,6 +86,10 @@ export class AsrService {
   private conversationContext: AsrConversationContext | null = null
   /** 最近一次识别的语音情感分析结果 */
   private _lastVoiceEmotion: VoiceEmotion | null = null
+  /** 多路径解码融合管理器（可选，启用后替代顺序降级逻辑） */
+  private multiPathManager: MultiPathDecoderManager = multiPathDecoderManager
+  /** 多路径融合是否已初始化 */
+  private multiPathInitialized = false
 
   constructor(gpuEngine: WhisperGpuEngine, baiduEngine: BaiduEngine) {
     this.gpuEngine = gpuEngine
@@ -385,7 +392,133 @@ export class AsrService {
     })
   }
 
-  async transcribe(audioBuffer: ArrayBuffer, requestId?: string): Promise<{ text: string; request_id: string; error?: string; voiceEmotion?: VoiceEmotion }> {
+  // ══════════════════════════════════════════
+  //  多路径解码融合集成
+  // ══════════════════════════════════════════
+
+  /**
+   * 初始化多路径解码融合系统。
+   *
+   * 将现有的 GPU、CPU（如果已初始化）和 Baidu 引擎注册为多路径解码器，
+   * 启动心跳监控，注册错误回调。
+   *
+   * 调用此方法后，transcribe() 的 useMultiPath 选项才能生效。
+   * 应在 ASR 引擎全部就绪后调用一次。
+   *
+   * @param options 可选的融合配置（覆盖默认值）
+   */
+  initializeMultiPath(options?: {
+    config?: Partial<import('./multipath/types').MultiPathFusionConfig>
+    enabled?: boolean
+  }): void {
+    if (this.multiPathInitialized) return
+
+    if (options?.config) {
+      this.multiPathManager.updateConfig(options.config)
+    }
+
+    // 注册 GPU 引擎
+    if (this.gpuEngine.getStatus().loaded) {
+      this.multiPathManager.registerWhisperGpu(this.gpuEngine, {
+        name: 'whisper_gpu',
+        modelSize: 'small',
+        timeoutMs: 15000,
+        initialWeight: 1.2, // GPU 引擎质量高，权重略高
+        confidenceBias: 0,
+      })
+    }
+
+    // 注册 CPU 引擎（如果已初始化）
+    if (this.cpuEngine && this.cpuEngine.getStatus().loaded) {
+      this.multiPathManager.registerWhisperCpu(this.cpuEngine, {
+        name: 'whisper_cpu',
+        modelSize: 'tiny',
+        timeoutMs: 25000,
+        initialWeight: 0.8,
+        confidenceBias: -0.05, // tiny 模型倾向于高估置信度，略微下调
+      })
+    }
+
+    // 注册 Baidu 引擎（如果有凭证）
+    if (this.baiduApiKey && this.baiduSecretKey) {
+      this.multiPathManager.registerBaidu(
+        this.baiduEngine,
+        this.baiduApiKey,
+        this.baiduSecretKey,
+        {
+          name: 'baidu',
+          timeoutMs: 20000,
+          initialWeight: 0.7,
+          confidenceBias: 0.05,
+        },
+      )
+    }
+
+    // 注册错误回调（记录日志）
+    this.multiPathManager.onError((msg) => {
+      log('WARN', 'asr_multipath_error_event', {
+        type: msg.type,
+        decoder: msg.decoderName,
+        message: msg.message.slice(0, 120),
+      })
+    })
+
+    this.multiPathInitialized = true
+
+    // 如果配置为启用，启动心跳
+    if (options?.enabled !== false) {
+      this.multiPathManager.setEnabled(true)
+    }
+
+    log('INFO', 'asr_multipath_initialized', {
+      decoder_count: this.multiPathManager.getDecoderNames().length,
+      enabled: this.multiPathManager.getConfig().enabled,
+      active_count: this.multiPathManager.getActiveDecoders().length,
+    })
+  }
+
+  /**
+   * 启用或禁用多路径融合。
+   * 切换后，transcribe() 的 useMultiPath 行为随之变化。
+   */
+  setMultiPathEnabled(enabled: boolean): void {
+    if (!this.multiPathInitialized && enabled) {
+      this.initializeMultiPath({ enabled })
+      return
+    }
+    this.multiPathManager.setEnabled(enabled)
+    log('INFO', 'asr_multipath_enabled', { enabled })
+  }
+
+  /**
+   * 检查多路径融合是否就绪。
+   */
+  isMultiPathReady(): boolean {
+    return this.multiPathInitialized && this.multiPathManager.isReady()
+  }
+
+  /**
+   * 获取多路径管理器（供外部高级操作）。
+   */
+  getMultiPathManager(): MultiPathDecoderManager {
+    return this.multiPathManager
+  }
+
+  /**
+   * 获取多路径解码器的健康状态（供调试/UI 展示）。
+   */
+  getMultiPathHealth(): DecoderHealth[] {
+    return this.multiPathManager.getAllHealth()
+  }
+
+  /**
+   * 获取多路径融合的权重表（供调试/UI 展示）。
+   */
+  getMultiPathWeights(): Array<{ name: string; baseWeight: number; dynamicWeight: number; accuracy: number }> {
+    return fusionEngine.getWeightTable()
+  }
+
+  async transcribe(audioBuffer: ArrayBuffer, requestId?: string, options?: { useMultiPath?: boolean }): Promise<{ text: string; request_id: string; error?: string; voiceEmotion?: VoiceEmotion }> {
     const rid = requestId || createRequestId()
     this._pendingRequests++
 
@@ -436,6 +569,59 @@ export class AsrService {
       } catch (ee) {
         // 特征分析失败不应阻塞 ASR
         log('WARN', 'asr_feature_analysis_failed', { error: String(ee) })
+      }
+
+      // ── 多路径解码融合路径（启用时替代顺序降级逻辑） ──
+      if (options?.useMultiPath && this.isMultiPathReady()) {
+        try {
+          const fusionResult = await this.multiPathManager.transcribe(float32, rid)
+
+          // 日志记录
+          log('INFO', 'transcription', {
+            request_id: rid,
+            text: fusionResult.text,
+            audio_len_s: audioDurationSec,
+            engine: `multipath(${fusionResult.primaryEngine})`,
+            confidence: Math.round(fusionResult.confidence * 100),
+            fusion_method: fusionResult.fusionMethod,
+            active_decoders: fusionResult.activeDecoderCount,
+            degraded: fusionResult.degraded,
+          })
+
+          // 记录每个解码器的识别日志
+          for (const dr of fusionResult.decoderResults) {
+            if (dr.success) {
+              this.recordRecognition(
+                dr.name as 'whisper_gpu' | 'whisper_cpu' | 'baidu',
+                dr.text,
+                rid,
+                audioDurationSec,
+                dr.latencyMs,
+                { environment, confidence: dr.confidence },
+              )
+              this.recordLowConfidenceIfNeeded(dr.text, dr.name as 'whisper_gpu' | 'whisper_cpu' | 'baidu', rid, audioDurationSec, dr.confidence)
+            }
+          }
+
+          // 降级情况下记录日志
+          if (fusionResult.degraded) {
+            const failed = fusionResult.decoderResults
+              .filter((r) => !r.success)
+              .map((r) => `${r.name}:${r.error?.slice(0, 60)}`)
+            log('WARN', 'asr_multipath_degraded', {
+              request_id: rid,
+              failed_decoders: failed.join('; '),
+              active: fusionResult.activeDecoderCount,
+              total: fusionResult.totalDecoderCount,
+            })
+          }
+
+          return { text: fusionResult.text, request_id: rid, voiceEmotion }
+        } catch (mpErr) {
+          const msg = mpErr instanceof Error ? mpErr.message : String(mpErr)
+          log('WARN', 'asr_multipath_failed_fallback_sequential', { request_id: rid, error: msg })
+          // 多路径失败，降级到顺序执行
+        }
       }
 
       // 1. GPU Whisper（Vulkan 加速，RTX 3060）

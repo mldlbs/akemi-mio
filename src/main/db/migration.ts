@@ -789,6 +789,71 @@ const MIGRATIONS: Migration[] = [
     `,
     category: 'index',
   },
+  {
+    version: 36,
+    sql: `
+      ALTER TABLE memories ADD COLUMN structured_data TEXT;
+    `,
+    revert: '',
+    category: 'schema',
+  },
+  {
+    version: 37,
+    sql: `
+      CREATE TABLE IF NOT EXISTS memories_new (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL CHECK(type IN ('user_fact', 'interaction', 'task_state', 'user_profile', 'fictional')),
+        content TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 0.5,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        tier TEXT NOT NULL DEFAULT 'ephemeral',
+        reinforce_count INTEGER NOT NULL DEFAULT 0,
+        behavior_score REAL NOT NULL DEFAULT 0.5,
+        last_accessed_at INTEGER NOT NULL DEFAULT 0,
+        access_count INTEGER NOT NULL DEFAULT 0,
+        is_pinned INTEGER NOT NULL DEFAULT 0,
+        manual_score_override REAL,
+        topics TEXT NOT NULL DEFAULT '[]',
+        utility_score REAL NOT NULL DEFAULT 0.5,
+        agent_reference_count INTEGER NOT NULL DEFAULT 0,
+        user_confirmed_useful_count INTEGER NOT NULL DEFAULT 0,
+        last_utility_update_at INTEGER NOT NULL DEFAULT 0,
+        structured_data TEXT
+      );
+      INSERT INTO memories_new SELECT * FROM memories;
+      DROP TABLE memories;
+      ALTER TABLE memories_new RENAME TO memories;
+      CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
+      CREATE INDEX IF NOT EXISTS idx_memories_content ON memories(content);
+    `,
+    revert: '',
+    category: 'schema',
+    irreversible: true,
+  },
+  {
+    version: 38,
+    sql: `
+      CREATE TABLE IF NOT EXISTS evolution_checkpoints (
+        id TEXT PRIMARY KEY,
+        cycle_id TEXT NOT NULL,
+        phase TEXT NOT NULL CHECK(phase IN ('pre_cycle','pre_pipeline','in_collect','pre_execute','post_execute','pre_commit')),
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','in_progress','completed','failed','rolled_back','interrupted')),
+        git_snapshot_branch TEXT,
+        stash_message TEXT,
+        target_files TEXT,
+        git_head_hash TEXT,
+        step_data TEXT,
+        created_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_evo_ckpt_cycle ON evolution_checkpoints(cycle_id);
+      CREATE INDEX IF NOT EXISTS idx_evo_ckpt_status ON evolution_checkpoints(status);
+    `,
+    revert: 'DROP TABLE IF EXISTS evolution_checkpoints;',
+    category: 'schema',
+  },
 ]
 
 // 导出迁移数组供测试验证

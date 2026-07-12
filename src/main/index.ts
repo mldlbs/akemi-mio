@@ -2,10 +2,19 @@ import './ort-log'
 import { app } from 'electron'
 import { AppRuntime } from './bootstrap/AppRuntime'
 
+// 禁用 GPU 加速 — 新版本 Electron/Chrome 的 GPU 进程有兼容性问题
+app.disableHardwareAcceleration()
+
+// 远程调试端口 — 用于抓取渲染进程控制台日志
+app.commandLine.appendSwitch('remote-debugging-port', '9222')
+
 // 透明窗口：阻止 Chromium 在失焦时暂停合成渲染，防止 DWM 刷白
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+// 禁用 GPU 加速避免渲染进程崩溃（Windows 上 GPU 驱动兼容性问题）
+app.commandLine.appendSwitch('disable-gpu')
+app.commandLine.appendSwitch('disable-software-rasterizer')
 
 // 全局崩溃防护
 import { log } from './logger/Logger'

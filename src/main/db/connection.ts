@@ -18,24 +18,38 @@ import { runMigrations } from './migration'
 class CompatStatement {
   private stmt: any
   private _columns: string[] = []
+  private _rows: any[] | null = null
+  private _rowIndex: number = 0
 
   constructor(stmt: any) {
     this._columns = stmt.columns().map((c: any) => c.name)
     this.stmt = stmt
   }
 
-  bind(_params: any[]): this {
+  bind(params: any[]): this {
+    if (params && params.length > 0) {
+      try {
+        this.stmt.bind(...params)
+      } catch {}
+    }
     return this
   }
   step(): boolean {
-    try {
-      const row = this.stmt.get()
-      if (row === undefined) return false
-      this._currentRow = row
-      return true
-    } catch {
-      return false
+    if (this._rows === null) {
+      try {
+        this._rows = this.stmt.all()
+      } catch {
+        try {
+          this.stmt.run()
+        } catch {}
+        this._rows = []
+      }
+      this._rowIndex = 0
     }
+    if (this._rowIndex >= this._rows.length) return false
+    this._currentRow = this._rows[this._rowIndex]
+    this._rowIndex++
+    return true
   }
   private _currentRow: any = null
   getAsObject(): Record<string, any> {
@@ -48,10 +62,13 @@ class CompatStatement {
   reset(): void {
     this.stmt.reset()
     this._currentRow = null
+    this._rowIndex = 0
   }
   free(): void {
     try {
       this.stmt.finalize()
+      this._rows = null
+      this._currentRow = null
     } catch {}
   }
 }
@@ -79,7 +96,7 @@ class CompatDatabase {
     return new CompatStatement(this.db.prepare(sql))
   }
 
-  exec(sql: string): Array<{ columns: string[]; values: any[][] }> {
+  exec(sql: string, params?: any[]): Array<{ columns: string[]; values: any[][] }> {
     const isSelect = sql.trim().toUpperCase().startsWith('SELECT')
     if (!isSelect) {
       this.db.exec(sql)
@@ -88,7 +105,7 @@ class CompatDatabase {
     try {
       const stmt = this.db.prepare(sql)
       const columns = stmt.columns().map((c: any) => c.name)
-      const rows = stmt.all()
+      const rows = params ? stmt.all(...params) : stmt.all()
       const values = rows.map((r: any) => columns.map((c: string) => r[c]))
       return values.length > 0 ? [{ columns, values }] : []
     } catch {
@@ -98,6 +115,10 @@ class CompatDatabase {
 
   close(): void {
     this.db.close()
+  }
+
+  getRowsModified(): number {
+    return this.db.changes
   }
 }
 

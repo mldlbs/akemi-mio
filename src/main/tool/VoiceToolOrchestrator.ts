@@ -14,7 +14,7 @@ import { log, createRequestId } from '../logger/Logger'
 import {
   matchIntents,
   extractSlots,
-  VOICE_INTENT_MAP,
+  findIntentById,
   type VoiceIntentDef,
 } from './voice-intent-map'
 
@@ -252,9 +252,9 @@ export class VoiceToolOrchestrator {
 
   // ── 私有方法 ──
 
-  /** 查找意图定义 */
+  /** 查找意图定义（静态 + 动态） */
   private findIntent(name: string): VoiceIntentDef | undefined {
-    return VOICE_INTENT_MAP.find((d) => d.intent === name)
+    return findIntentById(name)
   }
 
   /** 解析参数模板（批量） */

@@ -22,6 +22,7 @@ import { log } from '../../logger/Logger'
 import { piperOrchestrator } from '../../tts/PiperOrchestrator'
 import { ttsPiperBridge } from '../../tts/TtsPiperBridge'
 import { evolutionPiperBridge } from './EvolutionPiperBridge'
+import { piperReasoningChainExecutor } from '../../tts/reasoning'
 import type {
   EvolutionPlugin,
   EvolutionPluginManifest,
@@ -32,6 +33,7 @@ import type {
 import type { ProblemSource } from '../automation/types'
 import type { AssignedProblem } from '../automation/types'
 import type { FixResult } from '../automation/types'
+import type { PiperFailureCategory, PiperFailureSeverity } from '../../tts/reasoning/types'
 
 // ════════════════════════════════════════════
 //  问题 ID 前缀
@@ -43,15 +45,34 @@ const PROBLEM_ID_PREFIX = 'piper:'
 //  PiperEvolutionPlugin
 // ════════════════════════════════════════════
 
+/**
+ * PiperEvolutionPlugin — Evolution × PiperTTS 深度融合插件
+ *
+ * 【反 PiperTTS 反转】:
+ * 默认使用 PiperReasoningChainExecutor 替代直接 fix() 操作。
+ * 推理链将故障恢复变成一个可中断/可恢复的分步过程（反向应用实验43模式）。
+ *
+ * 通过 enableReasoningChain 切换控制：
+ * - true（默认）: fix() 委托给推理链，生成 Plan 支持中断恢复
+ * - false: 使用旧有直接 switchModel / reset 操作（向后兼容）
+ */
+
 export class PiperEvolutionPlugin implements EvolutionPlugin {
   readonly manifest: EvolutionPluginManifest = {
     name: 'piper-evolution',
-    version: '1.0.0',
-    description: 'PiperTTS 引擎健康监控与自动优化插件 — 检测模型失败、高延迟、队列过载等问题并自动修复',
+    version: '2.0.0',
+    description: 'PiperTTS 引擎健康监控与自动优化插件 — 检测模型失败、高延迟、队列过载等问题并自动修复（v2: 支持推理链中断恢复）',
     capabilities: ['collect', 'optimize'],
   }
 
   private _loaded = false
+
+  /**
+   * 是否启用推理链恢复模式。
+   * true  = 使用 PiperReasoningChainExecutor（中断可恢复）
+   * false = 使用旧有直接 fix 操作 (switchModel/reset)
+   */
+  private enableReasoningChain = true
 
   // ══════════════════════════════════════════
   //  EvolutionPlugin 接口实现
@@ -112,9 +133,25 @@ threshold: ${desc.threshold}`,
   }
 
   /**
+   * 设置是否启用推理链恢复模式。
+   */
+  setReasoningChainMode(enabled: boolean): void {
+    this.enableReasoningChain = enabled
+    log('INFO', 'piper_evolution_plugin_reasoning_mode', { enabled })
+  }
+
+  /**
    * 修复 PiperTTS 性能问题。
    *
-   * 支持的操作：
+   * 当 enableReasoningChain=true（默认）：
+   *   fix() 委托给 PiperReasoningChainExecutor，生成完整的推理链，
+   *   通过 PlanManager 持久化 Plan 支持中断恢复。
+   *   这是反 PiperTTS 反转的主要体现：Piper 拥有与 ASR 同等的恢复能力。
+   *
+   * 当 enableReasoningChain=false：
+   *   使用旧有直接 switchModel / reset 操作（向后兼容）。
+   *
+   * 支持的操作（旧有模式）：
    * - model_failure_rate: 切换为默认模型（huayan-medium）
    * - high_latency: 切换为轻量模型
    * - queue_overload: 重置队列
@@ -128,9 +165,16 @@ threshold: ${desc.threshold}`,
     log('INFO', 'piper_evolution_plugin_fix_start', {
       problemId: problem.id,
       category,
+      reasoningChain: this.enableReasoningChain,
     })
 
     try {
+      // ── 推理链模式：委托给 PiperReasoningChainExecutor ──
+      if (this.enableReasoningChain) {
+        return await this.fixWithReasoningChain(problem, t0)
+      }
+
+      // ── 旧有模式：直接操作 ──
       switch (category) {
         case 'model_failure_rate':
           return this.fixModelFailure(problem, t0)
@@ -164,6 +208,98 @@ threshold: ${desc.threshold}`,
         error: err.message,
       }
     }
+  }
+
+  /**
+   * 使用推理链执行修复。
+   * 将问题委托给 PiperReasoningChainExecutor 生成分步可恢复的恢复链。
+   */
+  private async fixWithReasoningChain(problem: PluginProblem, t0: number): Promise<PluginFixResult> {
+    const category = this.mapCategoryToFailureCategory(problem.context.category ?? '')
+    const currentValue = parseFloat(problem.context.currentValue ?? '0')
+    const threshold = parseFloat(problem.context.threshold ?? '0')
+    const model = problem.context.model || undefined
+
+    const chainResult = await piperReasoningChainExecutor.execute({
+      problemId: problem.id,
+      failureCategory: category,
+      currentValue,
+      threshold,
+      model,
+      detail: problem.description,
+      severity: this.mapSeverity(problem.severity),
+      metadata: {
+        ...problem.context.metadata,
+        raw: problem.context.raw,
+      },
+    })
+
+    const stepDetails = chainResult.stepResults
+      .map((r) => `[${r.success ? '✓' : '✗'}] 步骤${r.index}: ${r.description} (${(r.durationMs / 1000).toFixed(1)}s)`)
+      .join('\n')
+
+    const summary = chainResult.allSucceeded
+      ? [
+          '✅ Piper 推理链恢复完成',
+          '',
+          `故障类型: ${category}`,
+          `步骤: ${chainResult.succeeded}/${chainResult.totalSteps} 全部成功`,
+          chainResult.planId ? `Plan ID: ${chainResult.planId}` : '',
+          '',
+          stepDetails,
+        ].filter(Boolean).join('\n')
+      : [
+          '⚠️ Piper 推理链部分完成',
+          '',
+          `故障类型: ${category}`,
+          `步骤: ${chainResult.succeeded}/${chainResult.totalSteps}`,
+          chainResult.planId ? `Plan ID: ${chainResult.planId} (可恢复)` : '',
+          '',
+          stepDetails,
+          '',
+          '推理链已通过 PlanManager 持久化，可在下次会话中恢复执行。',
+        ].filter(Boolean).join('\n')
+
+    return {
+      problemId: problem.id,
+      success: chainResult.allSucceeded,
+      summary,
+      durationMs: Date.now() - t0,
+      output: JSON.stringify({
+        reasoningChain: true,
+        allSucceeded: chainResult.allSucceeded,
+        totalSteps: chainResult.totalSteps,
+        succeededSteps: chainResult.succeeded,
+        planId: chainResult.planId,
+      }),
+    }
+  }
+
+  /**
+   * 将 PluginProblem 的 category 字符串映射为 PiperFailureCategory。
+   */
+  private mapCategoryToFailureCategory(category: string): PiperFailureCategory {
+    const mapping: Record<string, PiperFailureCategory> = {
+      model_failure_rate: 'model_failure',
+      high_latency: 'high_latency',
+      queue_overload: 'queue_overload',
+      fallback_chain: 'fallback_chain',
+      model_unavailable: 'model_unavailable',
+      degradation: 'degradation',
+    }
+    return mapping[category] || 'unknown'
+  }
+
+  /**
+   * 将 PluginProblem 的 severity 映射为 PiperFailureSeverity。
+   */
+  private mapSeverity(severity: 'error' | 'warning' | 'info'): PiperFailureSeverity {
+    const mapping: Record<string, PiperFailureSeverity> = {
+      error: 'error',
+      warning: 'warning',
+      info: 'info',
+    }
+    return mapping[severity] || 'warning'
   }
 
   // ══════════════════════════════════════════

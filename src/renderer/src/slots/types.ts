@@ -2,6 +2,7 @@ export type ActiveSlot = 'chat' | 'tool' | 'preview' | 'workflow' | 'otpar' | 'd
 
 export interface UiState {
   sidebarOpen: boolean
+  rightPanelOpen: boolean
   activeSlot: ActiveSlot
 }
 

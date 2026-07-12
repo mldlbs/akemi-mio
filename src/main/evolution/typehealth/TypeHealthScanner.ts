@@ -15,13 +15,8 @@ import { readFileSync, existsSync, readdirSync } from 'fs'
 import type { Dirent } from 'fs'
 import { relative, join } from 'path'
 import { log } from '../../logger/Logger'
-import type {
-  TypeHealthIssue,
-  TypeHealthCategory,
-  TypeHealthSeverity,
-  TypeHealthScanConfig,
-  TypeHealthSummary,
-} from './TypeHealthIssue'
+import { eventBus } from '../../core/EventBus'
+import type { TypeHealthIssue, TypeHealthCategory, TypeHealthSeverity, TypeHealthScanConfig, TypeHealthSummary } from './TypeHealthIssue'
 import { DEFAULT_SCAN_CONFIG, getTargetCategories } from './TypeHealthIssue'
 import type { LearningCategory } from '../../learning/types'
 
@@ -73,8 +68,70 @@ export class TypeHealthScanner {
   // ══════════════════════════════════════════
 
   /**
-   * 执行一次完整扫描。
-   * 返回检测到的所有类型健康问题，同时保存在内部。
+   * 异步分片扫描 — 避免同步 `readFileSync` 扫描 840+ 文件阻塞事件循环。
+   * 每 YIELD_INTERVAL 个文件 yield 一次事件循环，让心跳、IPC 等有机会执行。
+   */
+  async scanAsync(config?: Partial<TypeHealthScanConfig>): Promise<TypeHealthIssue[]> {
+    if (config) this.setConfig(config)
+    const startedAt = Date.now()
+
+    const files = this.resolveFiles()
+    log('INFO', 'type_health_scan_start', {
+      filesCount: files.length,
+      projectRoot: this.config.projectRoot,
+    })
+
+    const YIELD_INTERVAL = 10
+    const newIssues: TypeHealthIssue[] = []
+
+    for (let idx = 0; idx < files.length; idx++) {
+      const file = files[idx]
+      try {
+        const content = readFileSync(file, 'utf-8')
+        const fileIssues = this.scanFile(file, content)
+        newIssues.push(...fileIssues)
+      } catch (err: any) {
+        log('WARN', 'type_health_scan_file_error', { file, error: err.message })
+      }
+
+      // 每 YIELD_INTERVAL 个文件 yield 一次，让事件循环处理心跳/IPC
+      if ((idx + 1) % YIELD_INTERVAL === 0) {
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      }
+    }
+
+    // 按分类过滤（如果指定了目标分类）
+    const filtered =
+      this.config.targetCategories.length > 0
+        ? newIssues.filter((i) => {
+            const targetCategories = this.getMappedCategories(this.config.targetCategories)
+            return targetCategories.includes(i.category)
+          })
+        : newIssues
+
+    // 按严重程度过滤
+    const severityOrder: TypeHealthSeverity[] = ['error', 'warning', 'info', 'suggestion']
+    const minIdx = severityOrder.indexOf(this.config.minSeverity)
+    const finalIssues = filtered.filter((i) => {
+      const idx = severityOrder.indexOf(i.severity)
+      return idx >= minIdx
+    })
+
+    this.issues = finalIssues
+
+    const duration = Date.now() - startedAt
+    log('INFO', 'type_health_scan_done', {
+      total: newIssues.length,
+      filtered: finalIssues.length,
+      filesCount: files.length,
+      durationMs: duration,
+    })
+
+    return finalIssues
+  }
+
+  /**
+   * 执行一次完整扫描（同步版本 — 可能阻塞事件循环，优先用 scanAsync）。
    */
   scan(config?: Partial<TypeHealthScanConfig>): TypeHealthIssue[] {
     if (config) this.setConfig(config)
@@ -102,12 +159,13 @@ export class TypeHealthScanner {
     }
 
     // 按分类过滤（如果指定了目标分类）
-    const filtered = this.config.targetCategories.length > 0
-      ? newIssues.filter((i) => {
-          const targetCategories = this.getMappedCategories(this.config.targetCategories)
-          return targetCategories.includes(i.category)
-        })
-      : newIssues
+    const filtered =
+      this.config.targetCategories.length > 0
+        ? newIssues.filter((i) => {
+            const targetCategories = this.getMappedCategories(this.config.targetCategories)
+            return targetCategories.includes(i.category)
+          })
+        : newIssues
 
     // 按严重程度过滤
     const severityOrder: TypeHealthSeverity[] = ['error', 'warning', 'info', 'suggestion']
@@ -178,13 +236,7 @@ export class TypeHealthScanner {
   /**
    * 递归遍历目录，收集匹配的文件。
    */
-  private walkDir(
-    root: string,
-    currentDir: string,
-    includeRes: RegExp[],
-    excludeRes: RegExp[],
-    result: string[],
-  ): void {
+  private walkDir(root: string, currentDir: string, includeRes: RegExp[], excludeRes: RegExp[], result: string[]): void {
     let entries: Dirent[]
     try {
       entries = readdirSync(currentDir, { withFileTypes: true })
@@ -278,8 +330,10 @@ export class TypeHealthScanner {
         const snippet = this.extractSnippet(lines, i)
 
         // 判断是否为泛型机会（函数参数或返回值中的 any）
-        const isFunctionParam = /^\s*(private|public|protected|static|async)?\s*\w+\s*\(/.test(line) ||
-          /=>\s*\{/.test(line) || line.includes('(') && line.includes(')')
+        const isFunctionParam =
+          /^\s*(private|public|protected|static|async)?\s*\w+\s*\(/.test(line) ||
+          /=>\s*\{/.test(line) ||
+          (line.includes('(') && line.includes(')'))
 
         issues.push({
           id: nextIssueId(),
@@ -292,9 +346,7 @@ export class TypeHealthScanner {
           title: '显式 any 类型',
           description: `第 ${i + 1} 行使用了显式 any 类型，缺少类型约束`,
           snippet,
-          suggestion: isFunctionParam
-            ? '考虑使用泛型参数替代 any：function fn<T>(arg: T): T'
-            : '考虑使用更具体的类型替代 any',
+          suggestion: isFunctionParam ? '考虑使用泛型参数替代 any：function fn<T>(arg: T): T' : '考虑使用更具体的类型替代 any',
           estimatedChars: 20,
           detectedAt: Date.now(),
         })
@@ -352,7 +404,10 @@ export class TypeHealthScanner {
       if (this.isSkippableLine(line)) continue
 
       // 查找函数定义行（包含 function 关键字或箭头函数）
-      const isFunctionDef = /(?:function\s+\w+\s*\(|^\s*(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?\(|^\s*\w+\s*=\s*\(|^\s*\((?:\w+\s*,?\s*)*\)\s*:\s*)/m.test(line)
+      const isFunctionDef =
+        /(?:function\s+\w+\s*\(|^\s*(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?\(|^\s*\w+\s*=\s*\(|^\s*\((?:\w+\s*,?\s*)*\)\s*:\s*)/m.test(
+          line,
+        )
 
       if (!isFunctionDef) continue
 
@@ -360,7 +415,10 @@ export class TypeHealthScanner {
       const paramMatch = line.match(/\(([^)]*)\)/)
       if (!paramMatch) continue
 
-      const params = paramMatch[1].split(',').map((p) => p.trim()).filter(Boolean)
+      const params = paramMatch[1]
+        .split(',')
+        .map((p) => p.trim())
+        .filter(Boolean)
       for (const param of params) {
         // 参数没有类型标注（没有 :Type）
         if (!/:\s*\w+/.test(param) && !param.startsWith('...')) {
@@ -530,7 +588,10 @@ export class TypeHealthScanner {
       const anyParamMatch = line.match(/\(([^)]*)\)/)
       if (!anyParamMatch) continue
 
-      const params = anyParamMatch[1].split(',').map((p) => p.trim()).filter(Boolean)
+      const params = anyParamMatch[1]
+        .split(',')
+        .map((p) => p.trim())
+        .filter(Boolean)
       const anyParams = params.filter((p) => /:\s*any\b/.test(p))
 
       // 如果有多个 any 参数 或 any 参数 + any 返回，推荐泛型
@@ -665,10 +726,13 @@ export class TypeHealthScanner {
   private hasTypeUsageInScope(lines: string[], funcLineIdx: number, paramName: string): boolean {
     // 简单的范围检查：查找函数体中的 paramName.xxx 模式
     const searchEnd = Math.min(lines.length, funcLineIdx + 30)
+    // 转义 paramName 中的正则特殊字符
+    const escapedName = paramName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const usageRe = new RegExp(`\\b${escapedName}\\.`)
     for (let i = funcLineIdx + 1; i < searchEnd; i++) {
       const line = lines[i]
       if (line.includes('}') && i > funcLineIdx + 1) break // 超出函数体
-      if (new RegExp(`\\b${paramName}\\.`).test(line)) return true
+      if (usageRe.test(line)) return true
     }
     return false
   }

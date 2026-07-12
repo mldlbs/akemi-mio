@@ -34,3 +34,39 @@ export type {
   BehaviorTtsFaultTolerance,
   UserBehaviorTtsNeed,
 } from './UserBehaviorTtsContract'
+
+// ── TTS/Plan:清理工作区 双模切换 ──
+export { TtsCleanupDualModeController, ttsCleanupDualModeController } from './TtsCleanupDualModeController'
+export type {
+  TtsCleanupBehaviorInput,
+  TtsCleanupWorkspaceInput,
+  TtsCleanupTtsInput,
+} from './TtsCleanupDualModeController'
+export {
+  TTS_CLEANUP_MODE_SPECIFICATIONS,
+  TTS_CLEANUP_MODE_LABELS,
+} from './TtsCleanupDualModeTypes'
+export type {
+  TtsCleanupModeType,
+  TtsCleanupSwitchDecision,
+  TtsCleanupSwitchReason,
+  TtsCleanupModeStateSnapshot,
+  TtsCleanupDualModeSwitchEvent,
+  TtsCleanupModeWorkingConditions,
+  CleanupInputCharacteristics,
+  CleanupLoadRange,
+  CleanupResponseTimeRequirement,
+} from './TtsCleanupDualModeTypes'
+
+// ── 行为序列学习器（语音触发的行为模式自动化） ──
+export { BehaviorSequenceLearner, behaviorSequenceLearner } from './BehaviorSequenceLearner'
+export type { LearnedPattern, LearnerConfig, LearnerStats } from './BehaviorSequenceLearner'
+
+// ── 行为驱动的主动记忆填充（TF-IDF + 意图聚类 + 时间序列分析）──
+export { BehaviorDrivenMemoryAnalyzer, behaviorDrivenMemoryAnalyzer } from './BehaviorDrivenMemoryAnalyzer'
+export type {
+  TfIdfResult,
+  IntentCluster,
+  TimePattern,
+  AnalysisResult,
+} from './BehaviorDrivenMemoryAnalyzer'

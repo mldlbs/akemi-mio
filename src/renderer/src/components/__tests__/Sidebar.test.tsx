@@ -5,6 +5,7 @@ import { renderWithProviders } from '../../__tests__/renderWithProviders'
 import { createMockIPC } from '../../__tests__/mockIPC'
 import { resetAllStores } from '../../store/reset'
 import { useSessionStore } from '../../store/sessionStore'
+import { useHistoryViewStore } from '../../store/historyViewStore'
 
 beforeEach(() => {
   resetAllStores()
@@ -71,7 +72,7 @@ describe('Sidebar', () => {
     expect(btns[1].classList.contains('active')).toBe(false)
   })
 
-  it('selects chat via store on click', () => {
+  it('opens history via store on click', () => {
     const now = Date.now()
     useSessionStore.getState().setSessionsLoading(false)
     useSessionStore.getState().setSessions([
@@ -86,10 +87,12 @@ describe('Sidebar', () => {
         createdAt: now - 60000,
       },
     ])
+    useSessionStore.getState().setActiveSessionId('s1')
     renderWithProviders(<Sidebar />)
     const btns = document.querySelectorAll('.sidebar-item')
     fireEvent.click(btns[1])
-    expect(useSessionStore.getState().activeSessionId).toBe('s2')
+    expect(useHistoryViewStore.getState().viewing).toBe(true)
+    expect(useHistoryViewStore.getState().sessionId).toBe('s2')
   })
 
   it('shows category sections without date headers', () => {

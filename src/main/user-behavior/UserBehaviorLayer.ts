@@ -32,6 +32,7 @@ import { parseFeaturesFromEnv } from './types'
 import { behaviorFeatureExtractor } from './BehaviorFeatureExtractor'
 import { behaviorHeatmapService } from './BehaviorHeatmapService'
 import type { ModuleHeatmap } from './types'
+import type { PlanExperiment42Plugin } from './plan-experiment-42'
 
 const DEFAULT_CONFIG: Partial<UserBehaviorConfig> = {
   debug: false,
@@ -52,6 +53,9 @@ export class UserBehaviorLayer {
 
   /** 注册的后处理钩子（按注册顺序执行） */
   private postHooks: PostProcessHook[] = []
+
+  /** Plan:实验42 插件（可选注入） */
+  private experimentPlugin: PlanExperiment42Plugin | null = null
 
   /** 上一次后处理结果缓存（用于外部读取） */
   private lastPostResult: PostProcessResult | null = null
@@ -92,6 +96,15 @@ export class UserBehaviorLayer {
     return this.lastPostResult
   }
 
+  /** 检查是否有实验42相关的 feature flag 启用 */
+  private hasAnyExperimentFlag(): boolean {
+    return (
+      this.features.has('plan_experiment_42_passive') ||
+      this.features.has('plan_experiment_42_suggestion') ||
+      this.features.has('plan_experiment_42_replacement')
+    )
+  }
+
   // ==================== 钩子注册 ====================
 
   /** 注册预处理钩子 */
@@ -104,6 +117,17 @@ export class UserBehaviorLayer {
   addPostHook(hook: PostProcessHook): void {
     this.postHooks.push(hook)
     log('INFO', 'user_behavior_post_hook_added', { total: this.postHooks.length })
+  }
+
+  /** 注入 Plan:实验42 插件 */
+  setExperimentPlugin(plugin: PlanExperiment42Plugin): void {
+    this.experimentPlugin = plugin
+    // 自动从当前 feature flags 推导实验阶段
+    plugin.autoDetectPhase(this.features)
+    log('INFO', 'user_behavior_exp42_plugin_attached', {
+      phase: plugin.getPhase(),
+      enabledFlag: Array.from(this.features).find((f) => f.startsWith('plan_experiment_42')),
+    })
   }
 
   // ==================== 预处理 ====================
@@ -124,6 +148,16 @@ export class UserBehaviorLayer {
           error: err.message,
         })
         // 单个 hook 失败不阻断整体流程
+      }
+    }
+
+    // ★ Plan:实验42 预处理钩子 — 旁路输出不做决策
+    // TODO Phase 2/3: 合并 plugin 返回的增强上下文到 current
+    if (this.experimentPlugin && this.hasAnyExperimentFlag()) {
+      try {
+        this.experimentPlugin.onPreProcess(current)
+      } catch (err: any) {
+        log('WARN', 'user_behavior_exp42_pre_error', { error: err.message })
       }
     }
 
@@ -159,6 +193,18 @@ export class UserBehaviorLayer {
         log('WARN', 'user_behavior_post_hook_error', {
           error: err.message,
         })
+      }
+    }
+
+    // ★ Plan:实验42 后处理钩子 — Phase 1 旁路输出不做决策
+    // TODO Phase 2/3: 将 plugin 返回的 PostProcessResult 合并到 result 中
+    if (this.experimentPlugin && this.hasAnyExperimentFlag()) {
+      try {
+        const pluginResult = this.experimentPlugin.onPostProcess(ctx)
+        // Phase 1: 插件返回空 result，合并无副作用；Phase 2/3 时此处生效
+        result = this.mergePostResults(result, pluginResult)
+      } catch (err: any) {
+        log('WARN', 'user_behavior_exp42_post_error', { error: err.message })
       }
     }
 

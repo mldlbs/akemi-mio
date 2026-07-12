@@ -19,6 +19,8 @@ export type { DashboardLiveSnapshot, DashboardLivePayload } from './StateBroadca
 export { EvolutionStateManager } from './EvolutionStateManager'
 export { EvolutionGitOps } from './EvolutionGitOps'
 export { RollbackLevel } from './EvolutionGitOps'
+export { EvolutionCheckpointManager, evolutionCheckpointManager } from './EvolutionCheckpointManager'
+export type { CheckpointContext, UnfinishedCheckpoint } from './EvolutionCheckpointManager'
 export { ProposalValidator } from './ProposalValidator'
 export type { Proposal, ProposalValidation } from './ProposalValidator'
 export { ANALYSIS_PROMPT, PLAN_EXECUTE_PROMPT, detectPlanMode, pickBestPlan, buildPlanInjection } from './EvolutionPromptBuilder'
@@ -28,6 +30,42 @@ export { PipelineOrchestrator } from './automation'
 export type { PipelineConfig, PipelineMetrics, Problem, SignalCollector, FixExecutor, FixResult } from './automation'
 export type { EvolutionSafetyMode } from './types'
 export type { PlanManagerLike } from './types'
+
+// ═══════════════════════════════════════════
+//  自进化文件整理引擎
+// ═══════════════════════════════════════════
+//
+//  基于进化系统的自适应文件整理模块：
+//  - Evolution 周期性扫描工作区文件并自动归类
+//  - 规则基因池（JSON 条件-动作对）支持进化
+//  - 用户行为反馈作为适应度函数
+//  - 优胜劣汰，工作区结构逐渐适配个人习惯
+
+export {
+  GenePool,
+  FileScanner,
+  FeedbackTracker,
+  FileOrganizerCollector,
+  FileOrganizerExecutor,
+  genePool,
+  fileScanner,
+  feedbackTracker,
+} from './file-organizer'
+
+export type {
+  FileFeatures,
+  OrganizerRule,
+  RuleCondition,
+  RuleAction,
+  GenePoolData,
+  FileMoveRecord,
+  EvolutionConfig,
+  ConditionType,
+  ConditionOperator,
+  ActionType,
+} from './file-organizer'
+
+export { DEFAULT_EVOLUTION_CONFIG, createDefaultRules } from './file-organizer'
 
 // Pipeline 阶段导出
 export { EvolutionAnalyzer, EvolutionStrategizer, EvolutionExecutor, EvolutionReviewer, setSandboxRoot } from './pipeline'

@@ -1,4 +1,5 @@
 import { useSessionStore } from '../store/sessionStore'
+import { useHistoryViewStore } from '../store/historyViewStore'
 import { useSlots } from '../slots/SlotContext'
 import { useCallback, useMemo } from 'react'
 import type { SessionItem } from '../slots/types'
@@ -27,17 +28,21 @@ export function Sidebar() {
   const sessions = useSessionStore((s) => s.sessions)
   const sessionsLoading = useSessionStore((s) => s.sessionsLoading)
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
-  const handleSelectChat = useSessionStore((s) => s.selectChat)
+  const { viewing, sessionId: historySessionId, openHistory, closeHistory } = useHistoryViewStore()
   const { uiState, setActiveSlot, toggleSidebar } = useSlots()
   const collapsed = !uiState.sidebarOpen
 
-  const onSelectChat = useCallback(
-    (sessionId: string) => {
+  const onHistoryClick = useCallback(
+    (sessionId: string, label: string) => {
       if (!sessionId) return
-      handleSelectChat(sessionId)
-      setActiveSlot('chat')
+      if (sessionId === activeSessionId && viewing) {
+        closeHistory()
+      } else if (sessionId !== activeSessionId) {
+        openHistory(sessionId, label)
+        setActiveSlot('chat')
+      }
     },
-    [handleSelectChat, setActiveSlot],
+    [activeSessionId, viewing, openHistory, closeHistory, setActiveSlot],
   )
 
   const sorted = useMemo(() => {
@@ -104,7 +109,10 @@ export function Sidebar() {
               key={cat}
               className="sidebar-collapsed-icon"
               title={cat}
-              onClick={() => onSelectChat(sorted.find((s) => s.category === cat)?.id || '')}
+              onClick={() => {
+                const first = sorted.find((s) => s.category === cat)
+                if (first) onHistoryClick(first.id, first.label)
+              }}
             >
               <i className={COLLAPSED_ICONS[cat] || 'ri-chat-1-line'} />
             </button>
@@ -136,12 +144,13 @@ export function Sidebar() {
               {items.map((s) => (
                 <button
                   key={s.id}
-                  className={`sidebar-item${s.id === activeSessionId ? ' active' : ''}`}
-                  onClick={() => onSelectChat(s.id)}
+                  className={`sidebar-item${s.id === activeSessionId ? ' active' : ''}${s.id === historySessionId && viewing ? ' viewing-history' : ''}`}
+                  onClick={() => onHistoryClick(s.id, s.label)}
                 >
                   <span className="sidebar-item-label" title={s.label}>
                     {s.label}
                   </span>
+                  {s.id === activeSessionId && <span className="sidebar-current-badge">当前</span>}
                   <span className="sidebar-item-time">{formatTime(s.lastActivityAt)}</span>
                 </button>
               ))}

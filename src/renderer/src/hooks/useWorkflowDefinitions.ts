@@ -56,7 +56,7 @@ export function useWorkflowDefinitions() {
     if (store.loading) refresh()
   }, [store.loading, refresh])
 
-  useIPCEvent(window.electronAPI.onWorkflowRunCreated, (data: any) => {
+  useIPCEvent(window.electronAPI?.onWorkflowRunCreated, (data: any) => {
     const steps: StepRun[] = (data.steps || []).map((s: any) => ({
       stepId: s.stepId,
       status: 'pending' as const,
@@ -71,11 +71,11 @@ export function useWorkflowDefinitions() {
     })
   })
 
-  useIPCEvent(window.electronAPI.onWorkflowDefCreated, () => {
+  useIPCEvent(window.electronAPI?.onWorkflowDefCreated, () => {
     window.electronAPI.listWorkflowDefinitions().then((defs) => store.setDefinitions(defs))
   })
 
-  useIPCEvent(window.electronAPI.onWorkflowRunUpdated, (data) => {
+  useIPCEvent(window.electronAPI?.onWorkflowRunUpdated, (data) => {
     const ts = Date.now()
     const status = data.status
     if (status === 'running') {
@@ -84,12 +84,14 @@ export function useWorkflowDefinitions() {
       store.addWorkflowEvent({ type: 'workflow.completed', runId: data.runId, timestamp: ts })
     } else if (status === 'failed') {
       store.addWorkflowEvent({ type: 'workflow.failed', runId: data.runId, error: data.error || 'unknown', timestamp: ts })
+    } else if (status === 'cancelled') {
+      store.addWorkflowEvent({ type: 'workflow.cancelled', runId: data.runId, timestamp: ts })
     } else if (status === 'paused') {
       store.addWorkflowEvent({ type: 'workflow.paused', runId: data.runId, timestamp: ts })
     }
   })
 
-  useIPCEvent(window.electronAPI.onWorkflowRunStep, (data) => {
+  useIPCEvent(window.electronAPI?.onWorkflowRunStep, (data) => {
     const ts = Date.now()
     const status = data.status
     if (status === 'running' || status === 'in_progress') {

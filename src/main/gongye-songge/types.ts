@@ -8,7 +8,13 @@
  * 1. 不侵入 Agent 核心逻辑
  * 2. 通过环境变量 GONGYE_SONGE_FEATURES 控制特性
  * 3. 预处理/后处理钩子可独立注册
+ *
+ * 【模式抽取】
+ * 通用类型和函数已迁移到 core/patterns：
+ * - parseFeaturesFromEnv → core/patterns 的统一实现
  */
+
+import { parseFeaturesFromEnv as coreParseFeaturesFromEnv } from '../core/patterns'
 
 // ════════════════════════════════════════════════════════════════
 // Feature Flag 配置
@@ -105,19 +111,13 @@ export interface IndustrialOdeLayerConfig {
 
 /** 解析 GONGYE_SONGE_FEATURES 环境变量为特性集合 */
 export function parseFeaturesFromEnv(): GongyeSonggeFeature[] {
-  const raw = process.env.GONGYE_SONGE_FEATURES || ''
-  if (!raw.trim()) return []
-
-  const allowed: Set<string> = new Set([
-    'content_format',
-    'style_inject',
-    'publish_ready',
-    'summary_format',
-  ])
-
-  return raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-    .filter((s) => allowed.has(s)) as GongyeSonggeFeature[]
+  return coreParseFeaturesFromEnv<GongyeSonggeFeature>({
+    envVar: 'GONGYE_SONGE_FEATURES',
+    allowed: [
+      'content_format',
+      'style_inject',
+      'publish_ready',
+      'summary_format',
+    ],
+  })
 }

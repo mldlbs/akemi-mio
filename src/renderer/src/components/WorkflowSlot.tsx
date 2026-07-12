@@ -237,7 +237,7 @@ export function WorkflowSlot() {
   const elapsed = hasActive && startTime > 0 ? now - startTime : 0
 
   // 收集 pipeline 实时日志 — 从步骤事件直接累积，不掉帧
-  useIPCEvent(window.electronAPI.onWorkflowRunStep, (data) => {
+  useIPCEvent(window.electronAPI?.onWorkflowRunStep, (data) => {
     if (!data.agentResult) return
     setPipelineLogs((prev) => {
       const lines = prev[data.runId] ?? []
@@ -413,7 +413,50 @@ export function WorkflowSlot() {
                       className="wf-cancel-btn"
                       title="取消运行"
                       onClick={async () => {
-                        await window.electronAPI.stopWorkflowRun(run.runId)
+                        const res = await window.electronAPI.stopWorkflowRun(run.runId)
+                        if (!res.success) {
+                          setRunError(res.error || '取消失败')
+                          // 刷新列表消除状态不一致
+                          const list = await window.electronAPI.listWorkflowRuns(20)
+                          for (const r of list) {
+                            const steps: StepRun[] = (r.steps || []).map((s: any) => {
+                              if (s.status === 'running' || s.status === 'in_progress')
+                                return { status: 'running', stepId: s.stepId, startedAt: s.startedAt ?? Date.now() }
+                              if (s.status === 'done' || s.status === 'completed')
+                                return {
+                                  status: 'done',
+                                  stepId: s.stepId,
+                                  startedAt: s.startedAt ?? Date.now(),
+                                  endedAt: s.completedAt ?? Date.now(),
+                                  agentResult: s.agentResult,
+                                }
+                              if (s.status === 'failed')
+                                return {
+                                  status: 'failed',
+                                  stepId: s.stepId,
+                                  startedAt: s.startedAt ?? Date.now(),
+                                  endedAt: s.completedAt ?? Date.now(),
+                                  error: s.error,
+                                }
+                              if (s.status === 'skipped')
+                                return {
+                                  status: 'skipped',
+                                  stepId: s.stepId,
+                                  startedAt: s.startedAt ?? Date.now(),
+                                  endedAt: s.completedAt ?? Date.now(),
+                                }
+                              return { status: 'pending', stepId: s.stepId }
+                            })
+                            store.addWorkflowEvent({
+                              type: 'workflow.created',
+                              runId: r.runId,
+                              workflowDefId: r.workflowDefId,
+                              workflowName: r.workflowName || '',
+                              steps,
+                              timestamp: r.startedAt || Date.now(),
+                            })
+                          }
+                        }
                       }}
                     >
                       <i className="ri-stop-circle-line" /> 取消

@@ -455,3 +455,69 @@ export const TOPIC_TRANSITION_PREFETCH_TTL_MS = parseInt(process.env.TOPIC_TRANS
  * Override via TOPIC_TRANSITION_PREFETCH_CACHE_MAX env.
  */
 export const TOPIC_TRANSITION_PREFETCH_CACHE_MAX = parseInt(process.env.TOPIC_TRANSITION_PREFETCH_CACHE_MAX || '20', 10)
+
+// ══════════════════════════════════════════
+//  行为驱动记忆填充（BehaviorDrivenMemoryAnalyzer）配置
+// ══════════════════════════════════════════
+
+/**
+ * 行为驱动记忆分析器：分析周期（毫秒），默认 2 小时。
+ * Override via BEHAVIOR_MEMORY_ANALYZER_INTERVAL env.
+ */
+export const BEHAVIOR_MEMORY_ANALYZER_INTERVAL = parseInt(
+  process.env.BEHAVIOR_MEMORY_ANALYZER_INTERVAL || String(2 * 60 * 60 * 1000),
+  10,
+)
+
+/**
+ * 行为驱动记忆分析器：分析窗口大小（最近 N 次交互）。
+ * Override via BEHAVIOR_MEMORY_ANALYZER_WINDOW env.
+ */
+export const BEHAVIOR_MEMORY_ANALYZER_WINDOW = parseInt(
+  process.env.BEHAVIOR_MEMORY_ANALYZER_WINDOW || '70',
+  10,
+)
+
+/**
+ * 行为驱动记忆分析器：TF-IDF 提取的高频词数量（top K）。
+ * Override via BEHAVIOR_MEMORY_TFIDF_TOP_K env.
+ */
+export const BEHAVIOR_MEMORY_TFIDF_TOP_K = parseInt(
+  process.env.BEHAVIOR_MEMORY_TFIDF_TOP_K || '15',
+  10,
+)
+
+/**
+ * 行为驱动记忆分析器：意图聚类数（K）。
+ * Override via BEHAVIOR_MEMORY_INTENT_CLUSTERS env.
+ */
+export const BEHAVIOR_MEMORY_INTENT_CLUSTERS = parseInt(
+  process.env.BEHAVIOR_MEMORY_INTENT_CLUSTERS || '4',
+  10,
+)
+
+/**
+ * 行为驱动记忆分析器：活跃时段判定的 z-score 阈值。
+ * Override via BEHAVIOR_MEMORY_PEAK_Z_SCORE env.
+ */
+export const BEHAVIOR_MEMORY_PEAK_Z_SCORE = parseFloat(
+  process.env.BEHAVIOR_MEMORY_PEAK_Z_SCORE || '1.5',
+)
+
+/**
+ * 行为驱动记忆分析器：最小交互数（低于此值不执行分析）。
+ * Override via BEHAVIOR_MEMORY_MIN_INTERACTIONS env.
+ */
+export const BEHAVIOR_MEMORY_MIN_INTERACTIONS = parseInt(
+  process.env.BEHAVIOR_MEMORY_MIN_INTERACTIONS || '10',
+  10,
+)
+
+/**
+ * 行为驱动记忆分析器：每次周期最多新创建的条目数。
+ * Override via BEHAVIOR_MEMORY_MAX_MEMORIES_PER_CYCLE env.
+ */
+export const BEHAVIOR_MEMORY_MAX_MEMORIES_PER_CYCLE = parseInt(
+  process.env.BEHAVIOR_MEMORY_MAX_MEMORIES_PER_CYCLE || '8',
+  10,
+)

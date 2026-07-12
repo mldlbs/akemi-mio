@@ -52,7 +52,7 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
   const chunkBufRef = useRef('')
   const chunkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  useIPCEvent(window.electronAPI.onAIChunk, (chunk: string) => {
+  useIPCEvent(window.electronAPI?.onAIChunk, (chunk: string) => {
     chunkBufRef.current += chunk
     fadeTimer.clear()
     if (!chunkTimerRef.current) {
@@ -68,15 +68,15 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
     }
   })
 
-  useIPCEvent(window.electronAPI.onTTSAudio, (filePath: string) => {
+  useIPCEvent(window.electronAPI?.onTTSAudio, (filePath: string) => {
     playTTS(filePath)
   })
-  useIPCEvent(window.electronAPI.onTTSBuffer, (buf: ArrayBuffer) => {
+  useIPCEvent(window.electronAPI?.onTTSBuffer, (buf: ArrayBuffer) => {
     playTTSBuffer(buf)
   })
 
   // 带 sessionId 的 message:new = 最终完整消息；无 sessionId 的（中间 tool 输出）不清除 streaming 状态
-  useIPCEvent(window.electronAPI.onMessageNew, (msg: { id: string; role: string; sessionId?: string }) => {
+  useIPCEvent(window.electronAPI?.onMessageNew, (msg: { id: string; role: string; sessionId?: string }) => {
     if (msg.sessionId && msg.role === 'assistant') {
       // flush 残留 chunk 再重置
       if (chunkBufRef.current) {
@@ -92,7 +92,7 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
     }
   })
 
-  useIPCEvent(window.electronAPI.onToolStatus, (status: { type: string; tool: string; message: string }) => {
+  useIPCEvent(window.electronAPI?.onToolStatus, (status: { type: string; tool: string; message: string }) => {
     store.setToolStatus(status)
   })
 

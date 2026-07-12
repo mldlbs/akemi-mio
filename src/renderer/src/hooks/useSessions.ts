@@ -41,7 +41,7 @@ export function useSessions() {
   // message:new 只添加消息，不重新拉全量 sessions 列表
   // 除非是新会话（activeSessionId 不同）才更新
   const lastMsgRef = useRef(0)
-  useIPCEvent<MessageItem>(window.electronAPI.onMessageNew as any, (msg) => {
+  useIPCEvent<MessageItem>(window.electronAPI?.onMessageNew as any, (msg) => {
     if (!msg.sessionId) return
     // 防止重复消息（IPC 可能多发）
     if (msg.createdAt <= lastMsgRef.current) return

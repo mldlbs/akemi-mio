@@ -7,6 +7,7 @@ import { eventBus, SubscriptionTracker } from '../core/EventBus'
 import {
   INITIAL_HOTWORDS,
   WORKSPACE,
+  WORKSPACE_ROOT,
   RUNTIME_ROOT,
   TELEGRAM_SERVER_URL,
   TELEGRAM_POLL_INTERVAL_MS,
@@ -24,6 +25,7 @@ import { ttsTypographyFeedbackLoop } from '../tts/TtsTypographyFeedbackLoop'
 import { AgentService } from '../agent/AgentService'
 import { MemoryService } from '../memory/MemoryService'
 import { memoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
+import { memoryTtsBridge } from '../tts/MemoryTtsBridge'
 import { registerHandlers, createServiceRef } from '../ipc/handlers'
 import type { ServiceRef } from '../ipc/handlers'
 import { credentialsManager } from '../credentials/CredentialsManager'
@@ -44,12 +46,12 @@ import { PluginLoader, toolRegistry } from '../plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '../skill'
 import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
 import { setupStartupLogging, createWindow, setupWallpaperListener, getMainWindow } from '../core/Lifecycle'
-import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle, setUserContextOverride } from '../core/TrayManager'
+import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle, setUserContextOverride, setOrganizerPause, setOrganizerResume, setOrganizerSkip } from '../core/TrayManager'
 import { initUpdater, setUpdateWindow } from '../updater/UpdaterService'
-import { EvolutionDashboardService, MemoryContextService } from '../wallpaper/WallpaperService'
+import { EvolutionDashboardService, MemoryContextService, FileOrganizerProgressService } from '../wallpaper/WallpaperService'
 import { MonitoringService } from '../monitoring/MonitoringService'
 import { WallpaperEventBridge } from '../wallpaper/WallpaperEventBridge'
-import { initDatabase, closeDatabase } from '../db/connection'
+import { initDatabase, closeDatabase, getRawDb, getEventRawDb } from '../db/connection'
 import { ConstitutionEngine } from '../constitution'
 import { CapabilityEngine, freezeDefaults } from '../capability'
 import { CognitiveService } from '../cognitive'
@@ -77,6 +79,8 @@ import { ResourceBudget } from '../core/ResourceBudget'
 import { BudgetRebalancer } from '../core/BudgetRebalancer'
 import { LazyServiceGroup } from './LazyServiceGroup'
 import { SessionRecoveryManager } from '../agent/SessionRecoveryManager'
+import { EventArchiver } from '../core/evaluation/EventArchiver'
+import { RetentionScheduler } from '../core/evaluation/RetentionScheduler'
 import { UIBridge } from '../agent/UIBridge'
 import { EventStore } from '../core/event-sourcing/EventStore'
 import { RuntimeHealthManager } from '../health/RuntimeHealthManager'
@@ -134,6 +138,9 @@ export class AppRuntime {
   private monitoringService?: MonitoringService
   private memoryContextService?: MemoryContextService
   private memoryContextRef: ServiceRef<MemoryContextService> = createServiceRef<MemoryContextService>()
+  private behaviorMemoryAnalyzer?: import('../behavior/BehaviorDrivenMemoryAnalyzer').BehaviorDrivenMemoryAnalyzer
+  private organizerService?: FileOrganizerProgressService
+  private organizerRef: ServiceRef<FileOrganizerProgressService> = createServiceRef<FileOrganizerProgressService>()
   private metricsStore?: import('../core/evaluation/GuardrailMetricsStore').GuardrailMetricsStore
   private metricsProjection?: import('../core/evaluation/GuardrailMetricsProjection').GuardrailMetricsProjection
   private metricsQueryRef: ServiceRef<import('../core/evaluation/GuardrailMetricsQueryService').GuardrailMetricsQueryService> =
@@ -330,7 +337,12 @@ export class AppRuntime {
 
     // Evaluation 子系统：Store → Emitter → Bridge
     this.evaluationStore = new EvaluationStore()
-    await this.evaluationStore.init()
+    log('INFO', 'evaluation_store_init_start')
+    await Promise.race([
+      this.evaluationStore.init(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('evaluationStore.init timeout')), 15000)),
+    ])
+    log('INFO', 'evaluation_store_init_done')
     const sessionId = `runtime_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     this.evaluationEmitter = new EvaluationEmitter(this.evaluationStore, 'runtime', sessionId)
     llmService.setEvaluationEmitter(this.evaluationEmitter)
@@ -451,6 +463,7 @@ export class AppRuntime {
       this.memoryContextRef,
       decisionQueryRef,
       this.metricsQueryRef,
+      this.organizerRef,
     )
 
     // === Stage 3: 核心服务（内存、插件、技能） ===
@@ -459,6 +472,13 @@ export class AppRuntime {
     this.crashGuard.flushMemory = () => memoryService.flush()
     // Memory × Evolution 深度融合桥接器：注入 MemoryService 引用
     memoryEvolutionBridge.setMemoryService(memoryService)
+    // Memory × TTS 深度融合桥接器：注入双方向引用 + 注册合成回调
+    memoryTtsBridge.setMemoryService(memoryService)
+    memoryTtsBridge.setTtsService(ttsService)
+    // 注册 TTS 合成完成回调：每次合成后，桥接器决定是否记录到 Memory
+    ttsService.setOnSynthesisComplete((record) => {
+      memoryTtsBridge.recordSynthesis(record)
+    })
     const skillManager = new SkillManager()
     await skillManager.initialize()
     agentService.setSkillManager(skillManager)
@@ -517,6 +537,61 @@ export class AppRuntime {
       }
     } catch (err) {
       log('WARN', 'industrial_ode_layer_init_failed', { error: String(err) })
+    }
+
+    // ── Plan:清理工作区 - 整理文件目录 上层增强层（由 WORKSPACE_CLEANUP_FEATURES 控制）──
+    try {
+      const { WorkspaceCleanupLayer } = await import('../workspace-cleanup/WorkspaceCleanupLayer')
+      const { parseFeaturesFromEnv } = await import('../workspace-cleanup/types')
+      const wsFeatures = parseFeaturesFromEnv()
+      if (wsFeatures.length > 0) {
+        const preHooks: any[] = []
+        const postHooks: any[] = []
+
+        // 预处理：意图检测
+        if (wsFeatures.includes('intent_detect')) {
+          preHooks.push(WorkspaceCleanupLayer.createIntentDetectPreHook())
+        }
+
+        // 预处理：工作区统计注入（需 layer 实例方法，在构造后添加）
+        // inject_stats 钩子通过构造函数参数注入的 createInjectStatsPreHook 处理
+
+        // 后处理：扫描并报告
+        if (wsFeatures.includes('scan_and_report')) {
+          // scan_and_report 是实例方法，在构造后动态注册
+        }
+
+        // 后处理：整理报告
+        if (wsFeatures.includes('report_summary')) {
+          postHooks.push(WorkspaceCleanupLayer.createCleanupReportPostHook())
+        }
+
+        const workspaceCleanupLayer = new WorkspaceCleanupLayer({
+          features: wsFeatures,
+          preHooks: preHooks.length > 0 ? preHooks : undefined,
+          postHooks: postHooks.length > 0 ? postHooks : undefined,
+          llmService: llmService
+            ? {
+                chatJson: (prompt: string, opts?: any) => llmService.chatJson(prompt, opts),
+              }
+            : undefined,
+          debug: process.env.WORKSPACE_CLEANUP_DEBUG === 'true',
+        })
+
+        // 动态注册实例方法钩子（需要在构造后，因为实例方法捕获了 this）
+        if (wsFeatures.includes('inject_stats')) {
+          const injectHook = workspaceCleanupLayer.createInjectStatsPreHook()
+          workspaceCleanupLayer.addPreHook(injectHook)
+        }
+        if (wsFeatures.includes('scan_and_report')) {
+          const scanHook = workspaceCleanupLayer.createScanAndReportPostHook()
+          workspaceCleanupLayer.addPostHook(scanHook)
+        }
+
+        agentService.setWorkspaceCleanupLayer(workspaceCleanupLayer)
+      }
+    } catch (err) {
+      log('WARN', 'workspace_cleanup_layer_init_failed', { error: String(err) })
     }
 
     // Phase 4: Kernel 升级 — init() / start() 生命周期
@@ -707,6 +782,12 @@ export class AppRuntime {
     memoryIndexer.setKnowledgeGraph(memoryService.knowledgeGraph)
     memoryIndexer.setWorkerPool(this.workerPool!)
 
+    // ── 行为驱动的主动记忆填充（TF-IDF + 意图聚类 + 时间序列分析）──
+    const { behaviorDrivenMemoryAnalyzer: bdma } = await import('../behavior/BehaviorDrivenMemoryAnalyzer')
+    this.behaviorMemoryAnalyzer = bdma
+    bdma.setMemoryService(memoryService)
+    // 启动延迟到 stage 5（懒加载服务组）
+
     const cognitiveService = new CognitiveService()
     await cognitiveService.initialize(join(RUNTIME_ROOT, 'CONSTITUTION.md'), {
       engineeringMemory: memoryService.engineering,
@@ -865,6 +946,15 @@ export class AppRuntime {
     this.taskRunner.start()
     log('INFO', 'task_runtime_started')
 
+    // === Heartbeat: 5s 间隔检测主进程事件循环是否存活 ===
+    let beatId = 0
+    const heartbeat = setInterval(() => {
+      log('DEBUG', 'heartbeat', { tick: ++beatId, uptime: Date.now() - startMs })
+    }, 5000)
+    // 注册到清理函数防止泄漏
+    const { addGlobalDisposer } = await import('../core/Lifecycle')
+    addGlobalDisposer(() => clearInterval(heartbeat))
+
     // === Stage 8: Retention & Archive（R1） ===
     this.initRetentionScheduler()
 
@@ -925,12 +1015,14 @@ export class AppRuntime {
     ttsTypographyFeedbackLoop.stop()
     this.memoryService?.shutdown()
     this.memoryIndexer?.stop()
+    this.behaviorMemoryAnalyzer?.stop()
     await this.evaluationStore?.shutdown().catch(() => {})
     this.feedbackLoop?.dispose()
     evolutionService?.stop()
     insightService?.stop()
     creativityService?.stop()
     this.dashboardService?.destroy()
+    this.organizerService?.destroy()
     this.memoryContextService?.destroy()
     this.lazyInit?.cancel()
     this.subs.dispose()
@@ -944,10 +1036,6 @@ export class AppRuntime {
    */
   private initRetentionScheduler(): void {
     try {
-      const { EventArchiver } = require('../core/evaluation/EventArchiver')
-      const { RetentionScheduler } = require('../core/evaluation/RetentionScheduler')
-      const { getRawDb, getEventRawDb } = require('../db/connection')
-      const { WORKSPACE_ROOT } = require('../config')
       const mainRawDb = getRawDb()
       const eventRawDb = getEventRawDb()
 
@@ -1267,6 +1355,17 @@ export class AppRuntime {
       },
     })
 
+    // 行为驱动的主动记忆填充（在记忆索引之后启动）
+    this.lazyInit!.add({
+      name: 'behavior-memory-analyzer',
+      priority: 'normal',
+      delayMs: 1500,
+      fn: async () => {
+        this.behaviorMemoryAnalyzer?.start()
+        log('INFO', 'behavior_memory_analyzer_started')
+      },
+    })
+
     // 洞察
     this.lazyInit!.add({
       name: 'insight',
@@ -1450,6 +1549,27 @@ export class AppRuntime {
       },
     })
 
+    // 文件整理可视化进度服务 — 监听组织事件推送到壁纸 overlay
+    this.lazyInit!.add({
+      name: 'organizer-progress',
+      priority: 'normal',
+      delayMs: 400,
+      fn: async () => {
+        const organizer = new FileOrganizerProgressService()
+        const win = getMainWindow()
+        if (win && !win.isDestroyed()) {
+          organizer.setWindow(win)
+        }
+        this.organizerService = organizer
+        this.organizerRef.current = organizer
+        // 托盘控制回调
+        setOrganizerPause(() => organizer.pause())
+        setOrganizerResume(() => organizer.resume())
+        setOrganizerSkip(() => organizer.skipCurrent())
+        log('INFO', 'organizer_progress_service_started')
+      },
+    })
+
     // 桌面记忆浮窗 — 定期从 Memory 获取高关联记忆推送到桌面 overlay
     this.lazyInit!.add({
       name: 'memory-context',
@@ -1515,6 +1635,19 @@ export class AppRuntime {
         const { UserBehaviorService } = await import('../behavior/UserBehaviorService')
         const behavior = new UserBehaviorService()
         behavior.start()
+
+        // ── 注册 UserBehavior 为 Wallpaper 插件 ──
+        // UserBehaviorPluginAdapter 实现 IBehaviorProvider 契约，
+        // WallpaperPluginRegistry 在运行时发现并加载此插件。
+        // UserBehavior 只需实现契约，不关心 Wallpaper 的内部调度。
+        const { WallpaperPluginRegistry, UserBehaviorPluginAdapter } = await import('../wallpaper/plugin')
+        const wpRegistry = WallpaperPluginRegistry.getInstance()
+        wpRegistry.register(new UserBehaviorPluginAdapter(behavior))
+        await wpRegistry.loadAll()
+        log('INFO', 'user_behavior_wallpaper_plugin_registered', {
+          hasProvider: !!wpRegistry.getBehaviorProvider(),
+        })
+
         log('INFO', 'user_behavior_service_started')
       },
     })

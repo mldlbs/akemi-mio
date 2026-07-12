@@ -5,6 +5,7 @@ interface SlotContextValue {
   uiState: UiState
   setActiveSlot: (slot: ActiveSlot) => void
   toggleSidebar: () => void
+  toggleRightPanel: () => void
 }
 
 const SlotContext = createContext<SlotContextValue | null>(null)
@@ -12,6 +13,7 @@ const SlotContext = createContext<SlotContextValue | null>(null)
 export function SlotProvider({ children }: { children: ReactNode }) {
   const [uiState, setUiState] = useState<UiState>({
     sidebarOpen: true,
+    rightPanelOpen: true,
     activeSlot: 'chat',
   })
 
@@ -23,7 +25,11 @@ export function SlotProvider({ children }: { children: ReactNode }) {
     setUiState((s) => ({ ...s, sidebarOpen: !s.sidebarOpen }))
   }, [])
 
-  return <SlotContext.Provider value={{ uiState, setActiveSlot, toggleSidebar }}>{children}</SlotContext.Provider>
+  const toggleRightPanel = useCallback(() => {
+    setUiState((s) => ({ ...s, rightPanelOpen: !s.rightPanelOpen }))
+  }, [])
+
+  return <SlotContext.Provider value={{ uiState, setActiveSlot, toggleRightPanel, toggleSidebar }}>{children}</SlotContext.Provider>
 }
 
 export function useSlots(): SlotContextValue {

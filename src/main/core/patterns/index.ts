@@ -54,3 +54,22 @@ export {
   createThresholdTracker,
 } from './ThresholdTracker'
 export type { ThresholdAction, ThresholdTrackerOptions } from './ThresholdTracker'
+
+// ════════════════════════════════════════════════════════════════
+//  新增通用模式 v2
+//  （从 MCP Tool / WorkspaceCleanupLayer / IndustrialOdeLayer 共性中提取）
+// ════════════════════════════════════════════════════════════════
+
+export { HookChain, MapHookChain, createDefaultMerge } from './HookChain'
+export type {
+  Hook,
+  MapHook,
+  HookChainOptions,
+  MergeStrategy,
+  MapHookChainOptions,
+} from './HookChain'
+
+export { FeatureFlagSet, parseFeaturesFromEnv } from './FeatureFlagSet'
+export type { ParseFeaturesFromEnvOptions } from './FeatureFlagSet'
+
+export { applyDefaults, createWithDefaults, buildWithDefaults } from './DefaultsBuilder'

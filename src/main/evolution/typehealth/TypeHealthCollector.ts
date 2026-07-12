@@ -91,8 +91,8 @@ export class TypeHealthCollector implements SignalCollector {
         targetCategories: learningCategories,
       })
 
-      // 3. 执行扫描
-      const issues = typeHealthScanner.scan()
+      // 3. 执行扫描（异步分片版本，避免阻塞事件循环）
+      const issues = await typeHealthScanner.scanAsync()
 
       if (issues.length === 0) {
         log('INFO', 'type_health_collector_empty', {

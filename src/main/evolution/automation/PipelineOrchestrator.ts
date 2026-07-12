@@ -26,6 +26,7 @@ import { AsrLogCollector } from './AsrLogCollector'
 import { AsrOptimizationExecutor } from './AsrOptimizationExecutor'
 import { AsrVocabEvolutionExecutor } from './AsrVocabEvolutionExecutor'
 import { AsrAcousticOptimizationExecutor } from './AsrAcousticOptimizationExecutor'
+import { AsrReasoningChainExecutor } from './AsrReasoningChainExecutor'
 import { PlanLogCollector } from './PlanLogCollector'
 import { AutoPatchExecutor } from './AutoPatchExecutor'
 import { ToolEvolutionCollector } from './ToolEvolutionCollector'
@@ -36,13 +37,9 @@ import { TtsTypographyCollector } from './TtsTypographyCollector'
 import { TtsTypographyExecutor } from './TtsTypographyExecutor'
 import { TypeHealthCollector } from '../typehealth/TypeHealthCollector'
 import { TypeRefactorExecutor } from '../typehealth/TypeRefactorExecutor'
-import {
-  registerCollector,
-  registerExecutor,
-  getAllCollectors,
-  getAllExecutors,
-  getExecutorsBySource,
-} from './registry'
+import { FileOrganizerCollector } from '../file-organizer/FileOrganizerCollector'
+import { FileOrganizerExecutor } from '../file-organizer/FileOrganizerExecutor'
+import { registerCollector, registerExecutor, getAllCollectors, getAllExecutors, getExecutorsBySource } from './registry'
 
 export interface PipelineConfig {
   projectRoot: string
@@ -104,7 +101,8 @@ export class PipelineOrchestrator {
     const toolEvolutionCollector = new ToolEvolutionCollector()
     const ttsPreferenceCollector = new TtsPreferenceCollector()
     const ttsTypographyCollector = new TtsTypographyCollector()
-    const typeHealthCollector = new TypeHealthCollector()
+    const fileOrganizerCollector = new FileOrganizerCollector()
+    // type-health collector 已禁用：同步 readFileSync 840 文件阻塞 IPC，每次产出 0 问题
 
     // Stage 2: 注册到中央注册表
     registerCollector(tscCollector)
@@ -114,8 +112,8 @@ export class PipelineOrchestrator {
     registerCollector(planLogCollector)
     registerCollector(toolEvolutionCollector)
     registerCollector(ttsPreferenceCollector)
-    registerCollector(ttsTypographyCollector)
-    registerCollector(typeHealthCollector)
+    registerCollector(ttsTypographyCollector) // type-health 已禁用
+    registerCollector(fileOrganizerCollector)
 
     // Stage 3: 从注册表加载到本地
     for (const c of getAllCollectors()) {
@@ -124,6 +122,7 @@ export class PipelineOrchestrator {
 
     // Stage 4: 创建并注册内置执行器
     const claudeCodeExecutor = new ClaudeCodeExecutor()
+    const asrReasoningChainExecutor = new AsrReasoningChainExecutor()
     const asrOptimizationExecutor = new AsrOptimizationExecutor()
     const asrVocabEvolutionExecutor = new AsrVocabEvolutionExecutor()
     const asrAcousticOptimizationExecutor = new AsrAcousticOptimizationExecutor()
@@ -132,8 +131,11 @@ export class PipelineOrchestrator {
     const ttsConfigOptExecutor = new TtsConfigOptimizationExecutor()
     const ttsTypographyExecutor = new TtsTypographyExecutor()
     const typeRefactorExecutor = new TypeRefactorExecutor()
+    const fileOrganizerExecutor = new FileOrganizerExecutor()
 
     registerExecutor(claudeCodeExecutor)
+    // 推理链执行器优先注册（ASR 问题首选推理链路径）
+    registerExecutor(asrReasoningChainExecutor)
     registerExecutor(asrOptimizationExecutor)
     registerExecutor(asrVocabEvolutionExecutor)
     registerExecutor(asrAcousticOptimizationExecutor)
@@ -142,6 +144,7 @@ export class PipelineOrchestrator {
     registerExecutor(ttsConfigOptExecutor)
     registerExecutor(ttsTypographyExecutor)
     registerExecutor(typeRefactorExecutor)
+    registerExecutor(fileOrganizerExecutor)
     if (mcpManager) {
       registerExecutor(new DeepSeekExecutor(mcpManager))
     }

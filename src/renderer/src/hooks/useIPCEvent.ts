@@ -15,7 +15,7 @@ import { useEffect, useRef } from 'react'
  * ```
  */
 export function useIPCEvent<T>(
-  register: (cb: (data: T) => void) => () => void,
+  register: ((cb: (data: T) => void) => () => void) | undefined,
   handler: (data: T) => void,
   deps: React.DependencyList = [],
 ): void {
@@ -23,6 +23,7 @@ export function useIPCEvent<T>(
   handlerRef.current = handler
 
   useEffect(() => {
+    if (typeof register !== 'function') return
     const cleanup = register((data: T) => {
       handlerRef.current(data)
     })

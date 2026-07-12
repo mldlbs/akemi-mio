@@ -57,8 +57,12 @@ export class WorkflowSchedulerV2 {
 
     this.executeLoop(run, def, abort.signal).catch((err) => {
       log('ERROR', 'workflow_v2_error', { runId: run.runId, error: String(err) })
-      run.status = 'failed'
-      workflowStore.updateRun(run)
+      // 如果 stopRun 已经改为 cancelled，不再覆盖
+      const current = workflowStore.getRun(run.runId)
+      if (current && current.status === 'running') {
+        run.status = 'failed'
+        workflowStore.updateRun(run)
+      }
       this.running.delete(run.runId)
     })
 
@@ -157,6 +161,7 @@ export class WorkflowSchedulerV2 {
         while (queue.length > 0 && active.length < concurrency) {
           const sd = queue.shift()!
           const promise = this.executeStep(sd, run, def, outputDir, ctx, signal).then((result) => {
+            if (signal.aborted) return
             if (result.status === 'done') {
               completed.add(sd.id)
               ctx.steps[sd.id] = { result: result.data, status: 'done' }
@@ -193,7 +198,7 @@ export class WorkflowSchedulerV2 {
     }
 
     if (signal.aborted) {
-      run.status = 'failed'
+      run.status = 'cancelled'
       workflowStore.updateRun(run)
       this.running.delete(run.runId)
     }
@@ -573,7 +578,7 @@ export class WorkflowSchedulerV2 {
   ): Promise<{ status: string; data?: any; error?: string }> {
     switch (sd.handler) {
       case 'subagent':
-        return this.handleSubagent(sd, run, def, outputDir, ctx)
+        return this.handleSubagent(sd, run, def, outputDir, ctx, signal)
       case 'tool':
         return this.handleToolStep(sd)
       case 'api':
@@ -581,7 +586,7 @@ export class WorkflowSchedulerV2 {
       case 'prompt':
         return this.handlePromptStep(sd)
       case 'plan':
-        return this.handlePlanStep(sd)
+        return this.handlePlanStep(sd, signal)
       default:
         return { status: 'failed', error: `Unknown handler: ${sd.handler}` }
     }
@@ -593,13 +598,17 @@ export class WorkflowSchedulerV2 {
     def: WorkflowDef,
     outputDir: string,
     ctx: StepContext,
+    signal: AbortSignal,
   ): Promise<{ status: string; data?: any; error?: string }> {
+    if (signal.aborted) return { status: 'failed', error: 'Cancelled' }
+
     const subOptions: SpawnTaskOptions = {}
     if (sd.config.allowedTools !== undefined) subOptions.allowedToolNames = sd.config.allowedTools
     if (sd.config.maxTurns !== undefined) subOptions.maxTurns = sd.config.maxTurns
     if (sd.config.llmTimeoutMs !== undefined) subOptions.llmTimeoutMs = sd.config.llmTimeoutMs
 
     subOptions.onProgress = (msg) => {
+      if (signal.aborted) return
       eventBus.emit('workflow.run.step', { runId: run.runId, stepId: sd.id, status: 'running', agentResult: msg })
     }
 
@@ -622,9 +631,12 @@ export class WorkflowSchedulerV2 {
     const agentId = this.dispatch.runSubAgent(fullPrompt, def.description, subOptions)
     const pendingAgents = [agentId]
 
-    const results = await this.waitForAgents(pendingAgents, run, sd)
+    const results = await this.waitForAgents(pendingAgents, run, sd, signal)
     const agentResult = results.find((r) => pendingAgents.includes(r.id))
 
+    if (signal.aborted) {
+      return { status: 'failed', error: 'Cancelled' }
+    }
     if (agentResult?.error) {
       return { status: 'failed', error: agentResult.error, data: agentResult.summary }
     }
@@ -647,7 +659,7 @@ export class WorkflowSchedulerV2 {
     return { status: 'done', data: '(prompt injected)' }
   }
 
-  private async handlePlanStep(sd: WorkflowStepDef): Promise<{ status: string; data?: any; error?: string }> {
+  private async handlePlanStep(sd: WorkflowStepDef, signal: AbortSignal): Promise<{ status: string; data?: any; error?: string }> {
     const planPrompt = sd.config.planPrompt || sd.config.prompt || sd.description || ''
     this.dispatch.runPlan(planPrompt)
 
@@ -657,6 +669,7 @@ export class WorkflowSchedulerV2 {
     }
 
     for (let i = 0; i < 600; i++) {
+      if (signal.aborted) return { status: 'failed', error: 'Cancelled' }
       const ps = this.dispatch.getPlanStatus()
       if (!ps || ps.status === 'abandoned' || ps.status === 'completed') {
         if (ps?.status === 'completed') {
@@ -675,11 +688,13 @@ export class WorkflowSchedulerV2 {
     agentIds: string[],
     run: WorkflowRun,
     sd: WorkflowStepDef,
+    signal?: AbortSignal,
   ): Promise<{ id: string; summary: string; error?: string }[]> {
     const maxWait = 60 * 60 * 1000
     const interval = 2000
     let waited = 0
     while (waited < maxWait) {
+      if (signal?.aborted) return []
       const results = this.dispatch.getCompletedAgentResults()
       const done = agentIds.every((id) => results.some((r) => r.id === id))
       if (done) return results
@@ -724,12 +739,14 @@ export class WorkflowSchedulerV2 {
       this.running.delete(runId)
     }
     const run = workflowStore.getRun(runId)
-    if (run && run.status === 'running') {
-      run.status = 'failed'
-      workflowStore.updateRun(run)
-      return true
-    }
-    return false
+    if (!run) return false
+    // 无论当前状态如何，始终标记为 cancelled 并发送 IPC
+    // 防止竞态: executeLoop 在 stopRun 读 DB 前已经结束，
+    // 但前端仍未收到状态更新，取消后需要强制同步
+    run.status = 'cancelled'
+    run.completedAt = Date.now()
+    workflowStore.updateRun(run)
+    return true
   }
 
   isActive(runId?: string): boolean {

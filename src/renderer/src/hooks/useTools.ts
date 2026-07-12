@@ -6,13 +6,13 @@ export function useTools() {
   const store = useAgentStore()
 
   // tool:status 'start' 标志新一轮对话开始，清空 tool 列表
-  useIPCEvent(window.electronAPI.onToolStatus, (status: { type: string }) => {
+  useIPCEvent(window.electronAPI?.onToolStatus, (status: { type: string }) => {
     if (status.type === 'start') {
       store.clearTools()
     }
   })
 
-  useIPCEvent(window.electronAPI.onToolInvoked, (data: ToolIPCEvent) => {
+  useIPCEvent(window.electronAPI?.onToolInvoked, (data: ToolIPCEvent) => {
     const id = data.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     store.addTool({
       type: 'tool.started',
@@ -23,7 +23,7 @@ export function useTools() {
     })
   })
 
-  useIPCEvent(window.electronAPI.onToolCompleted, (data: ToolIPCEvent) => {
+  useIPCEvent(window.electronAPI?.onToolCompleted, (data: ToolIPCEvent) => {
     const id = data.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     store.addTool({
       type: 'tool.succeeded',
@@ -34,7 +34,7 @@ export function useTools() {
     })
   })
 
-  useIPCEvent(window.electronAPI.onToolFailed, (data: ToolIPCEvent) => {
+  useIPCEvent(window.electronAPI?.onToolFailed, (data: ToolIPCEvent) => {
     const id = data.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     store.addTool({
       type: 'tool.failed',

@@ -5,7 +5,7 @@
  * 遵循与 TscCollector 相同的模式。
  */
 
-import { execSync } from 'child_process'
+import { execAsync } from '../../utils/async'
 import { existsSync } from 'fs'
 import { log } from '../../logger/Logger'
 import type { Problem, SignalCollector } from './types'
@@ -31,17 +31,12 @@ export class EslintCollector implements SignalCollector {
   async collect(): Promise<Problem[]> {
     this.lastRun = Date.now()
     try {
-      // ESLint compact 格式输出，即使有错误也通过 || true 捕获
-      const stdout = execSync(
-        'npx eslint src/ --ext .ts,.tsx --format=compact 2>&1 || true',
-        {
-          cwd: this.projectRoot,
-          timeout: 60_000,
-          windowsHide: true,
-          encoding: 'utf-8',
-          maxBuffer: 2 * 1024 * 1024,
-        },
-      )
+      const stdout = await execAsync('npx eslint src/ --ext .ts,.tsx --format=compact 2>&1 || true', {
+        cwd: this.projectRoot,
+        timeout: 60_000,
+        windowsHide: true,
+        maxBuffer: 2 * 1024 * 1024,
+      })
 
       const problems = this.parseEslintOutput(stdout)
       log('INFO', 'eslint_collector_done', { count: problems.length })

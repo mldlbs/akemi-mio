@@ -82,7 +82,7 @@ export class StateBroadcaster {
   /** 滚动历史缓冲区（最新在前） */
   private history: DashboardLiveSnapshot[] = []
   private static readonly MAX_HISTORY = 120
-  private static readonly INTERVAL_MS = 1000
+  private static readonly INTERVAL_MS = 2000
 
   /** 上次推送的 JSON 指纹，用于跳过无变化推送 */
   private lastSnapshotJson: string | null = null

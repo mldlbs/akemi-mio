@@ -16,9 +16,14 @@
  *   2. 在 registry.ts 中统一注册（或自动发现）
  *   3. PipelineOrchestrator 通过 getAllCollectors() / getAllExecutors() 获取所有实现
  *   4. 支持运行时动态注册（第三方扩展）
+ *
+ * 【模式抽取】
+ * 通用工厂逻辑已迁移到 core/patterns：
+ * - buildCollector / buildExecutor 使用 core/patterns 的 applyDefaults
  */
 
 import { log } from '../../logger/Logger'
+import { applyDefaults } from '../../core/patterns'
 import type { SignalCollector, FixExecutor, ProblemSource } from './types'
 
 // ==============================================================================
@@ -64,14 +69,12 @@ export interface ExecutorDef {
 /**
  * 从 CollectorDef 构建 SignalCollector 实例
  * 作用同 buildTool()：补全默认值，统一创建
+ * 使用 core/patterns 的 applyDefaults 补全默认值。
  */
 export function buildCollector(def: CollectorDef): SignalCollector {
-  return {
-    name: def.name,
-    source: def.source,
-    collect: def.collect,
-    shouldRun: def.shouldRun,
-  }
+  return applyDefaults(def as SignalCollector, {
+    // SignalCollector 没有需要补全的默认字段
+  })
 }
 
 // ==============================================================================
@@ -81,15 +84,12 @@ export function buildCollector(def: CollectorDef): SignalCollector {
 /**
  * 从 ExecutorDef 构建 FixExecutor 实例
  * 作用同 buildTool()：补全默认值，统一创建
+ * 使用 core/patterns 的 applyDefaults 补全默认值。
  */
 export function buildExecutor(def: ExecutorDef): FixExecutor {
-  return {
-    name: def.name,
-    supportedSources: def.supportedSources,
-    execute: def.execute,
-    isAvailable: def.isAvailable,
-    timeoutMs: def.timeoutMs,
-  }
+  return applyDefaults(def as FixExecutor, {
+    // FixExecutor 没有需要补全的默认字段
+  })
 }
 
 // ==============================================================================

@@ -346,16 +346,16 @@ export function WorkflowEditor({ initial, onBack, onSaved }: Props) {
   const [showRunPanel, setShowRunPanel] = useState(false)
   const hasActiveRuns = storeActiveRuns.length > 0
 
-  useIPCEvent(window.electronAPI.onWorkflowRunCreated, (data: any) => {
+  useIPCEvent(window.electronAPI?.onWorkflowRunCreated, (data: any) => {
     setShowRunPanel(true)
   })
 
-  useIPCEvent(window.electronAPI.onWorkflowRunUpdated, (_data: any) => {
+  useIPCEvent(window.electronAPI?.onWorkflowRunUpdated, (_data: any) => {
     // Run state updates flow through the store via useWorkflowDefinitions
     // Nothing extra needed here — the store is the single source of truth
   })
 
-  useIPCEvent(window.electronAPI.onWorkflowRunStep, (data) => {
+  useIPCEvent(window.electronAPI?.onWorkflowRunStep, (data) => {
     if (!data.agentResult) return
     setPipelineLogs((prev) => {
       const lines = prev[data.runId] ?? []

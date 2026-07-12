@@ -47,6 +47,17 @@ export type UserBehaviorFeature =
   /** 反馈回路收敛自动切换：收敛后自动从 monitor 切到 auto */
   | 'feedback_loop_auto_switch'
 
+  // ═════════════════════════════════════════════════════════════════
+  //  Plan:实验42：并发Workflow隔离性测试 — 渐进式引入
+  // ═════════════════════════════════════════════════════════════════
+
+  /** 实验42 Phase 1: 旁路输出不做决策（观察+日志） */
+  | 'plan_experiment_42_passive'
+  /** 实验42 Phase 2: 作为建议源影响部分决策 */
+  | 'plan_experiment_42_suggestion'
+  /** 实验42 Phase 3: 替换 UserBehavior 核心模块 */
+  | 'plan_experiment_42_replacement'
+
 export type UserBehaviorFeatureMap = ReadonlySet<UserBehaviorFeature>
 
 // ==================== 钩子类型 ====================
@@ -178,6 +189,9 @@ export function parseFeaturesFromEnv(): UserBehaviorFeature[] {
     'mcp_feedback_loop',
     'feedback_loop_damping',
     'feedback_loop_auto_switch',
+    'plan_experiment_42_passive',
+    'plan_experiment_42_suggestion',
+    'plan_experiment_42_replacement',
   ])
 
   return raw

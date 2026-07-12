@@ -5,6 +5,7 @@ import { Sidebar } from './components/Sidebar'
 import { MainArea } from './components/MainArea'
 import { InputBar } from './components/InputBar'
 import { ChatSlot } from './components/ChatSlot'
+import { HistoryView } from './components/HistoryView'
 import { ToolSlot } from './components/ToolSlot'
 import { PreviewSlot } from './components/PreviewSlot'
 import { WorkflowSlot } from './components/WorkflowSlot'
@@ -13,10 +14,12 @@ import { OtparSlot } from './components/OtparSlot'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { SettingsModal } from './components/SettingsModal'
 import { SystemDock } from './components/SystemDock'
+import { RightPanel } from './components/RightPanel'
 import { WallpaperOverlay } from './components/WallpaperOverlay'
 import { useSlots } from './slots/SlotContext'
 import { useSessions, useAIOutput, useTools, useDeviceStatus, usePlans, useWorkflowDefinitions } from './hooks'
 import { useSessionStore } from './store/sessionStore'
+import { useHistoryViewStore } from './store/historyViewStore'
 import type { MessageItem } from './slots/types'
 
 export type { MessageItem } from './slots/types'
@@ -35,8 +38,7 @@ function dumpMarks(label: string) {
   console.log(`[PERF] ${label}\n${lines}`)
 }
 
-function App() {
-  // 初始化 IPC 监听器（hooks 内部负责注册事件并写入 store）
+function AppInner() {
   useSessions()
   const { activeSessionId } = useSessionStore()
   const device = useDeviceStatus()
@@ -45,6 +47,7 @@ function App() {
   usePlans()
   useWorkflowDefinitions()
   const { uiState } = useSlots()
+  const { viewing } = useHistoryViewStore()
 
   return (
     <div className="app-shell">
@@ -52,7 +55,9 @@ function App() {
       <div className="app-body">
         <Sidebar />
         <MainArea>
-          {uiState.activeSlot === 'tool' ? (
+          {viewing ? (
+            <HistoryView />
+          ) : uiState.activeSlot === 'tool' ? (
             <ToolSlot />
           ) : uiState.activeSlot === 'otpar' ? (
             <ErrorBoundary>
@@ -72,6 +77,7 @@ function App() {
             <ChatSlot />
           )}
         </MainArea>
+        <RightPanel />
       </div>
       <InputBar
         onSend={handleResult}
@@ -87,6 +93,20 @@ function App() {
       <WallpaperOverlay />
     </div>
   )
+}
+
+function App() {
+  if (!window.electronAPI) {
+    return (
+      <div className="app-shell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+        <div style={{ textAlign: 'center', color: '#888' }}>
+          <h2>Akemi Mio</h2>
+          <p style={{ marginTop: 8, fontSize: 13 }}>等待 Electron 连接…</p>
+        </div>
+      </div>
+    )
+  }
+  return <AppInner />
 }
 
 export default App

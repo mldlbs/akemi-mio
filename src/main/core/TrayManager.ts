@@ -9,6 +9,9 @@ let tray: Tray | null = null
 let dashboardToggleCb: (() => void) | null = null
 let contextualTtsToggleCb: (() => void) | null = null
 let userContextOverrideCb: ((mode: string) => void) | null = null
+let organizerPauseCb: (() => void) | null = null
+let organizerResumeCb: (() => void) | null = null
+let organizerSkipCb: (() => void) | null = null
 
 /** 注册仪表盘切换回调（由 AppRuntime 在仪表盘服务就绪后调用） */
 export function setDashboardToggle(cb: () => void): void {
@@ -23,6 +26,21 @@ export function setContextualTtsToggle(cb: () => void): void {
 /** 注册用户情境语音覆盖回调（由 AppRuntime 调用） */
 export function setUserContextOverride(cb: (mode: string) => void): void {
   userContextOverrideCb = cb
+}
+
+/** 注册文件整理暂停回调 */
+export function setOrganizerPause(cb: () => void): void {
+  organizerPauseCb = cb
+}
+
+/** 注册文件整理继续回调 */
+export function setOrganizerResume(cb: () => void): void {
+  organizerResumeCb = cb
+}
+
+/** 注册文件整理跳过当前文件回调 */
+export function setOrganizerSkip(cb: () => void): void {
+  organizerSkipCb = cb
 }
 
 export function initTray(mainWindow: () => BrowserWindow | null): void {
@@ -58,6 +76,19 @@ export function initTray(mainWindow: () => BrowserWindow | null): void {
         click: () => {
           dashboardToggleCb?.()
         },
+      },
+      { type: 'separator' },
+      {
+        label: '文件整理：暂停',
+        click: () => organizerPauseCb?.(),
+      },
+      {
+        label: '文件整理：继续',
+        click: () => organizerResumeCb?.(),
+      },
+      {
+        label: '文件整理：跳过当前',
+        click: () => organizerSkipCb?.(),
       },
       { type: 'separator' },
       {

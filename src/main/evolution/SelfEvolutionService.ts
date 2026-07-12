@@ -37,6 +37,7 @@ import type { UserBehaviorLayer } from '../user-behavior/UserBehaviorLayer'
 import type { PreProcessContext, PostProcessContext, PostProcessResult } from '../user-behavior/types'
 import { insertMessage, createMessageId } from '../db/messages'
 import { getMainWindow } from '../core/Lifecycle'
+import { evolutionCheckpointManager } from './EvolutionCheckpointManager'
 import type { MemoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
 
 // =============================================================================
@@ -227,15 +228,44 @@ export class SelfEvolutionService implements ISubsystem {
     // 初始同步 Evolution 状态到 PiperTTS 桥接器
     this.syncStateToPiperBridge()
 
-    // 首次启动时立即执行一次管道
-    // （如果管道已注入）
-    if (this.pipeline) {
-      this.pipeline.runOnce().catch(() => {})
-    }
+    // ★ 检查点恢复：检测上次中断是否有未完成的检查点（后台执行，不阻塞启动）
+    void this.recoverCheckpointsOnStartup()
+
+    // 注册进程信号处理，确保任意中断都能保存检查点现场
+    evolutionCheckpointManager.registerSignalHandlers()
+
+    // 首次管道延迟 120 秒执行（等渲染进程 IPC 通道稳定，避免启动时冲垮）
+    this._firstRunTimer = setTimeout(() => {
+      if (this.pipeline) {
+        this.pipeline.runOnce().catch(() => {})
+      }
+    }, 120_000)
   }
+
+  private _firstRunTimer: ReturnType<typeof setTimeout> | null = null
 
   async stop(): Promise<void> {
     this.state = 'stopping'
+
+    // ★ 标记当前检查点为 interrupted（配合信号处理确保任意中断都能保留现场）
+    const currentId = evolutionCheckpointManager.getCurrentCheckpointId()
+    if (currentId) {
+      try {
+        const { getRawDb } = await import('../db/connection')
+        const db = getRawDb()
+        if (db) {
+          db.run('UPDATE evolution_checkpoints SET status = ?, completed_at = ? WHERE id = ?', [
+            'interrupted',
+            Date.now(),
+            currentId,
+          ])
+          log('INFO', 'evolution_stop_marked_interrupted', { checkpointId: currentId })
+        }
+      } catch (err) {
+        log('WARN', 'evolution_stop_mark_failed', { error: String(err) })
+      }
+    }
+
     this.stopExistingTick()
     this.disposeEventSubscriptions()
     this.state = 'stopped'
@@ -324,7 +354,12 @@ export class SelfEvolutionService implements ISubsystem {
   private syncStateToPiperBridge(): void {
     const cooldown = this.getRecoveryCooldown()
     evolutionPiperBridge.syncEvolutionState({
-      schedulerState: this.schedulerState === EvolutionSchedulerState.ANALYZING ? 'analyzing' : this.schedulerState === EvolutionSchedulerState.COOLDOWN ? 'cooldown' : 'idle',
+      schedulerState:
+        this.schedulerState === EvolutionSchedulerState.ANALYZING
+          ? 'analyzing'
+          : this.schedulerState === EvolutionSchedulerState.COOLDOWN
+            ? 'cooldown'
+            : 'idle',
       safetyMode: this.safetyMode === 'review' ? 'review' : 'auto',
       executeFailures: this.tryRunFailures + this.executeFailures,
       inCooldown: cooldown.active,
@@ -340,6 +375,46 @@ export class SelfEvolutionService implements ISubsystem {
     this.safetyMode = mode
     this.syncStateToPiperBridge()
     log('INFO', 'evolution_safety_mode', { mode })
+  }
+
+  // ==================== 检查点恢复 ====================
+
+  /**
+   * 在服务启动时检测并处理上次中断留下的未完成检查点。
+   * 结果会以 Evolution 消息的形式写入 UI。
+   */
+  private async recoverCheckpointsOnStartup(): Promise<void> {
+    try {
+      const summary = await evolutionCheckpointManager.recoverOnStartup()
+      if (!summary) {
+        log('INFO', 'evolution_no_unfinished_checkpoints')
+        return
+      }
+
+      log('INFO', 'evolution_checkpoint_recovery', { summary: summary.slice(0, 200) })
+
+      // 将恢复摘要写入 UI 消息
+      try {
+        const msg = {
+          id: createMessageId(),
+          source: 'electron' as const,
+          role: 'assistant' as const,
+          content: summary,
+          category: 'evolution' as const,
+          sessionId: SelfEvolutionService.EVOLUTION_SESSION_ID,
+          createdAt: Date.now(),
+        }
+        insertMessage(msg)
+        const win = getMainWindow()
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('message:new', msg)
+        }
+      } catch {
+        // 窗口可能尚未创建
+      }
+    } catch (err: any) {
+      log('ERROR', 'evolution_checkpoint_recovery_error', { error: String(err) })
+    }
   }
 
   // ==================== 调度 tick ====================
@@ -482,14 +557,31 @@ export class SelfEvolutionService implements ISubsystem {
       }
 
       try {
+        // ★ 检查点体系：在每个关键阶段创建 git 快照 + 数据库记录，
+        //   确保进程中断后能恢复现场或回滚。
+        const cycleId = `cycle_${startedAt}`
+
+        // pre_cycle：整个周期开始前的完整快照
+        const preCycleCkpt = await evolutionCheckpointManager.beginCheckpoint(cycleId, 'pre_cycle')
+
         // 步骤 1：触发自动化管道（如果已注入）
         if (this.pipeline) {
           log('INFO', 'evolution_trigger_pipeline')
+
+          // pre_pipeline：管道执行前的快照（含当前工作区所有变更）
+          const prePipelineCkpt = await evolutionCheckpointManager.beginCheckpoint(cycleId, 'pre_pipeline')
+
           const metrics = await this.pipeline.runOnce()
           this.lastPipelineMetrics = metrics
           this.tryRunFailures = 0
           this.lastSuccessTime = Date.now()
           this.recoveryCooldownUntil = 0
+
+          // pre_pipeline 完成
+          if (prePipelineCkpt) evolutionCheckpointManager.completeCheckpoint(prePipelineCkpt)
+
+          // post_execute：管道执行完成后的确认快照
+          const postExecCkpt = await evolutionCheckpointManager.beginCheckpoint(cycleId, 'post_execute')
 
           summary = this.buildPipelineSummary(metrics)
           success = true
@@ -499,11 +591,17 @@ export class SelfEvolutionService implements ISubsystem {
             fixed: metrics.totalFixed,
             queueSize: metrics.queueSize,
           })
+
+          // post_execute 完成
+          if (postExecCkpt) evolutionCheckpointManager.completeCheckpoint(postExecCkpt)
         } else {
           // 无管道：空 run（仅做健康检查）
           summary = '自动化管道未配置，本次跳跃'
           success = true
         }
+
+        // pre_cycle 完成（至此全链路检查点均成功标记）
+        if (preCycleCkpt) evolutionCheckpointManager.completeCheckpoint(preCycleCkpt)
 
         // 周期成功 → 重置失败计数
         if (success && this.recoveryCooldownUntil > 0) {
@@ -548,8 +646,10 @@ export class SelfEvolutionService implements ISubsystem {
           // 从 summary 中提取 [xxx] 标题作为洞察片段
           const insightMatches = summary.match(/【[^】]+】/g)
           const insights = insightMatches
-            ? [...new Set(insightMatches)].map(m => m.replace(/[【】]/g, '').trim()).slice(0, 3)
-            : summary.length > 50 ? [summary.slice(0, 100)] : undefined
+            ? [...new Set(insightMatches)].map((m) => m.replace(/[【】]/g, '').trim()).slice(0, 3)
+            : summary.length > 50
+              ? [summary.slice(0, 100)]
+              : undefined
           this.memoryBridge.storeEvolutionResult({
             summary,
             metrics: this.lastPipelineMetrics,
@@ -578,6 +678,12 @@ export class SelfEvolutionService implements ISubsystem {
         }
 
         log('ERROR', 'evolution_cycle_error', { error: String(err), failures: this.tryRunFailures })
+
+        // ★ 检查点失败：标记当前未完成的检查点
+        const currentId = evolutionCheckpointManager.getCurrentCheckpointId()
+        if (currentId) {
+          evolutionCheckpointManager.failCheckpoint(currentId, String(err))
+        }
 
         // ★ 即使失败，也将结果写入记忆系统（便于后续分析失败模式）
         if (this.memoryBridge && this.memoryBridge.isReady()) {

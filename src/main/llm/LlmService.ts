@@ -222,7 +222,7 @@ export class LlmService {
         const statusErr = this._checkStatus(res, requestId, t0)
         if (statusErr) return statusErr
 
-        const full = await this._readSSEStream(res, onChunk, requestId, t0)
+        const full = await this._readSSEStream(res, onChunk, requestId, t0, controller.signal)
 
         const elapsed = Date.now() - t0
         const outputTokens = estimateTokens(full)
@@ -361,7 +361,13 @@ export class LlmService {
     log('ERROR', 'llm_last_20_msgs', { request_id: requestId, msgs: last20.join('\n') })
   }
 
-  private async _readSSEStream(res: Response, onChunk: ChunkCallback, requestId?: string, t0?: number): Promise<string> {
+  private async _readSSEStream(
+    res: Response,
+    onChunk: ChunkCallback,
+    requestId?: string,
+    t0?: number,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const reader = res.body?.getReader()
     if (!reader) throw new Error('no reader')
 
@@ -371,6 +377,7 @@ export class LlmService {
     let hasFirstChunk = false
 
     while (true) {
+      if (signal?.aborted) break
       const { done, value } = await reader.read()
       if (done) break
 
@@ -601,6 +608,7 @@ export class LlmService {
     let hasToolCalls = false
 
     while (true) {
+      if (signal.aborted) break
       const { done, value } = await reader.read()
       if (done) break
 
