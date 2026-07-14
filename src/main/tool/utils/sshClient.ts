@@ -16,10 +16,20 @@ const EXEC_TIMEOUT = 60_000
 
 function getDefaultSSHConfig(): SSHConfig {
   const cm = getCredentialsManager()
+  if (!cm) throw new Error('凭据系统未初始化，无法获取 SSH 配置')
+
+  const host = cm.get('centos_host')
+  const portStr = cm.get('centos_port')
+  const username = cm.get('centos_user')
+
+  if (!host) throw new Error('SSH 凭据缺失: centos_host 未设置')
+  if (!portStr) throw new Error('SSH 凭据缺失: centos_port 未设置')
+  if (!username) throw new Error('SSH 凭据缺失: centos_user 未设置')
+
   return {
-    host: cm?.get('centos_host') || '192.168.31.123',
-    port: parseInt(cm?.get('centos_port') || '8091', 10),
-    username: cm?.get('centos_user') || 'root',
+    host,
+    port: parseInt(portStr, 10),
+    username,
   }
 }
 
