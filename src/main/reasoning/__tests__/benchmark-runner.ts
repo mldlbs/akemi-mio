@@ -64,8 +64,12 @@ for (const c of allCases) {
 
   const hasPattern = d.pattern && d.pattern !== 'default'
   const patternStr = hasPattern ? d.pattern : '(none)'
-  const scoreStr = detail.scores ? Object.entries(detail.scores).map(([p, s]) => `${p}=${s}`).join(', ') : ''
-  const hitsStr = detail.hits.length > 0 ? detail.hits.map(h => h.tag).join(', ') : ''
+  const scoreStr = detail.scores
+    ? Object.entries(detail.scores)
+        .map(([p, s]) => `${p}=${s}`)
+        .join(', ')
+    : ''
+  const hitsStr = detail.hits.length > 0 ? detail.hits.map((h) => h.tag).join(', ') : ''
   const overrideStr = detail.overriddenByScene ? ` [override:${detail.overriddenByScene}]` : ''
 
   if (!hasPattern) noneCount++
@@ -77,7 +81,7 @@ for (const c of allCases) {
   console.log(`${c.id} [${patternStr}${overrideStr}] ${c.text.slice(0, 50)}`)
   if (scoreStr) console.log(`  scores: ${scoreStr}`)
   if (hitsStr) console.log(`  hits: ${hitsStr}`)
-  if (c.expectations.length > 0) console.log(`  expects: ${c.expectations.slice(0, 3).join(', ') }`)
+  if (c.expectations.length > 0) console.log(`  expects: ${c.expectations.slice(0, 3).join(', ')}`)
   console.log()
 }
 
