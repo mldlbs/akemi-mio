@@ -1,0 +1,115 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "docs/golden/golden-schema.json",
+  "title": "GoldenCase",
+  "description": "Schema for M4.3 Golden Case — a frozen reference data point for regression testing the reasoning layer.",
+  "type": "object",
+  "required": ["caseId", "caseRef", "level1", "changelog", "createdAt", "updatedAt"],
+  "properties": {
+    "caseId": {
+      "description": "Benchmark case identifier, e.g. Q01, D-D05",
+      "type": "string",
+      "pattern": "^[A-Z]+-?[A-Z]?\\d+$"
+    },
+    "caseRef": {
+      "type": "object",
+      "required": ["text", "expectations"],
+      "properties": {
+        "text": { "type": "string" },
+        "expectations": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "level1": {
+      "type": "object",
+      "required": ["schemaVersion", "directive"],
+      "properties": {
+        "schemaVersion": { "type": "string", "enum": ["0.1"] },
+        "directive": {
+          "type": "object",
+          "required": ["pattern", "goals", "constraints", "outputStyle"],
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "enum": ["cause_effect", "hypothesis_verification", "option_evaluation", "goal_constraint_tradeoff", "none"]
+            },
+            "goals": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": ["identify_root_cause", "compare_options", "evaluate_tradeoffs", "explain_causality", "provide_recommendation"]
+                  },
+                  "description": { "type": "string" }
+                }
+              }
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["type", "description"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": ["scope", "assumption", "priority"]
+                  },
+                  "description": { "type": "string" }
+                }
+              }
+            },
+            "outputStyle": {
+              "type": "string",
+              "enum": ["causal_narrative", "structured_comparison", "conclusion_first", "default"]
+            }
+          }
+        }
+      }
+    },
+    "level2": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["schemaVersion", "renderedPrompt", "goldenResponse", "llmContext"],
+          "properties": {
+            "schemaVersion": { "type": "string", "enum": ["0.1"] },
+            "renderedPrompt": { "type": "string" },
+            "goldenResponse": { "type": "string" },
+            "llmContext": {
+              "type": "object",
+              "required": ["model", "temperature", "promptBuilderVersion", "recordedAt"],
+              "properties": {
+                "model": { "type": "string" },
+                "temperature": { "type": "number" },
+                "promptBuilderVersion": { "type": "string" },
+                "recordedAt": { "type": "string", "format": "date-time" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "changelog": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["date", "reason", "author", "level"],
+        "properties": {
+          "date": { "type": "string" },
+          "reason": { "type": "string" },
+          "author": { "type": "string" },
+          "level": { "type": "string", "enum": ["l1", "l2"] },
+          "previousDirectiveHash": { "type": "string" }
+        }
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}
