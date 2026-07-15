@@ -1,6 +1,6 @@
 # ADR-008：Tool Decision Contract
 
-**Status:** ✅ Accepted (Frozen) — P1–P4.1 Implementation Complete
+**Status:** ✅ Accepted (Frozen) — P1–P4.1 Implementation Complete (Design Validation Passed, Runtime Validation Pending)
 **Date:** 2026-07-15
 **Supersedes:** None
 **Supersedes by:** None
@@ -8,7 +8,8 @@
 - ADR-006 — Reasoning Contract
 - `src/main/agent/UserBehaviorAnalyzer.ts` — Scene Classification
 - `src/main/agent/ChatExecutor.ts` — Tool Loop
-- `src/main/agent/ToolPolicyPlanner.ts` — Proposed implementation
+- `src/main/agent/toolPolicy/ToolPolicyPlanner.ts` — Planner 实现
+- `src/main/agent/toolPolicy/ToolPromptAssembler.ts` — Assembler 实现
 
 ---
 
@@ -444,3 +445,93 @@ toToolFilter() 的输出（allowedToolNames）是 Safety Net，
 - [Validation Scenarios](adr-008-validation-scenarios.md) — 场景测试矩阵与 Invariant 验证
 - [UserBehaviorAnalyzer](../src/main/agent/UserBehaviorAnalyzer.ts) — Scene 分类和风格 Prompt 的所属组件
 - [ChatExecutor](../src/main/agent/ChatExecutor.ts) — 消费 ToolDecision + Style Prompt 的 Runtime
+
+---
+
+## Appendix A: Runtime Validation
+
+### A.1 Design Validation
+
+以下 7 项 Invariant 通过静态审计和代码审查验证。这是设计验证（Design Validation），不是运行时验证（Runtime Validation）。
+
+| # | Invariant | 验证方式 | 证据 |
+|---|-----------|----------|------|
+| I-1 | **确定性：** 相同输入必然产生完全相同的 `ToolDecision` | 代码审查 | `decide()` 纯函数，无外部状态、无随机 |
+| I-2 | **无副作用：** `decide()` 不修改任何外部状态 | 代码审查 | `decide()` / `toToolFilter()` 均无写操作 |
+| I-3 | **无 LLM 调用：** `decide()` 纯本地同步逻辑 | 代码审查 | 仅 Regex，无 async/await，无模型访问 |
+| I-4 | **Prompt 不含策略：** `SCENE_PROMPTS` 中无工具策略语句 | 代码审查 | P3 commit `18eb201` 已清理 |
+| I-5 | **auto 不注入：** `preference === 'auto'` 时 `assemble()` 返回 `null` | 代码审查 | `ToolPromptAssembler` 第 39 行 |
+| I-6 | **Safety Filter < ToolDecision：** `toToolFilter()` 不影响 `decide()` | 代码审查 | 单向依赖，Planner → Filter，无反写 |
+| I-7 | **ToolDecision 不可变：** 输出后不可修改 | 代码审查 | `decide()` 每次返回新对象 |
+
+### A.2 Decision Flow Verification
+
+```
+User Message
+     │
+     ▼
+SceneClassifier.analyzeScene()        ① Scene 分类
+     │
+     ▼
+ToolPolicyPlanner.decide()
+  ├── _detectSignals(userText)        ② 强信号优先
+  │     └── META_FEEDBACK > USER_REQUEST > EXECUTION_TASK
+  │         > FRESH_INFORMATION > FILE_AVAILABLE
+  └── SCENE_DEFAULT[scene]            ③ 场景兜底
+     │
+     ▼
+ToolDecision {preference, confidence, reason}
+     │
+  ┌──┴───────────┐
+  ▼               ▼
+Assembler      toToolFilter()
+(pref≠auto)    (avoid/forbidden→[], else→undefined)
+  │               │
+  ▼               ▼
+extraModules   chatWithTools(allowedToolNames)
+```
+
+### A.3 Regression Baseline
+
+以下 10 个场景构成回归基线。任何修改 `ToolPolicyPlanner` 的变更必须与下表结果一致。
+
+| # | 场景 | 用户输入 | 信号 | prefs | reason | filter | Prompt 注入 |
+|---|------|----------|------|-------|--------|--------|-------------|
+| 1 | Quick QA + 时间查询 | "现在几点了" | FRESH_INFORMATION | proactive | FRESH_INFORMATION | undefined | 是 |
+| 2 | Quick QA（纯简短） | "你好" | — | avoid | DEFAULT | [] | 是 |
+| 3 | 新鲜信息查询 | "今天天气怎么样" | FRESH_INFORMATION | proactive | FRESH_INFORMATION | undefined | 是 |
+| 4 | 上传文件 | "我刚发了一个文件你看一下" | FILE_AVAILABLE | proactive | FILE_AVAILABLE | undefined | 是 |
+| 5 | 执行任务 | "帮我实现一个排序函数" | EXECUTION_TASK | proactive | EXECUTION_TASK | undefined | 是 |
+| 6 | Meta Feedback | "你只会说不会做" | META_FEEDBACK | proactive | META_FEEDBACK | undefined | 是 |
+| 7 | 显式工具请求 | "用工具查一下这个" | USER_REQUEST | proactive | USER_REQUEST | undefined | 是 |
+| 8 | Casual Chat | "今天心情不错" | — | avoid | DEFAULT | [] | 是 |
+| 9 | Code Debugging | "这个bug怎么修" | — | proactive | DEFAULT | undefined | 是 |
+| 10 | Deep Discussion | "你怎么看这个架构设计" | — | auto | DEFAULT | undefined | 否（null） |
+
+### A.4 Log Schema
+
+```typescript
+// behavior_adaptive_scene 日志条目
+{
+  scene,        // SceneLabel: 当前场景
+  mode,         // ResponseMode: 当前回复模式
+  confidence,   // number: 场景分类置信度
+  topics,       // string[]: 主导话题
+  avgLen,       // number: 用户消息平均长度
+  toolPreference, // 'proactive'|'auto'|'avoid'|'forbidden'
+  toolReason,   // ToolDecisionReason 字符串
+  toolFilter    // 'all'|'none'|'restricted'
+}
+```
+
+工具调用日志由已有的事件系统处理：`agent.tool.invoked` + `agent.tool.completed`。
+
+### A.5 Runtime Validation (Pending)
+
+以下验证项依赖真实对话数据，当前未完成：
+
+- [ ] 工具调用率是否改善（旧架构 vs 新架构，相同对话集）
+- [ ] "Mio 只说不做"场景是否减少
+- [ ] 信号检测误报率（false positive on "Mio 不会让人失望"）
+- [ ] `avoid` 策略是否过度抑制合法工具调用
+- [ ] `proactive` 策略是否引入不必要的工具调用
