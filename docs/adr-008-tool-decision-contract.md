@@ -1,6 +1,6 @@
 # ADR-008：Tool Decision Contract
 
-**Status:** ✅ Draft — Gate 1 (Decision Space)
+**Status:** ✅ Accepted (Frozen) — P1–P4.1 Implementation Complete
 **Date:** 2026-07-15
 **Supersedes:** None
 **Supersedes by:** None
@@ -439,6 +439,8 @@ toToolFilter() 的输出（allowedToolNames）是 Safety Net，
 
 ## Related
 
-- [ToolPolicyPlanner 原型实现](../src/main/agent/ToolPolicyPlanner.ts) — ADR-008 驱动的参考实现
+- [ToolPolicyPlanner 实现](../src/main/agent/toolPolicy/ToolPolicyPlanner.ts) — ADR-008 驱动实现
+- [ToolPromptAssembler 实现](../src/main/agent/toolPolicy/ToolPromptAssembler.ts) — ADR-008 驱动实现
+- [Validation Scenarios](adr-008-validation-scenarios.md) — 场景测试矩阵与 Invariant 验证
 - [UserBehaviorAnalyzer](../src/main/agent/UserBehaviorAnalyzer.ts) — Scene 分类和风格 Prompt 的所属组件
 - [ChatExecutor](../src/main/agent/ChatExecutor.ts) — 消费 ToolDecision + Style Prompt 的 Runtime
