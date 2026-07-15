@@ -8,8 +8,9 @@
  * J-5: Field order is canonical (consistent JSON key ordering)
  */
 import { describe, it, expect } from 'vitest'
+import { render } from '../golden/JsonRenderer'
 import { ReportGenerator } from '../golden/ReportGenerator'
-import type { ReplayResult, ReplayFailure, ReasoningDirective } from '../golden/types'
+import type { ReplayResult, ReplayFailure, ReasoningDirective, RegressionReport } from '../golden/types'
 
 const gen = new ReportGenerator()
 
@@ -41,30 +42,16 @@ function mockResult(overrides?: Partial<ReplayResult>): ReplayResult {
   }
 }
 
-// ── No-op renderer placeholder (replaced by real implementation in P1.4.1b) ──
-
-import type { RegressionReport } from '../golden/types'
-function render(report: RegressionReport): string {
-  void report // placeholder
-  return '{}'
-}
-function renderJson(report: RegressionReport): string {
-  void report // placeholder
-  return '{}'
-}
-
-// ── Tests ──
-
 describe('JSON Renderer Contract', () => {
   describe('J-1: Determinism', () => {
-    it.skip('same report produces identical JSON output', () => {
+    it('same report produces identical JSON output', () => {
       const r = gen.generate(mockResult())
       expect(render(r)).toBe(render(r))
     })
   })
 
   describe('J-2: Round-trip recovery', () => {
-    it.skip('JSON.parse(render(r)) recovers all top-level fields', () => {
+    it('JSON.parse(render(r)) recovers all top-level fields', () => {
       const r = gen.generate(mockResult())
       const parsed: RegressionReport = JSON.parse(render(r))
       expect(parsed.reportSchemaVersion).toBe(r.reportSchemaVersion)
@@ -77,7 +64,7 @@ describe('JSON Renderer Contract', () => {
       expect(parsed.metadata.runnerVersion).toBe(r.metadata.runnerVersion)
     })
 
-    it.skip('round-trip preserves nested object structure', () => {
+    it('round-trip preserves nested object structure', () => {
       const r = gen.generate(mockResult({ failed: 3, failures: [mockFailure({ caseId: 'A' }), mockFailure({ caseId: 'B' }), mockFailure({ caseId: 'C' })] }))
       const parsed: RegressionReport = JSON.parse(render(r))
       expect(parsed.regression.entries.length).toBe(3)
@@ -90,7 +77,7 @@ describe('JSON Renderer Contract', () => {
   })
 
   describe('J-3: Immutability', () => {
-    it.skip('render() does not mutate input RegressionReport', () => {
+    it('render() does not mutate input RegressionReport', () => {
       const r = gen.generate(mockResult())
       const frozen = JSON.stringify(r)
       render(r)
@@ -99,11 +86,10 @@ describe('JSON Renderer Contract', () => {
   })
 
   describe('J-4: No derived fields', () => {
-    it.skip('output contains no extra fields beyond Contract', () => {
+    it('output contains no extra top-level fields beyond Contract', () => {
       const r = gen.generate(mockResult())
       const parsed = JSON.parse(render(r))
       const topKeys = new Set(Object.keys(parsed))
-      // Only seven top-level keys: reportSchemaVersion, summary, capability, regression, evidence, trend, metadata
       expect(topKeys.size).toBe(7)
       expect(topKeys.has('reportSchemaVersion')).toBe(true)
       expect(topKeys.has('summary')).toBe(true)
@@ -114,7 +100,7 @@ describe('JSON Renderer Contract', () => {
       expect(topKeys.has('metadata')).toBe(true)
     })
 
-    it.skip('summary contains no extra fields', () => {
+    it('summary contains only the 7 Contract fields', () => {
       const r = gen.generate(mockResult())
       const parsed: RegressionReport = JSON.parse(render(r))
       const summaryKeys = new Set(Object.keys(parsed.summary))
@@ -130,14 +116,14 @@ describe('JSON Renderer Contract', () => {
   })
 
   describe('J-5: Canonical JSON field order', () => {
-    it.skip('same object always produces byte-identical output', () => {
+    it('same object always produces byte-identical output', () => {
       const r = gen.generate(mockResult())
       const s1 = render(r)
       const s2 = render(r)
-      expect(s1).toBe(s2) // same string, byte-level
+      expect(s1).toBe(s2)
     })
 
-    it.skip('two deep-equal reports produce canonical-identical output', () => {
+    it('two deep-equal reports produce canonical-identical output', () => {
       const r1 = gen.generate(mockResult())
       const r2 = gen.generate(mockResult())
       expect(render(r1)).toBe(render(r2))
