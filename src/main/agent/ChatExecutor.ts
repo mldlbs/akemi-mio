@@ -55,6 +55,7 @@ import { PersonaDriftControlSystem, DRIFT_CORRECTION_PROMPT } from './PersonaDri
 import { classifyContent } from './ContentClassifier'
 import { userBehaviorAnalyzer, type SceneLabel, type ResponseMode, type InteractionDetail } from './UserBehaviorAnalyzer'
 import { ToolPolicyPlanner } from './toolPolicy/ToolPolicyPlanner'
+import { ToolPromptAssembler } from './toolPolicy/ToolPromptAssembler'
 import type { ToolDecision } from './toolPolicy/types'
 import { behaviorStateMachine } from '../behavior/BehaviorStateMachine'
 import type { BehaviorMode } from '../behavior/BehaviorStateMachine'
@@ -143,6 +144,8 @@ export class ChatExecutor {
   private currentToolDecision: ToolDecision | null = null
   /** ADR-008: 工具策略规划器 */
   private toolPolicyPlanner = new ToolPolicyPlanner()
+  /** ADR-008: 工具策略→Prompt 转换器 */
+  private toolPromptAssembler = new ToolPromptAssembler()
   /** 当前轮用户消息的领域标签（供 InteractionDetail 使用） */
   private currentDomainLabel = ''
   /** 执行决策门 — 每轮 tool batch 后强制决策 */
@@ -316,6 +319,13 @@ export class ChatExecutor {
       const scenePrompt = userBehaviorAnalyzer.getScenePrompt()
       if (scenePrompt) {
         extraModules.push(scenePrompt)
+      }
+    }
+    // ADR-008: 注入独立工具策略 Prompt（P3 新增行为）
+    if (this.currentToolDecision) {
+      const toolPrompt = this.toolPromptAssembler.assemble(this.currentToolDecision)
+      if (toolPrompt) {
+        extraModules.push(toolPrompt)
       }
     }
     // 行为强化记忆巩固：检测重复提问模式，自动强化相关记忆条目
