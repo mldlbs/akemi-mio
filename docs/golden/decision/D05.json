@@ -1,0 +1,44 @@
+{
+  "caseId": "D05",
+  "caseRef": {
+    "text": "用微服务还是单体架构？",
+    "expectations": [
+      "比较方案",
+      "分析场景约束",
+      "权衡 tradeoff",
+      "给出建议"
+    ]
+  },
+  "level1": {
+    "schemaVersion": "0.1",
+    "directive": {
+      "pattern": "option_evaluation",
+      "goals": [
+        {
+          "type": "compare_options"
+        },
+        {
+          "type": "evaluate_tradeoffs"
+        }
+      ],
+      "constraints": [
+        {
+          "type": "scope",
+          "description": "在明确的标准下比较"
+        }
+      ],
+      "outputStyle": "structured_comparison"
+    }
+  },
+  "level2": null,
+  "changelog": [
+    {
+      "date": "2026-07-15T01:21:23.771Z",
+      "reason": "v0.1 initial golden capture from Benchmark v0.1",
+      "author": "golden-dataset-generator",
+      "level": "l1"
+    }
+  ],
+  "createdAt": "2026-07-15T01:21:23.771Z",
+  "updatedAt": "2026-07-15T01:21:23.771Z"
+}

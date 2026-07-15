@@ -1,0 +1,43 @@
+{
+  "caseId": "D03",
+  "caseRef": {
+    "text": "我应该升级到新版框架吗？",
+    "expectations": [
+      "评估影响",
+      "分析迁移成本与收益",
+      "给出建议"
+    ]
+  },
+  "level1": {
+    "schemaVersion": "0.1",
+    "directive": {
+      "pattern": "goal_constraint_tradeoff",
+      "goals": [
+        {
+          "type": "evaluate_tradeoffs"
+        },
+        {
+          "type": "provide_recommendation"
+        }
+      ],
+      "constraints": [
+        {
+          "type": "priority",
+          "description": "先明确目标和约束再分析方案"
+        }
+      ],
+      "outputStyle": "conclusion_first"
+    }
+  },
+  "level2": null,
+  "changelog": [
+    {
+      "date": "2026-07-15T01:21:23.771Z",
+      "reason": "v0.1 initial golden capture from Benchmark v0.1",
+      "author": "golden-dataset-generator",
+      "level": "l1"
+    }
+  ],
+  "createdAt": "2026-07-15T01:21:23.771Z",
+  "updatedAt": "2026-07-15T01:21:23.771Z"
+}

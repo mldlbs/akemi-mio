@@ -1,0 +1,32 @@
+{
+  "caseId": "D09",
+  "caseRef": {
+    "text": "用 Event Sourcing 还是直接用数据库？",
+    "expectations": [
+      "比较方案",
+      "分析各自适用条件",
+      "权衡 tradeoff",
+      "给出推荐"
+    ]
+  },
+  "level1": {
+    "schemaVersion": "0.1",
+    "directive": {
+      "pattern": "none",
+      "goals": [],
+      "constraints": [],
+      "outputStyle": "default"
+    }
+  },
+  "level2": null,
+  "changelog": [
+    {
+      "date": "2026-07-15T01:21:23.771Z",
+      "reason": "v0.1 initial golden capture from Benchmark v0.1",
+      "author": "golden-dataset-generator",
+      "level": "l1"
+    }
+  ],
+  "createdAt": "2026-07-15T01:21:23.771Z",
+  "updatedAt": "2026-07-15T01:21:23.771Z"
+}

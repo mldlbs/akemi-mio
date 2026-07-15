@@ -1,0 +1,44 @@
+{
+  "caseId": "D12",
+  "caseRef": {
+    "text": "哪个数据库更适合高并发写入场景？",
+    "expectations": [
+      "比较方案",
+      "分析约束",
+      "给出推荐",
+      "说明依据"
+    ]
+  },
+  "level1": {
+    "schemaVersion": "0.1",
+    "directive": {
+      "pattern": "option_evaluation",
+      "goals": [
+        {
+          "type": "compare_options"
+        },
+        {
+          "type": "evaluate_tradeoffs"
+        }
+      ],
+      "constraints": [
+        {
+          "type": "scope",
+          "description": "在明确的标准下比较"
+        }
+      ],
+      "outputStyle": "structured_comparison"
+    }
+  },
+  "level2": null,
+  "changelog": [
+    {
+      "date": "2026-07-15T01:21:23.771Z",
+      "reason": "v0.1 initial golden capture from Benchmark v0.1",
+      "author": "golden-dataset-generator",
+      "level": "l1"
+    }
+  ],
+  "createdAt": "2026-07-15T01:21:23.771Z",
+  "updatedAt": "2026-07-15T01:21:23.771Z"
+}

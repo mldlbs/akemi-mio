@@ -1,0 +1,31 @@
+{
+  "caseId": "C01",
+  "caseRef": {
+    "text": "帮我想一个项目名字",
+    "expectations": [
+      "发散思路",
+      "给出建议",
+      "说明理由"
+    ]
+  },
+  "level1": {
+    "schemaVersion": "0.1",
+    "directive": {
+      "pattern": "none",
+      "goals": [],
+      "constraints": [],
+      "outputStyle": "default"
+    }
+  },
+  "level2": null,
+  "changelog": [
+    {
+      "date": "2026-07-15T01:21:23.771Z",
+      "reason": "v0.1 initial golden capture from Benchmark v0.1",
+      "author": "golden-dataset-generator",
+      "level": "l1"
+    }
+  ],
+  "createdAt": "2026-07-15T01:21:23.771Z",
+  "updatedAt": "2026-07-15T01:21:23.771Z"
+}

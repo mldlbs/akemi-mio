@@ -1,0 +1,38 @@
+{
+  "caseId": "Q03",
+  "caseRef": {
+    "text": "这个 Bug 是怎么产生的？",
+    "expectations": [
+      "追溯原因",
+      "描述触发条件",
+      "解释传播路径"
+    ]
+  },
+  "level1": {
+    "schemaVersion": "0.1",
+    "directive": {
+      "pattern": "cause_effect",
+      "goals": [
+        {
+          "type": "identify_root_cause"
+        },
+        {
+          "type": "explain_causality"
+        }
+      ],
+      "constraints": [],
+      "outputStyle": "causal_narrative"
+    }
+  },
+  "level2": null,
+  "changelog": [
+    {
+      "date": "2026-07-15T01:21:23.771Z",
+      "reason": "v0.1 initial golden capture from Benchmark v0.1",
+      "author": "golden-dataset-generator",
+      "level": "l1"
+    }
+  ],
+  "createdAt": "2026-07-15T01:21:23.771Z",
+  "updatedAt": "2026-07-15T01:21:23.771Z"
+}

@@ -1,0 +1,44 @@
+{
+  "caseId": "P08",
+  "caseRef": {
+    "text": "怎么给这个项目添加 CI/CD？",
+    "expectations": [
+      "规划流程",
+      "列出阶段",
+      "说明工具选型",
+      "给出实施步骤"
+    ]
+  },
+  "level1": {
+    "schemaVersion": "0.1",
+    "directive": {
+      "pattern": "goal_constraint_tradeoff",
+      "goals": [
+        {
+          "type": "evaluate_tradeoffs"
+        },
+        {
+          "type": "provide_recommendation"
+        }
+      ],
+      "constraints": [
+        {
+          "type": "priority",
+          "description": "先明确目标和约束再分析方案"
+        }
+      ],
+      "outputStyle": "conclusion_first"
+    }
+  },
+  "level2": null,
+  "changelog": [
+    {
+      "date": "2026-07-15T01:21:23.771Z",
+      "reason": "v0.1 initial golden capture from Benchmark v0.1",
+      "author": "golden-dataset-generator",
+      "level": "l1"
+    }
+  ],
+  "createdAt": "2026-07-15T01:21:23.771Z",
+  "updatedAt": "2026-07-15T01:21:23.771Z"
+}
