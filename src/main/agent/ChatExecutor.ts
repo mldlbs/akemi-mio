@@ -54,6 +54,8 @@ import { setPersonaStateManager } from '../tool/deps'
 import { PersonaDriftControlSystem, DRIFT_CORRECTION_PROMPT } from './PersonaDriftControlSystem'
 import { classifyContent } from './ContentClassifier'
 import { userBehaviorAnalyzer, type SceneLabel, type ResponseMode, type InteractionDetail } from './UserBehaviorAnalyzer'
+import { ToolPolicyPlanner } from './toolPolicy/ToolPolicyPlanner'
+import type { ToolDecision } from './toolPolicy/types'
 import { behaviorStateMachine } from '../behavior/BehaviorStateMachine'
 import type { BehaviorMode } from '../behavior/BehaviorStateMachine'
 import { buildTtsNeed } from '../behavior/UserBehaviorTtsContract'
@@ -137,6 +139,10 @@ export class ChatExecutor {
   private currentResponseMode: ResponseMode = 'warm_chat'
   /** 当前场景允许的工具集（undefined = 不限制） */
   private sceneAllowedTools: string[] | undefined = undefined
+  /** ADR-008: 当前轮的工具策略决策（日志/观察用，P1 不改变行为） */
+  private currentToolDecision: ToolDecision | null = null
+  /** ADR-008: 工具策略规划器 */
+  private toolPolicyPlanner = new ToolPolicyPlanner()
   /** 当前轮用户消息的领域标签（供 InteractionDetail 使用） */
   private currentDomainLabel = ''
   /** 执行决策门 — 每轮 tool batch 后强制决策 */
@@ -454,6 +460,10 @@ export class ChatExecutor {
     this.currentScene = sceneResult.scene
     this.currentResponseMode = sceneResult.responseMode
     this.sceneAllowedTools = userBehaviorAnalyzer.getSceneToolFilter()
+    // ADR-008: 工具策略决策（P1 仅日志，不改变行为）
+    this.currentToolDecision = this.toolPolicyPlanner.decide(this.currentScene, text, {
+      hasRecentToolCalls: this.toolPolicyPlanner.getRecentToolCalls() > 0,
+    })
     log('INFO', 'behavior_adaptive_scene', {
       scene: sceneResult.scene,
       mode: sceneResult.responseMode,
@@ -461,6 +471,8 @@ export class ChatExecutor {
       topics: sceneResult.dominantTopics,
       avgLen: sceneResult.avgUserMessageLength,
       restrictedTools: this.sceneAllowedTools?.length ?? 'all',
+      toolPreference: this.currentToolDecision.preference,
+      toolReason: this.currentToolDecision.reason,
     })
     // ── [隐式反馈] 用户发送新消息 → 标记"继续对话"（接受当前 TTS 质量）──
     if (this.implicitFeedbackEnabled) {
@@ -765,7 +777,10 @@ export class ChatExecutor {
           this.sceneAllowedTools = userBehaviorAnalyzer.getSceneToolFilter()
         }
         const result = await this.llmService.chatWithTools(
-          messages, requestId, 120000, onToken,
+          messages,
+          requestId,
+          120000,
+          onToken,
           undefined, // externalSignal
           this.sceneAllowedTools, // allowedToolNames — 场景工具过滤
         )
@@ -805,11 +820,7 @@ export class ChatExecutor {
           // ── [MCP-AGENT HYBRID] 工具选择验证 ──
           if (this.hybridPipeline?.isPointEnabled('tool_selection')) {
             const contextText = this.buildHybridContextText(messages)
-            const arbResult = await this.hybridPipeline.validateToolSelection(
-              result.toolCalls,
-              contextText,
-              requestId,
-            )
+            const arbResult = await this.hybridPipeline.validateToolSelection(result.toolCalls, contextText, requestId)
             if (arbResult && arbResult.arbitratedOutput.assessment !== 'approved') {
               const rejected = arbResult.arbitratedOutput.rejectedTools
               const suggested = arbResult.arbitratedOutput.suggestedAdditionalTools
@@ -897,11 +908,7 @@ export class ChatExecutor {
           // ── [MCP-AGENT HYBRID] 工具结果验证 ──
           if (this.hybridPipeline?.isPointEnabled('result_validation')) {
             const contextText = this.buildHybridContextText(messages)
-            const arbResult = await this.hybridPipeline.validateResults(
-              toolResults,
-              contextText,
-              requestId,
-            )
+            const arbResult = await this.hybridPipeline.validateResults(toolResults, contextText, requestId)
             if (arbResult && arbResult.arbitratedOutput.verdict !== 'consistent') {
               const issues = arbResult.arbitratedOutput.issues
               const additionalCtx = arbResult.arbitratedOutput.additionalContext
@@ -1034,11 +1041,7 @@ export class ChatExecutor {
         // ── [MCP-AGENT HYBRID] 回复质量验证 ──
         if (finalReply && this.hybridPipeline?.isPointEnabled('reply_quality')) {
           const contextText = this.buildHybridContextText(messages)
-          const arbResult = await this.hybridPipeline.validateReplyQuality(
-            finalReply,
-            contextText,
-            requestId,
-          )
+          const arbResult = await this.hybridPipeline.validateReplyQuality(finalReply, contextText, requestId)
           if (arbResult && arbResult.arbitratedOutput.needsRegeneration) {
             const suggestion = arbResult.arbitratedOutput.suggestion
             messages.push({
