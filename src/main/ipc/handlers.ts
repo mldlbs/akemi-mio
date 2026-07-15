@@ -1487,7 +1487,6 @@ export function registerHandlers(
       return svc.getProjectionState()
     })
   }
-}
 
   // ══════════════════════════════════════════
   //  快捷任务编排（QuickTask）
