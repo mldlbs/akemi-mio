@@ -58,6 +58,13 @@ const EXPLICIT_TOOL_PATTERNS: RegExp[] = [
   /what.*tool|use.*tool|call.*tool/,
 ]
 
+/** 元反馈信号 — 用户对 Agent 行为的抱怨或反馈 */
+const META_FEEDBACK_PATTERNS: RegExp[] = [
+  /只会说|只说不做|不干活|没有用|不会用|不用工具|只会聊天/,
+  /退化|退步|越来越.*差|越来越.*笨|越来越.*傻/,
+  /只说不做|光说不做|只会说不会做/,
+]
+
 /** 文件/信息可用信号 — 用户提到了文件或新信息 */
 const FILE_AVAILABLE_PATTERNS: RegExp[] = [
   /文件|文档|附件|截图|图片|照片/,
@@ -75,6 +82,7 @@ interface SignalDefinition {
 }
 
 const SIGNALS: SignalDefinition[] = [
+  { reason: ToolDecisionReason.META_FEEDBACK, patterns: META_FEEDBACK_PATTERNS, confidence: 0.8 },
   { reason: ToolDecisionReason.USER_REQUEST, patterns: EXPLICIT_TOOL_PATTERNS, confidence: 0.85 },
   { reason: ToolDecisionReason.EXECUTION_TASK, patterns: EXECUTION_PATTERNS, confidence: 0.75 },
   { reason: ToolDecisionReason.FRESH_INFORMATION, patterns: FRESH_INFO_PATTERNS, confidence: 0.7 },
