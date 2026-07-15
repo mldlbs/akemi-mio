@@ -287,15 +287,16 @@ RegressionReport（= f(ReplayResult)，纯函数变换）
 
 | # | Invariant | 验证方式 |
 |---|-----------|----------|
-| I-1 | `RegressionReport` 是 `ReplayResult` 的纯函数。相同输入必然产生相同输出。 | 属性测试 |
-| I-2 | ReportGenerator 不读取 Golden 文件、不访问文件系统、不重新执行 Replay、不依赖 Git。 | 代码审查 + 依赖审计 |
-| I-3 | `trend` 在 v0.1 恒为 `null`。不存在任何其他代码路径填充它。 | Contract Test |
-| I-4 | `summary.passRate === passed / total` 恒成立。 | Contract Test |
-| I-5 | `summary.status` 由决策矩阵决定：`failed === 0 && passed > 0 → 'pass'`；`failed > 0 → 'fail'`；`passed + failed === 0 → 'inconclusive'`。 | Contract Test |
-| I-6 | `regression.entries` 与 `evidence.entries` 中每条记录都有对应的 `caseId` 相互引用。 | Contract Test |
-| I-7 | `capability.regressed` 中的 `affectedCaseIds` 必须是总失败 case ID 的子集。 | Contract Test |
-| I-8 | ReportGenerator 只产生类型对象，不负责序列化（JSON/Markdown/CLI 是 P1.4 的职责）。 | 代码审查 |
-| I-9 | CommitContext 省略时，`metadata.commit.sha` 为 `'unknown'`，`metadata.commit.branch` 为 `'unknown'`。 | Contract Test |
+| I-1 | **Referential Transparency（引用透明）：** `∀ r, generate(r) = generate(r)`。相同 `ReplayResult` 必然产生完全相同的 `RegressionReport`。 | Contract Test |
+| I-2 | **Immutability：** `generate(r)` 不修改输入 `r`。输入在调用前后保持不变。 | Contract Test |
+| I-3 | ReportGenerator 不读取 Golden 文件、不访问文件系统、不重新执行 Replay、不依赖 Git。 | 代码审查 + 依赖审计 |
+| I-4 | `trend` 在 v0.1 恒为 `null`。不存在任何其他代码路径填充它。 | Contract Test |
+| I-5 | `summary.passRate === passed / total` 恒成立。 | Contract Test |
+| I-6 | `summary.status` 由 [Status Decision Matrix](#3a-status-decision-matrix冻结) 决定（来源：ADR-007，非 Contract Tests）。 | Contract Test |
+| I-7 | `regression.entries` 与 `evidence.entries` 中每条记录都有对应的 `caseId` 相互引用。 | Contract Test |
+| I-8 | `capability.regressed` 中的 `affectedCaseIds` 必须是总失败 case ID 的子集。 | Contract Test |
+| I-9 | ReportGenerator 只产生类型对象，不负责序列化（JSON/Markdown/CLI 是 P1.4 的职责）。 | 代码审查 |
+| I-10 | CommitContext 省略时，`metadata.commit.sha` 为 `'unknown'`，`metadata.commit.branch` 为 `'unknown'`。 | Contract Test |
 
 ---
 
