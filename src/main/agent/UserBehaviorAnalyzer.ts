@@ -162,23 +162,23 @@ export interface RepeatedPattern {
  * 交互场景标签 — 根据用户行为分析得出的场景判断
  */
 export type SceneLabel =
-  | 'code_debugging'    // 代码调试/修复
-  | 'quick_qa'          // 快速问答
-  | 'casual_chat'       // 日常闲聊
-  | 'deep_discussion'   // 深入讨论
-  | 'creative_writing'  // 创意写作
-  | 'system_evolution'  // 系统进化
-  | 'task_execution'    // 任务执行
-  | 'unknown'           // 未知/默认
+  | 'code_debugging' // 代码调试/修复
+  | 'quick_qa' // 快速问答
+  | 'casual_chat' // 日常闲聊
+  | 'deep_discussion' // 深入讨论
+  | 'creative_writing' // 创意写作
+  | 'system_evolution' // 系统进化
+  | 'task_execution' // 任务执行
+  | 'unknown' // 未知/默认
 
 /**
  * 回复模式 — 由场景决定的 Agent 输出风格
  */
 export type ResponseMode =
-  | 'concise'    // 简洁直接
-  | 'detailed'   // 详细深入
-  | 'technical'  // 技术优先
-  | 'warm_chat'  // 温暖聊天
+  | 'concise' // 简洁直接
+  | 'detailed' // 详细深入
+  | 'technical' // 技术优先
+  | 'warm_chat' // 温暖聊天
 
 /** 交互详情记录（用于后续统计） */
 export interface InteractionDetail {
@@ -251,7 +251,7 @@ const SCENE_PROMPTS: Record<ResponseMode, string> = {
   technical: `【自适应·技术模式】
 检测到当前为编程/调试场景。回复要求：
 - 回复集中在技术实现和问题解决上
-- 多做少说，先执行再汇报
+- 回答直接，避免冗长；如已完成必要操作再说明结果
 - 代码和命令优先于文字解释`,
   warm_chat: `【自适应·聊天模式】
 检测到当前为日常聊天场景。回复要求：
@@ -269,12 +269,17 @@ const SCENE_PROMPTS: Record<ResponseMode, string> = {
  */
 const SCENE_ALLOWED_TOOLS: Partial<Record<SceneLabel, string[]>> = {
   concise: [
-    'read_file', 'grep', 'list_files', 'get_credential', 'list_credentials',
-    'list_mcp_servers', 'list_plans', 'list_workflows', 'list_skills',
+    'read_file',
+    'grep',
+    'list_files',
+    'get_credential',
+    'list_credentials',
+    'list_mcp_servers',
+    'list_plans',
+    'list_workflows',
+    'list_skills',
   ],
-  warm_chat: [
-    'read_file', 'grep', 'list_files', 'remember_fact',
-  ],
+  warm_chat: ['read_file', 'grep', 'list_files', 'remember_fact'],
 }
 
 // ── UserBehaviorAnalyzer ──
@@ -387,9 +392,7 @@ export class UserBehaviorAnalyzer {
    * 用于冷启动时从持久化存储恢复分析状态。
    */
   loadFromStoredMessages(messages: StoredMessage[]): void {
-    const userMessages = messages
-      .filter((m) => m.role === 'user')
-      .map((m) => ({ content: m.content, timestamp: m.createdAt }))
+    const userMessages = messages.filter((m) => m.role === 'user').map((m) => ({ content: m.content, timestamp: m.createdAt }))
     // 只取最近 maxRecords 条
     this.recentUserMessages = userMessages.slice(-this.maxRecords)
   }
@@ -489,11 +492,7 @@ export class UserBehaviorAnalyzer {
    * 生成用于注入 system prompt 的工具提示片段。
    * 按优先级从高到低排列，每条约 60-120 字。
    */
-  private _buildToolHints(
-    tools: string[],
-    topics: string[],
-    toolCounts: Record<string, number>,
-  ): string[] {
+  private _buildToolHints(tools: string[], topics: string[], toolCounts: Record<string, number>): string[] {
     const hints: string[] = []
 
     if (tools.length > 0) {
@@ -575,10 +574,7 @@ export class UserBehaviorAnalyzer {
       if (past.content === currentText.trim()) continue
       if (past.content.length < REPEAT_MIN_MESSAGE_LENGTH) continue
 
-      const similarity = computeBigramJaccard(
-        normalized,
-        past.content.toLowerCase(),
-      )
+      const similarity = computeBigramJaccard(normalized, past.content.toLowerCase())
 
       if (similarity > bestSimilarity) {
         bestSimilarity = similarity
@@ -732,14 +728,10 @@ export class UserBehaviorAnalyzer {
     const hasSufficientData = userMsgs.length >= SCENE_MIN_INTERACTIONS
 
     // 1. 计算平均用户消息长度
-    const avgLength = userMsgs.length > 0
-      ? Math.round(userMsgs.reduce((s, d) => s + d.length, 0) / userMsgs.length)
-      : 0
+    const avgLength = userMsgs.length > 0 ? Math.round(userMsgs.reduce((s, d) => s + d.length, 0) / userMsgs.length) : 0
 
     // 2. 工具调用占比
-    const toolRatio = window.length > 0
-      ? toolCalls.length / window.length
-      : 0
+    const toolRatio = window.length > 0 ? toolCalls.length / window.length : 0
 
     // 3. 从用户消息提取话题
     const recentUserTexts = this.recentUserMessages.slice(-windowSize).map((m) => m.content)
@@ -857,17 +849,110 @@ export class UserBehaviorAnalyzer {
 
     // 中文停用词（高频无意义词）
     const stopWords = new Set([
-      '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一',
-      '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着',
-      '没有', '看', '好', '自己', '这', '他', '她', '它', '们', '那', '些',
-      '吧', '吗', '啊', '呢', '哦', '嗯', '哈', 'the', 'a', 'an', 'is', 'are',
-      'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does',
-      'did', 'will', 'would', 'can', 'could', 'may', 'might', 'shall', 'should',
-      'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into',
-      'through', 'during', 'before', 'after', 'above', 'below', 'between',
-      'and', 'or', 'but', 'not', 'so', 'if', 'than', 'that', 'this', 'these',
-      'those', 'it', 'its', 'what', 'which', 'who', 'whom', 'how', 'when',
-      'where', 'why',
+      '的',
+      '了',
+      '在',
+      '是',
+      '我',
+      '有',
+      '和',
+      '就',
+      '不',
+      '人',
+      '都',
+      '一',
+      '一个',
+      '上',
+      '也',
+      '很',
+      '到',
+      '说',
+      '要',
+      '去',
+      '你',
+      '会',
+      '着',
+      '没有',
+      '看',
+      '好',
+      '自己',
+      '这',
+      '他',
+      '她',
+      '它',
+      '们',
+      '那',
+      '些',
+      '吧',
+      '吗',
+      '啊',
+      '呢',
+      '哦',
+      '嗯',
+      '哈',
+      'the',
+      'a',
+      'an',
+      'is',
+      'are',
+      'was',
+      'were',
+      'be',
+      'been',
+      'being',
+      'have',
+      'has',
+      'had',
+      'do',
+      'does',
+      'did',
+      'will',
+      'would',
+      'can',
+      'could',
+      'may',
+      'might',
+      'shall',
+      'should',
+      'to',
+      'of',
+      'in',
+      'for',
+      'on',
+      'with',
+      'at',
+      'by',
+      'from',
+      'as',
+      'into',
+      'through',
+      'during',
+      'before',
+      'after',
+      'above',
+      'below',
+      'between',
+      'and',
+      'or',
+      'but',
+      'not',
+      'so',
+      'if',
+      'than',
+      'that',
+      'this',
+      'these',
+      'those',
+      'it',
+      'its',
+      'what',
+      'which',
+      'who',
+      'whom',
+      'how',
+      'when',
+      'where',
+      'why',
     ])
 
     for (const word of words) {
