@@ -260,28 +260,6 @@ const SCENE_PROMPTS: Record<ResponseMode, string> = {
 - 带有关怀感，适当关心用户状态`,
 }
 
-// ── 场景抑制工具集（根据场景限制可用工具） ──
-
-/**
- * 每个场景下允许使用的工具集合。
- * undefined = 不限制（全部可用）。
- * 空数组 = 仅聊天，不使用工具。
- */
-const SCENE_ALLOWED_TOOLS: Partial<Record<SceneLabel, string[]>> = {
-  concise: [
-    'read_file',
-    'grep',
-    'list_files',
-    'get_credential',
-    'list_credentials',
-    'list_mcp_servers',
-    'list_plans',
-    'list_workflows',
-    'list_skills',
-  ],
-  warm_chat: ['read_file', 'grep', 'list_files', 'remember_fact'],
-}
-
 // ── UserBehaviorAnalyzer ──
 
 export class UserBehaviorAnalyzer {
@@ -666,6 +644,11 @@ export class UserBehaviorAnalyzer {
     log('INFO', 'behavior_tool_unsuppressed', { tool: toolName })
   }
 
+  /** 获取最近工具调用次数（供 ToolPolicyPlanner 信号检测使用） */
+  getRecentToolCallCount(): number {
+    return this.recentToolCalls.length
+  }
+
   /** 重置所有用户反馈 */
   resetFeedback(): void {
     this.suppressedTools.clear()
@@ -826,16 +809,6 @@ export class UserBehaviorAnalyzer {
       return `${basePrompt}\n\n【自适应·话题感知】当前活跃话题：${topics.join('、')}。回复时可结合这些话题语境。`
     }
     return basePrompt
-  }
-
-  /**
-   * 获取当前场景下应限制的工具集。
-   * 返回 undefined 表示不限制（全部可用）。
-   * 返回空数组表示仅聊天不用工具。
-   */
-  getSceneToolFilter(scene?: SceneLabel): string[] | undefined {
-    const s = scene ?? this.cachedSceneResult?.scene ?? 'unknown'
-    return SCENE_ALLOWED_TOOLS[s]
   }
 
   // ── 私有辅助 ──

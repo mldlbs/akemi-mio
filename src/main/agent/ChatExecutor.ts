@@ -143,7 +143,9 @@ export class ChatExecutor {
   /** ADR-008: 当前轮的工具策略决策（日志/观察用，P1 不改变行为） */
   private currentToolDecision: ToolDecision | null = null
   /** ADR-008: 工具策略规划器 */
-  private toolPolicyPlanner = new ToolPolicyPlanner()
+  private toolPolicyPlanner = new ToolPolicyPlanner(
+    () => userBehaviorAnalyzer.getRecentToolCallCount(),
+  )
   /** ADR-008: 工具策略→Prompt 转换器 */
   private toolPromptAssembler = new ToolPromptAssembler()
   /** 当前轮用户消息的领域标签（供 InteractionDetail 使用） */
@@ -469,20 +471,19 @@ export class ChatExecutor {
     const sceneResult = userBehaviorAnalyzer.analyzeScene()
     this.currentScene = sceneResult.scene
     this.currentResponseMode = sceneResult.responseMode
-    this.sceneAllowedTools = userBehaviorAnalyzer.getSceneToolFilter()
-    // ADR-008: 工具策略决策（P1 仅日志，不改变行为）
-    this.currentToolDecision = this.toolPolicyPlanner.decide(this.currentScene, text, {
-      hasRecentToolCalls: this.toolPolicyPlanner.getRecentToolCalls() > 0,
-    })
+    // ADR-008: 工具策略决策
+    this.currentToolDecision = this.toolPolicyPlanner.decide(this.currentScene, text)
+    // ADR-008: 统一过滤路径 — toToolFilter 替代 getSceneToolFilter
+    this.sceneAllowedTools = this.toolPolicyPlanner.toToolFilter(this.currentToolDecision)
     log('INFO', 'behavior_adaptive_scene', {
       scene: sceneResult.scene,
       mode: sceneResult.responseMode,
       confidence: sceneResult.confidence,
       topics: sceneResult.dominantTopics,
       avgLen: sceneResult.avgUserMessageLength,
-      restrictedTools: this.sceneAllowedTools?.length ?? 'all',
       toolPreference: this.currentToolDecision.preference,
       toolReason: this.currentToolDecision.reason,
+      toolFilter: this.sceneAllowedTools === undefined ? 'all' : this.sceneAllowedTools.length === 0 ? 'none' : 'restricted',
     })
     // ── [隐式反馈] 用户发送新消息 → 标记"继续对话"（接受当前 TTS 质量）──
     if (this.implicitFeedbackEnabled) {
@@ -784,7 +785,8 @@ export class ChatExecutor {
           const reScene = userBehaviorAnalyzer.analyzeScene()
           this.currentScene = reScene.scene
           this.currentResponseMode = reScene.responseMode
-          this.sceneAllowedTools = userBehaviorAnalyzer.getSceneToolFilter()
+          this.currentToolDecision = this.toolPolicyPlanner.decide(this.currentScene, this.lastUserText)
+          this.sceneAllowedTools = this.toolPolicyPlanner.toToolFilter(this.currentToolDecision)
         }
         const result = await this.llmService.chatWithTools(
           messages,
