@@ -35,7 +35,7 @@ import type { ISubsystem, HealthCheckResult, SubsystemState } from '../core/life
 import type { PipelineOrchestrator, PipelineMetrics } from './automation'
 import type { UserBehaviorLayer } from '../user-behavior/UserBehaviorLayer'
 import type { PreProcessContext, PostProcessContext, PostProcessResult } from '../user-behavior/types'
-import { insertMessage, createMessageId } from '../db/messages'
+import { createMessageId } from '../db/messages'
 import { getMainWindow } from '../core/Lifecycle'
 import { evolutionCheckpointManager } from './EvolutionCheckpointManager'
 import type { MemoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
@@ -393,7 +393,7 @@ export class SelfEvolutionService implements ISubsystem {
 
       log('INFO', 'evolution_checkpoint_recovery', { summary: summary.slice(0, 200) })
 
-      // 将恢复摘要写入 UI 消息
+      // 将恢复摘要写入 UI 消息（不写入 messages 表）
       try {
         const msg = {
           id: createMessageId(),
@@ -404,7 +404,6 @@ export class SelfEvolutionService implements ISubsystem {
           sessionId: SelfEvolutionService.EVOLUTION_SESSION_ID,
           createdAt: Date.now(),
         }
-        insertMessage(msg)
         const win = getMainWindow()
         if (win && !win.isDestroyed()) {
           win.webContents.send('message:new', msg)
@@ -808,7 +807,7 @@ export class SelfEvolutionService implements ISubsystem {
         sessionId: SelfEvolutionService.EVOLUTION_SESSION_ID,
         createdAt: Date.now(),
       }
-      insertMessage(msg)
+      // 只发 IPC 展示，不写 messages 表
       try {
         const win = getMainWindow()
         if (win && !win.isDestroyed()) {
