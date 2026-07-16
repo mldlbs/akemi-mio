@@ -1,6 +1,6 @@
 # ADR-008：Tool Decision Contract
 
-**Status:** ✅ Accepted (Frozen) — P1–P4.1 Implementation Complete (Design Validation Passed, Runtime Validation Pending)
+**Status:** ✅ Accepted (Frozen) — RC Validation Entry: P1–P4.1 Complete, 28 Tests Pass, 10-Scenario Real-Conversation 7/10 Matched (3 Scene-Classification Variance Only)
 **Date:** 2026-07-15
 **Supersedes:** None
 **Supersedes by:** None
