@@ -60,6 +60,7 @@ import {
 } from './definitions/FileOpsTools'
 import { typeHealthTool } from './definitions/TypeHealthTool'
 import { rememberFileRuleTool, listFileRulesTool, deleteFileRuleTool } from './definitions/FileRuleTools'
+import { createReasoningChainTool } from './definitions/ReasoningChainTools'
 
 export function getAllTools(): Tool[] {
   return [
@@ -145,5 +146,6 @@ export function getAllTools(): Tool[] {
     rememberFileRuleTool as Tool,
     listFileRulesTool as Tool,
     deleteFileRuleTool as Tool,
+    createReasoningChainTool as Tool,
   ]
 }
