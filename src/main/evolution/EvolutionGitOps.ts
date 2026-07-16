@@ -92,20 +92,14 @@ export class EvolutionGitOps {
   }
 
   async rollbackToSnapshot(branch: string, level: RollbackLevel = RollbackLevel.MODULE): Promise<boolean> {
-    try {
-      const currentBranch = await this.getCurrentBranch()
-      await execAsync('git stash push -m "[rollback] auto-stash before rollback"', { timeout: 15000 })
-      await execAsync(`git checkout ${branch} -- .`, { timeout: 15000 })
-      if (level === RollbackLevel.MODULE || level === RollbackLevel.SYSTEM) {
-        await execAsync('git clean -fd', { timeout: 15000 })
-      }
-      await execAsync(`git checkout ${currentBranch}`, { timeout: 10000 })
-      log('INFO', 'evolution_rollback_completed', { branch, level })
-      return true
-    } catch (err: any) {
-      log('ERROR', 'evolution_rollback_failed', { error: err.message?.slice(0, 100) })
-      return false
-    }
+    // P0: 阻止无差别工作区覆盖，保护开发环境
+    // snapshot 不做文件级 ownership，rollback 会覆盖所有跟踪文件
+    // 包括人类的未提交修改。正确修复见 P1：
+    //   - snapshot 记录 modifiedFiles 列表
+    //   - rollback 只恢复 modifiedFiles，不是整个 .
+    // P2 防御：rollback 前检测 git status，若有非 Evolution 修改则拒绝
+    log('WARN', 'evolution_rollback_to_snapshot_blocked', { branch, level, message: 'rollback temporarily disabled - P0 safety guard' })
+    return false
   }
 
   async rollback(level: RollbackLevel, ref: string): Promise<boolean> {
