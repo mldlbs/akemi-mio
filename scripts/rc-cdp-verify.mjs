@@ -83,6 +83,7 @@ async function main() {
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   // Get log size before
   const logBefore = readLogLines()
   const beforeCount = logBefore.length
@@ -99,6 +100,11 @@ async function main() {
     const sessionId = 'rc-verify-' + sc.id + '-' + Date.now()
     const result = await send('Runtime.evaluate', {
       expression: 'window.electronAPI.chat("' + safeText + '", undefined, "' + sessionId + '")',
+=======
+  async function evalExpr(expr) {
+    const r = await send('Runtime.evaluate', {
+      expression: expr,
+>>>>>>> Stashed changes
 =======
   async function evalExpr(expr) {
     const r = await send('Runtime.evaluate', {
