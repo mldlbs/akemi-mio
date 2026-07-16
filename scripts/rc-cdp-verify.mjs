@@ -83,8 +83,10 @@ async function main() {
     })
 
     const safeText = sc.text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+    // Use unique sessionId per scenario to isolate conversation context
+    const sessionId = 'rc-verify-' + sc.id + '-' + Date.now()
     const result = await send('Runtime.evaluate', {
-      expression: 'window.electronAPI.chat("' + safeText + '")',
+      expression: 'window.electronAPI.chat("' + safeText + '", undefined, "' + sessionId + '")',
       objectGroup: 'mio',
       returnByValue: true,
       awaitPromise: true,
