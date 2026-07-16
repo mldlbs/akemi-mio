@@ -1,6 +1,6 @@
 # ADR-008：Tool Decision Contract
 
-**Status:** ✅ Accepted (Frozen) — RC Validation Entry: P1–P4.1 Complete, 28 Tests Pass, 10-Scenario Real-Conversation 7/10 Matched (3 Scene-Classification Variance Only)
+**Status:** ✅ Accepted (Frozen) — RC Validation Complete: 38 Tests Pass | 10-Scenario Baseline: 7/10 Matched | Real-Task Runtime Validation ✅ (Signal → Decision → Tool Invocation → Artifact Changed → Runtime Healthy) | End-to-End Functional Validation ⚠️ Blocked by External API (HTTP 530) | Component Correctness Confirmed
 **Date:** 2026-07-15
 **Supersedes:** None
 **Supersedes by:** None
