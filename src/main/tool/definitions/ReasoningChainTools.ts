@@ -55,7 +55,10 @@ export interface ReasoningChainSpec {
 }
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 =======
+=======
+>>>>>>> Stashed changes
 /** 推理链执行状态 */
 export interface ReasoningChainStatus {
   /** 唯一标识 */
@@ -72,6 +75,9 @@ export interface ReasoningChainStatus {
   status: 'active' | 'completed' | 'failed' | 'abandoned'
 }
 
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 // =============================================================================
 // 常量
@@ -114,7 +120,11 @@ function getFallbackSteps(task: string): ReasoningChainSpec {
   return {
     title: task.slice(0, 30),
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
     summary: '任务: ' + task.slice(0, 100),
+=======
+    summary: `任务: ${task.slice(0, 100)}`,
+>>>>>>> Stashed changes
 =======
     summary: `任务: ${task.slice(0, 100)}`,
 >>>>>>> Stashed changes
@@ -259,15 +269,21 @@ export const createReasoningChainTool = buildTool({
           try {
             const contextBlock = args.context
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
               ? '\n附加上下文:\n' + args.context + '\n'
               : ''
 
             const decomposePrompt = '请分析以下任务并分解为推理链（JSON 格式）：\n\n任务: ' + task + contextBlock
 =======
+=======
+>>>>>>> Stashed changes
               ? `\n附加上下文:\n${args.context}\n`
               : ''
 
             const decomposePrompt = `请分析以下任务并分解为推理链（JSON 格式）：\n\n任务: ${task}${contextBlock}`
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 
             const result = await llm.generate(decomposePrompt, {
@@ -294,7 +310,11 @@ export const createReasoningChainTool = buildTool({
           } catch (err: any) {
             log('WARN', 'reasoning_chain_llm_attempt_failed', {
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
               attempt: attempt,
+=======
+              attempt,
+>>>>>>> Stashed changes
 =======
               attempt,
 >>>>>>> Stashed changes
@@ -329,6 +349,7 @@ export const createReasoningChainTool = buildTool({
       const stepDescriptions = chainSpec.steps.map((s) => {
         const depNote = s.dependencies.length > 0
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
           ? '[依赖步骤 ' + s.dependencies.join(', ') + '] '
           : ''
         return depNote + s.description
@@ -346,6 +367,8 @@ export const createReasoningChainTool = buildTool({
       }
       const planDescription = planLines.join('\n')
 =======
+=======
+>>>>>>> Stashed changes
           ? `[依赖步骤 ${s.dependencies.join(', ')}] `
           : ''
         return `${depNote}${s.description}`
@@ -356,11 +379,15 @@ export const createReasoningChainTool = buildTool({
         chainSpec.steps
           .map((s) => `步骤 ${s.index}: ${s.description}\n  推理: ${s.reasoning}\n  验证: ${s.verificationCriteria}`)
           .join('\n\n')
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 
       const plan = pm.createPlan(planTitle, planDescription, stepDescriptions, chainSpec.priority)
 
       // ── 5. 构建返回结果 ──
+<<<<<<< Updated upstream
 <<<<<<< Updated upstream
       const chainId = 'rc_' + plan.id + '_' + Date.now()
       const lines: string[] = [
@@ -376,6 +403,8 @@ export const createReasoningChainTool = buildTool({
         '━━━ 推理步骤 ━━━',
         '',
 =======
+=======
+>>>>>>> Stashed changes
       const chainId = `rc_${plan.id}_${Date.now()}`
       const lines: string[] = [
         `🧠 推理链已生成 — ${chainSpec.title}`,
@@ -389,11 +418,15 @@ export const createReasoningChainTool = buildTool({
         ``,
         `━━━ 推理步骤 ━━━`,
         ``,
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
       ]
 
       for (const step of chainSpec.steps) {
         const depStr = step.dependencies.length > 0
+<<<<<<< Updated upstream
 <<<<<<< Updated upstream
           ? ' ⬅ 依赖步骤 ' + step.dependencies.join(', ')
           : '（起始步骤）'
@@ -415,6 +448,8 @@ export const createReasoningChainTool = buildTool({
         planId: plan.id,
         chainId: chainId,
 =======
+=======
+>>>>>>> Stashed changes
           ? ` ⬅ 依赖步骤 ${step.dependencies.join(', ')}`
           : '（起始步骤）'
         lines.push(`【步骤 ${step.index}】${depStr}`)
@@ -434,6 +469,9 @@ export const createReasoningChainTool = buildTool({
       log('INFO', 'reasoning_chain_created', {
         planId: plan.id,
         chainId,
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
         steps: chainSpec.steps.length,
         priority: chainSpec.priority,
@@ -445,7 +483,11 @@ export const createReasoningChainTool = buildTool({
     } catch (err: any) {
       log('ERROR', 'reasoning_chain_failed', { error: err.message })
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
       return formatToolError('创建推理链失败: ' + err.message)
+=======
+      return formatToolError(`创建推理链失败: ${err.message}`)
+>>>>>>> Stashed changes
 =======
       return formatToolError(`创建推理链失败: ${err.message}`)
 >>>>>>> Stashed changes
