@@ -1,0 +1,68 @@
+{
+  "pipelineId": "mcp-to-asr",
+  "description": "MCP tool execution → ASR processing pipeline: execute an MCP tool and process its output through ASR speech/text processing",
+  "version": "1.0.0",
+  "stages": [
+    {
+      "id": "mcp-exec",
+      "stageType": "mcp-tool-execution",
+      "description": "Execute an MCP tool (e.g., read_file, grep, list_files) and produce structured output",
+      "dependsOn": [],
+      "config": {
+        "toolName": "",
+        "toolArgs": {},
+        "timeoutMs": 30000
+      },
+      "inputSchema": {
+        "type": "object",
+        "description": "Pipeline-level input can provide tool params via {{pipeline.xxx}} templates",
+        "properties": {
+          "toolName": { "type": "string", "description": "MCP tool name to execute" },
+          "toolArgs": { "type": "object", "description": "Arguments to pass to the tool" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "description": "Tool execution success" },
+          "toolName": { "type": "string", "description": "Name of the executed tool" },
+          "outputText": { "type": "string", "description": "Text content from tool output" },
+          "isError": { "type": "boolean", "description": "Whether tool returned an error" },
+          "argsUsed": { "type": "object", "description": "Resolved arguments used for execution" }
+        }
+      }
+    },
+    {
+      "id": "asr-process",
+      "stageType": "asr-processing",
+      "description": "Process MCP tool output through ASR: transcribe audio or process text for speech analysis",
+      "dependsOn": ["mcp-exec"],
+      "config": {
+        "mode": "process-text",
+        "textField": "outputText",
+        "sourceStage": "mcp-exec"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": { "type": "string", "description": "Processing mode: 'process-text' or 'transcribe'" },
+          "textField": { "type": "string", "description": "Field name in source stage output containing text" },
+          "audioField": { "type": "string", "description": "Field name in source stage output containing audio path" },
+          "sourceStage": { "type": "string", "description": "ID of the upstream stage to pull data from" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "description": "ASR processing success" },
+          "mode": { "type": "string", "description": "Actual mode used" },
+          "text": { "type": "string", "description": "Transcribed text (transcribe mode)" },
+          "processedText": { "type": "string", "description": "Processed/cleaned text (process-text mode)" },
+          "keywords": { "type": "array", "description": "Extracted keywords" },
+          "metrics": { "type": "object", "description": "Text quality metrics" },
+          "voiceEmotion": { "type": "object", "description": "Voice emotion analysis (transcribe mode)" }
+        }
+      }
+    }
+  ]
+}
