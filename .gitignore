@@ -47,5 +47,11 @@ test-*.txt
 test_write.txt
 test*.json
 writing-ui/
+nul
+scripts/cdp-*.mjs
+scripts/cdp-*.cjs
+scripts/fix-rct*.mjs
+scripts/fix-rct*.cjs
+scripts/mio-writing-session.mjs
 out/
 .ssh/
