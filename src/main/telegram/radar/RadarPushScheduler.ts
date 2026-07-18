@@ -20,7 +20,6 @@
 
 import { log } from '../../logger/Logger'
 import { scheduler } from '../../core/Scheduler'
-import { startupRadarAdapter } from '../../startup-radar'
 import { radarPushRuleStore } from './RadarPushRuleStore'
 import { eventBus } from '../../core/EventBus'
 import type { RadarPushRule } from './types'
@@ -31,9 +30,6 @@ import type { RadarPushRule } from './types'
 
 /** 两次推送之间的最小间隔（分钟），避免重复推送 */
 const MIN_PUSH_INTERVAL_MS = 5 * 60 * 1000 // 5 分钟
-
-/** 雷达扫描的最大信号数 */
-const MAX_SCAN_SIGNALS = 10
 
 // ════════════════════════════════════════════════════════════════
 // RadarPushScheduler
@@ -180,7 +176,7 @@ export class RadarPushScheduler {
   }
 
   /**
-   * 执行推送：触发雷达扫描并发送结果到 Telegram。
+   * 执行推送：从远程 Radar API 获取数据并发送到 Telegram。
    */
   private async executePush(rule: RadarPushRule): Promise<void> {
     log('INFO', 'radar_push_executing', {
@@ -190,56 +186,104 @@ export class RadarPushScheduler {
       location: rule.location,
     })
 
-    // 1. 构建扫描参数
-    const sources = rule.sources.length > 0
-      ? rule.sources
-      : ['hackernews', 'github_trending', '36kr']
-
-    // 合并地点到关键词
-    const keywords = [...rule.keywords]
-    if (rule.location && !keywords.includes(rule.location)) {
-      keywords.push(rule.location)
-    }
-
-    // 2. 执行雷达扫描
-    const result = await startupRadarAdapter.scan({
-      sources: sources as any[],
-      keywords: keywords.length > 0 ? keywords : undefined,
-      limit: MAX_SCAN_SIGNALS,
-      minScore: 0.3,
-    })
-
-    // 3. 格式化并推送
-    if (!result || result.signals.length === 0) {
-      // 无信号时，推送一条简洁的"无新信息"
-      const noSignalMsg = [
-        `📡 **雷达推送: ${rule.name}**`,
-        `━━━ ⏰ ${new Date().toLocaleString('zh-CN', { hour12: false })} ━━━`,
-        '',
-        '📭 当前无匹配的新信号。',
-        rule.location ? `📍 ${rule.location}` : '',
-        keywords.length > 0 ? `🔑 ${keywords.join(', ')}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n')
-
-      this.emitPushEvent(rule, noSignalMsg, 0)
-    } else {
-      // 有信号，使用适配器的批量格式化
-      const signalMsg = startupRadarAdapter.formatBatchForTelegram(result.signals, {
-        detailed: false,
-        showScores: false,
-        showUrl: true,
-      })
-
-      const header = `📡 **雷达推送: ${rule.name}**\n━━━ ⏰ ${new Date().toLocaleString('zh-CN', { hour12: false })} ━━━\n\n`
-      const fullMsg = header + signalMsg
-
-      this.emitPushEvent(rule, fullMsg, result.signals.length)
-    }
-
-    // 4. 更新规则推送状态
+    const message = await this.fetchRemoteRadarMessage(rule)
+    this.emitPushEvent(rule, message, 0)
     radarPushRuleStore.markPushed(rule.id)
+  }
+
+  /**
+   * 从远程 Radar API (https://ai.crlkcloud.cyou) 获取信号/机会/趋势数据并格式化为消息。
+   */
+  private async fetchRemoteRadarMessage(rule: RadarPushRule): Promise<string> {
+    const lines: string[] = [
+      `📡 **雷达推送: ${rule.name}**`,
+      `━━━ ⏰ ${new Date().toLocaleString('zh-CN', { hour12: false })} ━━━`,
+      '',
+    ]
+
+    try {
+      const res = await fetch('https://ai.crlkcloud.cyou/radar/pipeline', {
+        signal: AbortSignal.timeout(20000),
+      })
+      if (!res.ok) {
+        lines.push(`❌ 远程雷达服务不可用 (${res.status})`)
+        return lines.join('\n')
+      }
+
+      const body: any = await res.json()
+
+      // === signals ===
+      const signals: any[] = body.signals || []
+      if (signals.length > 0) {
+        lines.push(`🔥 **信号** (${signals.length} 条)`)
+        for (const s of signals.slice(0, rule.keywords.length > 0 ? 15 : 10)) {
+          const title = s.problem || s.title || ''
+          // 有关键词则过滤
+          if (rule.keywords.length > 0) {
+            const kwLower = rule.keywords.map((k) => k.toLowerCase())
+            const match = kwLower.some((kw) => title.toLowerCase().includes(kw))
+            if (!match) continue
+          }
+          const score = s.score ?? '?'
+          const evidence = s.evidence || ''
+          lines.push(`  • ${title.slice(0, 120)}`)
+          lines.push(`    评分: ${score}${evidence ? ` | ${evidence}` : ''}`)
+        }
+        lines.push('')
+      }
+
+      // === opportunities ===
+      const opps: any[] = body.opportunities || []
+      if (opps.length > 0) {
+        const filtered = rule.keywords.length > 0
+          ? opps.filter((o) => {
+              const kwLower = rule.keywords.map((k) => k.toLowerCase())
+              return (o.title || '').length > 0
+            })
+          : opps
+        lines.push(`💡 **持续机会** (${filtered.length} 个)`)
+        for (const o of filtered.slice(0, 5)) {
+          const score = o.avg_score ?? '?'
+          const days = o.consecutive_days ?? '?'
+          const type = o.type || 'opportunity'
+          lines.push(`  • [${type}] ${(o.title || '').slice(0, 100)}`)
+          lines.push(`    评分: ${score} | 连续 ${days} 天 | 出现 ${o.appearances ?? '?'} 次`)
+        }
+        lines.push('')
+      }
+
+      // === reports (最新分析报告) ===
+      const reports: any[] = body.reports || []
+      if (reports.length > 0) {
+        const latest = reports[0]
+        lines.push(`📊 **最新报告**`)
+        lines.push(`  ${(latest.content || latest.summary || '').slice(0, 300)}`)
+        lines.push('')
+      }
+
+      // === themes ===
+      const themes: any[] = body.themes || []
+      if (themes.length > 0) {
+        lines.push(`📂 **主题覆盖**`)
+        for (const t of themes) {
+          const name = t.theme || t.name || '?'
+          const cnt = t.count || t.cnt || '?'
+          const score = t.avg_score ?? '?'
+          lines.push(`  • ${name}: ${cnt} 条信号 (均分 ${score})`)
+        }
+        lines.push('')
+      }
+
+      // 如果完全没有数据
+      if (lines.length <= 3) {
+        lines.push('📭 当前无信号数据。')
+      }
+    } catch (err: any) {
+      log('WARN', 'remote_radar_fetch_failed', { error: err.message })
+      lines.push(`❌ 获取雷达数据失败: ${err.message}`)
+    }
+
+    return lines.join('\n')
   }
 
   /**
