@@ -227,96 +227,106 @@ export class RadarPushScheduler {
   }
 
   /**
-   * 从远程 Radar API (https://ai.crlkcloud.cyou) 获取信号/机会/趋势数据并格式化为消息。
+   * 从远程 Radar API 获取数据并格式化为简洁中文消息。
    */
   private async fetchRemoteRadarMessage(rule: RadarPushRule): Promise<string> {
-    const lines: string[] = [
-      `📡 **雷达推送: ${rule.name}**`,
-      `━━━ ⏰ ${new Date().toLocaleString('zh-CN', { hour12: false })} ━━━`,
-      '',
-    ]
+    const THEME_CN: Record<string, string> = {
+      ai_infrastructure: 'AI 基础设施', dev_productivity: '开发者工具',
+      compliance_automation: '合规自动化', data_tools: '数据工具',
+      knowledge_management: '知识管理', collaboration: '协同办公',
+      nocode_lowcode: '低代码', fintech: '金融科技',
+      security: '安全', other: '其他',
+    }
+    const TYPE_CN: Record<string, string> = {
+      market_gap: '市场缺口', feature_request: '功能需求',
+      replacement: '替代方案', workflow: '流程痛点', bug: 'Bug 修复',
+    }
 
     try {
       const res = await fetchWithRetry('https://ai.crlkcloud.cyou/radar/pipeline', 2)
-      if (!res.ok) {
-        lines.push(`❌ 远程雷达服务不可用 (${res.status})`)
-        return lines.join('\n')
-      }
+      if (!res.ok) return `📡 创业雷达更新\n━━━━━━━━━━━\n❌ 服务不可用 (${res.status})`
 
       const body: any = await res.json()
+      const parts: string[] = [`📡 创业雷达更新`]
 
-      // === signals ===
+      // 信号摘要 — 按 theme 聚合
       const signals: any[] = body.signals || []
-      if (signals.length > 0) {
-        lines.push(`🔥 **信号** (${signals.length} 条)`)
-        for (const s of signals.slice(0, rule.keywords.length > 0 ? 15 : 10)) {
-          const title = s.problem || s.title || ''
-          // 有关键词则过滤
-          if (rule.keywords.length > 0) {
-            const kwLower = rule.keywords.map((k) => k.toLowerCase())
-            const match = kwLower.some((kw) => title.toLowerCase().includes(kw))
-            if (!match) continue
-          }
-          const score = s.score ?? '?'
-          const evidence = s.evidence || ''
-          lines.push(`  • ${title.slice(0, 120)}`)
-          lines.push(`    评分: ${score}${evidence ? ` | ${evidence}` : ''}`)
-        }
-        lines.push('')
-      }
-
-      // === opportunities ===
       const opps: any[] = body.opportunities || []
-      if (opps.length > 0) {
-        const filtered = rule.keywords.length > 0
-          ? opps.filter((o) => {
-              const kwLower = rule.keywords.map((k) => k.toLowerCase())
-              return (o.title || '').length > 0
-            })
-          : opps
-        lines.push(`💡 **持续机会** (${filtered.length} 个)`)
-        for (const o of filtered.slice(0, 5)) {
-          const score = o.avg_score ?? '?'
-          const days = o.consecutive_days ?? '?'
-          const type = o.type || 'opportunity'
-          lines.push(`  • [${type}] ${(o.title || '').slice(0, 100)}`)
-          lines.push(`    评分: ${score} | 连续 ${days} 天 | 出现 ${o.appearances ?? '?'} 次`)
-        }
-        lines.push('')
-      }
-
-      // === reports (最新分析报告) ===
-      const reports: any[] = body.reports || []
-      if (reports.length > 0) {
-        const latest = reports[0]
-        lines.push(`📊 **最新报告** (${latest.date || '?'})`)
-        lines.push(`  信号: ${latest.total_signals ?? '?'} | 高价值: ${latest.high_value ?? '?'}`)
-        lines.push('')
-      }
-
-      // === themes ===
       const themes: any[] = body.themes || []
-      if (themes.length > 0) {
-        lines.push(`📂 **主题覆盖**`)
-        for (const t of themes) {
-          const name = t.theme || t.name || '?'
-          const cnt = t.count || t.cnt || '?'
-          const score = t.avg_score ?? '?'
-          lines.push(`  • ${name}: ${cnt} 条信号 (均分 ${score})`)
+
+      // 头条：高评分信号
+      const topSignals = signals
+        .filter((s) => s.score >= 7 || s.business_value >= 7)
+        .slice(0, 5)
+      if (topSignals.length > 0) {
+        parts.push(`━━━ 🔥 高价值信号 ━━━`)
+        for (const s of topSignals) {
+          const t = s.problem || ''
+          const theme = THEME_CN[s.theme] || s.theme || ''
+          const cls = s.classification || ''
+          parts.push(`  • ${t.slice(0, 80)}`)
+          const tags = [`评分 ${s.score ?? '?'}`]
+          if (theme) tags.push(theme)
+          if (cls && cls !== 'feature_request') tags.push(cls)
+          if (s.source) tags.push(`来源 ${s.source}`)
+          parts.push(`    ${tags.join(' | ')}`)
         }
-        lines.push('')
       }
 
-      // 如果完全没有数据
-      if (lines.length <= 3) {
-        lines.push('📭 当前无信号数据。')
+      // 顶部机会
+      const topOpps = opps
+        .sort((a: any, b: any) => (b.avg_score || 0) - (a.avg_score || 0))
+        .slice(0, 5)
+      if (topOpps.length > 0) {
+        parts.push(`━━━ 💡 机会 TOP${topOpps.length} ━━━`)
+        for (const o of topOpps) {
+          const theme = THEME_CN[o.theme] || o.theme || ''
+          const type = TYPE_CN[o.type] || o.type || ''
+          parts.push(`  • ${(o.title || '').slice(0, 70)}`)
+          const tags = [`${type}`]
+          if (o.avg_score) tags.push(`评分 ${o.avg_score}`)
+          if (o.appearances > 1) tags.push(`出现 ${o.appearances} 次`)
+          if (o.consecutive_days) tags.push(`连续 ${o.consecutive_days} 天`)
+          if (theme) tags.push(theme)
+          parts.push(`    ${tags.join(' | ')}`)
+        }
       }
+
+      // 主题趋势
+      if (themes.length > 0) {
+        const top = themes.slice(0, 4)
+        parts.push(`━━━ 📂 热点主题 ━━━`)
+        for (const t of top) {
+          const name = THEME_CN[t.theme] || t.theme || ''
+          const subs = (t.sub_themes || []).slice(0, 3).map((s: any) => s.name).join('、')
+          parts.push(`  ${name}: ${t.count} 条信号`)
+          if (subs) parts.push(`    ${subs}`)
+        }
+      }
+
+      // 市场摘要
+      if (opps.length > 0) {
+        const byTheme: Record<string, number> = {}
+        for (const o of opps) {
+          const t = THEME_CN[o.theme] || o.theme || '其他'
+          byTheme[t] = (byTheme[t] || 0) + 1
+        }
+        const summary = Object.entries(byTheme)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([k, v]) => `${k} ${v} 个`)
+          .join('、')
+        if (summary) {
+          parts.push(`━━━ 📊 市场分布 ━━━`)
+          parts.push(`  ${summary}`)
+        }
+      }
+
+      return parts.join('\n')
     } catch (err: any) {
       log('WARN', 'remote_radar_fetch_failed', { error: err.message })
-      lines.push(`❌ 获取雷达数据失败: ${err.message}`)
+      return `📡 创业雷达更新\n━━━━━━━━━━━\n❌ 获取失败: ${err.message}`
     }
-
-    return lines.join('\n')
   }
 
   /** 当数据库中没有规则时使用的默认规则 */
