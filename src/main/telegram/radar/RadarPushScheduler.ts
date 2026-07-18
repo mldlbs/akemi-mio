@@ -34,6 +34,23 @@ const MIN_PUSH_INTERVAL_MS = 5 * 60 * 1000 // 5 分钟
 /** 没有规则时默认使用的规则名 */
 const DEFAULT_RULE_NAME = '默认推送'
 
+/** 带重试的 fetch，超时 30s */
+async function fetchWithRetry(url: string, retries = 2): Promise<Response> {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fetch(url, { signal: AbortSignal.timeout(30000) })
+    } catch (err) {
+      if (i < retries) {
+        log('WARN', 'remote_radar_retry', { attempt: i + 1, error: String(err) })
+        await new Promise((r) => setTimeout(r, 2000))
+      } else {
+        throw err
+      }
+    }
+  }
+  throw new Error('unreachable')
+}
+
 // ════════════════════════════════════════════════════════════════
 // RadarPushScheduler
 // ════════════════════════════════════════════════════════════════
@@ -220,9 +237,7 @@ export class RadarPushScheduler {
     ]
 
     try {
-      const res = await fetch('https://ai.crlkcloud.cyou/radar/pipeline', {
-        signal: AbortSignal.timeout(20000),
-      })
+      const res = await fetchWithRetry('https://ai.crlkcloud.cyou/radar/pipeline', 2)
       if (!res.ok) {
         lines.push(`❌ 远程雷达服务不可用 (${res.status})`)
         return lines.join('\n')
