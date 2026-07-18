@@ -1212,6 +1212,9 @@ export class AppRuntime {
       fn: async () => {
         if (process.env.EVOLUTION_SERVICE_DISABLED === 'true') {
           log('INFO', 'evolution_disabled', { reason: 'EVOLUTION_SERVICE_DISABLED=true' })
+          // 确保被其他模块引用的子目录仍存在
+          const { ensureEssentialDirs } = await import('../evolution/EvolutionUtils')
+          ensureEssentialDirs()
           return
         }
         const evolution = initEvolution(agentService)

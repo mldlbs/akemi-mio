@@ -177,6 +177,7 @@ export class AgentService implements IEngineService {
       this.recoveryManager,
       this.tokenAccount,
       this.subAgentPool,
+      null, // runtimeManager — ChatExecutor 会在内部创建
       this.reflectLoop,
     )
 

@@ -20,7 +20,10 @@ import { log } from '../logger/Logger'
 import { getRawDb } from '../db/connection'
 import { execAsync } from '../utils/async'
 import { EvolutionGitOps } from './EvolutionGitOps'
+import { WORKSPACE } from '../config'
 import type { EvolutionCheckpointPhase, EvolutionCheckpointStatus } from '../db/schema/evolution_checkpoints'
+
+const EVO_CWD = WORKSPACE.evolution
 
 // =============================================================================
 // 检查点数据库行接口
@@ -565,7 +568,7 @@ export class EvolutionCheckpointManager {
 
   /** 执行 git 命令的快捷方法 */
   private async execGit(cmd: string, timeout: number): Promise<string> {
-    return execAsync(cmd, { timeout, windowsHide: true })
+    return execAsync(cmd, { cwd: EVO_CWD, timeout, windowsHide: true })
   }
 }
 

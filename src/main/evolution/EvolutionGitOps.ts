@@ -1,5 +1,8 @@
 import { log } from '../logger/Logger'
 import { execAsync } from '../utils/async'
+import { WORKSPACE } from '../config'
+
+const EVO_CWD = WORKSPACE.evolution
 
 export enum RollbackLevel {
   TASK = 'task',
@@ -16,8 +19,8 @@ export class EvolutionGitOps {
 
   async autoGitCommit(planTitle: string): Promise<void> {
     try {
-      await execAsync('git add -A', { timeout: 15000 })
-      await execAsync(`git commit -m "[evolution] ${planTitle}"`, { timeout: 15000 })
+      await execAsync('git add -A', { cwd: EVO_CWD, timeout: 15000 })
+      await execAsync(`git commit -m "[evolution] ${planTitle}"`, { cwd: EVO_CWD, timeout: 15000 })
       log('INFO', 'evolution_auto_commit', { planTitle })
     } catch (err: any) {
       log('INFO', 'evolution_auto_commit_skip', { error: err.message?.slice(0, 100) })
@@ -28,10 +31,10 @@ export class EvolutionGitOps {
     try {
       const oneHourAgo = Date.now() - 60 * 60 * 1000
       if (lastSuccessTime > 0 && lastSuccessTime > oneHourAgo) return false
-      const status = await execAsync('git status --short', { timeout: 10000 })
+      const status = await execAsync('git status --short', { cwd: EVO_CWD, timeout: 10000 })
       const dirtyCount = status.trim() ? status.trim().split('\n').length : 0
       if (dirtyCount > 5) {
-        await execAsync('git stash push -m "[evolution] auto-stash pre-analysis"', { timeout: 15000 })
+        await execAsync('git stash push -m "[evolution] auto-stash pre-analysis"', { cwd: EVO_CWD, timeout: 15000 })
         log('INFO', 'evolution_workspace_stashed', { dirtyCount })
         return true
       }
@@ -43,7 +46,7 @@ export class EvolutionGitOps {
 
   async workspacePostRestore(): Promise<void> {
     try {
-      await execAsync('git stash pop', { timeout: 15000 })
+      await execAsync('git stash pop', { cwd: EVO_CWD, timeout: 15000 })
       log('INFO', 'evolution_workspace_stash_restored')
     } catch (err: any) {
       log('INFO', 'evolution_workspace_stash_restore_skip', { error: err.message?.slice(0, 100) })
@@ -52,7 +55,7 @@ export class EvolutionGitOps {
 
   async collectChangedFiles(): Promise<{ newFiles: string[]; modifiedFiles: string[] }> {
     try {
-      const output = await execAsync('git status --porcelain 2>&1', { timeout: 5000 })
+      const output = await execAsync('git status --porcelain 2>&1', { cwd: EVO_CWD, timeout: 5000 })
       const lines = (output || '').split('\n').filter(Boolean)
       const newFiles: string[] = []
       const modifiedFiles: string[] = []
@@ -70,7 +73,7 @@ export class EvolutionGitOps {
 
   async getCurrentBranch(): Promise<string> {
     try {
-      const result = await execAsync('git rev-parse --abbrev-ref HEAD', { timeout: 10000 })
+      const result = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: EVO_CWD, timeout: 10000 })
       return result.trim()
     } catch {
       return 'unknown'
@@ -79,10 +82,10 @@ export class EvolutionGitOps {
 
   async createSnapshot(tag: string): Promise<string | null> {
     try {
-      await execAsync('git add -A', { timeout: 15000 })
-      await execAsync(`git commit -m "[snapshot] ${tag}"`, { timeout: 15000 })
+      await execAsync('git add -A', { cwd: EVO_CWD, timeout: 15000 })
+      await execAsync(`git commit -m "[snapshot] ${tag}"`, { cwd: EVO_CWD, timeout: 15000 })
       const branch = `evolution/snapshot/${tag}_${Date.now()}`
-      await execAsync(`git branch ${branch}`, { timeout: 10000 })
+      await execAsync(`git branch ${branch}`, { cwd: EVO_CWD, timeout: 10000 })
       log('INFO', 'evolution_snapshot_created', { tag, branch })
       return branch
     } catch (err: any) {
@@ -108,7 +111,7 @@ export class EvolutionGitOps {
 
   async cleanupSnapshot(branch: string): Promise<boolean> {
     try {
-      await execAsync(`git branch -D ${branch}`, { timeout: 10000 })
+      await execAsync(`git branch -D ${branch}`, { cwd: EVO_CWD, timeout: 10000 })
       log('INFO', 'evolution_snapshot_cleaned', { branch })
       return true
     } catch (err: any) {

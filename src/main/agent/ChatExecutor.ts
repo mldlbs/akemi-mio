@@ -294,7 +294,13 @@ export class ChatExecutor {
 
     // TODO(v3): 切换为 this.knowledgeQuery.getCombinedContext() 统一获取，
     // 当前保持传统同步路径（getFormattedContext 均为同步调用）
-    const memCtx = this.memoryService.getFormattedContext()
+    let memCtx: string
+    try {
+      memCtx = this.memoryService.getFormattedContext()
+    } catch (err) {
+      log('WARN', 'memory_get_formatted_context_failed', { error: String(err) })
+      return
+    }
     this.obsLogger?.logMemory(this.lastUserText, memCtx)
     const reflectCtx = this.reflectLoop.getFormattedContext()
 
@@ -560,7 +566,7 @@ export class ChatExecutor {
     if (effectiveSessionId !== this.currentSessionId) {
       this.currentSessionId = effectiveSessionId
       this.workingMemory = new WorkingMemory('chat')
-      this.refreshMemory()
+      try { this.refreshMemory() } catch (err) { log('WARN', 'refresh_memory_skipped', { error: String(err) }) }
       const history = getMessagesBySession(effectiveSessionId)
       for (const m of history) {
         if (m.role === 'user') {
@@ -571,7 +577,7 @@ export class ChatExecutor {
       }
     }
     // 先刷新 memory（可能重建 context），再加用户消息，确保消息不丢失
-    this.refreshMemory()
+    try { this.refreshMemory() } catch (err) { log('WARN', 'refresh_memory_skipped', { error: String(err) }) }
     this.workingMemory.addUser(text)
     eventBus.emit('agent.input.received', { text, requestId: rid, source })
     const contentCategory = classifyContent(text)

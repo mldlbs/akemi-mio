@@ -1,4 +1,34 @@
+import { existsSync, mkdirSync } from 'fs'
+import { join } from 'path'
 import { log } from '../logger/Logger'
+import { WORKSPACE } from '../config'
+
+/**
+ * 确保被外部模块引用的 evolution_workspace 子目录存在。
+ * 当 EVOLUTION_SERVICE_DISABLED 时，evolution 懒初始化被跳过，
+ * 但这些目录仍被其他模块引用（SessionRecoveryManager、ConstitutionEngine 等）。
+ */
+export function ensureEssentialDirs(): void {
+  const subDirs = [
+    'recovery',
+    'constitution',
+    'social',
+    'pipeline_data',
+    'observer',
+    'creativity',
+    'inspiration',
+    'sandbox',
+    'generated_tools',
+    'behavior_optimizations',
+  ]
+  for (const name of subDirs) {
+    const dir = join(WORKSPACE.evolution, name)
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true })
+    }
+  }
+  log('INFO', 'evolution_essential_dirs_ensured', { count: subDirs.length })
+}
 
 /**
  * 获取系统状态快照（用于错误日志增强）。
