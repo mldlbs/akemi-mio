@@ -53,6 +53,8 @@
  */
 
 import { log } from '../logger/Logger'
+import { getObserverService } from '../tool/deps'
+import type { Observation } from '../observer/types'
 import type {
   StartupSignal,
   StartupSignalCategory,
@@ -703,59 +705,40 @@ export class StartupRadarAdapter implements IStartupRadarProvider {
   // ════════════════════════════════════════════════════════════
 
   /**
-   * 采集原始数据。
-   *
-   * POC 阶段：返回伪数据用于验证适配层逻辑。
-   * 全量阶段：对接 Observer Service / RadarTools 进行真实采集。
-   *
-   * 类比 UserBehaviorPluginAdapter 对 UserBehavior 的代理调用。
+   * 采集原始数据 — 委托 ObserverService.collectBySource 从真实 API 采集。
+   * 支持多源并发采集 + 关键词 OR 过滤 + 数量限制。
    */
   private async collectRawData(
     sources: SignalSource[],
     keywords?: string[],
     limit?: number,
   ): Promise<RawDataItem[]> {
-    // ── POC 阶段：返回模拟数据 ──
-
-    const allItems: RawDataItem[] = []
-
-    // 声明 POC 数据内联，避免外部依赖
-    const mockData: RawDataMap = {
-      hackernews: [
-        { title: 'Show HN: 基于 AI 的代码审查助手开源发布', summary: '一个使用大语言模型自动审查 Pull Request 的开源工具，支持 GitHub 和 GitLab 集成，已获得 2000+ star', url: 'https://news.ycombinator.com/item?id=example1' },
-        { title: 'YC W25 批量申请启动，AI + SaaS 方向项目激增', summary: 'Y Combinator 2025 冬季批次收到创纪录的申请量，其中 AI-powered SaaS 工具占比超过 40%', url: 'https://news.ycombinator.com/item?id=example2' },
-        { title: 'Cursor IDE 获 6000 万美元 B 轮融资', summary: 'AI 编程助手 Cursor 完成 6000 万美元 B 轮融资，估值达 4 亿美元，由 a16z 领投', url: 'https://news.ycombinator.com/item?id=example3' },
-      ],
-      github_trending: [
-        { title: 'n8n — 开源工作流自动化工具持续增长', summary: 'n8n 本周 GitHub Star 突破 5 万，企业级工作流自动化领域开源替代 Zapier 的最佳选择', url: 'https://github.com/n8n-io/n8n' },
-        { title: 'LangChain v0.3 发布：Agent 框架重大升级', summary: 'LangChain 发布 v0.3，引入全新的 Agent Executor 架构和更简单的工具定义 API', url: 'https://github.com/langchain-ai/langchain' },
-      ],
-      '36kr': [
-        { title: '2025 年 Q2 中国 SaaS 市场融资报告：AIGC 赛道占比超六成', summary: '2025 年 Q2 中国 SaaS 行业共完成 127 笔融资，总金额超 85 亿元人民币，AIGC 相关项目占比 62%', url: 'https://36kr.com/p/example1' },
-        { title: '低代码平台「轻流」完成 5 亿元 C 轮融资', summary: '低代码开发平台轻流宣布完成 5 亿元人民币 C 轮融资，由红杉中国领投，估值达 30 亿元', url: 'https://36kr.com/p/example2' },
-      ],
+    const os = getObserverService()
+    if (!os) {
+      log('WARN', 'startup_radar_observer_unavailable')
+      return []
     }
 
-    for (const source of sources) {
-      const sourceData = mockData[source] ?? []
-      const capped = keywords
-        ? sourceData.filter(item =>
-            keywords.some(kw => item.title.includes(kw) || item.summary.includes(kw)),
-          ).slice(0, limit)
-        : sourceData.slice(0, limit)
+    const collected = await os.collectBySource(sources, keywords, limit ?? 20)
+    const items: RawDataItem[] = []
 
-      for (const item of capped) {
-        allItems.push({
-          title: item.title,
-          summary: item.summary,
-          source,
-          url: item.url,
-          createdAt: Date.now() - Math.random() * 12 * 3600 * 1000, // 0-12小时前
+    for (const [source, observations] of Object.entries(collected)) {
+      for (const obs of observations) {
+        items.push({
+          title: obs.content.slice(0, 200),
+          summary: obs.content,
+          source: source as SignalSource,
+          url: extractUrl(obs.content) ?? undefined,
+          createdAt: new Date(obs.timestamp).getTime(),
         })
       }
     }
 
-    return allItems
+    if (items.length === 0) {
+      log('INFO', 'startup_radar_no_raw_data', { sources, keywordCount: keywords?.length ?? 0 })
+    }
+
+    return items
   }
 
   /**
@@ -796,7 +779,7 @@ export class StartupRadarAdapter implements IStartupRadarProvider {
 //  内部类型
 // ════════════════════════════════════════════════════════════════
 
-/** POC 阶段的原始数据项 */
+/** 原始数据项 */
 interface RawDataItem {
   title: string
   summary: string
@@ -805,13 +788,13 @@ interface RawDataItem {
   createdAt: number
 }
 
-/** POC 阶段的数据源映射 */
-interface RawDataMap {
-  [source: string]: Array<{
-    title: string
-    summary: string
-    url?: string
-  }>
+/**
+ * 从 Observation content 中提取 URL（如果有匹配）。
+ * Observation 格式如："title (points N by user) — https://..."
+ */
+function extractUrl(content: string): string | null {
+  const match = content.match(/https?:\/\/[^\s)]+/)
+  return match ? match[0] : null
 }
 
 // ════════════════════════════════════════════════════════════════

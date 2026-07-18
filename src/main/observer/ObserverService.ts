@@ -236,6 +236,62 @@ export class ObserverService {
     }
   }
 
+  /**
+   * 按源名称列表按需采集，支持关键词过滤（OR 匹配）和数量限制。
+   * 返回 { sourceName → Observation[] } 映射。
+   */
+  async collectBySource(
+    sourceNames: string[],
+    keywords?: string[],
+    limit: number = 20,
+  ): Promise<Record<string, Observation[]>> {
+    const result: Record<string, Observation[]> = {}
+    const collectorMap = new Map<string, Collector>()
+    for (const c of this.collectors) {
+      collectorMap.set(c.name, c)
+      // 兼容源名称别名
+      if (c.name === 'weibo-hot') collectorMap.set('weibo_hot', c)
+      if (c.name === 'github-trending') collectorMap.set('github_trending', c)
+    }
+
+    for (const name of sourceNames) {
+      const canonical = name === 'weibo_hot' ? 'weibo-hot'
+        : name === 'github_trending' ? 'github-trending'
+        : name
+      const collector = collectorMap.get(canonical)
+      if (!collector) {
+        if (name !== '36kr' && name !== 'crunchbase') {
+          log('WARN', 'collect_by_source_unknown', { source: name })
+        }
+        continue
+      }
+
+      try {
+        let obs = await collector.collect()
+
+        // 关键词过滤（OR 匹配 title/content）
+        if (keywords && keywords.length > 0) {
+          const kwLower = keywords.map((k) => k.toLowerCase())
+          obs = obs.filter((o) =>
+            kwLower.some((kw) => o.content.toLowerCase().includes(kw)),
+          )
+        }
+
+        // 数量限制
+        if (limit > 0 && obs.length > limit) {
+          obs = obs.slice(0, limit)
+        }
+
+        result[name] = obs
+        this.store.store(obs)
+      } catch (err: any) {
+        log('ERROR', 'collect_by_source_failed', { source: name, error: err.message })
+      }
+    }
+
+    return result
+  }
+
   async forceFerment(): Promise<void> {
     const result = await this.fermentation.ferment('afternoon')
     if (result.clusters.length > 0) {
