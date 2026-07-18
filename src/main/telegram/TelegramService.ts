@@ -38,6 +38,7 @@ const ROUTING: Record<string, string> = {
   budget: 'push',
   recovery: 'push',
   stability: 'push',
+  radar: 'push',
   system: 'push',
   image_gen: 'gen',
   image_result: 'gen',
@@ -693,34 +694,11 @@ export class TelegramService {
       this.enqueueReply(chatId, `📊 稳定性状态变更: ${p.previous} → ${p.current} (${p.score}分)`, 'stability')
     })
 
-    // === 📡 雷达（发到独立的群组 chat，走专用 bot 直连 API 不经过 proxy） ===
-    eventBus.on('radar.push.rule_fired', async (p: any) => {
-      const botToken = credentialsManager.get('radar_bot_token')
+    // === 📡 雷达（发到独立的群组 chat，不混入个人推送） ===
+    eventBus.on('radar.push.rule_fired', (p: any) => {
       const rawChatId = credentialsManager.get('radar_chat_id')
       const targetChatId = rawChatId ? parseInt(rawChatId, 10) : chatId
-
-      if (botToken && !isNaN(targetChatId)) {
-        // 直连 Telegram Bot API 发送
-        try {
-          const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: targetChatId,
-              text: p.message,
-              parse_mode: 'Markdown',
-            }),
-            signal: AbortSignal.timeout(15000),
-          })
-          const data = await res.json()
-          if (!data.ok) {
-            log('WARN', 'radar_push_bot_api_failed', { error: data.description })
-          }
-        } catch (err: any) {
-          log('WARN', 'radar_push_bot_api_error', { error: err.message })
-        }
-      } else {
-        // fallback: 走 proxy outbox
+      if (!isNaN(targetChatId)) {
         this.enqueueReply(targetChatId, p.message, 'radar')
       }
     })
