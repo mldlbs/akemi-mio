@@ -102,6 +102,7 @@ export class ChatExecutor {
   private recoveryManager: SessionRecoveryManager | null
   private tokenAccount: TokenAccount | null
   private subAgentPool: SubAgentPool
+  private runtimeManager: import('../runtime/RuntimeManagerImpl').RuntimeManagerImpl | null
   private reflectLoop: ReflectLoop
   private goalGuardrail: GoalGuardrail
   private sessionPlanIds: Set<string> = new Set()
@@ -171,6 +172,7 @@ export class ChatExecutor {
     recoveryManager: SessionRecoveryManager | null,
     tokenAccount: TokenAccount | null,
     subAgentPool: SubAgentPool,
+    runtimeManager: import('../runtime/RuntimeManagerImpl').RuntimeManagerImpl | null,
     reflectLoop: ReflectLoop,
   ) {
     this.llmService = llmService
@@ -187,6 +189,7 @@ export class ChatExecutor {
     this.recoveryManager = recoveryManager
     this.tokenAccount = tokenAccount
     this.subAgentPool = subAgentPool
+    this.runtimeManager = runtimeManager
     this.reflectLoop = reflectLoop
     this.goalGuardrail = goalGuardrail
     this.errorClassifier = { classify: classifyError }
@@ -1025,6 +1028,23 @@ export class ChatExecutor {
         const pa = await this.handlePlanForceContinue(result.reply || '', messages, ctx)
         if (pa === 'continue' || pa === 'abandon') continue
         const done = this.subAgentPool.collectCompleted()
+        // [旁路] Runtime 旁路集成 — RUNTIME_ENABLED=1 时额外收集 Runtime Worker 结果
+        if (this.runtimeManager && process.env.RUNTIME_ENABLED === '1') {
+          for (const task of this.runtimeManager.listTasks()) {
+            const completed = task.collectCompleted()
+            for (const r of completed) {
+              done.push({
+                id: r.id,
+                goal: r.goal,
+                status: r.state === 'cancelled' ? ('interrupted' as any) : (r.state as any),
+                summary: r.summary,
+                error: r.error,
+                startedAt: 0,
+                completedAt: Date.now(),
+              })
+            }
+          }
+        }
         if (done.length > 0) {
           messages.push({ role: 'assistant', content: result.reply || '' })
           const reportLines = done.map((t: any) => {
