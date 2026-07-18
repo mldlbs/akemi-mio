@@ -42,6 +42,7 @@ export class WorkflowStoreV2 {
   }
 
   getDefinition(id: string): WorkflowDef | null {
+    this.seedPresets()
     const stmt = this.db.prepare('SELECT definition FROM workflow_defs WHERE id = ?')
     stmt.bind([id])
     if (!stmt.step()) {
