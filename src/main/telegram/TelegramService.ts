@@ -693,9 +693,17 @@ export class TelegramService {
       this.enqueueReply(chatId, `📊 稳定性状态变更: ${p.previous} → ${p.current} (${p.score}分)`, 'stability')
     })
 
-    // === 📡 雷达 ===
+    // === 📡 雷达（发到独立的群组 chat，不混入个人推送） ===
     eventBus.on('radar.push.rule_fired', (p: any) => {
-      this.enqueueReply(chatId, p.message, 'radar')
+      const radarChatId = (() => {
+        const raw = credentialsManager.get('radar_chat_id')
+        if (raw) {
+          const id = parseInt(raw, 10)
+          if (!isNaN(id)) return id
+        }
+        return chatId // fallback 到个人
+      })()
+      this.enqueueReply(radarChatId, p.message, 'radar')
     })
 
     // === ⚙️ 系统 ===
