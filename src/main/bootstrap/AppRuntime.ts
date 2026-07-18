@@ -271,7 +271,9 @@ export class AppRuntime {
         })
         return res.text()
       },
-      injectPrompt: () => {},
+      injectPrompt: (prompt) => {
+        eventBus.emit('agent.input.received', { text: prompt, requestId: `wf_${Date.now()}`, source: 'workflow' });
+      },
       getCompletedAgentResults: () =>
         agentService['subAgentPool'].collectCompleted().map((r) => ({ id: r.id, summary: r.summary, error: r.error })),
       runPlan: (prompt) => {
@@ -297,9 +299,9 @@ export class AppRuntime {
     setWorkflowScheduler(scheduler)
 
     // 初始化 WorkflowTriggerManager（cron + event 触发）
+    // 注意: .start() 延后到 initDatabase() 之后调用，避免 DB 未就绪的竞态
     const { WorkflowTriggerManager } = await import('../workflow/WorkflowTriggerManager')
     const triggerManager = new WorkflowTriggerManager()
-    triggerManager.start()
 
     const telegramService = new TelegramService(agentService)
 
@@ -329,6 +331,9 @@ export class AppRuntime {
     await initDatabase()
     log('PERF', 'startup_stage', { stage: 'db_ready', ms: Date.now() - t0, total: Date.now() - startMs })
     log('INFO', 'database_ready')
+
+    // Workflow 触发器管理器在 DB 就绪后启动
+    triggerManager.start()
     credentialsManager.migrate()
     log('INFO', 'credential_migration_done')
     setCredentialsManager(credentialsManager)

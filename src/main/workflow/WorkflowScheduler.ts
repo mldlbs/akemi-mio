@@ -38,6 +38,7 @@ interface StepContext {
 export class WorkflowSchedulerV2 {
   private dispatch: WorkflowDispatch
   private running = new Map<string, AbortController>()
+  private cancelled = new Set<string>()
   private maxConcurrency = 5
 
   constructor(dispatch: WorkflowDispatch) {
@@ -57,13 +58,13 @@ export class WorkflowSchedulerV2 {
 
     this.executeLoop(run, def, abort.signal).catch((err) => {
       log('ERROR', 'workflow_v2_error', { runId: run.runId, error: String(err) })
-      // 如果 stopRun 已经改为 cancelled，不再覆盖
-      const current = workflowStore.getRun(run.runId)
-      if (current && current.status === 'running') {
+      // 使用同步 cancelled set 而非读 DB 来检测 stopRun，彻底消除竞态
+      if (!this.cancelled.has(run.runId)) {
         run.status = 'failed'
         workflowStore.updateRun(run)
       }
       this.running.delete(run.runId)
+      this.cancelled.delete(run.runId)
     })
 
     return run
@@ -150,6 +151,7 @@ export class WorkflowSchedulerV2 {
       if (runnable.length === 0) {
         finishRun(run, stepDefs, completed, failures, skipped, workflowStore)
         this.running.delete(run.runId)
+        this.cancelled.delete(run.runId)
         return
       }
 
@@ -201,6 +203,7 @@ export class WorkflowSchedulerV2 {
       run.status = 'cancelled'
       workflowStore.updateRun(run)
       this.running.delete(run.runId)
+      this.cancelled.delete(run.runId)
     }
   }
 
@@ -738,11 +741,9 @@ export class WorkflowSchedulerV2 {
       abort.abort()
       this.running.delete(runId)
     }
+    this.cancelled.add(runId)
     const run = workflowStore.getRun(runId)
     if (!run) return false
-    // 无论当前状态如何，始终标记为 cancelled 并发送 IPC
-    // 防止竞态: executeLoop 在 stopRun 读 DB 前已经结束，
-    // 但前端仍未收到状态更新，取消后需要强制同步
     run.status = 'cancelled'
     run.completedAt = Date.now()
     workflowStore.updateRun(run)
