@@ -449,6 +449,20 @@ export class AppRuntime {
     const { GuardrailMetricsQueryService } = await import('../core/evaluation/GuardrailMetricsQueryService')
     this.metricsQueryRef.current = new GuardrailMetricsQueryService(this.metricsStore, this.metricsProjection)
 
+    // 运行时增量构建：每 5 分钟 replay 新 events → 刷新 metrics
+    const METRICS_REFRESH_MS = 5 * 60 * 1000
+    const metricsTimer = setInterval(async () => {
+      try {
+        const lastUpdate = await this.metricsStore!.getLastUpdateTimestamp()
+        if (lastUpdate !== null) {
+          await this.metricsProjection!.build(lastUpdate)
+        }
+      } catch {
+        // metrics 刷新失败 → 静默降级（不干扰主流程）
+      }
+    }, METRICS_REFRESH_MS)
+    this.subs.add(() => clearInterval(metricsTimer))
+
     // DecisionQueryService — 只读查询层（M5.3）
     const { DecisionQueryService } = await import('../core/evaluation/DecisionQueryService')
     const decisionQueryRef = createServiceRef<DecisionQueryService>()
