@@ -5,8 +5,7 @@
  */
 
 import { log } from '../../logger/Logger'
-import type { ServerManager } from '../../mcp/ServerManager'
-import type { SubAgentPool } from '../../agent/SubAgentPool'
+import type { SubAgentPoolAdapter } from '../../agent/SubAgentPoolAdapter'
 import type { AssignedProblem, FixResult, FixExecutor, ProblemSource } from './types'
 
 export class DeepSeekExecutor implements FixExecutor {
@@ -14,20 +13,12 @@ export class DeepSeekExecutor implements FixExecutor {
   readonly supportedSources: ProblemSource[] = ['tsc', 'lint']
   readonly timeoutMs = 180_000
 
-  private pool: SubAgentPool | null = null
+  private pool: SubAgentPoolAdapter | null = null
   private lastExecuteAt = 0
   private minIntervalMs = 5_000
   private busy = false
 
-  constructor(mcpManager?: ServerManager) {
-    if (mcpManager) {
-      const { SubAgentPool: Pool } = require('../../agent/SubAgentPool')
-      this.pool = new Pool(mcpManager)
-    }
-  }
-
-  /** 延迟注入 pool（init 时 mcpManager 可能还没就绪） */
-  setPool(pool: SubAgentPool): void {
+  constructor(pool: SubAgentPoolAdapter) {
     this.pool = pool
   }
 

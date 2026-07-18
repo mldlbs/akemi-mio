@@ -1249,8 +1249,8 @@ export class AppRuntime {
           persistDir: join(WORKSPACE.evolution, 'pipeline_data'),
           maxFixesPerCycle: 3,
         })
-        // 注册基础 collector 和 executor（先不传 mcpManager，备用执行器延迟注入）
-        pipeline.initDefaults()
+        // 注册基础 collector 和 executor（注入 SubAgentPoolAdapter 替代旧 SubAgentPool）
+        pipeline.initDefaults(agentService.getSubAgentPool())
         // 注册 Evolution 插件（ServiceLoader 模式）
         const { PluginServiceLoader, WallpaperPlugin, PluginCollectorAdapter, PluginExecutorAdapter } = await import('../evolution/plugin')
         const pluginLoader = PluginServiceLoader.getInstance()

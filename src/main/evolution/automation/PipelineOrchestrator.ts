@@ -22,6 +22,7 @@ import { TestCollector } from './TestCollector'
 import { EslintCollector } from './EslintCollector'
 import { ClaudeCodeExecutor } from './ClaudeCodeExecutor'
 import { DeepSeekExecutor } from './DeepSeekExecutor'
+import type { SubAgentPoolAdapter } from '../../agent/SubAgentPoolAdapter'
 import { AsrLogCollector } from './AsrLogCollector'
 import { AsrOptimizationExecutor } from './AsrOptimizationExecutor'
 import { AsrVocabEvolutionExecutor } from './AsrVocabEvolutionExecutor'
@@ -91,7 +92,7 @@ export class PipelineOrchestrator {
    * 后续新增 Collector/Executor 只需在 registerBuiltins 中注册，
    * 消费侧通过 getAllCollectors() / getAllExecutors() 发现。
    */
-  initDefaults(mcpManager?: any): void {
+  initDefaults(subAgentPool?: SubAgentPoolAdapter): void {
     // Stage 1: 创建内置采集器
     const tscCollector = new TscCollector(this.config.projectRoot)
     const testCollector = new TestCollector(this.config.projectRoot)
@@ -145,8 +146,8 @@ export class PipelineOrchestrator {
     registerExecutor(ttsTypographyExecutor)
     registerExecutor(typeRefactorExecutor)
     registerExecutor(fileOrganizerExecutor)
-    if (mcpManager) {
-      registerExecutor(new DeepSeekExecutor(mcpManager))
+    if (subAgentPool) {
+      registerExecutor(new DeepSeekExecutor(subAgentPool))
     }
 
     // Stage 5: 从注册表加载到本地
