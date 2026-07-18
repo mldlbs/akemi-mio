@@ -175,7 +175,7 @@ export interface WorkflowStepRun {
   retryCount?: number
 }
 
-export type WorkflowRunStatus = 'pending' | 'running' | 'paused' | 'done' | 'failed'
+export type WorkflowRunStatus = 'pending' | 'running' | 'paused' | 'done' | 'failed' | 'cancelled'
 
 export interface WorkflowRun {
   runId: string

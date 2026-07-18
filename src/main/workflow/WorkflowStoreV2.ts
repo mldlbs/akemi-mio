@@ -204,6 +204,19 @@ export class WorkflowStoreV2 {
     return run
   }
 
+  /** 强制将运行标记为已取消（绕过 CHECK constraint，写 failed + 发射 cancelled 事件） */
+  forceCancelRun(runId: string): boolean {
+    const stmt = this.db.prepare('SELECT 1 FROM workflow_runs WHERE run_id = ?')
+    stmt.bind([runId])
+    if (!stmt.step()) { stmt.free(); return false }
+    stmt.free()
+    this.db.run('UPDATE workflow_runs SET status = ?, completed_at = ? WHERE run_id = ?', ['failed', Date.now(), runId])
+    markDirty()
+    // 发射 cancelled 事件让前端 FSM 正确转换
+    eventBus.emit('workflow.run.updated', { runId, status: 'cancelled' })
+    return true
+  }
+
   updateRun(run: WorkflowRun): void {
     this.db.run(
       `UPDATE workflow_runs SET status = ?, context = ?, pending_gate = ?, completed_at = ?

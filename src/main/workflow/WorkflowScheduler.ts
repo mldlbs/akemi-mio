@@ -760,7 +760,9 @@ export class WorkflowSchedulerV2 {
     if (!run) return false
     run.status = 'cancelled'
     run.completedAt = Date.now()
-    workflowStore.updateRun(run)
+    // 使用 forceCancelRun 绕过 DB CHECK constraint(SQLite 不支持 cancelled)
+    // 写入 failed + 单独发射 cancelled 事件供前端 FSM 正确转换
+    workflowStore.forceCancelRun(runId)
     return true
   }
 
