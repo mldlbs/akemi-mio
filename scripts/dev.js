@@ -17,6 +17,7 @@ const child = spawn(process.execPath, [electronVite, 'dev'], {
   env: {
     ...process.env,
     AKEMI_MIO_OBSERVABILITY: process.env.AKEMI_MIO_OBSERVABILITY || '',
+    RUNTIME_ENABLED: process.env.RUNTIME_ENABLED || '1',
   },
 })
 

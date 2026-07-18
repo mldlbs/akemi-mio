@@ -12,7 +12,9 @@ import { eventBus, EventBus } from '../core/EventBus'
 import type { PlanManagerLike } from '../evolution/types'
 import { extractJsonFromLLMReply } from '../utils/llm'
 import { planManager as defaultPlanManager } from '../evolution'
-import { SubAgentPool, type SpawnTaskOptions } from './SubAgentPool'
+import { type SpawnTaskOptions } from './SubAgentPool'
+import { SubAgentPool } from './SubAgentPool'
+import { SubAgentPoolAdapter } from './SubAgentPoolAdapter'
 import { getRolePrompt, type SubAgentRoleName } from './roles'
 import { ReflectLoop } from './ReflectLoop'
 import { FailureAnalyzer } from './FailureAnalyzer'
@@ -39,6 +41,8 @@ import type { IndustrialOdeLayer } from '../gongye-songge'
 import type { WorkspaceCleanupLayer } from '../workspace-cleanup'
 import type { IEngineService, EngineStatus, EngineMetrics } from '../engine/types'
 import { RuntimeValidator } from '../runtime/RuntimeValidator'
+import { RuntimeManagerImpl } from '../runtime/RuntimeManagerImpl'
+import { SupervisedAgentSupervisorImpl } from '../runtime/SupervisedAgentSupervisorImpl'
 
 export class AgentService implements IEngineService {
   /** IEngineService 引擎名 */
@@ -66,7 +70,7 @@ export class AgentService implements IEngineService {
   private selfTaskAbortController: AbortController | null = null
   /** 自任务开始时间戳，用于检测挂起超时任务 */
   private selfTaskStartTime: number = 0
-  private subAgentPool: SubAgentPool
+  private subAgentPool: SubAgentPoolAdapter
   readonly reflectLoop = new ReflectLoop()
   readonly proceduralMemory = new ProceduralMemory()
   readonly failureAnalyzer = new FailureAnalyzer()
@@ -111,6 +115,8 @@ export class AgentService implements IEngineService {
   // ── v2 架构 ──
   /** ChatExecutor — Chat 运行时（独立 context + toolLoop） */
   private chatExecutor: ChatExecutor | null = null
+  /** RuntimeManager — 多 Task 管理（side-by-side 旁路） */
+  private runtimeManager: import('../runtime/RuntimeManagerImpl').RuntimeManagerImpl | null = null
   /** TaskExecutor — Evolution 循环执行引擎 */
   private taskExecutor: TaskExecutor | null = null
 
@@ -139,12 +145,33 @@ export class AgentService implements IEngineService {
       planManager: this.planManager,
     })
     this.goalGuardrail = new GoalGuardrail(null, null, { softCheckInterval: 1 })
-    this.subAgentPool = new SubAgentPool(
+    this.subAgentPool = new SubAgentPoolAdapter(
+      this.mcpManager,
+      this.llmService['chatApiKey'] || '',
+      this.llmService['codeApiKey'] || '',
+      this.runtimeManager, // 共享 RuntimeManagerImpl
+    )
+    // 旧 SubAgentPool 保留给 spawnSkillAgent（ScopedAgent 不在 Runtime v1 覆盖范围）
+    const legacySubAgentPool = new SubAgentPool(
       this.mcpManager,
       this.eventBus,
       this.llmService['chatApiKey'] || undefined,
       this.llmService['codeApiKey'] || undefined,
     )
+    this.subAgentPool.attachLegacyPool(legacySubAgentPool)
+
+    log('INFO', 'runtime_manager_init', { RUNTIME_ENABLED: process.env.RUNTIME_ENABLED })
+
+    // RuntimeManager side-by-side integration
+    this.runtimeManager = new RuntimeManagerImpl(
+      () => new SupervisedAgentSupervisorImpl(
+        this.mcpManager,
+        this.llmService['chatApiKey'] || 'mock_key',
+        this.llmService['codeApiKey'] || 'mock_key',
+      ),
+    )
+    this.runtimeValidator.start(this.runtimeManager)
+
     this.registerDefaultHandlers()
     // 监听计划创建，追踪本次会话的活跃计划
     this.eventBus.on('agent.plan.created', (p: { planId: string; title: string }) => {
@@ -177,7 +204,7 @@ export class AgentService implements IEngineService {
       this.recoveryManager,
       this.tokenAccount,
       this.subAgentPool,
-      null, // runtimeManager — ChatExecutor 会在内部创建
+      this.runtimeManager, // RuntimeManager side-by-side 旁路
       this.reflectLoop,
     )
 
@@ -444,7 +471,7 @@ export class AgentService implements IEngineService {
     return this.memoryService
   }
 
-  getSubAgentPool(): SubAgentPool {
+  getSubAgentPool(): SubAgentPoolAdapter {
     return this.subAgentPool
   }
 

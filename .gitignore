@@ -53,5 +53,7 @@ scripts/cdp-*.cjs
 scripts/fix-rct*.mjs
 scripts/fix-rct*.cjs
 scripts/mio-writing-session.mjs
+scripts/merge-mcp.mjs
+scripts/verify-*.cjs
 out/
 .ssh/

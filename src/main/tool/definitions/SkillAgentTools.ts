@@ -1,7 +1,7 @@
 import { buildTool, formatToolResult, formatToolError } from '../types'
 import { getSkillManager } from '../deps'
 import { skillAgentRegistry } from '../../skill/SkillAgentRegistry'
-import { SubAgentPool } from '../../agent/SubAgentPool'
+import { SubAgentPoolAdapter } from '../../agent/SubAgentPoolAdapter'
 
 /**
  * spawn_skill_agent — 派发一个受控子 Agent 来执行 executor 技能
@@ -45,12 +45,12 @@ export const spawnSkillAgentTool = buildTool({
   isReadOnly: false,
 })
 
-let _subAgentPool: SubAgentPool | null = null
+let _subAgentPool: SubAgentPoolAdapter | null = null
 
-export function setSubAgentPool(pool: SubAgentPool | null): void {
+export function setSubAgentPool(pool: SubAgentPoolAdapter | null): void {
   _subAgentPool = pool
 }
 
-export function getSubAgentPool(): SubAgentPool | null {
+export function getSubAgentPool(): SubAgentPoolAdapter | null {
   return _subAgentPool
 }

@@ -4,7 +4,7 @@
  * 目标：在不修改调用者（ChatExecutor、AgentPoolTools、WorkflowScheduler）
  * 的情况下，将 `spawn()` `spawnTask()` `collectCompleted()` 等委托给 Runtime。
  *
- * spawnSkillAgent 仍委托给原生 SubAgentPool（ScopedAgent 是不同抽象，不在 v1 Runtime 覆盖范围）。
+ * spawnSkillAgent 仍委托给旧 SubAgentPool（ScopedAgent 是不同抽象，不在 v1 Runtime 覆盖范围）。
  */
 
 import type { ServerManager } from '../mcp/ServerManager'
@@ -17,15 +17,32 @@ import type {
   SpawnTaskOptions,
   SubAgentStatus,
 } from './SubAgentPool'
+import type { SkillAgentDef } from '../skill/SkillAgentRegistry'
+
+/** Runtime 范围内不支持 SkillAgent，外部注入旧池 */
+interface LegacyPool {
+  spawnSkillAgent(skillName: string, agentDef: SkillAgentDef, params: Record<string, any>): string
+}
 
 export class SubAgentPoolAdapter {
   private runtimeManager: RuntimeManagerImpl
   private defaultTask: RuntimeTaskImpl | null = null
+  private legacyPool: LegacyPool | null = null
 
-  constructor(mcpManager: ServerManager, chatKey: string, codeKey: string) {
-    this.runtimeManager = new RuntimeManagerImpl(
+  constructor(
+    mcpManager: ServerManager,
+    chatKey: string,
+    codeKey: string,
+    runtimeManager?: RuntimeManagerImpl,
+  ) {
+    this.runtimeManager = runtimeManager ?? new RuntimeManagerImpl(
       () => new SupervisedAgentSupervisorImpl(mcpManager, chatKey, codeKey),
     )
+  }
+
+  /** 注入旧 SubAgentPool（仅用于 spawnSkillAgent，ScopedAgent 不在 Runtime v1 范围） */
+  attachLegacyPool(pool: LegacyPool): void {
+    this.legacyPool = pool
   }
 
   /** 确保有默认 Task */
@@ -116,6 +133,15 @@ export class SubAgentPoolAdapter {
     const count = this.defaultTask.getStatus().running
     this.defaultTask.cancel('adapter_interrupt_all')
     return count
+  }
+
+  /** 技能子 Agent 派发 — 委托给旧 SubAgentPool */
+  spawnSkillAgent(skillName: string, agentDef: SkillAgentDef, params: Record<string, any>): string {
+    if (!this.legacyPool) {
+      log('WARN', 'adapter_no_legacy_pool', { skill: skillName })
+      return ''
+    }
+    return this.legacyPool.spawnSkillAgent(skillName, agentDef, params)
   }
 
   setKeys(_chatKey: string, _codeKey: string): void {

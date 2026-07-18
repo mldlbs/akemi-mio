@@ -16,7 +16,7 @@ import type { MemoryService } from '../memory/MemoryService'
 import { ChatResult } from '../llm/types'
 import { eventBus, type EventPayload } from '../core/EventBus'
 import type { PlanManagerLike } from '../evolution/types'
-import { SubAgentPool } from './SubAgentPool'
+import { SubAgentPoolAdapter } from './SubAgentPoolAdapter'
 import { ReflectLoop } from './ReflectLoop'
 import { Guardrail } from './Guardrail'
 import { ProgressGuardrail } from './ProgressGuardrail'
@@ -101,7 +101,7 @@ export class ChatExecutor {
   private skillManager: SkillManager | null
   private recoveryManager: SessionRecoveryManager | null
   private tokenAccount: TokenAccount | null
-  private subAgentPool: SubAgentPool
+  private subAgentPool: SubAgentPoolAdapter
   private runtimeManager: import('../runtime/RuntimeManagerImpl').RuntimeManagerImpl | null
   private reflectLoop: ReflectLoop
   private goalGuardrail: GoalGuardrail
@@ -171,7 +171,7 @@ export class ChatExecutor {
     skillManager: SkillManager | null,
     recoveryManager: SessionRecoveryManager | null,
     tokenAccount: TokenAccount | null,
-    subAgentPool: SubAgentPool,
+    subAgentPool: SubAgentPoolAdapter,
     runtimeManager: import('../runtime/RuntimeManagerImpl').RuntimeManagerImpl | null,
     reflectLoop: ReflectLoop,
   ) {
@@ -1036,7 +1036,9 @@ export class ChatExecutor {
         const done = this.subAgentPool.collectCompleted()
         // [旁路] Runtime 旁路集成 — RUNTIME_ENABLED=1 时额外收集 Runtime Worker 结果
         if (this.runtimeManager && process.env.RUNTIME_ENABLED === '1') {
-          for (const task of this.runtimeManager.listTasks()) {
+          const tasks = this.runtimeManager.listTasks()
+          log('DEBUG', 'runtime_bypass_check', { taskCount: tasks.length })
+          for (const task of tasks) {
             const completed = task.collectCompleted()
             for (const r of completed) {
               done.push({
