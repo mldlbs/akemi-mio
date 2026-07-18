@@ -162,6 +162,7 @@ const PROMPT_TOOLS = `可用工具列表：
 - cancel_workflow_run — 取消正在运行的工作流
 - list_workflow_runs — 查看工作流运行历史
 - enable_workflow / disable_workflow — 启用/停用工作流
+- approve_workflow_gate — 审批工作流中的审批门（gate），工作流暂停时使用
 
 端口和进程管理：
 - netstat -ano | findstr :端口号 — 检查端口占用

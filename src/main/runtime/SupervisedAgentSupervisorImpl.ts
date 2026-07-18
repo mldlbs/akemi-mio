@@ -168,6 +168,11 @@ export class SupervisedAgentSupervisorImpl implements AgentSupervisor {
     return results
   }
 
+  /** 非破坏性读取已完成结果（不 drain）— 用于并行多步骤轮询场景 */
+  peekCompleted(): CompletedWorkerResult[] {
+    return [...this.completedResults]
+  }
+
   // ── 内部 ──
 
   private onWorkerComplete(agent: SupervisedWorkerAgent, result: { status: string; summary: string; error?: string }): void {

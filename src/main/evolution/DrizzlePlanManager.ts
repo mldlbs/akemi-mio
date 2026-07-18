@@ -240,7 +240,7 @@ export class DrizzlePlanManager {
     db.run('UPDATE plans SET updated_at = ? WHERE id = ?', [Date.now(), planId])
 
     markDirty()
-    eventBus.emit('agent.plan.step', { planId, stepIndex, status })
+    eventBus.emit('agent.plan.step', { planId, stepIndex, status, result })
     log('INFO', 'plan_step_update', { plan_id: planId, step: stepIndex, status })
     return true
   }

@@ -19,7 +19,7 @@ export interface MemoryEmotionTag {
 
 export interface MemoryEntry {
   id: string
-  type: 'user_fact' | 'interaction' | 'task_state' | 'user_profile' | 'fictional' | 'writing_feedback' | 'polishing_decision'
+  type: 'user_fact' | 'interaction' | 'task_state' | 'user_profile' | 'fictional' | 'writing_feedback' | 'polishing_decision' | 'blog_memory'
   content: string
   confidence: number
   createdAt: number

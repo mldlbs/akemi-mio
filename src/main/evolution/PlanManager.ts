@@ -102,7 +102,7 @@ export class PlanManager {
     if (result) plan.steps[stepIndex].result = result
     plan.updatedAt = Date.now()
     this.save()
-    eventBus.emit('agent.plan.step', { planId, stepIndex, status })
+    eventBus.emit('agent.plan.step', { planId, stepIndex, status, result })
     log('INFO', 'plan_step_update', { plan_id: planId, step: stepIndex, status })
     return true
   }

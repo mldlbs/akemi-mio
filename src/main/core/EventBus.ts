@@ -113,7 +113,7 @@ export interface EventPayload {
   'agent.tool.completed': { tool: string; result: string; requestId: string }
   'agent.tool.failed': { tool: string; error: string; requestId: string }
   'agent.plan.created': { planId: string; title: string }
-  'agent.plan.step': { planId: string; stepIndex: number; status: string }
+  'agent.plan.step': { planId: string; stepIndex: number; status: string; result?: string }
   'agent.plan.completed': { planId: string }
   'tts.playback.started': { text: string }
   'tts.playback.finished': {}

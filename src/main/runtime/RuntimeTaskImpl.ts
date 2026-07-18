@@ -88,4 +88,8 @@ export class RuntimeTaskImpl {
   collectCompleted(): CompletedWorkerResult[] {
     return this.supervisor.collectCompleted()
   }
+
+  peekCompleted(): CompletedWorkerResult[] {
+    return this.supervisor.peekCompleted()
+  }
 }

@@ -26,6 +26,8 @@ export interface WorkflowDispatch {
   runApi: (url: string, method: string, body?: any) => Promise<string>
   injectPrompt: (prompt: string) => void
   getCompletedAgentResults: () => { id: string; summary: string; error?: string }[]
+  /** 非破坏性读取已完成结果（不 drain），用于并行多步骤场景 */
+  peekCompletedAgentResults: () => { id: string; summary: string; error?: string }[]
   runPlan: (prompt: string) => string
   getPlanStatus: () => { id: string; title: string; total: number; done: number; pending: string[]; status: string } | null
   getDefinition: (id: string) => WorkflowDef | null
@@ -704,9 +706,14 @@ export class WorkflowSchedulerV2 {
     let waited = 0
     while (waited < maxWait) {
       if (signal?.aborted) return []
-      const results = this.dispatch.getCompletedAgentResults()
-      const done = agentIds.every((id) => results.some((r) => r.id === id))
-      if (done) return results
+      // 使用非破坏性 peek — 不 drain 其他步骤的结果
+      const allResults = this.dispatch.peekCompletedAgentResults()
+      const done = agentIds.every((id) => allResults.some((r) => r.id === id))
+      if (done) {
+        // 仅消费属于自己的结果
+        const results = this.dispatch.getCompletedAgentResults()
+        return results.filter((r) => agentIds.includes(r.id))
+      }
       eventBus.emit('workflow.run.step', {
         runId: run.runId,
         stepId: sd.id,

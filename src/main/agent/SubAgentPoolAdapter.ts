@@ -109,6 +109,21 @@ export class SubAgentPoolAdapter {
     }))
   }
 
+  /** 非破坏性读取已完成结果（不 drain）— 用于并行多步骤轮询场景 */
+  peekCompleted(): SubAgentResult[] {
+    if (!this.defaultTask) return []
+    const completed = this.defaultTask.peekCompleted()
+    return completed.map((c) => ({
+      id: c.id,
+      goal: c.goal,
+      status: c.state === 'cancelled' ? 'interrupted' as SubAgentStatus : c.state as SubAgentStatus,
+      summary: c.summary,
+      error: c.error,
+      startedAt: 0,
+      completedAt: Date.now(),
+    }))
+  }
+
   /** 当前运行中的任务列表 */
   listRunning(): { id: string; goal: string; elapsed: number }[] {
     if (!this.defaultTask) return []

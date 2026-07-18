@@ -897,6 +897,31 @@ export const cancelWorkflowRunTool = buildTool({
   },
 })
 
+export const approveWorkflowGateTool = buildTool({
+  name: 'approve_workflow_gate',
+  description: '审批工作流中的审批门（gate）步骤。当工作流因 gate 暂停时，使用此工具 approve 通过或 reject 驳回。',
+  inputJSONSchema: {
+    type: 'object',
+    properties: {
+      runId: { type: 'string', description: '运行 ID（从 get_workflow_status 获取）' },
+      stepId: { type: 'string', description: '审批门步骤 ID' },
+      decision: { type: 'string', enum: ['approve', 'reject'], description: 'approve=通过, reject=驳回' },
+      comment: { type: 'string', description: '可选审批意见' },
+    },
+    required: ['runId', 'stepId', 'decision'],
+  },
+  handler: async (args: { runId: string; stepId: string; decision: string; comment?: string }) => {
+    try {
+      const scheduler = getWorkflowScheduler()
+      const ok = scheduler.approveGate(args.runId, args.stepId, args.decision, args.comment)
+      if (!ok) return formatToolError(`审批失败：运行 ${args.runId} 的 gate（${args.stepId}）不存在或已处理`)
+      return formatToolResult(`✅ 审批门「${args.stepId}」已 ${args.decision === 'approve' ? '通过' : '驳回'}，工作流继续执行。`)
+    } catch (err: any) {
+      return formatToolError(err.message)
+    }
+  },
+})
+
 export const rerunWorkflowTool = buildTool({
   name: 'rerun_workflow',
   description: '从历史运行记录重新运行工作流。会基于上次的定义和输入创建全新的运行。常用于失败后修复定义再重跑。',

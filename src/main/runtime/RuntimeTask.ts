@@ -72,8 +72,11 @@ export interface RuntimeTask {
   /** Worker 聚合状态 */
   getStatus(): SupervisorStatus
 
-  /** 收集已完成的 Worker 结果 */
+  /** 收集已完成的 Worker 结果（drain） */
   collectCompleted(): CompletedWorkerResult[]
+
+  /** 非破坏性读取已完成结果（不 drain），用于并行多步骤轮询 */
+  peekCompleted(): CompletedWorkerResult[]
 }
 
 // ── RuntimeManager（Runtime 入口层） ──

@@ -521,3 +521,41 @@ export const BEHAVIOR_MEMORY_MAX_MEMORIES_PER_CYCLE = parseInt(
   process.env.BEHAVIOR_MEMORY_MAX_MEMORIES_PER_CYCLE || '8',
   10,
 )
+
+// ══════════════════════════════════════════
+//  博客时光机（Plan Memory Blog）配置
+// ══════════════════════════════════════════
+
+/**
+ * 博客时光机总开关（默认开启）。设置为 'false' 禁用。
+ * Override via BLOG_MEMORY_ENABLED env.
+ */
+export const BLOG_MEMORY_ENABLED = process.env.BLOG_MEMORY_ENABLED !== 'false'
+
+/**
+ * 博客时光机：最大存储条目数。
+ * Override via BLOG_MEMORY_MAX_ENTRIES env.
+ */
+export const BLOG_MEMORY_MAX_ENTRIES = parseInt(process.env.BLOG_MEMORY_MAX_ENTRIES || '200', 10)
+
+/**
+ * 博客时光机：单条内容最大长度（字符数）。
+ * Override via BLOG_MEMORY_MAX_CONTENT_LENGTH env.
+ */
+export const BLOG_MEMORY_MAX_CONTENT_LENGTH = parseInt(process.env.BLOG_MEMORY_MAX_CONTENT_LENGTH || '500', 10)
+
+/**
+ * 博客时光机：默认记忆层级。
+ * Override via BLOG_MEMORY_DEFAULT_TIER env.
+ */
+export const BLOG_MEMORY_DEFAULT_TIER: 'permanent' | 'semi' | 'ephemeral' = (
+  ['permanent', 'semi', 'ephemeral'] as const
+).includes(process.env.BLOG_MEMORY_DEFAULT_TIER as any)
+  ? (process.env.BLOG_MEMORY_DEFAULT_TIER as 'permanent' | 'semi' | 'ephemeral')
+  : 'semi'
+
+/**
+ * 博客时光机：默认置信度。
+ * Override via BLOG_MEMORY_DEFAULT_CONFIDENCE env.
+ */
+export const BLOG_MEMORY_DEFAULT_CONFIDENCE = parseFloat(process.env.BLOG_MEMORY_DEFAULT_CONFIDENCE || '0.8')

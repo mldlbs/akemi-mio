@@ -23,6 +23,7 @@ import {
   cancelWorkflowRunTool,
   rerunWorkflowTool,
   listWorkflowRunsTool,
+  approveWorkflowGateTool,
   autoScheduleWorkflowTool,
 } from './definitions/WorkflowTools'
 import { listSkillsTool, enableSkillTool, disableSkillTool } from './definitions/SkillTools'
@@ -97,6 +98,7 @@ export function getAllTools(): Tool[] {
     cancelWorkflowRunTool as Tool,
     rerunWorkflowTool as Tool,
     listWorkflowRunsTool as Tool,
+    approveWorkflowGateTool as Tool,
     listSkillsTool as Tool,
     enableSkillTool as Tool,
     disableSkillTool as Tool,

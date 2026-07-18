@@ -277,6 +277,8 @@ export class AppRuntime {
       },
       getCompletedAgentResults: () =>
         agentService['subAgentPool'].collectCompleted().map((r) => ({ id: r.id, summary: r.summary, error: r.error })),
+      peekCompletedAgentResults: () =>
+        agentService['subAgentPool'].peekCompleted().map((r) => ({ id: r.id, summary: r.summary, error: r.error })),
       runPlan: (prompt) => {
         const planManager = agentService['planManager']
         return planManager.createPlan('Workflow Plan', prompt, []).id
@@ -557,6 +559,21 @@ export class AppRuntime {
       }
     } catch (err) {
       log('WARN', 'industrial_ode_layer_init_failed', { error: String(err) })
+    }
+
+    // ── Plan Memory Blog：记忆增强博客时光机 ──
+    try {
+      const { initBlogMemoryRecorder, initBlogMemoryRetriever } = await import('../memory/plan-memory-blog')
+      const { setBlogMemoryRecorder, setBlogMemoryRetriever } = await import('../tool/deps')
+      const recorder = initBlogMemoryRecorder()
+      const retriever = initBlogMemoryRetriever(memoryService)
+      setBlogMemoryRecorder(recorder)
+      setBlogMemoryRetriever(retriever)
+      log('INFO', 'blog_memory_recorder_initialized', {
+        enabled: process.env.BLOG_MEMORY_ENABLED !== 'false',
+      })
+    } catch (err) {
+      log('WARN', 'blog_memory_recorder_init_failed', { error: String(err) })
     }
 
     // ── Plan:清理工作区 - 整理文件目录 上层增强层（由 WORKSPACE_CLEANUP_FEATURES 控制）──

@@ -141,3 +141,25 @@ export function setAsrService(as: AsrService | null): void {
 export function getAsrService(): AsrService | null {
   return _asrService
 }
+
+// ── Blog Memory 服务（供 Plan Memory Blog 时光机调用）──
+import type { BlogMemoryRecorder, BlogMemoryRetriever } from '../memory/plan-memory-blog'
+
+let _blogMemoryRecorder: BlogMemoryRecorder | null = null
+let _blogMemoryRetriever: BlogMemoryRetriever | null = null
+
+export function setBlogMemoryRecorder(r: BlogMemoryRecorder | null): void {
+  _blogMemoryRecorder = r
+}
+
+export function getBlogMemoryRecorder(): BlogMemoryRecorder | null {
+  return _blogMemoryRecorder
+}
+
+export function setBlogMemoryRetriever(r: BlogMemoryRetriever | null): void {
+  _blogMemoryRetriever = r
+}
+
+export function getBlogMemoryRetriever(): BlogMemoryRetriever | null {
+  return _blogMemoryRetriever
+}
