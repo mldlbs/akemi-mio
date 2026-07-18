@@ -227,7 +227,7 @@ export class RadarPushScheduler {
   }
 
   /**
-   * 从远程 Radar API 获取数据并格式化为简洁中文消息。
+   * 从远程 Radar API 获取数据并格式化为中文解读风格消息。
    */
   private async fetchRemoteRadarMessage(rule: RadarPushRule): Promise<string> {
     const THEME_CN: Record<string, string> = {
@@ -244,88 +244,105 @@ export class RadarPushScheduler {
 
     try {
       const res = await fetchWithRetry('https://ai.crlkcloud.cyou/radar/pipeline', 2)
-      if (!res.ok) return `📡 创业雷达更新\n━━━━━━━━━━━\n❌ 服务不可用 (${res.status})`
+      if (!res.ok) return `📡 创业雷达 | 服务暂不可用 (${res.status})`
 
       const body: any = await res.json()
-      const parts: string[] = [`📡 创业雷达更新`]
-
-      // 信号摘要 — 按 theme 聚合
       const signals: any[] = body.signals || []
       const opps: any[] = body.opportunities || []
       const themes: any[] = body.themes || []
 
-      // 头条：高评分信号
+      const lines: string[] = [`📡 创业雷达速报`]
+      lines.push(`━━━━━━━━━━━━━━━━━━━━`)
+
+      // ── 数据概览 ──
+      const totalSignals = signals.length
+      const totalOpps = opps.length
+      const topTheme = themes[0]
+      const topThemeName = topTheme ? (THEME_CN[topTheme.theme] || topTheme.theme) : '—'
+      const highValue = signals.filter((s: any) => (s.score || 0) >= 7).length
+
+      const overviewBits: string[] = []
+      if (totalSignals > 0) overviewBits.push(`${totalSignals} 条新信号`)
+      if (totalOpps > 0) overviewBits.push(`${totalOpps} 个持续机会`)
+      if (highValue > 0) overviewBits.push(`${highValue} 条高价值`)
+      if (topThemeName !== '—') overviewBits.push(`最热: ${topThemeName}`)
+      if (overviewBits.length > 0) {
+        lines.push(`📊 本期监测到 ${overviewBits.join('，')}。`)
+      }
+
+      // ── 市场解读 ──
+      if (themes.length > 0) {
+        const hot = themes.slice(0, 4)
+        const hotDesc = hot.map((t: any) => {
+          const name = THEME_CN[t.theme] || t.theme
+          return `${name}(${t.count} 条)`
+        }).join('、')
+        // 找最高 avg_score 的一些机会做解读
+        const topByScore = [...opps].sort((a: any, b: any) => (b.avg_score || 0) - (a.avg_score || 0))
+        const highlightOpp = topByScore[0]
+
+        let insight = `本周热点领域: ${hotDesc}。`
+        if (highlightOpp) {
+          const theme = THEME_CN[highlightOpp.theme] || highlightOpp.theme
+          const type = TYPE_CN[highlightOpp.type] || highlightOpp.type
+          const title = (highlightOpp.title || '').slice(0, 50)
+          insight += ` 其中值得关注的是「${title}」(${type}，评分 ${highlightOpp.avg_score})`
+          if (highlightOpp.appearances > 1) insight += `，已累计出现 ${highlightOpp.appearances} 次`
+          insight += '。'
+        }
+        lines.push(`🔍 ${insight}`)
+      }
+
+      // ── 高价值信号 ──
       const topSignals = signals
-        .filter((s) => s.score >= 7 || s.business_value >= 7)
-        .slice(0, 5)
+        .filter((s: any) => (s.score || 0) >= 6)
+        .slice(0, 4)
       if (topSignals.length > 0) {
-        parts.push(`━━━ 🔥 高价值信号 ━━━`)
+        lines.push(`━━━ 🔥 值得关注的信号 ━━━`)
         for (const s of topSignals) {
-          const t = s.problem || ''
+          const title = (s.problem || '').slice(0, 70)
           const theme = THEME_CN[s.theme] || s.theme || ''
-          const cls = s.classification || ''
-          parts.push(`  • ${t.slice(0, 80)}`)
-          const tags = [`评分 ${s.score ?? '?'}`]
-          if (theme) tags.push(theme)
-          if (cls && cls !== 'feature_request') tags.push(cls)
-          if (s.source) tags.push(`来源 ${s.source}`)
-          parts.push(`    ${tags.join(' | ')}`)
+          const tag = theme ? `[${theme}]` : ''
+          lines.push(`  ${tag} ${title}`)
+          const detail: string[] = []
+          if (s.score) detail.push(`评分 ${s.score}`)
+          if (s.source) detail.push(`来源 ${s.source}`)
+          if (s.classification && s.classification !== 'feature_request') {
+            detail.push(TYPE_CN[s.classification] || s.classification)
+          }
+          if (s.report_date) detail.push(s.report_date)
+          if (detail.length) lines.push(`    ${detail.join(' | ')}`)
         }
       }
 
-      // 顶部机会
-      const topOpps = opps
+      // ── 机会榜 ──
+      const topOpps = [...opps]
         .sort((a: any, b: any) => (b.avg_score || 0) - (a.avg_score || 0))
-        .slice(0, 5)
+        .slice(0, 4)
       if (topOpps.length > 0) {
-        parts.push(`━━━ 💡 机会 TOP${topOpps.length} ━━━`)
+        lines.push(`━━━ 💡 机会榜 ━━━`)
         for (const o of topOpps) {
+          const title = (o.title || '').slice(0, 60)
           const theme = THEME_CN[o.theme] || o.theme || ''
           const type = TYPE_CN[o.type] || o.type || ''
-          parts.push(`  • ${(o.title || '').slice(0, 70)}`)
-          const tags = [`${type}`]
-          if (o.avg_score) tags.push(`评分 ${o.avg_score}`)
-          if (o.appearances > 1) tags.push(`出现 ${o.appearances} 次`)
-          if (o.consecutive_days) tags.push(`连续 ${o.consecutive_days} 天`)
-          if (theme) tags.push(theme)
-          parts.push(`    ${tags.join(' | ')}`)
+          lines.push(`  [${theme}] ${title}`)
+          const detail: string[] = [`${type}`]
+          if (o.avg_score) detail.push(`评分 ${o.avg_score}`)
+          if (o.appearances > 1) detail.push(`${o.appearances} 次出现`)
+          if (o.consecutive_days) detail.push(`连续 ${o.consecutive_days} 天`)
+          lines.push(`    ${detail.join(' · ')}`)
         }
       }
 
-      // 主题趋势
-      if (themes.length > 0) {
-        const top = themes.slice(0, 4)
-        parts.push(`━━━ 📂 热点主题 ━━━`)
-        for (const t of top) {
-          const name = THEME_CN[t.theme] || t.theme || ''
-          const subs = (t.sub_themes || []).slice(0, 3).map((s: any) => s.name).join('、')
-          parts.push(`  ${name}: ${t.count} 条信号`)
-          if (subs) parts.push(`    ${subs}`)
-        }
-      }
+      // ── 底部操作提示 ──
+      lines.push(`━━━━━━━━━━━━━━━━━━━━`)
+      lines.push(`⏰ ${new Date().toLocaleString('zh-CN', { hour12: false })}`)
+      lines.push(`💬 发送 /radar 查看详情`)
 
-      // 市场摘要
-      if (opps.length > 0) {
-        const byTheme: Record<string, number> = {}
-        for (const o of opps) {
-          const t = THEME_CN[o.theme] || o.theme || '其他'
-          byTheme[t] = (byTheme[t] || 0) + 1
-        }
-        const summary = Object.entries(byTheme)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 3)
-          .map(([k, v]) => `${k} ${v} 个`)
-          .join('、')
-        if (summary) {
-          parts.push(`━━━ 📊 市场分布 ━━━`)
-          parts.push(`  ${summary}`)
-        }
-      }
-
-      return parts.join('\n')
+      return lines.join('\n')
     } catch (err: any) {
       log('WARN', 'remote_radar_fetch_failed', { error: err.message })
-      return `📡 创业雷达更新\n━━━━━━━━━━━\n❌ 获取失败: ${err.message}`
+      return `📡 创业雷达 | 获取失败: ${err.message}`
     }
   }
 
