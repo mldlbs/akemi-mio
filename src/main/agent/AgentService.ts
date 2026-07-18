@@ -38,6 +38,7 @@ import { agentPluginRegistry, ObserveStagePluginAdapter, ThinkStagePluginAdapter
 import type { IndustrialOdeLayer } from '../gongye-songge'
 import type { WorkspaceCleanupLayer } from '../workspace-cleanup'
 import type { IEngineService, EngineStatus, EngineMetrics } from '../engine/types'
+import { RuntimeValidator } from '../runtime/RuntimeValidator'
 
 export class AgentService implements IEngineService {
   /** IEngineService 引擎名 */
@@ -112,6 +113,9 @@ export class AgentService implements IEngineService {
   private chatExecutor: ChatExecutor | null = null
   /** TaskExecutor — Evolution 循环执行引擎 */
   private taskExecutor: TaskExecutor | null = null
+
+  /** RuntimeValidator — 运行时指标验证器 */
+  readonly runtimeValidator = new RuntimeValidator()
 
   constructor(
     llmService: LlmService,
@@ -578,6 +582,10 @@ export class AgentService implements IEngineService {
       }
 
       log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: finalReply.reply?.length || 0 })
+
+      // 记录旧路径 task（未使用 Runtime Worker 的 chat 调用）
+      this.runtimeValidator.recordLegacyTask()
+
       return finalReply
     } catch (err) {
       this.eventBus.emit('agent.error', { error: String(err), requestId: rid })
