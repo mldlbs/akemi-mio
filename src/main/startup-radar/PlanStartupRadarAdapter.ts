@@ -53,8 +53,6 @@
  */
 
 import { log } from '../logger/Logger'
-import { getObserverService } from '../tool/deps'
-import type { Observation } from '../observer/types'
 import type {
   StartupSignal,
   StartupSignalCategory,
@@ -705,40 +703,99 @@ export class StartupRadarAdapter implements IStartupRadarProvider {
   // ════════════════════════════════════════════════════════════
 
   /**
-   * 采集原始数据 — 委托 ObserverService.collectBySource 从真实 API 采集。
-   * 支持多源并发采集 + 关键词 OR 过滤 + 数量限制。
+   * 采集原始数据 — 从远程 Radar API 获取。
+   * Base URL: https://ai.crlkcloud.cyou
    */
   private async collectRawData(
     sources: SignalSource[],
     keywords?: string[],
     limit?: number,
   ): Promise<RawDataItem[]> {
-    const os = getObserverService()
-    if (!os) {
-      log('WARN', 'startup_radar_observer_unavailable')
+    const BASE = 'https://ai.crlkcloud.cyou'
+    const items: RawDataItem[] = []
+
+    try {
+      // Pipeline 数据包含 signals + opportunities + trends
+      const res = await fetch(`${BASE}/radar/pipeline`, {
+        signal: AbortSignal.timeout(20000),
+      })
+      if (!res.ok) {
+        log('WARN', 'startup_radar_api_failed', { status: res.status })
+        return []
+      }
+      const body: any = await res.json()
+
+      // 从 signals 提取
+      if (Array.isArray(body.signals)) {
+        for (const sig of body.signals) {
+          items.push(this.signalToRawItem(sig, 'radar'))
+        }
+      }
+
+      // 从 opportunities 提取（它们更有结构化信息）
+      if (Array.isArray(body.opportunities)) {
+        for (const opp of body.opportunities) {
+          items.push(this.opportunityToRawItem(opp))
+        }
+      }
+
+      // 从 trends 提取
+      if (Array.isArray(body.trends)) {
+        for (const trend of body.trends) {
+          items.push(this.trendToRawItem(trend))
+        }
+      }
+    } catch (err: any) {
+      log('WARN', 'startup_radar_api_error', { error: err.message })
       return []
     }
 
-    const collected = await os.collectBySource(sources, keywords, limit ?? 20)
-    const items: RawDataItem[] = []
-
-    for (const [source, observations] of Object.entries(collected)) {
-      for (const obs of observations) {
-        items.push({
-          title: obs.content.slice(0, 200),
-          summary: obs.content,
-          source: source as SignalSource,
-          url: extractUrl(obs.content) ?? undefined,
-          createdAt: new Date(obs.timestamp).getTime(),
-        })
-      }
+    // 关键词过滤
+    let filtered = items
+    if (keywords && keywords.length > 0) {
+      const kwLower = keywords.map((k) => k.toLowerCase())
+      filtered = items.filter(
+        (item) =>
+          kwLower.some((kw) => item.title.toLowerCase().includes(kw) || item.summary.toLowerCase().includes(kw)),
+      )
     }
 
-    if (items.length === 0) {
-      log('INFO', 'startup_radar_no_raw_data', { sources, keywordCount: keywords?.length ?? 0 })
+    // 数量限制
+    if (limit && limit > 0 && filtered.length > limit) {
+      filtered = filtered.slice(0, limit)
     }
 
-    return items
+    return filtered
+  }
+
+  private signalToRawItem(sig: any, source: string): RawDataItem {
+    return {
+      title: sig.problem || sig.title || '',
+      summary: `${sig.problem || ''} — pain:${sig.pain ?? '?'} score:${sig.score ?? '?'}`,
+      source: source as SignalSource,
+      url: sig.evidence || sig.url || undefined,
+      createdAt: sig.created_at ? new Date(sig.created_at).getTime() : Date.now(),
+    }
+  }
+
+  private opportunityToRawItem(opp: any): RawDataItem {
+    return {
+      title: opp.title || '',
+      summary: `[${opp.type || 'opportunity'}] ${opp.title || ''} — 置信度:${opp.confidence ?? '?'} 平均分:${opp.avg_score ?? '?'}`,
+      source: 'radar' as SignalSource,
+      url: opp.evidence || opp.url || undefined,
+      createdAt: Date.now(),
+    }
+  }
+
+  private trendToRawItem(trend: any): RawDataItem {
+    return {
+      title: trend.theme || '',
+      summary: `[trend] ${trend.theme || ''} — growth7d:${trend.growth7d ?? '?'} momentum:${trend.momentum ?? '?'}`,
+      source: 'radar' as SignalSource,
+      url: undefined,
+      createdAt: Date.now(),
+    }
   }
 
   /**
@@ -786,15 +843,6 @@ interface RawDataItem {
   source: SignalSource
   url?: string
   createdAt: number
-}
-
-/**
- * 从 Observation content 中提取 URL（如果有匹配）。
- * Observation 格式如："title (points N by user) — https://..."
- */
-function extractUrl(content: string): string | null {
-  const match = content.match(/https?:\/\/[^\s)]+/)
-  return match ? match[0] : null
 }
 
 // ════════════════════════════════════════════════════════════════
