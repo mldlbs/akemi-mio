@@ -1210,6 +1210,10 @@ export class AppRuntime {
       priority: 'normal',
       delayMs: 200,
       fn: async () => {
+        if (process.env.EVOLUTION_SERVICE_DISABLED === 'true') {
+          log('INFO', 'evolution_disabled', { reason: 'EVOLUTION_SERVICE_DISABLED=true' })
+          return
+        }
         const evolution = initEvolution(agentService)
         evolution.setSafetyMode('auto')
         // 注册 Evolution 内核模块
