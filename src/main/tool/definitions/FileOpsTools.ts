@@ -140,7 +140,8 @@ export const searchFilesGlobTool = buildTool({
   handler: async (args: { pattern: string; workspace?: string; maxResults?: number }) => {
     try {
       const base = resolveWorkspace(args.workspace || 'project')
-      const { globSync } = await import('glob')
+      const glob = await import('glob')
+      const globSync = glob.globSync || glob.sync
       const matches = globSync(args.pattern, { cwd: base, dot: false })
       if (!matches.length) return formatToolResult('未找到匹配文件')
       const max = args.maxResults ?? 100
