@@ -21,6 +21,7 @@ import * as path from 'path'
 
 export interface WorkflowDispatch {
   runSubAgent: (goal: string, parentGoal?: string, options?: SpawnTaskOptions) => string
+  interruptAgent: (id: string) => boolean
   runTool: (name: string, args: Record<string, any>) => Promise<string>
   runApi: (url: string, method: string, body?: any) => Promise<string>
   injectPrompt: (prompt: string) => void
@@ -38,7 +39,10 @@ interface StepContext {
 export class WorkflowSchedulerV2 {
   private dispatch: WorkflowDispatch
   private running = new Map<string, AbortController>()
+  /** 同步取消标记 — 避免 executeLoop 在 stopRun 之后再次写入 cancelled */
   private cancelled = new Set<string>()
+  /** 每个运行追踪其 spawn 出的 agent ID，用于取消时 kill */
+  private runAgentIds = new Map<string, string[]>()
   private maxConcurrency = 5
 
   constructor(dispatch: WorkflowDispatch) {
@@ -58,13 +62,12 @@ export class WorkflowSchedulerV2 {
 
     this.executeLoop(run, def, abort.signal).catch((err) => {
       log('ERROR', 'workflow_v2_error', { runId: run.runId, error: String(err) })
-      // 使用同步 cancelled set 而非读 DB 来检测 stopRun，彻底消除竞态
+      // 如果 stopRun 已经写入了 cancelled，不再重复写
       if (!this.cancelled.has(run.runId)) {
         run.status = 'failed'
         workflowStore.updateRun(run)
       }
-      this.running.delete(run.runId)
-      this.cancelled.delete(run.runId)
+      cleanupSchedulerState(this, run.runId)
     })
 
     return run
@@ -150,8 +153,7 @@ export class WorkflowSchedulerV2 {
 
       if (runnable.length === 0) {
         finishRun(run, stepDefs, completed, failures, skipped, workflowStore)
-        this.running.delete(run.runId)
-        this.cancelled.delete(run.runId)
+        cleanupSchedulerState(this, run.runId)
         return
       }
 
@@ -200,10 +202,10 @@ export class WorkflowSchedulerV2 {
     }
 
     if (signal.aborted) {
-      run.status = 'cancelled'
-      workflowStore.updateRun(run)
-      this.running.delete(run.runId)
-      this.cancelled.delete(run.runId)
+      // stopRun 已经写入 DB + emit 事件，这里不再重复写
+      // 只清理内存状态
+      cleanupSchedulerState(this, run.runId)
+      return
     }
   }
 
@@ -633,6 +635,10 @@ export class WorkflowSchedulerV2 {
 
     const agentId = this.dispatch.runSubAgent(fullPrompt, def.description, subOptions)
     const pendingAgents = [agentId]
+    // 追踪 agent ID，用于取消时 kill
+    const prev = this.runAgentIds.get(run.runId) ?? []
+    prev.push(agentId)
+    this.runAgentIds.set(run.runId, prev)
 
     const results = await this.waitForAgents(pendingAgents, run, sd, signal)
     const agentResult = results.find((r) => pendingAgents.includes(r.id))
@@ -742,6 +748,14 @@ export class WorkflowSchedulerV2 {
       this.running.delete(runId)
     }
     this.cancelled.add(runId)
+
+    // 中断所有由该 workflow spawn 出的子 agent
+    const agentIds = this.runAgentIds.get(runId) ?? []
+    for (const aid of agentIds) {
+      this.dispatch.interruptAgent(aid)
+    }
+    this.runAgentIds.delete(runId)
+
     const run = workflowStore.getRun(runId)
     if (!run) return false
     run.status = 'cancelled'
@@ -842,4 +856,11 @@ function validateSchema(data: any, schema: Record<string, ValueSchema>): string[
     else if (field.type === 'array' && !Array.isArray(val)) errors.push(`${key}: expected array`)
   }
   return errors
+}
+
+/** 清理一次运行相关的所有内存状态 */
+function cleanupSchedulerState(s: WorkflowSchedulerV2, runId: string): void {
+  s.running.delete(runId)
+  s.cancelled.delete(runId)
+  s.runAgentIds.delete(runId)
 }

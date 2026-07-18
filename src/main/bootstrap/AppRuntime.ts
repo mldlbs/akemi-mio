@@ -259,6 +259,7 @@ export class AppRuntime {
     const { workflowStore } = await import('../workflow/WorkflowStoreV2')
     const scheduler = new WorkflowSchedulerV2({
       runSubAgent: (goal, parentGoal, options) => agentService['subAgentPool'].spawn(goal, parentGoal, options),
+      interruptAgent: (id) => agentService['subAgentPool'].interrupt(id),
       runTool: async (name, args) => {
         const result = await mcpManager.callTool(name, args)
         return typeof result === 'string' ? result : JSON.stringify(result)
