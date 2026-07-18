@@ -426,68 +426,63 @@ export class StartupRadarAdapter implements IStartupRadarProvider {
         return null
       }
 
-      // POC 阶段：收集原始数据（先做关键词匹配，后续对接 RadarTools）
+      // 1. 从各源采集原始 feed → 本地分类评分
       const rawItems = await this.collectRawData(sources, keywords, limit)
-
-      if (!rawItems || rawItems.length === 0) {
-        log('WARN', 'startup_radar_no_data', { sources })
-        return null
-      }
-
-      // 1. 分类 & 评分（Wallpaper 算法核心 — 复用 MemoryContextService 评分模式）
       const signals: StartupSignal[] = []
       const sourceDist: Record<string, number> = {}
       const categoryDist: Record<string, number> = {}
 
-      for (const item of rawItems) {
-        const category = classifyCategory(item.title, item.summary, item.source)
-        const scores: SignalDimensionScores = {
-          relevance: evaluateRelevance(item.title, item.summary, category, focusArea),
-          timeliness: evaluateTimeliness(item.createdAt),
-          impact: evaluateImpact(item.title, item.summary),
-          confidence: evaluateConfidence(item.source, !!item.url, item.summary.length),
-          actionability: evaluateActionability(item.title, item.summary),
+      if (rawItems && rawItems.length > 0) {
+        for (const item of rawItems) {
+          const category = classifyCategory(item.title, item.summary, item.source)
+          const scores: SignalDimensionScores = {
+            relevance: evaluateRelevance(item.title, item.summary, category, focusArea),
+            timeliness: evaluateTimeliness(item.createdAt),
+            impact: evaluateImpact(item.title, item.summary),
+            confidence: evaluateConfidence(item.source, !!item.url, item.summary.length),
+            actionability: evaluateActionability(item.title, item.summary),
+          }
+
+          const compositeScore = computeCompositeScore(scores, item.source, category)
+          if (compositeScore < minScore) continue
+
+          const urgency = computeUrgency(compositeScore)
+
+          signals.push({
+            id: nextSignalId(),
+            category,
+            title: item.title,
+            summary: item.summary,
+            source: item.source,
+            url: item.url,
+            scores,
+            compositeScore,
+            urgency,
+            pushed: false,
+            tags: this.extractTags(item.title, item.summary, category),
+            createdAt: item.createdAt ?? Date.now(),
+            expiresAt: Date.now() + 24 * 3600 * 1000,
+          })
+
+          sourceDist[item.source] = (sourceDist[item.source] ?? 0) + 1
+          categoryDist[category] = (categoryDist[category] ?? 0) + 1
         }
+      }
 
-        const compositeScore = computeCompositeScore(scores, item.source, category)
-
-        // 过滤低于阈值的信号
-        if (compositeScore < minScore) continue
-
-        const urgency = computeUrgency(compositeScore)
-
-        const signal: StartupSignal = {
-          id: nextSignalId(),
-          category,
-          title: item.title,
-          summary: item.summary,
-          source: item.source,
-          url: item.url,
-          scores,
-          compositeScore,
-          urgency,
-          pushed: false,
-          tags: this.extractTags(item.title, item.summary, category),
-          createdAt: item.createdAt ?? Date.now(),
-          expiresAt: Date.now() + 24 * 3600 * 1000, // 24 小时过期
-        }
-
-        signals.push(signal)
-
-        // 统计
-        sourceDist[item.source] = (sourceDist[item.source] ?? 0) + 1
-        categoryDist[category] = (categoryDist[category] ?? 0) + 1
+      // 2. 从远程 Radar API 获取已处理信号（异步，不影响本地采集）
+      const remoteSignals = await this.fetchRemoteSignals()
+      for (const rs of remoteSignals) {
+        signals.push(rs)
+        sourceDist['remote_radar'] = (sourceDist['remote_radar'] ?? 0) + 1
+        categoryDist[rs.category] = (categoryDist[rs.category] ?? 0) + 1
       }
 
       if (signals.length === 0) {
-        log('INFO', 'startup_radar_all_filtered', {
-          rawCount: rawItems.length,
-          minScore,
-        })
+        log('WARN', 'startup_radar_no_data', { sources })
         return {
           signals: [],
           timestamp: Date.now(),
-          sourceCount: Object.keys(sourceDist).length,
+          sourceCount: 0,
           totalSignals: 0,
           urgentCount: 0,
           compositeHeatIndex: 0,
@@ -496,10 +491,10 @@ export class StartupRadarAdapter implements IStartupRadarProvider {
         }
       }
 
-      // 2. 按复合评分降序排列
+      // 3. 按复合评分降序排列
       signals.sort((a, b) => b.compositeScore - a.compositeScore)
 
-      // 3. 计算统计
+      // 4. 计算统计
       const hotCount = signals.filter(s => s.urgency === 'hot').length
       const warmCount = signals.filter(s => s.urgency === 'warm').length
       const avgScore = signals.reduce((s, sig) => s + sig.compositeScore, 0) / signals.length
@@ -515,7 +510,6 @@ export class StartupRadarAdapter implements IStartupRadarProvider {
         categoryDistribution: categoryDist,
       }
 
-      // 更新快照缓存
       this.lastSnapshot = {
         signals: [...signals],
         timestamp: Date.now(),
@@ -527,12 +521,12 @@ export class StartupRadarAdapter implements IStartupRadarProvider {
       }
 
       log('INFO', 'startup_radar_scan_completed', {
-        sources: sources.join(','),
+        remoteCount: remoteSignals.length,
+        localCount: rawItems?.length ?? 0,
         totalSignals: signals.length,
         hotCount,
         warmCount,
         avgScore: avgScore.toFixed(3),
-        topCategory: Object.entries(categoryDist).sort((a, b) => b[1] - a[1])[0]?.[0],
       })
 
       // 通知订阅者
@@ -703,99 +697,296 @@ export class StartupRadarAdapter implements IStartupRadarProvider {
   // ════════════════════════════════════════════════════════════
 
   /**
-   * 采集原始数据 — 从远程 Radar API 获取。
-   * Base URL: https://ai.crlkcloud.cyou
+   * 采集原始数据 — 从 HackerNews、GitHub Trending 等各源 API 获取原始 feed。
+   * 支持多源并发采集 + 关键词 OR 过滤 + 数量限制。
    */
   private async collectRawData(
     sources: SignalSource[],
     keywords?: string[],
     limit?: number,
   ): Promise<RawDataItem[]> {
-    const BASE = 'https://ai.crlkcloud.cyou'
-    const items: RawDataItem[] = []
+    const tasks = sources.map((source) => this.fetchSource(source, limit ?? 10))
+    const results = await Promise.allSettled(tasks)
+    const allItems: RawDataItem[] = []
 
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]
+      const source = sources[i]
+      if (result.status === 'rejected') {
+        log('WARN', 'startup_radar_source_failed', { source, error: String(result.reason) })
+        continue
+      }
+      let items = result.value
+      if (keywords && keywords.length > 0) {
+        const kwLower = keywords.map((k) => k.toLowerCase())
+        items = items.filter(
+          (item) =>
+            kwLower.some((kw) => item.title.toLowerCase().includes(kw) || item.summary.toLowerCase().includes(kw)),
+        )
+      }
+      allItems.push(...items)
+    }
+
+    if (allItems.length === 0) {
+      log('INFO', 'startup_radar_no_raw_data', { sources, keywordCount: keywords?.length ?? 0 })
+    }
+
+    return allItems
+  }
+
+  /**
+   * 从远程 Radar API (https://ai.crlkcloud.cyou) 获取已处理的信号/机会/主题。
+   * 返回的是已评分、已分类的信号，直接作为 StartupSignal 使用。
+   */
+  private async fetchRemoteSignals(): Promise<StartupSignal[]> {
     try {
-      // Pipeline 数据包含 signals + opportunities + trends
-      const res = await fetch(`${BASE}/radar/pipeline`, {
+      const res = await fetch('https://ai.crlkcloud.cyou/radar/pipeline', {
         signal: AbortSignal.timeout(20000),
       })
       if (!res.ok) {
-        log('WARN', 'startup_radar_api_failed', { status: res.status })
+        log('WARN', 'remote_radar_api_failed', { status: res.status })
         return []
       }
       const body: any = await res.json()
+      const signals: StartupSignal[] = []
 
-      // 从 signals 提取
+      // signals → StartupSignal
       if (Array.isArray(body.signals)) {
         for (const sig of body.signals) {
-          items.push(this.signalToRawItem(sig, 'radar'))
+          signals.push({
+            id: nextSignalId(),
+            category: this.remoteCategory(sig.classification),
+            title: sig.problem || sig.title || '',
+            summary: `${sig.icp || ''} ${sig.gap || ''}`.trim(),
+            source: 'other',
+            url: sig.evidence || undefined,
+            scores: {
+              relevance: 0.7,
+              timeliness: 0.7,
+              impact: (sig.pain ?? 5) / 10,
+              confidence: 0.6,
+              actionability: 0.5,
+            },
+            compositeScore: (sig.score ?? 5) / 10,
+            urgency: (sig.score ?? 5) >= 7 ? 'hot' : (sig.score ?? 5) >= 4 ? 'warm' : 'cold',
+            pushed: false,
+            tags: ['远程雷达', sig.classification || 'signal'].filter(Boolean),
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 24 * 3600 * 1000,
+          })
         }
       }
 
-      // 从 opportunities 提取（它们更有结构化信息）
+      // opportunities → StartupSignal
       if (Array.isArray(body.opportunities)) {
         for (const opp of body.opportunities) {
-          items.push(this.opportunityToRawItem(opp))
+          const score = (opp.avg_score ?? 5) / 10
+          signals.push({
+            id: nextSignalId(),
+            category: this.opportunityCategory(opp.type),
+            title: opp.title || '',
+            summary: `[机会] 类型:${opp.type || '?'} 出现:${opp.appearances ?? '?'}次 连续:${opp.consecutive_days ?? '?'}天`,
+            source: 'other',
+            url: opp.evidence || undefined,
+            scores: {
+              relevance: 0.8,
+              timeliness: 0.6,
+              impact: score,
+              confidence: opp.confidence ?? 0.5,
+              actionability: 0.6,
+            },
+            compositeScore: score,
+            urgency: score >= 0.7 ? 'hot' : score >= 0.4 ? 'warm' : 'cold',
+            pushed: false,
+            tags: ['远程雷达', '机会', opp.type || 'opportunity'].filter(Boolean),
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 48 * 3600 * 1000,
+          })
         }
       }
 
-      // 从 trends 提取
-      if (Array.isArray(body.trends)) {
-        for (const trend of body.trends) {
-          items.push(this.trendToRawItem(trend))
-        }
-      }
+      return signals
     } catch (err: any) {
-      log('WARN', 'startup_radar_api_error', { error: err.message })
+      log('WARN', 'remote_radar_api_error', { error: err.message })
       return []
     }
+  }
 
-    // 关键词过滤
-    let filtered = items
-    if (keywords && keywords.length > 0) {
-      const kwLower = keywords.map((k) => k.toLowerCase())
-      filtered = items.filter(
-        (item) =>
-          kwLower.some((kw) => item.title.toLowerCase().includes(kw) || item.summary.toLowerCase().includes(kw)),
+  private remoteCategory(classification?: string): StartupSignalCategory {
+    const map: Record<string, StartupSignalCategory> = {
+      bug: 'consumer_demand',
+      feature_request: 'consumer_demand',
+      workflow: 'consumer_demand',
+      replacement: 'competitor',
+      market_gap: 'market_trend',
+    }
+    return (classification && map[classification]) || 'market_trend'
+  }
+
+  private opportunityCategory(type?: string): StartupSignalCategory {
+    const map: Record<string, StartupSignalCategory> = {
+      bug: 'consumer_demand',
+      feature_request: 'technology',
+      workflow: 'market_trend',
+      replacement: 'competitor',
+      market_gap: 'market_trend',
+    }
+    return (type && map[type]) || 'market_trend'
+  }
+
+  /**
+   * 按源名称从对应 API 获取数据。
+   */
+  private async fetchSource(source: SignalSource, limit: number): Promise<RawDataItem[]> {
+    switch (source) {
+      case 'hackernews':
+        return this.fetchHackerNews(limit)
+      case 'github_trending':
+        return this.fetchGitHubTrending(limit)
+      case 'weibo_hot':
+        return this.fetchWeiboHot(limit)
+      case 'bilibili':
+        return this.fetchBilibili(limit)
+      case 'douyin':
+        return this.fetchDouyin(limit)
+      default:
+        log('WARN', 'startup_radar_unsupported_source', { source })
+        return []
+    }
+  }
+
+  private async fetchHackerNews(limit: number): Promise<RawDataItem[]> {
+    const idsRes = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json', {
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!idsRes.ok) return []
+    const ids: number[] = await idsRes.json()
+    const topIds = ids.slice(0, limit * 2)
+    const batchSize = 10
+    const items: RawDataItem[] = []
+    for (let i = 0; i < topIds.length && items.length < limit; i += batchSize) {
+      const batch = topIds.slice(i, i + batchSize)
+      const stories = await Promise.all(
+        batch.map((id) =>
+          fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, {
+            signal: AbortSignal.timeout(10000),
+          })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+        ),
       )
+      for (const story of stories) {
+        if (!story || story.type !== 'story' || !story.title || items.length >= limit) continue
+        const url = story.url || `https://news.ycombinator.com/item?id=${story.id}`
+        items.push({
+          title: story.title,
+          summary: `${story.title} (by ${story.by ?? 'unknown'})`,
+          source: 'hackernews',
+          url,
+          createdAt: (story.time || 0) * 1000,
+        })
+      }
     }
-
-    // 数量限制
-    if (limit && limit > 0 && filtered.length > limit) {
-      filtered = filtered.slice(0, limit)
-    }
-
-    return filtered
+    return items
   }
 
-  private signalToRawItem(sig: any, source: string): RawDataItem {
-    return {
-      title: sig.problem || sig.title || '',
-      summary: `${sig.problem || ''} — pain:${sig.pain ?? '?'} score:${sig.score ?? '?'}`,
-      source: source as SignalSource,
-      url: sig.evidence || sig.url || undefined,
-      createdAt: sig.created_at ? new Date(sig.created_at).getTime() : Date.now(),
-    }
+  private async fetchGitHubTrending(limit: number): Promise<RawDataItem[]> {
+    try {
+      const res = await fetch('https://api.vvhan.com/api/github/trending', {
+        signal: AbortSignal.timeout(10000),
+      })
+      if (res.ok) {
+        const body: any = await res.json()
+        if (body.code === 200 && Array.isArray(body.data)) {
+          return body.data.slice(0, limit).map((repo: any) => ({
+            title: repo.title || repo.name || 'Unknown',
+            summary: repo.description || repo.title || '',
+            source: 'github_trending',
+            url: repo.url || `https://github.com/${repo.title}`,
+            createdAt: Date.now(),
+          }))
+        }
+      }
+    } catch { /* fallback */ }
+    try {
+      const res = await fetch('https://github.com/trending', {
+        signal: AbortSignal.timeout(15000),
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      })
+      if (!res.ok) return []
+      const html = await res.text()
+      const repos: RawDataItem[] = []
+      const articleRegex = /<article[\s\S]*?<h2[\s\S]*?<a[^>]*href="\/([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
+      let match: RegExpExecArray | null
+      while ((match = articleRegex.exec(html)) !== null && repos.length < limit) {
+        const name = match[1].trim()
+        repos.push({
+          title: (match[2].replace(/<[^>]+>/g, '').trim()) || name,
+          summary: `${name} — GitHub trending`,
+          source: 'github_trending',
+          url: `https://github.com/${name}`,
+          createdAt: Date.now(),
+        })
+      }
+      return repos
+    } catch { return [] }
   }
 
-  private opportunityToRawItem(opp: any): RawDataItem {
-    return {
-      title: opp.title || '',
-      summary: `[${opp.type || 'opportunity'}] ${opp.title || ''} — 置信度:${opp.confidence ?? '?'} 平均分:${opp.avg_score ?? '?'}`,
-      source: 'radar' as SignalSource,
-      url: opp.evidence || opp.url || undefined,
-      createdAt: Date.now(),
-    }
+  private async fetchWeiboHot(limit: number): Promise<RawDataItem[]> {
+    try {
+      const res = await fetch('https://weibo.com/ajax/side/hotSearch', {
+        signal: AbortSignal.timeout(10000),
+      })
+      if (!res.ok) return []
+      const body: any = await res.json()
+      const realtime = body?.data?.realtime
+      if (!Array.isArray(realtime)) return []
+      return realtime.slice(0, limit).map((item: any) => ({
+        title: item.word || item.word_scheme || '',
+        summary: `[微博热搜] ${item.word || ''} (热度: ${item.raw_hot || item.num || '?'})`,
+        source: 'weibo_hot',
+        url: item.word_scheme || `https://s.weibo.com/weibo?q=${encodeURIComponent(item.word || '')}`,
+        createdAt: Date.now(),
+      }))
+    } catch { return [] }
   }
 
-  private trendToRawItem(trend: any): RawDataItem {
-    return {
-      title: trend.theme || '',
-      summary: `[trend] ${trend.theme || ''} — growth7d:${trend.growth7d ?? '?'} momentum:${trend.momentum ?? '?'}`,
-      source: 'radar' as SignalSource,
-      url: undefined,
-      createdAt: Date.now(),
-    }
+  private async fetchBilibili(limit: number): Promise<RawDataItem[]> {
+    try {
+      const res = await fetch('https://api.bilibili.com/x/web-interface/popular', {
+        signal: AbortSignal.timeout(10000),
+      })
+      if (!res.ok) return []
+      const body: any = await res.json()
+      const list = body?.data?.list
+      if (!Array.isArray(list)) return []
+      return list.slice(0, limit).map((item: any) => ({
+        title: item.title || '',
+        summary: `[B站热门] ${item.title || ''} (播放: ${item.stat?.view || '?'})`,
+        source: 'bilibili',
+        url: `https://www.bilibili.com/video/${item.bvid}`,
+        createdAt: new Date((item.pubdate || 0) * 1000).getTime(),
+      }))
+    } catch { return [] }
+  }
+
+  private async fetchDouyin(limit: number): Promise<RawDataItem[]> {
+    try {
+      const res = await fetch('https://www.douyin.com/aweme/v1/web/hot/search/list/', {
+        signal: AbortSignal.timeout(10000),
+      })
+      if (!res.ok) return []
+      const body: any = await res.json()
+      const list = body?.data?.word_list
+      if (!Array.isArray(list)) return []
+      return list.slice(0, limit).map((item: any) => ({
+        title: item.word || '',
+        summary: `[抖音热搜] ${item.word || ''} (热度: ${item.hot_value || '?'})`,
+        source: 'douyin',
+        url: `https://www.douyin.com/search/${encodeURIComponent(item.word || '')}`,
+        createdAt: Date.now(),
+      }))
+    } catch { return [] }
   }
 
   /**
