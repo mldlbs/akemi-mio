@@ -691,6 +691,11 @@ export class TelegramService {
       this.enqueueReply(chatId, `📊 稳定性状态变更: ${p.previous} → ${p.current} (${p.score}分)`, 'stability')
     })
 
+    // === 📡 雷达 ===
+    eventBus.on('radar.push.rule_fired', (p: any) => {
+      this.enqueueReply(chatId, p.message, 'radar')
+    })
+
     // === ⚙️ 系统 ===
     eventBus.on('plugin.registered', (p: any) => {
       this.enqueueReply(chatId, `⚙️ 插件加载: ${p.name} v${p.version} (${p.toolCount} 工具)`, 'system')
