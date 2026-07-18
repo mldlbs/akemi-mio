@@ -31,6 +31,9 @@ import type { RadarPushRule } from './types'
 /** 两次推送之间的最小间隔（分钟），避免重复推送 */
 const MIN_PUSH_INTERVAL_MS = 5 * 60 * 1000 // 5 分钟
 
+/** 没有规则时默认使用的规则名 */
+const DEFAULT_RULE_NAME = '默认推送'
+
 // ════════════════════════════════════════════════════════════════
 // RadarPushScheduler
 // ════════════════════════════════════════════════════════════════
@@ -103,20 +106,35 @@ export class RadarPushScheduler {
    */
   private tick(): string {
     try {
-      const rules = radarPushRuleStore.getEnabled()
-      if (rules.length === 0) return 'no_rules'
+      // 检查全局冷却
+      const now = Date.now()
+      if (now - this.lastGlobalPushTime < MIN_PUSH_INTERVAL_MS) {
+        return 'cooldown'
+      }
 
-      const now = new Date()
-      const currentMinute = now.getMinutes()
-      const currentHour = now.getHours()
-      const currentDay = now.getDay() // 0=Sun
+      const rules = radarPushRuleStore.getEnabled()
+      if (rules.length === 0) {
+        // 没有规则时使用默认规则直接推送
+        this.lastGlobalPushTime = Date.now()
+        this.executePush(this.defaultRule()).catch((err) => {
+          log('ERROR', 'radar_push_execution_failed', {
+            id: 'default',
+            error: String(err),
+          })
+        })
+        return 'default_push'
+      }
+
+      const currentMinute = new Date().getMinutes()
+      const currentHour = new Date().getHours()
+      const currentDay = new Date().getDay() // 0=Sun
 
       let matchedCount = 0
 
       for (const rule of rules) {
         if (this.isRuleMatching(rule, currentMinute, currentHour, currentDay)) {
           // 检查是否在最小间隔内推送过
-          if (rule.lastPushedAt && Date.now() - rule.lastPushedAt < MIN_PUSH_INTERVAL_MS) {
+          if (rule.lastPushedAt && now - rule.lastPushedAt < MIN_PUSH_INTERVAL_MS) {
             log('DEBUG', 'radar_push_skipped_cooldown', {
               id: rule.id,
               lastPushed: new Date(rule.lastPushedAt).toISOString(),
@@ -135,7 +153,7 @@ export class RadarPushScheduler {
       }
 
       if (matchedCount > 0) {
-        this.lastGlobalPushTime = Date.now()
+        this.lastGlobalPushTime = now
       }
 
       return `matched=${matchedCount}`
@@ -256,8 +274,8 @@ export class RadarPushScheduler {
       const reports: any[] = body.reports || []
       if (reports.length > 0) {
         const latest = reports[0]
-        lines.push(`📊 **最新报告**`)
-        lines.push(`  ${(latest.content || latest.summary || '').slice(0, 300)}`)
+        lines.push(`📊 **最新报告** (${latest.date || '?'})`)
+        lines.push(`  信号: ${latest.total_signals ?? '?'} | 高价值: ${latest.high_value ?? '?'}`)
         lines.push('')
       }
 
@@ -284,6 +302,24 @@ export class RadarPushScheduler {
     }
 
     return lines.join('\n')
+  }
+
+  /** 当数据库中没有规则时使用的默认规则 */
+  private defaultRule(): RadarPushRule {
+    return {
+      id: '__default__',
+      name: DEFAULT_RULE_NAME,
+      enabled: true,
+      frequency: 'daily',
+      minute: new Date().getMinutes(),
+      hour: new Date().getHours(),
+      keywords: [],
+      sources: [],
+      rawText: '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      pushCount: 0,
+    }
   }
 
   /**
