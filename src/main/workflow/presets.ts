@@ -8,4 +8,9 @@ import devPipelineLarge from './definitions/dev-pipeline-large.json'
 import writingPipeline from './definitions/writing-pipeline.json'
 import type { WorkflowDef } from './types'
 
-export const PRESET_DEFINITIONS: WorkflowDef[] = [devPipelineSimple, devPipelineMedium, devPipelineLarge, writingPipeline] as WorkflowDef[]
+export const PRESET_DEFINITIONS: WorkflowDef[] = [
+  devPipelineSimple,
+  devPipelineMedium,
+  devPipelineLarge,
+  writingPipeline,
+] as WorkflowDef[]

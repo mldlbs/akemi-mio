@@ -65,6 +65,9 @@ export class RadarPushScheduler {
   /** 最后一次推送时间（用于全局去重） */
   private lastGlobalPushTime = 0
 
+  /** 最后一次推送的消息 hash，用于内容级去重 */
+  private lastMessageHash = ''
+
   // ════════════════════════════════════════════════════════════════
   // 生命周期
   // ════════════════════════════════════════════════════════════════
@@ -222,6 +225,15 @@ export class RadarPushScheduler {
     })
 
     const message = await this.fetchRemoteRadarMessage(rule)
+
+    // 内容级去重：相同消息不重复推送
+    const hash = simpleHash(message)
+    if (hash === this.lastMessageHash) {
+      log('INFO', 'radar_push_duplicate_skipped', { hash })
+      return
+    }
+    this.lastMessageHash = hash
+
     this.emitPushEvent(rule, message, 0)
     radarPushRuleStore.markPushed(rule.id)
   }
@@ -251,93 +263,85 @@ export class RadarPushScheduler {
       const opps: any[] = body.opportunities || []
       const themes: any[] = body.themes || []
 
-      const lines: string[] = [`📡 创业雷达速报`]
-      lines.push(`━━━━━━━━━━━━━━━━━━━━`)
+      // ── 信号按主题归类计数 ──
+      const themeCounts = new Map<string, number>()
+      for (const s of signals) {
+        const t = THEME_CN[s.theme] || s.theme || '其他'
+        themeCounts.set(t, (themeCounts.get(t) || 0) + 1)
+      }
+      const themeDist = [...themeCounts.entries()].sort((a, b) => b[1] - a[1])
 
-      // ── 数据概览 ──
-      const totalSignals = signals.length
-      const totalOpps = opps.length
-      const topTheme = themes[0]
-      const topThemeName = topTheme ? (THEME_CN[topTheme.theme] || topTheme.theme) : '—'
+      // ── 机会排序 TOP 3 ──
+      const topOpps = [...opps]
+        .sort((a: any, b: any) => (b.avg_score || 0) - (a.avg_score || 0))
+        .slice(0, 3)
+
+      // ── 主题热度 TOP 5 ──
+      const topThemes = [...themes].sort((a, b) => b.count - a.count).slice(0, 5)
+
       const highValue = signals.filter((s: any) => (s.score || 0) >= 7).length
 
-      const overviewBits: string[] = []
-      if (totalSignals > 0) overviewBits.push(`${totalSignals} 条新信号`)
-      if (totalOpps > 0) overviewBits.push(`${totalOpps} 个持续机会`)
-      if (highValue > 0) overviewBits.push(`${highValue} 条高价值`)
-      if (topThemeName !== '—') overviewBits.push(`最热: ${topThemeName}`)
-      if (overviewBits.length > 0) {
-        lines.push(`📊 本期监测到 ${overviewBits.join('，')}。`)
+      // ═══════════════════════ 组装消息 ═══════════════════════
+      const lines: string[] = []
+
+      // 头部：一句概况
+      const dateStr = new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour12: false })
+      const summary = `📡 创业雷达 · ${dateStr}`
+      lines.push(summary)
+
+      // 数据句
+      let dataLine = `  捕获 ${signals.length} 条信号`
+      if (highValue > 0) dataLine += `（${highValue} 条高价值）`
+      dataLine += `，${opps.length} 个持续机会`
+      if (topThemes.length > 0) {
+        const names = topThemes.slice(0, 3).map((t: any) => THEME_CN[t.theme] || t.theme)
+        dataLine += ` · 最热 ${names.join(' / ')}`
       }
+      lines.push(dataLine)
 
-      // ── 市场解读 ──
-      if (themes.length > 0) {
-        const hot = themes.slice(0, 4)
-        const hotDesc = hot.map((t: any) => {
-          const name = THEME_CN[t.theme] || t.theme
-          return `${name}(${t.count} 条)`
-        }).join('、')
-        // 找最高 avg_score 的一些机会做解读
-        const topByScore = [...opps].sort((a: any, b: any) => (b.avg_score || 0) - (a.avg_score || 0))
-        const highlightOpp = topByScore[0]
+      // 间隔行
+      lines.push('')
 
-        let insight = `本周热点领域: ${hotDesc}。`
-        if (highlightOpp) {
-          const theme = THEME_CN[highlightOpp.theme] || highlightOpp.theme
-          const type = TYPE_CN[highlightOpp.type] || highlightOpp.type
-          const title = (highlightOpp.title || '').slice(0, 50)
-          insight += ` 其中值得关注的是「${title}」(${type}，评分 ${highlightOpp.avg_score})`
-          if (highlightOpp.appearances > 1) insight += `，已累计出现 ${highlightOpp.appearances} 次`
-          insight += '。'
-        }
-        lines.push(`🔍 ${insight}`)
-      }
-
-      // ── 高价值信号 ──
-      const topSignals = signals
-        .filter((s: any) => (s.score || 0) >= 6)
-        .slice(0, 4)
-      if (topSignals.length > 0) {
-        lines.push(`━━━ 🔥 值得关注的信号 ━━━`)
-        for (const s of topSignals) {
-          const title = (s.problem || '').slice(0, 70)
-          const theme = THEME_CN[s.theme] || s.theme || ''
-          const tag = theme ? `[${theme}]` : ''
-          lines.push(`  ${tag} ${title}`)
-          const detail: string[] = []
-          if (s.score) detail.push(`评分 ${s.score}`)
-          if (s.source) detail.push(`来源 ${s.source}`)
-          if (s.classification && s.classification !== 'feature_request') {
-            detail.push(TYPE_CN[s.classification] || s.classification)
-          }
-          if (s.report_date) detail.push(s.report_date)
-          if (detail.length) lines.push(`    ${detail.join(' | ')}`)
-        }
+      // ── 信号分布 ──
+      if (themeDist.length > 0) {
+        const parts = themeDist.slice(0, 5).map(([name, count]) => `${name} ${count}`)
+        lines.push(`📊 信号分布  ${parts.join(' · ')}`)
       }
 
       // ── 机会榜 ──
-      const topOpps = [...opps]
-        .sort((a: any, b: any) => (b.avg_score || 0) - (a.avg_score || 0))
-        .slice(0, 4)
       if (topOpps.length > 0) {
-        lines.push(`━━━ 💡 机会榜 ━━━`)
+        lines.push('')
+        lines.push(`💡 TOP ${topOpps.length} 机会`)
         for (const o of topOpps) {
-          const title = (o.title || '').slice(0, 60)
-          const theme = THEME_CN[o.theme] || o.theme || ''
           const type = TYPE_CN[o.type] || o.type || ''
-          lines.push(`  [${theme}] ${title}`)
-          const detail: string[] = [`${type}`]
-          if (o.avg_score) detail.push(`评分 ${o.avg_score}`)
-          if (o.appearances > 1) detail.push(`${o.appearances} 次出现`)
-          if (o.consecutive_days) detail.push(`连续 ${o.consecutive_days} 天`)
-          lines.push(`    ${detail.join(' · ')}`)
+          const title = (o.title || '').slice(0, 40)
+          const score = o.avg_score || o.avg_pain || ''
+          lines.push(`  ${title}`)
+          const tags: string[] = []
+          if (type) tags.push(type)
+          if (score) tags.push(`评分 ${score}`)
+          if (o.appearances > 1) tags.push(`${o.appearances} 次`)
+          if (o.consecutive_days) tags.push(`连 ${o.consecutive_days} 天`)
+          if (tags.length) lines.push(`  ${' '.repeat(2)}${tags.join('  ')}`)
         }
       }
 
-      // ── 底部操作提示 ──
-      lines.push(`━━━━━━━━━━━━━━━━━━━━`)
-      lines.push(`⏰ ${new Date().toLocaleString('zh-CN', { hour12: false })}`)
-      lines.push(`💬 发送 /radar 查看详情`)
+      // ── 高价值信号概览 ──
+      if (highValue > 0) {
+        const hvSignals = signals.filter((s: any) => (s.score || 0) >= 7).slice(0, 3)
+        lines.push('')
+        lines.push(`🔥 高价值信号`)
+        for (const s of hvSignals) {
+          const theme = THEME_CN[s.theme] || s.theme || ''
+          const raw = s.business_value ?? s.problem ?? ''
+          const brief = String(raw).slice(0, 50)
+          lines.push(`  ${theme ? `[${theme}] ` : ''}${brief}`)
+        }
+      }
+
+      // ── 底部 ──
+      lines.push('')
+      lines.push(`💬 /radar 查看详情 · ${dateStr}`)
 
       return lines.join('\n')
     } catch (err: any) {
@@ -380,3 +384,12 @@ export class RadarPushScheduler {
 
 /** 全局单例 */
 export const radarPushScheduler = new RadarPushScheduler()
+
+/** 简单哈希 */
+function simpleHash(s: string): string {
+  let h = 0
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0
+  }
+  return Math.abs(h).toString(36)
+}

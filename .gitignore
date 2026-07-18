@@ -53,7 +53,12 @@ scripts/cdp-*.cjs
 scripts/fix-rct*.mjs
 scripts/fix-rct*.cjs
 scripts/mio-writing-session.mjs
+scripts/mio-6g.cjs
+scripts/mio-next.cjs
+scripts/check-workflow.cjs
+scripts/launch.cjs
 scripts/merge-mcp.mjs
 scripts/verify-*.cjs
+C\357\200\272Usersgf191AppDataLocalTemp*
 out/
 .ssh/

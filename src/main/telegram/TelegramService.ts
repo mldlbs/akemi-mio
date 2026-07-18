@@ -122,6 +122,8 @@ export class TelegramService {
     }
   >()
   private pushChatId: number | null = null
+  /** 标记是否已订阅推送事件，防止重复注册 */
+  private pushEventsSubscribed = false
   /** 当 outbox 任务被禁用时，通过此回调重新激活 */
   private reactivateOutbox: (() => void) | null = null
   // ★ 修复：Map<requestId, session> 通过 EventBus requestId 精确匹配输入/回复
@@ -414,6 +416,8 @@ export class TelegramService {
   // ── 主动推送：全部系统事件 → Telegram ──
 
   private subscribePushEvents(): void {
+    if (this.pushEventsSubscribed) return
+    this.pushEventsSubscribed = true
     const chatId = this.pushChatId
     if (!chatId) return
 
