@@ -2,6 +2,7 @@ import { AgentService } from '../agent/AgentService'
 import { log } from '../logger/Logger'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import { eventBus } from '../core/EventBus'
+import { radarPushScheduler } from './radar/RadarPushScheduler'
 import { insertOutbox, type OutboxCategory } from '../db/outbox'
 import { WORKSPACE, TELEGRAM_SERVER_URL, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED } from '../config'
 import { writeFileSync, existsSync, mkdirSync } from 'fs'
@@ -180,6 +181,7 @@ export class TelegramService {
       } else {
         log('INFO', 'telegram_push_enabled', { chatId: this.pushChatId })
         this.subscribePushEvents()
+        radarPushScheduler.start()
       }
     }
 
