@@ -76,3 +76,33 @@ export interface BlogMemoryRecorderConfig {
   /** 默认置信度 */
   defaultConfidence: number
 }
+
+// =============================================================================
+// 经验记忆工作流引擎类型
+// =============================================================================
+
+/** 经验搜索选项 */
+export interface ExperienceSearchOptions {
+  /** 按分类筛选 */
+  category?: BlogMemoryCategory | BlogMemoryCategory[]
+  /** 按博客 ID 筛选 */
+  blogId?: string
+  /** 仅显示已固定的 */
+  pinnedOnly?: boolean
+  /** 最大返回条数 */
+  limit?: number
+  /** 起始时间戳 */
+  fromTimestamp?: number
+  /** 结束时间戳 */
+  toTimestamp?: number
+}
+
+/** 经验搜索结果条目 */
+export interface ExperienceSearchResult {
+  /** 原始记忆条目 */
+  memoryEntry: { id: string; content: string; type: string; confidence: number; tier: string; isPinned: boolean; createdAt: number }
+  /** 结构化数据 */
+  data: BlogMemoryStructuredData
+  /** 相似度得分（0-1），语义搜索时有效；关键词搜索=1.0 */
+  score: number
+}

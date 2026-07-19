@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSlots } from '../slots/SlotContext'
 import { useDesktopToolbarStore, type DesktopTask } from '../store/desktopToolbarStore'
+import { BookmarkPanel } from './BookmarkPanel'
 
-type RightTab = 'tools' | 'evolution' | 'monitor' | 'memory'
+type RightTab = 'tools' | 'evolution' | 'monitor' | 'memory' | 'bookmarks'
 
 // =============================================================================
 // 类型定义
@@ -341,6 +342,9 @@ export function RightPanel() {
           <button className={`right-panel-tab${tab === 'memory' ? ' active' : ''}`} onClick={() => setTab('memory')} title="记忆">
             <i className="ri-brain-line" />
           </button>
+          <button className={`right-panel-tab${tab === 'bookmarks' ? ' active' : ''}`} onClick={() => setTab('bookmarks')} title="语音书签">
+            <i className="ri-bookmark-3-line" />
+          </button>
         </div>
         <button className="right-panel-close" onClick={toggleRightPanel} title="收起右侧面板">
           <i className="ri-close-line" />
@@ -655,6 +659,13 @@ export function RightPanel() {
                   ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ════════════════════════════════════ 记忆 Tab ════════════════════════════════════ */}
+        {tab === 'bookmarks' && (
+          <div className="right-panel-section right-panel-section--full">
+            <BookmarkPanel />
           </div>
         )}
 

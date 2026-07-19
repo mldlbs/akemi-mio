@@ -582,6 +582,331 @@
   gap: 4px;
 }
 
+/* ═══════════════════════════════════════
+   语音记忆书签 (Voice Bookmark)
+   ═══════════════════════════════════════ */
+
+/* ─── 消息书签按钮 ─── */
+.msg-bm-btn {
+  width: 20px; height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+.msg-bm-btn:hover { color: var(--accent); }
+.msg-bm-btn.done { color: var(--accent); }
+.msg-bm-btn.loading { pointer-events: none; }
+
+/* ─── 书签面板 ─── */
+.bookmark-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  height: 100%;
+}
+
+.bookmark-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm);
+}
+
+.bookmark-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.bookmark-panel-refresh {
+  width: 28px; height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+.bookmark-panel-refresh:hover {
+  background: var(--bg-glass-hover);
+  color: var(--text-secondary);
+}
+
+/* ─── 搜索栏 ─── */
+.bookmark-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-card);
+  background: var(--bg-glass);
+  transition: border-color var(--duration-fast) var(--ease-glass);
+}
+.bookmark-search.focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-glow);
+}
+
+.bookmark-search-icon {
+  color: var(--text-muted);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.bookmark-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--fs-caption);
+  outline: none;
+  min-width: 0;
+}
+
+.bookmark-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.bookmark-search-clear {
+  width: 18px; height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg-glass-strong);
+  color: var(--text-muted);
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+.bookmark-search-clear:hover {
+  background: var(--text-muted);
+  color: var(--bg-base);
+}
+
+/* ─── 书签列表 ─── */
+.bookmark-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-xs) 0;
+}
+
+.bookmark-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  color: var(--text-muted);
+  font-size: var(--fs-caption);
+  padding: var(--space-xl) var(--space-md);
+}
+
+.bookmark-empty-icon {
+  font-size: 28px;
+  opacity: 0.3;
+}
+
+.bookmark-empty-hint {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* ─── 单条书签 ─── */
+.bookmark-item {
+  padding: var(--space-sm) var(--space-sm);
+  border-radius: var(--radius-card);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-glass);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bookmark-item:hover {
+  background: var(--bg-glass-hover);
+  border-color: var(--border-glass-hover);
+}
+
+.bookmark-item.playing {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.bookmark-item.favorite {
+  border-left: 2px solid var(--accent-soft, #f59e0b);
+}
+
+.bookmark-item-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-xs);
+}
+
+.bookmark-item-summary {
+  flex: 1;
+  font-size: var(--fs-caption);
+  color: var(--text-primary);
+  line-height: 1.4;
+  word-break: break-word;
+  min-width: 0;
+}
+
+.bookmark-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.bookmark-action-btn {
+  width: 22px; height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+  opacity: 0.5;
+}
+
+.bookmark-item:hover .bookmark-action-btn {
+  opacity: 1;
+}
+
+.bookmark-action-btn:hover {
+  color: var(--accent);
+  background: var(--bg-glass-strong);
+}
+
+.bookmark-action-btn.favorited {
+  color: var(--accent-soft, #f59e0b);
+  opacity: 1;
+}
+
+.bookmark-action-delete:hover {
+  color: var(--status-error, #ef4444);
+}
+
+.bookmark-item-bottom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+.bookmark-item-audio-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-glow);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.bookmark-item-tags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.bookmark-item-tag {
+  font-size: 9px;
+  color: var(--text-muted);
+  background: var(--bg-glass-strong);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.bookmark-item-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: auto;
+  opacity: 0.6;
+}
+
+.bookmark-item-fav-icon {
+  font-size: 10px;
+  color: var(--accent-soft, #f59e0b);
+}
+
+/* ─── 对话上下文预览 ─── */
+.bookmark-item-context {
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-glass);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bookmark-context-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.bookmark-context-role {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--text-muted);
+  min-width: 18px;
+}
+
+.bookmark-context-text {
+  color: var(--text-muted);
+  opacity: 0.7;
+  word-break: break-word;
+  min-width: 0;
+}
+
+.bookmark-context-more {
+  font-size: 9px;
+  color: var(--text-muted);
+  opacity: 0.5;
+  padding-left: 22px;
+}
+
+/* ─── 右侧面板书签tab的全宽模式 ─── */
+.right-panel-section--full {
+  padding: 0 !important;
+  height: 100%;
+  overflow: hidden;
+}
+
 /* ─── 状态栏 ─── */
 .status-bar {
   display: flex;

@@ -40,7 +40,7 @@ import { socialPipelineTool } from './definitions/SocialPipelineTool'
 import { polishStyleScanTool, polishDialogueEvalTool, polishAiDetectTool, polishRhythmAnalyzeTool } from './definitions/PolishTools'
 import { queryTrendsTool } from './definitions/TrendQueryTool'
 import { typographyMemoryTool } from './definitions/TypographyMemoryTool'
-import { speakWithPiperTool, switchPiperModelTool, listPiperModelsTool } from './definitions/PiperTtsTool'
+import { speakWithPiperTool, switchPiperModelTool, listPiperModelsTool, listVoiceRolesTool, listVoiceSchemesTool, setVoiceSchemeTool } from './definitions/PiperTtsTool'
 import { verifyTypographyTool, readAloudSegmentTool } from './definitions/TypographyVerificationTool'
 import {
   learningQueryTool,
@@ -62,6 +62,34 @@ import {
 import { typeHealthTool } from './definitions/TypeHealthTool'
 import { rememberFileRuleTool, listFileRulesTool, deleteFileRuleTool } from './definitions/FileRuleTools'
 import { createReasoningChainTool } from './definitions/ReasoningChainTools'
+import {
+  blogStartSessionTool,
+  blogSessionStatusTool,
+  blogHandleInputTool,
+  blogAdvanceStageTool,
+  blogGetHabitsTool,
+  blogGetSuggestionsTool,
+  blogListSessionsTool,
+} from './definitions/BlogTools'
+import {
+  blogMemorySearchTool,
+  blogMemoryListTool,
+  blogMemoryPinTool,
+  blogMemoryDeleteTool,
+  blogMemoryClearTool,
+  blogMemoryStatsTool,
+  blogMemoryRecordTool,
+} from './definitions/ExperienceMemoryTools'
+import {
+  cicdTypecheckTool,
+  cicdLintTool,
+  cicdTestTool,
+  cicdBuildTool,
+  cicdBuildDocsTool,
+  cicdDeployPreviewTool,
+  cicdQualityGateTool,
+} from './definitions/CicdTools'
+import { ttsSpeakTool } from './definitions/TtsSpeakTool'
 
 export function getAllTools(): Tool[] {
   return [
@@ -124,6 +152,9 @@ export function getAllTools(): Tool[] {
     speakWithPiperTool as Tool,
     switchPiperModelTool as Tool,
     listPiperModelsTool as Tool,
+    listVoiceRolesTool as Tool,
+    listVoiceSchemesTool as Tool,
+    setVoiceSchemeTool as Tool,
     typographyMemoryTool as Tool,
     moveFileTool as Tool,
     copyFileTool as Tool,
@@ -149,5 +180,27 @@ export function getAllTools(): Tool[] {
     listFileRulesTool as Tool,
     deleteFileRuleTool as Tool,
     createReasoningChainTool as Tool,
+    blogStartSessionTool as Tool,
+    blogSessionStatusTool as Tool,
+    blogHandleInputTool as Tool,
+    blogAdvanceStageTool as Tool,
+    blogGetHabitsTool as Tool,
+    blogGetSuggestionsTool as Tool,
+    blogListSessionsTool as Tool,
+    blogMemorySearchTool as Tool,
+    blogMemoryListTool as Tool,
+    blogMemoryPinTool as Tool,
+    blogMemoryDeleteTool as Tool,
+    blogMemoryClearTool as Tool,
+    blogMemoryStatsTool as Tool,
+    blogMemoryRecordTool as Tool,
+    cicdTypecheckTool as Tool,
+    cicdLintTool as Tool,
+    cicdTestTool as Tool,
+    cicdBuildTool as Tool,
+    cicdBuildDocsTool as Tool,
+    cicdDeployPreviewTool as Tool,
+    cicdQualityGateTool as Tool,
+    ttsSpeakTool as Tool,
   ]
 }

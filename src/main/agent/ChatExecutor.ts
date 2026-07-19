@@ -59,6 +59,9 @@ import { ToolPromptAssembler } from './toolPolicy/ToolPromptAssembler'
 import type { ToolDecision } from './toolPolicy/types'
 import { behaviorStateMachine } from '../behavior/BehaviorStateMachine'
 import type { BehaviorMode } from '../behavior/BehaviorStateMachine'
+import { correctionPatternLearner } from '../behavior/CorrectionPatternLearner'
+import { behaviorPreferenceStore } from '../behavior/BehaviorPreferenceStore'
+import { toolDefaultAdjuster } from '../behavior/ToolDefaultAdjuster'
 import { buildTtsNeed } from '../behavior/UserBehaviorTtsContract'
 import { asrHotwordManager } from '../asr/AsrHotwordManager'
 import { sentimentAnalyzer } from '../tts/SentimentAnalyzer'
@@ -229,7 +232,11 @@ export class ChatExecutor {
     failureAnalyzer?: FailureAnalyzer | null
     knowledgeQuery?: UnifiedKnowledgeQuery | null
   }): void {
-    if (deps.memoryService !== undefined) this.memoryService = deps.memoryService
+    if (deps.memoryService !== undefined) {
+      this.memoryService = deps.memoryService
+      // 偏好存储依赖 memoryService，首次注入时初始化
+      behaviorPreferenceStore.setMemoryService(deps.memoryService)
+    }
     if (deps.skillManager !== undefined) this.skillManager = deps.skillManager
     if (deps.recoveryManager !== undefined) this.recoveryManager = deps.recoveryManager
     if (deps.tokenAccount !== undefined) this.tokenAccount = deps.tokenAccount
@@ -346,6 +353,12 @@ export class ChatExecutor {
         this.memoryService.reinforceByBehaviorPattern(repeatPattern.mergedTopics, repeatPattern.currentText)
       }
     }
+    // 行为偏好上下文注入：基于用户习惯偏好调整回复
+    const prefContext = behaviorPreferenceStore.getFormattedContext()
+    if (prefContext) extraModules.push(prefContext)
+    // 工具默认参数推荐：基于学习到的用户偏好注入工具参数默认值
+    const toolDefaultContext = toolDefaultAdjuster.adjust().formattedPrompt
+    if (toolDefaultContext) extraModules.push(toolDefaultContext)
     const allExtraModules = extraModules.length > 0 ? extraModules : undefined
     if (memCtx || reflectCtx || allExtraModules || this.identityContext) {
       this.workingMemory.refreshMemory(memCtx, reflectCtx, allExtraModules, this.identityContext || undefined)
@@ -447,6 +460,8 @@ export class ChatExecutor {
     noTts?: boolean,
   ): Promise<ChatResult> {
     this.noTts = noTts ?? false
+    // 纠正模式学习器懒启动（安全幂等）
+    correctionPatternLearner.start()
     // 行为情绪检测器懒启动（首次 run 时绑定窗口事件并开始采样）
     if (this.behaviorEmotionEnabled && !behaviorEmotionDetector.isEnabled()) {
       behaviorEmotionDetector.setEnabled(true)
@@ -468,6 +483,8 @@ export class ChatExecutor {
     this.lastUserText = text
     // 行为分析：记录用户消息用于模式检测
     userBehaviorAnalyzer.recordUserMessage(text)
+    // 行为偏好学习：检测用户消息中的风格/参数纠正模式
+    correctionPatternLearner.recordUserMessage(text)
     // 行为自适应对话策略：记录交互详情并分析场景
     this.currentDomainLabel = this._extractDomainLabel(text)
     userBehaviorAnalyzer.recordInteractionDetail({
@@ -664,6 +681,10 @@ export class ChatExecutor {
           planActive: this.sessionPlanIds.size > 0,
           agentId: 'chat',
         })
+      }
+      // 行为偏好持久化：交互结束后刷新偏好存储
+      if (this.memoryService) {
+        behaviorPreferenceStore.flush()
       }
       return { reply }
     } catch (err) {

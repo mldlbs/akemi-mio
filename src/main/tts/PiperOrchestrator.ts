@@ -225,6 +225,42 @@ export class PiperOrchestrator implements IEngineService {
     }
   }
 
+  /**
+   * 预热指定模型 — 加速首次合成。
+   *
+   * 角色化方案切换时调用，通过一次极短的语音合成（1 字符）触发
+   * Piper Python 进程和 ONNX 模型的初始化，后续实际合成时跳过冷启动。
+   *
+   * 预热不会阻塞正常合成队列，但建议在后台静默执行。
+   *
+   * @param modelName 要预热的模型名
+   */
+  async warmupModel(modelName: string): Promise<void> {
+    if (!VALID_MODELS.includes(modelName)) {
+      log('WARN', 'piper_warmup_invalid_model', { model: modelName })
+      return
+    }
+
+    // 使用一个极短文本预热（仅触发模型加载，不产生有效音频）
+    const warmupText = ' '
+    const speed = PIPER_MODEL_CATALOG[modelName]?.speed ?? 1.0
+    const pitch = PIPER_MODEL_CATALOG[modelName]?.pitch ?? 1.0
+
+    // 在队列外直接调用 synthesizeWithModel（不走队列，避免阻塞正常请求）
+    const result = await this.synthesizeWithModel(warmupText, modelName, speed, pitch)
+    if (result.ok) {
+      // 清理预热产生的临时文件
+      try {
+        unlinkSync(result.value)
+      } catch {
+        /* ignore */
+      }
+      log('DEBUG', 'piper_warmup_success', { model: modelName })
+    } else {
+      log('WARN', 'piper_warmup_failed', { model: modelName, error: result.error })
+    }
+  }
+
   /** 获取当前活跃模型 */
   getCurrentModel(): string {
     return this.currentModel

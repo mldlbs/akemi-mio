@@ -31,7 +31,8 @@ import type {
 import { parseFeaturesFromEnv } from './types'
 import { behaviorFeatureExtractor } from './BehaviorFeatureExtractor'
 import { behaviorHeatmapService } from './BehaviorHeatmapService'
-import type { ModuleHeatmap } from './types'
+import { qualityMetricsTracker } from './QualityMetricsTracker'
+import type { ModuleHeatmap, DegradationSignal } from './types'
 import type { PlanExperiment42Plugin } from './plan-experiment-42'
 
 const DEFAULT_CONFIG: Partial<UserBehaviorConfig> = {
@@ -580,5 +581,172 @@ export class UserBehaviorLayer {
         return {}
       }
     }
+  }
+
+  // ===========================================================================
+  // 质量指标追踪钩子
+  // ===========================================================================
+
+  /**
+   * 预处理钩子：质量指标趋势注入。
+   * 在 Evolution 周期开始前，读取最近的质量指标趋势数据，
+   * 将降级信号注入预处理上下文，供后续分析消费。
+   *
+   * 依赖 feature flag: quality_metrics
+   */
+  static createQualityMetricsPreHook(): PreProcessHook {
+    return async (ctx) => {
+      try {
+        const latest = qualityMetricsTracker.getLatestSnapshot()
+        if (!latest) return ctx
+
+        const enrichedCtx = ctx as any
+        enrichedCtx.qualityMetrics = {
+          healthScore: latest.healthScore,
+          healthScoreDelta: latest.healthScoreDelta,
+          isDegraded: latest.isDegraded,
+          degradationSignals: latest.degradationSignals.map((s) => ({
+            metric: s.metricName,
+            severity: s.severity,
+            description: s.description,
+          })),
+          metrics: latest.metrics.map((m) => ({
+            name: m.name,
+            value: m.value,
+            trend: m.trend,
+            degraded: m.degraded,
+          })),
+          totalToolCalls: latest.totalToolCalls,
+          hasPersistentDowntrend: qualityMetricsTracker.hasPersistentDowntrend(3),
+        }
+
+        log('INFO', 'quality_metrics_pre_hook', {
+          healthScore: latest.healthScore,
+          degraded: latest.isDegraded,
+          persistentDowntrend: qualityMetricsTracker.hasPersistentDowntrend(3),
+          signals: latest.degradationSignals.length,
+        })
+
+        return enrichedCtx as typeof ctx
+      } catch {
+        return ctx
+      }
+    }
+  }
+
+  /**
+   * 后处理钩子：质量指标快照记录。
+   * 在 Evolution 周期结束后，记录新的质量指标快照，
+   * 用于下一周期的趋势对比。
+   *
+   * 依赖 feature flag: quality_metrics
+   */
+  static createQualityMetricsPostHook(): PostProcessHook {
+    return async (ctx) => {
+      try {
+        if (!ctx.success) return {}
+
+        const snapshot = qualityMetricsTracker.recordSnapshot()
+        const lines: string[] = []
+
+        // 健康评分报告
+        const healthEmoji =
+          snapshot.healthScore >= 80
+            ? '🟢'
+            : snapshot.healthScore >= 50
+              ? '🟡'
+              : '🔴'
+        lines.push(`${healthEmoji} 质量指标健康评分: ${snapshot.healthScore.toFixed(0)}/100`)
+
+        if (snapshot.healthScoreDelta !== 0) {
+          const arrow = snapshot.healthScoreDelta > 0 ? '↑' : '↓'
+          lines.push(`   变化: ${arrow} ${Math.abs(snapshot.healthScoreDelta).toFixed(1)} 分`)
+        }
+
+        // 降级信号报告
+        if (snapshot.isDegraded && snapshot.degradationSignals.length > 0) {
+          lines.push('')
+          lines.push('⚠️ 检测到质量降级信号：')
+          for (const signal of snapshot.degradationSignals) {
+            const changePct = Math.abs(Math.round(signal.delta * 100))
+            lines.push(`  · ${signal.description}（${changePct}%）`)
+            if (signal.relatedModules.length > 0) {
+              lines.push(`    关联模块: ${signal.relatedModules.join(', ')}`)
+            }
+            lines.push(`    建议优化: ${signal.suggestedOptimizationType}`)
+          }
+        }
+
+        // 持续下降警告
+        if (qualityMetricsTracker.hasPersistentDowntrend(3)) {
+          lines.push('')
+          lines.push('⚠️ 连续 3 个周期健康评分下降，建议人工介入检查系统状态。')
+        }
+
+        // 趋势摘要
+        const decliningMetrics = snapshot.metrics
+          .filter((m) => m.trend === 'declining')
+          .map((m) => m.name)
+        if (decliningMetrics.length > 0) {
+          lines.push('')
+          lines.push(`📉 劣化指标: ${decliningMetrics.join(', ')}`)
+        }
+        const improvingMetrics = snapshot.metrics
+          .filter((m) => m.trend === 'improving')
+          .map((m) => m.name)
+        if (improvingMetrics.length > 0) {
+          lines.push(`📈 改善指标: ${improvingMetrics.join(', ')}`)
+        }
+
+        const qualitySummary = lines.join('\n')
+        const enhancedSummary = ctx.rawSummary
+          ? `${ctx.rawSummary}\n\n---\n${qualitySummary}`
+          : qualitySummary
+
+        return {
+          enhancedSummary,
+          extraData: {
+            qualityMetrics: {
+              healthScore: snapshot.healthScore,
+              healthScoreDelta: snapshot.healthScoreDelta,
+              isDegraded: snapshot.isDegraded,
+              totalMetrics: snapshot.metrics.length,
+              degradationSignals: snapshot.degradationSignals.length,
+              callsInWindow: snapshot.totalToolCalls,
+            },
+          },
+          messages: snapshot.isDegraded
+            ? [`📊 质量指标: 评分 ${snapshot.healthScore.toFixed(0)}/100 ${snapshot.healthScoreDelta < 0 ? '↓' : '↑'} — ${snapshot.degradationSignals.length} 个降级信号`]
+            : [`📊 质量指标: 评分 ${snapshot.healthScore.toFixed(0)}/100`],
+        }
+      } catch {
+        return {}
+      }
+    }
+  }
+
+  /**
+   * 公共方法：直接触发质量指标快照记录并返回降级信号。
+   * 供 SelfEvolutionService 在管道执行前主动调用。
+   */
+  captureQualityMetrics(): {
+    snapshot: ReturnType<typeof qualityMetricsTracker.recordSnapshot> | null
+    signals: DegradationSignal[]
+  } | null {
+    if (!this.features.has('quality_metrics')) return null
+    try {
+      const snapshot = qualityMetricsTracker.recordSnapshot()
+      return {
+        snapshot,
+        signals: snapshot.degradationSignals,
+      }
+    } catch {
+      return null
+    }
+  }
+
+  /** 获取质量指标追踪器实例 */
+  getQualityMetricsTracker(): typeof qualityMetricsTracker {
+    return qualityMetricsTracker
   }
 }

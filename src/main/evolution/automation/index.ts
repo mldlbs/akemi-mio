@@ -27,6 +27,7 @@ export { TtsTypographyCollector } from './TtsTypographyCollector'
 export { TtsTypographyExecutor } from './TtsTypographyExecutor'
 export { FileOrganizerCollector } from '../file-organizer/FileOrganizerCollector'
 export { FileOrganizerExecutor } from '../file-organizer/FileOrganizerExecutor'
+export { CicdCollector } from '../cicd/CicdCollector'
 
 // ═══════════════════════════════════════════
 //  MCP 模式迁移导出

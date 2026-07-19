@@ -38,6 +38,7 @@ import type { PreferenceRecommendation } from './types'
 import type { UserBehaviorTtsNeed } from '../behavior/UserBehaviorTtsContract'
 import { SlidingWindow } from '../core/patterns/SlidingWindow'
 import { piperOrchestrator, type PiperSynthesizeResult, type PiperSynthesizeRequest } from './PiperOrchestrator'
+import { voiceRoleManager } from './VoiceRoleManager'
 
 // ══════════════════════════════════════════
 //  类型定义
@@ -198,6 +199,8 @@ export class TtsPiperBridge {
     model?: string
     speed?: number
     pitch?: number
+    /** 角色 ID — 从 VoiceRoleManager 解析对应的模型/语速/音调 */
+    roleId?: string
   }): PiperSynthesizeRequest {
     const request: PiperSynthesizeRequest = {
       text,
@@ -207,12 +210,21 @@ export class TtsPiperBridge {
       taskTag: overrides?.taskTag as any,
     }
 
-    // ── 模型选择：优先 override，其次 ContextVoiceConfig，最后保持默认 ──
+    // ── 模型选择：优先 override，其次 roleId，其次 ContextVoiceConfig，最后保持默认 ──
+    if (!request.model && overrides?.roleId) {
+      const role = voiceRoleManager.getRole(overrides.roleId)
+      if (role) {
+        request.model = role.piperModel
+        if (request.speed === undefined) request.speed = role.piperSpeed
+        if (request.pitch === undefined) request.pitch = role.piperPitch
+      }
+    }
+
     if (!request.model && this.context.ttsContextVoiceConfig) {
       request.model = this.context.ttsContextVoiceConfig.piperModel
     }
 
-    // ── 语速/音调：从 TTS 情境语音配置中提取 ──
+    // ── 语速/音调：如果 roleId 已经设置了，跳过 ContextVoiceConfig 覆盖 ──
     if (request.speed === undefined && this.context.ttsContextVoiceConfig) {
       request.speed = this.context.ttsContextVoiceConfig.piperSpeed
     }
@@ -283,7 +295,7 @@ export class TtsPiperBridge {
   async synthesizeWithPiper(
     text: string,
     ttsParams?: EmotionTtsParams,
-    overrides?: { taskTag?: string; model?: string; speed?: number; pitch?: number },
+    overrides?: { taskTag?: string; model?: string; speed?: number; pitch?: number; roleId?: string },
   ): Promise<PiperSynthesizeResult> {
     // 通过共享上下文构建请求参数
     const request = this.buildPiperRequest(text, overrides)

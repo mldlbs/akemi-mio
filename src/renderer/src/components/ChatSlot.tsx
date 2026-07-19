@@ -3,6 +3,7 @@ import { useSessionStore } from '../store/sessionStore'
 import { useAgentStore } from '../store/agentStore'
 import type { AgentState } from '../store/agentStore'
 import { isToolActive } from '../tool/toolTypes'
+import { BookmarkButton } from './BookmarkButton'
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -98,6 +99,7 @@ const MessageList = React.memo(function MessageList({
           <div className="msg-bubble">{m.content}</div>
           <div className="msg-actions">
             <CopyButton text={m.content} />
+            <BookmarkButton message={m} contextMessages={messages} />
             <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
           </div>
         </div>

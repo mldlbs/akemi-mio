@@ -6,6 +6,8 @@ import devPipelineMedium from './definitions/dev-pipeline-medium.json'
 import devPipelineLarge from './definitions/dev-pipeline-large.json'
 // @ts-ignore - JSON module not in tsconfig
 import writingPipeline from './definitions/writing-pipeline.json'
+// @ts-ignore - JSON module not in tsconfig
+import blogWorkflow from './definitions/blog-workflow.json'
 import type { WorkflowDef } from './types'
 
 export const PRESET_DEFINITIONS: WorkflowDef[] = [
@@ -13,4 +15,5 @@ export const PRESET_DEFINITIONS: WorkflowDef[] = [
   devPipelineMedium,
   devPipelineLarge,
   writingPipeline,
+  ...blogWorkflow,
 ] as WorkflowDef[]

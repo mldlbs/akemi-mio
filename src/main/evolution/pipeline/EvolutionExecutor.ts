@@ -16,6 +16,9 @@ import type { DevPlan, PlanManagerLike } from '../types'
 import type { EvolutionGitOps } from '../EvolutionGitOps'
 import type { ISubsystem, HealthCheckResult, SubsystemState } from '../../core/lifecycle/types'
 import type { ExecutionInput, ExecutionResult } from './types'
+import type { CicdStepResult } from '../cicd/types'
+import type { CicdOrchestrator } from '../cicd/CicdOrchestrator'
+import { planStepMapper } from '../cicd/PlanStepMapper'
 
 export class EvolutionExecutor implements ISubsystem {
   readonly name = 'EvolutionExecutor'
@@ -32,6 +35,9 @@ export class EvolutionExecutor implements ISubsystem {
   private executionLock = new AsyncLock()
   private proposalValidator: any = null
   private safetyMode: string = 'auto'
+
+  /** CI/CD Orchestrator（可选注入）：将 CI/CD 可映射的步骤通过 MCP 工具执行而非 LLM */
+  private cicdOrchestrator: CicdOrchestrator | null = null
 
   constructor(
     agentService: AgentService,
@@ -76,6 +82,12 @@ export class EvolutionExecutor implements ISubsystem {
   }
   setSafetyMode(mode: string) {
     this.safetyMode = mode
+  }
+  setCicdOrchestrator(orchestrator: CicdOrchestrator | null): void {
+    this.cicdOrchestrator = orchestrator
+    if (orchestrator) {
+      log('INFO', 'evolution_executor_cicd_attached', { ready: orchestrator.isReady?.() ?? false })
+    }
   }
   getExecuteFailures(): number {
     return this.executeFailures
@@ -167,6 +179,31 @@ export class EvolutionExecutor implements ISubsystem {
         if (!vr.passed) log('WARN', 'plan_exec_proposal_validation_failed', { planId: plan.id })
       } catch (err: any) {
         log('WARN', 'plan_exec_proposal_validation_error', { error: String(err) })
+      }
+    }
+
+    // ★ CI/CD 映射检查：如果该步骤可映射且 CicdOrchestrator 就绪，优先使用 MCP 工具执行
+    if (this.cicdOrchestrator && this.cicdOrchestrator.isReady?.() && planStepMapper.isMappable(step.description)) {
+      log('INFO', 'plan_exec_cicd_mapped', { step: step.description.slice(0, 80) })
+      try {
+        const cicdResult: CicdStepResult = await this.cicdOrchestrator.executeStep(step.description)
+        if (cicdResult.passed) {
+          const summary = `[CI/CD] ${cicdResult.summary}`
+          pm.updateStep(plan.id, stepIdx, 'done', summary)
+          this.planExecConsecutiveErrors = 0
+          this.executeFailures = 0
+          log('INFO', 'plan_step_done_cicd', { plan_id: plan.id, step: step.description, action: cicdResult.action })
+          this.cleanupSnapshot()
+          return { success: true, stepIndex: stepIdx, planCompleted: false }
+        } else {
+          // CI/CD 检查未通过：记录失败让 Evolution 系统决定回滚
+          const summary = `[CI/CD 失败] ${cicdResult.summary}`
+          log('WARN', 'plan_step_cicd_failed', { plan_id: plan.id, step: step.description, summary })
+          return this.handleStepFailure(plan, step, stepIdx, summary)
+        }
+      } catch (err: any) {
+        log('WARN', 'plan_exec_cicd_error', { error: err.message })
+        // CI/CD 工具异常时回退到 LLM 执行
       }
     }
 

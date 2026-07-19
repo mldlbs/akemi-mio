@@ -70,3 +70,35 @@ export type {
   TimePattern,
   AnalysisResult,
 } from './BehaviorDrivenMemoryAnalyzer'
+
+// ── 行为偏好键值存储 ──
+export { BehaviorPreferenceStore, behaviorPreferenceStore } from './BehaviorPreferenceStore'
+export type {
+  PreferenceStat,
+  PreferenceValue,
+  PreferenceSnapshot,
+} from './BehaviorPreferenceStore'
+
+// ── 用户纠正模式学习器 ──
+export { CorrectionPatternLearner, correctionPatternLearner } from './CorrectionPatternLearner'
+export type {
+  ToolCallSnapshot,
+  CorrectionEvent,
+  LearnedPreference,
+} from './CorrectionPatternLearner'
+
+// ── 工具默认参数调整器 ──
+export { ToolDefaultAdjuster, toolDefaultAdjuster } from './ToolDefaultAdjuster'
+export type {
+  ToolDefaultHint,
+  WorkflowRecommendation,
+  AdjustmentResult,
+} from './ToolDefaultAdjuster'
+
+// ── 行为驱动博客工作流桥接 ──
+export { BehaviorBlogBridge, behaviorBlogBridge } from './BehaviorBlogBridge'
+export type {
+  BehaviorSummary,
+  ActiveTimeDistribution,
+  PublishRecommendation,
+} from './BehaviorBlogBridge'

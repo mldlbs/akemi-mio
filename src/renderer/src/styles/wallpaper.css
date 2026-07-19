@@ -1696,6 +1696,96 @@
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   TTS Subtitle Overlay — 桌面实时语音字幕
+   在底部区域渐显渐隐显示 PiperTTS 正在合成的语音文本
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ─── 字幕容器（固定在底部居中） ─── */
+.wp-tts-subtitle-overlay {
+  position: fixed;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: min(80vw, 720px);
+  pointer-events: none; /* 鼠标穿透 */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ─── 单行字幕 ─── */
+.wp-tts-subtitle-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 4px 16px;
+  border-radius: 8px;
+  background: var(--wp-bg-glass, oklch(0 0 0 / 0.25));
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px solid var(--wp-border-glass, oklch(1 0 0 / 0.08));
+  will-change: opacity;
+}
+
+/* ─── 字幕文本 ─── */
+.wp-tts-subtitle-text {
+  font-size: var(--tts-subtitle-font-size, 14px);
+  font-weight: var(--tts-subtitle-font-weight, 500);
+  font-family: var(--tts-subtitle-font-family, inherit);
+  color: var(--tts-subtitle-color, oklch(0.95 0.005 12));
+  text-align: center;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 4px oklch(0 0 0 / 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* ─── 淡入动画 ─── */
+.wp-tts-subtitle-in {
+  animation: wp-tts-sub-in 0.3s ease both;
+}
+
+@keyframes wp-tts-sub-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ─── 淡出动画 ─── */
+.wp-tts-subtitle-out {
+  animation: wp-tts-sub-out 0.3s ease both;
+}
+
+@keyframes wp-tts-sub-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+}
+
+/* ─── 专注模式下隐藏字幕 ─── */
+.wp-mode-focus .wp-tts-subtitle-overlay {
+  display: none !important;
+}
+
 /* ─── 聚焦模式隐藏 ─── */
 .wp-mode-focus .wp-org-panel {
   display: none !important;

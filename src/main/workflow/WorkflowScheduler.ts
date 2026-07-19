@@ -16,6 +16,7 @@ import { resolveTemplate, resolveExpression } from './TemplateEngine'
 import { evaluateCondition } from './ConditionEvaluator'
 import type { WorkflowDef, WorkflowRun, WorkflowStepDef, ValueSchema } from './types'
 import type { SpawnTaskOptions } from '../agent/SubAgentPool'
+import { behaviorBlogBridge } from '../behavior/BehaviorBlogBridge'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -555,8 +556,9 @@ export class WorkflowSchedulerV2 {
     if (!cfg || !cfg.code) return { status: 'done', data: null }
 
     try {
-      const fn = new Function('ctx', 'steps', 'input', cfg.code)
-      const result = fn(ctx, ctx.steps, ctx.input)
+      const services = { behaviorBlogBridge }
+      const fn = new Function('ctx', 'steps', 'input', 'services', cfg.code)
+      const result = fn(ctx, ctx.steps, ctx.input, services)
       return { status: 'done', data: result }
     } catch (err: any) {
       return { status: 'failed', error: `Script error: ${err.message}` }

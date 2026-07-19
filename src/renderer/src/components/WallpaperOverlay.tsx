@@ -3,6 +3,7 @@ import { useBehaviorAwareWallpaper } from '../hooks/useBehaviorAwareWallpaper'
 import { useFocusScore } from '../hooks/useFocusScore'
 import { BehaviorDash } from './BehaviorDash'
 import { TaskSwitcher } from './TaskSwitcher'
+import { TtsSubtitleOverlay } from './TtsSubtitleOverlay'
 import { WallpaperWidgetHost } from '../widgets/WallpaperWidgetHost'
 import { wallpaperWidgetRegistry } from '../widgets/WallpaperWidgetRegistry'
 import { registerAllWidgets } from '../widgets/plugins'
@@ -193,6 +194,9 @@ export function WallpaperOverlay() {
 
       {/* ── 多任务任务切换器 ── */}
       {showTaskSwitcher && <TaskSwitcher switches={recentSwitches} visible={true} />}
+
+      {/* ── TTS 语音实时字幕 ── */}
+      <TtsSubtitleOverlay />
 
       {/* ── 状态标签 ── */}
       <div className="wallpaper-status-label">{statusLabel}</div>

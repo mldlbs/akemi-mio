@@ -23,6 +23,7 @@ export { UserBehaviorLayer } from './UserBehaviorLayer'
 export { parseFeaturesFromEnv } from './types'
 export { BehaviorFeatureExtractor, behaviorFeatureExtractor, registerBehaviorRecordHook } from './BehaviorFeatureExtractor'
 export { BehaviorHeatmapService, behaviorHeatmapService } from './BehaviorHeatmapService'
+export { QualityMetricsTracker, qualityMetricsTracker } from './QualityMetricsTracker'
 
 // ── MCP ↔ UserBehavior 强化回路 ──
 export { MCPFeedbackLoopService, createMCPFeedbackLoop } from './feedback-loop'

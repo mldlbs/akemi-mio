@@ -435,6 +435,37 @@ export function createElectronAPI(ipc: IpcRenderer) {
       }
     },
 
+    // ── TTS 语音字幕 ──
+    onTtsSubtitle: (callback: (data: {
+      text: string
+      estimatedDurationMs: number
+      id: string
+      startTime: number
+    }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: {
+        text: string
+        estimatedDurationMs: number
+        id: string
+        startTime: number
+      }) => callback(data)
+      ipc.on('tts:subtitle', handler)
+      return () => {
+        ipc.removeListener('tts:subtitle', handler)
+      }
+    },
+
+    getSubtitleEnabled: (): Promise<{ enabled: boolean }> => ipc.invoke('tts:subtitle:getEnabled'),
+
+    setSubtitleEnabled: (enabled: boolean): Promise<{ success: boolean; enabled: boolean }> => ipc.invoke('tts:subtitle:setEnabled', enabled),
+
+    onSubtitleToggle: (callback: (data: { enabled: boolean }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: { enabled: boolean }) => callback(data)
+      ipc.on('tts:subtitle:toggle', handler)
+      return () => {
+        ipc.removeListener('tts:subtitle:toggle', handler)
+      }
+    },
+
     // ── Writing Status ──
     getWritingStatus: (): Promise<{ stories: any[]; totalStories: number; totalScenes: number }> => ipc.invoke('writing:getStatus'),
 
@@ -979,6 +1010,97 @@ export function createElectronAPI(ipc: IpcRenderer) {
         ipc.removeListener('quick_task:update', handler)
       }
     },
+
+    // ── 语音记忆书签 ──
+    voiceBookmarkCreate: (
+      summary: string,
+      conversationContext: Array<{ role: 'user' | 'assistant'; content: string; createdAt: number }>,
+      options?: { audioText?: string; tags?: string[]; isFavorite?: boolean },
+    ): Promise<{
+      success: boolean
+      bookmark?: { id: string; summary: string; audioPath: string; tags: string[]; bookmarkedAt: number }
+      error?: string
+    }> => ipc.invoke('voice-bookmark:create', summary, conversationContext, options),
+
+    voiceBookmarkList: (
+      limit?: number,
+      offset?: number,
+    ): Promise<{
+      success: boolean
+      bookmarks: Array<{
+        id: string
+        summary: string
+        audioPath: string
+        audioText: string
+        tags: string[]
+        isFavorite: boolean
+        bookmarkedAt: number
+        conversationContext: Array<{ role: string; content: string; createdAt: number }>
+        ttsDurationMs: number
+      }>
+      error?: string
+    }> => ipc.invoke('voice-bookmark:list', limit, offset),
+
+    voiceBookmarkSearch: (
+      query: string,
+    ): Promise<{
+      success: boolean
+      bookmarks: Array<{
+        id: string
+        summary: string
+        audioPath: string
+        audioText: string
+        tags: string[]
+        isFavorite: boolean
+        bookmarkedAt: number
+        conversationContext: Array<{ role: string; content: string; createdAt: number }>
+        ttsDurationMs: number
+      }>
+      error?: string
+    }> => ipc.invoke('voice-bookmark:search', query),
+
+    voiceBookmarkGet: (
+      id: string,
+    ): Promise<{
+      success: boolean
+      bookmark?: {
+        id: string
+        summary: string
+        audioPath: string
+        audioText: string
+        tags: string[]
+        isFavorite: boolean
+        bookmarkedAt: number
+        conversationContext: Array<{ role: string; content: string; createdAt: number }>
+        ttsDurationMs: number
+      }
+      error?: string
+    }> => ipc.invoke('voice-bookmark:get', id),
+
+    voiceBookmarkDelete: (id: string): Promise<{ success: boolean; error?: string }> =>
+      ipc.invoke('voice-bookmark:delete', id),
+
+    voiceBookmarkGetAudioPath: (id: string): Promise<{ success: boolean; audioPath?: string; error?: string }> =>
+      ipc.invoke('voice-bookmark:audioPath', id),
+
+    voiceBookmarkToggleFavorite: (id: string): Promise<{ success: boolean; isFavorite?: boolean; error?: string }> =>
+      ipc.invoke('voice-bookmark:toggleFavorite', id),
+
+    voiceBookmarkGetFavorites: (): Promise<{
+      success: boolean
+      bookmarks: Array<{
+        id: string
+        summary: string
+        audioPath: string
+        audioText: string
+        tags: string[]
+        isFavorite: boolean
+        bookmarkedAt: number
+        conversationContext: Array<{ role: string; content: string; createdAt: number }>
+        ttsDurationMs: number
+      }>
+      error?: string
+    }> => ipc.invoke('voice-bookmark:favorites'),
   }
 }
 

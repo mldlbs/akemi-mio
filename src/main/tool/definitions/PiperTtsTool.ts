@@ -25,6 +25,8 @@ import { formatToolResult, formatToolError } from '../types'
 import { log } from '../../logger/Logger'
 import { cleanTTS } from '../../tts/TtsService'
 import { piperOrchestrator, type PiperTaskTag, PIPER_MODEL_CATALOG } from '../../tts/PiperOrchestrator'
+import { voiceRoleManager } from '../../tts/VoiceRoleManager'
+import { VOICE_ROLE_MAP } from '../../tts/VoiceRoleTypes'
 import { BrowserWindow } from 'electron'
 
 /** 播放音频文件到渲染进程 */
@@ -48,12 +50,16 @@ export const speakWithPiperTool = buildTool({
       },
       task_tag: {
         type: 'string',
-        description: '任务标签，自动选择最佳模型。可选: chat（日常对话/快速回复）, story（讲故事/朗读/高表现力）, alert（通知/提醒/警告）。',
+        description: '任务标签，自动选择最佳模型。可选: chat（日常对话/快速回复）, story（讲故事/朗读/高表现力）, alert（通知/提醒/警告）。与 role_id 二选一。',
         enum: ['chat', 'story', 'alert'],
+      },
+      role_id: {
+        type: 'string',
+        description: '语音角色 ID。通过角色方案映射到对应的 Piper 模型、语速和音调。与 task_tag 二选一。可用: gentle_female（温柔女声）, calm_male（沉稳男声）, lively_child（活泼童声）, warm_female（温暖女声）, professional_male（专业男声）。使用 list_voice_roles 查看详情。',
       },
       model: {
         type: 'string',
-        description: '显式指定 Piper 语音模型。可选: zh_CN-huayan-medium（花颜·女声/默认）, zh_CN-ling_ling-medium（玲玲·温柔女声）, zh_CN-tx_mati-medium（马提·沉稳男声）。优先级高于 task_tag。',
+        description: '显式指定 Piper 语音模型。可选: zh_CN-huayan-medium（花颜·女声/默认）, zh_CN-ling_ling-medium（玲玲·温柔女声）, zh_CN-tx_mati-medium（马提·沉稳男声）。优先级高于 task_tag 和 role_id。',
       },
       speed: {
         type: 'number',
@@ -69,6 +75,7 @@ export const speakWithPiperTool = buildTool({
   handler: async (args: {
     text: string
     task_tag?: string
+    role_id?: string
     model?: string
     speed?: number
     pitch?: number
@@ -84,26 +91,49 @@ export const speakWithPiperTool = buildTool({
       return formatToolError(`无效的任务标签: ${args.task_tag}。可选: chat, story, alert`)
     }
 
-    // 验证 model（如果指定）
+    // 验证 role_id
+    const ROLE_IDS = Object.keys(VOICE_ROLE_MAP)
+    if (args.role_id && !ROLE_IDS.includes(args.role_id)) {
+      return formatToolError(`无效的角色 ID: ${args.role_id}。可用角色: ${ROLE_IDS.join(', ')}`)
+    }
+
+    // 从角色 ID 解析模型参数
+    let resolvedModel = args.model
+    let resolvedSpeed = args.speed
+    let resolvedPitch = args.pitch
+    if (!resolvedModel && args.role_id) {
+      const role = VOICE_ROLE_MAP[args.role_id]
+      if (role) {
+        resolvedModel = role.piperModel
+        if (resolvedSpeed === undefined) resolvedSpeed = role.piperSpeed
+        if (resolvedPitch === undefined) resolvedPitch = role.piperPitch
+      }
+    }
+
+    // 验证 model
     const VALID_MODELS = Object.keys(PIPER_MODEL_CATALOG)
-    if (args.model && !VALID_MODELS.includes(args.model)) {
-      return formatToolError(`无效的模型名: ${args.model}。可选: ${VALID_MODELS.join(', ')}`)
+    if (resolvedModel && !VALID_MODELS.includes(resolvedModel)) {
+      return formatToolError(`无效的模型名: ${resolvedModel}。可选: ${VALID_MODELS.join(', ')}`)
     }
 
     // 验证参数范围
-    if (args.speed !== undefined && (args.speed < 0.5 || args.speed > 2.0)) {
-      return formatToolError(`语速超出范围: ${args.speed}。应在 0.5-2.0 之间。`)
+    if (resolvedSpeed !== undefined && (resolvedSpeed < 0.5 || resolvedSpeed > 2.0)) {
+      return formatToolError(`语速超出范围: ${resolvedSpeed}。应在 0.5-2.0 之间。`)
     }
-    if (args.pitch !== undefined && (args.pitch < 0.5 || args.pitch > 2.0)) {
-      return formatToolError(`音调超出范围: ${args.pitch}。应在 0.5-2.0 之间。`)
+    if (resolvedPitch !== undefined && (resolvedPitch < 0.5 || resolvedPitch > 2.0)) {
+      return formatToolError(`音调超出范围: ${resolvedPitch}。应在 0.5-2.0 之间。`)
     }
+
+    const roleName = args.role_id ? VOICE_ROLE_MAP[args.role_id]?.name || args.role_id : '(none)'
 
     log('INFO', 'piper_tool_request', {
       text_len: text.length,
       task_tag: args.task_tag || '(none)',
-      model: args.model || '(auto)',
-      speed: args.speed ?? '(model default)',
-      pitch: args.pitch ?? '(model default)',
+      role_id: args.role_id || '(none)',
+      role_name: roleName,
+      model: resolvedModel || '(auto)',
+      speed: resolvedSpeed ?? '(model default)',
+      pitch: resolvedPitch ?? '(model default)',
       text_preview: text.slice(0, 60),
       queue_size: piperOrchestrator.getQueueStatus().queueSize,
     })
@@ -112,9 +142,9 @@ export const speakWithPiperTool = buildTool({
     const result = await piperOrchestrator.synthesize({
       text,
       taskTag: args.task_tag as PiperTaskTag | undefined,
-      model: args.model,
-      speed: args.speed,
-      pitch: args.pitch,
+      model: resolvedModel,
+      speed: resolvedSpeed,
+      pitch: resolvedPitch,
     })
 
     if (!result.success) {
@@ -223,4 +253,102 @@ export const listPiperModelsTool = buildTool({
     return formatToolResult(lines.join('\n'))
   },
   isReadOnly: true,
+})
+
+// ══════════════════════════════════════════
+//  角色化语音引擎工具
+// ══════════════════════════════════════════
+
+export const listVoiceRolesTool = buildTool({
+  name: 'list_voice_roles',
+  description: '列出所有可用的语音角色及其 TTS 参数和 Piper 模型映射。语音角色是角色化多任务语音引擎的核心概念，每个角色绑定了一套完整的 TTS 参数（Edge-TTS + Piper）。',
+  inputJSONSchema: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  handler: async () => {
+    const roles = voiceRoleManager.getRoles()
+    const activeScheme = voiceRoleManager.getActiveScheme()
+
+    const roleLines = roles.map((r) => {
+      return `  - ${r.name} (${r.id})
+    ${r.description}
+    Edge-TTS: ${r.voice} | 语速 ${r.rate} | 音调 ${r.pitch}
+    Piper: ${r.piperModel} | 语速 ${r.piperSpeed}x | 音调 ${r.piperPitch}x
+    风格: ${r.voiceStyle}`
+    })
+
+    const schemeLines = [
+      '',
+      '当前方案:',
+      `  ${activeScheme.name} (${activeScheme.id})`,
+      '  任务映射:',
+      ...Object.entries(activeScheme.mappings).map(([task, roleId]) => {
+        const roleName = VOICE_ROLE_MAP[roleId]?.name || roleId
+        return `    ${task} → ${roleName}`
+      }),
+    ]
+
+    return formatToolResult([
+      `可用语音角色 (${roles.length} 个):`,
+      ...roleLines,
+      ...schemeLines,
+    ].join('\n'))
+  },
+  isReadOnly: true,
+})
+
+export const listVoiceSchemesTool = buildTool({
+  name: 'list_voice_schemes',
+  description: '列出所有可用的角色方案及其任务映射。角色方案将不同任务类型映射到不同的语音角色，实现多任务语音区分。',
+  inputJSONSchema: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  handler: async () => {
+    const schemes = voiceRoleManager.getSchemes()
+    const activeId = voiceRoleManager.getActiveScheme().id
+
+    const lines = schemes.map((s) => {
+      const marker = s.id === activeId ? ' ★ 当前' : ''
+      const mappingLines = Object.entries(s.mappings).map(([task, roleId]) => {
+        const roleName = VOICE_ROLE_MAP[roleId]?.name || roleId || '(未设置)'
+        return `    ${task} → ${roleName}`
+      })
+      return `- ${s.name} (${s.id})${marker}
+  ${s.description}
+  映射:
+${mappingLines.join('\n')}`
+    })
+
+    return formatToolResult(
+      `可用角色方案 (${schemes.length} 个):\n\n${lines.join('\n\n')}\n\n使用 set_voice_scheme 切换方案。`,
+    )
+  },
+  isReadOnly: true,
+})
+
+export const setVoiceSchemeTool = buildTool({
+  name: 'set_voice_scheme',
+  description: '切换当前角色方案。方案切换后，Agent 在不同任务场景下的语音角色将自动更新。切换时会预加载新方案涉及的 Piper 模型以减少延迟。',
+  inputJSONSchema: {
+    type: 'object',
+    properties: {
+      scheme_id: {
+        type: 'string',
+        description: '要切换到的方案 ID。可选: default（默认方案）, geek（极客方案）, gentle（柔和方案）。使用 list_voice_schemes 查看所有方案详情。',
+      },
+    },
+    required: ['scheme_id'],
+  },
+  handler: async (args: { scheme_id: string }) => {
+    const result = await voiceRoleManager.setActiveScheme(args.scheme_id)
+    if (!result.success) {
+      return formatToolError(result.message)
+    }
+    return formatToolResult(result.message)
+  },
+  isReadOnly: false,
 })

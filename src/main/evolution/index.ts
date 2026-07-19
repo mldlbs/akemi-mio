@@ -185,6 +185,22 @@ export { DEFAULT_EVOLUTION_PIPER_BRIDGE_CONFIG } from './piper'
 export type { MemoryEvolutionBridge, EvolutionMemoryContext, MemoryEvolutionResult } from '../memory/MemoryEvolutionBridge'
 export { memoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
 
+// ═══════════════════════════════════════════
+//  CI/CD Orchestrator — Evolution × MCP 工具桥接
+// ═══════════════════════════════════════════
+//
+// CicdOrchestrator 将 Evolution 计划执行与 MCP CI/CD 工具集桥接。
+// PlanStepMapper 自动将计划步骤描述映射到对应 CI/CD 工具调用。
+// CicdCollector 作为 Pipeline 采集器定期执行 CI/CD 检查。
+//
+// 使用方式：
+//   1. CicdOrchestrator 注入 EvolutionExecutor 作为可选的执行后端
+//   2. 计划步骤含 "typecheck"、"lint"、"test" 等关键词时自动映射
+//   3. 结果反馈给 Evolution 系统决定回滚或继续
+
+export { CicdOrchestrator, CicdCollector, PlanStepMapper, planStepMapper } from './cicd'
+export type { CicdAction, CicdStepResult, CicdCycleReport, CicdOrchestratorConfig, StepMapping } from './cicd/types'
+
 export const planManager = new DrizzlePlanManager()
 export let evolutionService: SelfEvolutionService | null = null
 

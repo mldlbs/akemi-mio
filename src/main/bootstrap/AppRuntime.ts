@@ -22,8 +22,10 @@ import { AsrService } from '../asr/AsrService'
 import { asrEvolutionManager } from '../asr/AsrEvolutionManager'
 import { TtsService } from '../tts/TtsService'
 import { ttsTypographyFeedbackLoop } from '../tts/TtsTypographyFeedbackLoop'
+import { voiceRoleManager } from '../tts/VoiceRoleManager'
 import { AgentService } from '../agent/AgentService'
 import { MemoryService } from '../memory/MemoryService'
+import { VoiceBookmarkService } from '../memory/VoiceBookmarkService'
 import { memoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
 import { memoryTtsBridge } from '../tts/MemoryTtsBridge'
 import { registerHandlers, createServiceRef } from '../ipc/handlers'
@@ -46,7 +48,7 @@ import { PluginLoader, toolRegistry } from '../plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '../skill'
 import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
 import { setupStartupLogging, createWindow, setupWallpaperListener, getMainWindow } from '../core/Lifecycle'
-import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle, setUserContextOverride, setOrganizerPause, setOrganizerResume, setOrganizerSkip } from '../core/TrayManager'
+import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle, setUserContextOverride, setOrganizerPause, setOrganizerResume, setOrganizerSkip, setSubtitleToggle, setVoiceRoleSchemeSwitch } from '../core/TrayManager'
 import { initUpdater, setUpdateWindow } from '../updater/UpdaterService'
 import { EvolutionDashboardService, MemoryContextService, FileOrganizerProgressService } from '../wallpaper/WallpaperService'
 import { MonitoringService } from '../monitoring/MonitoringService'
@@ -145,6 +147,8 @@ export class AppRuntime {
   private metricsProjection?: import('../core/evaluation/GuardrailMetricsProjection').GuardrailMetricsProjection
   private metricsQueryRef: ServiceRef<import('../core/evaluation/GuardrailMetricsQueryService').GuardrailMetricsQueryService> =
     createServiceRef()
+  private voiceBookmarkRef: ServiceRef<VoiceBookmarkService> = createServiceRef<VoiceBookmarkService>()
+  private voiceBookmarkService?: VoiceBookmarkService
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
     this.crashGuard = crashGuard ?? { flushMemory: null }
@@ -326,6 +330,19 @@ export class AppRuntime {
       }
     })
     initTray(() => getMainWindow())
+
+    // ── 角色化语音引擎初始化 ──
+    // 初始化 VoiceRoleManager，预加载当前方案涉及的 Piper 模型。
+    // 注册托盘角色方案切换回调。
+    voiceRoleManager.initialize().catch((err) => {
+      log('WARN', 'voice_role_manager_init_failed', { error: String(err) })
+    })
+    setVoiceRoleSchemeSwitch((schemeId: string) => {
+      voiceRoleManager.setActiveScheme(schemeId).catch((err) => {
+        log('WARN', 'voice_role_scheme_switch_failed', { error: String(err) })
+      })
+    })
+
     const uiBridge = new UIBridge()
     uiBridge.bind(win)
     log('PERF', 'startup_stage', { stage: 'window_created', ms: Date.now() - t0, total: Date.now() - startMs })
@@ -486,6 +503,7 @@ export class AppRuntime {
       decisionQueryRef,
       this.metricsQueryRef,
       this.organizerRef,
+      this.voiceBookmarkRef,
     )
 
     // === Stage 3: 核心服务（内存、插件、技能） ===
@@ -509,6 +527,55 @@ export class AppRuntime {
     setMemoryService(memoryService)
     setPlanManager(planManager)
     setToolSkillManager(skillManager)
+
+    // ── 语音记忆书签服务 ──
+    const voiceBookmarkSvc = new VoiceBookmarkService()
+    voiceBookmarkSvc.setMemoryService(memoryService)
+    voiceBookmarkSvc.setSynthesizeFn(async (text: string, outputPath: string): Promise<boolean> => {
+      try {
+        // 通过 TtsPiperBridge 使用 PiperTTS 合成语音
+        // 若有 Piper 不可用，回退到 edge-tts
+        const { ttsPiperBridge } = await import('../tts/TtsPiperBridge')
+        const result = await ttsPiperBridge.synthesizeWithPiper(text, {
+          voice: 'zh-CN-XiaoxiaoNeural',
+          rate: '+10%',
+          pitch: '+8Hz',
+          label: '书签语音',
+        })
+        if (result.success && result.audioFile) {
+          const { promises: fsp } = await import('fs')
+          await fsp.copyFile(result.audioFile, outputPath)
+          // 清理源临时文件
+          fsp.unlink(result.audioFile).catch(() => {})
+          return true
+        }
+        return false
+      } catch {
+        // Piper 不可用，尝试 edge-tts
+        try {
+          const { execFile } = await import('child_process')
+          await new Promise<void>((resolve, reject) => {
+            execFile(
+              'edge-tts',
+              ['--voice', 'zh-CN-XiaoxiaoNeural', '--text', text, '--write-media', outputPath],
+              { timeout: 30000, windowsHide: true },
+              (err, _stdout, stderr) => {
+                if (err) reject(new Error(stderr || String(err)))
+                else resolve()
+              },
+            )
+          })
+          return true
+        } catch (err) {
+          log('ERROR', 'voice_bookmark_tts_fallback_failed', { error: String(err) })
+          return false
+        }
+      }
+    })
+    await voiceBookmarkSvc.init()
+    this.voiceBookmarkService = voiceBookmarkSvc
+    this.voiceBookmarkRef.current = voiceBookmarkSvc
+    log('INFO', 'voice_bookmark_service_ready')
 
     // ── Plan:工业颂歌 公众号排版处理 上层增强层（由 GONGYE_SONGE_FEATURES 控制）──
     try {
@@ -574,6 +641,15 @@ export class AppRuntime {
       })
     } catch (err) {
       log('WARN', 'blog_memory_recorder_init_failed', { error: String(err) })
+    }
+
+    // ── Experience Memory Service：经验记忆工作流引擎 ──
+    try {
+      const { initExperienceMemoryService } = await import('../memory/plan-memory-blog')
+      initExperienceMemoryService()
+      log('INFO', 'experience_memory_service_initialized')
+    } catch (err) {
+      log('WARN', 'experience_memory_service_init_failed', { error: String(err) })
     }
 
     // ── Plan:清理工作区 - 整理文件目录 上层增强层（由 WORKSPACE_CLEANUP_FEATURES 控制）──
@@ -1318,6 +1394,18 @@ export class AppRuntime {
         evolution.setPipeline(pipeline)
         // Memory × Evolution 深度融合：注入桥接器
         evolution.setMemoryBridge(memoryEvolutionBridge)
+
+        // ★ CI/CD Orchestrator 初始化：加载 MCP CI/CD 工具集
+        const { CicdOrchestrator } = await import('../evolution/cicd')
+        const cicdOrchestrator = new CicdOrchestrator({
+          runQualityGateBeforeSteps: false,
+          autoDeployOnSuccess: false,
+          maxParallelChecks: 4,
+        })
+        await cicdOrchestrator.init()
+        evolution.setCicdOrchestrator(cicdOrchestrator)
+        log('INFO', 'cicd_orchestrator_initialized', { toolsLoaded: cicdOrchestrator.isReady() })
+
         this.pipeline = pipeline
         evolution.scheduleEvolution(2)
         if (evolutionRef) evolutionRef.current = evolution
@@ -1612,6 +1700,18 @@ export class AppRuntime {
         setOrganizerSkip(() => organizer.skipCurrent())
         log('INFO', 'organizer_progress_service_started')
       },
+    })
+
+    // ── 语音字幕托盘切换 ──
+    setSubtitleToggle(() => {
+      const current = credentialsManager.get('tts_subtitle_enabled')
+      const newState = current === 'false' ? 'true' : 'false'
+      credentialsManager.set('tts_subtitle_enabled', newState)
+      const win = getMainWindow()
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('tts:subtitle:toggle', { enabled: newState === 'true' })
+      }
+      log('INFO', 'tts_subtitle_toggled', { enabled: newState })
     })
 
     // 桌面记忆浮窗 — 定期从 Memory 获取高关联记忆推送到桌面 overlay

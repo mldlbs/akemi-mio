@@ -34,11 +34,12 @@ import type { PlanManagerLike } from './types'
 import type { ISubsystem, HealthCheckResult, SubsystemState } from '../core/lifecycle/types'
 import type { PipelineOrchestrator, PipelineMetrics } from './automation'
 import type { UserBehaviorLayer } from '../user-behavior/UserBehaviorLayer'
-import type { PreProcessContext, PostProcessContext, PostProcessResult } from '../user-behavior/types'
+import type { PreProcessContext, PostProcessContext, PostProcessResult, DegradationSignal } from '../user-behavior/types'
 import { createMessageId } from '../db/messages'
 import { getMainWindow } from '../core/Lifecycle'
 import { evolutionCheckpointManager } from './EvolutionCheckpointManager'
 import type { MemoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
+import type { CicdOrchestrator } from './cicd/CicdOrchestrator'
 
 // =============================================================================
 // 调度状态机状态枚举
@@ -116,6 +117,9 @@ export class SelfEvolutionService implements ISubsystem {
 
   // ==================== Memory × Evolution 深度融合桥接器 ====================
   private memoryBridge: MemoryEvolutionBridge | null = null
+
+  // ==================== CI/CD Orchestrator ====================
+  private cicdOrchestrator: CicdOrchestrator | null = null
 
   // ==================== 状态持久化 ====================
   private stateFilePath: string
@@ -197,6 +201,19 @@ export class SelfEvolutionService implements ISubsystem {
   /** 获取当前桥接器（供外部只读访问） */
   getMemoryBridge(): MemoryEvolutionBridge | null {
     return this.memoryBridge
+  }
+
+  /** 注入 CI/CD Orchestrator */
+  setCicdOrchestrator(orchestrator: CicdOrchestrator | null): void {
+    this.cicdOrchestrator = orchestrator
+    if (orchestrator) {
+      log('INFO', 'evolution_cicd_orchestrator_attached')
+    }
+  }
+
+  /** 获取当前 CI/CD Orchestrator（供外部只读访问） */
+  getCicdOrchestrator(): CicdOrchestrator | null {
+    return this.cicdOrchestrator
   }
 
   /** 获取最近一次 UserBehavior 后处理结果 */
@@ -555,6 +572,48 @@ export class SelfEvolutionService implements ISubsystem {
         }
       }
 
+      // ★ 质量指标追踪：在每个周期开始前读取降级信号
+      //   captureQualityMetrics() 会记录新的快照，供此周期消费
+      let qualityDegradationSignals: DegradationSignal[] = []
+      let qualityHealthScore: number | null = null
+      let qualityHealthDelta: number | null = null
+      if (this.userBehaviorLayer) {
+        try {
+          const qmResult = this.userBehaviorLayer.captureQualityMetrics()
+          if (qmResult) {
+            qualityDegradationSignals = qmResult.signals
+            qualityHealthScore = qmResult.snapshot?.healthScore ?? null
+            qualityHealthDelta = qmResult.snapshot?.healthScoreDelta ?? null
+            if (preProcessData) {
+              preProcessData = {
+                ...preProcessData,
+                qualityMetrics: {
+                  healthScore: qualityHealthScore,
+                  healthScoreDelta: qualityHealthDelta,
+                  degradationSignals: qualityDegradationSignals.map((s) => ({
+                    metric: s.metricName,
+                    severity: s.severity,
+                    description: s.description,
+                    target: s.recommendedTarget,
+                  })),
+                  isDegraded: qualityDegradationSignals.length > 0,
+                },
+              }
+            }
+            if (qualityDegradationSignals.length > 0) {
+              log('INFO', 'evolution_quality_degradation_detected', {
+                signals: qualityDegradationSignals.length,
+                healthScore: qualityHealthScore,
+                delta: qualityHealthDelta,
+                topSignal: qualityDegradationSignals[0]?.description?.slice(0, 80),
+              })
+            }
+          }
+        } catch (err: any) {
+          log('WARN', 'evolution_quality_metrics_error', { error: err.message })
+        }
+      }
+
       try {
         // ★ 检查点体系：在每个关键阶段创建 git 快照 + 数据库记录，
         //   确保进程中断后能恢复现场或回滚。
@@ -584,6 +643,35 @@ export class SelfEvolutionService implements ISubsystem {
 
           summary = this.buildPipelineSummary(metrics)
           success = true
+
+          // ★ CI/CD 质量门禁：在每次进化周期中运行综合质量检查
+          if (this.cicdOrchestrator && this.cicdOrchestrator.isReady()) {
+            log('INFO', 'evolution_cicd_quality_gate_start')
+            try {
+              const gateResult = await this.cicdOrchestrator.executeStep('[quality_gate] 进化周期质量门禁')
+              if (gateResult.passed) {
+                summary += `\n\n【CI/CD 质量门禁】✅ 通过（${gateResult.durationMs}ms）`
+                log('INFO', 'evolution_cicd_gate_passed', { durationMs: gateResult.durationMs })
+              } else {
+                summary += `\n\n【CI/CD 质量门禁】⚠️ ${gateResult.summary}（${gateResult.durationMs}ms）`
+                log('WARN', 'evolution_cicd_gate_failed', { summary: gateResult.summary.slice(0, 100) })
+              }
+            } catch (err: any) {
+              log('WARN', 'evolution_cicd_gate_error', { error: err.message })
+              summary += `\n\n【CI/CD 质量门禁】❌ 执行异常: ${err.message}`
+            }
+          }
+
+          // 附加质量指标降级信息
+          if (qualityDegradationSignals.length > 0) {
+            const degradationLines = qualityDegradationSignals
+              .slice(0, 3)
+              .map((s, i) => `  ${i + 1}. ${s.description}（严重度: ${Math.round(s.severity * 100)}%）`)
+              .join('\n')
+            summary +=
+              `\n\n【质量指标降级信号】检测到 ${qualityDegradationSignals.length} 个指标劣化：\n${degradationLines}` +
+              (qualityHealthScore !== null ? `\n当前健康评分: ${qualityHealthScore.toFixed(0)}/100（${qualityHealthDelta !== null && qualityHealthDelta < 0 ? '↓' : '↑'}${qualityHealthDelta !== null ? Math.abs(qualityHealthDelta).toFixed(1) : ''}）` : '')
+          }
 
           log('INFO', 'evolution_pipeline_report', {
             collected: metrics.totalCollected,

@@ -13,6 +13,17 @@ let organizerPauseCb: (() => void) | null = null
 let organizerResumeCb: (() => void) | null = null
 let organizerSkipCb: (() => void) | null = null
 
+/** 语音字幕切换回调 */
+let subtitleToggleCb: (() => void) | null = null
+
+// ── 角色方案切换 ──
+let voiceRoleSchemeCb: ((schemeId: string) => void) | null = null
+
+/** 注册角色方案切换回调（由 AppRuntime 在 VoiceRoleManager 就绪后调用） */
+export function setVoiceRoleSchemeSwitch(cb: (schemeId: string) => void): void {
+  voiceRoleSchemeCb = cb
+}
+
 /** 注册仪表盘切换回调（由 AppRuntime 在仪表盘服务就绪后调用） */
 export function setDashboardToggle(cb: () => void): void {
   dashboardToggleCb = cb
@@ -41,6 +52,11 @@ export function setOrganizerResume(cb: () => void): void {
 /** 注册文件整理跳过当前文件回调 */
 export function setOrganizerSkip(cb: () => void): void {
   organizerSkipCb = cb
+}
+
+/** 注册语音字幕切换回调 */
+export function setSubtitleToggle(cb: () => void): void {
+  subtitleToggleCb = cb
 }
 
 export function initTray(mainWindow: () => BrowserWindow | null): void {
@@ -92,6 +108,13 @@ export function initTray(mainWindow: () => BrowserWindow | null): void {
       },
       { type: 'separator' },
       {
+        label: '切换语音字幕',
+        click: () => {
+          subtitleToggleCb?.()
+        },
+      },
+      { type: 'separator' },
+      {
         label: '语音模式：自动/手动',
         click: () => {
           contextualTtsToggleCb?.()
@@ -115,6 +138,24 @@ export function initTray(mainWindow: () => BrowserWindow | null): void {
           {
             label: '休息模式',
             click: () => userContextOverrideCb?.('manual_rest'),
+          },
+        ],
+      },
+      { type: 'separator' },
+      {
+        label: '角色方案',
+        submenu: [
+          {
+            label: '默认方案',
+            click: () => voiceRoleSchemeCb?.('default'),
+          },
+          {
+            label: '极客方案',
+            click: () => voiceRoleSchemeCb?.('geek'),
+          },
+          {
+            label: '柔和方案',
+            click: () => voiceRoleSchemeCb?.('gentle'),
           },
         ],
       },

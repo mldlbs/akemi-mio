@@ -31,6 +31,8 @@ import type { GuardrailMetricsQueryService } from '../core/evaluation/GuardrailM
 import { typographyVerificationService } from '../typing/TypographyVerificationService'
 import { quickTaskService } from '../behavior/QuickTaskService'
 import type { QuickTaskStep } from '../behavior/QuickTaskTypes'
+import { voiceRoleManager } from '../tts/VoiceRoleManager'
+import type { VoiceBookmarkService } from '../memory/VoiceBookmarkService'
 
 /** 打开的沙盒窗口表，防止重复打开 */
 const sandboxWindows = new Map<string, BrowserWindow>()
@@ -91,6 +93,7 @@ export function registerHandlers(
   decisionQueryRef?: ServiceRef<DecisionQueryService>,
   metricsQueryRef?: ServiceRef<GuardrailMetricsQueryService>,
   organizerRef?: ServiceRef<FileOrganizerProgressService>,
+  voiceBookmarkRef?: ServiceRef<VoiceBookmarkService>,
 ): void {
   ipcMain.handle('window:close', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -522,6 +525,29 @@ export function registerHandlers(
       log('ERROR', 'tts_engine_preference_get_failed', { error: String(err) })
       return { success: false }
     }
+  })
+
+  // ── TTS 语音字幕 IPC ──
+
+  // 注册字幕回调：TTS 合成时推送字幕到所有窗口
+  ttsService.setSubtitleCallback((data) => {
+    const wins = BrowserWindow.getAllWindows()
+    for (const win of wins) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('tts:subtitle', data)
+      }
+    }
+  })
+
+  ipcMain.handle('tts:subtitle:getEnabled', async () => {
+    const enabled = credentialsManager.get('tts_subtitle_enabled')
+    return { enabled: enabled !== 'false' }
+  })
+
+  ipcMain.handle('tts:subtitle:setEnabled', async (_event, enabled: boolean) => {
+    credentialsManager.set('tts_subtitle_enabled', enabled ? 'true' : 'false')
+    log('INFO', 'tts_subtitle_enabled', { enabled })
+    return { success: true, enabled }
   })
 
   ipcMain.handle('tts:router-state', async () => {
@@ -1604,6 +1630,178 @@ export function registerHandlers(
       return { success: false, error: String(err) }
     }
   })
+
+  // ══════════════════════════════════════════
+  //  角色化语音引擎 IPC
+  // ══════════════════════════════════════════
+
+  ipcMain.handle('voice:role:schemes', async () => {
+    try {
+      const schemes = voiceRoleManager.getSchemes()
+      const active = voiceRoleManager.getActiveScheme()
+      return { success: true, schemes, activeSchemeId: active.id }
+    } catch (err) {
+      log('ERROR', 'voice_role_schemes_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('voice:role:setScheme', async (_event, schemeId: string) => {
+    try {
+      const result = await voiceRoleManager.setActiveScheme(schemeId)
+      return result
+    } catch (err) {
+      log('ERROR', 'voice_role_set_scheme_failed', { error: String(err) })
+      return { success: false, message: String(err) }
+    }
+  })
+
+  ipcMain.handle('voice:role:activeScheme', async () => {
+    try {
+      const active = voiceRoleManager.getActiveScheme()
+      return { success: true, scheme: active }
+    } catch (err) {
+      log('ERROR', 'voice_role_active_scheme_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('voice:role:roles', async () => {
+    try {
+      const roles = voiceRoleManager.getRoles()
+      return { success: true, roles }
+    } catch (err) {
+      log('ERROR', 'voice_role_roles_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('voice:role:forTask', async (_event, taskType: string) => {
+    try {
+      const role = voiceRoleManager.getRoleForTask(taskType as any)
+      const params = voiceRoleManager.getTtsParamsForTask(taskType as any)
+      return { success: true, role, params }
+    } catch (err) {
+      log('ERROR', 'voice_role_for_task_failed', { error: String(err) })
+      return { success: false }
+    }
+  })
+
+  // ══════════════════════════════════════════
+  //  语音记忆书签 (Voice Bookmark)
+  // ══════════════════════════════════════════
+
+  // VoiceBookmarkService 是全局单例，通过 voiceBookmarkServiceRef 访问
+  // 在 AppRuntime 中初始化后注入
+  if (voiceBookmarkRef) {
+    ipcMain.handle('voice-bookmark:create', async (_event, summary: string, conversationContext: any[], options?: any) => {
+      try {
+        const svc = voiceBookmarkRef.current
+        if (!svc) return { success: false, error: 'VoiceBookmarkService not initialized' }
+        const bookmark = await svc.createBookmark(summary, conversationContext, options)
+        if (!bookmark) return { success: false, error: '创建书签失败' }
+        return {
+          success: true,
+          bookmark: {
+            id: bookmark.id,
+            summary: bookmark.summary,
+            audioPath: bookmark.audioPath,
+            tags: bookmark.tags,
+            bookmarkedAt: bookmark.bookmarkedAt,
+          },
+        }
+      } catch (err: any) {
+        log('ERROR', 'voice_bookmark_create_failed', { error: String(err) })
+        return { success: false, error: String(err) }
+      }
+    })
+
+    ipcMain.handle('voice-bookmark:list', async (_event, limit?: number, offset?: number) => {
+      try {
+        const svc = voiceBookmarkRef.current
+        if (!svc) return { success: false, bookmarks: [], error: 'VoiceBookmarkService not initialized' }
+        const bookmarks = svc.listBookmarks(limit, offset)
+        return { success: true, bookmarks }
+      } catch (err: any) {
+        log('ERROR', 'voice_bookmark_list_failed', { error: String(err) })
+        return { success: false, bookmarks: [], error: String(err) }
+      }
+    })
+
+    ipcMain.handle('voice-bookmark:search', async (_event, query: string) => {
+      try {
+        const svc = voiceBookmarkRef.current
+        if (!svc) return { success: false, bookmarks: [], error: 'VoiceBookmarkService not initialized' }
+        const bookmarks = svc.searchBookmarks(query)
+        return { success: true, bookmarks }
+      } catch (err: any) {
+        log('ERROR', 'voice_bookmark_search_failed', { error: String(err) })
+        return { success: false, bookmarks: [], error: String(err) }
+      }
+    })
+
+    ipcMain.handle('voice-bookmark:get', async (_event, id: string) => {
+      try {
+        const svc = voiceBookmarkRef.current
+        if (!svc) return { success: false, error: 'VoiceBookmarkService not initialized' }
+        const bookmark = svc.getBookmark(id)
+        if (!bookmark) return { success: false, error: '书签未找到' }
+        return { success: true, bookmark }
+      } catch (err: any) {
+        log('ERROR', 'voice_bookmark_get_failed', { error: String(err) })
+        return { success: false, error: String(err) }
+      }
+    })
+
+    ipcMain.handle('voice-bookmark:delete', async (_event, id: string) => {
+      try {
+        const svc = voiceBookmarkRef.current
+        if (!svc) return { success: false, error: 'VoiceBookmarkService not initialized' }
+        const deleted = await svc.deleteBookmark(id)
+        return { success: deleted, error: deleted ? undefined : '删除失败或书签未找到' }
+      } catch (err: any) {
+        log('ERROR', 'voice_bookmark_delete_failed', { error: String(err) })
+        return { success: false, error: String(err) }
+      }
+    })
+
+    ipcMain.handle('voice-bookmark:audioPath', async (_event, id: string) => {
+      try {
+        const svc = voiceBookmarkRef.current
+        if (!svc) return { success: false, error: 'VoiceBookmarkService not initialized' }
+        const audioPath = svc.getAudioPath(id)
+        if (!audioPath) return { success: false, error: '音频文件未找到' }
+        return { success: true, audioPath }
+      } catch (err: any) {
+        log('ERROR', 'voice_bookmark_audiopath_failed', { error: String(err) })
+        return { success: false, error: String(err) }
+      }
+    })
+
+    ipcMain.handle('voice-bookmark:toggleFavorite', async (_event, id: string) => {
+      try {
+        const svc = voiceBookmarkRef.current
+        if (!svc) return { success: false, error: 'VoiceBookmarkService not initialized' }
+        const toggled = svc.toggleFavorite(id)
+        return { success: toggled, isFavorite: toggled ? svc.getBookmark(id)?.isFavorite : undefined }
+      } catch (err: any) {
+        log('ERROR', 'voice_bookmark_toggle_favorite_failed', { error: String(err) })
+        return { success: false, error: String(err) }
+      }
+    })
+
+    ipcMain.handle('voice-bookmark:favorites', async () => {
+      try {
+        const svc = voiceBookmarkRef.current
+        if (!svc) return { success: false, bookmarks: [], error: 'VoiceBookmarkService not initialized' }
+        const bookmarks = svc.getFavorites()
+        return { success: true, bookmarks }
+      } catch (err: any) {
+        log('ERROR', 'voice_bookmark_favorites_failed', { error: String(err) })
+        return { success: false, bookmarks: [], error: String(err) }
+      }
+    })
+  }
 }
 
 function emptyMetricsSummary(): any {

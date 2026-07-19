@@ -1,0 +1,183 @@
+[
+  {
+    "id": "preset_blog_workflow",
+    "name": "博客智能协作工作流",
+    "description": "与 BlogAgent 协作完成博客写作。集成 UserBehavior 模块，利用最近36次交互数据动态调整内容风格和发布策略。",
+    "inputSchema": "主题: string, 目标平台: string",
+    "enabled": true,
+    "trigger": { "type": "manual" },
+    "maxConcurrency": 1,
+    "tags": ["blog", "content", "writing", "behavior-driven"],
+    "steps": [
+      {
+        "id": "s0_behavior",
+        "name": "行为分析",
+        "description": "调用 UserBehavior 接口获取用户行为摘要，分析高频话题、阅读偏好、活跃时段，为后续步骤提供个性化依据",
+        "handler": "script",
+        "config": {
+          "script": {
+            "code": "const summary = services.behaviorBlogBridge.getBehaviorSummary(); return summary;"
+          }
+        },
+        "dependsOn": [],
+        "outputSchema": {
+          "hasSufficientData": { "type": "boolean" },
+          "totalInteractions": { "type": "number" },
+          "highFrequencyTopics": { "type": "array" },
+          "avgMessageLength": { "type": "number" },
+          "sceneLabel": { "type": "string" },
+          "formattedSummary": { "type": "string" }
+        }
+      },
+      {
+        "id": "s1_intent",
+        "name": "主题与意图分析",
+        "description": "分析用户需求，结合行为摘要数据，确认博客主题、目标平台、受众和风格。输出结构化分析供用户审核",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 12,
+          "prompt": "## 任务：博客主题与意图分析\n\n你现在是 BlogAgent — 专注于博客写作的智能协作助手。\n\n### 输入\n用户主题/需求：{{input}}\n\n### == 行为感知上下文 ==\n{{steps.s0_behavior.result.formattedSummary | 暂无行为数据}}\n\n根据以上行为摘要，注意以下个性化调整：\n- 如果存在高频话题，优先围绕这些话题组织内容角度\n- 根据用户的平均消息长度调整内容深度（长消息偏好→详细技术分析，短消息偏好→简洁实用）\n- 根据交互场景调整语气（调试场景→实用导向，创作场景→表达导向）\n\n### 分析要求\n\n1. **主题理解**：解析用户想要写的博客主题，判断是技术博客、经验分享、产品介绍还是个人随笔\n2. **目标平台判断**：根据主题和用户上下文判断最佳平台（博客园/CSDN/知乎/公众号/掘金/个人博客等）\n3. **受众分析**：分析目标读者群体及其阅读动机（入门者/进阶者/同行/潜在客户）\n4. **风格建议**：输出推荐的写作风格（教程式/故事式/论证式/清单式/深度分析）\n5. **预期篇幅**：推荐的文章长度范围\n6. **行为对齐**：参考行为摘要中的话题偏好和交互特征，调整内容角度\n\n### 输出格式（严格 JSON）\n\n```json\n{\n  \"topic\": \"主题名称\",\n  \"topicType\": \"技术博客|经验分享|产品介绍|个人随笔\",\n  \"platform\": \"推荐平台\",\n  \"platformReason\": \"推荐该平台的原因\",\n  \"audience\": {\n    \"type\": \"读者类型\",\n    \"motivation\": \"读者为什么读这篇文章\",\n    \"knowledgeLevel\": \"入门|进阶|专家\"\n  },\n  \"style\": \"推荐风格\",\n  \"estimatedLength\": {\n    \"min\": 字数下限,\n    \"max\": 字数上限\n  },\n  \"keyPoints\": [\"核心要点1\", \"核心要点2\", \"核心要点3\"],\n  \"behaviorNotes\": \"基于行为摘要的内容角度调整说明\",\n  \"questions\": [\"需要向用户确认的问题1\", \"需要向用户确认的问题2\"]\n}\n```\n\n### 注意\n- 如果有可用的趋势数据，参考近期热门主题\n- 如果用户已明确指定平台和风格，直接使用用户的设定\n- 分析完成后，在 questions 中列出需要用户确认的选项\n- 行为摘要只是参考，用户明确要求优先于行为推断"
+        },
+        "dependsOn": ["s0_behavior"],
+        "outputSchema": {
+          "topic": { "type": "string" },
+          "topicType": { "type": "string" },
+          "platform": { "type": "string" },
+          "audience": { "type": "object" },
+          "style": { "type": "string" },
+          "keyPoints": { "type": "array" },
+          "behaviorNotes": { "type": "string" },
+          "questions": { "type": "array" }
+        }
+      },
+      {
+        "id": "s1_gate",
+        "name": "意图确认",
+        "description": "向用户展示意图分析结果（含行为适配建议），由用户确认或调整后继续",
+        "handler": "gate",
+        "config": {
+          "message": "我已分析完成（已参考你的行为偏好），以下是我的理解：\n\n**主题**：{{steps.s1_intent.result.topic}}\n**类型**：{{steps.s1_intent.result.topicType}}\n**推荐平台**：{{steps.s1_intent.result.platform}}\n**目标受众**：{{steps.s1_intent.result.audience.type}}\n**风格**：{{steps.s1_intent.result.style}}\n**行为适配说明**：{{steps.s1_intent.result.behaviorNotes | 无}}\n\n是否按此方向继续？你可以：\n- 输入「好」「继续」确认\n- 输入「改成XX」修改某个选项\n- 输入「跳过」跳过此确认",
+          "preview": "主题分析结果确认",
+          "options": ["继续", "修改主题", "修改平台", "重新分析"]
+        },
+        "dependsOn": ["s1_intent"]
+      },
+      {
+        "id": "s2_material",
+        "name": "素材收集",
+        "description": "根据主题和用户行为偏好收集相关资料、代码片段、案例、趋势数据等",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 15,
+          "allowedTools": ["read_file", "grep", "search_files_glob", "query_trends", "retrieve_memory", "search_memories", "store_memory"],
+          "prompt": "## 任务：博客素材收集\n\n你现在是 BlogAgent 的素材收集环节。请为博客主题收集相关资料。\n\n### 主题\n{{steps.s1_intent.result.topic}}\n\n### 行为偏好参考\n{{steps.s0_behavior.result.formattedSummary | 暂无行为数据}}\n\n### 素材收集要求\n\n1. **代码分析**：如果主题涉及代码/项目，分析相关源码，找出可展示的代码片段\n2. **趋势数据**：使用 query_trends 或 read_file 查看 observer 趋势数据\n3. **历史记忆**：使用 retrieve_memory / search_memories 查找相关经验\n4. **已有内容**：检查 evolution_workspace 下是否有相关草稿或笔记\n5. **话题对齐**：参考行为摘要中的高频话题，确保收集的素材覆盖用户感兴趣的方向\n\n### 输出格式（严格 JSON）\n\n```json\n{\n  \"codeSnippets\": [\n    {\n      \"title\": \"片段标题\",\n      \"code\": \"代码内容\",\n      \"explanation\": \"为什么这段代码值得展示\"\n    }\n  ],\n  \"referenceLinks\": [\"参考链接1\", \"参考链接2\"],\n  \"dataPoints\": [\n    {\"data\": \"数据/事实\", \"source\": \"来源\"}\n  ],\n  \"examples\": [\"可用的案例/例子1\", \"可用的案例/例子2\"],\n  \"existingDrafts\": [\"找到的已有草稿路径(如果有)\"],\n  \"materialSummary\": \"素材汇总说明\"\n}\n```"
+        },
+        "dependsOn": ["s1_gate"]
+      },
+      {
+        "id": "s3_outline",
+        "name": "文章大纲生成",
+        "description": "基于素材、主题和行为偏好生成文章大纲结构，供用户审核",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 10,
+          "prompt": "## 任务：生成博客大纲\n\n你现在是 BlogAgent 的规划环节。请根据主题分析和素材，生成文章大纲。\n\n### 主题\n{{steps.s1_intent.result.topic}}\n\n### 素材摘要\n{{steps.s2_material.result.materialSummary}}\n\n### 行为偏好参考\n{{steps.s0_behavior.result.formattedSummary}}\n\n### 大纲要求\n\n1. **标题方向**：提供 2-3 个标题候选\n2. **Hook 开头**：一段吸引人的开头（30-50字）\n3. **章节结构**：每个章节包含：\n   - 章节标题\n   - 核心主张（CoreClaim）\n   - 需要解释的原因（MustExplain）\n   - 预埋的代码/例子（Example）\n4. **CTA（行动号召）**：文章结尾的互动引导\n5. **行为对齐**：如果行为摘要显示用户偏好某类话题或风格，大纲中应侧重相关角度\n\n### 输出格式（严格 JSON）\n\n```json\n{\n  \"titleCandidates\": [\"标题1\", \"标题2\", \"标题3\"],\n  \"hook\": \"开头的吸引段落\",\n  \"sections\": [\n    {\n      \"title\": \"章节标题\",\n      \"coreClaim\": \"核心主张\",\n      \"mustExplain\": \"必须解释的原因\",\n      \"example\": \"预埋的例子/代码\"\n    }\n  ],\n  \"cta\": \"行动号召\",\n  \"estimatedReadingTime\": \"预计阅读时间(分钟)\"\n}\n```"
+        },
+        "dependsOn": ["s2_material"]
+      },
+      {
+        "id": "s3_gate",
+        "name": "大纲审核",
+        "description": "向用户展示大纲，由用户确认、修改或跳过",
+        "handler": "gate",
+        "config": {
+          "message": "以下是博客大纲，请审核：\n\n**标题候选**：{{steps.s3_outline.result.titleCandidates | 暂无}}\n**章节数**：{{steps.s3_outline.result.sections.length | 0}}\n\n请审阅大纲详情。你可以：\n- 输入「好」「继续」确认此大纲\n- 输入「修改XX」调整某部分\n- 输入「跳过大纲」直接写初稿\n- 输入「重来」重新生成",
+          "preview": "文章大纲预览",
+          "options": ["确认", "修改大纲", "跳过大纲", "重新生成"]
+        },
+        "dependsOn": ["s3_outline"]
+      },
+      {
+        "id": "s4_draft",
+        "name": "初稿生成",
+        "description": "根据大纲逐章节展开为完整的博客正文，融入行为偏好的角度",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 20,
+          "prompt": "## 任务：生成博客初稿\n\n你现在是 BlogAgent 的写作环节。请根据审核通过的大纲，展开完整正文。\n\n### 大纲\n{{steps.s3_outline.result}}\n\n### 素材\n{{steps.s2_material.result}}\n\n### 行为偏好参考\n{{steps.s0_behavior.result.formattedSummary}}\n\n### 写作要求\n\n1. 逐章节展开，每个章节 300-800 字\n2. 技术内容要准确，代码片段可直接运行\n3. 语言自然流畅，避免 AI 腔（不要「值得注意的是」「显而易见」等套话）\n4. 用具体例子代替抽象论述\n5. 保持一致性的人称和语气\n6. **行为对齐**：\n   - 如果行为摘要显示用户偏好技术深度，增加技术细节和性能数据\n   - 如果用户偏好简洁，控制篇幅避免冗长\n   - 如果用户处于调试/问题解决场景，侧重实用性和可操作性\n\n### 输出格式（严格 JSON）\n\n```json\n{\n  \"title\": \"最终标题\",\n  \"content\": \"完整正文内容（Markdown格式）\",\n  \"wordCount\": 字数,\n  \"sections\": [\"各章节标题列表\"],\n  \"codeBlocks\": [\"代码块语言标签列表\"],\n  \"draftQuality\": {\n    \"completeness\": 完整度评分0-1,\n    \"technicalAccuracy\": 技术准确性0-1,\n    \"readability\": 可读性0-1,\n    \"aiToneNotes\": \"需要去除AI腔的地方\"\n  }\n}\n```"
+        },
+        "dependsOn": ["s3_gate"]
+      },
+      {
+        "id": "s4_gate",
+        "name": "初稿审核",
+        "description": "向用户展示初稿，由用户审核、提出修改意见或批准",
+        "handler": "gate",
+        "config": {
+          "message": "初稿已生成！以下是初稿概览：\n\n**标题**：{{steps.s4_draft.result.title}}\n**字数**：{{steps.s4_draft.result.wordCount}}\n**完整度**：{{steps.s4_draft.result.draftQuality.completeness}}\n\n请审阅初稿。你可以：\n- 输入「继续」或具体修改意见进入润色环节\n- 输入「修改XX」指定需要修改的部分\n- 输入「跳过审核」直接进入下一步",
+          "preview": "初稿内容预览",
+          "options": ["继续润色", "需要修改", "跳过审核", "重新生成"]
+        },
+        "dependsOn": ["s4_draft"]
+      },
+      {
+        "id": "s5_polish",
+        "name": "终稿润色",
+        "description": "根据用户反馈进行润色，去除AI腔，优化表达，确保质量",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 15,
+          "prompt": "## 任务：终稿润色\n\n你现在是 BlogAgent 的润色环节。请根据用户反馈对初稿进行润色优化。\n\n### 初稿\n{{steps.s4_draft.result.content}}\n\n### 用户反馈\n{{steps.s4_gate.result}}\n\n### 行为偏好参考\n{{steps.s0_behavior.result.formattedSummary}}\n\n### 润色要求\n\n1. **去AI味**：消除以下特征——\n   - 「值得注意的是」「显而易见」「需要指出的是」等总结性过渡语\n   - 「非常」「极其」「十分」「突然」等空洞副词\n   - 「命运的齿轮」「在这个数字化时代」等套话\n   - 解释性旁白（让代码和例子自己说话）\n\n2. **语言优化**：\n   - 短句交替长句，控制阅读节奏\n   - 技术术语前后一致\n   - 代码格式规范\n\n3. **行为对齐**：根据用户平均消息长度调整内容冗余度（偏好简洁用户→删减不必要的解释）\n\n4. **如果用户有具体修改意见**，按要求优先处理\n\n### 输出格式（严格 JSON）\n\n```json\n{\n  \"title\": \"最终标题\",\n  \"content\": \"润色后的完整正文（Markdown格式）\",\n  \"wordCount\": 字数,\n  \"changes\": [\"修改点1\", \"修改点2\"],\n  \"qualityScore\": 质量评分0-1\n}\n```"
+        },
+        "dependsOn": ["s4_gate"]
+      },
+      {
+        "id": "s5_gate",
+        "name": "终稿确认",
+        "description": "展示润色后的终稿，由用户最终确认",
+        "handler": "gate",
+        "config": {
+          "message": "润色完成！终稿信息：\n\n**标题**：{{steps.s5_polish.result.title}}\n**字数**：{{steps.s5_polish.result.wordCount}}\n**质量评分**：{{steps.s5_polish.result.qualityScore}}\n\n请确认终稿。你可以：\n- 输入「通过」「好」确认完成\n- 输入「再改一下XX」继续修改\n- 输入「保存」直接保存到草稿目录",
+          "preview": "终稿预览",
+          "options": ["通过", "再修改", "保存到草稿"]
+        },
+        "dependsOn": ["s5_polish"]
+      },
+      {
+        "id": "s6_publish",
+        "name": "发布规划（行为驱动）",
+        "description": "规划发布平台、发布时间、标签等，利用行为数据分析最佳发布时段",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 10,
+          "prompt": "## 任务：博客发布规划\n\n你现在是 BlogAgent 的发布规划环节。请为完成的博客文章制定发布计划。\n\n### 完成信息\n\n**标题**：{{steps.s5_polish.result.title}}\n**目标平台**：{{steps.s1_intent.result.platform}}\n**字数**：{{steps.s5_polish.result.wordCount}}\n\n### == 行为驱动发布调度 ==\n\n根据行为分析，用户的活跃时间分布如下：\n{{steps.s0_behavior.result.formattedSummary}}\n\n推荐发布时间：\n{{steps.s0_behavior.result.publishRecommendation.reasoning}}\n\n请在发布计划中采纳以上推荐时间作为主要发布时段，以提高文章曝光和互动率。\n\n### 规划要求\n\n1. **平台适配**：根据目标平台适配格式\n   - 公众号：需要导语、分段、引用格式\n   - 知乎：需要更详细的前言和结论\n   - 博客园/CSDN：适合技术细节\n   - 掘金：适合简短精炼\n\n2. **标签推荐**：推荐 3-5 个 SEO 友好的标签（参考高频话题调整标签权重）\n3. **发布时间建议**：基于行为分析的用户活跃时间推荐（如上所示），设定具体发布时间\n4. **多平台分发**：如果需要多平台发布，规划适配方案\n5. **标签-话题对齐**：如果行为摘要显示高频话题，相关标签应排在前面\n\n### 输出格式（严格 JSON）\n\n```json\n{\n  \"platformPlan\": [\n    {\n      \"platform\": \"平台名\",\n      \"formatNotes\": \"格式适配说明\",\n      \"recommendedTime\": \"基于行为数据推荐的具体发布时间\",\n      \"tags\": [\"标签1\", \"标签2\"]\n    }\n  ],\n  \"seoKeywords\": [\"SEO关键词1\", \"SEO关键词2\"],\n  \"summary\": \"文章摘要（120字以内，用于SEO描述）\",\n  \"publishPriority\": \"首发平台优先顺序\",\n  \"behaviorBasedTiming\": \"行为驱动的时间选择说明\"\n}\n```"
+        },
+        "dependsOn": ["s5_gate"]
+      },
+      {
+        "id": "s6_gate",
+        "name": "发布确认（含行为推荐）",
+        "description": "展示发布计划（含行为驱动的时段推荐），由用户确认或调整",
+        "handler": "gate",
+        "config": {
+          "message": "发布计划已就绪！\n\n**首发平台**：{{steps.s6_publish.result.publishPriority}}\n**推荐标签**：{{steps.s6_publish.result.seoKeywords}}\n**推荐发布时间**：{{steps.s6_publish.result.behaviorBasedTiming | 见各平台计划}}\n\n发布计划已考虑了你的活跃习惯，建议在活跃时段发布以获取更多互动。\n\n请确认最终发布计划。你可以：\n- 输入「好」「完成」结束工作流\n- 输入「调整」修改发布计划\n- 输入「保存」将文章保存到本地",
+          "preview": "发布计划预览（含行为驱动时间推荐）",
+          "options": ["完成", "调整发布计划", "仅保存到草稿"]
+        },
+        "dependsOn": ["s6_publish"]
+      },
+      {
+        "id": "s7_tracking",
+        "name": "效果追踪登记",
+        "description": "记录本次博客写作的效果数据，回写入 UserBehavior 形成闭环",
+        "handler": "script",
+        "config": {
+          "script": {
+            "code": "const result = ctx.steps.s6_gate ? ctx.steps.s6_gate.result : null; const decision = result ? (typeof result === 'string' ? result : result.decision || '') : ''; const summary = ctx.steps.s0_behavior ? ctx.steps.s0_behavior.result : null; return { tracked: true, topic: ctx.steps.s1_intent?.result?.topic || 'unknown', platform: ctx.steps.s1_intent?.result?.platform || 'unknown', publishRecommendation: summary?.publishRecommendation || null, userDecision: decision, recordedAt: Date.now(), message: '效果追踪已登记，后续可通过 BehaviorBlogBridge 查询' };"
+          }
+        },
+        "dependsOn": ["s6_gate"]
+      }
+    ]
+  }
+]

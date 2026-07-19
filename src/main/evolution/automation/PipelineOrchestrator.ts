@@ -40,6 +40,7 @@ import { TypeHealthCollector } from '../typehealth/TypeHealthCollector'
 import { TypeRefactorExecutor } from '../typehealth/TypeRefactorExecutor'
 import { FileOrganizerCollector } from '../file-organizer/FileOrganizerCollector'
 import { FileOrganizerExecutor } from '../file-organizer/FileOrganizerExecutor'
+import { CicdCollector } from '../cicd/CicdCollector'
 import { registerCollector, registerExecutor, getAllCollectors, getAllExecutors, getExecutorsBySource } from './registry'
 
 export interface PipelineConfig {
@@ -103,6 +104,7 @@ export class PipelineOrchestrator {
     const ttsPreferenceCollector = new TtsPreferenceCollector()
     const ttsTypographyCollector = new TtsTypographyCollector()
     const fileOrganizerCollector = new FileOrganizerCollector()
+    const cicdCollector = new CicdCollector()
     // type-health collector 已禁用：同步 readFileSync 840 文件阻塞 IPC，每次产出 0 问题
 
     // Stage 2: 注册到中央注册表
@@ -115,6 +117,7 @@ export class PipelineOrchestrator {
     registerCollector(ttsPreferenceCollector)
     registerCollector(ttsTypographyCollector) // type-health 已禁用
     registerCollector(fileOrganizerCollector)
+    registerCollector(cicdCollector)
 
     // Stage 3: 从注册表加载到本地
     for (const c of getAllCollectors()) {

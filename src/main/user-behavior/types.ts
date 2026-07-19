@@ -40,6 +40,8 @@ export type UserBehaviorFeature =
   | 'heatmap_driven_priority'
   /** 冷模块降频：低使用率模块降低分析频率 */
   | 'cold_module_dampening'
+  /** 质量指标追踪：跨周期质量指标趋势分析与降级检测 */
+  | 'quality_metrics'
   /** 反馈回路：MCP ↔ UserBehavior 强化回路（核心开关） */
   | 'mcp_feedback_loop'
   /** 反馈回路阻尼：指数平滑参数调整（防止振荡发散） */
@@ -151,6 +153,89 @@ export interface ModuleHeatmapEntry {
   description: string
 }
 
+// ==================== 质量指标类型 ====================
+
+/** 指标趋势方向 */
+export type MetricTrend = 'improving' | 'stable' | 'declining'
+
+/** 单个质量指标的快照值 */
+export interface MetricSnapshot {
+  /** 指标名称（如 error_rate, success_rate, avg_pause_time） */
+  name: string
+  /** 当前值（0-1 范围，1 = 最好状态） */
+  value: number
+  /** 趋势方向 */
+  trend: MetricTrend
+  /** 与上一周期的变化量（绝对值） */
+  delta: number
+  /** 是否触发降级阈值 */
+  degraded: boolean
+  /** 该指标关联的模块（多个模块逗号分隔） */
+  relatedModules?: string
+  /** 指标描述 */
+  description: string
+}
+
+/** 一次进化周期的质量指标快照 */
+export interface QualityMetricsSnapshot {
+  /** 快照 ID（格式: qm_{timestamp}） */
+  id: string
+  /** 创建时间戳 */
+  createdAt: number
+  /** 距上次快照的小时数 */
+  hoursSinceLastSnapshot: number
+  /** 指标列表 */
+  metrics: MetricSnapshot[]
+  /** 总体健康评分（0-100，0=最差，100=最好） */
+  healthScore: number
+  /** 健康评分变化量 */
+  healthScoreDelta: number
+  /** 是否触发了总体降级 */
+  isDegraded: boolean
+  /** 分析窗口内的总工具调用数 */
+  totalToolCalls: number
+  /** 降级信号列表（仅当 isDegraded=true 时非空） */
+  degradationSignals: DegradationSignal[]
+}
+
+/** 降级信号 — Evolution 的优化目标 */
+export interface DegradationSignal {
+  /** 信号 ID */
+  id: string
+  /** 降级的指标名称 */
+  metricName: string
+  /** 当前值 */
+  currentValue: number
+  /** 上一周期值 */
+  previousValue: number
+  /** 变化量 */
+  delta: number
+  /** 降级严重度（0-1） */
+  severity: number
+  /** 关联模块 */
+  relatedModules: string[]
+  /** 建议的优化类型 */
+  suggestedOptimizationType: string
+  /** 优化描述 */
+  description: string
+  /** 推荐的优化目标代码模块 */
+  recommendedTarget: string
+}
+
+/** 质量指标追踪器配置 */
+export interface QualityMetricsConfig {
+  /** 状态持久化路径 */
+  stateFilePath: string
+  /** 降级阈值：指标变化超过此值视为降级（默认 0.1 = 10%） */
+  degradationThreshold: number
+  /** 降级严重度阈值：超过此值才生成优化信号（默认 0.3） */
+  severityThreshold: number
+  /** 最大历史快照保留数 */
+  maxSnapshots: number
+}
+
+// ==================== 模块热力图类型 ====================
+
 /** 模块热力图 — Evolution 的优先级输入 */
 export interface ModuleHeatmap {
   /** 全量条目列表（按使用量降序） */
@@ -186,6 +271,7 @@ export function parseFeaturesFromEnv(): UserBehaviorFeature[] {
     'module_heatmap',
     'heatmap_driven_priority',
     'cold_module_dampening',
+    'quality_metrics',
     'mcp_feedback_loop',
     'feedback_loop_damping',
     'feedback_loop_auto_switch',

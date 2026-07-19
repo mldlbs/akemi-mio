@@ -14,6 +14,25 @@ import { ttsExperimentHook } from './TtsExperimentHook'
 import { ttsConfigManager } from './TtsConfigManager'
 import { SpeechPluginRegistry, PiperTtsPlugin, EdgeTtsPlugin } from '../speech'
 
+// ══════════════════════════════════════════
+//  语音字幕 — Subtitle Data Types
+// ══════════════════════════════════════════
+
+/** 单条字幕数据 */
+export interface TtsSubtitleData {
+  /** 字幕文本 */
+  text: string
+  /** 估计持续时间（毫秒） */
+  estimatedDurationMs: number
+  /** 字幕 ID（用于追踪同一句子） */
+  id: string
+  /** 开始时间戳 */
+  startTime: number
+}
+
+/** 字幕回调 */
+export type TtsSubtitleCallback = (data: TtsSubtitleData) => void
+
 /** 默认 TTS 情感参数（无情感分析时使用） */
 const DEFAULT_EMOTION_PARAMS: EmotionTtsParams = {
   voice: 'zh-CN-XiaoxiaoNeural',
@@ -135,6 +154,39 @@ export class TtsService {
   private qualityWeight = 0.6
   /** 当前延迟权重 0-1 */
   private latencyWeight = 0.4
+
+  // ══════════════════════════════════════════
+  //  语音字幕 — 字幕回调
+  // ══════════════════════════════════════════
+
+  /** 字幕回调（由 AppRuntime 注册，用于推送字幕到渲染进程） */
+  private subtitleCallback: TtsSubtitleCallback | null = null
+
+  /** 字幕计数器（用于生成唯一 ID） */
+  private subtitleIdCounter = 0
+
+  /** 注册字幕回调 */
+  setSubtitleCallback(cb: TtsSubtitleCallback | null): void {
+    this.subtitleCallback = cb
+  }
+
+  /** 获取字幕是否启用 */
+  hasSubtitleCallback(): boolean {
+    return this.subtitleCallback !== null
+  }
+
+  /** 内部：发射字幕事件 */
+  private emitSubtitle(text: string): void {
+    if (!this.subtitleCallback) return
+    const estimatedDurationMs = Math.max(2000, text.length * 80) // ~80ms/字符，至少2s
+    this.subtitleIdCounter++
+    this.subtitleCallback({
+      text,
+      estimatedDurationMs,
+      id: `sub-${this.subtitleIdCounter}-${Date.now()}`,
+      startTime: Date.now(),
+    })
+  }
 
   /** ── Memory × TTS 深度融合：合成记录回调 ── */
   /** TTS 合成完成后的回调（由 MemoryTtsBridge 注册，用于记录合成历史到 Memory） */
@@ -652,6 +704,9 @@ export class TtsService {
     // 记录最后播报文本（用于重听 replay）
     this.lastSpokenText = text
     this.lastSpokenCleanText = clean
+
+    // ── 发射字幕事件（推送当前句子到渲染进程） ──
+    this.emitSubtitle(clean)
 
     const tempFile = getTempFile()
     const t0 = Date.now()

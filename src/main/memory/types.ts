@@ -17,9 +17,33 @@ export interface MemoryEmotionTag {
   timestamp: number
 }
 
+/** 语音记忆书签 */
+export interface VoiceBookmark {
+  /** 书签 ID（与 MemoryEntry.id 一致） */
+  id: string
+  /** 摘要文本 */
+  summary: string
+  /** 语音文件绝对路径（由 PiperTTS 生成） */
+  audioPath: string
+  /** 语音合成文本（用于重听） */
+  audioText: string
+  /** 语音合成耗时（毫秒） */
+  ttsDurationMs: number
+  /** 语音合成引擎 */
+  ttsEngine: string
+  /** 书签创建时间戳 */
+  bookmarkedAt: number
+  /** 关联的对话上下文（最近 N 轮） */
+  conversationContext: Array<{ role: 'user' | 'assistant'; content: string; createdAt: number }>
+  /** 标签列表 */
+  tags: string[]
+  /** 是否已收藏 */
+  isFavorite: boolean
+}
+
 export interface MemoryEntry {
   id: string
-  type: 'user_fact' | 'interaction' | 'task_state' | 'user_profile' | 'fictional' | 'writing_feedback' | 'polishing_decision' | 'blog_memory'
+  type: 'user_fact' | 'interaction' | 'task_state' | 'user_profile' | 'fictional' | 'writing_feedback' | 'polishing_decision' | 'blog_memory' | 'voice_bookmark'
   content: string
   confidence: number
   createdAt: number
