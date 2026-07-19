@@ -38,7 +38,7 @@ import type { PreProcessContext, PostProcessContext, PostProcessResult, Degradat
 import { createMessageId } from '../db/messages'
 import { getMainWindow } from '../core/Lifecycle'
 import { evolutionCheckpointManager } from './EvolutionCheckpointManager'
-import type { MemoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
+import type { MemoryEvolutionBridge, MemoryChangeEvent } from '../memory/MemoryEvolutionBridge'
 import type { CicdOrchestrator } from './cicd/CicdOrchestrator'
 
 // =============================================================================
@@ -196,6 +196,68 @@ export class SelfEvolutionService implements ISubsystem {
   setMemoryBridge(bridge: MemoryEvolutionBridge): void {
     this.memoryBridge = bridge
     log('INFO', 'evolution_memory_bridge_attached')
+
+    // 订阅记忆变化事件 → 触发更及时的进化响应
+    const unsubscribe = bridge.subscribeMemoryChanges((event: MemoryChangeEvent) => {
+      this.onMemoryChangeEvent(event)
+    })
+    this.eventSubscriptions.push(unsubscribe)
+  }
+
+  /**
+   * 处理记忆变化事件（v2 深度融合）。
+   * 根据记忆变化类型决定是否触发即时进化分析：
+   * - 重复纠正模式 → 高优先级触发进化分析
+   * - 用户偏好变更 → 中等优先级（仅在 IDLE 状态触发）
+   * - 新高置信度事实 → 低优先级（仅记录日志）
+   * - 任务状态变更 → 仅记录
+   */
+  private onMemoryChangeEvent(event: MemoryChangeEvent): void {
+    switch (event.type) {
+      case 'repeated_correction_pattern':
+        log('INFO', 'evolution_memory_event_correction', {
+          topic: event.topic,
+          count: event.count,
+        })
+        // 高频纠正信号 → 突破冷却直接触发进化分析
+        if (event.count >= 3 && this.schedulerState === EvolutionSchedulerState.IDLE) {
+          log('INFO', 'evolution_triggered_by_memory_correction', { topic: event.topic })
+          // 防无限循环：自己触发的进化完成后会 emit cycle.completed，忽略该事件
+          void this.runAnalysisCycle()
+        }
+        break
+
+      case 'user_preference_changed':
+        log('INFO', 'evolution_memory_event_preference', {
+          key: event.key,
+          value: event.value,
+        })
+        // 偏好变更 → 仅在 IDLE 且不在冷却时触发
+        if (
+          this.schedulerState === EvolutionSchedulerState.IDLE &&
+          this.recoveryCooldownUntil === 0
+        ) {
+          log('INFO', 'evolution_triggered_by_memory_preference', { key: event.key })
+          void this.runAnalysisCycle()
+        }
+        break
+
+      case 'new_high_confidence_fact':
+        log('INFO', 'evolution_memory_event_new_fact', {
+          confidence: event.confidence,
+          snippet: event.content.slice(0, 40),
+        })
+        // 新事实 → 仅记录，不触发进化（信息量不足以判断是否需要行动）
+        break
+
+      case 'task_state_changed':
+        log('INFO', 'evolution_memory_event_task', {
+          taskId: event.taskId,
+          status: event.status,
+        })
+        // 任务变更 → 仅记录
+        break
+    }
   }
 
   /** 获取当前桥接器（供外部只读访问） */
@@ -568,6 +630,25 @@ export class SelfEvolutionService implements ISubsystem {
           }
           log('INFO', 'evolution_memory_context_injected', {
             ctxLength: enhancedCtx.length,
+          })
+        }
+
+        // ★ 记忆驱动的进化优先级（v2 深度融合）：从记忆系统分析当前进化目标
+        const priorities = this.memoryBridge.getTargetedEvolutionPriorities(3)
+        if (priorities.length > 0) {
+          preProcessData = {
+            ...preProcessData,
+            evolutionPriorities: priorities.map((p) => ({
+              topic: p.topic,
+              score: p.score,
+              reason: p.reason,
+              suggestedCollector: p.suggestedCollector,
+            })),
+          }
+          log('INFO', 'evolution_priorities_injected', {
+            topPriority: priorities[0].topic,
+            topScore: priorities[0].score.toFixed(2),
+            count: priorities.length,
           })
         }
       }
