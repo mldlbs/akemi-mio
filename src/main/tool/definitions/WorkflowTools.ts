@@ -793,7 +793,7 @@ export const updateWorkflowTool = buildTool({
         ...existing,
         name: args.name ?? existing.name,
         description: args.description ?? existing.description,
-        steps: args.steps ?? existing.steps,
+        steps: args.steps ? mergeSteps(existing.steps, args.steps) : existing.steps,
         tags: args.tags ?? (existing as any).tags,
         trigger: args.trigger ?? (existing as any).trigger,
         maxConcurrency: args.maxConcurrency ?? (existing as any).maxConcurrency,
@@ -806,6 +806,24 @@ export const updateWorkflowTool = buildTool({
     }
   },
 })
+
+/** 按 ID 合并步骤 — 只更新传入的步骤，不覆盖未传的 */
+function mergeSteps(existing: any[], incoming: any[]): any[] {
+  const stepMap = new Map(existing.map((s) => [s.id, { ...s }]))
+  for (const s of incoming) {
+    if (s.id && stepMap.has(s.id)) {
+      const prev = stepMap.get(s.id)!
+      stepMap.set(s.id, {
+        ...prev,
+        ...s,
+        config: s.config ? { ...prev.config, ...s.config } : prev.config,
+      })
+    } else if (s.id) {
+      stepMap.set(s.id, s)
+    }
+  }
+  return Array.from(stepMap.values())
+}
 
 export const deleteWorkflowTool = buildTool({
   name: 'delete_workflow',

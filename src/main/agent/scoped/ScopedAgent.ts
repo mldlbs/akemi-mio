@@ -82,7 +82,7 @@ export class ScopedAgent {
 
   private async toolLoop(): Promise<string> {
     const messages = this.context.getMessages()
-    const maxTurns = 15
+    const maxTurns = this.agentDef.maxTurns ?? 15
 
     for (let i = 0; i < maxTurns; i++) {
       if (this.abortController.signal.aborted) {
