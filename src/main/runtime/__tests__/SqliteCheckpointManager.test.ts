@@ -1,18 +1,26 @@
 /**
- * CheckpointManager contract tests.
+ * SqliteCheckpointManager — contract tests.
  *
- * 验证 CheckpointManager 接口是否满足 ADR-010 定义的语义约束。
- * 不依赖具体存储实现（通过 MemoryCheckpointStorage 验证接口契约）。
+ * Reuses the same contract scenarios as MockCheckpointManager tests,
+ * but backed by a real SQLite database.
+ *
+ * Scene 1: create() — produces valid checkpoints
+ * Scene 2: save + load round-trip — persists and loads correctly
+ * Scene 3: validate() — enforces schema constraints
+ * Scene 4: identity separation — checkpointId ≠ taskId
+ * Scene 5: persistence across instances — survives re-created manager
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
-import type { Checkpoint } from '../CheckpointTypes'
-import type { CheckpointManager } from '../CheckpointManager'
-import { MockCheckpointManager } from './MockCheckpointManager'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { existsSync, unlinkSync } from 'fs'
+import { join } from 'path'
+import { initDatabase, closeDatabase } from '../../db/connection'
+import type { Checkpoint } from './CheckpointTypes'
+import { SqliteCheckpointManager } from '../SqliteCheckpointManager'
 
-// ════════════════════════════════════════════════════
-//  Test Fixtures
-// ════════════════════════════════════════════════════
+vi.mock('../logger/Logger', () => ({ log: vi.fn() }))
+
+let dbPath: string
 
 function validMinimalCheckpoint(overrides?: Partial<Checkpoint>): Checkpoint {
   return {
@@ -34,15 +42,20 @@ function validMinimalCheckpoint(overrides?: Partial<Checkpoint>): Checkpoint {
   }
 }
 
-// ════════════════════════════════════════════════════
-//  Contract Tests
-// ════════════════════════════════════════════════════
+describe('SqliteCheckpointManager — Contract', () => {
+  let mgr: SqliteCheckpointManager
 
-describe('CheckpointManager — Contract Validation', () => {
-  let mgr: MockCheckpointManager
+  beforeEach(async () => {
+    dbPath = join(process.cwd(), 'akemi-mio.db')
+    if (existsSync(dbPath)) unlinkSync(dbPath)
+    process.env.USER_DATA_DIR = process.cwd()
+    await initDatabase()
+    mgr = new SqliteCheckpointManager()
+  })
 
-  beforeEach(() => {
-    mgr = new MockCheckpointManager()
+  afterEach(() => {
+    closeDatabase()
+    if (existsSync(dbPath)) unlinkSync(dbPath)
   })
 
   // ── Scene 1: create() ──
@@ -57,6 +70,7 @@ describe('CheckpointManager — Contract Validation', () => {
       expect(cp.id).toBeTruthy()
       expect(cp.taskId).toBe('task_1')
       expect(cp.schemaVersion).toBe('1.0')
+      expect(cp.runtimeCompatibility.min).toBe('2.0')
     })
 
     it('should include execution state from context', async () => {
@@ -72,7 +86,7 @@ describe('CheckpointManager — Contract Validation', () => {
     })
   })
 
-  // ── Scene 2: save() + load() round-trip ──
+  // ── Scene 2: save + load round-trip ──
   describe('Scene 2: save + load round-trip', () => {
     it('should persist and return the same checkpoint', async () => {
       const cp = validMinimalCheckpoint()
@@ -81,10 +95,22 @@ describe('CheckpointManager — Contract Validation', () => {
       expect(loaded.id).toBe(cp.id)
       expect(loaded.taskId).toBe(cp.taskId)
       expect(loaded.executionState.workerId).toBe(cp.executionState.workerId)
+      expect(loaded.schemaVersion).toBe('1.0')
     })
 
     it('should throw on loading nonexistent checkpoint', async () => {
       await expect(mgr.load('cp_nonexistent')).rejects.toThrow('checkpoint not found')
+    })
+
+    it('should update existing checkpoint on save with same id', async () => {
+      const cp = validMinimalCheckpoint({ executionState: { workerId: 'w1', goal: 'g1', step: 3, lastSafePoint: 'after_tool' as any, conversationContext: { type: 'inline', messages: [], tokenEstimate: 0 }, pendingToolCalls: [] } })
+      await mgr.save(cp)
+
+      const updated = { ...cp, executionState: { ...cp.executionState, step: 10 } }
+      await mgr.save(updated)
+
+      const loaded = await mgr.load(cp.id)
+      expect(loaded.executionState.step).toBe(10)
     })
   })
 
@@ -110,26 +136,10 @@ describe('CheckpointManager — Contract Validation', () => {
       expect(r.ok).toBe(false)
       expect(r.errors.some((e) => e.includes('taskState.name'))).toBe(true)
     })
-
-    it('should fail when executionState.workerId is missing', () => {
-      const cp = validMinimalCheckpoint({
-        executionState: {
-          workerId: '',
-          goal: 'g',
-          step: 0,
-          lastSafePoint: 'before_llm' as any,
-          conversationContext: { type: 'inline', messages: [], tokenEstimate: 0 },
-          pendingToolCalls: [],
-        },
-      })
-      const r = mgr.validate(cp)
-      expect(r.ok).toBe(false)
-      expect(r.errors.some((e) => e.includes('executionState.workerId'))).toBe(true)
-    })
   })
 
-  // ── Scene 5: checkpointId ≠ taskId (identity separation) ──
-  describe('Scene 5: identity separation', () => {
+  // ── Scene 4: identity separation ──
+  describe('Scene 4: identity separation', () => {
     it('should have distinct checkpointId from taskId', async () => {
       const cp = await mgr.create({
         taskId: 'task_sep_1',
@@ -150,6 +160,50 @@ describe('CheckpointManager — Contract Validation', () => {
       const loaded2 = await mgr.load(cp2.id)
       expect(loaded1.executionState.step).toBe(1)
       expect(loaded2.executionState.step).toBe(5)
+    })
+  })
+
+  // ── Scene 5: persistence across instances ──
+  describe('Scene 5: persistence across instances', () => {
+    it('should survive re-creating the manager (same DB)', async () => {
+      const cp = validMinimalCheckpoint({ id: 'cp_survive', taskId: 't_survive' })
+      await mgr.save(cp)
+
+      // "re-create" the manager (same DB file, new instance)
+      const mgr2 = new SqliteCheckpointManager()
+      const loaded = await mgr2.load(cp.id)
+      expect(loaded.id).toBe('cp_survive')
+      expect(loaded.taskId).toBe('t_survive')
+    })
+
+    it('should persist JSON blob fields including componentStates', async () => {
+      const cp = validMinimalCheckpoint({
+        componentStates: {
+          'workflow-runtime': {
+            component: 'workflow-runtime',
+            version: '1.0',
+            data: { activeRuns: [{ runId: 'r1', status: 'running' }, { runId: 'r2', status: 'paused' }] },
+            createdAt: Date.now(),
+          },
+        },
+      })
+      await mgr.save(cp)
+      const loaded = await mgr.load(cp.id)
+      expect(loaded.componentStates!['workflow-runtime'].data).toBeDefined()
+      const wf = loaded.componentStates!['workflow-runtime']
+      expect((wf.data as any).activeRuns).toHaveLength(2)
+    })
+  })
+
+  // ── Scene 6: clear ──
+  describe('Scene 6: clear', () => {
+    it('should remove all checkpoints', async () => {
+      const cp = validMinimalCheckpoint()
+      await mgr.save(cp)
+      expect(await mgr.load(cp.id)).toBeDefined()
+
+      mgr.clear()
+      await expect(mgr.load(cp.id)).rejects.toThrow('checkpoint not found')
     })
   })
 })

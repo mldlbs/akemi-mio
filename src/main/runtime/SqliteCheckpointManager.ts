@@ -1,20 +1,21 @@
 /**
- * MockCheckpointManager — 语义正确的 CheckpointManager 最小实现。
+ * SqliteCheckpointManager — CheckpointManager 的 SQLite 生产实现。
  *
- * 用于 contract tests 和 integration tests，验证接口设计是否能通过契约约束。
- * 用 real implementation 替代后，测试可继续复用。
+ * 复用 MockCheckpointManager 已验证的语义契约，
+ * 使用 getRawDb() 持久化到 checkpoint_store 表。
+ *
+ * 不改变 CheckpointManager 接口。
  */
 
+import { getRawDb, markDirty } from '../db/connection'
 import type { Checkpoint, CheckpointId, ValidationResult } from './CheckpointTypes'
-import type { CheckpointManager } from './CheckpointManager'
+import type { CheckpointManager, CheckpointContext } from './CheckpointManager'
 
-let nextId = 0
+let idCounter = 0
 
-export class MockCheckpointManager implements CheckpointManager {
-  private store = new Map<CheckpointId, Checkpoint>()
-
-  async create(context: any): Promise<Checkpoint> {
-    const id = `cp_${++nextId}`
+export class SqliteCheckpointManager implements CheckpointManager {
+  async create(context: CheckpointContext): Promise<Checkpoint> {
+    const id = `cp_${Date.now()}_${++idCounter}`
     return {
       id,
       taskId: context.taskId,
@@ -38,13 +39,29 @@ export class MockCheckpointManager implements CheckpointManager {
   }
 
   async save(checkpoint: Checkpoint): Promise<void> {
-    this.store.set(checkpoint.id, structuredClone(checkpoint))
+    const db = getRawDb()
+    const data = JSON.stringify(checkpoint)
+    const now = Date.now()
+    db.run(
+      `INSERT INTO checkpoint_store (id, data, created_at, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+      [checkpoint.id, data, now, now],
+    )
+    markDirty()
   }
 
   async load(id: CheckpointId): Promise<Checkpoint> {
-    const cp = this.store.get(id)
-    if (!cp) throw new Error(`checkpoint not found: ${id}`)
-    return structuredClone(cp)
+    const db = getRawDb()
+    const stmt = db.prepare('SELECT data FROM checkpoint_store WHERE id = ?')
+    stmt.bind([id])
+    if (!stmt.step()) {
+      stmt.free()
+      throw new Error(`checkpoint not found: ${id}`)
+    }
+    const row = stmt.getAsObject() as any
+    stmt.free()
+    return JSON.parse(row.data) as Checkpoint
   }
 
   validate(checkpoint: Checkpoint): ValidationResult {
@@ -60,8 +77,10 @@ export class MockCheckpointManager implements CheckpointManager {
     return { ok: errors.length === 0, errors, warnings }
   }
 
+  /** 清空所有 checkpoint（测试用） */
   clear(): void {
-    this.store.clear()
-    nextId = 0
+    const db = getRawDb()
+    db.run('DELETE FROM checkpoint_store')
+    markDirty()
   }
 }

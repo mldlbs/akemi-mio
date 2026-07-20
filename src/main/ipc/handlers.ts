@@ -33,6 +33,10 @@ import { quickTaskService } from '../behavior/QuickTaskService'
 import type { QuickTaskStep } from '../behavior/QuickTaskTypes'
 import { voiceRoleManager } from '../tts/VoiceRoleManager'
 import type { VoiceBookmarkService } from '../memory/VoiceBookmarkService'
+import { runVoiceMemoryShortcut } from '../memory/VoiceMemoryShortcut'
+import type { TaskPanelService } from '../wallpaper/TaskPanelService'
+import type { WallpaperInteractiveService } from '../wallpaper/WallpaperInteractiveService'
+import type { RuntimeRestoreService } from '../runtime/RuntimeRestoreService'
 
 /** 打开的沙盒窗口表，防止重复打开 */
 const sandboxWindows = new Map<string, BrowserWindow>()
@@ -94,6 +98,9 @@ export function registerHandlers(
   metricsQueryRef?: ServiceRef<GuardrailMetricsQueryService>,
   organizerRef?: ServiceRef<FileOrganizerProgressService>,
   voiceBookmarkRef?: ServiceRef<VoiceBookmarkService>,
+  taskPanelRef?: ServiceRef<TaskPanelService>,
+  wallpaperInteractiveRef?: ServiceRef<WallpaperInteractiveService>,
+  restoreRef?: ServiceRef<RuntimeRestoreService>,
 ): void {
   ipcMain.handle('window:close', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -212,6 +219,12 @@ export function registerHandlers(
         memoryService.setLastUserText(hybridResult.text)
         // ASR热词增强：将识别结果回灌到频率热词管理器
         asrHotwordManager.feedUserText(hybridResult.text)
+
+        // 6. 语音记忆快捷通道：检测记忆操作意图，直接执行（fire-and-forget）
+        // 在 Agent 处理之前，为简单记忆操作提供零 LLM 延迟的快速路径。
+        // 非记忆文本零开销（classifyVoiceMemoryIntent 常数时间返回 'none'）。
+        runVoiceMemoryShortcut(hybridResult.text.trim(), memoryService, ttsService)
+          .catch((err: unknown) => log('WARN', 'voice_memory_shortcut_error', { error: String(err) }))
       }
 
       return {
@@ -532,9 +545,20 @@ export function registerHandlers(
   // 注册字幕回调：TTS 合成时推送字幕到所有窗口
   ttsService.setSubtitleCallback((data) => {
     const wins = BrowserWindow.getAllWindows()
+    // 获取当前情感参数，随字幕一同推送
+    const emotionParams = ttsService.getEmotionParams()
+    const voiceState = {
+      state: 'speaking' as const,
+      emotionParams,
+      text: data.text,
+      timestamp: Date.now(),
+      estimatedDurationMs: data.estimatedDurationMs,
+    }
     for (const win of wins) {
       if (!win.isDestroyed()) {
         win.webContents.send('tts:subtitle', data)
+        // 推送语音状态（含情感参数）到壁纸等可视化组件
+        win.webContents.send('tts:voice-state', voiceState)
       }
     }
   })
@@ -1112,6 +1136,23 @@ export function registerHandlers(
     }
   })
 
+  // ── Runtime v2: manual restore entry ──
+  // Only makes restore capability available; AppRuntime.start() does NOT auto-restore.
+  ipcMain.handle('runtime:restore', async (_event, checkpointId: string) => {
+    if (!restoreRef?.current) {
+      log('WARN', 'runtime_restore_not_ready')
+      return { success: false, error: 'RuntimeRestoreService not initialized', status: null }
+    }
+    try {
+      const result = await restoreRef.current.restore(checkpointId)
+      log('INFO', 'runtime_restore_completed', { checkpointId, status: result.status })
+      return { success: result.status !== 'failed', status: result.status, errors: result.errors }
+    } catch (err: any) {
+      log('ERROR', 'runtime_restore_failed', { checkpointId, error: String(err) })
+      return { success: false, error: String(err), status: 'failed' }
+    }
+  })
+
   // ── Writing API status ──
 
   ipcMain.handle('writing:getStatus', async () => {
@@ -1304,6 +1345,28 @@ export function registerHandlers(
     if (win && !win.isDestroyed()) {
       win.webContents.send('wallpaper:styles-updated', css)
     }
+    return { success: true }
+  })
+
+  // ── 壁纸交互模式 ──
+  ipcMain.handle('wallpaper:interactive:getConfig', async () => {
+    const svc = wallpaperInteractiveRef?.current
+    if (!svc) return { enabled: false, shortcut: 'CommandOrControl+Space' }
+    return svc.getConfig()
+  })
+
+  ipcMain.handle('wallpaper:interactive:setEnabled', async (_event, enabled: boolean) => {
+    const svc = wallpaperInteractiveRef?.current
+    if (!svc) return { success: false }
+    svc.setConfig({ enabled })
+    // 推送当前状态到渲染进程
+    const wins = BrowserWindow.getAllWindows()
+    for (const win of wins) {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('wallpaper:interactive:toggle', { active: false })
+      }
+    }
+    log('INFO', 'wallpaper_interactive_config_set', { enabled })
     return { success: true }
   })
 

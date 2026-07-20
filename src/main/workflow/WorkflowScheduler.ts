@@ -15,6 +15,7 @@ import { workflowStore, resolveRunOutputDir } from './WorkflowStoreV2'
 import { resolveTemplate, resolveExpression } from './TemplateEngine'
 import { evaluateCondition } from './ConditionEvaluator'
 import type { WorkflowDef, WorkflowRun, WorkflowStepDef, ValueSchema } from './types'
+import type { WorkflowResumeResult } from '../runtime/CheckpointTypes'
 import type { SpawnTaskOptions } from '../agent/SubAgentPool'
 import { behaviorBlogBridge } from '../behavior/BehaviorBlogBridge'
 import * as fs from 'fs'
@@ -449,16 +450,115 @@ export class WorkflowSchedulerV2 {
     workflowStore.updateStep(run, stepId, 'done', JSON.stringify({ decision, modifiedInput }))
     workflowStore.updateRun(run)
 
+    // 清理旧的 controller（循环已退出但 map entry 可能残留），注册新的
+    this.running.delete(runId)
+    this.registerRuntimeState(runId)
+
     const def = workflowStore.getDefinition(run.workflowDefId)
     if (def) {
-      this.executeLoop(run, def, new AbortController().signal).catch((err) => {
-        log('ERROR', 'workflow_v2_resume_error', { runId, error: String(err) })
-        run.status = 'failed'
-        workflowStore.updateRun(run)
-      })
+      this.startExecution(runId)
     }
 
     return true
+  }
+
+  // ════════════════════════════════════════════════════
+  //  Resume primitives (extracted from approveGate)
+  // ════════════════════════════════════════════════════
+
+  /**
+   * Register a run ID in the in-memory running Map with a fresh AbortController.
+   * Called by approveGate and resumeRun to ensure the scheduler can track and
+   * cancel the run.
+   */
+  registerRuntimeState(runId: string): void {
+    // 清除可能残留的旧 controller
+    const old = this.running.get(runId)
+    if (old) old.abort()
+    this.running.set(runId, new AbortController())
+  }
+
+  /**
+   * Start (or restart) executeLoop for an already-registered run.
+   * Requires the run to be in this.running Map (set by registerRuntimeState).
+   * Does NOT set run.status — caller must ensure the run is in 'running' state.
+   */
+  startExecution(runId: string): boolean {
+    const run = workflowStore.getRun(runId)
+    if (!run) return false
+
+    const def = workflowStore.getDefinition(run.workflowDefId)
+    if (!def) return false
+
+    const abort = this.running.get(runId)
+    if (!abort) return false
+
+    log('INFO', 'workflow_v2_start_execution', { runId })
+
+    this.executeLoop(run, def, abort.signal).catch((err) => {
+      log('ERROR', 'workflow_v2_execution_error', { runId, error: String(err) })
+      if (!this.cancelled.has(runId)) {
+        run.status = 'failed'
+        workflowStore.updateRun(run)
+      }
+      cleanupSchedulerState(this, runId)
+    })
+
+    return true
+  }
+
+  /**
+   * Resume a run from checkpoint recovery.
+   *
+   * Phase 2 of the two-phase recovery protocol:
+   * 1. Component.restore() generates WorkflowRecoveryPlan (Phase 1, no side effects)
+   * 2. RecoveryActivator calls resumeRun() (Phase 2, may start executeLoop)
+   *
+   * Decision matrix:
+   *   done/failed/cancelled → skip (no-op)
+   *   paused               → register-only (wait for gate approval)
+   *   running + pendingGate → register-only (wait for gate approval)
+   *   running              → register + start execution
+   *   run not found        → failed
+   *   def not found        → failed
+   */
+  resumeRun(runId: string): WorkflowResumeResult {
+    const run = workflowStore.getRun(runId)
+    if (!run) {
+      return { runId, state: 'failed', reason: 'run not found in store' }
+    }
+
+    // Terminal states — skip
+    if (run.status === 'done' || run.status === 'failed' || run.status === 'cancelled') {
+      return { runId, state: 'skipped', reason: `status=${run.status}` }
+    }
+
+    // Paused (with or without pending gate) — register only
+    if (run.status === 'paused' || run.pendingGate) {
+      this.registerRuntimeState(runId)
+      return { runId, state: 'registered', reason: run.pendingGate ? 'pending gate' : 'paused' }
+    }
+
+    // Running with no gate — full resume
+    const def = workflowStore.getDefinition(run.workflowDefId)
+    if (!def) {
+      return { runId, state: 'failed', reason: 'workflow definition not found' }
+    }
+
+    // 将 run 状态设为 running（DB 已是 running，但内存状态需确保）
+    run.status = 'running'
+    this.registerRuntimeState(runId)
+    const started = this.startExecution(runId)
+    if (!started) {
+      return { runId, state: 'failed', reason: 'startExecution failed' }
+    }
+
+    return { runId, state: 'started' }
+  }
+
+  /** Start multiple runs from recovery plans. */
+  resumeRuns(runIds: string[]): WorkflowResumeResult[] {
+    return runIds.map((id) => this.resumeRun(id))
   }
 
   private async handleAggregate(sd: WorkflowStepDef, ctx: StepContext): Promise<{ status: string; data?: any }> {
@@ -773,6 +873,11 @@ export class WorkflowSchedulerV2 {
     // 写入 failed + 单独发射 cancelled 事件供前端 FSM 正确转换
     workflowStore.forceCancelRun(runId)
     return true
+  }
+
+  /** 返回当前活跃（running/paused）的 run ID 列表。供 checkpoint snapshot 使用 */
+  getActiveRunIds(): string[] {
+    return Array.from(this.running.keys())
   }
 
   isActive(runId?: string): boolean {

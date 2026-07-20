@@ -31,10 +31,8 @@ export interface Checkpoint {
   memoryReference?: MemoryReference
 
   // 组件级状态（版本化 payload，CheckpointManager 不解包）
-  componentStates?: {
-    workflow?: VersionedState
-    tools?: VersionedState
-  }
+  // key = domain component id, e.g. "workflow-runtime", "blog-session"
+  componentStates?: Record<string, VersionedState>
 
   // 元数据
   createdAt: number
@@ -109,12 +107,34 @@ export enum SafePoint {
 }
 
 // ════════════════════════════════════════
-//  StatefulComponent — 组件快照/恢复接口
+//  CheckpointableComponent — 组件快照/恢复接口
+//
+//  由 Domain Service 实现，例如 WorkflowRuntime、BlogSession。
+//  Tool handler 不需要实现此接口。
 // ════════════════════════════════════════
 
-export interface StatefulComponent {
+export interface CheckpointableComponent {
+  /** 组件唯一标识，作为 componentStates 的 key */
+  id: string
+
+  /** 捕获当前组件状态 */
   snapshot(): VersionedState | Promise<VersionedState>
+
+  /** 恢复到指定状态 */
   restore(state: VersionedState): Promise<void>
+}
+
+// ════════════════════════════════════════
+//  ComponentDescriptor — 组件的延迟工厂描述符
+//
+//  registry stores descriptor, not instance.
+//  restore() 每次创建独立实例。
+// ════════════════════════════════════════
+
+export interface ComponentDescriptor {
+  id: string
+  version: string
+  create(): CheckpointableComponent
 }
 
 // ════════════════════════════════════════
@@ -139,4 +159,35 @@ export interface RestoreResult {
   taskId: string
   errors: string[]
   degradedComponents: string[]
+}
+
+// ════════════════════════════════════════
+//  Recovery Plan — 组件 restore 与 scheduler resume 之间的桥梁
+//
+//  由 CheckpointableComponent.restore() 生成（Phase 1），
+//  在 restore 成功后由 RecoveryActivator 消费（Phase 2）。
+// ════════════════════════════════════════
+
+export type WorkflowRecoveryAction = 'resume' | 'register-only' | 'skip'
+
+export interface WorkflowRecoveryPlan {
+  runId: string
+  action: WorkflowRecoveryAction
+  reason?: string
+}
+
+export interface WorkflowResumeResult {
+  runId: string
+  state: 'registered' | 'started' | 'skipped' | 'failed'
+  reason?: string
+}
+
+/**
+ * RecoveryActivator — Phase 2 激活接口。
+ *
+ * RuntimeRestoreService restore 成功后调用，触发 scheduler 恢复执行。
+ * 由调用方（AgentService）注入，保持 RuntimeRestoreService 对 scheduler 无感知。
+ */
+export interface RecoveryActivator {
+  activate(plans: WorkflowRecoveryPlan[]): Promise<void>
 }

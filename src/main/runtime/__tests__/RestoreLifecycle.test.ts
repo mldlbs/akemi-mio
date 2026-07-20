@@ -15,6 +15,8 @@ import { SupervisedAgentSupervisorImpl } from '../SupervisedAgentSupervisorImpl'
 import { ServerManager } from '../../mcp/ServerManager'
 import { snapshotRuntimeTask, toCheckpointContext, planRestore, mapStateToSafePoint } from '../RuntimeCheckpointAdapter'
 import { MockCheckpointManager } from './MockCheckpointManager'
+import { ComponentRegistryImpl } from '../ComponentRegistry'
+import { CheckpointRestoreCoordinatorImpl } from '../CheckpointRestoreCoordinator'
 
 // ── Mock MCP / LLM 依赖 ──
 
@@ -220,18 +222,23 @@ describe('Scenario 2: Restore failure isolation', () => {
     const cp = await cpMgr.create(toCheckpointContext(snapshot))
     await cpMgr.save(cp)
 
-    // Restore with a component that fails (no allowDegraded flag)
-    const failingComponent = {
-      name: 'workflow',
-      capabilities: {},
-      snapshot: () => ({ component: 'workflow', version: '1', data: {}, createdAt: 0 }),
-      restore: async () => { throw new Error('simulated failure') },
-    }
-    const result = await cpMgr.restore(cp, [failingComponent as any])
+    // Restore with a component that fails via CheckpointRestoreCoordinator
+    const registry = new ComponentRegistryImpl()
+    registry.register({
+      id: 'workflow', version: '1.0',
+      create: () => ({
+        id: 'workflow',
+        snapshot: vi.fn(),
+        restore: async () => { throw new Error('simulated failure') },
+      }),
+    })
+    const coordinator = new CheckpointRestoreCoordinatorImpl(registry)
+    const cpWithState = { ...cp, componentStates: { workflow: { component: 'workflow', version: '1.0', data: {}, createdAt: 0 } } }
+    const result = await coordinator.restore(cpWithState)
 
     // Assert: restore failed
     expect(result.status).toBe('failed')
-    expect(result.errors.some((e: string) => e.includes('workflow'))).toBe(true)
+    expect(result.errors.some((e) => e.includes('workflow'))).toBe(true)
 
     // Assert: Task A unaffected — manager still returns same task
     const stillInManager = mgr.getTask(taskA.id)

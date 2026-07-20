@@ -5,7 +5,7 @@
  * 但不解释组件内部状态。
  */
 
-import type { Checkpoint, CheckpointId, ValidationResult, RestoreResult, StatefulComponent } from './CheckpointTypes'
+import type { Checkpoint, CheckpointId, ValidationResult } from './CheckpointTypes'
 
 /**
  * CheckpointManager 接口。
@@ -39,14 +39,6 @@ export interface CheckpointManager {
    * 不执行实际恢复操作。
    */
   validate(checkpoint: Checkpoint): ValidationResult
-
-  /**
-   * 完整恢复流程：验证 → 重建 RuntimeTask → 恢复组件 → 标记可运行。
-   * 返回 RestoreResult 说明成功/失败/降级情况。
-   *
-   * 事务语义：核心 restore 失败 → task 不进入 running 状态。
-   */
-  restore(checkpoint: Checkpoint, components?: StatefulComponent[]): Promise<RestoreResult>
 }
 
 /**

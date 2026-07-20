@@ -21,6 +21,7 @@ import { BaiduEngine } from '../asr/BaiduEngine'
 import { AsrService } from '../asr/AsrService'
 import { asrEvolutionManager } from '../asr/AsrEvolutionManager'
 import { TtsService } from '../tts/TtsService'
+import { ttsScheduler } from '../tts/TtsScheduler'
 import { ttsTypographyFeedbackLoop } from '../tts/TtsTypographyFeedbackLoop'
 import { voiceRoleManager } from '../tts/VoiceRoleManager'
 import { AgentService } from '../agent/AgentService'
@@ -48,9 +49,11 @@ import { PluginLoader, toolRegistry } from '../plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '../skill'
 import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
 import { setupStartupLogging, createWindow, setupWallpaperListener, getMainWindow } from '../core/Lifecycle'
-import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle, setUserContextOverride, setOrganizerPause, setOrganizerResume, setOrganizerSkip, setSubtitleToggle, setVoiceRoleSchemeSwitch } from '../core/TrayManager'
+import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle, setUserContextOverride, setOrganizerPause, setOrganizerResume, setOrganizerSkip, setSubtitleToggle, setVoiceRoleSchemeSwitch, setTaskPanelToggle } from '../core/TrayManager'
 import { initUpdater, setUpdateWindow } from '../updater/UpdaterService'
 import { EvolutionDashboardService, MemoryContextService, FileOrganizerProgressService } from '../wallpaper/WallpaperService'
+import { TaskPanelService } from '../wallpaper/TaskPanelService'
+import { WallpaperInteractiveService } from '../wallpaper/WallpaperInteractiveService'
 import { MonitoringService } from '../monitoring/MonitoringService'
 import { WallpaperEventBridge } from '../wallpaper/WallpaperEventBridge'
 import { initDatabase, closeDatabase, getRawDb, getEventRawDb } from '../db/connection'
@@ -135,6 +138,9 @@ export class AppRuntime {
   private metricsEngine?: MetricsEngineImpl
   private comfyUI?: ComfyUIManager
   private pipeline?: PipelineOrchestrator
+  private componentRegistry?: import('../runtime/ComponentRegistry').ComponentRegistryImpl
+  private checkpointManager?: import('../runtime/SqliteCheckpointManager').SqliteCheckpointManager
+  private runtimeRestoreService?: import('../runtime/RuntimeRestoreService').RuntimeRestoreServiceImpl
   private feedbackLoop?: import('../user-behavior/feedback-loop').MCPFeedbackLoopService
   private dashboardService?: EvolutionDashboardService
   private monitoringService?: MonitoringService
@@ -305,6 +311,21 @@ export class AppRuntime {
     })
     setWorkflowScheduler(scheduler)
 
+    // ── Runtime v2: ComponentRegistry — Stage 1 (descriptor registration) ──
+    // WorkflowSchedulerV2 must exist before WorkflowRuntimeCheckpointableComponent
+    // because descriptor.create() captures scheduler + workflowStore in closure.
+    const { ComponentRegistryImpl } = await import('../runtime/ComponentRegistry')
+    const { WorkflowRuntimeCheckpointableComponent } = await import('../runtime/WorkflowRuntimeCheckpointableComponent')
+    this.componentRegistry = new ComponentRegistryImpl()
+    this.componentRegistry.register({
+      id: 'workflow-runtime',
+      version: '1.0',
+      create: () => new WorkflowRuntimeCheckpointableComponent(scheduler, workflowStore),
+    })
+    log('INFO', 'runtime_v2_component_registry_initialized', {
+      components: this.componentRegistry.list().length,
+    })
+
     // 初始化 WorkflowTriggerManager（cron + event 触发）
     // 注意: .start() 延后到 initDatabase() 之后调用，避免 DB 未就绪的竞态
     const { WorkflowTriggerManager } = await import('../workflow/WorkflowTriggerManager')
@@ -343,6 +364,12 @@ export class AppRuntime {
       })
     })
 
+    // ── [混合 TTS 调度器] 初始化缓存 + 高频短语预生成 ──
+    // 在后台异步完成，不阻塞启动流程
+    ttsScheduler.initialize(join(WORKSPACE_ROOT, 'tts_cache')).catch((err) => {
+      log('WARN', 'tts_scheduler_init_failed', { error: String(err) })
+    })
+
     const uiBridge = new UIBridge()
     uiBridge.bind(win)
     log('PERF', 'startup_stage', { stage: 'window_created', ms: Date.now() - t0, total: Date.now() - startMs })
@@ -359,6 +386,24 @@ export class AppRuntime {
     setCredentialsManager(credentialsManager)
     llmService.refreshFromCredentials((key) => credentialsManager.get(key))
     log('INFO', 'llm_config_loaded_from_credentials')
+
+    // ── Runtime v2: Storage + RestoreService — Stage 2 (after DB init) ──
+    // SqliteCheckpointManager needs DB connection. RuntimeRestoreService needs
+    // ComponentRegistry from Stage 1. Activator needs WorkflowScheduler from Stage 1.
+    const { SqliteCheckpointManager } = await import('../runtime/SqliteCheckpointManager')
+    this.checkpointManager = new SqliteCheckpointManager()
+
+    const { RuntimeRestoreServiceImpl } = await import('../runtime/RuntimeRestoreService')
+    const { RuntimeRecoveryActivator } = await import('../runtime/RuntimeRecoveryActivator')
+    this.runtimeRestoreService = new RuntimeRestoreServiceImpl(
+      this.checkpointManager,
+      this.componentRegistry!,
+    )
+    this.runtimeRestoreService.setActivator(new RuntimeRecoveryActivator(scheduler))
+    log('INFO', 'runtime_v2_restore_service_initialized', {
+      storageReady: !!this.checkpointManager,
+      registryComponents: this.componentRegistry?.list().length ?? 0,
+    })
 
     // Evaluation 子系统：Store → Emitter → Bridge
     this.evaluationStore = new EvaluationStore()
@@ -490,8 +535,12 @@ export class AppRuntime {
     // evolutionRef/dashboardRef — 延迟注入
     const evolutionRef = createServiceRef<SelfEvolutionService>()
     const dashboardRef = createServiceRef<EvolutionDashboardService>()
+    const taskPanelRef = createServiceRef<TaskPanelService>()
+    const wallpaperInteractiveRef = createServiceRef<WallpaperInteractiveService>()
 
     // 注册 IPC Handler
+    const restoreRef = createServiceRef<import('../runtime/RuntimeRestoreService').RuntimeRestoreService>()
+    restoreRef.current = this.runtimeRestoreService ?? null
     registerHandlers(
       agentService,
       stateManager,
@@ -504,6 +553,9 @@ export class AppRuntime {
       this.metricsQueryRef,
       this.organizerRef,
       this.voiceBookmarkRef,
+      taskPanelRef,
+      wallpaperInteractiveRef,
+      restoreRef,
     )
 
     // === Stage 3: 核心服务（内存、插件、技能） ===
@@ -650,6 +702,29 @@ export class AppRuntime {
       log('INFO', 'experience_memory_service_initialized')
     } catch (err) {
       log('WARN', 'experience_memory_service_init_failed', { error: String(err) })
+    }
+
+    // ── Blog Dual-Mode Switching Service：博客写作双模式切换引擎 ──
+    try {
+      const { blogModeService } = await import('../agent/blog/BlogModeService')
+      const { setBlogModeService } = await import('../tool/deps')
+      setBlogModeService(blogModeService)
+      // 注册模式切换事件总线日志
+      eventBus.track(
+        'blog.mode.switched',
+        (p: any) => log('INFO', 'blog_mode_switched', {
+          sessionId: p.sessionId,
+          from: p.fromMode,
+          to: p.toMode,
+          reason: p.reason,
+          snapshotId: p.snapshotId,
+        }),
+        this.subs,
+        'runtime:blog_mode_switched',
+      )
+      log('INFO', 'blog_dual_mode_service_initialized', { defaultMode: blogModeService.getDefaultMode() })
+    } catch (err) {
+      log('WARN', 'blog_dual_mode_service_init_failed', { error: String(err) })
     }
 
     // ── Plan:清理工作区 - 整理文件目录 上层增强层（由 WORKSPACE_CLEANUP_FEATURES 控制）──
@@ -1369,6 +1444,14 @@ export class AppRuntime {
         })
         // 注册记忆分析采集器（从对话记录中检测用户不满意模式）
         pipeline.addCollector(new MemoryAnalysisCollector())
+        // 注册记忆优化采集器和执行器（自适应调参：分析统计 → 生成建议 → 应用变更）
+        const { MemoryOptimizationCollector, MemoryOptimizationExecutor } = await import('../evolution/automation')
+        const memOptCollector = new MemoryOptimizationCollector()
+        const memOptExecutor = new MemoryOptimizationExecutor()
+        memOptCollector.setMemoryService(memoryService)
+        memOptExecutor.setMemoryService(memoryService)
+        pipeline.addCollector(memOptCollector)
+        pipeline.addExecutor(memOptExecutor)
         // 注册行为特征采集器和优化执行器（行为驱动自进化）
         const { BehaviorCollector, BehaviorOptimizationExecutor } = await import('../evolution/automation')
         pipeline.addCollector(new BehaviorCollector())
@@ -1664,6 +1747,35 @@ export class AppRuntime {
       },
     })
 
+    // 桌面悬浮任务面板 — 在壁纸 overlay 上显示 Agent 状态、计划进度与快捷操作
+    this.lazyInit!.add({
+      name: 'task-panel',
+      priority: 'normal',
+      delayMs: 150,
+      fn: async () => {
+        const taskPanel = new TaskPanelService()
+        taskPanel.setAgentService(agentService)
+        try {
+          const { planManager } = await import('../evolution')
+          taskPanel.setPlanManager(planManager)
+        } catch {
+          // planManager 不可用时降级
+        }
+        const win = getMainWindow()
+        if (win && !win.isDestroyed()) {
+          taskPanel.setWindow(win)
+          taskPanel.setVisible(true)
+        }
+        taskPanelRef.current = taskPanel
+        // 托盘切换回调
+        setTaskPanelToggle(() => {
+          const tp = taskPanelRef.current
+          if (tp) tp.toggleVisibility()
+        })
+        log('INFO', 'task_panel_service_started')
+      },
+    })
+
     // 自进化监控服务 — 定期推送系统指标和进化状态到壁纸
     this.lazyInit!.add({
       name: 'monitoring',
@@ -1767,6 +1879,23 @@ export class AppRuntime {
         if (win) {
           startWallpaperCssWatcher(process.cwd(), [win])
         }
+      },
+    })
+
+    // 壁纸交互模式 — 全局快捷键 Ctrl+Space 切换桌面 Agent 面板
+    this.lazyInit!.add({
+      name: 'wallpaper-interactive',
+      priority: 'normal',
+      delayMs: 500,
+      fn: async () => {
+        const service = new WallpaperInteractiveService()
+        const win = getMainWindow()
+        if (win && !win.isDestroyed()) {
+          service.setWindow(win)
+        }
+        service.start()
+        wallpaperInteractiveRef.current = service
+        log('INFO', 'wallpaper_interactive_service_started', {})
       },
     })
 
