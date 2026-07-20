@@ -21,6 +21,16 @@ export {
   type PriorityRecommendation,
 } from './ToolAnalytics'
 
+// ===== 工具运行时可调参数配置管理 =====
+export {
+  ToolConfigManager,
+  toolConfigManager,
+  type ToolTunableConfig,
+  type ToolConfigStoreData,
+  type ConfigChangeType,
+  type ConfigChangeRecord,
+} from './ToolConfigManager'
+
 // ===== Memory 模式迁移：ToolProviderRegistry =====
 export { toolProviderRegistry, ToolProviderRegistry } from './registry'
 export { type IToolProvider, adaptToToolProvider } from './IToolProvider'

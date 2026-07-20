@@ -1,17 +1,27 @@
 /**
  * TtsRouter — 混合 TTS 智能路由
  *
- * 根据网络状况、质量/延迟需求、用户偏好，在云端 TTS (edge-tts) 和本地 PiperTTS 之间自动选择。
+ * 根据网络状况、质量/延迟需求、用户偏好，在云端 TTS (edge-ts) 和本地 PiperTTS 之间自动选择。
  *
  * 决策层次（优先级递减）：
  *   1. 用户显式偏好 (cloud/local) → 直接使用
  *   2. 网络不可用 → 本地 Piper（兜底）
- *   3. 网络延迟高 + 延迟权重 > 质量权重 → 本地 Piper
- *   4. 质量权重 > 延迟权重 + 网络良好 → 云端 edge-tts
- *   5. 默认：网络可用 → 云端，否则 → 本地
+ *   3. 情感强度低 + 文本短 → 本地 Piper（低情感短句用本地快速响应）
+ *   4. RTT > rttPiperThresholdMs（默认 100ms）且低情感短句 → 本地 Piper
+ *   5. 网络延迟高 + 延迟权重 > 质量权重 → 本地 Piper
+ *   6. 质量权重 > 延迟权重 + 网络良好 → 云端 edge-tts
+ *   7. 默认：网络可用 → 云端，否则 → 本地
+ *
+ * 情感+长度感知（新增）：
+ *   - emotionStrength: 文本情感得分绝对值 0-1（从 SentimentAnalyzer 获得）
+ *   - textLength: 文本单词/词数
+ *   - 当 emotionStrength < minEmotionForCloud 且 textLength < maxShortTextWords 时，
+ *     即使网络状况良好也倾向本地 Piper，保证短促日常用语的低延迟响应
+ *   - 高情感文本（emotionStrength >= minEmotionForCloud）优先云端以获得情感表现力
  *
  * 集成点：
  *   - TtsService._synthesize() → router.decide() 决定引擎
+ *   - TtsScheduler → 在路由前分析情感强度和文本长度
  *   - IPC handler → router.setUserPreference() 接收用户偏好
  *   - Settings UI → 已有 cloud/local 切换（需增加 auto 模式）
  *
@@ -131,31 +141,45 @@ export class TtsRouter {
   /**
    * 决定使用哪个 TTS 引擎。
    *
-   * @param options.qualityWeight 质量权重 0-1（越高越倾向云端，云端表现力更强）
-   * @param options.latencyWeight 延迟权重 0-1（越高越倾向本地，本地延迟更低）
+   * 决策层次（优先级递减）：
+   *   1. 用户显式偏好 → 直接使用
+   *   2. Piper 性能感知 → 性能差时倾向云端
+   *   3. 情感强度低 + 文本短 → 本地 Piper（低情感短句无需云端表现力）
+   *   4. RTT > rttPiperThresholdMs + 低情感短文本 → 本地 Piper（网络延迟高时本地优先）
+   *   5. 网络不可用 → 本地兜底
+   *   6. 网络延迟高 + 延迟权重 > 质量权重 → 本地 Piper
+   *   7. 质量权重 > 延迟权重 + 网络良好 → 云端 edge-tts
+   *   8. 默认策略
+   *
+   * @param options.qualityWeight 质量权重 0-1（越高越倾向云端）
+   * @param options.latencyWeight 延迟权重 0-1（越高越倾向本地）
    * @param options.forceCheck 是否强制刷新网络检测
+   * @param options.emotionStrength 文本情感强度绝对值 0-1（由 SentimentAnalyzer 提供）
+   * @param options.textLength 文本长度（词数）
    */
   async decide(options?: {
     qualityWeight?: number
     latencyWeight?: number
     forceCheck?: boolean
+    emotionStrength?: number
+    textLength?: number
   }): Promise<TtsRoutingDecision> {
     const qualityWeight = options?.qualityWeight ?? this.config.defaultQualityWeight
     const latencyWeight = options?.latencyWeight ?? this.config.defaultLatencyWeight
+    const emotionStrength = options?.emotionStrength
+    const textLength = options?.textLength
 
     // ── 第 1 层：用户显式偏好 ──
     if (this.userPreference === 'cloud') {
-      return this.makeDecision('cloud', 'user_preference_cloud', -1, true, qualityWeight, latencyWeight)
+      return this.makeDecision('cloud', 'user_preference_cloud', -1, true, qualityWeight, latencyWeight, emotionStrength, textLength)
     }
     if (this.userPreference === 'local') {
-      return this.makeDecision('local', 'user_preference_local', -1, true, qualityWeight, latencyWeight)
+      return this.makeDecision('local', 'user_preference_local', -1, true, qualityWeight, latencyWeight, emotionStrength, textLength)
     }
 
-    // ── 第 2 层：Piper 性能感知（新增） ──
-    // 如果 Piper 性能不佳（高延迟/高失败率），产生云端倾向
+    // ── 第 2 层：Piper 性能感知 ──
     const piperCloudBias = this.getCloudBiasFromPiperPerformance()
     if (piperCloudBias >= 0.4 && latencyWeight <= qualityWeight) {
-      // Piper 性能差 + 用户不特别关注延迟 → 切云端
       log('INFO', 'tts_router_piper_perf_bias', {
         cloudBias: piperCloudBias.toFixed(2),
         piperRecentLatency: this.piperPerformance?.recentLatencyMs,
@@ -169,25 +193,68 @@ export class TtsRouter {
         true,
         qualityWeight,
         latencyWeight,
+        emotionStrength,
+        textLength,
       )
     }
 
-    // ── 第 3 层：检测网络状态 ──
+    // ── 第 3 层：情感强度 + 文本长度感知 ──
+    const isLowEmotion = emotionStrength !== undefined && emotionStrength < this.config.minEmotionForCloud
+    const isShortText = textLength !== undefined && textLength < this.config.maxShortTextWords
+    const isLowEmotionShortText = isLowEmotion && isShortText
+
+    // 情感强度低 + 文本短 → 本地 Piper（即使网络良好）
+    // 这些低情感短句（如"好的""再见"）用本地引擎避免网络延迟
+    if (isLowEmotionShortText) {
+      log('INFO', 'tts_router_emotion_length', {
+        emotionStrength,
+        textLength,
+        minEmotion: this.config.minEmotionForCloud,
+        maxShortText: this.config.maxShortTextWords,
+        decision: 'local',
+      })
+      return this.makeDecision(
+        'local',
+        `low_emotion_${emotionStrength?.toFixed(2)}_short_text_${textLength}`,
+        -1,
+        true,
+        qualityWeight,
+        latencyWeight,
+        emotionStrength,
+        textLength,
+      )
+    }
+
+    // ── 第 4 层：检测网络状态 ──
     const netStatus = options?.forceCheck
       ? await networkMonitor.refresh()
       : await networkMonitor.getStatus()
 
-    // ── 第 4 层：网络不可用 → 本地兜底 ──
+    // ── 第 5 层：网络不可用 → 本地兜底 ──
     if (!netStatus.available) {
-      return this.makeDecision('local', 'network_unavailable', netStatus.latencyMs, false, qualityWeight, latencyWeight)
+      return this.makeDecision('local', 'network_unavailable', netStatus.latencyMs, false, qualityWeight, latencyWeight, emotionStrength, textLength)
     }
 
-    // ── 第 5 层：基于权重和网络质量决策 ──
+    // ── 第 6 层：RTT 阈值检测 ──
+    // RTT > rttPiperThresholdMs（默认 100ms）且是低情感短文本 → 本地 Piper
+    if (netStatus.latencyMs > this.config.rttPiperThresholdMs && isLowEmotionShortText) {
+      return this.makeDecision(
+        'local',
+        `rtt_${netStatus.latencyMs}ms_exceeds_${this.config.rttPiperThresholdMs}_low_emotion_short_text`,
+        netStatus.latencyMs,
+        true,
+        qualityWeight,
+        latencyWeight,
+        emotionStrength,
+        textLength,
+      )
+    }
+
+    // ── 第 7 层：基于权重和网络质量决策 ──
     const latency = netStatus.latencyMs
 
     // 网络延迟很高 + 用户更关注延迟 → 本地
     if (latency > this.config.maxLatencyMs && latencyWeight > qualityWeight) {
-      // 同样检查 Piper 性能
       if (piperCloudBias < 0.3) {
         return this.makeDecision(
           'local',
@@ -196,9 +263,10 @@ export class TtsRouter {
           true,
           qualityWeight,
           latencyWeight,
+          emotionStrength,
+          textLength,
         )
       }
-      // Piper 也不太好 → 还是去云端
       return this.makeDecision(
         'cloud',
         `high_latency_${latency}ms_but_piper_unhealthy`,
@@ -206,6 +274,8 @@ export class TtsRouter {
         true,
         qualityWeight,
         latencyWeight,
+        emotionStrength,
+        textLength,
       )
     }
 
@@ -218,10 +288,12 @@ export class TtsRouter {
         true,
         qualityWeight,
         latencyWeight,
+        emotionStrength,
+        textLength,
       )
     }
 
-    // ── 第 6 层：默认策略 ──
+    // ── 第 8 层：默认策略 ──
     if (qualityWeight >= latencyWeight) {
       return this.makeDecision(
         'cloud',
@@ -230,11 +302,11 @@ export class TtsRouter {
         true,
         qualityWeight,
         latencyWeight,
+        emotionStrength,
+        textLength,
       )
     } else {
-      // 延迟权重更高时，如果网络延迟超过 goodLatencyMs，倾向本地
       if (latency > this.config.goodLatencyMs) {
-        // 但检查 Piper 性能
         if (piperCloudBias < 0.3) {
           return this.makeDecision(
             'local',
@@ -243,6 +315,8 @@ export class TtsRouter {
             true,
             qualityWeight,
             latencyWeight,
+            emotionStrength,
+            textLength,
           )
         }
         return this.makeDecision(
@@ -252,6 +326,8 @@ export class TtsRouter {
           true,
           qualityWeight,
           latencyWeight,
+          emotionStrength,
+          textLength,
         )
       }
       return this.makeDecision(
@@ -261,27 +337,36 @@ export class TtsRouter {
         true,
         qualityWeight,
         latencyWeight,
+        emotionStrength,
+        textLength,
       )
     }
   }
 
   /**
    * 同步决策（使用缓存的网络状态，不发起新检测）。
-   * 适用于需要快速决策的场景。
+   * 适用于需要快速决策的场景，例如 TtsService._synthesize()。
+   *
+   * @param options.emotionStrength 文本情感强度绝对值 0-1
+   * @param options.textLength 文本长度（词数）
    */
   decideSync(options?: {
     qualityWeight?: number
     latencyWeight?: number
+    emotionStrength?: number
+    textLength?: number
   }): TtsRoutingDecision {
     const qualityWeight = options?.qualityWeight ?? this.config.defaultQualityWeight
     const latencyWeight = options?.latencyWeight ?? this.config.defaultLatencyWeight
+    const emotionStrength = options?.emotionStrength
+    const textLength = options?.textLength
 
     // 用户偏好优先
     if (this.userPreference === 'cloud') {
-      return this.makeDecision('cloud', 'user_preference_cloud', -1, true, qualityWeight, latencyWeight)
+      return this.makeDecision('cloud', 'user_preference_cloud', -1, true, qualityWeight, latencyWeight, emotionStrength, textLength)
     }
     if (this.userPreference === 'local') {
-      return this.makeDecision('local', 'user_preference_local', -1, true, qualityWeight, latencyWeight)
+      return this.makeDecision('local', 'user_preference_local', -1, true, qualityWeight, latencyWeight, emotionStrength, textLength)
     }
 
     // ── Piper 性能感知 ──
@@ -294,13 +379,47 @@ export class TtsRouter {
         true,
         qualityWeight,
         latencyWeight,
+        emotionStrength,
+        textLength,
       )
     }
 
-    // 使用缓存状态
+    // ── 情感 + 长度感知 ──
+    const isLowEmotion = emotionStrength !== undefined && emotionStrength < this.config.minEmotionForCloud
+    const isShortText = textLength !== undefined && textLength < this.config.maxShortTextWords
+    const isLowEmotionShortText = isLowEmotion && isShortText
+
+    if (isLowEmotionShortText) {
+      return this.makeDecision(
+        'local',
+        `sync_low_emotion_${emotionStrength?.toFixed(2)}_short_text_${textLength}`,
+        -1,
+        true,
+        qualityWeight,
+        latencyWeight,
+        emotionStrength,
+        textLength,
+      )
+    }
+
+    // ── 使用缓存网络状态 ──
     const cached = networkMonitor.getCachedStatus()
+
+    // RTT > rttPiperThresholdMs + 低情感短文本 → Piper
+    if (cached && cached.available && cached.latencyMs > this.config.rttPiperThresholdMs && isLowEmotionShortText) {
+      return this.makeDecision(
+        'local',
+        `sync_rtt_${cached.latencyMs}ms_exceeds_${this.config.rttPiperThresholdMs}_low_emotion`,
+        cached.latencyMs,
+        true,
+        qualityWeight,
+        latencyWeight,
+        emotionStrength,
+        textLength,
+      )
+    }
+
     if (!cached || !cached.available) {
-      // 无缓存或已知不可用 → 本地（但 Piper 性能差时仍需处理）
       if (piperCloudBias >= 0.4) {
         return this.makeDecision(
           'cloud',
@@ -309,6 +428,8 @@ export class TtsRouter {
           cached?.available ?? false,
           qualityWeight,
           latencyWeight,
+          emotionStrength,
+          textLength,
         )
       }
       return this.makeDecision(
@@ -318,27 +439,28 @@ export class TtsRouter {
         cached?.available ?? false,
         qualityWeight,
         latencyWeight,
+        emotionStrength,
+        textLength,
       )
     }
 
     const latency = cached.latencyMs
     if (latency > this.config.maxLatencyMs && latencyWeight > qualityWeight) {
       if (piperCloudBias < 0.3) {
-        return this.makeDecision('local', `high_latency_${latency}ms`, latency, true, qualityWeight, latencyWeight)
+        return this.makeDecision('local', `high_latency_${latency}ms`, latency, true, qualityWeight, latencyWeight, emotionStrength, textLength)
       }
-      return this.makeDecision('cloud', `high_latency_${latency}ms_piper_unhealthy`, latency, true, qualityWeight, latencyWeight)
+      return this.makeDecision('cloud', `high_latency_${latency}ms_piper_unhealthy`, latency, true, qualityWeight, latencyWeight, emotionStrength, textLength)
     }
 
     if (qualityWeight >= latencyWeight) {
-      return this.makeDecision('cloud', `default_cloud_${latency}ms`, latency, true, qualityWeight, latencyWeight)
+      return this.makeDecision('cloud', `default_cloud_${latency}ms`, latency, true, qualityWeight, latencyWeight, emotionStrength, textLength)
     }
 
-    // 延迟权重高 → 倾向本地
     if (piperCloudBias < 0.3 && latency > this.config.goodLatencyMs) {
-      return this.makeDecision('local', `sync_decision_${latency}ms`, latency, true, qualityWeight, latencyWeight)
+      return this.makeDecision('local', `sync_decision_${latency}ms`, latency, true, qualityWeight, latencyWeight, emotionStrength, textLength)
     }
 
-    return this.makeDecision('cloud', `sync_cloud_${latency}ms_piper_bias_${piperCloudBias.toFixed(2)}`, latency, true, qualityWeight, latencyWeight)
+    return this.makeDecision('cloud', `sync_cloud_${latency}ms_piper_bias_${piperCloudBias.toFixed(2)}`, latency, true, qualityWeight, latencyWeight, emotionStrength, textLength)
   }
 
   /** 获取最近的决策（供调试） */
@@ -355,6 +477,8 @@ export class TtsRouter {
     networkAvailable: boolean,
     qualityWeight: number,
     latencyWeight: number,
+    emotionStrength?: number,
+    textLength?: number,
   ): TtsRoutingDecision {
     const decision: TtsRoutingDecision = {
       engine,
@@ -363,16 +487,20 @@ export class TtsRouter {
       networkAvailable,
       qualityWeight,
       latencyWeight,
+      emotionStrength,
+      textLength,
     }
 
     // 仅在引擎变化或有意义的原因时记录日志
-    if (!this.lastDecision || this.lastDecision.engine !== engine) {
+    if (!this.lastDecision || this.lastDecision.engine !== engine || this.lastDecision.reason !== reason) {
       log('INFO', 'tts_router_decision', {
         engine,
         reason,
         latencyMs: networkLatencyMs,
         qualityWeight: qualityWeight.toFixed(2),
         latencyWeight: latencyWeight.toFixed(2),
+        emotionStrength: emotionStrength?.toFixed(2),
+        textLength,
       })
     }
 

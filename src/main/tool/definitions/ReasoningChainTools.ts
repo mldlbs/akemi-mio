@@ -23,6 +23,7 @@
 import { buildTool, formatToolResult, formatToolError } from '../types'
 import { getObserverService, getPlanManager } from '../deps'
 import { log } from '../../logger/Logger'
+import { evolutionConsumerBridge } from '../../evolution/consumer'
 
 // =============================================================================
 // 类型定义
@@ -159,7 +160,26 @@ export const createReasoningChainTool = buildTool({
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
           try {
             const contextBlock = args.context ? '\n附加上下文:\n' + args.context + '\n' : ''
-            const decomposePrompt = '请分析以下任务并分解为推理链 JSON格式：\n\n任务: ' + task + contextBlock
+
+            // ★ Evolution 消费者上下文注入
+            // 从 EvolutionConsumerBridge 获取已知问题列表和管道状态，
+            // 使推理链分解时能感知当前系统的问题分布和健康度。
+            const evolutionCtx = evolutionConsumerBridge.getContext('plan_reasoning_chain')
+            const evolutionBlock = evolutionCtx?.knownIssues && evolutionCtx.knownIssues.length > 0
+              ? '\n[Evolution 系统状态]\n' +
+                evolutionCtx.knownIssues.map((i) =>
+                  `  [${i.severity}] ${i.title} (来源: ${i.source})`
+                ).join('\n') +
+                (evolutionCtx.pipeline
+                  ? '\n  管道: 已采集 ' + evolutionCtx.pipeline.totalCollected +
+                    ' 个问题, 已修复 ' + evolutionCtx.pipeline.totalFixed +
+                    ', 队列 ' + evolutionCtx.pipeline.queueSize +
+                    ', 状态: ' + evolutionCtx.pipeline.healthStatus
+                  : '') +
+                '\n'
+              : ''
+
+            const decomposePrompt = '请分析以下任务并分解为推理链 JSON格式：\n\n任务: ' + task + contextBlock + evolutionBlock
 
             const result = await llm.generate(decomposePrompt, {
               system: DECOMPOSE_SYSTEM_PROMPT,

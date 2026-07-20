@@ -16,12 +16,30 @@ let ttsEnergy = 0
 let ttsAnimId = 0
 let ttsStartCb: ((duration: number) => void) | null = null
 let ttsErrorCb: ((err: string) => void) | null = null
+let ttsStateCb: ((state: TTSState) => void) | null = null
+
+/** 实时 FFT 频率数据缓冲区，供 VoiceWallpaper 读取 */
+let ttsFreqData: Uint8Array = new Uint8Array(0)
 
 export function onTTSStart(cb: (duration: number) => void) {
   ttsStartCb = cb
 }
 export function onTTSError(cb: (err: string) => void) {
   ttsErrorCb = cb
+}
+/** 注册 TTS 播放状态变更回调 */
+export function onTTSStateChange(cb: (state: TTSState) => void): () => void {
+  ttsStateCb = cb
+  cb(ttsState)
+  return () => { ttsStateCb = null }
+}
+/** 读取当前 TTS 播放状态 */
+export function readTTSState(): TTSState {
+  return ttsState
+}
+/** 读取最新 FFT 频率数据快照（长度 = frequencyBinCount，0 表示无数据） */
+export function readTTSFreqData(): Uint8Array {
+  return ttsFreqData
 }
 
 function safeCleanup() {
@@ -43,11 +61,13 @@ function safeCleanup() {
   if (ttsCtx && ttsCtx.state !== 'closed') ttsCtx.close()
   ttsCtx = null
   ttsState = 'idle'
+  ttsStateCb?.(ttsState)
 }
 
 function doPlay(buf: ArrayBuffer) {
   safeCleanup()
   ttsState = 'loading'
+  ttsStateCb?.(ttsState)
   const ctx = new AudioContext()
   ttsCtx = ctx
 
@@ -59,6 +79,7 @@ function doPlay(buf: ArrayBuffer) {
         return
       }
       ttsState = 'playing'
+      ttsStateCb?.(ttsState)
 
       const duration = audioBuf.duration
       ttsStartCb?.(duration)
@@ -66,6 +87,11 @@ function doPlay(buf: ArrayBuffer) {
       ttsAnalyser = ctx.createAnalyser()
       ttsAnalyser.fftSize = 256
       ttsAnalyser.smoothingTimeConstant = 0.85
+
+      // 重设 FFT 数据缓冲区以匹配 analyser 的 frequencyBinCount
+      if (ttsFreqData.length !== ttsAnalyser.frequencyBinCount) {
+        ttsFreqData = new Uint8Array(ttsAnalyser.frequencyBinCount)
+      }
 
       ttsSource = ctx.createBufferSource()
       ttsSource.buffer = audioBuf
@@ -80,6 +106,8 @@ function doPlay(buf: ArrayBuffer) {
         // 每 2 帧（~30fps）采样一次，避免与 React 渲染竞争
         if (++ttsPollFrame % 2 === 0) {
           ttsAnalyser?.getByteFrequencyData(freqData)
+          // 同步到共享缓冲区
+          ttsFreqData.set(freqData)
           let total = 0
           for (let b = 0; b < freqData.length; b++) total += freqData[b]
           ttsEnergy = total / (freqData.length * 255)

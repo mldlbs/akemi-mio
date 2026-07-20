@@ -166,6 +166,20 @@ export function createElectronAPI(ipc: IpcRenderer) {
       }
     },
 
+    onTTSVoiceState: (callback: (state: {
+      state: 'speaking' | 'idle'
+      emotionParams: { voice: string; rate: string; pitch: string; label: string }
+      text: string
+      timestamp: number
+      estimatedDurationMs?: number
+    }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: any) => callback(state)
+      ipc.on('tts:voice-state', handler)
+      return () => {
+        ipc.removeListener('tts:voice-state', handler)
+      }
+    },
+
     onToolStatus: (callback: (status: { type: string; tool: string; message: string }) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, status: { type: string; tool: string; message: string }) => callback(status)
       ipc.on('tool:status', handler)
@@ -658,6 +672,22 @@ export function createElectronAPI(ipc: IpcRenderer) {
     invokeDesktopTool: (toolName: string, args: Record<string, string>): Promise<{ success: boolean; result?: string; error?: string }> =>
       ipc.invoke('desktop:invokeTool', toolName, args),
 
+    // ── 桌面悬浮任务面板（TaskPanel） ──
+    getTaskPanelState: (): Promise<{ success: boolean; state?: any; error?: string }> =>
+      ipc.invoke('taskPanel:getState'),
+
+    toggleTaskPanelVisibility: (): Promise<{ success: boolean; visible: boolean }> =>
+      ipc.invoke('taskPanel:toggleVisibility'),
+
+    setTaskPanelVisibility: (visible: boolean): Promise<{ success: boolean; visible: boolean }> =>
+      ipc.invoke('taskPanel:setVisibility', visible),
+
+    invokeTaskPanelQuickAction: (actionId: string, args?: Record<string, string>): Promise<{ success: boolean; result?: string; error?: string }> =>
+      ipc.invoke('taskPanel:invokeQuickAction', actionId, args || {}),
+
+    recordTaskPanelAction: (action: { tool: string; status: 'running' | 'success' | 'error'; summary: string }): Promise<{ success: boolean }> =>
+      ipc.invoke('taskPanel:recordAction', action),
+
     // ── 排版内容语音校验与预览 ──
     verifyTypography: (
       text: string,
@@ -827,6 +857,21 @@ export function createElectronAPI(ipc: IpcRenderer) {
     },
 
     reloadWallpaperStyles: (css: string): Promise<{ success: boolean }> => ipc.invoke('wallpaper:reloadStyles', css),
+
+    // ── 壁纸交互模式（Ctrl+Space 激活） ──
+    onWallpaperToggleInteractive: (callback: (data: { active: boolean }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: { active: boolean }) => callback(data)
+      ipc.on('wallpaper:interactive:toggle', handler)
+      return () => {
+        ipc.removeListener('wallpaper:interactive:toggle', handler)
+      }
+    },
+
+    getWallpaperInteractiveConfig: (): Promise<{ enabled: boolean; shortcut: string }> =>
+      ipc.invoke('wallpaper:interactive:getConfig'),
+
+    setWallpaperInteractiveEnabled: (enabled: boolean): Promise<{ success: boolean }> =>
+      ipc.invoke('wallpaper:interactive:setEnabled', enabled),
 
     // ── 桌面记忆浮窗 ──
     onMemoryContextData: (

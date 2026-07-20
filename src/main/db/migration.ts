@@ -854,6 +854,19 @@ const MIGRATIONS: Migration[] = [
     revert: 'DROP TABLE IF EXISTS evolution_checkpoints;',
     category: 'schema',
   },
+  {
+    version: 39,
+    sql: `
+      CREATE TABLE IF NOT EXISTS checkpoint_store (
+        id TEXT PRIMARY KEY,
+        data TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `,
+    revert: 'DROP TABLE IF EXISTS checkpoint_store;',
+    category: 'schema',
+  },
 ]
 
 // 导出迁移数组供测试验证

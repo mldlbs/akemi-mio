@@ -70,6 +70,8 @@ import {
   blogGetHabitsTool,
   blogGetSuggestionsTool,
   blogListSessionsTool,
+  blogSetModeTool,
+  blogGetModeTool,
 } from './definitions/BlogTools'
 import {
   blogMemorySearchTool,
@@ -90,6 +92,14 @@ import {
   cicdQualityGateTool,
 } from './definitions/CicdTools'
 import { ttsSpeakTool } from './definitions/TtsSpeakTool'
+import { clearToolCacheTool, getToolCacheStatsTool } from './definitions/ToolCacheTools'
+import {
+  blogMdToHtmlTool,
+  blogSeoAnalyzeTool,
+  blogPlatformFormatTool,
+  blogToolboxPipelineTool,
+  blogToolboxInfoTool,
+} from './definitions/BlogToolboxTools'
 
 export function getAllTools(): Tool[] {
   return [
@@ -187,6 +197,8 @@ export function getAllTools(): Tool[] {
     blogGetHabitsTool as Tool,
     blogGetSuggestionsTool as Tool,
     blogListSessionsTool as Tool,
+    blogSetModeTool as Tool,
+    blogGetModeTool as Tool,
     blogMemorySearchTool as Tool,
     blogMemoryListTool as Tool,
     blogMemoryPinTool as Tool,
@@ -202,5 +214,14 @@ export function getAllTools(): Tool[] {
     cicdDeployPreviewTool as Tool,
     cicdQualityGateTool as Tool,
     ttsSpeakTool as Tool,
+    clearToolCacheTool as Tool,
+    getToolCacheStatsTool as Tool,
+
+    // === BlogToolbox ===
+    blogMdToHtmlTool as Tool,
+    blogSeoAnalyzeTool as Tool,
+    blogPlatformFormatTool as Tool,
+    blogToolboxPipelineTool as Tool,
+    blogToolboxInfoTool as Tool,
   ]
 }

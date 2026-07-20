@@ -1,6 +1,10 @@
 /**
  * 记忆情感标签 — 存储对话时的情感分析结果
  * 序列化为 JSON 存储在 structuredData 中（key="emotion"）
+ *
+ * 支持两种情感模型：
+ * 1. 极性模型（polarity/score）：轻量关键词匹配
+ * 2. 维度模型（valence/arousal）：连续情感向量，构成情感时间序列
  */
 export interface MemoryEmotionTag {
   /** 情感极性 */
@@ -15,6 +19,18 @@ export interface MemoryEmotionTag {
   matchedWords: string[]
   /** 分析时间戳 */
   timestamp: number
+  /**
+   * 情感维度：效价（愉悦度）
+   * -1.0 (极度不悦) ~ +1.0 (极度愉悦)
+   * 用于构造情感时间序列和叙事曲线
+   */
+  valence?: number
+  /**
+   * 情感维度：唤醒度（激活度）
+   * -1.0 (极度平静/低迷) ~ +1.0 (极度兴奋/紧张)
+   * 用于构造情感时间序列和叙事曲线
+   */
+  arousal?: number
 }
 
 /** 语音记忆书签 */

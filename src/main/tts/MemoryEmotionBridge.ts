@@ -119,7 +119,10 @@ export class MemoryEmotionBridge {
       // 2. 映射情感标签
       const emotionLabel = this.mapPolarityToLabel(result.polarity, result.contentType, result.matchedWords)
 
-      // 3. 构造情感标签
+      // 3. 构造情感标签（含效价/唤醒度维度）
+      const valence = this.computeValence(result.polarity, result.score, matchedWords)
+      const arousal = this.computeArousal(userText, result.score, matchedWords)
+
       const tag: MemoryEmotionTag = {
         polarity: result.polarity,
         score: result.score,
@@ -127,6 +130,8 @@ export class MemoryEmotionBridge {
         contentType: result.contentType,
         matchedWords: result.matchedWords.slice(0, 5),
         timestamp: Date.now(),
+        valence,
+        arousal,
       }
 
       // 4. 查找最近一条用户输入相关的 Memory 条目并附加情感标签
@@ -449,6 +454,52 @@ export class MemoryEmotionBridge {
     ]
 
     return parts.join(' | ')
+  }
+
+  /**
+   * 从文本情感分析结果计算效价（Valence）。
+   * 效价范围 -1.0（负面）~ +1.0（正面）
+   */
+  private computeValence(polarity: string, score: number, matchedWords: string[]): number {
+    const base = polarity === 'positive' ? 0.3 : polarity === 'negative' ? -0.3 : 0
+    const intensity = Math.max(-1, Math.min(1, score))
+
+    // 关键词强度微调
+    const strongPositive = matchedWords.filter((w) => ['太棒', '完美', '精彩', '超赞', '厉害', '非常好'].includes(w)).length
+    const strongNegative = matchedWords.filter((w) => ['糟糕', '崩溃', '气死', '绝望', '恶心'].includes(w)).length
+
+    let delta = base * intensity
+    delta += strongPositive * 0.1
+    delta -= strongNegative * 0.1
+
+    return Math.max(-1, Math.min(1, delta))
+  }
+
+  /**
+   * 从文本情感分析结果计算唤醒度（Arousal）。
+   * 唤醒度范围 -1.0（低迷/平静）~ +1.0（兴奋/紧张）
+   */
+  private computeArousal(userText: string, score: number, matchedWords: string[]): number {
+    // 标点符号检测兴奋度
+    const exclamationCount = (userText.match(/！/g) || []).length
+    const questionCount = (userText.match(/？/g) || []).length
+
+    // 关键词检测
+    const highArousalWords = matchedWords.filter((w) =>
+      ['太棒', '崩溃', '气死', '超赞', '好激动', '兴奋', '紧张', '着急', '天哪'].includes(w),
+    ).length
+
+    // 文本长度（短文本往往唤醒度高）
+    const isShort = userText.length < 20
+
+    // 计算唤醒度
+    let arousal = score * 0.3 // 基础：情感强度
+    arousal += exclamationCount * 0.15 // 感叹号 → 唤醒度↑
+    arousal += questionCount * 0.1 // 问号 → 唤醒度↑
+    arousal += highArousalWords * 0.15 // 高唤醒关键词
+    if (isShort) arousal += 0.1 // 短文本 → 唤醒度稍高
+
+    return Math.max(-1, Math.min(1, arousal))
   }
 }
 

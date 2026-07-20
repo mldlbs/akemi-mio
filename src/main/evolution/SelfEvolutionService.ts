@@ -27,6 +27,7 @@ import { eventBus, EventBus } from '../core/EventBus'
 import { AsyncLock } from '../utils/AsyncLock'
 import { PlanIntegrityChecker } from './PlanIntegrityChecker'
 import { evolutionPiperBridge } from './piper/EvolutionPiperBridge'
+import { evolutionConsumerBridge } from './consumer'
 import { EVOLUTION_SAFETY_MODE, WORKSPACE } from '../config'
 import { asrEvolutionManager } from '../asr/AsrEvolutionManager'
 import type { AgentService } from '../agent/AgentService'
@@ -168,6 +169,8 @@ export class SelfEvolutionService implements ISubsystem {
       (this.eventBus.on as any)('pipeline.completed', (p: any) => {
         this.lastPipelineMetrics = this.pipeline?.getMetrics() ?? null
         this.syncStateToPiperBridge()
+        // ★ 通知消费者桥接器：Evolution 状态已更新
+        evolutionConsumerBridge.refresh()
       }) as any,
       // 将进化结果持久化为 UI 消息
       (this.eventBus.on as any)('evolution.cycle.completed', (p: any) => {
@@ -244,6 +247,10 @@ export class SelfEvolutionService implements ISubsystem {
 
     // 初始同步 Evolution 状态到 PiperTTS 桥接器
     this.syncStateToPiperBridge()
+
+    // ★ 初始化消费者桥接器（注册默认消费者契约）
+    evolutionConsumerBridge.init()
+    this.syncSchedulerStateToConsumerBridge()
 
     // ★ 检查点恢复：检测上次中断是否有未完成的检查点（后台执行，不阻塞启动）
     void this.recoverCheckpointsOnStartup()
@@ -631,6 +638,8 @@ export class SelfEvolutionService implements ISubsystem {
 
           const metrics = await this.pipeline.runOnce()
           this.lastPipelineMetrics = metrics
+          // ★ 同步管道指标到消费者桥接器
+          evolutionConsumerBridge.updatePipelineMetrics(metrics)
           this.tryRunFailures = 0
           this.lastSuccessTime = Date.now()
           this.recoveryCooldownUntil = 0
@@ -874,8 +883,28 @@ export class SelfEvolutionService implements ISubsystem {
     const oldState = this.schedulerState
     this.schedulerState = newState
     this.syncStateToPiperBridge()
+    // ★ 同步调度器状态到消费者桥接器
+    this.syncSchedulerStateToConsumerBridge()
     log('INFO', 'scheduler_state_transition', { from: oldState, to: newState, reason })
     this.eventBus.emit('evolution.scheduler.state' as any, { from: oldState, to: newState, reason, timestamp: Date.now() })
+  }
+
+  /**
+   * 将当前调度器状态同步到 EvolutionConsumerBridge。
+   * 使 Plan/ReasoningChain 消费者能感知 Evolution 的运行状态。
+   */
+  private syncSchedulerStateToConsumerBridge(): void {
+    evolutionConsumerBridge.updateSchedulerState({
+      state:
+        this.schedulerState === EvolutionSchedulerState.ANALYZING
+          ? 'analyzing'
+          : this.schedulerState === EvolutionSchedulerState.COOLDOWN
+            ? 'cooling_down'
+            : 'idle',
+      lastRun: this.lastRun > 0 ? this.lastRun : null,
+      consecutiveFailures: this.tryRunFailures,
+      isHealthy: this.tryRunFailures < 3,
+    })
   }
 
   // ==================== 将结果发送到 UI ====================

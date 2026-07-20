@@ -418,6 +418,10 @@ export interface TtsRoutingDecision {
   qualityWeight: number
   /** 本次请求的延迟权重 0-1 */
   latencyWeight: number
+  /** 文本情感强度（绝对值 0-1），未分析时为 -1 */
+  emotionStrength?: number
+  /** 文本长度（词数），未分析时为 -1 */
+  textLength?: number
 }
 
 /** TTS 路由配置 */
@@ -434,6 +438,12 @@ export interface TtsRouterConfig {
   networkCacheTtlMs: number
   /** 最低网络可用性：在此延迟以下视为"良好" */
   goodLatencyMs: number
+  /** [混合TTS] RTT 阈值（ms）：RTT 超过此值时短低情感文本使用本地 Piper */
+  rttPiperThresholdMs: number
+  /** [混合TTS] 最低情感强度：低于此值且文本短 → 倾向本地 Piper */
+  minEmotionForCloud: number
+  /** [混合TTS] 短文本词数上限：低于此值且低情感 → 倾向本地 Piper */
+  maxShortTextWords: number
 }
 
 /** 默认路由配置 */
@@ -444,6 +454,12 @@ export const DEFAULT_TTS_ROUTER_CONFIG: TtsRouterConfig = {
   defaultLatencyWeight: 0.4,
   networkCacheTtlMs: 5000,
   goodLatencyMs: 150,
+  /** RTT > 100ms 时低情感短文本使用 Piper */
+  rttPiperThresholdMs: 100,
+  /** 情感强度 < 0.4 视为低情感 */
+  minEmotionForCloud: 0.4,
+  /** 词数 < 10 视为短文本 */
+  maxShortTextWords: 10,
 }
 
 // ══════════════════════════════════════════
@@ -670,6 +686,93 @@ export interface SmoothTransitionConfig {
 export const DEFAULT_SMOOTH_TRANSITION: SmoothTransitionConfig = {
   durationSec: 20,
   enabled: true,
+}
+
+// ══════════════════════════════════════════
+//  情感维度模型与叙事情绪曲线
+// ══════════════════════════════════════════
+
+/**
+ * 情感向量 — 连续维度情感表示
+ * 使用效价-唤醒度二维模型（Valence-Arousal Model）
+ */
+export interface EmotionVector {
+  /** 效价（愉悦度）-1.0 ~ +1.0 */
+  valence: number
+  /** 唤醒度（激活度）-1.0 ~ +1.0 */
+  arousal: number
+}
+
+/**
+ * 情绪曲线的单时间点
+ */
+export interface EmotionTimeSeriesPoint {
+  /** 时间戳（毫秒） */
+  timestamp: number
+  /** 情感向量 */
+  emotionVector: EmotionVector
+  /** 可读标签（如 "开心"、"悲伤"） */
+  label: string
+  /** 源消息文本摘要 */
+  snippet: string
+}
+
+/**
+ * 叙事情感段落 — Agent 回复中的一个情感段落
+ * Agent 将其回复按情感变化切分为多个段落，每段分配独立的情感参数
+ */
+export interface NarrativeEmotionSegment {
+  /** 段落文本 */
+  text: string
+  /** 目标语音风格标签 */
+  style: VoiceStyle
+  /** 风格强度 0.0–1.0 */
+  styleDegree: number
+  /** 目标情感向量 */
+  emotionVector: EmotionVector
+  /**
+   * SpeakingStyle 名称（边缘 TTS 参数，如 "cheerful" / "sad"）
+   * 映射关系见 SPEAKING_STYLE_VOICE_MAP
+   */
+  speakingStyle?: string
+}
+
+/**
+ * 叙事情绪曲线 — 一组有序的情感段落
+ */
+export interface NarrativeEmotionCurve {
+  /** 段落列表（有序） */
+  segments: NarrativeEmotionSegment[]
+  /** 整体情绪趋势描述 */
+  trendDescription: string
+  /** 原始记忆情感时间序列源数据摘要 */
+  sourceTimeSeries?: EmotionTimeSeriesPoint[]
+}
+
+/**
+ * 语音风格 → 边缘 TTS SpeakingStyle 参数映射
+ *
+ * 边缘 TTS 支持以下 SpeakingStyle 值：
+ * cheerful, sad, angry, fearful, excited, friendly, whispering, shouting,
+ * hopeful, surprised, warm, determined, empathetic, neutral
+ *
+ * 注意：Piper 本地引擎不支持 SpeakingStyle，仅云端 edge-tts 可用
+ */
+export const SPEAKING_STYLE_VOICE_MAP: Record<VoiceStyle, string> = {
+  cheerful: 'cheerful',
+  serious: 'determined',
+  gentle: 'warm',
+  neutral: 'neutral',
+  warm: 'friendly',
+  energetic: 'excited',
+  calm: 'empathetic',
+  playful: 'happy',
+}
+
+/** 默认叙事情绪曲线（无情感数据时的回退值） */
+export const DEFAULT_NARRATIVE_CURVE: NarrativeEmotionCurve = {
+  segments: [],
+  trendDescription: '平稳',
 }
 
 /** 默认 UserContextClassifier 配置 */

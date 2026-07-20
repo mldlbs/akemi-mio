@@ -13,6 +13,9 @@ import { implicitFeedbackTracker } from './ImplicitFeedbackTracker'
 import { ttsExperimentHook } from './TtsExperimentHook'
 import { ttsConfigManager } from './TtsConfigManager'
 import { SpeechPluginRegistry, PiperTtsPlugin, EdgeTtsPlugin } from '../speech'
+import { ttsCache } from './TtsCache'
+import { sentimentAnalyzer } from './SentimentAnalyzer'
+import type { StyledTtsSegment } from './emotion'
 
 // ══════════════════════════════════════════
 //  语音字幕 — Subtitle Data Types
@@ -596,6 +599,61 @@ export class TtsService {
     }
   }
 
+  /**
+   * 叙事情感语音播报 — 按情感段落合成并播放。
+   *
+   * 将一段叙事先按情感划分为多个段落，每段独立合成，
+   * 支持段落间 SpeakingStyle 变化（云 TTS）或 rate/pitch 调整（本地 TTS）。
+   *
+   * 合成策略：
+   *   - 云端（edge-tts）: 使用 --style / --style-degree 参数逐段控制
+   *   - 本地（Piper）:   回退到 rate/pitch 调整模拟情感变化
+   *
+   * @param segments 情感段落列表（每段有独立的文本、风格、强度）
+   * @param isCloudEngine 是否使用云端引擎（云端支持 SpeakingStyle）
+   */
+  async speakNarrative(segments: StyledTtsSegment[], isCloudEngine: boolean): Promise<void> {
+    if (this.loopMode) {
+      this.loopCount = 0
+    }
+
+    this.onStateUpdate({ ttsPlaying: true })
+    try {
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i]
+        if (!seg.text || seg.text.trim().length < 15) continue
+
+        // 设置当前段的情感参数
+        this.emotionParams = { ...seg.params }
+
+        // 记录最后播报文本（供重听）
+        this.lastSpokenText = seg.text
+        this.lastSpokenCleanText = seg.text
+
+        // 发射字幕事件
+        this.emitSubtitle(seg.text)
+
+        // 合成当前段
+        await this._synthesizeWithStyle(seg.text, seg.speakingStyle, seg.styleDegree, isCloudEngine)
+
+        // 段落间日志
+        log('INFO', 'tts_narrative_segment', {
+          index: i,
+          total: segments.length,
+          style: seg.speakingStyle,
+          degree: seg.styleDegree,
+          chars: seg.text.length,
+        })
+      }
+      // 播报完成后自动调度循环
+      this.scheduleNextLoop()
+    } catch (err) {
+      log('ERROR', 'tts_narrative_error', { error: String(err) })
+    } finally {
+      this.onStateUpdate({ ttsPlaying: false })
+    }
+  }
+
   // ══════════════════════════════════════════
   //  重听（Replay）与循环播放（Loop）
   // ══════════════════════════════════════════
@@ -821,16 +879,45 @@ export class TtsService {
   private async _synthesize(text: string, outputFile: string, attempt = 1): Promise<void> {
     const maxAttempts = 2
 
+    // ── [混合 TTS 缓存] 合成前先查缓存 ──
+    // 如果缓存命中（相同文本+情感标签的合成结果），直接复制缓存文件到输出路径
+    // 避免重复合成，对高频短语（问候/确认）和重复内容效果显著
+    const emotionLabel = this.emotionEnabled ? this.emotionParams.label : DEFAULT_EMOTION_PARAMS.label
+    const cachedFile = ttsCache.checkCache(text, emotionLabel)
+    if (cachedFile) {
+      try {
+        await fsp.copyFile(cachedFile, outputFile)
+        log('INFO', 'tts_cache_hit', {
+          chars: text.length,
+          cacheFile: cachedFile,
+          emotionLabel,
+        })
+        return
+      } catch (err) {
+        // 缓存复制失败不阻塞，降级到正常合成
+        log('WARN', 'tts_cache_copy_failed', { error: String(err) })
+      }
+    }
+
     // ── Piper 性能反馈注入路由决策 ──
-    // 将 TtsPiperBridge 采集的 Piper 最新性能数据推送给 TtsRouter，
-    // 使路由器在 cloud/local 决策时能感知本地引擎的实时表现。
-    // 这是在每次合成前执行的轻量级同步操作。
     const piperFeedback = ttsPiperBridge.getPiperFeedback()
     ttsRouter.setPiperPerformance({
       recentLatencyMs: piperFeedback.recentLatencyMs,
       anyModelFailed: piperFeedback.anyModelFailed,
       queueDepth: piperFeedback.queueDepth,
     })
+
+    // ── 情感强度分析（用于增强路由决策） ──
+    // 使用 SentimentAnalyzer 分析文本的情感得分绝对值作为情感强度
+    let emotionStrength: number | undefined
+    let textLength: number | undefined
+    try {
+      const sentiment = sentimentAnalyzer.analyze(text)
+      emotionStrength = Math.abs(sentiment.score)
+      textLength = Math.round(text.length / 1.5) // 中英文混合按 1.5 字符/词估算
+    } catch {
+      // 情感分析失败不阻塞路由
+    }
 
     // ── 路由决策：使用 TtsRouter 动态选择引擎 ──
     // USE_LOCAL_TTS 环境变量作为硬覆盖（向后兼容），优先级高于路由器
@@ -841,22 +928,18 @@ export class TtsService {
       useLocal = false
     } else {
       // 动态路由：使用缓存的网络状态同步决策（避免每次句子都检测网络）
+      // 注入 emotionStrength 和 textLength 辅助路由
       const decision = ttsRouter.decideSync({
         qualityWeight: this.qualityWeight,
         latencyWeight: this.latencyWeight,
+        emotionStrength,
+        textLength,
       })
       useLocal = decision.engine === 'local'
     }
 
     try {
       if (useLocal) {
-        // — TTS × PiperTTS 深度融合：通过 TtsPiperBridge 调用 PiperOrchestrator —
-        // 替代原有的直接 execFile('python', [PIPER_SCRIPT, outputFile]) 调用，
-        // 享受 PiperOrchestrator 的模型管理、队列调度、自动回退等能力。
-        // 同时通过 syncTtsStateToBridge 将 TTS 侧的全局状态（情感参数、行为需求、
-        // 情境语音配置、隐式反馈推荐）同步到桥接器，使 Piper 的模型选择和参数
-        // 调整能感知 TTS 上下文。
-
         this.syncTtsStateToBridge()
 
         const effectiveParams = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS
@@ -866,8 +949,6 @@ export class TtsService {
           throw new Error(result.error || `piper bridge exit with error`)
         }
 
-        // PiperOrchestrator 在自己的 temp 文件中生成音频，
-        // 将结果复制到 speakInternal 期望的 outputFile 位置
         if (result.audioFile) {
           await fsp.copyFile(result.audioFile, outputFile)
         } else {
@@ -875,6 +956,7 @@ export class TtsService {
         }
         return
       }
+      // ── 云端合成 ──
       const params = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS
       const edgeTts = execFile(
         'edge-tts',
@@ -890,6 +972,12 @@ export class TtsService {
           this.currentProcess = null
         }
       })
+
+      // ── [混合 TTS 缓存] 云端合成成功后将结果写入缓存 ──
+      // 键 = text + emotionLabel，下次相同文本+情感标签直接命中
+      // 仅缓存云端结果，Piper 结果已有 PhrasePregenService 的预生成缓存
+      ttsCache.setCache(outputFile, text, emotionLabel, 'cloud')
+
     } catch (err) {
       if (attempt < maxAttempts) {
         log('WARN', 'tts_synthesis_retry', { attempt, error: String(err).slice(0, 100), text_len: text.length })
@@ -932,6 +1020,120 @@ export class TtsService {
         },
       }
     }).then(() => log('PERF', 'tts_playback_done', { duration_ms: Date.now() - playT0 }))
+  }
+
+  /**
+   * 带 SpeakingStyle 的合成方法。
+   *
+   * 云端引擎（edge-tts）：传递 --style 和 --style-degree 参数
+   * 本地引擎（Piper）：回退到普通 _synthesize（无 SpeakingStyle 支持）
+   *
+   * @param text 要合成的文本
+   * @param speakingStyle SpeakingStyle 名称（如 "cheerful", "sad"）
+   * @param styleDegree 风格强度 0.0–2.0
+   * @param isCloudEngine 是否使用云端引擎
+   */
+  private async _synthesizeWithStyle(
+    text: string,
+    speakingStyle: string,
+    styleDegree: number,
+    isCloudEngine: boolean,
+  ): Promise<void> {
+    const clean = cleanTTS(text)
+    if (!clean || clean.length < 15) return
+
+    const tempFile = getTempFile()
+    const t0 = Date.now()
+
+    try {
+      if (isCloudEngine) {
+        // ── 云端合成（带 SpeakingStyle） ──
+        const params = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS
+
+        // 构建边缘 TTS 命令，添加 style 和 style-degree 参数
+        const args = [
+          '--voice', params.voice,
+          '--text', clean,
+          '--write-media', tempFile,
+          '--rate', params.rate,
+          '--pitch', params.pitch,
+          '--style', speakingStyle,
+          '--style-degree', String(Math.max(0, Math.min(2, styleDegree))),
+        ]
+
+        const edgeTts = execFile('edge-tts', args, { timeout: 30000, windowsHide: true })
+        this.currentProcess = { kill: () => edgeTts.kill() }
+        await new Promise<void>((resolve, reject) => {
+          edgeTts.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`edge-tts exit ${code}`))))
+          edgeTts.on('error', reject)
+        }).finally(() => {
+          if (this.currentProcess?.kill === edgeTts.kill) {
+            this.currentProcess = null
+          }
+        })
+      } else {
+        // ── 本地引擎（Piper）：不支持 SpeakingStyle，回退到普通合成 ──
+        this.syncTtsStateToBridge()
+        const params = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS
+        const result = await ttsPiperBridge.synthesizeWithPiper(clean, params)
+        if (!result.success) throw new Error(result.error || 'piper bridge error')
+        if (result.audioFile) {
+          await fsp.copyFile(result.audioFile, tempFile)
+        } else {
+          throw new Error('piper bridge returned no audio file')
+        }
+      }
+
+      const synthDurationMs = Date.now() - t0
+      log('PERF', 'tts_narrative_synthesis', {
+        duration_ms: synthDurationMs,
+        chars: clean.length,
+        style: speakingStyle,
+        degree: styleDegree,
+      })
+
+      // ── 记录合成完成事件 ──
+      if (this.onSynthesisComplete) {
+        const engine = isCloudEngine ? 'cloud' : 'local'
+        const synthParams = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS
+        this.onSynthesisComplete({
+          timestamp: Date.now(),
+          textSnippet: clean.slice(0, 80),
+          textLength: clean.length,
+          durationMs: synthDurationMs,
+          params: synthParams,
+          engine,
+          success: true,
+          label: synthParams.label,
+        })
+      }
+
+      // ── 播放合成音频 ──
+      if (this.onAudioReady) {
+        this.onAudioReady(tempFile)
+      }
+    } catch (err) {
+      // 合成失败，记录事件
+      if (this.onSynthesisComplete) {
+        const engine = isCloudEngine ? 'cloud' : 'local'
+        const synthParams = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS
+        this.onSynthesisComplete({
+          timestamp: Date.now(),
+          textSnippet: clean.slice(0, 80),
+          textLength: clean.length,
+          durationMs: Date.now() - t0,
+          params: synthParams,
+          engine,
+          success: false,
+          label: synthParams.label,
+        })
+      }
+      this._logError(err)
+    } finally {
+      try {
+        fsp.unlink(tempFile).catch(() => {})
+      } catch {}
+    }
   }
 
   private _logError(err: unknown): void {

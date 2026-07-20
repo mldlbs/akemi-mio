@@ -13,6 +13,9 @@ import { adaptToPlugin } from './IMemoryPlugin'
 import { FictionalMemoryGenerator } from './FictionalMemoryGenerator'
 import { MemoryUtilityTracker } from './MemoryUtilityTracker'
 import { MemoryCleaner } from './MemoryCleaner'
+import { memoryConfigManager } from './MemoryOptimizationConfig'
+import type { MemoryOptimizationStats } from './MemoryOptimizationConfig'
+import type { MemoryTunableConfig } from './MemoryOptimizationConfig'
 import type { MemoryEntry } from './types'
 import type { InterestProfile } from './BehaviorWeightingService'
 import type { SummaryLLM } from './MetaController'
@@ -1022,6 +1025,139 @@ export class MemoryService {
   /** 获取效用统计摘要 */
   getUtilityStats() {
     return this.utilityTracker.getStats(this.entries)
+  }
+
+  // ══════════════════════════════════════════
+  //  记忆优化统计（供 Evolution 自适应优化使用）
+  // ══════════════════════════════════════════
+
+  /**
+   * 获取全面的记忆优化统计数据。
+   * 包含访问模式、效用分布、行为得分分布和当前配置。
+   * 供 MemoryOptimizationCollector 分析使用。
+   */
+  getOptimizationStats(): MemoryOptimizationStats {
+    const userFacts = this.entries.filter((e) => e.type === 'user_fact')
+    const now = Date.now()
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
+
+    // ── 访问统计 ──
+    const accessCounts = userFacts.map((e) => e.accessCount).sort((a, b) => a - b)
+    const neverAccessed = userFacts.filter((e) => e.accessCount === 0)
+    const staleEntries = userFacts.filter(
+      (e) => e.lastAccessedAt > 0 && now - e.lastAccessedAt > SEVEN_DAYS_MS,
+    )
+    const longTail = userFacts.filter(
+      (e) => e.accessCount <= 1 && e.tier !== 'permanent' && !e.isPinned,
+    )
+
+    const meanAccess = accessCounts.length > 0
+      ? accessCounts.reduce((a, b) => a + b, 0) / accessCounts.length
+      : 0
+    const medianAccess = accessCounts.length > 0
+      ? accessCounts[Math.floor(accessCounts.length / 2)]
+      : 0
+    const p90Access = accessCounts.length > 0
+      ? accessCounts[Math.floor(accessCounts.length * 0.9)]
+      : 0
+    const p99Access = accessCounts.length > 0
+      ? accessCounts[Math.floor(accessCounts.length * 0.99)]
+      : 0
+
+    // ── 效用统计 ──
+    const utilityScores = userFacts
+      .map((e) => this.utilityTracker.computeUtilityScore(e))
+      .sort((a, b) => a - b)
+    const lowUtility = userFacts.filter((e) => this.utilityTracker.isLowUtility(e))
+    const highUtility = userFacts.filter((e) => this.utilityTracker.isHighUtility(e))
+
+    const meanUtility = utilityScores.length > 0
+      ? utilityScores.reduce((a, b) => a + b, 0) / utilityScores.length
+      : 0
+    const medianUtility = utilityScores.length > 0
+      ? utilityScores[Math.floor(utilityScores.length / 2)]
+      : 0
+
+    // ── 行为得分统计 ──
+    const behaviorScores = userFacts.map((e) => e.behaviorScore).sort((a, b) => a - b)
+    const decayedCount = userFacts.filter((e) => e.behaviorScore < 0.5).length
+    const totalAgentReferences = userFacts.reduce((a, e) => a + e.agentReferenceCount, 0)
+    const totalUserConfirmations = userFacts.reduce((a, e) => a + e.userConfirmedUsefulCount, 0)
+
+    const meanBehavior = behaviorScores.length > 0
+      ? behaviorScores.reduce((a, b) => a + b, 0) / behaviorScores.length
+      : 0
+    const medianBehavior = behaviorScores.length > 0
+      ? behaviorScores[Math.floor(behaviorScores.length / 2)]
+      : 0
+
+    return {
+      totalEntries: userFacts.length,
+      permanentCount: userFacts.filter((e) => e.tier === 'permanent').length,
+      semiCount: userFacts.filter((e) => e.tier === 'semi').length,
+      ephemeralCount: userFacts.filter((e) => e.tier === 'ephemeral').length,
+
+      accessStats: {
+        meanAccessCount: meanAccess,
+        medianAccessCount: medianAccess,
+        neverAccessedCount: neverAccessed.length,
+        neverAccessedRatio: userFacts.length > 0 ? neverAccessed.length / userFacts.length : 0,
+        p90AccessCount: p90Access,
+        p99AccessCount: p99Access,
+        staleEntriesCount: staleEntries.length,
+        longTailCount: longTail.length,
+        longTailRatio: userFacts.length > 0 ? longTail.length / userFacts.length : 0,
+      },
+
+      utilityStats: {
+        meanUtility,
+        medianUtility,
+        lowUtilityCount: lowUtility.length,
+        lowUtilityRatio: userFacts.length > 0 ? lowUtility.length / userFacts.length : 0,
+        highUtilityCount: highUtility.length,
+        highUtilityRatio: userFacts.length > 0 ? highUtility.length / userFacts.length : 0,
+      },
+
+      behaviorStats: {
+        meanBehaviorScore: meanBehavior,
+        medianBehaviorScore: medianBehavior,
+        decayedCount,
+        totalAgentReferences,
+        totalUserConfirmations,
+      },
+
+      currentConfig: memoryConfigManager.getConfig(),
+    }
+  }
+
+  /**
+   * 更新记忆可调参数配置（由 MemoryOptimizationExecutor 调用）。
+   * 每次变更会创建快照，支持回滚。
+   *
+   * @param partial 要更新的参数字段
+   * @param reason 变更原因
+   * @returns 更新后的完整配置
+   */
+  updateTunableConfig(partial: Partial<MemoryTunableConfig>, reason: string): MemoryTunableConfig {
+    return memoryConfigManager.updateConfig(partial, reason)
+  }
+
+  /** 获取当前可调参数配置 */
+  getTunableConfig(): MemoryTunableConfig {
+    return memoryConfigManager.getConfig()
+  }
+
+  /** 获取配置变更快照历史 */
+  getConfigSnapshots() {
+    return memoryConfigManager.getSnapshots()
+  }
+
+  /**
+   * 回滚最近一次配置变更。
+   * @returns 回滚后的配置，或 null（无快照）
+   */
+  rollbackMemoryConfig(): MemoryTunableConfig | null {
+    return memoryConfigManager.rollback()
   }
 
   /**

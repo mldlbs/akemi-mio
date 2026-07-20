@@ -12,6 +12,7 @@ let userContextOverrideCb: ((mode: string) => void) | null = null
 let organizerPauseCb: (() => void) | null = null
 let organizerResumeCb: (() => void) | null = null
 let organizerSkipCb: (() => void) | null = null
+let taskPanelToggleCb: (() => void) | null = null
 
 /** 语音字幕切换回调 */
 let subtitleToggleCb: (() => void) | null = null
@@ -59,6 +60,11 @@ export function setSubtitleToggle(cb: () => void): void {
   subtitleToggleCb = cb
 }
 
+/** 注册桌面任务面板切换回调 */
+export function setTaskPanelToggle(cb: () => void): void {
+  taskPanelToggleCb = cb
+}
+
 export function initTray(mainWindow: () => BrowserWindow | null): void {
   if (tray) return
 
@@ -91,6 +97,12 @@ export function initTray(mainWindow: () => BrowserWindow | null): void {
         label: '切换自进化仪表盘',
         click: () => {
           dashboardToggleCb?.()
+        },
+      },
+      {
+        label: '切换任务面板',
+        click: () => {
+          taskPanelToggleCb?.()
         },
       },
       { type: 'separator' },

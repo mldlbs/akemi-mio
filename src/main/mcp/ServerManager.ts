@@ -13,6 +13,8 @@ import { MemoryRetriever, ToolMemoryDefaults } from './ToolMemoryDefaults'
 import { MEMORY_TOOL_PERSONALIZATION, BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE } from '../config'
 import { behaviorPredictor } from './BehaviorPredictor'
 import { toolCallLogStore } from '../tool/ToolCallLogStore'
+import { toolCallMemoryCache } from '../tool/ToolCallMemoryCache'
+import { classifyToolError } from '../tool/ToolErrorType'
 import { toolAnalytics } from '../tool/ToolAnalytics'
 
 const FILE_WRITE_TOOLS = new Set(['write_file', 'edit_file'])
@@ -376,6 +378,17 @@ export class ServerManager {
       throw new Error(`未知工具: ${name}`)
     }
 
+    // ★ 工具调用记忆缓存：检查是否有实际调用过的结果
+    const memoryCacheHit = toolCallMemoryCache.get(name, args)
+    if (memoryCacheHit !== null) {
+      log('INFO', 'tool_memory_cache_used', { tool: name, hitCount: memoryCacheHit.hitCount })
+      // 缓存命中时仍记录调用（保持统计连续性）
+      this.memoryInterceptor.postCall(name, args, memoryCacheHit.result, true)
+      toolCallLogStore.record(name, args, memoryCacheHit.result, null, Date.now() - startedAt, true)
+      this.recordAndPredict(name, args, memoryCacheHit.result, meta.serverName)
+      return memoryCacheHit.result
+    }
+
     // ★ 行为预激活：检查预加载缓存中是否有该工具+参数的结果
     const cacheKey = behaviorPredictor.buildCacheKey(name, args)
     const cachedResult = behaviorPredictor.getCachedResult(cacheKey)
@@ -385,6 +398,8 @@ export class ServerManager {
       behaviorPredictor.recordCall(name, args, 0, true)
       this.memoryInterceptor.postCall(name, args, cachedResult, true)
       toolCallLogStore.record(name, args, cachedResult, null, Date.now() - startedAt, true)
+      // 同时存入工具调用记忆缓存（双重缓存, 提升后续命中率）
+      toolCallMemoryCache.set(name, args, cachedResult, 0, true)
       // 记录后预测下一步，触发后续工具的预加载
       this.recordAndPredict(name, args, cachedResult, meta.serverName)
       return cachedResult
@@ -424,6 +439,16 @@ export class ServerManager {
       }
     }
 
+    // ★ 记忆缓存：基于错误历史自动调整参数（如超时增加）
+    const adjustment = toolCallMemoryCache.getAdjustedArgs(name, enrichedArgs)
+    if (adjustment.adjusted) {
+      log('INFO', 'tool_args_adjusted_by_cache', {
+        tool: name,
+        reason: adjustment.reason,
+      })
+      enrichedArgs = adjustment.args
+    }
+
     let result: string
     let success = true
 
@@ -457,6 +482,9 @@ export class ServerManager {
       // ★ 详细调用日志记录
       toolCallLogStore.record(name, args, result, null, Date.now() - startedAt, true)
 
+      // ★ 工具调用记忆缓存：存储成功结果
+      toolCallMemoryCache.set(name, args, result, Date.now() - startedAt, true)
+
       // ★ 行为驱动预激活：记录本次调用并预测下一步
       this.recordAndPredict(name, args, result, meta.serverName)
 
@@ -468,6 +496,10 @@ export class ServerManager {
 
       // ★ 详细调用日志记录（失败）
       toolCallLogStore.record(name, args, null, err.message || String(err), Date.now() - startedAt, false)
+
+      // ★ 工具调用记忆缓存：记录失败模式（含错误类型）
+      const errorType = classifyToolError(err.message || String(err))
+      toolCallMemoryCache.recordError(name, args, err.message || String(err), errorType)
 
       // ★ 行为驱动预激活：即使调用失败也记录行为（但 success=false）
       behaviorPredictor.recordCall(name, args, 0, false)

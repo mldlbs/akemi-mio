@@ -186,6 +186,37 @@ export type { MemoryEvolutionBridge, EvolutionMemoryContext, MemoryEvolutionResu
 export { memoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
 
 // ═══════════════════════════════════════════
+//  Evolution Consumer Bridge — 消费者驱动契约
+// ═══════════════════════════════════════════
+//
+// 从消费者视角定义 Evolution 的输出格式、响应速度和容错要求。
+// 消费者通过 EvolutionConsumerBridge 获取裁剪后的上下文，
+// 不直接访问 Evolution 内部实现。
+//
+// 当前已注册消费者：
+//   - plan_reasoning_chain: create_reasoning_chain tool
+//   - plan_asr: AsrReasoningChainExecutor
+//
+// 使用方式：
+//   import { evolutionConsumerBridge } from './evolution/consumer'
+//   const ctx = evolutionConsumerBridge.getContext('plan_reasoning_chain')
+//   if (ctx?.knownIssues) { ... }
+
+export { evolutionConsumerBridge, EvolutionConsumerBridge } from './consumer'
+export { PLAN_CONSUMER_REQUIREMENTS, ASR_PLAN_CONSUMER_REQUIREMENTS } from './consumer'
+export type {
+  EvolutionConsumerContext,
+  ConsumerId,
+  ConsumerRequirements,
+  ConsumerOutputFormat,
+  ConsumerFaultTolerance,
+  IEvolutionConsumerBridge,
+  KnownIssue,
+  PipelineSummary,
+  SchedulerStatus,
+} from './consumer'
+
+// ═══════════════════════════════════════════
 //  CI/CD Orchestrator — Evolution × MCP 工具桥接
 // ═══════════════════════════════════════════
 //

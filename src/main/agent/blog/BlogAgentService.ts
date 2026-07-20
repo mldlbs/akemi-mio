@@ -27,8 +27,10 @@ import {
   DEFAULT_HABIT_PROFILE,
   BLOG_WORKFLOW_ID,
 } from './types'
-import { getMemoryService } from '../../tool/deps'
+import { getMemoryService, getBlogModeService } from '../../tool/deps'
 import { experienceMemoryService } from '../../memory/plan-memory-blog/ExperienceMemoryService'
+import { blogModeMonitor } from './BlogModeMonitor'
+import { BLOG_MODE_LABELS } from './BlogExecutionMode'
 
 // =============================================================================
 // 常量
@@ -58,7 +60,7 @@ export class BlogAgentService {
   // ===========================================================================
 
   /** 开始新的博客写作会话 */
-  startSession(topic: string, platform?: string): BlogSessionState {
+  startSession(topic: string, platform?: string, userInput?: string): BlogSessionState {
     const sessionId = `blog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const state: BlogSessionState = {
       sessionId,
@@ -94,6 +96,25 @@ export class BlogAgentService {
       }
     } catch {
       // 经验引擎不可用不影响核心功能
+    }
+
+    // 双模式切换引擎：自动推荐并注册执行模式
+    try {
+      const modeSvc = getBlogModeService()
+      if (modeSvc) {
+        const recommendation = modeSvc.startWithModeRecommendation(topic, userInput || topic, this.habitProfile)
+        modeSvc.registerSession(sessionId, recommendation.recommendedMode)
+        // 更新 monitor 的负载计数
+        blogModeMonitor.setActiveSessionCount(this.sessions.size)
+        log('INFO', 'blog_session_mode_registered', {
+          sessionId,
+          mode: recommendation.recommendedMode,
+          confidence: recommendation.confidence.toFixed(2),
+          reasons: recommendation.reasons.slice(0, 2),
+        })
+      }
+    } catch {
+      // 模式引擎不可用不影响核心功能
     }
 
     log('INFO', 'blog_session_started', { sessionId, topic })
@@ -205,6 +226,14 @@ export class BlogAgentService {
     const s = this.sessions.get(sessionId)
     if (!s) return '错误：找不到该博客写作会话。请先使用 blog_start_session 开始新的写作。'
 
+    // 记录用户输入到模式 monitor（用于检测交互偏好变化）
+    blogModeMonitor.recordUserInput(command.raw)
+
+    // 自动检查是否需要切换模式（异步触发，不阻塞响应）
+    if (command.type !== 'status') {
+      this.autoCheckModeSwitch(sessionId, command.raw).catch(() => {})
+    }
+
     switch (command.type) {
       case 'skip':
         return this.handleSkip(s, command)
@@ -240,9 +269,15 @@ export class BlogAgentService {
     const totalCount = BLOG_STAGE_ORDER.length - session.skippedStages.length
     const progress = Math.round((completedCount / totalCount) * 100)
 
+    // 获取当前执行模式
+    const modeSvc = getBlogModeService()
+    const currentMode = modeSvc?.getSessionMode(session.sessionId) ?? 'mcp'
+    const modeLabel = BLOG_MODE_LABELS[currentMode]
+
     return [
       `📝 博客写作进度: ${progress}%`,
       `当前阶段: ${stageLabel}`,
+      `当前模式: ${modeLabel}`,
       `主题: ${session.topic}`,
       `已完成 ${completedCount}/${totalCount} 个阶段`,
       session.targetPlatform ? `目标平台: ${session.targetPlatform}` : '',
@@ -326,6 +361,39 @@ export class BlogAgentService {
     }
 
     return suggestions
+  }
+
+  // ===========================================================================
+  // 双模式切换辅助
+  // ===========================================================================
+
+  /**
+   * 自动检查是否需要切换执行模式（异步调用）
+   */
+  private async autoCheckModeSwitch(sessionId: string, userInput: string): Promise<void> {
+    try {
+      const modeSvc = getBlogModeService()
+      const s = this.sessions.get(sessionId)
+      if (!modeSvc || !s) return
+
+      const { switched, recommendation } = await modeSvc.checkAndAutoSwitch(sessionId, s, userInput)
+      if (switched && recommendation) {
+        log('INFO', 'blog_auto_mode_switched', {
+          sessionId,
+          to: recommendation.recommendedMode,
+          confidence: recommendation.confidence,
+        })
+        // 如果切换到 plan_chain 模式，标记当前 stage 为自动化执行
+        if (recommendation.recommendedMode === 'plan_chain') {
+          s.userFeedback.push('[自动切换] 进入 Plan:推理链模式，后续步骤将自动化执行')
+        } else {
+          s.userFeedback.push('[自动切换] 进入 MCP 交互模式，恢复逐步骤确认')
+        }
+      }
+    } catch (err) {
+      // 模式切换失败不影响核心功能
+      log('WARN', 'blog_auto_mode_check_failed', { error: String(err) })
+    }
   }
 
   // ===========================================================================
@@ -495,6 +563,14 @@ export class BlogAgentService {
     for (const [id, s] of this.sessions) {
       if (now - s.lastActivityAt > SESSION_TTL_MS) {
         this.sessions.delete(id)
+        // 同时清理模式服务中的会话记录
+        try {
+          const modeSvc = getBlogModeService()
+          modeSvc?.unregisterSession(id)
+        } catch {
+          // 模式服务不可用不影响
+        }
+        blogModeMonitor.setActiveSessionCount(this.sessions.size)
         log('INFO', 'blog_session_expired', { sessionId: id })
       }
     }

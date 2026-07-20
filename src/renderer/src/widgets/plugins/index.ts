@@ -21,6 +21,8 @@ import { rssSummaryWidget } from './RssSummaryWidget'
 import { memoryContextWidget } from './MemoryContextWidget'
 import { memoryFlashWidget } from './MemoryFlashWidget'
 import { fileOrganizerProgressWidget } from './FileOrganizerProgressWidget'
+import { taskPanelWidget } from './TaskPanelWidget'
+import { voiceWallpaperWidget } from './VoiceWallpaperWidget'
 
 /**
  * 注册所有内置 wallpaper widget 插件。
@@ -35,6 +37,7 @@ export function registerAllWidgets(): void {
 
   // decoration 区
   wallpaperWidgetRegistry.register(natureAnimationWidget)
+  wallpaperWidgetRegistry.register(voiceWallpaperWidget)
 
   // overlay 区
   wallpaperWidgetRegistry.register(shortcutsGuideWidget)
@@ -45,6 +48,9 @@ export function registerAllWidgets(): void {
 
   // overlay 区 — 实时 Canvas 仪表盘
   wallpaperWidgetRegistry.register(evolutionDashboardCanvasWidget)
+
+  // overlay 区 — 桌面悬浮任务面板
+  wallpaperWidgetRegistry.register(taskPanelWidget)
 
   // monitor 区
   wallpaperWidgetRegistry.register(evolutionStatusWidget)

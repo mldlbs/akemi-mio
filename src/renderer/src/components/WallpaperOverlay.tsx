@@ -4,9 +4,11 @@ import { useFocusScore } from '../hooks/useFocusScore'
 import { BehaviorDash } from './BehaviorDash'
 import { TaskSwitcher } from './TaskSwitcher'
 import { TtsSubtitleOverlay } from './TtsSubtitleOverlay'
+import { WallpaperAgentPanel } from './WallpaperAgentPanel'
 import { WallpaperWidgetHost } from '../widgets/WallpaperWidgetHost'
 import { wallpaperWidgetRegistry } from '../widgets/WallpaperWidgetRegistry'
 import { registerAllWidgets } from '../widgets/plugins'
+import { useWallpaperInteractionStore } from '../store/wallpaperInteractionStore'
 import type { WallpaperWidgetContext } from '../widgets/types'
 
 // =============================================================================
@@ -50,6 +52,13 @@ export function WallpaperOverlay() {
     modeLabel,
     contextLabel,
   } = useBehaviorAwareWallpaper()
+
+  const {
+    interactive,
+    setInteractive,
+    enabled: interactiveEnabled,
+    loadConfig,
+  } = useWallpaperInteractionStore()
 
   const focus = useFocusScore(behavior)
   const [currentTime, setCurrentTime] = useState(new Date())
@@ -99,6 +108,25 @@ export function WallpaperOverlay() {
     return unsub
   }, [])
 
+  // ── 壁纸交互模式：加载配置 + 订阅 toggle 事件 ──
+  useEffect(() => {
+    loadConfig()
+
+    const unsub = window.electronAPI.onWallpaperToggleInteractive(({ active }) => {
+      setInteractive(active)
+    })
+    return unsub
+  }, [loadConfig, setInteractive])
+
+  // ── 交互模式启用时暂停行为模式切换（避免干扰） ──
+  useEffect(() => {
+    if (interactive) {
+      document.documentElement.style.setProperty('--wallpaper-interactive-active', '1')
+    } else {
+      document.documentElement.style.removeProperty('--wallpaper-interactive-active')
+    }
+  }, [interactive])
+
   if (!config.enabled) return null
 
   // ── 格式化时间 ──
@@ -134,6 +162,7 @@ export function WallpaperOverlay() {
     mode === 'multitasking' ? 'wp-mode-multitasking' : '',
     mode === 'break' && privacyFade > 0 ? 'wp-mode-break-privacy' : '',
     hideDecoration ? 'wp-hide-decoration' : '',
+    interactive ? 'wp-interactive-active' : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -197,6 +226,9 @@ export function WallpaperOverlay() {
 
       {/* ── TTS 语音实时字幕 ── */}
       <TtsSubtitleOverlay />
+
+      {/* ── 壁纸交互模式：Agent 面板（Ctrl+Space 激活） ── */}
+      {interactiveEnabled && <WallpaperAgentPanel />}
 
       {/* ── 状态标签 ── */}
       <div className="wallpaper-status-label">{statusLabel}</div>

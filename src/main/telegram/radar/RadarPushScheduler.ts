@@ -239,114 +239,25 @@ export class RadarPushScheduler {
   }
 
   /**
-   * 从远程 Radar API 获取数据并格式化为中文解读风格消息。
+   * 从 /api/briefing 获取已格式化好的中文简报，直接作为推送消息。
    */
   private async fetchRemoteRadarMessage(rule: RadarPushRule): Promise<string> {
-    const THEME_CN: Record<string, string> = {
-      ai_infrastructure: 'AI 基础设施', dev_productivity: '开发者工具',
-      compliance_automation: '合规自动化', data_tools: '数据工具',
-      knowledge_management: '知识管理', collaboration: '协同办公',
-      nocode_lowcode: '低代码', fintech: '金融科技',
-      security: '安全', other: '其他',
-    }
-    const TYPE_CN: Record<string, string> = {
-      market_gap: '市场缺口', feature_request: '功能需求',
-      replacement: '替代方案', workflow: '流程痛点', bug: 'Bug 修复',
-    }
-
     try {
-      const res = await fetchWithRetry('https://ai.crlkcloud.cyou/radar/pipeline', 2)
-      if (!res.ok) return `📡 创业雷达 | 服务暂不可用 (${res.status})`
+      const res = await fetchWithRetry('https://ai.crlkcloud.cyou/api/briefing', 2)
+      if (!res.ok) return `📡 商业信号雷达 | 服务暂不可用 (${res.status})`
 
-      const body: any = await res.json()
-      const signals: any[] = body.signals || []
-      const opps: any[] = body.opportunities || []
-      const themes: any[] = body.themes || []
+      const text = await res.text()
+      const lines = text.split('\n')
 
-      // ── 信号按主题归类计数 ──
-      const themeCounts = new Map<string, number>()
-      for (const s of signals) {
-        const t = THEME_CN[s.theme] || s.theme || '其他'
-        themeCounts.set(t, (themeCounts.get(t) || 0) + 1)
-      }
-      const themeDist = [...themeCounts.entries()].sort((a, b) => b[1] - a[1])
+      // 替换头部：统一冠名
+      const header = `📡 商业信号雷达 · ${new Date().toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })}`
+      // 第一行原始是 "📡 商业信号雷达 · X月X日 周X"，替换掉保持统一格式
+      const body = lines.map((l, i) => (i === 0 ? header : l)).join('\n')
 
-      // ── 机会排序 TOP 3 ──
-      const topOpps = [...opps]
-        .sort((a: any, b: any) => (b.avg_score || 0) - (a.avg_score || 0))
-        .slice(0, 3)
-
-      // ── 主题热度 TOP 5 ──
-      const topThemes = [...themes].sort((a, b) => b.count - a.count).slice(0, 5)
-
-      const highValue = signals.filter((s: any) => (s.score || 0) >= 7).length
-
-      // ═══════════════════════ 组装消息 ═══════════════════════
-      const lines: string[] = []
-
-      // 头部：一句概况
-      const dateStr = new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour12: false })
-      const summary = `📡 创业雷达 · ${dateStr}`
-      lines.push(summary)
-
-      // 数据句
-      let dataLine = `  捕获 ${signals.length} 条信号`
-      if (highValue > 0) dataLine += `（${highValue} 条高价值）`
-      dataLine += `，${opps.length} 个持续机会`
-      if (topThemes.length > 0) {
-        const names = topThemes.slice(0, 3).map((t: any) => THEME_CN[t.theme] || t.theme)
-        dataLine += ` · 最热 ${names.join(' / ')}`
-      }
-      lines.push(dataLine)
-
-      // 间隔行
-      lines.push('')
-
-      // ── 信号分布 ──
-      if (themeDist.length > 0) {
-        const parts = themeDist.slice(0, 5).map(([name, count]) => `${name} ${count}`)
-        lines.push(`📊 信号分布  ${parts.join(' · ')}`)
-      }
-
-      // ── 机会榜 ──
-      if (topOpps.length > 0) {
-        lines.push('')
-        lines.push(`💡 TOP ${topOpps.length} 机会`)
-        for (const o of topOpps) {
-          const type = TYPE_CN[o.type] || o.type || ''
-          const title = (o.title || '').slice(0, 40)
-          const score = o.avg_score || o.avg_pain || ''
-          lines.push(`  ${title}`)
-          const tags: string[] = []
-          if (type) tags.push(type)
-          if (score) tags.push(`评分 ${score}`)
-          if (o.appearances > 1) tags.push(`${o.appearances} 次`)
-          if (o.consecutive_days) tags.push(`连 ${o.consecutive_days} 天`)
-          if (tags.length) lines.push(`  ${' '.repeat(2)}${tags.join('  ')}`)
-        }
-      }
-
-      // ── 高价值信号概览 ──
-      if (highValue > 0) {
-        const hvSignals = signals.filter((s: any) => (s.score || 0) >= 7).slice(0, 3)
-        lines.push('')
-        lines.push(`🔥 高价值信号`)
-        for (const s of hvSignals) {
-          const theme = THEME_CN[s.theme] || s.theme || ''
-          const raw = s.business_value ?? s.problem ?? ''
-          const brief = String(raw).slice(0, 50)
-          lines.push(`  ${theme ? `[${theme}] ` : ''}${brief}`)
-        }
-      }
-
-      // ── 底部 ──
-      lines.push('')
-      lines.push(`💬 /radar 查看详情 · ${dateStr}`)
-
-      return lines.join('\n')
+      return body
     } catch (err: any) {
       log('WARN', 'remote_radar_fetch_failed', { error: err.message })
-      return `📡 创业雷达 | 获取失败: ${err.message}`
+      return `📡 商业信号雷达 | 获取失败: ${err.message}`
     }
   }
 

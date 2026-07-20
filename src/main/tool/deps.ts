@@ -163,3 +163,16 @@ export function setBlogMemoryRetriever(r: BlogMemoryRetriever | null): void {
 export function getBlogMemoryRetriever(): BlogMemoryRetriever | null {
   return _blogMemoryRetriever
 }
+
+// ── Blog Mode Service（供 Blog Dual-Mode Switching 使用）──
+import type { BlogModeService } from '../agent/blog/BlogModeService'
+
+let _blogModeService: BlogModeService | null = null
+
+export function setBlogModeService(bms: BlogModeService | null): void {
+  _blogModeService = bms
+}
+
+export function getBlogModeService(): BlogModeService | null {
+  return _blogModeService
+}

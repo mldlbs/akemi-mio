@@ -31,7 +31,9 @@ import { AsrReasoningChainExecutor } from './AsrReasoningChainExecutor'
 import { PlanLogCollector } from './PlanLogCollector'
 import { AutoPatchExecutor } from './AutoPatchExecutor'
 import { ToolEvolutionCollector } from './ToolEvolutionCollector'
+import { ToolAnalyticsCollector } from './ToolAnalyticsCollector'
 import { ToolEvolutionExecutor } from './ToolEvolutionExecutor'
+import { ToolConfigOptimizationExecutor } from './ToolConfigOptimizationExecutor'
 import { TtsPreferenceCollector } from './TtsPreferenceCollector'
 import { TtsConfigOptimizationExecutor } from './TtsConfigOptimizationExecutor'
 import { TtsTypographyCollector } from './TtsTypographyCollector'
@@ -101,6 +103,7 @@ export class PipelineOrchestrator {
     const asrLogCollector = new AsrLogCollector()
     const planLogCollector = new PlanLogCollector()
     const toolEvolutionCollector = new ToolEvolutionCollector()
+    const toolAnalyticsCollector = new ToolAnalyticsCollector()
     const ttsPreferenceCollector = new TtsPreferenceCollector()
     const ttsTypographyCollector = new TtsTypographyCollector()
     const fileOrganizerCollector = new FileOrganizerCollector()
@@ -114,6 +117,7 @@ export class PipelineOrchestrator {
     registerCollector(asrLogCollector)
     registerCollector(planLogCollector)
     registerCollector(toolEvolutionCollector)
+    registerCollector(toolAnalyticsCollector)
     registerCollector(ttsPreferenceCollector)
     registerCollector(ttsTypographyCollector) // type-health 已禁用
     registerCollector(fileOrganizerCollector)
@@ -132,6 +136,7 @@ export class PipelineOrchestrator {
     const asrAcousticOptimizationExecutor = new AsrAcousticOptimizationExecutor()
     const autoPatchExecutor = new AutoPatchExecutor()
     const toolEvolutionExecutor = new ToolEvolutionExecutor()
+    const toolConfigOptExecutor = new ToolConfigOptimizationExecutor()
     const ttsConfigOptExecutor = new TtsConfigOptimizationExecutor()
     const ttsTypographyExecutor = new TtsTypographyExecutor()
     const typeRefactorExecutor = new TypeRefactorExecutor()
@@ -145,6 +150,7 @@ export class PipelineOrchestrator {
     registerExecutor(asrAcousticOptimizationExecutor)
     registerExecutor(autoPatchExecutor)
     registerExecutor(toolEvolutionExecutor)
+    registerExecutor(toolConfigOptExecutor)
     registerExecutor(ttsConfigOptExecutor)
     registerExecutor(ttsTypographyExecutor)
     registerExecutor(typeRefactorExecutor)

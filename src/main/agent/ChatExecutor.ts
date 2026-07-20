@@ -89,6 +89,7 @@ import type {
 import { VOICE_EMOTION_TTS_MAP } from '../tts/types'
 import type { VoiceEmotion } from '../asr/types'
 import type { McpAgentHybridPipeline } from '../hybrid/McpAgentHybridPipeline'
+import { narrativeEmotionController, type StyledTtsSegment } from '../tts/emotion'
 
 export class ChatExecutor {
   private llmService: LlmService
@@ -131,6 +132,11 @@ export class ChatExecutor {
   private pendingDriftSignal: string | null = null
   /** 当前轮 user 消息的 content category */
   private currentCategory = 'chat'
+  /** ── 叙事情感控制 ── */
+  /** 待处理的叙事情感段落（由 applySentimentToTts 设置，run() 消费） */
+  private pendingNarrativeSegments: StyledTtsSegment[] | null = null
+  /** 叙述性检测：回复长度超过此阈值 + 非纯对话内容 → 启用叙述模式 */
+  private readonly NARRATIVE_MIN_LENGTH = 80
   /** MCP-Agent 混合流水线（可选注入）*/
   private hybridPipeline: McpAgentHybridPipeline | null = null
 
@@ -634,7 +640,22 @@ export class ChatExecutor {
       log('PERF', 'round_trip', { request_id: rid, duration_ms: Date.now() - t0, reply_len: reply.length })
       // ── [EMOTION] 最终回复情感分析 ──
       this.applySentimentToTts(reply)
-      if (!this.noTts) this.ttsService.flushBuffer()
+      if (!this.noTts) {
+        // 如果是叙事情感模式且有段落分割，使用 speakNarrative
+        if (this.pendingNarrativeSegments && this.pendingNarrativeSegments.length > 1) {
+          const segments = this.pendingNarrativeSegments
+          this.pendingNarrativeSegments = null
+          // 清除流式缓冲区中的剩余内容（叙事模式下不重复播放缓冲内容）
+          this.ttsService.stop()
+          // 异步启动叙事播报（不等待完成）
+          this.ttsService.speakNarrative(segments, true).catch((err) => {
+            log('WARN', 'narrative_speak_error', { error: String(err) })
+          })
+        } else {
+          this.pendingNarrativeSegments = null
+          this.ttsService.flushBuffer()
+        }
+      }
       // ── [Memory × TTS 深度融合] 检测记忆状态变化 ← TTS 适应 ──
       // 在每轮交互完成后检测记忆是否发生了值得通知 TTS 的显著变化
       const memoryChange = memoryTtsBridge.detectMemoryChangeForTts()
@@ -1565,10 +1586,47 @@ export class ChatExecutor {
               }
             : null,
       })
+      // ── [NARRATIVE CURVE] ──
+      if (this.memoryService && combined.length >= this.NARRATIVE_MIN_LENGTH) {
+        const isNarr = this.detectNarrativeContent(combined)
+        if (isNarr) {
+          try {
+            const narrResult = narrativeEmotionController.buildNarrativeEmotion(combined, this.memoryService, finalParams, true)
+            if (narrResult.segments.length > 1) {
+              this.pendingNarrativeSegments = narrResult.segments
+            }
+          } catch (err) {
+            log('WARN', 'narrative_curve_error', { error: String(err) })
+          }
+        }
+      }
     } catch (err) {
       // 情感分析失败不应影响正常对话流程
       log('WARN', 'sentiment_apply_error', { error: String(err) })
     }
+  }
+
+  /**
+   * 检测回复文本是否为叙事性内容。
+   */
+  private detectNarrativeContent(text: string): boolean {
+    if (text.length < this.NARRATIVE_MIN_LENGTH) return false
+    const narrativePatterns = [
+      /让.*告诉|为.*介绍|来讲.*故事|话说|从前|有一次/,
+      /首先|然后|最后|接着|另一方面/,
+      /总的来说|总而言之|综上所述|归根结底/,
+      /比如|例如|举例来说|打个比方/,
+      /之所以|是因为|原因是|因为.*所以/,
+      /如果.*就|当.*时|一旦.*便/,
+    ]
+    const narrativeScore = narrativePatterns.reduce((score: number, p: RegExp) => {
+      return score + (p.test(text) ? 1 : 0)
+    }, 0)
+    const chatPatterns = [/^[好嗯哦对是]/, /^[哈哈呵呵嘿嘿]+/, /明白|了解|知道了|没问题/]
+    const chatScore = chatPatterns.reduce((score: number, p: RegExp) => {
+      return score + (p.test(text) ? 1 : 0)
+    }, 0)
+    return narrativeScore >= 1 || (text.length >= this.NARRATIVE_MIN_LENGTH * 2 && chatScore === 0)
   }
 
   /** 切换情感自适应语音开关（供 IPC 调用） */
