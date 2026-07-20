@@ -31,6 +31,7 @@ logs.*
 check-*.js
 check-*.mjs
 __*
+!__tests__/
 .claude/projects/
 .claude/tool_call_log.json
 .claude-flow/

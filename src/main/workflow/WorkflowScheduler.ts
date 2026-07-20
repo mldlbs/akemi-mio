@@ -14,7 +14,7 @@ import { eventBus } from '../core/EventBus'
 import { workflowStore, resolveRunOutputDir } from './WorkflowStoreV2'
 import { resolveTemplate, resolveExpression } from './TemplateEngine'
 import { evaluateCondition } from './ConditionEvaluator'
-import type { WorkflowDef, WorkflowRun, WorkflowStepDef, ValueSchema } from './types'
+import type { WorkflowDef, WorkflowRun, WorkflowStepDef, WorkflowStepRun, ValueSchema } from './types'
 import type { WorkflowResumeResult } from '../runtime/CheckpointTypes'
 import type { SpawnTaskOptions } from '../agent/SubAgentPool'
 import { behaviorBlogBridge } from '../behavior/BehaviorBlogBridge'
@@ -115,15 +115,13 @@ export class WorkflowSchedulerV2 {
   private async executeLoop(run: WorkflowRun, def: WorkflowDef, signal: AbortSignal): Promise<void> {
     const outputDir = resolveRunOutputDir(def, run)
     const stepDefs = [...def.steps]
-    const completed = new Set<string>()
-    const failures = new Set<string>()
-    const skipped = new Set<string>()
     const concurrency = def.maxConcurrency ?? this.maxConcurrency
 
-    const ctx: StepContext = {
-      steps: {},
-      input: run.userInput ?? '',
-    }
+    // ── Rebuild execution context from persisted step runs ──
+    // For resume after restart: hydrate completed/failures/skipped sets
+    // and ctx.steps so the loop can skip already-processed steps and
+    // resolve dependency chains from prior step outputs.
+    const { completed, failures, skipped, ctx } = rebuildExecutionSteps(run.steps, run.userInput ?? '')
 
     while (!signal.aborted && run.status === 'running') {
       // 1. Handle pending gate → pause
@@ -912,6 +910,47 @@ function depsReady(sd: WorkflowStepDef, completed: Set<string>, failures: Set<st
 function markSkipped(run: WorkflowRun, sd: WorkflowStepDef, reason: string, skipped: Set<string>, store: typeof workflowStore): void {
   store.updateStep(run, sd.id, 'skipped', reason)
   skipped.add(sd.id)
+}
+
+// ════════════════════════════════════════════════════
+//  Resume context rebuild
+// ════════════════════════════════════════════════════
+
+export interface RebuildContextResult {
+  completed: Set<string>
+  failures: Set<string>
+  skipped: Set<string>
+  ctx: StepContext
+}
+
+/**
+ * Rebuild scheduler execution context from persisted WorkflowStepRun[].
+ *
+ * Resume semantics:
+ * - completed step: skipped (not re-executed), output restored for dependency chain
+ * - failed step: re-evaluated under current retry policy
+ * - skipped step: skipped
+ * - retry counter: reset after process restart (fresh scheduler session)
+ */
+export function rebuildExecutionSteps(steps: WorkflowStepRun[], input: string): RebuildContextResult {
+  const completed = new Set<string>()
+  const failures = new Set<string>()
+  const skipped = new Set<string>()
+  const ctx: StepContext = { steps: {}, input }
+
+  for (const step of steps) {
+    if (step.status === 'done') {
+      completed.add(step.stepId)
+      ctx.steps[step.stepId] = { result: step.agentResult, status: 'done' }
+    } else if (step.status === 'failed') {
+      failures.add(step.stepId)
+      ctx.steps[step.stepId] = { result: null, status: 'failed', error: step.error }
+    } else if (step.status === 'skipped') {
+      skipped.add(step.stepId)
+    }
+  }
+
+  return { completed, failures, skipped, ctx }
 }
 
 function finishRun(
