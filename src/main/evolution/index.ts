@@ -182,7 +182,7 @@ export { DEFAULT_EVOLUTION_PIPER_BRIDGE_CONFIG } from './piper'
 //
 // 桥接器单例定义在 src/main/memory/MemoryEvolutionBridge.ts
 
-export type { MemoryEvolutionBridge, EvolutionMemoryContext, MemoryEvolutionResult } from '../memory/MemoryEvolutionBridge'
+export type { MemoryEvolutionBridge, EvolutionMemoryContext, MemoryEvolutionResult, EvolutionPriority, MemoryChangeEvent, MemoryEvolutionCorrelation } from '../memory/MemoryEvolutionBridge'
 export { memoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
 
 // ═══════════════════════════════════════════
