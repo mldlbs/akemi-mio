@@ -27,6 +27,10 @@ logs.*
 *.whl
 *.tar.gz
 *.wav
+*.ps1
+check-*.js
+check-*.mjs
+__*
 .claude/projects/
 .claude/tool_call_log.json
 .claude-flow/
