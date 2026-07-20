@@ -162,7 +162,7 @@ function EventCardItem({
 // 事件卡片容器
 // ════════════════════════════════════════════════════════════
 
-function EventCardContainer({ ctx }: { ctx: WallpaperWidgetContext }) {
+function EventCardContainer({ hideDecoration }: WallpaperWidgetContext) {
   const [cards, setCards] = useState<EventCard[]>([])
   const [expanded, setExpanded] = useState(true)
   const [detailCard, setDetailCard] = useState<EventCard | null>(null)
@@ -208,7 +208,7 @@ function EventCardContainer({ ctx }: { ctx: WallpaperWidgetContext }) {
   }, [])
 
   // ── 隐藏状态下不渲染 ──
-  if (ctx.hideDecoration) return null
+  if (hideDecoration) return null
 
   // ── 按优先级排序 ──
   const sortedCards = [...cards].sort((a, b) => {

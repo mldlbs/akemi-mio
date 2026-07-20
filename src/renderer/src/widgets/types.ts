@@ -58,6 +58,14 @@ export interface MonitoringData {
   evoLocked: boolean
 }
 
+/**
+ * Widget 组件类型。
+ * 接收展开后的 WallpaperWidgetContext 作为 props。
+ * Host 通过 `<widget.Component {...ctx} />` 调用，所以组件必须解构 `WallpaperWidgetContext` 直接属性，
+ * 而非 `{ ctx: WallpaperWidgetContext }`。
+ */
+export type WallpaperWidgetComponent = React.ComponentType<WallpaperWidgetContext>
+
 // =============================================================================
 // Widget 插件上下文
 // =============================================================================
@@ -135,7 +143,7 @@ export interface IWallpaperWidgetDefinition {
   shouldShow(ctx: WallpaperWidgetContext): boolean
 
   /** 渲染组件 */
-  Component: React.ComponentType<WallpaperWidgetContext>
+  Component: WallpaperWidgetComponent
 
   /**
    * 插件初始化回调（可选）。
