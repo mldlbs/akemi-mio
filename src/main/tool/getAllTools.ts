@@ -100,6 +100,10 @@ import {
   blogToolboxPipelineTool,
   blogToolboxInfoTool,
 } from './definitions/BlogToolboxTools'
+import {
+  generatePodcastTool,
+  generatePodcastPreviewTool,
+} from './definitions/GeneratePodcastTool'
 
 export function getAllTools(): Tool[] {
   return [
@@ -223,5 +227,9 @@ export function getAllTools(): Tool[] {
     blogPlatformFormatTool as Tool,
     blogToolboxPipelineTool as Tool,
     blogToolboxInfoTool as Tool,
+
+    // === Blog Audio Podcast ===
+    generatePodcastTool as Tool,
+    generatePodcastPreviewTool as Tool,
   ]
 }
