@@ -7,10 +7,13 @@
  */
 
 // ── 问题来源类型 ──
-export type ProblemSource = 'tsc' | 'test' | 'lint' | 'log' | 'git' | 'runtime' | 'feature' | 'behavior' | 'tool' | 'tts' | 'file_organizer' | 'cicd' | 'memory'
+export type ProblemSource = 'tsc' | 'test' | 'lint' | 'log' | 'git' | 'runtime' | 'feature' | 'behavior' | 'tool' | 'tts' | 'file_organizer' | 'cicd' | 'memory' | 'agent' | 'blog' | 'evidence'
 
 // ── 问题严重度 ──
 export type Severity = 'error' | 'warning' | 'info'
+
+// ── Evidence 问题类型 ──
+export type EvidenceProblemType = 'critical_regression' | 'capability_regression' | 'performance' | 'info'
 
 // ── 一个被检测到的具体问题 ──
 export interface Problem {
@@ -36,6 +39,14 @@ export interface Problem {
     /** 额外元数据 */
     metadata?: Record<string, string>
   }
+  /** Evidence 专有：关联的 RegressionReport ID */
+  evidenceRef?: string
+  /** Evidence 专有：退化类型分类 */
+  evidenceType?: EvidenceProblemType
+  /** Evidence 专有：置信度 [0, 1] */
+  confidence?: number
+  /** Evidence 专有：受影响的 ThinkingPattern */
+  affectedCapability?: string
 }
 
 // ── 分配给 Executor 的问题 ──

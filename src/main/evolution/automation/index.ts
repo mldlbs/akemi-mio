@@ -32,6 +32,9 @@ export { TtsTypographyExecutor } from './TtsTypographyExecutor'
 export { FileOrganizerCollector } from '../file-organizer/FileOrganizerCollector'
 export { FileOrganizerExecutor } from '../file-organizer/FileOrganizerExecutor'
 export { CicdCollector } from '../cicd/CicdCollector'
+export { BlogOptimizationCollector } from '../blog/BlogOptimizationCollector'
+export { BlogOptimizationExecutor } from '../blog/BlogOptimizationExecutor'
+export { EvidenceCollector } from './EvidenceCollector'
 
 // ═══════════════════════════════════════════
 //  MCP 模式迁移导出
