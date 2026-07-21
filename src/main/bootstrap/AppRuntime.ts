@@ -1496,6 +1496,12 @@ export class AppRuntime {
         // Memory × Evolution 深度融合：注入桥接器
         evolution.setMemoryBridge(memoryEvolutionBridge)
 
+        // Phase 3C.2: 将 policy.decision 事件持久化为 EvaluationEvent
+        const { PolicyDecisionObserver } = await import('../core/evaluation/observers/PolicyDecisionObserver')
+        if (this.evaluationEmitter) {
+          new PolicyDecisionObserver(this.evaluationEmitter).start()
+        }
+
         // ★ CI/CD Orchestrator 初始化：加载 MCP CI/CD 工具集
         const { CicdOrchestrator } = await import('../evolution/cicd')
         const cicdOrchestrator = new CicdOrchestrator({

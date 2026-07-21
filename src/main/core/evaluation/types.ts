@@ -102,6 +102,8 @@ export type EventType =
   | 'guardrail.recommendation.expired'
   // ── Guardrail Config Lifecycle（M7.3 — Config Termination）
   | 'guardrail.config.terminated'
+  // ── Evolution Governance（Phase 3C.2）
+  | 'evolution.policy.decision'
 
 // ══════════════════════════════════════════════
 // 任务类别
@@ -484,6 +486,29 @@ export interface GuardrailConfigTerminatedPayload {
   terminatedAt: number
 }
 
+// ══════════════════════════════════════════════
+// Evolution Governance Payloads（Phase 3C.2）
+// ══════════════════════════════════════════════
+
+export interface PolicyDecisionPayload {
+  /** Execution mode at decision time */
+  mode: 'disabled' | 'shadow' | 'enforce'
+  /** Policy verdict */
+  action: 'execute' | 'skip' | 'block'
+  /** Whether tryFix() was actually called */
+  executed: boolean
+  /** Problem source that triggered this decision */
+  source: string
+  /** Problem identifier for traceability */
+  problemId: string
+  /** Policy version string */
+  policyVersion: string
+  /** Verdict reason from ExecutionPolicy.evaluate() */
+  reason: string
+  /** Unix ms when the policy decision was made (may differ from event.timestamp) */
+  evaluatedAt: number
+}
+
 export type EventPayload =
   | ({ type: 'task.started' } & TaskStartedPayload)
   | ({ type: 'task.completed' } & TaskCompletedPayload)
@@ -518,6 +543,8 @@ export type EventPayload =
   | ({ type: 'guardrail.recommendation.approval_rejected' } & GuardrailApprovalRejectedPayload)
   | ({ type: 'guardrail.recommendation.expired' } & GuardrailRecommendationExpiredPayload)
   | ({ type: 'guardrail.config.terminated' } & GuardrailConfigTerminatedPayload)
+  // Phase 3C.2 — Evolution Governance
+  | ({ type: 'evolution.policy.decision' } & PolicyDecisionPayload)
 
 // ══════════════════════════════════════════════
 // 事件消费者接口（供 Metrics / Fitness / Evolution 使用）

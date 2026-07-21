@@ -1,7 +1,7 @@
 # M5 Release Review — Evidence-Driven Evolution
 
 **Date:** 2026-07-21
-**Baseline:** `652e1ce` (`feat/evaluation-bridge`)
+**Baseline:** `81a875a` (`feat/evaluation-bridge`)
 **Predecessor:** M4 Correctness (Closed, `98f747d`)
 
 ## 状态摘要

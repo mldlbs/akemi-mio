@@ -8,6 +8,7 @@
 - Phase 3B (Constitution Wiring) — Frozen
 - Phase 3C (Pipeline Gate) — Frozen
 - Phase 3C+ (Shadow Mode) — Implemented
+- Phase 3C.2 (Policy Decision Observation) — Implemented
 
 ---
 
@@ -166,12 +167,30 @@ interface PolicyDecisionEvent {
 
 ## Activation Gate
 
+### 观察机制
+
+`policy.decision` 事件通过 [PolicyDecisionObserver](docs/design/policy-decision-observation.md) 自动持久化为 `evolution.policy.decision` EvaluationEvent。激活条件的查询直接通过 EvaluationStore 完成：
+
+```sql
+-- 总样本 + 比例
+SELECT
+  COUNT(*) AS total,
+  SUM(CASE WHEN json_extract(payload, '$.action') = 'execute' THEN 1 ELSE 0 END) AS execute_cnt,
+  SUM(CASE WHEN json_extract(payload, '$.action') = 'skip' THEN 1 ELSE 0 END) AS skip_cnt,
+  SUM(CASE WHEN json_extract(payload, '$.action') = 'block' THEN 1 ELSE 0 END) AS block_cnt
+FROM evaluation_events
+WHERE type = 'evolution.policy.decision'
+  AND json_extract(payload, '$.mode') = 'shadow'
+  AND timestamp >= <observation_start_ts>
+```
+
 ### 治理门激活条件
 
 首次从 shadow 切换到 enforce 必须满足以下条件：
 
 ```
 [✅] Shadow mode 已在 AppRuntime 中激活
+[✅] PolicyDecisionObserver 已接入 EvaluationStore（Phase 3C.2）
 [ ] 至少 1 次完整 evolution.cycle.completed 周期
 [ ] shadow decisions ≥ 100（小样本无统计意义）
 [ ] policy.decision 事件中：
@@ -185,6 +204,8 @@ interface PolicyDecisionEvent {
 不满足任何条件时不得切换。Shadow mode 已实现，无需额外实现。
 
 ### Shadow mode 退出条件
+
+数据来源：EvaluationStore `evolution.policy.decision` 事件（条件同激活门）。
 
 ```
 [ ] ≥ 1 次完整 Evolution 周期完成
@@ -207,6 +228,8 @@ interface PolicyDecisionEvent {
 | `ExecutionPolicy.ts` | Action contract + Level 2 freeze + ExecutionMode + PolicyDecisionEvent.mode/executed | ✅ Committed |
 | `ProblemQueue.ts` | Skipped/blocked tracking + persistence | ✅ Committed |
 | `PipelineOrchestrator.ts` | Injectable gate + mode-based routing (disabled/shadow/enforce) | ✅ Committed |
+| `PolicyDecisionObserver.ts` | PolicyDecision → EvaluationEvent observer (Phase 3C.2) | ✅ Committed |
+| `EvaluationEvent` types | `EventType: evolution.policy.decision`, `PolicyDecisionPayload` | ✅ Committed |
 | `index.ts` | Type exports incl. ExecutionMode | ✅ Committed |
 
 ### Wiring (active in shadow mode)
@@ -214,8 +237,9 @@ interface PolicyDecisionEvent {
 | Wiring point | Status | Mode |
 |---|---|---|
 | `AppRuntime → setExecutionPolicy(new ExecutionPolicy({ mode: 'shadow' }))` | ✅ Active | shadow |
+| `AppRuntime → PolicyDecisionObserver.start()` | ✅ Active | observation |
 
-Before Shadow Mode (Phase 3C baseline), AppRuntime did NOT call `setExecutionPolicy()`. With Shadow Mode, the policy is present but does not block execution.
+Before Shadow Mode (Phase 3C baseline), AppRuntime did NOT call `setExecutionPolicy()`. With Shadow Mode, the policy is present but does not block execution. With Phase 3C.2, policy decisions are persisted as EvaluationEvents for activation gate queries.
 
 ### Tests
 
