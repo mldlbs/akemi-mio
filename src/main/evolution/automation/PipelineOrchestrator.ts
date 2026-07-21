@@ -17,6 +17,8 @@ import { log } from '../../logger/Logger'
 import { eventBus } from '../../core/EventBus'
 import type { SignalCollector, FixExecutor, FixResult } from './types'
 import { ProblemQueue } from './ProblemQueue'
+import { ExecutionPolicy } from './ExecutionPolicy'
+import type { VerdictAction, PolicyDecisionEvent } from './ExecutionPolicy'
 import { TscCollector } from './TscCollector'
 import { TestCollector } from './TestCollector'
 import { EslintCollector } from './EslintCollector'
@@ -70,6 +72,7 @@ export class PipelineOrchestrator {
   private executors: FixExecutor[] = []
   private queue: ProblemQueue
   private config: PipelineConfig
+  private executionPolicy?: ExecutionPolicy
   private _isRunning = false
   private _lastRunAt = 0
   private totalCollected = 0
@@ -87,6 +90,11 @@ export class PipelineOrchestrator {
 
   addExecutor(executor: FixExecutor): void {
     this.executors.push(executor)
+  }
+
+  /** Phase 3C: 注入执行策略门 */
+  setExecutionPolicy(policy: ExecutionPolicy): void {
+    this.executionPolicy = policy
   }
 
   /**
