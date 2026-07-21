@@ -71,4 +71,4 @@ _tsc_check.*
 out/
 .ssh/
 tsc-permission-test.json
-.ssh/
+.ssh/*.ts.tmp.*
