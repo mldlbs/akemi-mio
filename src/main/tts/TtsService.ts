@@ -16,6 +16,7 @@ import { SpeechPluginRegistry, PiperTtsPlugin, EdgeTtsPlugin } from '../speech'
 import { ttsCache } from './TtsCache'
 import { sentimentAnalyzer } from './SentimentAnalyzer'
 import type { StyledTtsSegment } from './emotion'
+import { piperSceneAdaptor as piperSceneAdaptorSingleton } from './PiperSceneAdaptor'
 
 // ══════════════════════════════════════════
 //  语音字幕 — Subtitle Data Types
@@ -470,6 +471,46 @@ export class TtsService {
     return this.contextEnabled
   }
 
+  // ══════════════════════════════════════════
+  //  行为感知场景自适应（PiperSceneAdaptor）
+  // ══════════════════════════════════════════
+
+  /**
+   * 设置场景手动覆盖模式。
+   *
+   * @param mode 'auto' 自动检测，或特定场景名如 'focus' / 'meeting' / 'late_night'
+   */
+  setSceneOverride(mode: string): void {
+    const validModes = ['auto', 'focus', 'meeting', 'late_night', 'work', 'leisure', 'rest']
+    if (!validModes.includes(mode)) {
+      log('WARN', 'tts_scene_override_invalid', { mode })
+      return
+    }
+    piperSceneAdaptorSingleton.setOverrideMode(mode as any)
+    log('INFO', 'tts_scene_override_set', { mode })
+  }
+
+  /** 获取当前场景覆盖模式 */
+  getSceneOverride(): string {
+    return piperSceneAdaptorSingleton.getOverrideMode()
+  }
+
+  /** 获取当前场景自适应结果摘要 */
+  getSceneAdaptorStatus() {
+    return piperSceneAdaptorSingleton.getStatus()
+  }
+
+  /** 获取场景学习的偏好记录 */
+  getSceneLearningData() {
+    return piperSceneAdaptorSingleton.getLearningData()
+  }
+
+  /** 重置场景学习数据 */
+  resetSceneLearningData(): void {
+    piperSceneAdaptorSingleton.resetLearningData()
+    log('INFO', 'tts_scene_learning_reset')
+  }
+
   /** 设置 TTS 引擎偏好（auto/cloud/local） */
   setEnginePreference(pref: TtsUserPreference): void {
     this.enginePreference = pref
@@ -866,12 +907,62 @@ export class TtsService {
   /**
    * 将 TTS 当前状态同步到 TtsPiperBridge，使 PiperOrchestrator 感知。
    * 在每次本地合成前调用。
+   *
+   * 行为感知场景自适应整合点：
+   * 查询 PiperSceneAdaptor 获取当前场景的 Piper 参数（模型/语速/音调/音量），
+   * 将其与 ContextVoiceConfig 合并后同步给桥接器。
+   * 场景自适应仅在本地 TTS (Piper) 合成时生效，不影响云端 edge-tts。
    */
   private syncTtsStateToBridge(): void {
+    let mergedConfig: ContextVoiceConfig | null = this.contextVoiceConfig
+
+    // ── 行为感知场景自适应 ──
+    // 查询 PiperSceneAdaptor 获取细粒度场景的 Piper 参数
+    if (this.contextEnabled) {
+      const sceneResult = piperSceneAdaptorSingleton.getAdaptedConfig()
+      if (sceneResult.confidence >= 0.3 || sceneResult.isManualOverride) {
+        // 如果当前已有 ContextVoiceConfig（来自 UserContextClassifier），
+        // 仅覆盖其 Piper 特定字段（model/speed/pitch/volume），保留 voice/rate/pitch 不变
+        if (mergedConfig) {
+          mergedConfig = {
+            ...mergedConfig,
+            piperModel: sceneResult.config.piperModel,
+            piperSpeed: sceneResult.config.piperSpeed,
+            piperPitch: sceneResult.config.piperPitch,
+            volume: sceneResult.config.volume,
+            label: `${sceneResult.config.label}·场景`,
+          }
+        } else {
+          // 没有现有 ContextVoiceConfig，直接用场景配置构建一个
+          mergedConfig = {
+            voice: 'zh-CN-XiaoxiaoNeural',
+            rate: '+10%',
+            pitch: '+8Hz',
+            volume: sceneResult.config.volume,
+            piperModel: sceneResult.config.piperModel,
+            piperSpeed: sceneResult.config.piperSpeed,
+            piperPitch: sceneResult.config.piperPitch,
+            label: sceneResult.config.label,
+          }
+        }
+
+        // 记录场景自适应事件
+        log('DEBUG', 'tts_scene_adaptation_applied', {
+          scene: sceneResult.scene,
+          confidence: sceneResult.confidence,
+          piperModel: sceneResult.config.piperModel,
+          piperSpeed: sceneResult.config.piperSpeed,
+          piperPitch: sceneResult.config.piperPitch,
+          volume: sceneResult.config.volume,
+          isManual: sceneResult.isManualOverride,
+        })
+      }
+    }
+
     ttsPiperBridge.syncTtsState({
       emotionParams: this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS,
       behaviorNeed: this.activeBehaviorNeed,
-      contextVoiceConfig: this.contextVoiceConfig,
+      contextVoiceConfig: mergedConfig,
       implicitRecommendation: implicitFeedbackTracker.getRecommendation(),
     })
   }

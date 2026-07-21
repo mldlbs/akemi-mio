@@ -50,6 +50,13 @@ export type UserBehaviorFeature =
   | 'feedback_loop_auto_switch'
 
   // ═════════════════════════════════════════════════════════════════
+  //  ASR 适配器 — VoiceEmotion / AcousticEnvironment → BehaviorContext
+  // ═════════════════════════════════════════════════════════════════
+
+  /** ASR→UserBehavior 适配器：将 ASR 数据模型和判断规则适配为 UserBehavior 可消费的格式 */
+  | 'asr_adapter'
+
+  // ═════════════════════════════════════════════════════════════════
   //  Plan:实验42：并发Workflow隔离性测试 — 渐进式引入
   // ═════════════════════════════════════════════════════════════════
 
@@ -278,6 +285,7 @@ export function parseFeaturesFromEnv(): UserBehaviorFeature[] {
     'plan_experiment_42_passive',
     'plan_experiment_42_suggestion',
     'plan_experiment_42_replacement',
+    'asr_adapter',
   ])
 
   return raw

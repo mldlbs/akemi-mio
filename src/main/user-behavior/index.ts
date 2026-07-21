@@ -68,6 +68,20 @@ export type {
 } from './feedback-loop/types'
 
 // ── Plan:实验42：并发Workflow隔离性测试 — 渐进式引入 ──
+// ── ASR→UserBehavior 适配器 ──
+export { AsrBehaviorAdapter, asrBehaviorAdapter } from './asr-adapter'
+export type {
+  BehaviorContextHint,
+  AsrQualitySignal,
+  AsrBehaviorOutput,
+  AsrVoiceEmotionInput,
+  AsrEnvironmentInput,
+  AsrConfidenceInput,
+  AsrDomainStatInput,
+  AsrBehaviorAdapterConfig,
+} from './asr-adapter'
+
+// ── Plan:实验42：并发Workflow隔离性测试 — 渐进式引入 ──
 export { PlanExperiment42Plugin } from './plan-experiment-42'
 export type {
   ExperimentPhase,

@@ -790,6 +790,162 @@ export const DEFAULT_USER_CONTEXT_CLASSIFIER_CONFIG = {
 }
 
 // ══════════════════════════════════════════
+//  Piper 行为感知场景 — 行为感知语音自适应的场景识别
+// ══════════════════════════════════════════
+
+/**
+ * Piper 场景 — 行为感知语音自适应的细粒度场景分类。
+ *
+ * 与 UserContext（work/leisure/rest）的关系：
+ * - work → 可细分为 focus（深度专注）和 meeting（会议/通话）
+ * - rest → 可细分为 late_night（深夜模式）
+ * - 其他场景保留原语义
+ *
+ * 这些场景专为 PiperTTS 参数映射设计，控制模型选择/语速/音调/音量。
+ * 由 PiperSceneAdaptor 基于现有分类器信号推导得出。
+ */
+export type PiperScene = 'focus' | 'meeting' | 'late_night' | 'work' | 'leisure' | 'rest'
+
+/** Piper 场景配置 — 场景到 PiperTTS 语音参数的映射（模型/语速/音调/音量） */
+export interface PiperSceneConfig {
+  /** Piper 模型名 */
+  piperModel: string
+  /** Piper 语速因子 (0.5–2.0) */
+  piperSpeed: number
+  /** Piper 音调因子 */
+  piperPitch: number
+  /** 音量 0.0–1.0（仅本地播放有效） */
+  volume: number
+  /** 人类可读标签 */
+  label: string
+}
+
+/**
+ * 场景 → Piper 语音参数映射表。
+ *
+ * 设计原则：
+ * - focus（专注）:  中速清晰，huayan-medium（通用女声）
+ * - meeting（会议）: 低速轻柔，避免打扰会议，音量降低
+ * - late_night（深夜）: 低速低音调，ling_ling-medium（温柔女声），音量最低
+ * - work（工作）:    中高速，huayan-medium，音量适中
+ * - leisure（休闲）: 中速温暖，ling_ling-medium（温柔女声），音量正常
+ * - rest（休息）:    低速柔和，ling_ling-medium，音量较低
+ */
+export const PIPER_SCENE_MAP: Record<PiperScene, PiperSceneConfig> = {
+  focus: {
+    piperModel: 'zh_CN-huayan-medium',
+    piperSpeed: 1.1,
+    piperPitch: 1.0,
+    volume: 0.8,
+    label: '专注·高效',
+  },
+  meeting: {
+    piperModel: 'zh_CN-huayan-medium',
+    piperSpeed: 0.9,
+    piperPitch: 0.95,
+    volume: 0.6,
+    label: '会议·轻柔',
+  },
+  late_night: {
+    piperModel: 'zh_CN-ling_ling-medium',
+    piperSpeed: 0.75,
+    piperPitch: 0.85,
+    volume: 0.5,
+    label: '深夜·静谧',
+  },
+  work: {
+    piperModel: 'zh_CN-huayan-medium',
+    piperSpeed: 1.1,
+    piperPitch: 1.0,
+    volume: 0.85,
+    label: '工作·高效',
+  },
+  leisure: {
+    piperModel: 'zh_CN-ling_ling-medium',
+    piperSpeed: 0.95,
+    piperPitch: 1.05,
+    volume: 0.9,
+    label: '休闲·放松',
+  },
+  rest: {
+    piperModel: 'zh_CN-ling_ling-medium',
+    piperSpeed: 0.8,
+    piperPitch: 0.9,
+    volume: 0.7,
+    label: '休息·轻柔',
+  },
+}
+
+/** 场景覆盖模式：auto 自动检测，或手动锁定到特定场景 */
+export type PiperSceneOverrideMode = 'auto' | PiperScene
+
+/** 场景手动覆盖的学习记录 — 用户手动切换场景的偏好统计 */
+export interface SceneOverrideRecord {
+  /** 场景 */
+  scene: PiperScene
+  /** 手动覆盖到此场景的次数 */
+  count: number
+  /** 最后一次覆盖的时间戳 */
+  lastOverride: number
+}
+
+/** 场景自适应结果 */
+export interface PiperSceneResult {
+  /** 当前检测到的场景 */
+  scene: PiperScene
+  /** 对应的 Piper 语音配置 */
+  config: PiperSceneConfig
+  /** 置信度 0–1 */
+  confidence: number
+  /** 人类可读描述 */
+  description: string
+  /** 是否来自用户手动覆盖 */
+  isManualOverride: boolean
+}
+
+/** 场景自适应配置 */
+export interface PiperSceneAdaptorConfig {
+  /** 是否启用场景自适应 */
+  enabled: boolean
+  /** 手动覆盖模式（auto = 自动检测） */
+  overrideMode: PiperSceneOverrideMode
+  /** 是否启用学习（记录手动覆盖以优化映射） */
+  learningEnabled: boolean
+  /** 学习数据文件路径 */
+  learningDataPath: string
+  /** 场景切换去抖时间（秒），防止频繁切换 */
+  debounceSec: number
+  /** 学习生效所需的最低记录数 */
+  minRecordsForLearning: number
+}
+
+/** 默认场景自适应配置 */
+export const DEFAULT_PIPER_SCENE_ADAPTOR_CONFIG: PiperSceneAdaptorConfig = {
+  enabled: true,
+  overrideMode: 'auto',
+  learningEnabled: true,
+  learningDataPath: '',
+  debounceSec: 30,
+  minRecordsForLearning: 3,
+}
+
+/**
+ * 会议应用关键词 — 用于从活跃窗口检测会议/通话场景。
+ * 与 WORK_PROCESS_PATTERNS 互补，将会议类应用匹配到 meeting 场景。
+ */
+export const MEETING_PROCESS_PATTERNS: RegExp[] = [
+  // 视频会议
+  /zoom|teams|meet\.google|google.?meet|webex|gotomeeting|bluejeans/i,
+  /skype|slack.?call|discord.?call|whereby|jitsi/i,
+  // 屏幕共享/演示
+  /obs.?studio|streamlabs|xsplit/i,
+  // 电话/通话
+  /phone|dialer|call/i,
+  // 会议在窗口标题中的特征
+  /meeting|conference|presentation|webinar|会议|通话/i,
+]
+
+// ══════════════════════════════════════════
 //  工作相关进程关键词（用于 UserContextClassifier）
 // ══════════════════════════════════════════
 

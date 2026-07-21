@@ -10,6 +10,7 @@ export type BackgroundTaskType =
   | 'stability.tick'
   | 'evaluation.metrics'
   | 'social.tick'
+  | 'sleep.orchestration'
 
 /** 任务优先级等级 */
 export enum TaskTier {

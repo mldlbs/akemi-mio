@@ -65,6 +65,7 @@ import { toolDefaultAdjuster } from '../behavior/ToolDefaultAdjuster'
 import { buildTtsNeed } from '../behavior/UserBehaviorTtsContract'
 import { asrHotwordManager } from '../asr/AsrHotwordManager'
 import { sentimentAnalyzer } from '../tts/SentimentAnalyzer'
+import { agentMonitor, type AgentMonitor, type RoundMetrics } from './AgentMonitor'
 import { emotionToneMap } from '../tts/EmotionToneMap'
 import type { EmotionTtsParams, UserToneProfile, VoiceStyle, ReplyCategory } from '../tts/types'
 import { toneProfileAnalyzer } from '../tts/ToneProfileAnalyzer'
@@ -90,6 +91,7 @@ import { VOICE_EMOTION_TTS_MAP } from '../tts/types'
 import type { VoiceEmotion } from '../asr/types'
 import type { McpAgentHybridPipeline } from '../hybrid/McpAgentHybridPipeline'
 import { narrativeEmotionController, type StyledTtsSegment } from '../tts/emotion'
+import { TaskStepRecorder } from '../memory/TaskStepRecorder'
 
 export class ChatExecutor {
   private llmService: LlmService
@@ -143,6 +145,9 @@ export class ChatExecutor {
   /** 当前加载的 session，用于切换 session 时重建上下文 */
   private currentSessionId: string | null = null
 
+  /** 跨会话任务步骤记录器 — 自动记录每轮工具调用的输入/输出 */
+  private taskStepRecorder: TaskStepRecorder | null = null
+
   // ── 行为自适应对话策略 ──
   /** 当前轮检测到的场景标签 */
   private currentScene: SceneLabel = 'unknown'
@@ -166,6 +171,9 @@ export class ChatExecutor {
   private guardrailPipeline: GuardrailPipeline | null = null
   /** Evaluation Emitter — 用于写入 Guardrail Delivery Trace 事件 */
   private evaluationEmitter: EvaluationEmitter | null = null
+
+  /** Agent 性能监控器 */
+  private agentMonitor: AgentMonitor = agentMonitor
 
   constructor(
     llmService: LlmService,
@@ -242,6 +250,10 @@ export class ChatExecutor {
       this.memoryService = deps.memoryService
       // 偏好存储依赖 memoryService，首次注入时初始化
       behaviorPreferenceStore.setMemoryService(deps.memoryService)
+      // 跨会话任务步骤记录器 — 依赖 MemoryService
+      if (deps.memoryService && !this.taskStepRecorder) {
+        this.taskStepRecorder = new TaskStepRecorder(deps.memoryService)
+      }
     }
     if (deps.skillManager !== undefined) this.skillManager = deps.skillManager
     if (deps.recoveryManager !== undefined) this.recoveryManager = deps.recoveryManager
@@ -707,10 +719,41 @@ export class ChatExecutor {
       if (this.memoryService) {
         behaviorPreferenceStore.flush()
       }
+      // ── AgentMonitor: 记录本轮成功交互指标 ──
+      if (this.agentMonitor && reply) {
+        let sentimentScore = 0.5
+        try {
+          const sentiment = sentimentAnalyzer.analyze(reply)
+          sentimentScore = sentiment.score || 0.5
+        } catch { /* 情感分析失败不影响主流程 */ }
+        this.agentMonitor.recordRound({
+          timestamp: Date.now(),
+          success: true,
+          sentimentScore,
+          durationMs: Date.now() - t0,
+          toolCallCount: 0,
+          llmCallCount: (this.resourceBudget?.getSnapshot?.()?.chatLlmCalls as number) ?? 0,
+          wasInterrupted: ctx?.interruptFlag ?? false,
+          source,
+        })
+      }
       return { reply }
     } catch (err) {
       eventBus.emit('agent.error', { error: String(err), requestId: rid })
       log('ERROR', 'chat_handler_error', { request_id: rid, error: String(err) })
+      // ── AgentMonitor: 记录本轮失败交互指标 ──
+      if (this.agentMonitor) {
+        this.agentMonitor.recordRound({
+          timestamp: Date.now(),
+          success: false,
+          sentimentScore: 0.3,
+          durationMs: Date.now() - t0,
+          toolCallCount: 0,
+          llmCallCount: (this.resourceBudget?.getSnapshot?.()?.chatLlmCalls as number) ?? 0,
+          wasInterrupted: false,
+          source,
+        })
+      }
       return { error: 'INTERNAL' }
     } finally {
       this.runContext = null
@@ -779,6 +822,11 @@ export class ChatExecutor {
     behaviorEmotionDetector.stop()
     // 停止用户情境分类器轮询
     userContextClassifier.stop()
+  }
+
+  /** 设置 Agent 性能监控器（允许外部注入自定义实例） */
+  setAgentMonitor(monitor: AgentMonitor): void {
+    this.agentMonitor = monitor
   }
 
   private async toolLoop(messages: Message[], ctx: RunContext, requestId: string, source: string): Promise<string> {
@@ -967,6 +1015,20 @@ export class ChatExecutor {
             let c = tr.content || tr.error || ''
             if (c.length > 8000) c = c.slice(0, 8000) + `\n... [已截断，原长 ${c.length} 字符]`
             messages.push({ role: 'tool', tool_call_id: tr.id, content: c })
+          }
+          // ── [TASK STEP RECORDER] 记录本轮工具调用步骤 ──
+          if (this.taskStepRecorder && this.currentSessionId) {
+            try {
+              this.taskStepRecorder.recordToolCallRound({
+                toolCalls: result.toolCalls,
+                toolResults,
+                sessionId: this.currentSessionId,
+                stepIndex: i,
+                roundReply: result.reply,
+              })
+            } catch (err) {
+              log('WARN', 'task_step_record_failed', { error: String(err), step: i })
+            }
           }
           // ── [MCP-AGENT HYBRID] 工具结果验证 ──
           if (this.hybridPipeline?.isPointEnabled('result_validation')) {

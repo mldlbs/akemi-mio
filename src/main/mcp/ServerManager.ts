@@ -10,6 +10,9 @@ import { CapabilityEngine } from '../capability/CapabilityEngine'
 import { MemoryAwareInterceptor } from './MemoryAwareInterceptor'
 import type { MemoryService } from '../memory/MemoryService'
 import { MemoryRetriever, ToolMemoryDefaults } from './ToolMemoryDefaults'
+import { MemoryResourceProvider } from './MemoryResourceProvider'
+import type { MemoryResourceDefinition, ResourceContent } from './MemoryResourceProvider'
+import { setMemoryResourceProvider } from '../tool/deps'
 import { MEMORY_TOOL_PERSONALIZATION, BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE } from '../config'
 import { behaviorPredictor } from './BehaviorPredictor'
 import { toolCallLogStore } from '../tool/ToolCallLogStore'
@@ -79,6 +82,7 @@ export class ServerManager {
   private memoryInterceptor: MemoryAwareInterceptor = new MemoryAwareInterceptor()
   private memoryRetriever: MemoryRetriever = new MemoryRetriever()
   private toolDefaults: ToolMemoryDefaults = new ToolMemoryDefaults(this.memoryRetriever)
+  private memoryResourceProvider: MemoryResourceProvider = new MemoryResourceProvider()
   /** 每个 MCP 服务器的独立熔断器 */
   private circuitBreakers = new Map<string, { failures: number; state: 'closed' | 'open'; openedAt: number }>()
   /** 重启预算：每小时最多 RESTART_BUDGET_MAX 次重启，超限后自动禁用 */
@@ -108,12 +112,16 @@ export class ServerManager {
     this.capabilityEngine = engine
   }
 
-  /** 设置 MemoryService 用于记忆感知的工具调用拦截 */
+  /** 设置 MemoryService 用于记忆感知的工具调用拦截和 MCP 资源暴露 */
   setMemoryService(ms: MemoryService): void {
     this.memoryInterceptor.setMemoryService(ms)
     this.memoryRetriever.setMemoryService(ms)
     this.memoryInterceptor.setToolDefaults(this.toolDefaults)
     this.memoryInterceptor.setPersonalizationLevel(MEMORY_TOOL_PERSONALIZATION)
+
+    // 初始化 MemoryResourceProvider，将长期记忆作为 MCP 资源暴露
+    this.memoryResourceProvider.setMemoryService(ms)
+    setMemoryResourceProvider(this.memoryResourceProvider)
   }
 
   /** 获取 ToolMemoryDefaults 注册表，用于注册工具参数默认值映射 */
@@ -129,6 +137,42 @@ export class ServerManager {
   /** 获取 MemoryAwareInterceptor，用于动态调整个性化设置或记录反馈 */
   getMemoryInterceptor(): MemoryAwareInterceptor {
     return this.memoryInterceptor
+  }
+
+  // ══════════════════════════════════════════
+  //  Memory Resource Provider
+  // ══════════════════════════════════════════
+
+  /** 获取 MemoryResourceProvider，用于暴露记忆为 MCP 资源 */
+  getMemoryResourceProvider(): MemoryResourceProvider {
+    return this.memoryResourceProvider
+  }
+
+  /**
+   * 获取所有可用的记忆资源定义 (URI 模板)。
+   * 用于外部协议层（如 LLM 适配器）发现可读资源。
+   */
+  getResourceDefinitions(): MemoryResourceDefinition[] {
+    return this.memoryResourceProvider.getResourceDefinitions()
+  }
+
+  /**
+   * 通过 URI 读取记忆资源内容。
+   * @param uri 如 "memory://entries/mem_xxx" 或 "memory://stats"
+   * @returns 资源内容
+   */
+  async readResource(uri: string): Promise<ResourceContent> {
+    return this.memoryResourceProvider.readResource(uri)
+  }
+
+  /** 获取记忆服务器当前配置 */
+  getMemoryConfig() {
+    return this.memoryResourceProvider.getConfig()
+  }
+
+  /** 更新记忆服务器配置 */
+  updateMemoryConfig(partial: Parameters<MemoryResourceProvider['updateConfig']>[0]) {
+    return this.memoryResourceProvider.updateConfig(partial)
   }
 
   /** 从 mcp_servers.json 自动恢复持久化的 MCP 服务器 */

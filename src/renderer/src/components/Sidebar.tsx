@@ -45,6 +45,10 @@ export function Sidebar() {
     [activeSessionId, viewing, openHistory, closeHistory, setActiveSlot],
   )
 
+  const openBlogEditor = useCallback(() => {
+    setActiveSlot('blog')
+  }, [setActiveSlot])
+
   const sorted = useMemo(() => {
     return [...sessions].sort((a, b) => b.lastActivityAt - a.lastActivityAt)
   }, [sessions])
@@ -104,6 +108,13 @@ export function Sidebar() {
           <button className="sidebar-collapsed-icon" onClick={toggleSidebar} title="展开侧栏">
             <i className="ri-menu-unfold-line" />
           </button>
+          <button
+            className={`sidebar-collapsed-icon${uiState.activeSlot === 'blog' ? ' active' : ''}`}
+            onClick={openBlogEditor}
+            title="博客编辑器"
+          >
+            <i className="ri-quill-pen-line" />
+          </button>
           {Array.from(categorySet).map((cat) => (
             <button
               key={cat}
@@ -157,6 +168,19 @@ export function Sidebar() {
             </div>
           )
         })}
+          <div className="sidebar-section">
+            <div className="sidebar-section-label">
+              <i className="ri-tools-line" /> 工具
+            </div>
+            <button
+              className={`sidebar-item${uiState.activeSlot === 'blog' ? ' active' : ''}`}
+              onClick={openBlogEditor}
+            >
+              <span className="sidebar-item-label">
+                <i className="ri-quill-pen-line" /> 博客编辑器
+              </span>
+            </button>
+          </div>
       </div>
     </aside>
   )

@@ -22,6 +22,9 @@
 import { buildTool, formatToolResult, formatToolError } from '../types'
 import { log } from '../../logger/Logger'
 import { blogAudioService } from '../../audio/BlogAudioService'
+import { markdownSegmenter } from '../../audio/MarkdownSegmenter'
+import { contentVoiceMapper } from '../../audio/ContentVoiceMapper'
+import { PIPER_MODEL_CATALOG } from '../../tts/PiperOrchestrator'
 import { BrowserWindow } from 'electron'
 
 // ══════════════════════════════════════════
@@ -161,8 +164,8 @@ export const generatePodcastTool = buildTool({
       '',
       `📄 文章标题: ${result.title}`,
       `📝 段落数: ${result.totalSegments} (成功 ${result.successSegments}, 失败 ${result.failedSegments})`,
-      `⏱️ 总时长: ${result.totalDurationSec ? this.formatDuration(result.totalDurationSec) : '未知'}`,
-      `💾 文件大小: ${result.fileSizeBytes ? this.formatFileSize(result.fileSizeBytes) : '未知'}`,
+      `⏱️ 总时长: ${result.totalDurationSec ? formatDuration(result.totalDurationSec) : '未知'}`,
+      `💾 文件大小: ${result.fileSizeBytes ? formatFileSize(result.fileSizeBytes) : '未知'}`,
       `📁 输出路径: ${result.outputPath}`,
       `⚡ 耗时: ${((Date.now() - t0) / 1000).toFixed(1)} 秒`,
       '',
@@ -221,10 +224,6 @@ export const generatePodcastPreviewTool = buildTool({
   handler: async (args: { markdown: string }) => {
     const markdown = String(args.markdown || '').trim()
     if (!markdown) return formatToolError('Markdown 内容不能为空')
-
-    const { markdownSegmenter } = await import('../../audio/MarkdownSegmenter')
-    const { contentVoiceMapper } = await import('../../audio/ContentVoiceMapper')
-    const { PIPER_MODEL_CATALOG } = await import('../../tts/PiperOrchestrator')
 
     const { segments, metadata } = markdownSegmenter.segment(markdown)
     const assignments = contentVoiceMapper.assignAll(segments)
@@ -286,8 +285,3 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
-
-/**
- * Bug: 上面 handler 里调用了 this.formatDuration 但箭头函数没有 this 上下文。
- * 改为直接调用模块级 formatDuration 函数，已修复。
- */

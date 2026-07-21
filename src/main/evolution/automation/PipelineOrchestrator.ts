@@ -44,6 +44,11 @@ import { FileOrganizerCollector } from '../file-organizer/FileOrganizerCollector
 import { FileOrganizerExecutor } from '../file-organizer/FileOrganizerExecutor'
 import { CicdCollector } from '../cicd/CicdCollector'
 import { registerCollector, registerExecutor, getAllCollectors, getAllExecutors, getExecutorsBySource } from './registry'
+import { AgentPerformanceCollector } from './AgentPerformanceCollector'
+import { AgentPromptOptimizer } from './AgentPromptOptimizer'
+import { agentMonitor } from '../../agent/AgentMonitor'
+import { BlogOptimizationCollector } from '../blog/BlogOptimizationCollector'
+import { BlogOptimizationExecutor } from '../blog/BlogOptimizationExecutor'
 
 export interface PipelineConfig {
   projectRoot: string
@@ -122,6 +127,12 @@ export class PipelineOrchestrator {
     registerCollector(ttsTypographyCollector) // type-health 已禁用
     registerCollector(fileOrganizerCollector)
     registerCollector(cicdCollector)
+    // Agent 性能监控采集器（依赖全局 agentMonitor 单例）
+    const agentPerfCollector = new AgentPerformanceCollector(agentMonitor)
+    registerCollector(agentPerfCollector)
+    // 博客工作流优化采集器
+    const blogOptCollector = new BlogOptimizationCollector()
+    registerCollector(blogOptCollector)
 
     // Stage 3: 从注册表加载到本地
     for (const c of getAllCollectors()) {
@@ -158,6 +169,12 @@ export class PipelineOrchestrator {
     if (subAgentPool) {
       registerExecutor(new DeepSeekExecutor(subAgentPool))
     }
+    // Agent 提示词/行为优化执行器
+    const agentPromptOptimizer = new AgentPromptOptimizer()
+    registerExecutor(agentPromptOptimizer)
+    // 博客工作流优化执行器
+    const blogOptExecutor = new BlogOptimizationExecutor()
+    registerExecutor(blogOptExecutor)
 
     // Stage 5: 从注册表加载到本地
     for (const e of getAllExecutors()) {

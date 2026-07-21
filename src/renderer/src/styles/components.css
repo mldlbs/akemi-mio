@@ -1355,6 +1355,194 @@
   color: oklch(0.55 0.14 16);
 }
 
+/* ─── Tool Param Suggestions (记忆智能默认值) ─── */
+
+.tool-slot-suggestions {
+  margin-top: var(--space-md);
+}
+
+.tool-param-suggestions {
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.tool-param-suggestions-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--accent-soft, var(--text-secondary));
+  margin-bottom: var(--space-sm);
+}
+
+.tool-param-suggestions-header i {
+  font-size: var(--fs-body);
+}
+
+.tool-param-suggestions-hint {
+  font-size: var(--fs-caption);
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.tool-param-suggestions-loading,
+.tool-param-suggestions-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+  padding: var(--space-sm);
+}
+
+.tool-param-suggestions-error {
+  color: var(--text-error, #e74c3c);
+}
+
+.tool-param-combo-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.tool-param-combo-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  background: var(--bg-glass, rgba(255,255,255,0.03));
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.06));
+  transition: background 0.15s ease;
+}
+
+.tool-param-combo-item:hover {
+  background: var(--bg-glass-hover, rgba(255,255,255,0.06));
+}
+
+.tool-param-combo-args {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.tool-param-combo-arg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--fs-caption);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  background: var(--bg-tertiary, rgba(255,255,255,0.04));
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tool-param-combo-key {
+  color: var(--accent-soft, #6eb0ff);
+}
+
+.tool-param-combo-val {
+  color: var(--text-secondary);
+}
+
+.tool-param-combo-more {
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+  padding: 1px 4px;
+}
+
+.tool-param-combo-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+}
+
+.tool-param-combo-rating {
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  font-weight: 500;
+}
+
+.tool-param-combo-rating.rating-high {
+  color: oklch(0.52 0.10 150);
+  background: oklch(0.52 0.10 150 / 0.1);
+}
+
+.tool-param-combo-rating.rating-mid {
+  color: oklch(0.6 0.12 55);
+  background: oklch(0.6 0.12 55 / 0.1);
+}
+
+.tool-param-combo-rating.rating-low {
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+}
+
+.tool-param-combo-freq,
+.tool-param-combo-time {
+  color: var(--text-muted);
+}
+
+.tool-param-combo-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.tool-param-combo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 8px;
+  border: none;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-caption);
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-muted);
+  transition: all 0.12s ease;
+}
+
+.tool-param-combo-btn:hover {
+  background: var(--bg-glass-strong);
+  color: var(--text-primary);
+}
+
+.tool-param-combo-adopt {
+  color: oklch(0.52 0.10 150);
+}
+
+.tool-param-combo-adopt:hover {
+  background: oklch(0.52 0.10 150 / 0.12);
+  color: oklch(0.6 0.14 150);
+}
+
+.tool-param-combo-dismiss:hover {
+  color: oklch(0.55 0.14 16);
+  background: oklch(0.55 0.14 16 / 0.1);
+}
+
+.tool-param-combo-feedback-done {
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 /* ═══════════════════════════════════════
    Workflow Slot
    ═══════════════════════════════════════ */
@@ -5354,4 +5542,776 @@
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* ════════════════════════════════════════════════
+   Blog Editor — 语音驱动博客编辑器
+   ════════════════════════════════════════════════ */
+
+.blog-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+/* ── 工具栏 ── */
+.blog-editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-glass);
+  background: var(--bg-glass-strong);
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.blog-editor-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.blog-editor-tb-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+
+.blog-editor-tb-btn:hover {
+  background: var(--bg-glass-hover);
+  color: var(--text-secondary);
+}
+
+.blog-editor-tb-btn.active {
+  background: var(--acgent-bg);
+  color: var(--accent);
+}
+
+/* ── 编辑区域 ── */
+.blog-editor-body {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.blog-editor-textarea {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 20px 24px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  tab-size: 2;
+}
+
+.blog-editor-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.blog-editor-preview {
+  padding: 20px 24px;
+  overflow-y: auto;
+  height: 100%;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-primary);
+}
+
+/* ── 底部栏 ── */
+.blog-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-glass);
+  background: var(--bg-glass-strong);
+  flex-shrink: 0;
+}
+
+.blog-editor-footer-left,
+.blog-editor-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* ── 录音按钮 ── */
+.blog-editor-rec-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: var(--bg-glass-strong);
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--duration-normal) var(--ease-glass);
+}
+
+.blog-editor-rec-btn:hover {
+  background: var(--bg-glass-hover);
+  color: var(--accent);
+  transform: scale(1.05);
+}
+
+.blog-editor-rec-btn.recording {
+  background: #e74c3c;
+  color: white;
+  box-shadow: 0 0 12px rgba(231, 76, 60, 0.4);
+  animation: breathe-glow-active 2s ease-in-out infinite;
+}
+
+.blog-editor-rec-btn.transcribing {
+  background: var(--accent);
+  color: white;
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.blog-editor-rec-timer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.blog-editor-word-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.blog-editor-last-dictation {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── 历史录音面板 ── */
+.blog-editor-recordings {
+  border-top: 1px solid var(--border-glass);
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-glass-strong);
+}
+
+.blog-editor-recordings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-glass);
+}
+
+.blog-editor-rec-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px;
+}
+
+.blog-editor-recordings-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.blog-editor-recordings-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.blog-editor-recording-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-glass);
+}
+
+.blog-editor-recording-item:last-child {
+  border-bottom: none;
+}
+
+.blog-editor-recording-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 60px;
+  flex-shrink: 0;
+}
+
+.blog-editor-recording-time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.blog-editor-recording-dur {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.blog-editor-recording-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.blog-editor-recording-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.blog-editor-rec-action {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+
+.blog-editor-rec-action:hover {
+  background: var(--bg-glass-hover);
+  color: var(--text-secondary);
+}
+
+/* ════════════════════════════════════════════════
+   Blog Review — 博客审核与语音批注
+   ════════════════════════════════════════════════ */
+
+.blog-review {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  background: var(--bg-primary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+/* ── 顶部栏 ── */
+.blog-review-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-glass);
+  background: var(--bg-glass-strong);
+}
+
+.blog-review-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.blog-review-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.blog-review-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.blog-review-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.blog-review-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-glass);
+  border-radius: 6px;
+  background: var(--bg-glass-strong);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+
+.blog-review-btn:hover {
+  background: var(--bg-glass-hover);
+  color: var(--text-primary);
+}
+
+.blog-review-btn-primary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+
+.blog-review-btn-primary:hover {
+  opacity: 0.9;
+}
+
+/* ── 内容区 ── */
+.blog-review-body {
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+
+.blog-review-textarea {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+
+.blog-review-content {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.br-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--border-glass);
+}
+
+/* ── 段落 ── */
+.br-paragraph {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  margin: 4px -12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-glass);
+  position: relative;
+}
+
+.br-paragraph:hover {
+  background: var(--bg-glass-hover);
+}
+
+.br-paragraph.selected {
+  background: var(--accent-bg);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.br-paragraph.annotated {
+  border-left: 3px solid var(--accent);
+}
+
+.br-para-index {
+  width: 24px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+  padding-top: 2px;
+}
+
+.br-para-content {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.br-para-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.br-para-annot-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--accent-bg);
+}
+
+.br-para-img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+.br-para-heading {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.br-para-code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--bg-glass-strong);
+  padding: 8px 12px;
+  border-radius: 6px;
+  display: block;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+/* ── 批注侧栏 ── */
+.blog-review-sidebar {
+  border-left: 1px solid var(--border-glass);
+  overflow-y: auto;
+  background: var(--bg-glass-strong);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.br-sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.br-sidebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.br-sidebar-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 16px 0;
+}
+
+/* ── 批注录音器 ── */
+.br-annotation-recorder {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-primary);
+  border-radius: 8px;
+  border: 1px solid var(--border-glass);
+}
+
+.br-annotation-para-info {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.br-annotation-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.br-annotation-rec-icon {
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+.br-annotation-rec-icon.active {
+  color: #e74c3c;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.br-annotation-rec-timer {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.br-annotation-stop-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  background: #e74c3c;
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.br-annotation-record-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  background: var(--bg-glass-strong);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-glass);
+}
+
+.br-annotation-record-btn:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.br-annotation-cancel-btn {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.br-annotation-cancel-btn:hover {
+  color: var(--text-secondary);
+}
+
+/* ── 已有批注列表 ── */
+.br-annotations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.br-annotation-item {
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border-radius: 8px;
+  border: 1px solid var(--border-glass);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.br-annotation-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.br-annotation-para-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-bg);
+}
+
+.br-annotation-dur {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.br-annotation-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.br-annotation-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.br-annotation-snippet {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.br-annotation-item-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.br-annotation-action {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.br-annotation-action:hover {
+  background: var(--bg-glass-hover);
+  color: var(--text-secondary);
+}
+
+/* ── Markdown 预览样式 ── */
+.markdown-body {
+  line-height: 1.8;
+}
+
+.md-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.md-h1,
+.md-h2,
+.md-h3 {
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+  color: var(--text-primary);
+}
+
+.md-h1 { font-size: 1.5em; }
+.md-h2 { font-size: 1.25em; }
+.md-h3 { font-size: 1.1em; }
+
+.md-p {
+  margin: 0.5em 0;
+}
+
+.md-list {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.md-blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 0.5em 0;
+  padding: 4px 12px;
+  color: var(--text-secondary);
+  background: var(--bg-glass-strong);
+  border-radius: 0 4px 4px 0;
+}
+
+.md-code-block {
+  background: var(--bg-glass-strong);
+  padding: 12px 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0.5em 0;
+}
+
+.md-inline-code {
+  background: var(--bg-glass-strong);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.md-bold {
+  font-weight: 600;
+}
+
+.md-italic {
+  font-style: italic;
+}
+
+.md-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.md-link:hover {
+  text-decoration: underline;
+}
+
+.md-hr {
+  border: none;
+  border-top: 1px solid var(--border-glass);
+  margin: 1em 0;
+}
+
+/* ── 动画 ── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }

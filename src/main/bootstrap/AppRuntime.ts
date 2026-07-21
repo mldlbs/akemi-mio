@@ -25,6 +25,7 @@ import { ttsScheduler } from '../tts/TtsScheduler'
 import { ttsTypographyFeedbackLoop } from '../tts/TtsTypographyFeedbackLoop'
 import { voiceRoleManager } from '../tts/VoiceRoleManager'
 import { AgentService } from '../agent/AgentService'
+import { sleepOrchestrator } from '../agent/SleepOrchestrator'
 import { MemoryService } from '../memory/MemoryService'
 import { VoiceBookmarkService } from '../memory/VoiceBookmarkService'
 import { memoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
@@ -51,7 +52,7 @@ import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
 import { setupStartupLogging, createWindow, setupWallpaperListener, getMainWindow } from '../core/Lifecycle'
 import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle, setUserContextOverride, setOrganizerPause, setOrganizerResume, setOrganizerSkip, setSubtitleToggle, setVoiceRoleSchemeSwitch, setTaskPanelToggle } from '../core/TrayManager'
 import { initUpdater, setUpdateWindow } from '../updater/UpdaterService'
-import { EvolutionDashboardService, MemoryContextService, FileOrganizerProgressService } from '../wallpaper/WallpaperService'
+import { EvolutionDashboardService, MemoryContextService, ConversationContextService, FileOrganizerProgressService } from '../wallpaper/WallpaperService'
 import { TaskPanelService } from '../wallpaper/TaskPanelService'
 import { WallpaperInteractiveService } from '../wallpaper/WallpaperInteractiveService'
 import { MonitoringService } from '../monitoring/MonitoringService'
@@ -146,6 +147,8 @@ export class AppRuntime {
   private monitoringService?: MonitoringService
   private memoryContextService?: MemoryContextService
   private memoryContextRef: ServiceRef<MemoryContextService> = createServiceRef<MemoryContextService>()
+  private conversationContextService?: ConversationContextService
+  private conversationContextRef: ServiceRef<ConversationContextService> = createServiceRef<ConversationContextService>()
   private behaviorMemoryAnalyzer?: import('../behavior/BehaviorDrivenMemoryAnalyzer').BehaviorDrivenMemoryAnalyzer
   private organizerService?: FileOrganizerProgressService
   private organizerRef: ServiceRef<FileOrganizerProgressService> = createServiceRef<FileOrganizerProgressService>()
@@ -556,6 +559,7 @@ export class AppRuntime {
       taskPanelRef,
       wallpaperInteractiveRef,
       restoreRef,
+      this.conversationContextRef,
     )
 
     // === Stage 3: 核心服务（内存、插件、技能） ===
@@ -567,6 +571,8 @@ export class AppRuntime {
     // Memory × TTS 深度融合桥接器：注入双方向引用 + 注册合成回调
     memoryTtsBridge.setMemoryService(memoryService)
     memoryTtsBridge.setTtsService(ttsService)
+    // SleepOrchestrator：注入 TTS 服务引用用于唤醒语音问候
+    sleepOrchestrator.setTtsService(ttsService)
     // 注册 TTS 合成完成回调：每次合成后，桥接器决定是否记录到 Memory
     ttsService.setOnSynthesisComplete((record) => {
       memoryTtsBridge.recordSynthesis(record)
@@ -892,6 +898,8 @@ export class AppRuntime {
     constitutionEngine.setEnforcementMode('enforce')
     // Phase 4: 延迟注入 GoalGuardrail 依赖（ConstitutionEngine 在此阶段可用）
     agentService.goalGuardrail.setConstitutionEngine(constitutionEngine)
+    // Phase 3B: 连接 ProposalValidator → ConstitutionEngine
+    this.proposalValidator.setConstitution(constitutionEngine)
     // Phase 4: CapabilityEngine
     this.capabilityEngine = new CapabilityEngine()
     this.capabilityEngine.setEnforcementMode('enforce')
@@ -1124,6 +1132,14 @@ export class AppRuntime {
       },
       60000,
       { cooldownMs: 30000 },
+    )
+
+    // 休眠编排检测（每 10 分钟检查用户是否 60 分钟无交互）
+    this.taskRunner.register(
+      'sleep.orchestration',
+      () => sleepOrchestrator.tick(),
+      10 * 60 * 1000,
+      { cooldownMs: 60 * 1000 },
     )
 
     // Phase 5D: 注入 Task 健康提供者（此时所有 task 已注册）
@@ -1841,6 +1857,24 @@ export class AppRuntime {
         this.memoryContextService = memoryCtx
         this.memoryContextRef.current = memoryCtx
         log('INFO', 'memory_context_service_started')
+      },
+    })
+
+    // 对话语境信息浮层 — 从 Memory 采集对话摘要、待办和进度，推送到桌面 overlay
+    this.lazyInit!.add({
+      name: 'conversation-context',
+      priority: 'normal',
+      delayMs: 600,
+      fn: async () => {
+        const convCtx = new ConversationContextService()
+        const win = getMainWindow()
+        if (win && !win.isDestroyed()) {
+          convCtx.setWindow(win)
+        }
+        convCtx.start()
+        this.conversationContextService = convCtx
+        this.conversationContextRef.current = convCtx
+        log('INFO', 'conversation_context_service_started')
       },
     })
 

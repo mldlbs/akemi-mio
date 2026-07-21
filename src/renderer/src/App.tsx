@@ -11,6 +11,8 @@ import { PreviewSlot } from './components/PreviewSlot'
 import { WorkflowSlot } from './components/WorkflowSlot'
 import { DevPlanSlot } from './components/DevPlanSlot'
 import { OtparSlot } from './components/OtparSlot'
+import { BlogEditor } from './components/BlogEditor'
+import { BlogReview } from './components/BlogReview'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { SettingsModal } from './components/SettingsModal'
 import { SystemDock } from './components/SystemDock'
@@ -70,6 +72,10 @@ function AppInner() {
           ) : uiState.activeSlot === 'workflow' ? (
             <ErrorBoundary>
               <WorkflowSlot />
+            </ErrorBoundary>
+          ) : uiState.activeSlot === 'blog' ? (
+            <ErrorBoundary>
+              <BlogEditor />
             </ErrorBoundary>
           ) : uiState.activeSlot === 'preview' ? (
             <PreviewSlot />

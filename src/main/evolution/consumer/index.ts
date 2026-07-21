@@ -18,7 +18,7 @@
  */
 
 export { EvolutionConsumerBridge, evolutionConsumerBridge } from './EvolutionConsumerBridge'
-export { PLAN_CONSUMER_REQUIREMENTS, ASR_PLAN_CONSUMER_REQUIREMENTS, DEFAULT_PLAN_CONSUMERS } from './PlanConsumerContract'
+export { PLAN_CONSUMER_REQUIREMENTS, ASR_PLAN_CONSUMER_REQUIREMENTS, BLOG_PLAN_CONSUMER_REQUIREMENTS, DEFAULT_PLAN_CONSUMERS } from './PlanConsumerContract'
 export type {
   EvolutionConsumerContext,
   ConsumerId,

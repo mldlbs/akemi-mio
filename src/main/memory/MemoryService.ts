@@ -1,4 +1,5 @@
 import { log } from '../logger/Logger'
+import { eventBus } from '../core/EventBus'
 import { SummaryMemory } from './SummaryMemory'
 import { VectorMemory } from './VectorMemory'
 import { KnowledgeGraph } from './KnowledgeGraph'
@@ -12,7 +13,10 @@ import { TopicTransitionPredictor } from './TopicTransitionPredictor'
 import { adaptToPlugin } from './IMemoryPlugin'
 import { FictionalMemoryGenerator } from './FictionalMemoryGenerator'
 import { MemoryUtilityTracker } from './MemoryUtilityTracker'
+import { AdaptiveOrchestrator } from './AdaptiveOrchestrator'
 import { MemoryCleaner } from './MemoryCleaner'
+import { TaskMemoryCleaner } from './TaskMemoryCleaner'
+import { MemorySleepManager } from './MemorySleepManager'
 import { memoryConfigManager } from './MemoryOptimizationConfig'
 import type { MemoryOptimizationStats } from './MemoryOptimizationConfig'
 import type { MemoryTunableConfig } from './MemoryOptimizationConfig'
@@ -138,6 +142,9 @@ export class MemoryService {
   readonly fictionalGenerator: FictionalMemoryGenerator
   readonly utilityTracker: MemoryUtilityTracker
   readonly cleaner: MemoryCleaner
+  readonly taskCleaner: TaskMemoryCleaner
+  readonly sleepManager: MemorySleepManager
+  readonly adaptiveOrchestrator: AdaptiveOrchestrator
 
   constructor() {
     this.summary = new SummaryMemory()
@@ -148,6 +155,7 @@ export class MemoryService {
     this.fictionalGenerator = new FictionalMemoryGenerator()
     this.utilityTracker = new MemoryUtilityTracker()
     this.cleaner = new MemoryCleaner(this.utilityTracker)
+    this.taskCleaner = new TaskMemoryCleaner()
     this.lastCleanupTime = Date.now() // 初始化清理计时器
     this.metaController = new MetaController()
     this.metaController.setDeps({
@@ -188,6 +196,22 @@ export class MemoryService {
     this.topicTransitionPredictor.loadFromInteractionRecords(this.interactionTracker.getAll())
     // 启动定期衰减任务（同时管理效用衰减和清理）
     this.startDecayTimer()
+    // 初始化智能休眠管理器（空闲检测、低频压缩、活跃预加载）
+    this.sleepManager = new MemorySleepManager(
+      () => this.entries,
+      this.removedIds,
+      (entry) => this.upsertInDb(entry),
+    )
+    this.sleepManager.start()
+
+    // 初始化记忆驱动自适应编排器（仅依赖 Memory 自身的数据源）
+    this.adaptiveOrchestrator = new AdaptiveOrchestrator({
+      getInteractions: () => this.interactionTracker.getAll(),
+      getProcedures: () => this.getProceduresFallback(),
+      matchTemplates: undefined, // 由 configureAdaptiveOrchestrator 注入
+    })
+    // 初始挖掘一次模式（基于 InteractionTracker 数据）
+    this.adaptiveOrchestrator.triggerMining()
     log('INFO', 'memory_loaded', {
       entries: this.entries.length,
       permanent: this.entries.filter((e) => e.tier === 'permanent').length,
@@ -240,12 +264,29 @@ export class MemoryService {
     // 1. 精确去重 → 强化计数 + 置信度提升
     const exactExisting = this.entries.find((e) => e.type === type && e.content === content)
     if (exactExisting) {
+      const oldConfidence = exactExisting.confidence
+      const oldTier = exactExisting.tier
       exactExisting.updatedAt = Date.now()
       exactExisting.confidence = Math.max(exactExisting.confidence, confidence)
       exactExisting.reinforceCount++
       // 检查是否该晋升
       this.tryPromote(exactExisting)
       this.upsertInDb(exactExisting)
+
+      // 发射记忆更新事件
+      const changes: Array<{ field: string; oldValue?: unknown; newValue?: unknown }> = []
+      if (exactExisting.confidence !== oldConfidence) changes.push({ field: 'confidence', oldValue: oldConfidence, newValue: exactExisting.confidence })
+      if (exactExisting.tier !== oldTier) changes.push({ field: 'tier', oldValue: oldTier, newValue: exactExisting.tier })
+      eventBus.emit('memory.entry.updated', {
+        version: 1,
+        entryId: exactExisting.id,
+        type: exactExisting.type,
+        contentSnippet: exactExisting.content.slice(0, 50),
+        tier: exactExisting.tier,
+        changes,
+        timestamp: Date.now(),
+      })
+
       return
     }
 
@@ -296,6 +337,16 @@ export class MemoryService {
     this.entries.push(entry)
     this.upsertInDb(entry)
 
+    // 发射记忆创建事件
+    eventBus.emit('memory.entry.created', {
+      version: 1,
+      entryId: entry.id,
+      type: entry.type,
+      contentSnippet: entry.content.slice(0, 50),
+      tier: entry.tier,
+      timestamp: Date.now(),
+    })
+
     // 永久层不参与 pruning
     if (initialTier !== 'permanent') this.prune()
     else if (this.entries.filter((e) => e.tier === 'permanent').length > MAX_PERMANENT) {
@@ -317,6 +368,15 @@ export class MemoryService {
       entry.tier = 'semi'
       entry.updatedAt = Date.now()
       log('INFO', 'memory_promoted_semi', { content: entry.content.slice(0, 50) })
+      eventBus.emit('memory.entry.updated', {
+        version: 1,
+        entryId: entry.id,
+        type: entry.type,
+        contentSnippet: entry.content.slice(0, 50),
+        tier: 'semi',
+        changes: [{ field: 'tier', oldValue: 'ephemeral', newValue: 'semi' }],
+        timestamp: Date.now(),
+      })
     }
 
     // 半永久→永久
@@ -328,6 +388,15 @@ export class MemoryService {
       entry.updatedAt = Date.now()
       this.prunePermanent()
       log('INFO', 'memory_promoted_permanent', { content: entry.content.slice(0, 50), reinforceCount: entry.reinforceCount })
+      eventBus.emit('memory.entry.updated', {
+        version: 1,
+        entryId: entry.id,
+        type: entry.type,
+        contentSnippet: entry.content.slice(0, 50),
+        tier: 'permanent',
+        changes: [{ field: 'tier', oldValue: 'semi', newValue: 'permanent' }],
+        timestamp: Date.now(),
+      })
     }
   }
 
@@ -337,6 +406,8 @@ export class MemoryService {
 
   recordInteraction(userText?: string, responseTimeMs?: number): void {
     this.messageCount++
+    // 通知智能休眠管理器有用户交互
+    this.sleepManager.recordInteraction()
 
     // 行为驱动的交互记录
     if (userText) {
@@ -481,6 +552,17 @@ export class MemoryService {
         newScore: entry.behaviorScore.toFixed(3),
         topics: entry.topics.slice(0, 5),
       })
+
+      // 发射记忆更新事件（行为强化）
+      eventBus.emit('memory.entry.updated', {
+        version: 1,
+        entryId: entry.id,
+        type: entry.type,
+        contentSnippet: entry.content.slice(0, 50),
+        tier: entry.tier,
+        changes: [{ field: 'behaviorScore', oldValue: oldScore, newValue: entry.behaviorScore }],
+        timestamp: Date.now(),
+      })
     }
 
     // 2. 如果没有匹配的现有条目，创建新的半永久记忆条目
@@ -515,6 +597,16 @@ export class MemoryService {
         id: entry.id,
         topics: topics.slice(0, 5),
         sourceSnippet: sourceText.slice(0, 60),
+      })
+
+      // 发射记忆创建事件（行为强化）
+      eventBus.emit('memory.entry.created', {
+        version: 1,
+        entryId: entry.id,
+        type: entry.type,
+        contentSnippet: entry.content.slice(0, 50),
+        tier: entry.tier,
+        timestamp: Date.now(),
       })
     }
 
@@ -639,12 +731,23 @@ export class MemoryService {
     if (decayed > 0 || utilityDecayed > 0) {
       log('INFO', 'behavior_score_decayed', { behaviorDecayed: decayed, utilityDecayed, total: this.entries.length })
       this.prune()
+      eventBus.emit('memory.context.changed', {
+        version: 1,
+        totalEntries: this.entries.length,
+        tiers: { ephemeral: this.entries.filter(e => e.tier === 'ephemeral').length, semi: this.entries.filter(e => e.tier === 'semi').length, permanent: this.entries.filter(e => e.tier === 'permanent').length },
+        timestamp: Date.now(),
+      })
     }
 
     // 定期效用清理（每 24 小时检查一次）
     if (now - this.lastCleanupTime >= UTILITY_CLEANUP_INTERVAL) {
       this.lastCleanupTime = now
       this.cleaner.runCleanup(this.entries, this.removedIds)
+      // 同时执行任务步骤过期清理
+      const activeTaskIds = new Set(
+        this.getUnfinishedTasks().map((t) => t.taskId),
+      )
+      this.taskCleaner.runCleanup(this.entries, activeTaskIds)
     }
   }
 
@@ -667,6 +770,15 @@ export class MemoryService {
     entry.updatedAt = Date.now()
     this.upsertInDb(entry)
     log('INFO', 'memory_pinned', { id, content: entry.content.slice(0, 50) })
+    eventBus.emit('memory.entry.updated', {
+      version: 1,
+      entryId: entry.id,
+      type: entry.type,
+      contentSnippet: entry.content.slice(0, 50),
+      tier: entry.tier,
+      changes: [{ field: 'isPinned', oldValue: false, newValue: true }],
+      timestamp: Date.now(),
+    })
     return true
   }
 
@@ -678,6 +790,15 @@ export class MemoryService {
     entry.updatedAt = Date.now()
     this.upsertInDb(entry)
     log('INFO', 'memory_unpinned', { id, content: entry.content.slice(0, 50) })
+    eventBus.emit('memory.entry.updated', {
+      version: 1,
+      entryId: entry.id,
+      type: entry.type,
+      contentSnippet: entry.content.slice(0, 50),
+      tier: entry.tier,
+      changes: [{ field: 'isPinned', oldValue: true, newValue: false }],
+      timestamp: Date.now(),
+    })
     return true
   }
 
@@ -793,7 +914,7 @@ export class MemoryService {
     return this.messageCount
   }
 
-  /** 注入 LLM 服务用于生成高质量摘要（传递给 MetaController） */
+  /** 注入 LLM 服务用于生成高质量摘要（传递给 MetaController 和 SleepManager） */
   setSummaryLLM(llm: SummaryLLM): void {
     this.metaController.setDeps({
       summary: this.summary,
@@ -801,6 +922,7 @@ export class MemoryService {
       memory: this,
       summaryLLM: llm,
     })
+    this.sleepManager.setSummaryLLM(llm)
   }
 
   /** 设置最近的用户消息文本，用于 getFormattedContext 中的语义召回 */
@@ -973,6 +1095,20 @@ export class MemoryService {
     if (predictedCtx) {
       parts.push('')
       parts.push(predictedCtx)
+    }
+
+    // 智能休眠预加载缓存（基于活跃时段预测的预加载）
+    const sleepPreloadCtx = this.sleepManager.getPreloadCacheContext()
+    if (sleepPreloadCtx) {
+      parts.push('')
+      parts.push(sleepPreloadCtx)
+    }
+
+    // 记忆驱动自适应编排：基于用户历史行为模式的操作建议
+    const adaptiveCtx = this.adaptiveOrchestrator.getFormattedContext()
+    if (adaptiveCtx) {
+      parts.push('')
+      parts.push(adaptiveCtx)
     }
 
     // 短期行为驱动加权：显示与当前兴趣最匹配的记忆
@@ -1201,6 +1337,7 @@ export class MemoryService {
       clearInterval(this.decayTimer)
       this.decayTimer = null
     }
+    this.sleepManager.stop()
     this.cleaner.stop()
     this.flush()
   }
@@ -1216,6 +1353,25 @@ export class MemoryService {
   }
 
   /**
+   * 配置自适应编排器的外部依赖（ProceduralMemory / TaskTemplateRegistry）。
+   * 在 AppRuntime 启动完成，所有服务初始化后调用。
+   */
+  configureAdaptiveOrchestrator(deps: {
+    getProcedures: () => any[]
+    matchTemplates: (query: string, topK: number) => Array<{ name: string; description: string; steps: string[]; score: number }>
+  }): void {
+    this.adaptiveOrchestrator.miner.setProcedureProvider(deps.getProcedures)
+    this.adaptiveOrchestrator.miner.setTemplateMatcher(deps.matchTemplates)
+    // 重新挖掘（现在有了更丰富的数据源）
+    this.adaptiveOrchestrator.triggerMining()
+  }
+
+  /** 获取 ProceduralMemory 中的流程（作为 fallback） */
+  private getProceduresFallback(): Array<{ id: string; name: string; description: string; steps: string[]; triggerKeywords: string[]; embedding?: number[]; successCount: number; failCount: number; createdAt: number; updatedAt: number }> {
+    return []
+  }
+
+  /**
    * 按 id 删除一条记忆条目。
    * 返回 true 表示成功删除，false 表示未找到。
    * 删除操作会同时标记为待从 DB 中移除（通过 flush() 持久化）。
@@ -1227,6 +1383,14 @@ export class MemoryService {
     this.removedIds.add(entry.id)
     this.entries.splice(idx, 1)
     log('INFO', 'memory_forgotten', { id: entry.id, content: entry.content.slice(0, 50) })
+    eventBus.emit('memory.entry.deleted', {
+      version: 1,
+      entryId: entry.id,
+      type: entry.type,
+      contentSnippet: entry.content.slice(0, 50),
+      tier: entry.tier,
+      timestamp: Date.now(),
+    })
     return true
   }
 
@@ -1515,6 +1679,12 @@ export class MemoryService {
     }
     if (toRemove.length > 0) {
       log('INFO', 'memory_pruned', { tier, removed: toRemove.length })
+      eventBus.emit('memory.context.changed', {
+        version: 1,
+        totalEntries: this.entries.length,
+        tiers: { ephemeral: this.entries.filter(e => e.tier === 'ephemeral').length, semi: this.entries.filter(e => e.tier === 'semi').length, permanent: this.entries.filter(e => e.tier === 'permanent').length },
+        timestamp: Date.now(),
+      })
     }
   }
 
@@ -1533,9 +1703,18 @@ export class MemoryService {
         e.tier = 'semi' // 降级到半永久，不直接删除
       }
     }
+    const demotedCount = perm.filter((e) => !keep.has(e.id) && !e.isPinned).length
     log('INFO', 'memory_demoted_from_permanent', {
-      count: perm.filter((e) => !keep.has(e.id) && !e.isPinned).length,
+      count: demotedCount,
     })
+    if (demotedCount > 0) {
+      eventBus.emit('memory.context.changed', {
+        version: 1,
+        totalEntries: this.entries.length,
+        tiers: { ephemeral: this.entries.filter(e => e.tier === 'ephemeral').length, semi: this.entries.filter(e => e.tier === 'semi').length, permanent: this.entries.filter(e => e.tier === 'permanent').length },
+        timestamp: Date.now(),
+      })
+    }
   }
 
   // ===== 持久化 =====

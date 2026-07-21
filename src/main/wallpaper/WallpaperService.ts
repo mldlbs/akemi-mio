@@ -137,6 +137,12 @@ export { EvolutionDashboardService, type EvolutionDashboardState } from './Evolu
 export { MemoryContextService, type MemoryCardItem, type MemoryContextPayload, type MemoryContextConfig, type MemoryContextDisplayType } from './MemoryContextService'
 
 // =============================================================================
+// Re-export conversation context service
+// =============================================================================
+
+export { ConversationContextService, type ConversationTaskItem, type ConversationContextPayload, type ConversationContextConfig } from './ConversationContextService'
+
+// =============================================================================
 // Re-export file organizer progress service
 // =============================================================================
 

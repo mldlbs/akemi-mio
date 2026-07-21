@@ -1,8 +1,9 @@
-import { useState, type MouseEvent } from 'react'
+import { useMemo, useState, type MouseEvent } from 'react'
 import { useAgentStore } from '../store/agentStore'
 import { useClockStore } from '../store/clockStore'
 import { isToolActive } from '../tool/toolTypes'
 import type { ToolState } from '../tool/toolTypes'
+import { ToolParamSuggestions } from './ToolParamSuggestions'
 
 function useNow(): number {
   return useClockStore((s) => s.now)
@@ -52,6 +53,13 @@ export function ToolSlot() {
   const activeTools = tools.filter(isToolActive)
   const completedTools = tools.filter((t) => !isToolActive(t))
   const allEmpty = tools.length === 0
+
+  // 最近一次成功完成的工具，用于显示参数建议
+  const lastSuccessfulTool = useMemo(() => {
+    const success = tools.filter((t) => t.status === 'success')
+    if (success.length === 0) return null
+    return success[success.length - 1]
+  }, [tools])
 
   if (allEmpty) {
     return (
@@ -131,6 +139,19 @@ export function ToolSlot() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* 最近成功工具的参数组合智能建议 */}
+      {lastSuccessfulTool && !isToolActive(lastSuccessfulTool) && (
+        <div className="tool-slot-section tool-slot-suggestions">
+          <ToolParamSuggestions
+            toolName={lastSuccessfulTool.tool}
+            maxSuggestions={2}
+            onAdopt={(args) => {
+              // 采纳参数组合 — 目前关闭建议列表（用户可再次展开）
+            }}
+          />
         </div>
       )}
     </div>

@@ -1,14 +1,15 @@
 /**
  * MemoryContextService — 桌面记忆浮窗服务
  *
- * 定期从 Memory 系统获取活跃上下文（高关联记忆），
- * 通过 IPC push 到渲染进程在桌面 Overlay 上展示记忆卡片。
+ * 通过 EventBus 订阅 Memory 状态变更事件，实时推送到渲染进程展示记忆卡片。
+ * 同时保留定时轮询作为兜底（默认 30 分钟）。
  *
  * 数据流:
- *   MemoryService.query() → MemoryContextService (每10分钟) → webContents.send('wallpaper:memoryContext') → React Widget
+ *   MemoryService 操作 → EventBus memory.* 事件 → MemoryContextService → webContents.send('wallpaper:memoryContext') → React Widget
  *
  * 功能:
- *   - 每 10 分钟轮询 Memory 获取活跃上下文
+ *   - 响应式：Memory 状态变更后立即推送更新
+ *   - 兜底轮询：每 30 分钟刷新一次
  *   - 支持显示类型配置（通过 credentials 持久化）
  *   - 鼠标穿透开关（通过 EvolutionDashboardService 协同）
  *   - 低开销设计：缓存上次结果，仅当数据变化时推送
@@ -16,6 +17,7 @@
 
 import { BrowserWindow } from 'electron'
 import { log } from '../logger/Logger'
+import { eventBus, SubscriptionTracker } from '../core/EventBus'
 import { getMemoryService } from '../tool/deps'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import type { MemoryService } from '../memory/MemoryService'
@@ -91,7 +93,7 @@ export interface MemoryContextConfig {
 const DEFAULT_CONFIG: MemoryContextConfig = {
   enabled: true,
   displayType: 'all',
-  pollIntervalMs: 10 * 60 * 1000, // 10 分钟
+  pollIntervalMs: 30 * 60 * 1000, // 30 分钟（有事件驱动，轮询仅作兜底）
   maxCards: 5,
   mouseThrough: true,
 }
@@ -108,6 +110,7 @@ export class MemoryContextService {
   private config: MemoryContextConfig = { ...DEFAULT_CONFIG }
   private lastPayload: MemoryContextPayload | null = null
   private memoryService: MemoryService | null = null
+  private subs: SubscriptionTracker = new SubscriptionTracker()
 
   /** 加载持久化配置 */
   loadConfig(): MemoryContextConfig {
@@ -177,15 +180,19 @@ export class MemoryContextService {
     return this.memoryService
   }
 
-  /** 启动定时轮询 */
+  /** 启动定时轮询（兜底）+ 订阅 Memory 事件 */
   start(): void {
     if (this.pushTimer) return
     this.loadConfig()
     if (!this.config.enabled) return
 
+    // 订阅 Memory 状态变更事件 → 立即推送更新
+    this.subscribeToMemoryEvents()
+
     // 首次立即推送
     this.pushMemoryContext()
 
+    // 兜底轮询（事件驱动为主，轮询仅保底）
     this.pushTimer = setInterval(() => {
       this.pushMemoryContext()
     }, this.config.pollIntervalMs)
@@ -197,8 +204,34 @@ export class MemoryContextService {
     })
   }
 
-  /** 停止定时轮询 */
+  /** 订阅 Memory 状态变更事件 */
+  private subscribeToMemoryEvents(): void {
+    // 记忆条目创建 → 立即刷新
+    eventBus.track('memory.entry.created', () => {
+      this.pushMemoryContext()
+    }, this.subs, 'memory_context_service')
+
+    // 记忆条目更新 → 立即刷新
+    eventBus.track('memory.entry.updated', () => {
+      this.pushMemoryContext()
+    }, this.subs, 'memory_context_service')
+
+    // 记忆条目删除 → 立即刷新
+    eventBus.track('memory.entry.deleted', () => {
+      this.pushMemoryContext()
+    }, this.subs, 'memory_context_service')
+
+    // 记忆上下文批量变更（修剪/清理） → 立即刷新
+    eventBus.track('memory.context.changed', () => {
+      this.pushMemoryContext()
+    }, this.subs, 'memory_context_service')
+
+    log('INFO', 'memory_context_subscribed_events')
+  }
+
+  /** 停止定时轮询 + 取消事件订阅 */
   stop(): void {
+    this.subs.dispose()
     if (this.pushTimer) {
       clearInterval(this.pushTimer)
       this.pushTimer = null
@@ -213,6 +246,7 @@ export class MemoryContextService {
   /** 销毁服务 */
   destroy(): void {
     this.stop()
+    this.subs.dispose()
     this.mainWindow = null
     this.memoryService = null
     this.lastPayload = null

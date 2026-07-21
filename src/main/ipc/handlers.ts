@@ -4,7 +4,7 @@ import { AgentService } from '../agent/AgentService'
 import { StateManager } from '../core/StateManager'
 import { TtsService } from '../tts/TtsService'
 import { SelfEvolutionService } from '../evolution'
-import { EvolutionDashboardService, MemoryContextService, FileOrganizerProgressService } from '../wallpaper/WallpaperService'
+import { EvolutionDashboardService, MemoryContextService, ConversationContextService, FileOrganizerProgressService } from '../wallpaper/WallpaperService'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import { WAKE_WORDS, LLM_API_URL, LLM_CODE_API_URL, LLM_TEXT_API_URL, LLM_VISION_API_URL, WORKSPACE } from '../config'
 import { monitorEventLoopDelay } from 'perf_hooks'
@@ -101,6 +101,7 @@ export function registerHandlers(
   taskPanelRef?: ServiceRef<TaskPanelService>,
   wallpaperInteractiveRef?: ServiceRef<WallpaperInteractiveService>,
   restoreRef?: ServiceRef<RuntimeRestoreService>,
+  conversationContextRef?: ServiceRef<ConversationContextService>,
 ): void {
   ipcMain.handle('window:close', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -628,6 +629,43 @@ export function registerHandlers(
     } catch (err) {
       log('ERROR', 'tts_user_context_override_failed', { error: String(err) })
       return { success: false }
+    }
+  })
+
+  // ── 行为感知场景自适应 IPC ──
+  ipcMain.handle('tts:scene:config', async () => {
+    try {
+      return {
+        success: true,
+        status: ttsService.getSceneAdaptorStatus(),
+        learningData: ttsService.getSceneLearningData(),
+        overrideMode: ttsService.getSceneOverride(),
+      }
+    } catch (err) {
+      log('ERROR', 'tts_scene_config_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('tts:scene:override', async (_event, mode: string) => {
+    try {
+      ttsService.setSceneOverride(mode)
+      log('INFO', 'tts_scene_override_ipc', { mode })
+      return { success: true, mode }
+    } catch (err) {
+      log('ERROR', 'tts_scene_override_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('tts:scene:resetLearning', async () => {
+    try {
+      ttsService.resetSceneLearningData()
+      log('INFO', 'tts_scene_learning_reset_ipc')
+      return { success: true }
+    } catch (err) {
+      log('ERROR', 'tts_scene_learning_reset_failed', { error: String(err) })
+      return { success: false, error: String(err) }
     }
   })
 
@@ -1506,6 +1544,52 @@ export function registerHandlers(
     }
   })
 
+  // ── 对话语境信息浮层配置 ──
+  ipcMain.handle('wallpaper:conversationContext:getConfig', async () => {
+    try {
+      const svc = conversationContextRef?.current
+      if (!svc) return { enabled: true, position: 'right', maxTasks: 5, showSummary: true, showTasks: true, showProgress: true }
+      return svc.getConfig()
+    } catch (err: any) {
+      log('WARN', 'conversation_context_config_get_failed', { error: String(err) })
+      return { enabled: true, position: 'right', maxTasks: 5, showSummary: true, showTasks: true, showProgress: true }
+    }
+  })
+
+  ipcMain.handle('wallpaper:conversationContext:setConfig', async (_event, patch: Record<string, unknown>) => {
+    try {
+      const svc = conversationContextRef?.current
+      if (!svc) return { success: false, error: 'ConversationContextService not initialized' }
+      svc.saveConfig(patch as any)
+      svc.stop()
+      svc.start()
+      return { success: true }
+    } catch (err: any) {
+      log('WARN', 'conversation_context_config_set_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('wallpaper:openConversation', async (_event, conversationId: string) => {
+    try {
+      // 通过 chat 发送查询打开对话
+      // navigateToConversation 为轻量导航，不等待回复
+      agentService.processTextInput(
+        `打开 ${conversationId}`,
+        `wp_nav_${Date.now()}`,
+        'electron',
+        undefined,
+        undefined,
+        true, // noTts: 导航时不播放语音
+      ).catch(() => {})
+      log('INFO', 'conversation_navigated', { conversationId })
+      return { success: true }
+    } catch (err: any) {
+      log('WARN', 'conversation_navigate_failed', { conversationId, error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
   // ── Evaluation Decision Query API (M5.3) ──
 
   if (decisionQueryRef) {
@@ -1864,7 +1948,122 @@ export function registerHandlers(
         return { success: false, bookmarks: [], error: String(err) }
       }
     })
+
+    // ══════════════════════════════════════════════
+    //  博客语音服务 — 口述录音 & 审核批注
+    // ══════════════════════════════════════════════
+
+    ipcMain.handle('blog:saveAudio', async (_event, audio: ArrayBuffer, type: string, options?: any) => {
+      try {
+        const { blogVoiceService } = await import('../blog/BlogVoiceService')
+        await blogVoiceService.initialize()
+        const entry = await blogVoiceService.saveAudio(audio, type as 'dictation' | 'annotation', {
+          sessionId: options?.sessionId,
+          paragraphIndex: options?.paragraphIndex,
+          durationSec: options?.durationSec,
+          transcribedText: options?.transcribedText,
+          label: options?.label,
+        })
+        if (entry) {
+          return {
+            success: true,
+            entry: {
+              id: entry.id,
+              type: entry.type,
+              durationSec: entry.durationSec,
+              transcribedText: entry.transcribedText,
+              createdAt: entry.createdAt,
+            },
+          }
+        }
+        return { success: false, error: '保存失败' }
+      } catch (err: any) {
+        log('ERROR', 'blog_save_audio_failed', { error: String(err) })
+        return { success: false, error: String(err) }
+      }
+    })
+
+    ipcMain.handle('blog:listAudio', async (_event, type?: string, limit?: number) => {
+      try {
+        const { blogVoiceService } = await import('../blog/BlogVoiceService')
+        await blogVoiceService.initialize()
+        return blogVoiceService.listAudio(type as 'dictation' | 'annotation' | undefined, limit ?? 50)
+      } catch (err: any) {
+        log('ERROR', 'blog_list_audio_failed', { error: String(err) })
+        return []
+      }
+    })
+
+    ipcMain.handle('blog:getAudioPath', async (_event, entryId: string) => {
+      try {
+        const { blogVoiceService } = await import('../blog/BlogVoiceService')
+        await blogVoiceService.initialize()
+        const audioPath = blogVoiceService.getAudioPath(entryId)
+        if (audioPath) return { success: true, audioPath }
+        return { success: false, error: '音频条目未找到' }
+      } catch (err: any) {
+        return { success: false, error: String(err) }
+      }
+    })
+
+    ipcMain.handle('blog:deleteAudio', async (_event, entryId: string) => {
+      try {
+        const { blogVoiceService } = await import('../blog/BlogVoiceService')
+        await blogVoiceService.initialize()
+        const deleted = await blogVoiceService.deleteAudio(entryId)
+        return { success: deleted, error: deleted ? undefined : '条目未找到' }
+      } catch (err: any) {
+        return { success: false, error: String(err) }
+      }
+    })
   }
+}
+
+  // ══════════════════════════════════════════
+  //  工具调用参数组合智能默认值
+  // ══════════════════════════════════════════
+
+  ipcMain.handle('tool:getParamDefaults', async (_event, toolName: string, limit?: number) => {
+    try {
+      const { toolCallCombinationIndex } = await import('../tool/ToolCallCombinationIndex')
+      const combinations = toolCallCombinationIndex.getTopCombinations(toolName, limit)
+      return { success: true, combinations }
+    } catch (err: any) {
+      log('WARN', 'tool_get_param_defaults_failed', { toolName, error: String(err) })
+      return { success: false, combinations: [], error: String(err) }
+    }
+  })
+
+  ipcMain.handle('tool:recordParamFeedback', async (_event, toolName: string, args: Record<string, any>, rating: number) => {
+    try {
+      // 将用户反馈记录到 Memory 作为偏好，供 MemoryAwareInterceptor / ToolMemoryDefaults 使用
+      const memoryService = agentService.getMemoryService()
+      if (memoryService) {
+        const feedbackText = rating > 0
+          ? `【参数反馈】用户确认了 ${toolName} 的参数组合评分=${rating}`
+          : `【参数反馈】用户拒绝了 ${toolName} 的参数组合评分=${rating}`
+        memoryService.addFact(feedbackText, Math.abs(rating))
+        memoryService.saveUserPreference({
+          key: `tool_param_combo:${toolName}`,
+          value: JSON.stringify(args),
+          confidence: Math.abs(rating),
+          category: 'preference',
+          source: 'tool_param_feedback',
+          updatedAt: Date.now(),
+        })
+      }
+      // 同时记录到 ToolCallLogStore 作为一条隐式成功调用（用户采纳说明参数正确）
+      if (rating > 0) {
+        const { toolCallLogStore } = await import('../tool/ToolCallLogStore')
+        toolCallLogStore.record(toolName, args, '(user adopted default)', null, 0, true)
+      }
+      log('INFO', 'tool_param_feedback_recorded', { toolName, rating })
+      return { success: true }
+    } catch (err: any) {
+      log('WARN', 'tool_record_param_feedback_failed', { toolName, error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
 }
 
 function emptyMetricsSummary(): any {

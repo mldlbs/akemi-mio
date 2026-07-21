@@ -792,6 +792,29 @@ export function createElectronAPI(ipc: IpcRenderer) {
       }>,
     ): Promise<{ success: boolean }> => ipc.invoke('wallpaper:setConfig', config),
 
+    // ── 工具调用参数组合智能默认值 ──
+    getToolParamDefaults: (
+      toolName: string,
+      limit?: number,
+    ): Promise<{
+      success: boolean
+      combinations: Array<{
+        args: Record<string, any>
+        frequency: number
+        successRate: number
+        rating: number
+        lastUsed: number
+        firstSeen: number
+      }>
+      error?: string
+    }> => ipc.invoke('tool:getParamDefaults', toolName, limit),
+
+    recordToolParamFeedback: (
+      toolName: string,
+      args: Record<string, any>,
+      rating: number,
+    ): Promise<{ success: boolean; error?: string }> => ipc.invoke('tool:recordParamFeedback', toolName, args, rating),
+
     // ── 自进化系统监控 ──
     onMonitoringMetrics: (
       callback: (data: {
@@ -920,6 +943,58 @@ export function createElectronAPI(ipc: IpcRenderer) {
     ): Promise<{ success: boolean; error?: string }> => ipc.invoke('wallpaper:memoryContextConfig:set', config),
 
     refreshMemoryContext: (): Promise<{ success: boolean; error?: string }> => ipc.invoke('wallpaper:memoryContext:refresh'),
+
+    // ── 对话语境信息浮层 ──
+    onConversationContextData: (
+      callback: (data: {
+        summary: string
+        summaryConfidence: number
+        activeTasks: Array<{
+          taskId: string
+          title: string
+          status: string
+          completedSteps: number
+          totalSteps: number
+          progressPercent: number
+          updatedAt: number
+        }>
+        completedTasks: number
+        totalTasks: number
+        progressPercent: number
+        updatedAt: number
+        hasData: boolean
+        error?: string
+      }) => void,
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('wallpaper:conversationContext', handler)
+      return () => {
+        ipc.removeListener('wallpaper:conversationContext', handler)
+      }
+    },
+
+    getConversationContextConfig: (): Promise<{
+      enabled: boolean
+      position: string
+      maxTasks: number
+      showSummary: boolean
+      showTasks: boolean
+      showProgress: boolean
+    }> => ipc.invoke('wallpaper:conversationContext:getConfig'),
+
+    setConversationContextConfig: (
+      config: Partial<{
+        enabled: boolean
+        position: string
+        maxTasks: number
+        showSummary: boolean
+        showTasks: boolean
+        showProgress: boolean
+      }>,
+    ): Promise<{ success: boolean; error?: string }> => ipc.invoke('wallpaper:conversationContext:setConfig', config),
+
+    navigateToConversation: (conversationId: string): Promise<{ success: boolean; error?: string }> =>
+      ipc.invoke('wallpaper:openConversation', conversationId),
 
     // ── 文件整理进度可视化 ──
     onOrganizerProgress: (
@@ -1146,6 +1221,52 @@ export function createElectronAPI(ipc: IpcRenderer) {
       }>
       error?: string
     }> => ipc.invoke('voice-bookmark:favorites'),
+
+    // ── 博客语音服务（口述录音 & 审核批注） ──
+    blogSaveAudio: (
+      audio: ArrayBuffer,
+      type: 'dictation' | 'annotation',
+      options?: {
+        sessionId?: string
+        paragraphIndex?: number
+        durationSec?: number
+        transcribedText?: string
+        label?: string
+      },
+    ): Promise<{
+      success: boolean
+      entry?: {
+        id: string
+        type: string
+        durationSec: number
+        transcribedText?: string
+        createdAt: number
+      }
+      error?: string
+    }> => ipc.invoke('blog:saveAudio', audio, type, options),
+
+    blogListAudio: (
+      type?: 'dictation' | 'annotation',
+      limit?: number,
+    ): Promise<Array<{
+      id: string
+      type: string
+      sessionId?: string
+      paragraphIndex?: number
+      durationSec: number
+      transcribedText?: string
+      createdAt: number
+      label?: string
+    }>> => ipc.invoke('blog:listAudio', type, limit),
+
+    blogGetAudioPath: (
+      entryId: string,
+    ): Promise<{ success: boolean; audioPath?: string; error?: string }> =>
+      ipc.invoke('blog:getAudioPath', entryId),
+
+    blogDeleteAudio: (
+      entryId: string,
+    ): Promise<{ success: boolean; error?: string }> => ipc.invoke('blog:deleteAudio', entryId),
   }
 }
 

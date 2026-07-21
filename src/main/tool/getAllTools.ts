@@ -9,7 +9,7 @@ import { createDevPlanTool, updatePlanProgressTool, listPlansTool, completePlanT
 import { analyzeCodebaseTool } from './definitions/AnalyzeCodebaseTool'
 import { getCredentialTool, setCredentialTool, listCredentialsTool } from './definitions/CredentialTools'
 import { rememberFactTool } from './definitions/RememberFactTool'
-import { storeMemoryTool, retrieveMemoryTool, searchMemoriesTool, forgetMemoryTool } from './definitions/MemoryTools'
+import { storeMemoryTool, retrieveMemoryTool, searchMemoriesTool, forgetMemoryTool, summarizeMemoryTool, readResourceTool, configureMemoryTool } from './definitions/MemoryTools'
 import {
   analyzeTaskTool,
   listWorkflowsTool,
@@ -104,6 +104,7 @@ import {
   generatePodcastTool,
   generatePodcastPreviewTool,
 } from './definitions/GeneratePodcastTool'
+import { adaptiveOrchestrationTools } from './definitions/AdaptiveOrchestrationTools'
 
 export function getAllTools(): Tool[] {
   return [
@@ -127,6 +128,9 @@ export function getAllTools(): Tool[] {
     retrieveMemoryTool as Tool,
     searchMemoriesTool as Tool,
     forgetMemoryTool as Tool,
+    summarizeMemoryTool as Tool,
+    readResourceTool as Tool,
+    configureMemoryTool as Tool,
     analyzeTaskTool as Tool,
     autoScheduleWorkflowTool as Tool,
     listWorkflowsTool as Tool,
@@ -231,5 +235,8 @@ export function getAllTools(): Tool[] {
     // === Blog Audio Podcast ===
     generatePodcastTool as Tool,
     generatePodcastPreviewTool as Tool,
+
+    // === 记忆驱动自适应编排 ===
+    ...adaptiveOrchestrationTools as Tool[],
   ]
 }

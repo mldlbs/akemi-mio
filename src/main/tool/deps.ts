@@ -13,12 +13,14 @@ import type { RuntimeHealthManager } from '../health'
 import type { InsightService } from '../insight/InsightService'
 import type { ObserverService } from '../observer'
 import type { LocalModelService } from '../creativity/LocalModelService'
+import type { MemoryResourceProvider } from '../mcp/MemoryResourceProvider'
 
 import type { PersonaStateManager } from '../agent/PersonaStateManager'
 
 let _planManager: PlanManagerLike | null = null
 let _credentialsManager: CredentialsManager | null = null
 let _memoryService: MemoryService | null = null
+let _memoryResourceProvider: MemoryResourceProvider | null = null
 let _skillManager: SkillManager | null = null
 let _proceduralMemory: ProceduralMemory | null = null
 let _cognitiveService: CognitiveService | null = null
@@ -35,6 +37,9 @@ export function setCredentialsManager(cm: CredentialsManager | null): void {
 }
 export function setMemoryService(ms: MemoryService | null): void {
   _memoryService = ms
+}
+export function setMemoryResourceProvider(rp: MemoryResourceProvider | null): void {
+  _memoryResourceProvider = rp
 }
 export function setSkillManager(sm: SkillManager | null): void {
   _skillManager = sm
@@ -54,6 +59,9 @@ export function getCredentialsManager(): CredentialsManager | null {
 }
 export function getMemoryService(): MemoryService | null {
   return _memoryService
+}
+export function getMemoryResourceProvider(): MemoryResourceProvider | null {
+  return _memoryResourceProvider
 }
 export function getSkillManager(): SkillManager | null {
   return _skillManager
@@ -175,4 +183,29 @@ export function setBlogModeService(bms: BlogModeService | null): void {
 
 export function getBlogModeService(): BlogModeService | null {
   return _blogModeService
+}
+
+// ── TaskTemplateRegistry（供 AdaptiveOrchestrator 使用）──
+import type { TaskTemplateRegistry } from '../agent/task-template/TaskTemplateRegistry'
+
+let _taskTemplateRegistry: TaskTemplateRegistry | null = null
+
+export function setTaskTemplateRegistry(reg: TaskTemplateRegistry | null): void {
+  _taskTemplateRegistry = reg
+}
+
+export function getTaskTemplateRegistry(): TaskTemplateRegistry | null {
+  return _taskTemplateRegistry
+}
+
+// ── AdaptiveOrchestrator（供工具调用）──
+
+let _adaptiveOrchestrator: any = null
+
+export function setAdaptiveOrchestrator(orchestrator: any): void {
+  _adaptiveOrchestrator = orchestrator
+}
+
+export function getAdaptiveOrchestrator(): any {
+  return _adaptiveOrchestrator
 }

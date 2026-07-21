@@ -1,4 +1,4 @@
-export type ActiveSlot = 'chat' | 'tool' | 'preview' | 'workflow' | 'otpar' | 'devplan'
+export type ActiveSlot = 'chat' | 'tool' | 'preview' | 'workflow' | 'otpar' | 'devplan' | 'blog'
 
 export interface UiState {
   sidebarOpen: boolean

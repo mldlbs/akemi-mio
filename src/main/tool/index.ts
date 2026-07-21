@@ -21,6 +21,14 @@ export {
   type PriorityRecommendation,
 } from './ToolAnalytics'
 
+// ===== 工具调用参数组合索引（记忆智能默认值） =====
+export {
+  ToolCallCombinationIndex,
+  toolCallCombinationIndex,
+  type ParamCombination,
+  type CombinationQueryOptions,
+} from './ToolCallCombinationIndex'
+
 // ===== 工具运行时可调参数配置管理 =====
 export {
   ToolConfigManager,

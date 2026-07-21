@@ -100,10 +100,49 @@ export const ASR_PLAN_CONSUMER_REQUIREMENTS: ConsumerRequirements = {
 }
 
 /**
+ * 博客推理链消费者的 Evolution 需求规格。
+ *
+ * BlogReasoningChainExecutor 在执行博客写作推理链时，
+ * 需要了解 Evolution 的管道状态和已知问题，以优化博客写作策略。
+ * 例如：系统有很多 TSC 错误时，建议在博客中先聚焦稳定相关主题。
+ */
+export const BLOG_PLAN_CONSUMER_REQUIREMENTS: ConsumerRequirements = {
+  consumerId: 'plan_blog',
+
+  outputFormat: {
+    requiredFields: [
+      'pipeline.healthStatus',  // 管道健康度 → 影响博客发布的紧迫度判断
+      'knownIssues',            // 已知问题 → 影响博客主题选择和节奏建议
+    ],
+    optionalFields: [
+      'pipeline.totalCollected',  // 总采集数 → 了解系统问题密度
+      'scheduler.state',          // 调度器状态 → 判断是否应等待系统稳定
+    ],
+    // 博客写作上下文可以包含更多 Evolution 状态信息（≤3000 字符）
+    maxLength: 3000,
+  },
+
+  // 博客写作是异步任务，可接受 Evolution 状态获取延迟 5s
+  responseTimeSlaMs: 5000,
+
+  faultTolerance: {
+    // 完全允许 Evolution 不可用 → 博客写作不受影响
+    allowUnavailable: true,
+
+    // 降级时返回空上下文
+    fallbackStrategy: 'return_empty',
+
+    // 上下文超过 20 分钟视为过期（博客写作周期较短，新鲜度要求高于推理链）
+    maxStalenessMs: 20 * 60 * 1000,
+  },
+}
+
+/**
  * 所有 Plan 相关消费者的契约列表。
  * EvolutionConsumerBridge 使用此列表注册默认消费者。
  */
 export const DEFAULT_PLAN_CONSUMERS: ConsumerRequirements[] = [
   PLAN_CONSUMER_REQUIREMENTS,
   ASR_PLAN_CONSUMER_REQUIREMENTS,
+  BLOG_PLAN_CONSUMER_REQUIREMENTS,
 ]

@@ -203,7 +203,7 @@ export { memoryEvolutionBridge } from '../memory/MemoryEvolutionBridge'
 //   if (ctx?.knownIssues) { ... }
 
 export { evolutionConsumerBridge, EvolutionConsumerBridge } from './consumer'
-export { PLAN_CONSUMER_REQUIREMENTS, ASR_PLAN_CONSUMER_REQUIREMENTS } from './consumer'
+export { PLAN_CONSUMER_REQUIREMENTS, ASR_PLAN_CONSUMER_REQUIREMENTS, BLOG_PLAN_CONSUMER_REQUIREMENTS } from './consumer'
 export type {
   EvolutionConsumerContext,
   ConsumerId,

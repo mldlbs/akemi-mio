@@ -22,11 +22,18 @@ import type { AsrService } from './AsrService'
 
 export interface AsrConfigPatch {
   /** 补丁类型 */
-  type: 'hotword_add' | 'homophone_fix'
+  type: 'hotword_add' | 'homophone_fix' | 'vocab_weight_adjust' | 'domain_lm_boost'
   /** 操作描述 */
   description: string
   /** 要添加的值（热词文本或同音字规则原文） */
   value: string
+  /**
+   * 权重/优先级 0–1（可选）。
+   * - hotword_add: 权重越高，在热词列表中排序越靠前
+   * - domain_lm_boost: 权重越高，在 initial_prompt 中重复次数越多
+   * - 省略时使用默认权重 0.5
+   */
+  weight?: number
 }
 
 // =============================================================================
@@ -63,9 +70,12 @@ export class AsrEvolutionManager {
    * 2. 通过 AsrService/AsrHotwordManager 执行热更新
    * 3. 记录变更日志
    *
-   * @returns 变更日志 ID
+   * @param patches - 要应用的补丁列表
+   * @param options - 可选参数
+   * @param options.batchLabel - 批量操作的描述标签（用于快照）
+   * @returns 变更日志 ID 和快照 ID，失败返回 null
    */
-  applyPatches(patches: AsrConfigPatch[]): { changeId: string; snapshotId: string } | null {
+  applyPatches(patches: AsrConfigPatch[], options?: { batchLabel?: string }): { changeId: string; snapshotId: string } | null {
     if (!this.asrService) {
       log('WARN', 'asr_evolution_no_service')
       return null
@@ -79,7 +89,14 @@ export class AsrEvolutionManager {
     }
 
     // 创建评估快照
-    const appliedDescriptions = uniquePatches.map((p) => `${p.type}:${p.value}`)
+    const appliedDescriptions = uniquePatches.map((p) => {
+      const weightStr = p.weight !== undefined ? `@${p.weight.toFixed(2)}` : ''
+      return `${p.type}:${p.value}${weightStr}`
+    })
+    // 附加批量标签（如果有）
+    if (options?.batchLabel) {
+      appliedDescriptions.unshift(`[${options.batchLabel}]`)
+    }
     const snapshot = asrLogStore.createEvalSnapshot(appliedDescriptions, this.lookbackHours)
 
     // 应用每个补丁
@@ -183,31 +200,79 @@ export class AsrEvolutionManager {
         result.push(p)
       }
     }
-    return result
+    // 按权重降序排列（权重高的优先应用）
+    return result.sort((a, b) => (b.weight ?? 0.5) - (a.weight ?? 0.5))
   }
 
   /**
    * 应用单个补丁。
+   *
+   * 支持的补丁类型：
+   * - hotword_add: 将新词注入热词学习系统，带权重
+   * - homophone_fix: 将正确写法注入热词管理器
+   * - vocab_weight_adjust: 调整现有热词权重（通过重复喂入提高优先级）
+   * - domain_lm_boost: 领域语言模型增强，将词以更高权重注入
    */
   private applySinglePatch(patch: AsrConfigPatch): boolean {
     try {
       const service = this.asrService!
-      switch (patch.type) {
-        case 'hotword_add':
-          // 通过 feedUserTextToHotwords 将新词注入热词学习系统
-          // 手动输入一次让热词管理器学习该词
-          service.feedUserTextToHotwords(patch.value)
-          log('INFO', 'asr_patch_hotword_add', { word: patch.value })
-          return true
+      const weight = patch.weight ?? 0.5
 
-        case 'homophone_fix':
+      switch (patch.type) {
+        case 'hotword_add': {
+          // 通过 feedUserTextToHotwords 将新词注入热词学习系统
+          service.feedUserTextToHotwords(patch.value)
+          // 高权重词（>0.7）额外喂入一次以提高在热词列表中排序
+          if (weight > 0.7) {
+            service.feedUserTextToHotwords(patch.value)
+          }
+          log('INFO', 'asr_patch_hotword_add', {
+            word: patch.value,
+            weight: weight.toFixed(2),
+          })
+          return true
+        }
+
+        case 'homophone_fix': {
           // 同音字修正已经内置于 WhisperEngine/WhisperGpuEngine 的 HOMOPHONE_FIXES 常量中。
           // 运行时无法直接修改常量，但可以：
-          // 1. 将字段以热词形式注入（有助于 ASR 引擎本身提高识别率）
+          // 1. 将正确文本以热词形式注入（有助于 ASR 引擎提高识别率）
           // 2. 或通过 feedUserTextToHotwords 让系统学习该词的正确写法
           service.feedUserTextToHotwords(patch.value)
           log('INFO', 'asr_patch_homophone', { word: patch.value })
           return true
+        }
+
+        case 'vocab_weight_adjust': {
+          // 权重调整：通过多次喂入提高热词优先级
+          const repeatCount = Math.max(1, Math.min(5, Math.round(weight * 5)))
+          for (let i = 0; i < repeatCount; i++) {
+            service.feedUserTextToHotwords(patch.value)
+          }
+          log('INFO', 'asr_patch_weight_adjust', {
+            word: patch.value,
+            weight: weight.toFixed(2),
+            repeatCount,
+          })
+          return true
+        }
+
+        case 'domain_lm_boost': {
+          // 领域语言模型增强：多次喂入（权重越高次数越多），
+          // 然后刷新 ASR 上下文使热词立即生效
+          const boostCount = Math.max(2, Math.min(10, Math.round(weight * 10)))
+          for (let i = 0; i < boostCount; i++) {
+            service.feedUserTextToHotwords(patch.value)
+          }
+          // 刷新 ASR 上下文使新热词立即生效
+          service.refreshContext()
+          log('INFO', 'asr_patch_domain_boost', {
+            word: patch.value,
+            weight: weight.toFixed(2),
+            boostCount,
+          })
+          return true
+        }
 
         default:
           log('WARN', 'asr_patch_unknown_type', { type: (patch as any).type })

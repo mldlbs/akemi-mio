@@ -95,13 +95,18 @@ const MAX_CONTENT_LENGTH = 100
 // 子组件: 单条记忆卡片
 // =============================================================================
 
-function MemoryCard({ card, isLast }: { card: MemoryCardData; isLast: boolean }) {
+function MemoryCard({ card, isLast, onNavigate }: { card: MemoryCardData; isLast: boolean; onNavigate: (id: string) => void }) {
   const tierColor = TIER_COLORS[card.tier] || '#888'
   const typeLabel = TYPE_LABELS[card.type] || card.type
   const displayContent = card.content.length > MAX_CONTENT_LENGTH ? card.content.slice(0, MAX_CONTENT_LENGTH - 3) + '...' : card.content
 
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    onNavigate(card.id)
+  }, [card.id, onNavigate])
+
   return (
-    <div className={`wp-mem-card ${isLast ? 'wp-mem-card--last' : ''}`}>
+    <div className={`wp-mem-card ${isLast ? 'wp-mem-card--last' : ''}`} onClick={handleClick} title="单击跳转到记忆来源">
       {/* 头部：类型标签 + 层级指示器 */}
       <div className="wp-mem-card-header">
         <span className="wp-mem-card-type">{typeLabel}</span>
@@ -192,6 +197,11 @@ function MemoryContextPanel({ ctx }: { ctx: WallpaperWidgetContext }) {
   // 切换折叠
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => !prev)
+  }, [])
+
+  // 跳转到记忆来源对话
+  const handleNavigateToMemory = useCallback((memoryId: string) => {
+    window.electronAPI.navigateToConversation(memoryId).catch(() => {})
   }, [])
 
   // 切换配置面板
@@ -287,7 +297,7 @@ function MemoryContextPanel({ ctx }: { ctx: WallpaperWidgetContext }) {
       {/* 卡片列表 */}
       <div className="wp-mem-card-list">
         {payload.cards.map((card, i) => (
-          <MemoryCard key={card.id} card={card} isLast={i === payload.cards.length - 1} />
+          <MemoryCard key={card.id} card={card} isLast={i === payload.cards.length - 1} onNavigate={handleNavigateToMemory} />
         ))}
       </div>
 

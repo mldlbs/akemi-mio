@@ -15,6 +15,8 @@ import { asrHotwordManager } from './AsrHotwordManager'
 import type { VocabEntry, DomainStats } from './AsrHotwordManager'
 import { asrLogStore } from './AsrLogStore'
 import type { LowConfidenceSegment } from './AsrLogStore'
+import { AsrIdleDetector } from './AsrIdleDetector'
+import { asrFeedbackAnalyzer } from './AsrFeedbackAnalyzer'
 import { asrConfidenceScorer, DEFAULT_CONFIDENCE_THRESHOLD } from './AsrConfidenceScorer'
 import { acousticEnvClassifier } from './AsrAcousticEnvironmentClassifier'
 import { SpeechPluginRegistry, WhisperGpuAsrPlugin, WhisperCpuAsrPlugin, BaiduAsrPlugin } from '../speech'
@@ -90,10 +92,15 @@ export class AsrService {
   private multiPathManager: MultiPathDecoderManager = multiPathDecoderManager
   /** 多路径融合是否已初始化 */
   private multiPathInitialized = false
+  /** 空闲检测器（自适应领域词表微调） */
+  private idleDetector: AsrIdleDetector
+  /** 空闲优化是否已初始化 */
+  private idleOptimizationInitialized = false
 
   constructor(gpuEngine: WhisperGpuEngine, baiduEngine: BaiduEngine) {
     this.gpuEngine = gpuEngine
     this.baiduEngine = baiduEngine
+    this.idleDetector = new AsrIdleDetector(30) // 默认 30 分钟空闲阈值
   }
 
   private isCorrupted(text: string): boolean {
@@ -385,6 +392,9 @@ export class AsrService {
     // 将修正后的文本喂入热词管理器，让系统学习正确词汇
     this.feedUserTextToHotwords(correctedText)
 
+    // 用户反馈也视为语音活动，重置空闲计时
+    this.idleDetector.recordActivity()
+
     log('INFO', 'asr_user_feedback', {
       request_id: requestId,
       original: originalText.slice(0, 50),
@@ -521,6 +531,8 @@ export class AsrService {
   async transcribe(audioBuffer: ArrayBuffer, requestId?: string, options?: { useMultiPath?: boolean }): Promise<{ text: string; request_id: string; error?: string; voiceEmotion?: VoiceEmotion }> {
     const rid = requestId || createRequestId()
     this._pendingRequests++
+    // 通知空闲检测器有语音活动（重置空闲计时）
+    this.idleDetector.recordActivity()
 
     // 使用 try/finally 确保计数器在任何路径下都会递减，防止泄漏
     const decrement = () => {
@@ -708,6 +720,92 @@ export class AsrService {
     } finally {
       decrement()
     }
+  }
+
+  // ══════════════════════════════════════════
+  //  空闲优化集成（自适应领域词表微调）
+  // ══════════════════════════════════════════
+
+  /**
+   * 初始化空闲优化系统。
+   *
+   * 1. 创建并启动 AsrIdleDetector（默认 30 分钟空闲阈值）
+   * 2. 注册空闲回调 → 触发 AsrFeedbackAnalyzer 批量分析
+   * 3. 监控语音活动（transcribe/feedback）自动重置空闲计时
+   *
+   * 应在 ASR 引擎就绪后调用一次。
+   *
+   * @param idleMinutes 空闲阈值（分钟），默认 30
+   */
+  initIdleOptimization(idleMinutes = 30): void {
+    if (this.idleOptimizationInitialized) return
+    this.idleOptimizationInitialized = true
+
+    // 设置空闲阈值
+    this.idleDetector.setIdleThreshold(idleMinutes)
+
+    // 注册空闲回调：触发批量优化
+    this.idleDetector.onIdle(() => {
+      const result = asrFeedbackAnalyzer.analyzeAndOptimize()
+      if (result.changesApplied) {
+        log('INFO', 'asr_idle_optimization_completed', {
+          totalAnalyzed: result.totalAnalyzed,
+          patchesApplied: result.patchesApplied,
+          snapshotId: result.snapshotId,
+          topCorrected: result.topCorrected.slice(0, 3),
+        })
+      } else {
+        log('INFO', 'asr_idle_optimization_skipped', {
+          reason: result.skipReason || 'no changes',
+          totalAnalyzed: result.totalAnalyzed,
+        })
+      }
+    })
+
+    // 启动空闲检测器
+    this.idleDetector.start()
+
+    log('INFO', 'asr_idle_optimization_init', {
+      idleMinutes,
+      thresholdMs: this.idleDetector.idleThreshold,
+    })
+  }
+
+  /**
+   * 停止空闲优化系统。
+   * 在应用关闭时调用。
+   */
+  stopIdleOptimization(): void {
+    if (!this.idleOptimizationInitialized) return
+    this.idleDetector.stop()
+    this.idleOptimizationInitialized = false
+    log('INFO', 'asr_idle_optimization_stopped')
+  }
+
+  /**
+   * 获取空闲检测器状态（供调试/UI）。
+   */
+  getIdleDetectorState(): {
+    isRunning: boolean
+    isIdle: boolean
+    idleDurationMs: number
+    thresholdMs: number
+    lastAnalyze: { lastAnalyzeAt: number; cacheSize: number }
+  } {
+    return {
+      isRunning: this.idleDetector.isRunning,
+      isIdle: this.idleDetector.isIdle,
+      idleDurationMs: this.idleDetector.getIdleDuration(),
+      thresholdMs: this.idleDetector.idleThreshold,
+      lastAnalyze: asrFeedbackAnalyzer.getStats(),
+    }
+  }
+
+  /**
+   * 手动触发一次空闲优化分析（供调试/测试）。
+   */
+  triggerIdleOptimization(): ReturnType<typeof asrFeedbackAnalyzer.analyzeAndOptimize> {
+    return asrFeedbackAnalyzer.analyzeAndOptimize()
   }
 
   /**

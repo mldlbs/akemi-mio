@@ -88,6 +88,12 @@ export type EventName =
   | 'wallpaper.lock.changed'
   | 'wallpaper.css.reloaded'
 
+  // ── Memory 状态变更事件（用于 Wallpaper 信息浮层实时更新） ──
+  | 'memory.entry.created'
+  | 'memory.entry.updated'
+  | 'memory.entry.deleted'
+  | 'memory.context.changed'
+
   // ── Plan:TypeScript 学习计划事件（版本化 Schema，用于 Wallpaper ↔ Plan 事件总线） ──
   | 'plan.ts.step.completed'
   | 'plan.ts.difficulty.recorded'
@@ -320,6 +326,47 @@ export interface EventPayload {
     version: 1
     filename: string
     cssSize: number
+    timestamp: number
+  }
+
+  // ── Memory 状态变更事件（版本化 Schema，用于 Wallpaper 信息浮层实时更新） ──
+
+  /** 记忆条目创建：version=1 时包含条目 ID、类型、内容片段和层级 */
+  'memory.entry.created': {
+    version: 1
+    entryId: string
+    type: string
+    contentSnippet: string
+    tier: string
+    timestamp: number
+  }
+
+  /** 记忆条目更新（强化/晋升/降级）：version=1 时包含变更字段和旧值 */
+  'memory.entry.updated': {
+    version: 1
+    entryId: string
+    type: string
+    contentSnippet: string
+    tier: string
+    changes: Array<{ field: string; oldValue?: unknown; newValue?: unknown }>
+    timestamp: number
+  }
+
+  /** 记忆条目删除：version=1 时包含条目 ID */
+  'memory.entry.deleted': {
+    version: 1
+    entryId: string
+    type: string
+    contentSnippet: string
+    tier: string
+    timestamp: number
+  }
+
+  /** 记忆上下文变更（批量操作/修剪/清理后触发）：version=1 时包含统计信息 */
+  'memory.context.changed': {
+    version: 1
+    totalEntries: number
+    tiers: Record<string, number>
     timestamp: number
   }
 

@@ -867,6 +867,21 @@ const MIGRATIONS: Migration[] = [
     revert: 'DROP TABLE IF EXISTS checkpoint_store;',
     category: 'schema',
   },
+  {
+    version: 40,
+    sql: `
+      CREATE TABLE IF NOT EXISTS activity_hourly (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        hour INTEGER NOT NULL CHECK(hour >= 0 AND hour <= 23),
+        updated_at INTEGER NOT NULL,
+        UNIQUE(date, hour)
+      );
+      CREATE INDEX IF NOT EXISTS idx_activity_hourly_ts ON activity_hourly(updated_at);
+    `,
+    revert: 'DROP TABLE IF EXISTS activity_hourly;',
+    category: 'schema',
+  },
 ]
 
 // 导出迁移数组供测试验证

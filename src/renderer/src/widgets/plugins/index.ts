@@ -20,6 +20,7 @@ import { shortcutsGuideWidget } from './ShortcutsGuideWidget'
 import { rssSummaryWidget } from './RssSummaryWidget'
 import { memoryContextWidget } from './MemoryContextWidget'
 import { memoryFlashWidget } from './MemoryFlashWidget'
+import { conversationContextWidget } from './ConversationContextWidget'
 import { fileOrganizerProgressWidget } from './FileOrganizerProgressWidget'
 import { taskPanelWidget } from './TaskPanelWidget'
 import { voiceWallpaperWidget } from './VoiceWallpaperWidget'
@@ -43,6 +44,7 @@ export function registerAllWidgets(): void {
   wallpaperWidgetRegistry.register(shortcutsGuideWidget)
   wallpaperWidgetRegistry.register(rssSummaryWidget)
   // memoryContextWidget 已移至 SystemDock
+  wallpaperWidgetRegistry.register(conversationContextWidget)
   wallpaperWidgetRegistry.register(memoryFlashWidget)
   wallpaperWidgetRegistry.register(fileOrganizerProgressWidget)
 

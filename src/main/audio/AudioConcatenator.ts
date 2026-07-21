@@ -87,7 +87,7 @@ export class AudioConcatenator {
    */
   async concat(clips: AudioClip[], config: Partial<ConcatConfig> = {}): Promise<ConcatResult> {
     const t0 = Date.now()
-    const cfg: ConcatConfig = { ...DEFAULT_CONFIG, ...config, outputPath: config.outputPath || this.defaultOutputPath() }
+    const cfg = { ...DEFAULT_CONFIG, ...config, outputPath: config.outputPath || this.defaultOutputPath() } as ConcatConfig
 
     if (clips.length === 0) {
       return { success: false, error: '没有音频片段可拼接', durationMs: Date.now() - t0 }

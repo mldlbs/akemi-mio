@@ -559,3 +559,67 @@ export const BLOG_MEMORY_DEFAULT_TIER: 'permanent' | 'semi' | 'ephemeral' = (
  * Override via BLOG_MEMORY_DEFAULT_CONFIDENCE env.
  */
 export const BLOG_MEMORY_DEFAULT_CONFIDENCE = parseFloat(process.env.BLOG_MEMORY_DEFAULT_CONFIDENCE || '0.8')
+
+// ══════════════════════════════════════════
+//  智能记忆休眠与预唤醒配置
+// ══════════════════════════════════════════
+
+/**
+ * 空闲阈值：连续无交互超过此时间触发记忆整理（毫秒）。
+ * 默认 2 小时。Override via MEMORY_SLEEP_IDLE_THRESHOLD_MS env.
+ */
+export const MEMORY_SLEEP_IDLE_THRESHOLD_MS = parseInt(process.env.MEMORY_SLEEP_IDLE_THRESHOLD_MS || String(2 * 60 * 60 * 1000), 10)
+
+/**
+ * 低频判定：超过此天数未访问视为低频记忆。
+ * 默认 7 天。Override via MEMORY_SLEEP_LOW_FREQUENCY_DAYS env.
+ */
+export const MEMORY_SLEEP_LOW_FREQUENCY_DAYS = parseInt(process.env.MEMORY_SLEEP_LOW_FREQUENCY_DAYS || '7', 10)
+
+/**
+ * 整理检查间隔（毫秒）。
+ * 默认 30 分钟。Override via MEMORY_SLEEP_CHECK_INTERVAL_MS env.
+ */
+export const MEMORY_SLEEP_CHECK_INTERVAL_MS = parseInt(process.env.MEMORY_SLEEP_CHECK_INTERVAL_MS || String(30 * 60 * 1000), 10)
+
+/**
+ * 预加载提前量（分钟）：在预测活跃时段前此时间开始加载记忆到缓存。
+ * 默认 10 分钟。Override via MEMORY_SLEEP_PRELOAD_AHEAD_MINUTES env.
+ */
+export const MEMORY_SLEEP_PRELOAD_AHEAD_MINUTES = parseInt(process.env.MEMORY_SLEEP_PRELOAD_AHEAD_MINUTES || '10', 10)
+
+/**
+ * 活跃时段滑动窗口天数。
+ * 默认 14 天。Override via MEMORY_SLEEP_ACTIVITY_WINDOW_DAYS env.
+ */
+export const MEMORY_SLEEP_ACTIVITY_WINDOW_DAYS = parseInt(process.env.MEMORY_SLEEP_ACTIVITY_WINDOW_DAYS || '14', 10)
+
+/**
+ * 最小数据天数：活跃数据不足此天数时不进行预测。
+ * 默认 3 天。Override via MEMORY_SLEEP_MIN_ACTIVITY_DAYS env.
+ */
+export const MEMORY_SLEEP_MIN_ACTIVITY_DAYS = parseInt(process.env.MEMORY_SLEEP_MIN_ACTIVITY_DAYS || '3', 10)
+
+/**
+ * 高频记忆判定阈值：当日活跃时段中至少出现此天数才被视为高频。
+ * 默认 3 天。Override via MEMORY_SLEEP_HIGH_FREQ_THRESHOLD env.
+ */
+export const MEMORY_SLEEP_HIGH_FREQ_THRESHOLD = parseInt(process.env.MEMORY_SLEEP_HIGH_FREQ_THRESHOLD || '3', 10)
+
+/**
+ * 预加载缓存最大条目数。
+ * 默认 15 条。Override via MEMORY_SLEEP_PRELOAD_CACHE_MAX env.
+ */
+export const MEMORY_SLEEP_PRELOAD_CACHE_MAX = parseInt(process.env.MEMORY_SLEEP_PRELOAD_CACHE_MAX || '15', 10)
+
+/**
+ * 预加载缓存 TTL（毫秒）：超过此时间缓存失效。
+ * 默认 30 分钟。Override via MEMORY_SLEEP_PRELOAD_CACHE_TTL_MS env.
+ */
+export const MEMORY_SLEEP_PRELOAD_CACHE_TTL_MS = parseInt(process.env.MEMORY_SLEEP_PRELOAD_CACHE_TTL_MS || String(30 * 60 * 1000), 10)
+
+/**
+ * 空闲时单次压缩最多处理的记忆数。
+ * 默认 50 条。Override via MEMORY_SLEEP_MAX_COMPRESS env.
+ */
+export const MEMORY_SLEEP_MAX_COMPRESS = parseInt(process.env.MEMORY_SLEEP_MAX_COMPRESS || '50', 10)
