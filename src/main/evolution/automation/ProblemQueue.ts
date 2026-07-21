@@ -56,6 +56,8 @@ export class ProblemQueue {
         continue
       }
       if (this.completedIds.has(p.id)) continue
+      if (this.skippedIds.has(p.id)) continue
+      if (this.blockedIds.has(p.id)) continue
       this.problems.push(p)
       added++
     }
