@@ -65,5 +65,10 @@ scripts/launch.cjs
 scripts/merge-mcp.mjs
 scripts/verify-*.cjs
 C\357\200\272Usersgf191AppDataLocalTemp*
+_run_tsc*
+_run_tsc_check.*
+_tsc_check.*
 out/
+.ssh/
+tsc-permission-test.json
 .ssh/
