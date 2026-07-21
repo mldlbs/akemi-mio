@@ -173,6 +173,7 @@ interface PolicyDecisionEvent {
 ```
 [✅] Shadow mode 已在 AppRuntime 中激活
 [ ] 至少 1 次完整 evolution.cycle.completed 周期
+[ ] shadow decisions ≥ 100（小样本无统计意义）
 [ ] policy.decision 事件中：
       execute 比例 ≥ 60%（表明策略不完全阻断有效进化）
       skip 比例 ≤ 20%（表明策略未过度过滤）
@@ -187,6 +188,7 @@ interface PolicyDecisionEvent {
 
 ```
 [ ] ≥ 1 次完整 Evolution 周期完成
+[ ] shadow decisions ≥ 100
 [ ] execute ≥ 60%
 [ ] skip ≤ 20%
 [ ] block = 0
