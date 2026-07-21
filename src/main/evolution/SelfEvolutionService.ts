@@ -184,6 +184,7 @@ export class SelfEvolutionService implements ISubsystem {
   /** 注入管道引用 */
   setPipeline(pipeline: PipelineOrchestrator): void {
     this.pipeline = pipeline
+    this.lastPipelineMetrics = pipeline.getMetrics() ?? null
     log('INFO', 'evolution_pipeline_attached')
   }
 
