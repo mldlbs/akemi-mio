@@ -32,8 +32,11 @@ const DEFAULT_FAIL_MESSAGE = 'Fix attempt failed with no specific error'
 export class ProblemQueue {
   private problems: Problem[] = []
   private completedIds = new Set<string>()
-  private failedIds = new Map<string, number>() // problemId → retryCount
-  /** 已弹出但尚未完成/失败的问题，用于 markFailed() 时重建完整信息 */
+  private failedIds = new Map<string, number>()
+  /** Phase 3C: skipped/blocked by governance gate */
+  private skippedIds = new Set<string>()
+  private blockedIds = new Set<string>()
+  /** Processing cache for markFailed() reconstruction */
   private processingProblems = new Map<string, Problem>()
   private queuePath: string
 
