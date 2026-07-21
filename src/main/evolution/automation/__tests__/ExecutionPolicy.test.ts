@@ -1,34 +1,24 @@
 /**
- * ExecutionPolicy Contract Tests — Phase 3A
+ * ExecutionPolicy Contract Tests — Phase 3A / 3C
  *
  * 验证 ExecutionPolicy 作为全局治理门的正确性：
  *   Problem → ExecutionVerdict
  *
- * 不验证：
- *   - PipelineOrchestrator 集成（Phase 3A 不改执行逻辑）
- *   - ProposalValidator 接线（Phase 3B）
- *   - Evidence 接入（Phase 3C）
+ * Phase 3C 变更：
+ *   - action 字段为执行路径唯一依据
+ *   - Level 2 路径关闭（error severity 不再提升）
  *
  * 覆盖场景：
  *   | 场景                              | 期望                         |
  *   | --------------------------------- | ---------------------------- |
- *   | evidence source → Level 0         | 锁定记录                     |
- *   | memory source → Level 0           | 锁定记录                     |
- *   | agent source → Level 0            | 锁定记录                     |
- *   | tsc error → Level 2               | 可执行                       |
- *   | tsc warning → Level 2             | 可执行                       |
- *   | behavior warning → Level 1        | 阻断 + 建议                  |
- *   | feature error → Level 2           | error 提升一级               |
- *   | tool error → Level 2              | error 提升一级               |
- *   | info severity → Level 0           | 降级记录                     |
- *   | evidence error 仍为 Level 0       | 锁定不受 severity 影响       |
- *   | memory error 仍为 Level 0         | 锁定不受 severity 影响       |
- *   | blocks = true for Level 0         | 阻断执行                     |
- *   | blocks = true for Level 1         | 阻断执行                     |
- *   | blocks = false for Level 2        | 放行                         |
- *   | shouldPropose = false for Level 0 | 不生成 Proposal              |
- *   | shouldPropose = true for Level 1  | 生成 Proposal                |
- *   | shouldPropose = false for Level 2 | 不生成 Proposal              |
+ *   | evidence source → skip            | 治理跳过                     |
+ *   | memory source → skip              | 治理跳过                     |
+ *   | agent source → skip               | 治理跳过                     |
+ *   | tsc warning → execute             | legacy fall-through          |
+ *   | behavior warning → block          | 阻断 + 建议                  |
+ *   | feature error → block (无提升)    | Phase 3C 冻结 Level 2        |
+ *   | info severity → skip              | 降级跳过                     |
+ *   | action 优先于 level               | 执行路径只看 action          |
  */
 import { describe, it, expect } from 'vitest'
 import { ExecutionPolicy } from '../ExecutionPolicy'
@@ -57,131 +47,150 @@ function makeProblem(
 }
 
 // =============================================================================
-// 1. Level 0：锁定只记录
+// 1. skip: Level 0（治理跳过）
 // =============================================================================
-describe('ExecutionPolicy — Level 0', () => {
+describe('ExecutionPolicy — action: skip', () => {
   const policy = new ExecutionPolicy()
 
-  it('evidence source → Level 0', () => {
+  it('evidence source → action=skip', () => {
     const verdict = policy.evaluate(makeProblem('evidence'))
+    expect(verdict.action).toBe('skip')
     expect(verdict.level).toBe('level_0_record')
     expect(verdict.blocks).toBe(true)
     expect(verdict.shouldPropose).toBe(false)
   })
 
-  it('memory source → Level 0', () => {
+  it('memory source → action=skip', () => {
     const verdict = policy.evaluate(makeProblem('memory'))
+    expect(verdict.action).toBe('skip')
     expect(verdict.level).toBe('level_0_record')
   })
 
-  it('agent source → Level 0', () => {
+  it('agent source → action=skip', () => {
     const verdict = policy.evaluate(makeProblem('agent'))
+    expect(verdict.action).toBe('skip')
     expect(verdict.level).toBe('level_0_record')
   })
 
-  it('evidence error 仍为 Level 0（锁定不受 severity 影响）', () => {
+  it('evidence error 仍为 skip（锁定不受 severity 影响）', () => {
     const verdict = policy.evaluate(makeProblem('evidence', 'error'))
+    expect(verdict.action).toBe('skip')
     expect(verdict.level).toBe('level_0_record')
   })
 
-  it('memory error 仍为 Level 0（锁定不受 severity 影响）', () => {
+  it('memory error 仍为 skip（锁定不受 severity 影响）', () => {
     const verdict = policy.evaluate(makeProblem('memory', 'error'))
+    expect(verdict.action).toBe('skip')
     expect(verdict.level).toBe('level_0_record')
   })
 
-  it('info severity → Level 0（降级）', () => {
+  it('info severity → action=skip（降级）', () => {
     const verdict = policy.evaluate(makeProblem('tsc', 'info'))
+    expect(verdict.action).toBe('skip')
     expect(verdict.level).toBe('level_0_record')
   })
 })
 
 // =============================================================================
-// 2. Level 1：阻断 + 建议
+// 2. block: Level 1（治理阻断）
 // =============================================================================
-describe('ExecutionPolicy — Level 1', () => {
+describe('ExecutionPolicy — action: block', () => {
   const policy = new ExecutionPolicy()
 
-  it('behavior warning → Level 1', () => {
+  it('behavior warning → action=block', () => {
     const verdict = policy.evaluate(makeProblem('behavior'))
+    expect(verdict.action).toBe('block')
     expect(verdict.level).toBe('level_1_propose')
     expect(verdict.blocks).toBe(true)
     expect(verdict.shouldPropose).toBe(true)
   })
 
-  it('feature warning → Level 1', () => {
+  it('feature warning → action=block', () => {
     const verdict = policy.evaluate(makeProblem('feature'))
+    expect(verdict.action).toBe('block')
     expect(verdict.level).toBe('level_1_propose')
   })
 
-  it('tool warning → Level 1', () => {
+  it('tool warning → action=block', () => {
     const verdict = policy.evaluate(makeProblem('tool'))
+    expect(verdict.action).toBe('block')
     expect(verdict.level).toBe('level_1_propose')
   })
 
-  it('tts warning → Level 1', () => {
+  it('tts warning → action=block', () => {
     const verdict = policy.evaluate(makeProblem('tts'))
+    expect(verdict.action).toBe('block')
     expect(verdict.level).toBe('level_1_propose')
   })
 
-  it('cicd warning → Level 1', () => {
+  it('cicd warning → action=block', () => {
     const verdict = policy.evaluate(makeProblem('cicd'))
+    expect(verdict.action).toBe('block')
     expect(verdict.level).toBe('level_1_propose')
   })
 })
 
 // =============================================================================
-// 3. Level 2：可执行
+// 3. execute: Level 2（legacy fall-through，Phase 3C 保留但冻结）
 // =============================================================================
-describe('ExecutionPolicy — Level 2', () => {
+describe('ExecutionPolicy — action: execute', () => {
   const policy = new ExecutionPolicy()
 
-  it('tsc error → Level 2', () => {
+  it('tsc error → action=execute（level=level_2_execute）', () => {
     const verdict = policy.evaluate(makeProblem('tsc', 'error'))
+    expect(verdict.action).toBe('execute')
     expect(verdict.level).toBe('level_2_execute')
     expect(verdict.blocks).toBe(false)
     expect(verdict.shouldPropose).toBe(false)
   })
 
-  it('tsc warning → Level 2', () => {
+  it('tsc warning → action=execute', () => {
     const verdict = policy.evaluate(makeProblem('tsc', 'warning'))
+    expect(verdict.action).toBe('execute')
     expect(verdict.level).toBe('level_2_execute')
   })
 
-  it('test warning → Level 2', () => {
+  it('test warning → action=execute', () => {
     const verdict = policy.evaluate(makeProblem('test'))
+    expect(verdict.action).toBe('execute')
     expect(verdict.level).toBe('level_2_execute')
   })
 
-  it('runtime warning → Level 2', () => {
+  it('runtime warning → action=execute', () => {
     const verdict = policy.evaluate(makeProblem('runtime'))
+    expect(verdict.action).toBe('execute')
     expect(verdict.level).toBe('level_2_execute')
   })
 
-  it('log warning → Level 2', () => {
+  it('log warning → action=execute', () => {
     const verdict = policy.evaluate(makeProblem('log', 'warning'))
+    expect(verdict.action).toBe('execute')
     expect(verdict.level).toBe('level_2_execute')
   })
 })
 
 // =============================================================================
-// 4. error severity 提升
+// 4. error severity — Phase 3C 冻结 Level 2，不再提升
 // =============================================================================
-describe('ExecutionPolicy — error 提升', () => {
+describe('ExecutionPolicy — error severity (Phase 3C frozen)', () => {
   const policy = new ExecutionPolicy()
 
-  it('feature error 从 Level 1 提升到 Level 2', () => {
+  it('feature error → action=block（不再提升到 execute）', () => {
     const verdict = policy.evaluate(makeProblem('feature', 'error'))
-    expect(verdict.level).toBe('level_2_execute')
-    expect(verdict.blocks).toBe(false)
+    expect(verdict.action).toBe('block')
+    expect(verdict.level).toBe('level_1_propose')
+    expect(verdict.blocks).toBe(true)
   })
 
-  it('tool error 从 Level 1 提升到 Level 2', () => {
+  it('tool error → action=block（不再提升到 execute）', () => {
     const verdict = policy.evaluate(makeProblem('tool', 'error'))
-    expect(verdict.level).toBe('level_2_execute')
+    expect(verdict.action).toBe('block')
+    expect(verdict.level).toBe('level_1_propose')
   })
 
-  it('tsc error 本身已是 Level 2，不提升', () => {
+  it('tsc error 仍为 execute（保留 legacy fall-through）', () => {
     const verdict = policy.evaluate(makeProblem('tsc', 'error'))
+    expect(verdict.action).toBe('execute')
     expect(verdict.level).toBe('level_2_execute')
   })
 })
@@ -210,21 +219,23 @@ describe('ExecutionPolicy — 边界', () => {
     const problem = makeProblem('tool', 'warning')
     const a = policy.evaluate(problem)
     const b = policy.evaluate(problem)
+    expect(a.action).toBe(b.action)
     expect(a.level).toBe(b.level)
     expect(a.blocks).toBe(b.blocks)
     expect(a.shouldPropose).toBe(b.shouldPropose)
   })
 
-  it('blocks = true 代表阻断', () => {
+  it('action 决定 blocks（skip/block = true, execute = false）', () => {
     const record = policy.evaluate(makeProblem('evidence'))
+    expect(record.action).toBe('skip')
     expect(record.blocks).toBe(true)
 
     const propose = policy.evaluate(makeProblem('behavior'))
+    expect(propose.action).toBe('block')
     expect(propose.blocks).toBe(true)
-  })
 
-  it('blocks = false 代表放行', () => {
-    const verdict = policy.evaluate(makeProblem('tsc', 'warning'))
-    expect(verdict.blocks).toBe(false)
+    const exec = policy.evaluate(makeProblem('tsc', 'warning'))
+    expect(exec.action).toBe('execute')
+    expect(exec.blocks).toBe(false)
   })
 })
