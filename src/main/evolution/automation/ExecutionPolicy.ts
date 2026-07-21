@@ -24,19 +24,34 @@ import type { Problem, ProblemSource, Severity } from './types'
 // 类型定义
 // =============================================================================
 
-/** 执行策略等级 */
+/** 执行策略等级（保留兼容，执行路径使用 action） */
 export type ExecutionLevel = 'level_0_record' | 'level_1_propose' | 'level_2_execute'
+
+/** 执行动作（Phase 3C: 执行路径唯一依据） */
+export type VerdictAction = 'execute' | 'skip' | 'block'
 
 /** 策略决定 */
 export interface ExecutionVerdict {
-  /** 裁定结果 */
+  /** 裁定结果（保留兼容） */
   level: ExecutionLevel
+  /** 执行动作（Phase 3C: 消费方只看此字段） */
+  action: VerdictAction
   /** 决策原因 */
   reason: string
   /** 是否阻断执行（level_0 + level_1 = 阻断） */
   blocks: boolean
   /** 是否建议生成 ProposalRecord（仅 level_1） */
   shouldPropose: boolean
+}
+
+/** Phase 3C: policy.decision 事件固定 schema */
+export interface PolicyDecisionEvent {
+  problemId: string
+  source: string
+  action: VerdictAction
+  reason: string
+  policyVersion: string
+  timestamp: number
 }
 
 // =============================================================================
