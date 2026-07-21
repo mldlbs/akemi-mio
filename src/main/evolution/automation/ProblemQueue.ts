@@ -67,8 +67,14 @@ export class ProblemQueue {
   /** 取下一个最高优先级的问题 */
   pop(): AssignedProblem | null {
     const now = Date.now()
-    // 找到第一个不是处理中且未完成的
-    const idx = this.problems.findIndex((p) => !this.completedIds.has(p.id) && !this.failedIds.has(p.id))
+    // 跳过所有已完结状态：completed / failed / skipped / blocked
+    const idx = this.problems.findIndex(
+      (p) =>
+        !this.completedIds.has(p.id) &&
+        !this.failedIds.has(p.id) &&
+        !this.skippedIds.has(p.id) &&
+        !this.blockedIds.has(p.id),
+    )
     if (idx === -1) return null
     const p = this.problems.splice(idx, 1)[0]
     // 暂存以支持 markFailed() 重建完整信息
@@ -86,6 +92,20 @@ export class ProblemQueue {
   markCompleted(problemId: string): void {
     this.completedIds.add(problemId)
     this.failedIds.delete(problemId)
+    this.save()
+  }
+
+  /** 标记问题由治理策略跳过（不进入 executor，不影响 retry） */
+  skip(problemId: string): void {
+    this.skippedIds.add(problemId)
+    this.processingProblems.delete(problemId)
+    this.save()
+  }
+
+  /** 标记问题由治理策略阻断（不进入 executor，不影响 retry） */
+  block(problemId: string): void {
+    this.blockedIds.add(problemId)
+    this.processingProblems.delete(problemId)
     this.save()
   }
 
@@ -188,11 +208,13 @@ export class ProblemQueue {
   }
 
   /** 获取问题统计 */
-  getStats(): { pending: number; completed: number; failed: number } {
+  getStats(): { pending: number; completed: number; failed: number; skipped: number; blocked: number } {
     return {
       pending: this.problems.length,
       completed: this.completedIds.size,
       failed: this.failedIds.size,
+      skipped: this.skippedIds.size,
+      blocked: this.blockedIds.size,
     }
   }
 
@@ -285,6 +307,8 @@ export class ProblemQueue {
       if (data.failedIds) {
         this.failedIds = new Map(Object.entries(data.failedIds))
       }
+      if (Array.isArray(data.skippedIds)) this.skippedIds = new Set(data.skippedIds)
+      if (Array.isArray(data.blockedIds)) this.blockedIds = new Set(data.blockedIds)
       if (data.processingProblems) {
         this.processingProblems = new Map(Object.entries(data.processingProblems))
       }
@@ -297,6 +321,8 @@ export class ProblemQueue {
       log('INFO', 'problem_queue_loaded', {
         pending: this.problems.length,
         completed: this.completedIds.size,
+        skipped: this.skippedIds.size,
+        blocked: this.blockedIds.size,
       })
     } catch {
       log('WARN', 'problem_queue_load_failed')
@@ -314,6 +340,8 @@ export class ProblemQueue {
             problems: this.problems,
             completedIds: Array.from(this.completedIds),
             failedIds: Object.fromEntries(this.failedIds),
+            skippedIds: Array.from(this.skippedIds),
+            blockedIds: Array.from(this.blockedIds),
             updatedAt: Date.now(),
           },
           null,
