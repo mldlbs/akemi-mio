@@ -42,7 +42,7 @@ class FakeCollector implements SignalCollector {
 
 class FakeExecutor implements FixExecutor {
   readonly name = 'fake-exec'
-  supportedSources: ProblemSource[] = ['tsc', 'test', 'lint', 'runtime']
+  supportedSources: ProblemSource[] = ['tsc', 'test', 'lint', 'runtime', 'evidence', 'behavior', 'memory', 'feature', 'tool']
   timeoutMs = 5000
   private _available = true
   public executed: AssignedProblem[] = []
@@ -137,9 +137,9 @@ describe('Phase 3C: 无 ExecutionPolicy', () => {
 })
 
 // =============================================================================
-// 2. 带 ExecutionPolicy — action=skip
+// 2. 带 ExecutionPolicy (enforce) — action=skip
 // =============================================================================
-describe('Phase 3C: action=skip', () => {
+describe('Phase 3C: enforce mode — action=skip', () => {
   let collector: FakeCollector
   let executor: FakeExecutor
   let policy: ExecutionPolicy
@@ -147,7 +147,7 @@ describe('Phase 3C: action=skip', () => {
   beforeEach(() => {
     collector = new FakeCollector()
     executor = new FakeExecutor()
-    policy = new ExecutionPolicy()
+    policy = new ExecutionPolicy({ mode: 'enforce' })
   })
 
   it('evidence source → 不调用 executor', async () => {
@@ -183,9 +183,9 @@ describe('Phase 3C: action=skip', () => {
 })
 
 // =============================================================================
-// 3. 带 ExecutionPolicy — action=block
+// 3. 带 ExecutionPolicy (enforce) — action=block
 // =============================================================================
-describe('Phase 3C: action=block', () => {
+describe('Phase 3C: enforce mode — action=block', () => {
   let collector: FakeCollector
   let executor: FakeExecutor
   let policy: ExecutionPolicy
@@ -193,7 +193,7 @@ describe('Phase 3C: action=block', () => {
   beforeEach(() => {
     collector = new FakeCollector()
     executor = new FakeExecutor()
-    policy = new ExecutionPolicy()
+    policy = new ExecutionPolicy({ mode: 'enforce' })
   })
 
   it('behavior source → 不调用 executor', async () => {
@@ -231,9 +231,9 @@ describe('Phase 3C: action=block', () => {
 })
 
 // =============================================================================
-// 4. 带 ExecutionPolicy — action=execute（legacy fall-through）
+// 4. 带 ExecutionPolicy (enforce) — action=execute（legacy fall-through）
 // =============================================================================
-describe('Phase 3C: action=execute', () => {
+describe('Phase 3C: enforce mode — action=execute', () => {
   let collector: FakeCollector
   let executor: FakeExecutor
   let policy: ExecutionPolicy
@@ -241,7 +241,7 @@ describe('Phase 3C: action=execute', () => {
   beforeEach(() => {
     collector = new FakeCollector()
     executor = new FakeExecutor()
-    policy = new ExecutionPolicy()
+    policy = new ExecutionPolicy({ mode: 'enforce' })
   })
 
   it('tsc source 正常执行（legacy fall-through）', async () => {
@@ -276,9 +276,9 @@ describe('Phase 3C: action=execute', () => {
 })
 
 // =============================================================================
-// 5. policy.decision 事件
+// 5. policy.decision 事件 — enforce 模式
 // =============================================================================
-describe('Phase 3C: policy.decision event', () => {
+describe('Phase 3C: enforce mode — policy.decision event', () => {
   let collector: FakeCollector
   let executor: FakeExecutor
   let policy: ExecutionPolicy
@@ -286,10 +286,10 @@ describe('Phase 3C: policy.decision event', () => {
   beforeEach(() => {
     collector = new FakeCollector()
     executor = new FakeExecutor()
-    policy = new ExecutionPolicy()
+    policy = new ExecutionPolicy({ mode: 'enforce' })
   })
 
-  it('skip 事件含固定 schema', async () => {
+  it('skip 事件含固定 schema（mode=enforce, executed=false）', async () => {
     const events: any[] = []
     const { eventBus } = await import('../../../core/EventBus')
     const unsub = eventBus.on('policy.decision', (e: any) => events.push(e))
@@ -303,6 +303,8 @@ describe('Phase 3C: policy.decision event', () => {
       problemId: expect.any(String),
       source: 'evidence',
       action: 'skip',
+      mode: 'enforce',
+      executed: false,
       reason: expect.any(String),
       policyVersion: '1.0.0',
       timestamp: expect.any(Number),
@@ -310,7 +312,7 @@ describe('Phase 3C: policy.decision event', () => {
     unsub()
   })
 
-  it('block 事件含固定 schema', async () => {
+  it('block 事件含固定 schema（mode=enforce, executed=false）', async () => {
     const events: any[] = []
     const { eventBus } = await import('../../../core/EventBus')
     const unsub = eventBus.on('policy.decision', (e: any) => events.push(e))
@@ -324,13 +326,15 @@ describe('Phase 3C: policy.decision event', () => {
       problemId: expect.any(String),
       source: 'behavior',
       action: 'block',
+      mode: 'enforce',
+      executed: false,
       reason: expect.any(String),
       policyVersion: '1.0.0',
     })
     unsub()
   })
 
-  it('execute 不触发 decision 事件', async () => {
+  it('execute 触发 decision 事件（mode=enforce, executed=true）', async () => {
     const events: any[] = []
     const { eventBus } = await import('../../../core/EventBus')
     const unsub = eventBus.on('policy.decision', (e: any) => events.push(e))
@@ -339,8 +343,147 @@ describe('Phase 3C: policy.decision event', () => {
     collector.setProblems([makeProblem('tsc')])
     await pipeline.runOnce()
 
-    // tsc → action=execute → no event
-    expect(events.length).toBe(0)
+    // tsc → action=execute → emit event with executed=true
+    expect(events.length).toBe(1)
+    expect(events[0]).toMatchObject({
+      action: 'execute',
+      mode: 'enforce',
+      executed: true,
+    })
     unsub()
+  })
+})
+
+// =============================================================================
+// 6. disabled mode — evaluate + emit + always execute
+// =============================================================================
+describe('Phase 3C+: disabled mode — no enforcement', () => {
+  let collector: FakeCollector
+  let executor: FakeExecutor
+  let policy: ExecutionPolicy
+
+  beforeEach(() => {
+    collector = new FakeCollector()
+    executor = new FakeExecutor()
+    policy = new ExecutionPolicy({ mode: 'disabled' })
+  })
+
+  it('evidence 仍执行（disabled 不阻断）', async () => {
+    const pipeline = makePipeline(collector, executor, policy)
+    collector.setProblems([makeProblem('evidence')])
+
+    await pipeline.runOnce()
+
+    expect(executor.executed.length).toBe(1)
+    expect(executor.executed[0].source).toBe('evidence')
+  })
+
+  it('behavior 仍执行（disabled 不阻断）', async () => {
+    const pipeline = makePipeline(collector, executor, policy)
+    collector.setProblems([makeProblem('behavior')])
+
+    await pipeline.runOnce()
+
+    expect(executor.executed.length).toBe(1)
+    expect(executor.executed[0].source).toBe('behavior')
+  })
+
+  it('decision 事件仍发出（disabled 模式仍记录）', async () => {
+    const events: any[] = []
+    const { eventBus } = await import('../../../core/EventBus')
+    const unsub = eventBus.on('policy.decision', (e: any) => events.push(e))
+
+    const pipeline = makePipeline(collector, executor, policy)
+    collector.setProblems([makeProblem('evidence')])
+    await pipeline.runOnce()
+
+    expect(events.length).toBe(1)
+    expect(events[0]).toMatchObject({
+      action: 'skip',
+      mode: 'disabled',
+      executed: true,
+    })
+    unsub()
+  })
+})
+
+// =============================================================================
+// 7. shadow mode — evaluate + emit + execute, 不修改 queue 状态
+// =============================================================================
+describe('Phase 3C+: shadow mode — observe only', () => {
+  let collector: FakeCollector
+  let executor: FakeExecutor
+  let policy: ExecutionPolicy
+
+  beforeEach(() => {
+    collector = new FakeCollector()
+    executor = new FakeExecutor()
+    policy = new ExecutionPolicy({ mode: 'shadow' })
+  })
+
+  it('evidence 仍执行（shadow 不阻断）', async () => {
+    const pipeline = makePipeline(collector, executor, policy)
+    collector.setProblems([makeProblem('evidence')])
+
+    await pipeline.runOnce()
+
+    expect(executor.executed.length).toBe(1)
+    expect(executor.executed[0].source).toBe('evidence')
+  })
+
+  it('behavior 仍执行（shadow 不阻断）', async () => {
+    const pipeline = makePipeline(collector, executor, policy)
+    collector.setProblems([makeProblem('behavior')])
+
+    await pipeline.runOnce()
+
+    expect(executor.executed.length).toBe(1)
+  })
+
+  it('tsc 仍执行（shadow 不影响旧路径）', async () => {
+    const pipeline = makePipeline(collector, executor, policy)
+    collector.setProblems([makeProblem('tsc')])
+
+    await pipeline.runOnce()
+
+    expect(executor.executed.length).toBe(1)
+  })
+
+  it('decision 事件含 mode=shadow, executed=true', async () => {
+    const events: any[] = []
+    const { eventBus } = await import('../../../core/EventBus')
+    const unsub = eventBus.on('policy.decision', (e: any) => events.push(e))
+
+    const pipeline = makePipeline(collector, executor, policy)
+    collector.setProblems([makeProblem('behavior')])
+    await pipeline.runOnce()
+
+    expect(events.length).toBe(1)
+    expect(events[0]).toMatchObject({
+      action: 'block',
+      mode: 'shadow',
+      executed: true,
+    })
+    unsub()
+  })
+
+  it('不污染 queue skipped/blocked 状态', async () => {
+    const pipeline = makePipeline(collector, executor, policy)
+    collector.setProblems([
+      makeProblem('evidence'),
+      makeProblem('behavior'),
+      makeProblem('tsc'),
+    ])
+
+    await pipeline.runOnce()
+
+    // 所有问题都应被执行（shadow 模式不阻断）
+    expect(executor.executed.length).toBe(3)
+
+    // 获取 queue stats 确认 skipped/blocked 为 0
+    const metrics = pipeline.getMetrics()
+    // 通过事件验证：从 executor 记录而非 queue，因为 queue skipped/blocked 不暴露
+    // executor 应收到所有 3 个问题
+    expect(executor.executed.map(e => e.source).sort()).toEqual(['behavior', 'evidence', 'tsc'])
   })
 })

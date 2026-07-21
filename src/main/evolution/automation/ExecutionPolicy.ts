@@ -27,6 +27,14 @@ import type { Problem, ProblemSource, Severity } from './types'
 /** 执行策略等级（保留兼容，执行路径使用 action） */
 export type ExecutionLevel = 'level_0_record' | 'level_1_propose' | 'level_2_execute'
 
+/** 执行模式（Phase 3C+）
+ *
+ * disabled → evaluate + emit + always execute（兼容旧行为，用于部署验证）
+ * shadow   → evaluate + emit + always execute + 不修改 queue 状态（观测）
+ * enforce  → evaluate + emit + action 生效（治理）
+ */
+export type ExecutionMode = 'disabled' | 'shadow' | 'enforce'
+
 /** 执行动作（Phase 3C: 执行路径唯一依据）
  *
  * skip    → 治理跳过（level_0_record），不进 executor
@@ -49,11 +57,15 @@ export interface ExecutionVerdict {
   shouldPropose: boolean
 }
 
-/** Phase 3C: policy.decision 事件固定 schema */
+/** Phase 3C+: policy.decision 事件固定 schema */
 export interface PolicyDecisionEvent {
   problemId: string
   source: string
   action: VerdictAction
+  /** 决策时的执行模式 */
+  mode: ExecutionMode
+  /** shadow/disabled 模式下是否实际执行了 tryFix() */
+  executed: boolean
   reason: string
   policyVersion: string
   timestamp: number
@@ -98,6 +110,11 @@ const LOCKED_LEVEL_0: ProblemSource[] = ['evidence', 'memory', 'agent']
 
 export class ExecutionPolicy {
   private policyVersion = '1.0.0'
+  readonly mode: ExecutionMode
+
+  constructor(options?: { mode?: ExecutionMode }) {
+    this.mode = options?.mode ?? 'disabled'
+  }
 
   /**
    * 评估一个 Problem 的执行等级。

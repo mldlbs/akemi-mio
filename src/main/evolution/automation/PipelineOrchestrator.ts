@@ -248,20 +248,29 @@ export class PipelineOrchestrator {
         const problem = this.queue.pop()
         if (!problem) break
 
-        // Phase 3C: ExecutionPolicy gate — action 优先
+        // Phase 3C: ExecutionPolicy gate — mode 决定路由行为
         if (this.executionPolicy) {
           const verdict = this.executionPolicy.evaluate(problem)
-          if (verdict.action === 'skip') {
-            this.queue.skip(problem.id)
-            this.emitPolicyDecision(problem.id, problem.source, verdict)
-            continue
+          const mode = this.executionPolicy.mode
+
+          if (mode === 'enforce') {
+            if (verdict.action === 'skip') {
+              this.queue.skip(problem.id)
+              this.emitPolicyDecision(problem.id, problem.source, verdict, false)
+              continue
+            }
+            if (verdict.action === 'block') {
+              this.queue.block(problem.id)
+              this.emitPolicyDecision(problem.id, problem.source, verdict, false)
+              continue
+            }
+            // action === 'execute' → emit executed=true, fall through to tryFix
+            this.emitPolicyDecision(problem.id, problem.source, verdict, true)
+          } else {
+            // disabled / shadow: emit executed=true, always fall through to tryFix
+            // shadow mode does NOT call skip()/block() — queue state is unchanged
+            this.emitPolicyDecision(problem.id, problem.source, verdict, true)
           }
-          if (verdict.action === 'block') {
-            this.queue.block(problem.id)
-            this.emitPolicyDecision(problem.id, problem.source, verdict)
-            continue
-          }
-          // action === 'execute' → continue to tryFix()
         }
 
         const result = await this.tryFix(problem)
@@ -317,22 +326,25 @@ export class PipelineOrchestrator {
     return this.getMetrics()
   }
 
-  /** Phase 3C: 发出 policy.decision 事件 */
+  /** Phase 3C+: 发出 policy.decision 事件（含 mode + executed） */
   private emitPolicyDecision(
     problemId: string,
     source: string,
     verdict: import('./ExecutionPolicy').ExecutionVerdict,
+    executed: boolean,
   ): void {
     const event: PolicyDecisionEvent = {
       problemId,
       source,
       action: verdict.action,
+      mode: this.executionPolicy ? this.executionPolicy.mode : 'disabled',
+      executed,
       reason: verdict.reason,
       policyVersion: this.executionPolicy ? '1.0.0' : '0.0.0',
       timestamp: Date.now(),
     }
     eventBus.emit('policy.decision', event)
-    log('INFO', 'policy_decision', { problemId, action: verdict.action, reason: verdict.reason })
+    log('INFO', 'policy_decision', { problemId, action: verdict.action, mode: event.mode, executed })
   }
 
   /** 按优先级尝试主+备用执行器 */

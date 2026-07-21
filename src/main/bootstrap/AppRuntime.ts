@@ -34,7 +34,7 @@ import { registerHandlers, createServiceRef } from '../ipc/handlers'
 import type { ServiceRef } from '../ipc/handlers'
 import { credentialsManager } from '../credentials/CredentialsManager'
 import { initEvolution, evolutionService, planManager, SelfEvolutionService } from '../evolution'
-import { PipelineOrchestrator, CreativityCollector, CreativityExecutor, MemoryAnalysisCollector } from '../evolution/automation'
+import { PipelineOrchestrator, CreativityCollector, CreativityExecutor, MemoryAnalysisCollector, ExecutionPolicy } from '../evolution/automation'
 import { initInsight, insightService, insightStore } from '../insight'
 import { initCreativity, creativityService } from '../creativity'
 import { initInspiration } from '../inspiration'
@@ -1435,6 +1435,8 @@ export class AppRuntime {
         })
         // 注册基础 collector 和 executor（注入 SubAgentPoolAdapter 替代旧 SubAgentPool）
         pipeline.initDefaults(agentService.getSubAgentPool())
+        // Phase 3C+: 注入 Shadow Mode ExecutionPolicy（evaluate + emit, 不阻断执行）
+        pipeline.setExecutionPolicy(new ExecutionPolicy({ mode: 'shadow' }))
         // 注册 Evolution 插件（ServiceLoader 模式）
         const { PluginServiceLoader, WallpaperPlugin, PluginCollectorAdapter, PluginExecutorAdapter } = await import('../evolution/plugin')
         const pluginLoader = PluginServiceLoader.getInstance()
