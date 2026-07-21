@@ -248,6 +248,22 @@ export class PipelineOrchestrator {
         const problem = this.queue.pop()
         if (!problem) break
 
+        // Phase 3C: ExecutionPolicy gate — action 优先
+        if (this.executionPolicy) {
+          const verdict = this.executionPolicy.evaluate(problem)
+          if (verdict.action === 'skip') {
+            this.queue.skip(problem.id)
+            this.emitPolicyDecision(problem.id, problem.source, verdict)
+            continue
+          }
+          if (verdict.action === 'block') {
+            this.queue.block(problem.id)
+            this.emitPolicyDecision(problem.id, problem.source, verdict)
+            continue
+          }
+          // action === 'execute' → continue to tryFix()
+        }
+
         const result = await this.tryFix(problem)
 
         fixDetails.push({
@@ -299,6 +315,24 @@ export class PipelineOrchestrator {
     }
 
     return this.getMetrics()
+  }
+
+  /** Phase 3C: 发出 policy.decision 事件 */
+  private emitPolicyDecision(
+    problemId: string,
+    source: string,
+    verdict: import('./ExecutionPolicy').ExecutionVerdict,
+  ): void {
+    const event: PolicyDecisionEvent = {
+      problemId,
+      source,
+      action: verdict.action,
+      reason: verdict.reason,
+      policyVersion: this.executionPolicy ? '1.0.0' : '0.0.0',
+      timestamp: Date.now(),
+    }
+    eventBus.emit('policy.decision', event)
+    log('INFO', 'policy_decision', { problemId, action: verdict.action, reason: verdict.reason })
   }
 
   /** 按优先级尝试主+备用执行器 */
