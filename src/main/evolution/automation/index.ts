@@ -35,6 +35,8 @@ export { CicdCollector } from '../cicd/CicdCollector'
 export { BlogOptimizationCollector } from '../blog/BlogOptimizationCollector'
 export { BlogOptimizationExecutor } from '../blog/BlogOptimizationExecutor'
 export { EvidenceCollector } from './EvidenceCollector'
+export { EvidenceBridge, EVIDENCE_REPORT_READY } from './EvidenceBridge'
+export type { EvidenceReportReadyPayload, EvidenceEmitter } from './EvidenceBridge'
 
 // ═══════════════════════════════════════════
 //  MCP 模式迁移导出

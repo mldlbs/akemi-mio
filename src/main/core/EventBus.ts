@@ -98,6 +98,7 @@ export type EventName =
   // ── MCP ↔ UserBehavior 强化回路事件 ──
   | 'feedback_loop.state_changed'
   | 'feedback_loop.parameter_adjusted'
+  | 'evidence.report.ready'
 
 export interface EventPayload {
   'task.lifecycle': { taskId: string; type: string; status: string; durationMs?: number; error?: string }
@@ -386,6 +387,11 @@ export interface EventPayload {
     newValue: number
     dampingFactor: number
     reason: string
+  }
+  'evidence.report.ready': {
+    reportId: string
+    report: any
+    generatedAt: number
   }
 }
 
