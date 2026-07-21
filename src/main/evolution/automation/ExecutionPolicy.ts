@@ -27,7 +27,12 @@ import type { Problem, ProblemSource, Severity } from './types'
 /** 执行策略等级（保留兼容，执行路径使用 action） */
 export type ExecutionLevel = 'level_0_record' | 'level_1_propose' | 'level_2_execute'
 
-/** 执行动作（Phase 3C: 执行路径唯一依据） */
+/** 执行动作（Phase 3C: 执行路径唯一依据）
+ *
+ * skip    → 治理跳过（level_0_record），不进 executor
+ * block   → 治理阻断（level_1_propose），不进 executor
+ * execute → 放行至 tryFix()（level_2_execute 仅兼容保留，legacy source fall-through）
+ */
 export type VerdictAction = 'execute' | 'skip' | 'block'
 
 /** 策略决定 */
@@ -92,14 +97,21 @@ const LOCKED_LEVEL_0: ProblemSource[] = ['evidence', 'memory', 'agent']
 // =============================================================================
 
 export class ExecutionPolicy {
+  private policyVersion = '1.0.0'
+
   /**
    * 评估一个 Problem 的执行等级。
    *
-   * 规则：
+   * Phase 3C 规则：
    *   1. evidence/memory/agent source 始终 Level 0（锁定记录）
    *   2. 其他 source 按 DEFAULT_LEVEL_BY_SOURCE 映射
-   *   3. error severity 提升一级（不影响 Locked Level 0）
-   *   4. info severity 降级到 Level 0
+   *   3. info severity 降级到 Level 0
+   *   4. Level 2 路径关闭（仅作兼容保留，执行路径使用 action）
+   *
+   * action 映射：
+   *   level_0_record  → skip
+   *   level_1_propose → block
+   *   level_2_execute → execute（仅 legacy source fall-through）
    *
    * @param problem 待评估的问题
    * @returns 执行裁定
@@ -109,6 +121,7 @@ export class ExecutionPolicy {
     if (LOCKED_LEVEL_0.includes(problem.source as ProblemSource)) {
       return {
         level: 'level_0_record',
+        action: 'skip',
         reason: `source=${problem.source} 为锁定只记录来源`,
         blocks: true,
         shouldPropose: false,
@@ -119,6 +132,7 @@ export class ExecutionPolicy {
     if (problem.severity === 'info') {
       return {
         level: 'level_0_record',
+        action: 'skip',
         reason: `severity=info 自动降级为只记录`,
         blocks: true,
         shouldPropose: false,
@@ -128,18 +142,15 @@ export class ExecutionPolicy {
     // ── Rule 3: 按 source 获取基准等级 ──
     const baseLevel = DEFAULT_LEVEL_BY_SOURCE[problem.source] || 'level_1_propose'
 
-    // ── Rule 4: error severity 提升一级（除非已达 level_2） ──
-    const isError = problem.severity === 'error'
-    const finalLevel: ExecutionLevel =
-      isError && baseLevel === 'level_1_propose'
-        ? 'level_2_execute'
-        : baseLevel
+    // Phase 3C: Level 2 仅作兼容保留（legacy source fall-through）
+    const action = baseLevel === 'level_2_execute' ? 'execute' as const : baseLevel === 'level_1_propose' ? 'block' as const : 'skip' as const
 
     return {
-      level: finalLevel,
-      reason: `source=${problem.source}, severity=${problem.severity}, base=${baseLevel}, final=${finalLevel}`,
-      blocks: finalLevel !== 'level_2_execute',
-      shouldPropose: finalLevel === 'level_1_propose',
+      level: baseLevel,
+      action,
+      reason: `source=${problem.source}, severity=${problem.severity}, level=${baseLevel}`,
+      blocks: action !== 'execute',
+      shouldPropose: action === 'block',
     }
   }
 }
