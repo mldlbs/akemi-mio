@@ -38,7 +38,7 @@ export { EvidenceCollector } from './EvidenceCollector'
 export { EvidenceBridge, EVIDENCE_REPORT_READY } from './EvidenceBridge'
 export type { EvidenceReportReadyPayload, EvidenceEmitter } from './EvidenceBridge'
 export { ExecutionPolicy } from './ExecutionPolicy'
-export type { ExecutionLevel, ExecutionVerdict } from './ExecutionPolicy'
+export type { ExecutionLevel, ExecutionVerdict, VerdictAction, PolicyDecisionEvent } from './ExecutionPolicy'
 
 // ═══════════════════════════════════════════
 //  MCP 模式迁移导出
