@@ -28,8 +28,8 @@ logs.*
 *.tar.gz
 *.wav
 *.ps1
-check-*.js
-check-*.mjs
+check-*.bat
+scripts/query-shadow.*
 __*
 !__tests__/
 .claude/projects/
