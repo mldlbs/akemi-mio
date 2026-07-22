@@ -85,15 +85,49 @@ const configMock = vi.hoisted(() => ({
   BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE: 0.35,
   BEHAVIOR_PREDICTOR_MAX_CONCURRENT_PRELOADS: 3,
   ASR_HOTWORDS: [],
+  ASR_HOTWORD_WINDOW_SIZE: 5000,
+  ASR_HOTWORD_FREQ_THRESHOLD: 2,
+  BLOG_MEMORY_ENABLED: true,
+  BLOG_MEMORY_MAX_ENTRIES: 200,
+  BLOG_MEMORY_MAX_CONTENT_LENGTH: 5000,
+  BLOG_MEMORY_DEFAULT_TIER: 'ephemeral' as const,
+  BLOG_MEMORY_DEFAULT_CONFIDENCE: 0.8,
 }))
 
 vi.mock('../../config', () => configMock)
+vi.mock('../../asr/MemoryAsrHybridPipeline', () => ({
+  memoryAsrHybridPipeline: {
+    run: vi.fn().mockResolvedValue({ text: '识别文本', requestId: 'req-1', arbitrationTriggered: false }),
+    setEnabled: vi.fn(),
+    isReady: vi.fn().mockReturnValue(true),
+    getConfig: vi.fn().mockReturnValue({ enabled: true }),
+    updateConfig: vi.fn(),
+    setAsrService: vi.fn(),
+    setMemoryService: vi.fn(),
+    setLlmProvider: vi.fn(),
+  },
+}))
+
+vi.mock('../../asr/AsrHotwordManager', () => ({
+  asrHotwordManager: {
+    isEnabled: vi.fn().mockReturnValue(true),
+    setEnabled: vi.fn(),
+    feedUserText: vi.fn(),
+    getLongTermVocabSize: vi.fn().mockReturnValue(0),
+    deleteWord: vi.fn().mockReturnValue(false),
+    clearAllVocabulary: vi.fn(),
+  },
+}))
 
 vi.mock('../../core/EventBus', () => ({
   eventBus: {
     emit: vi.fn(),
     on: vi.fn(),
     off: vi.fn(),
+  },
+  SubscriptionTracker: class {
+    add = vi.fn()
+    dispose = vi.fn()
   },
 }))
 
@@ -117,6 +151,14 @@ describe('IPC handlers', () => {
       processTextInput: vi.fn().mockResolvedValue({ reply: 'test' }),
       getAsrService: vi.fn().mockReturnValue({
         transcribe: vi.fn().mockResolvedValue('test'),
+        toggleHotwordManager: vi.fn(),
+        getHotwordManagerState: vi.fn().mockReturnValue({ enabled: true, entryCount: 0, hotwords: [], totalInputs: 0 }),
+        getLearnedVocabulary: vi.fn().mockReturnValue([]),
+        getVocabularyDomainStats: vi.fn().mockReturnValue([]),
+        deleteLearnedWord: vi.fn().mockReturnValue(false),
+        clearAllLearnedVocabulary: vi.fn(),
+        refreshContext: vi.fn(),
+        setConversationContext: vi.fn(),
       }),
       getMcpManager: vi.fn().mockReturnValue({
         listServers: vi.fn().mockReturnValue([{ name: 'server1', initialized: true }]),
@@ -127,6 +169,9 @@ describe('IPC handlers', () => {
       resume: vi.fn(),
       stopConversation: vi.fn().mockResolvedValue(undefined),
       saveRecoverySnapshot: vi.fn(),
+      getMemoryService: vi.fn().mockReturnValue(null),
+      getLlmService: vi.fn().mockReturnValue(null),
+      getChatExecutor: vi.fn().mockReturnValue(null),
     }
 
     stateManager = {
@@ -139,6 +184,22 @@ describe('IPC handlers', () => {
     ttsService = {
       speak: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn(),
+      setSubtitleCallback: vi.fn(),
+      recordImplicitFeedback: vi.fn(),
+      setEnginePreference: vi.fn(),
+      getEnginePreference: vi.fn().mockReturnValue('auto'),
+      getLastRoutingDecision: vi.fn().mockReturnValue(null),
+      getRoutingWeights: vi.fn().mockReturnValue({}),
+      getEmotionParams: vi.fn().mockReturnValue(null),
+      getSceneAdaptorStatus: vi.fn().mockReturnValue({}),
+      getSceneLearningData: vi.fn().mockReturnValue([]),
+      getSceneOverride: vi.fn().mockReturnValue('auto'),
+      setSceneOverride: vi.fn(),
+      resetSceneLearningData: vi.fn(),
+      replay: vi.fn().mockResolvedValue(false),
+      hasReplayContent: vi.fn().mockReturnValue(false),
+      setLoopMode: vi.fn(),
+      isLoopMode: vi.fn().mockReturnValue(false),
     }
 
     evolutionService = {
@@ -189,7 +250,7 @@ describe('IPC handlers', () => {
       const handler = registeredHandlers.get('ai:chat')!
       const result = await handler({}, '你好', 'req-1')
       expect(agentService.processTextInput).toHaveBeenCalledWith('你好', 'req-1', 'electron', undefined, undefined, undefined)
-      expect(result).toEqual({ reply: '你好' })
+      expect(result).toEqual({ reply: 'test' })
     })
   })
 
@@ -198,14 +259,22 @@ describe('IPC handlers', () => {
       const handler = registeredHandlers.get('asr:transcribe')!
       const buffer = new ArrayBuffer(8)
       const result = await handler({}, buffer)
-      expect(agentService.getAsrService().transcribe).toHaveBeenCalledWith(buffer)
-      expect(result).toBe('识别文本')
+      expect(result).toHaveProperty('request_id')
+      expect(result.text).toBe('识别文本')
     })
 
     it('ASR 未初始化时抛出错误', async () => {
       agentService.getAsrService.mockReturnValue(null)
       const handler = registeredHandlers.get('asr:transcribe')!
       await expect(handler({}, new ArrayBuffer(8))).rejects.toThrow('ASR service not initialized')
+    })
+  })
+
+  describe('asr:toggle-hotwords', () => {
+    it('切换热词管理', async () => {
+      const handler = registeredHandlers.get('asr:toggle-hotwords')!
+      const result = await handler({}, true)
+      expect(result).toHaveProperty('enabled')
     })
   })
 
@@ -371,9 +440,11 @@ describe('IPC handlers', () => {
     it('no service returns UNAVAILABLE', async () => {
       registeredHandlers.clear()
       registeredOns.clear()
-      registerHandlers(agentService, stateManager, ttsService, { current: evolutionService }, undefined, undefined, undefined, undefined)
-      const handler = registeredHandlers.get('evaluation:getDecision')!
-      const result = await handler({}, 'd1')
+      // decisionQueryRef 存在但 current 为 null → service 不可用
+      registerHandlers(agentService, stateManager, ttsService, { current: evolutionService }, undefined, undefined, undefined, { current: null })
+      const handler = registeredHandlers.get('evaluation:getDecision')
+      expect(handler).toBeDefined()
+      const result = await handler!({}, 'd1')
       expect(result.state).toBe('UNAVAILABLE')
     })
   })

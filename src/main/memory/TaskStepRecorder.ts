@@ -427,7 +427,7 @@ export class TaskStepRecorder {
   private extractTopicsFromRecord(record: TaskStepRecord): string[] {
     const topics: string[] = ['task_step']
     if (record.taskId) topics.push(`task:${record.taskId}`)
-    if (record.toolSuccess) topics.push('success') else topics.push('failure')
+    if (record.toolSuccess) { topics.push('success') } else { topics.push('failure') }
     // 提取工具类别标签
     const lowerName = record.toolName.toLowerCase()
     if (lowerName.includes('read') || lowerName.includes('get') || lowerName.includes('search') || lowerName.includes('query')) {

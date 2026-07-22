@@ -105,6 +105,16 @@ import {
   generatePodcastPreviewTool,
 } from './definitions/GeneratePodcastTool'
 import { adaptiveOrchestrationTools } from './definitions/AdaptiveOrchestrationTools'
+import {
+  blogPreparePublishTool,
+  blogPublishTool,
+  blogApprovePublishTool,
+  blogRejectPublishTool,
+  blogPublishStatusTool,
+  blogPublishRollbackTool,
+  blogPublishCredentialCheckTool,
+  blogPublishWorkflowTool,
+} from './definitions/BlogPublishTools'
 
 export function getAllTools(): Tool[] {
   return [
@@ -238,5 +248,15 @@ export function getAllTools(): Tool[] {
 
     // === 记忆驱动自适应编排 ===
     ...adaptiveOrchestrationTools as Tool[],
+
+    // === BlogPublish 一键多平台发布工作流 ===
+    blogPreparePublishTool as Tool,
+    blogPublishTool as Tool,
+    blogApprovePublishTool as Tool,
+    blogRejectPublishTool as Tool,
+    blogPublishStatusTool as Tool,
+    blogPublishRollbackTool as Tool,
+    blogPublishCredentialCheckTool as Tool,
+    blogPublishWorkflowTool as Tool,
   ]
 }

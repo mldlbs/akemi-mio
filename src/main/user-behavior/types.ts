@@ -67,6 +67,28 @@ export type UserBehaviorFeature =
   /** 实验42 Phase 3: 替换 UserBehavior 核心模块 */
   | 'plan_experiment_42_replacement'
 
+  // ═════════════════════════════════════════════════════════════════
+  //  Plan:创业雷达 Telegram Bot — 渐进式引入
+  // ═════════════════════════════════════════════════════════════════
+
+  /** 创业雷达 Phase 1: 旁路输出不做决策（观察+日志） */
+  | 'plan_startup_radar_passive'
+  /** 创业雷达 Phase 2: 作为建议源影响部分决策 */
+  | 'plan_startup_radar_suggestion'
+  /** 创业雷达 Phase 3: 替换 UserBehavior 核心模块 */
+  | 'plan_startup_radar_replacement'
+
+  // ═════════════════════════════════════════════════════════════════
+  //  Plan:行为推理替换 — 用 Plan:推理链替代 UserBehavior 启发式算法
+  // ═════════════════════════════════════════════════════════════════
+
+  /** 行为推理替换 Phase 1: 旁路输出不做决策（观察启发式 vs Plan 推理差异） */
+  | 'plan_behavior_replacement_passive'
+  /** 行为推理替换 Phase 2: 作为建议源影响部分决策 */
+  | 'plan_behavior_replacement_suggestion'
+  /** 行为推理替换 Phase 3: 替换核心行为推理模块 */
+  | 'plan_behavior_replacement_replacement'
+
 export type UserBehaviorFeatureMap = ReadonlySet<UserBehaviorFeature>
 
 // ==================== 钩子类型 ====================
@@ -285,6 +307,12 @@ export function parseFeaturesFromEnv(): UserBehaviorFeature[] {
     'plan_experiment_42_passive',
     'plan_experiment_42_suggestion',
     'plan_experiment_42_replacement',
+    'plan_startup_radar_passive',
+    'plan_startup_radar_suggestion',
+    'plan_startup_radar_replacement',
+    'plan_behavior_replacement_passive',
+    'plan_behavior_replacement_suggestion',
+    'plan_behavior_replacement_replacement',
     'asr_adapter',
   ])
 

@@ -21,6 +21,8 @@ import { BaiduEngine } from '../asr/BaiduEngine'
 import { AsrService } from '../asr/AsrService'
 import { asrEvolutionManager } from '../asr/AsrEvolutionManager'
 import { TtsService } from '../tts/TtsService'
+import { piperOrchestrator } from '../tts/PiperOrchestrator'
+import { engineProvider } from '../engine'
 import { ttsScheduler } from '../tts/TtsScheduler'
 import { ttsTypographyFeedbackLoop } from '../tts/TtsTypographyFeedbackLoop'
 import { voiceRoleManager } from '../tts/VoiceRoleManager'
@@ -102,7 +104,7 @@ import { GuardrailDecisionStore } from '../core/evaluation/GuardrailDecisionStor
 import { DEFAULT_GUARDRAIL_POLICY_CONFIG } from '../core/evaluation/GuardrailTypes'
 import { ProgressObserver } from '../core/evaluation/ProgressObserver'
 import { GuardrailProgressAnalyzer } from '../core/evaluation/GuardrailProgressAnalyzer'
-import { type ToolEventBridge } from '../core/evaluation/ToolEventBridge'
+// ToolEventBridge 已在第 99 行作为值导入，类型自动可用
 import type { MetricSnapshot, TimeWindow } from '../core/evaluation/types'
 
 /**
@@ -260,6 +262,12 @@ export class AppRuntime {
 
     const agentService = new AgentService(llmService, asrService, ttsService, eventBus, mcpManager)
     this.agentServiceRef = agentService
+
+    // ── 注册引擎到统一抽象层（通过 IEngineQueryable/IEngineService 接口管理） ──
+    // 调用方可通过 engineProvider.getAll() 遍历所有引擎，无需感知具体实现
+    engineProvider.register(agentService)       // name='agent'
+    engineProvider.register(piperOrchestrator)   // name='piper-tts'
+
     // 将 SubAgentPool 引用注入到 SkillAgentTools 全局
     const { setSubAgentPool } = await import('../tool/definitions/SkillAgentTools')
     setSubAgentPool(agentService['subAgentPool'])
