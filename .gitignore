@@ -29,6 +29,8 @@ logs.*
 *.wav
 *.ps1
 check-*.bat
+check-*.js
+check-*.mjs
 scripts/query-shadow.*
 __*
 !__tests__/
