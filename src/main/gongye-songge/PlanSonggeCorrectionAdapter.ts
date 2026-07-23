@@ -48,6 +48,7 @@
  */
 
 import { log } from '../logger/Logger'
+import { eventBus } from '../core/EventBus'
 import {
   formatBasic,
   detectFormatNeed,
@@ -679,6 +680,7 @@ export class SonggeCorrectionAdapter implements ISonggeCorrectionProvider {
   /**
    * 通知所有订阅者（类比 UserBehaviorPluginAdapter.notify）。
    * 当外部数据源推送新数据时调用。
+   * 同时通过 EventBus 广播 'songge.correction.ready' 事件供 Plan 订阅。
    */
   notify(result: CorrectionResult): void {
     this.lastResult = result
@@ -689,6 +691,15 @@ export class SonggeCorrectionAdapter implements ISonggeCorrectionProvider {
         // 单个订阅者失败不影响其他订阅者
       }
     }
+    // 通过 EventBus 广播给所有感兴趣的 Plan
+    eventBus.emit('songge.correction.ready', {
+      version: 1,
+      compositeScore: result.compositeScore,
+      totalIssues: result.totalIssues,
+      chaptersNeedingFix: result.chaptersNeedingFix,
+      severity: result.severity,
+      timestamp: result.timestamp,
+    })
   }
 
   /** 获取缓存的最近一次修正结果 */

@@ -18,6 +18,7 @@
  */
 
 import { log } from '../../logger/Logger'
+import { eventBus } from '../../core/EventBus'
 import type {
   PostPerformance,
   AnalyticsReport,
@@ -129,7 +130,7 @@ export class BlogAnalyticsTracker {
     const hasSufficientData = posts.length >= MIN_POSTS_FOR_ANALYSIS
 
     if (!hasSufficientData) {
-      return {
+      const report: AnalyticsReport = {
         generatedAt: Date.now(),
         totalPosts: posts.length,
         platforms: [...new Set(posts.map((p) => p.platform))],
@@ -143,6 +144,18 @@ export class BlogAnalyticsTracker {
         insights: ['数据不足，至少需要 3 篇文章才能生成有效分析'],
         hasSufficientData: false,
       }
+      // 通过 EventBus 广播分析报告就绪事件
+      eventBus.emit('blog.analytics.report.ready', {
+        version: 1,
+        totalPosts: report.totalPosts,
+        platforms: report.platforms,
+        overallAvgViews: report.overallAvgViews,
+        overallAvgEngagementRate: report.overallAvgEngagementRate,
+        hasSufficientData: report.hasSufficientData,
+        insights: report.insights,
+        timestamp: report.generatedAt,
+      })
+      return report
     }
 
     // 按类别汇总
@@ -176,7 +189,7 @@ export class BlogAnalyticsTracker {
       bestTimeSlots,
     )
 
-    return {
+    const report: AnalyticsReport = {
       generatedAt: Date.now(),
       totalPosts: posts.length,
       platforms: [...new Set(posts.map((p) => p.platform))],
@@ -190,6 +203,20 @@ export class BlogAnalyticsTracker {
       insights,
       hasSufficientData: true,
     }
+
+    // 通过 EventBus 广播分析报告就绪事件
+    eventBus.emit('blog.analytics.report.ready', {
+      version: 1,
+      totalPosts: report.totalPosts,
+      platforms: report.platforms,
+      overallAvgViews: report.overallAvgViews,
+      overallAvgEngagementRate: report.overallAvgEngagementRate,
+      hasSufficientData: report.hasSufficientData,
+      insights: report.insights,
+      timestamp: report.generatedAt,
+    })
+
+    return report
   }
 
   // ===========================================================================
@@ -209,7 +236,7 @@ export class BlogAnalyticsTracker {
     const avoidTopics: string[] = []
 
     if (!report.hasSufficientData) {
-      return {
+      const output: StrategyOutput = {
         timestamp: Date.now(),
         dataDriven: false,
         recommendedTopics: plannedTopics?.slice(0, 3) ?? [
@@ -221,6 +248,16 @@ export class BlogAnalyticsTracker {
         avoidTopics: [],
         summary: '数据不足以进行数据驱动的策略调整。建议先发布 3 篇以上文章积累数据。默认推荐通用技术博客方向',
       }
+      // 通过 EventBus 广播策略调整事件
+      eventBus.emit('blog.analytics.strategy.adjusted', {
+        version: 1,
+        dataDriven: output.dataDriven,
+        recommendedTopics: output.recommendedTopics,
+        adjustmentCount: output.adjustments.length,
+        avoidTopics: output.avoidTopics,
+        timestamp: output.timestamp,
+      })
+      return output
     }
 
     // 基于类别表现调整
@@ -295,7 +332,7 @@ export class BlogAnalyticsTracker {
       while (recommendedTopics.length > 5) recommendedTopics.pop()
     }
 
-    return {
+    const output: StrategyOutput = {
       timestamp: Date.now(),
       dataDriven: true,
       recommendedTopics,
@@ -308,6 +345,18 @@ export class BlogAnalyticsTracker {
         report,
       ),
     }
+
+    // 通过 EventBus 广播策略调整事件
+    eventBus.emit('blog.analytics.strategy.adjusted', {
+      version: 1,
+      dataDriven: output.dataDriven,
+      recommendedTopics: output.recommendedTopics,
+      adjustmentCount: output.adjustments.length,
+      avoidTopics: output.avoidTopics,
+      timestamp: output.timestamp,
+    })
+
+    return output
   }
 
   // ===========================================================================

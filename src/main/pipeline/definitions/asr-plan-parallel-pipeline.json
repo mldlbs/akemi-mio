@@ -1,0 +1,109 @@
+{
+  "pipelineId": "asr-plan-parallel",
+  "description": "ASR × Plan:并行推进：雷达合并 + 工业颂歌备份 + 博客分析 处理流水线。ASR 语音识别输出作为 Plan:并行推进的输入，三个子任务（雷达合并、工业颂歌备份、博客分析）并发执行，中间结果可缓存可重放",
+  "version": "1.0.0",
+  "stages": [
+    {
+      "id": "asr-process",
+      "stageType": "asr-processing",
+      "description": "ASR 语音识别：将输入音频转写为文本，或处理上游文本进行语音意图分析",
+      "dependsOn": [],
+      "config": {
+        "mode": "process-text",
+        "textField": "outputText",
+        "sourceStage": ""
+      },
+      "inputSchema": {
+        "type": "object",
+        "description": "流水线输入可提供音频路径或文本内容",
+        "properties": {
+          "audioFile": { "type": "string", "description": "音频文件路径（transcribe 模式）" },
+          "text": { "type": "string", "description": "文本内容（process-text 模式）" },
+          "outputText": { "type": "string", "description": "上游传递的文本内容" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "description": "ASR 处理是否成功" },
+          "text": { "type": "string", "description": "转写文本（transcribe 模式）" },
+          "processedText": { "type": "string", "description": "处理后文本（process-text 模式）" },
+          "keywords": { "type": "array", "description": "提取的关键词列表" },
+          "metrics": { "type": "object", "description": "文本质量指标" },
+          "voiceEmotion": { "type": "object", "description": "语音情感分析结果" }
+        }
+      }
+    },
+    {
+      "id": "plan-parallel",
+      "stageType": "plan-parallel-advancement",
+      "description": "Plan:并行推进：以 ASR 输出文本为输入，并发执行雷达合并、工业颂歌备份、博客分析三个子任务",
+      "dependsOn": ["asr-process"],
+      "config": {
+        "sourceStage": "asr-process",
+        "textField": "text",
+        "processedTextField": "processedText",
+        "enableRadarMerge": true,
+        "enableSonggeBackup": true,
+        "enableBlogAnalysis": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "description": "自动从 ASR 上游 stage 的输出中获取文本数据",
+        "properties": {
+          "text": { "type": "string", "description": "ASR 转写文本" },
+          "processedText": { "type": "string", "description": "ASR 处理后文本" },
+          "keywords": { "type": "array", "description": "ASR 提取的关键词" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "radarMerge": {
+            "type": "object",
+            "description": "雷达合并子任务输出",
+            "properties": {
+              "success": { "type": "boolean" },
+              "signalCount": { "type": "number" },
+              "urgentCount": { "type": "number" },
+              "compositeHeatIndex": { "type": "number" },
+              "topSignals": { "type": "array" }
+            }
+          },
+          "songgeBackup": {
+            "type": "object",
+            "description": "工业颂歌备份子任务输出",
+            "properties": {
+              "success": { "type": "boolean" },
+              "chaptersAnalyzed": { "type": "number" },
+              "totalIssues": { "type": "number" },
+              "compositeScore": { "type": "number" },
+              "severity": { "type": "string" }
+            }
+          },
+          "blogAnalysis": {
+            "type": "object",
+            "description": "博客分析子任务输出",
+            "properties": {
+              "success": { "type": "boolean" },
+              "totalPosts": { "type": "number" },
+              "insights": { "type": "array" },
+              "strategyRecommendedTopics": { "type": "array" },
+              "hasSufficientData": { "type": "boolean" }
+            }
+          },
+          "durations": {
+            "type": "object",
+            "description": "各子任务耗时",
+            "properties": {
+              "radarMerge": { "type": "number" },
+              "songgeBackup": { "type": "number" },
+              "blogAnalysis": { "type": "number" }
+            }
+          },
+          "totalDurationMs": { "type": "number", "description": "总耗时" }
+        }
+      }
+    }
+  ]
+}

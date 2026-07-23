@@ -896,6 +896,64 @@ export function createElectronAPI(ipc: IpcRenderer) {
     setWallpaperInteractiveEnabled: (enabled: boolean): Promise<{ success: boolean }> =>
       ipc.invoke('wallpaper:interactive:setEnabled', enabled),
 
+    // ── 博客写作看板 ──
+    getBlogKanbanStatus: (): Promise<{
+      sessions: Array<{
+        sessionId: string
+        topic: string
+        targetPlatform: string
+        currentStageId: string
+        currentStageLabel: string
+        stageProgress: number
+        currentStageIndex: number
+        totalStages: number
+        completedStages: number
+        skippedStages: number
+        percentComplete: number
+        completed: boolean
+        stageStatuses: Array<{ stageId: string; label: string; status: string; index: number }>
+        createdAt: number
+        lastActivityAt: number
+        progressText: string
+      }>
+      totalActiveSessions: number
+      hasActiveSessions: boolean
+      timestamp: number
+    }> => ipc.invoke('wallpaper:blogKanban:getStatus'),
+
+    refreshBlogKanban: (): Promise<{ success: boolean }> =>
+      ipc.invoke('wallpaper:blogKanban:refresh'),
+
+    onBlogKanbanUpdate: (callback: (data: {
+      sessions: Array<{
+        sessionId: string
+        topic: string
+        targetPlatform: string
+        currentStageId: string
+        currentStageLabel: string
+        stageProgress: number
+        currentStageIndex: number
+        totalStages: number
+        completedStages: number
+        skippedStages: number
+        percentComplete: number
+        completed: boolean
+        stageStatuses: Array<{ stageId: string; label: string; status: string; index: number }>
+        createdAt: number
+        lastActivityAt: number
+        progressText: string
+      }>
+      totalActiveSessions: number
+      hasActiveSessions: boolean
+      timestamp: number
+    }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('wallpaper:blog-kanban:update', handler)
+      return () => {
+        ipc.removeListener('wallpaper:blog-kanban:update', handler)
+      }
+    },
+
     // ── 桌面记忆浮窗 ──
     onMemoryContextData: (
       callback: (data: {

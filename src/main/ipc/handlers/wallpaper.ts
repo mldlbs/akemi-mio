@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { log } from '../../logger/Logger'
 import { credentialsManager } from '../../credentials/CredentialsManager'
+import { blogKanbanBridge } from '../../wallpaper/BlogKanbanBridge'
 import type { HandlerContext } from './context'
 
 export function registerWallpaperHandlers({ agentService, memoryContextRef, conversationContextRef, wallpaperInteractiveRef }: HandlerContext): void {
@@ -99,5 +100,24 @@ export function registerWallpaperHandlers({ agentService, memoryContextRef, conv
       log('INFO', 'conversation_navigated', { conversationId })
       return { success: true }
     } catch (err: any) { log('WARN', 'conversation_navigate_failed', { conversationId, error: String(err) }); return { success: false, error: String(err) } }
+  })
+
+  // ── 博客看板数据 ──
+  ipcMain.handle('wallpaper:blogKanban:getStatus', async () => {
+    // 惰性启动桥接器（首次请求时自动启动）
+    if (!blogKanbanBridge.started) {
+      blogKanbanBridge.start()
+    }
+    const payload = blogKanbanBridge.getCachedPayload()
+    return payload ?? { sessions: [], totalActiveSessions: 0, hasActiveSessions: false, timestamp: Date.now() }
+  })
+
+  ipcMain.handle('wallpaper:blogKanban:refresh', async () => {
+    if (!blogKanbanBridge.started) {
+      blogKanbanBridge.start()
+    } else {
+      blogKanbanBridge.refresh()
+    }
+    return { success: true }
   })
 }

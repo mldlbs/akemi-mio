@@ -217,6 +217,7 @@ export class RadarPushScheduler {
    * 执行推送：从远程 Radar API 获取数据并发送到 Telegram。
    */
   private async executePush(rule: RadarPushRule): Promise<void> {
+    const t0 = Date.now()
     log('INFO', 'radar_push_executing', {
       id: rule.id,
       name: rule.name,
@@ -230,12 +231,14 @@ export class RadarPushScheduler {
     const hash = simpleHash(message)
     if (hash === this.lastMessageHash) {
       log('INFO', 'radar_push_duplicate_skipped', { hash })
+      this.emitPushCompleted(rule, message, false, Date.now() - t0, 'duplicate')
       return
     }
     this.lastMessageHash = hash
 
     this.emitPushEvent(rule, message, 0)
     radarPushRuleStore.markPushed(rule.id)
+    this.emitPushCompleted(rule, message, true, Date.now() - t0)
   }
 
   /**
@@ -284,12 +287,28 @@ export class RadarPushScheduler {
    */
   private emitPushEvent(rule: RadarPushRule, message: string, signalCount: number): void {
     eventBus.emit('radar.push.rule_fired', {
+      version: 1,
       ruleId: rule.id,
       ruleName: rule.name,
       message,
       signalCount,
       timestamp: Date.now(),
-    } as any)
+    })
+  }
+
+  /**
+   * 发出推送完成事件，供 Plan 订阅判断推送是否成功。
+   */
+  private emitPushCompleted(rule: RadarPushRule, message: string, success: boolean, durationMs: number, error?: string): void {
+    eventBus.emit('radar.push.completed', {
+      version: 1,
+      ruleId: rule.id,
+      success,
+      messageLength: message.length,
+      durationMs,
+      error,
+      timestamp: Date.now(),
+    })
   }
 }
 

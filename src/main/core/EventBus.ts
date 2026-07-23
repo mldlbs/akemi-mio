@@ -106,6 +106,18 @@ export type EventName =
   | 'feedback_loop.parameter_adjusted'
   | 'evidence.report.ready'
 
+  // ── Radar 推送事件（雷达合并领域，版本化 Schema） ──
+  | 'radar.push.rule_fired'
+  | 'radar.push.completed'
+
+  // ── 工业颂歌修正事件（版本化 Schema） ──
+  | 'songge.correction.ready'
+  | 'songge.correction.applied'
+
+  // ── 博客分析事件（版本化 Schema） ──
+  | 'blog.analytics.report.ready'
+  | 'blog.analytics.strategy.adjusted'
+
 export interface EventPayload {
   'task.lifecycle': { taskId: string; type: string; status: string; durationMs?: number; error?: string }
   'task.registered': { type: string; label: string }
@@ -439,6 +451,62 @@ export interface EventPayload {
     reportId: string
     report: any
     generatedAt: number
+  }
+
+  // ── Radar 推送事件（版本化 Schema） ──
+  'radar.push.rule_fired': {
+    version: 1
+    ruleId: string
+    ruleName: string
+    message: string
+    signalCount: number
+    timestamp: number
+  }
+  'radar.push.completed': {
+    version: 1
+    ruleId: string
+    success: boolean
+    messageLength: number
+    durationMs: number
+    error?: string
+    timestamp: number
+  }
+
+  // ── 工业颂歌修正事件（版本化 Schema） ──
+  'songge.correction.ready': {
+    version: 1
+    compositeScore: number
+    totalIssues: number
+    chaptersNeedingFix: number
+    severity: 'critical' | 'major' | 'minor' | 'info'
+    timestamp: number
+  }
+  'songge.correction.applied': {
+    version: 1
+    fixedIssues: number
+    remainingIssues: number
+    newCompositeScore: number
+    timestamp: number
+  }
+
+  // ── 博客分析事件（版本化 Schema） ──
+  'blog.analytics.report.ready': {
+    version: 1
+    totalPosts: number
+    platforms: string[]
+    overallAvgViews: number
+    overallAvgEngagementRate: number
+    hasSufficientData: boolean
+    insights: string[]
+    timestamp: number
+  }
+  'blog.analytics.strategy.adjusted': {
+    version: 1
+    dataDriven: boolean
+    recommendedTopics: string[]
+    adjustmentCount: number
+    avoidTopics: string[]
+    timestamp: number
   }
 }
 

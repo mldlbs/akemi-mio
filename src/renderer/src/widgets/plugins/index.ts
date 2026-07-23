@@ -24,6 +24,7 @@ import { conversationContextWidget } from './ConversationContextWidget'
 import { fileOrganizerProgressWidget } from './FileOrganizerProgressWidget'
 import { taskPanelWidget } from './TaskPanelWidget'
 import { voiceWallpaperWidget } from './VoiceWallpaperWidget'
+import { blogKanbanWidget } from './BlogKanbanCanvas'
 
 /**
  * 注册所有内置 wallpaper widget 插件。
@@ -50,6 +51,9 @@ export function registerAllWidgets(): void {
 
   // overlay 区 — 实时 Canvas 仪表盘
   wallpaperWidgetRegistry.register(evolutionDashboardCanvasWidget)
+
+  // overlay 区 — 博客写作看板
+  wallpaperWidgetRegistry.register(blogKanbanWidget)
 
   // overlay 区 — 桌面悬浮任务面板
   wallpaperWidgetRegistry.register(taskPanelWidget)
