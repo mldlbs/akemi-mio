@@ -469,18 +469,20 @@ describe('V3 — Score Determinism', () => {
 // ══════════════════════════════════════════════
 
 describe('V4 — Regression Guard', () => {
-  it('context mode guard blocks retrieval with warning (Phase 1 invariant)', () => {
-    // This simulates the mode='context' guard in SessionMemory.retrieve()
-    function guardedRetrieve(mode: 'observation' | 'context'): any[] {
+  it('context mode returns results (Phase 3: mode block removed)', () => {
+    // Phase 3 removed the mode='context' block from retrieve().
+    // Both 'observation' and 'context' now return results —
+    // injection decision moved to ChatExecutor layer.
+    function unguardedRetrieve(mode: 'observation' | 'context'): any[] {
       if (mode === 'context') {
-        // Logs warning and returns empty — Phase 1 invariant
-        return []
+        return [{ id: 'context-result', mode }]
       }
-      return [{ id: 'result' }]
+      return [{ id: 'observation-result', mode }]
     }
 
-    expect(guardedRetrieve('observation').length).toBe(1)
-    expect(guardedRetrieve('context').length).toBe(0)
+    expect(unguardedRetrieve('observation').length).toBe(1)
+    expect(unguardedRetrieve('context').length).toBe(1)
+    expect(unguardedRetrieve('context')[0].id).toBe('context-result')
   })
 
   it('compaction failure isolation — error does not propagate', () => {

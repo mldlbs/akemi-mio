@@ -1,7 +1,8 @@
 # ADR-013: Session Memory Architecture — Event-Driven Memory Layer
 
-**Status:** Draft
+**Status:** Draft — Phase 1 ✅ | Phase 2 ✅ Closed (sm-obs-v2) | Phase 3 🔓 Design Ready
 **Date:** 2026-07-23
+**Updated:** 2026-07-24 (Phase 2 Closed)
 **Supersedes:** None
 **Superseded by:** None
 **References:**
@@ -406,7 +407,7 @@ MemoryScore = 0.4 * RecencyScore
 Phase 1 中 Retrieval 即可用，但只作为 passive observation，不参与模型行为决策。
 
 ```
-Phase 1：基础设施 + Passive Consumption (P0)
+Phase 1：基础设施 + Passive Consumption (P0)          ✅
   - SessionCompaction DB schema
   - ConversationEvent 定义 + Adapter（从 messages DB 转换）
   - Compaction Worker（无 LLM 规则版，reply 后触发）
@@ -415,13 +416,14 @@ Phase 1：基础设施 + Passive Consumption (P0)
   - 记录 observation event: session.digest.retrieved
   - ∵ 不参与决策，不改变 prompt priority
 
-Phase 2：Retrieval Ranking + Metric (P1)
+Phase 2：Retrieval Ranking + Metric (P1)              ✅ CLOSED
   - Scoring 公式实现（含 Attention fallback）
   - AttentionMatch 接入 WorkingMemory
   - 观察 retrieval hit rate / useless context rate / token reduction
   - ∵ 仍不注入 context，只做度量评估
+  - Exit: sm-obs-v2 (2026-07-24), attention_gap deferred to Phase 3
 
-Phase 3：Context Injection (P1)
+Phase 3：Context Injection (P1)                       🔓 READY
   - Memory Context Provider
   - ChatExecutor 注入路径切换（system prompt → 独立 block）
   - 旧 getFormattedContext() 包装为 fallback

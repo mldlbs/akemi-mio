@@ -108,6 +108,12 @@ export type EventType =
   | 'session.digest.retrieved'
   | 'session.digest.retrieved_noop'
   | 'memory.compaction.failed'
+  // ADR-013 Phase 2 — Scoring Quality (补全 EventType union)
+  | 'memory.retrieval.scored'
+  | 'memory.scoring.attention_gap'
+  // ADR-013 Phase 3 — Context Injection
+  | 'memory.context.injected'
+  | 'memory.context.injection_skipped'
 
 // ══════════════════════════════════════════════
 // 任务类别
@@ -608,6 +614,27 @@ export interface MemoryScoringAttentionGapPayload {
   attentionEntityCount: number
 }
 
+// ══════════════════════════════════════════════
+// Phase 3 — Context Injection
+// ══════════════════════════════════════════════
+
+export interface MemoryContextInjectedPayload {
+  sessionId: string
+  /** 被注入的 session 记忆来源 Session IDs */
+  sourceSessions: string[]
+  /** 注入内容 token 估算 */
+  tokenEstimate: number
+  /** 使用的 session_compaction 数量 */
+  sourceCount: number
+  /** 是否 fallback 模式 */
+  fallbackMode: boolean
+}
+
+export interface MemoryContextInjectionSkippedPayload {
+  sessionId: string
+  reason: 'no_results' | 'provider_error' | 'budget_exhausted'
+}
+
 export type EventPayload =
   | ({ type: 'task.started' } & TaskStartedPayload)
   | ({ type: 'task.completed' } & TaskCompletedPayload)
@@ -651,6 +678,9 @@ export type EventPayload =
   // ADR-013 Phase 2 — Scoring Quality
   | ({ type: 'memory.retrieval.scored' } & MemoryRetrievalScoredPayload)
   | ({ type: 'memory.scoring.attention_gap' } & MemoryScoringAttentionGapPayload)
+  // ADR-013 Phase 3 — Context Injection
+  | ({ type: 'memory.context.injected' } & MemoryContextInjectedPayload)
+  | ({ type: 'memory.context.injection_skipped' } & MemoryContextInjectionSkippedPayload)
 
 // ══════════════════════════════════════════════
 // 事件消费者接口（供 Metrics / Fitness / Evolution 使用）

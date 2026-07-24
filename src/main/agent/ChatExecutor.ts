@@ -93,6 +93,7 @@ import type { McpAgentHybridPipeline } from '../hybrid/McpAgentHybridPipeline'
 import { narrativeEmotionController, type StyledTtsSegment } from '../tts/emotion'
 import { TaskStepRecorder } from '../memory/TaskStepRecorder'
 import { SessionMemory, sessionMemory as defaultSessionMemory } from '../memory/SessionMemory'
+import { MemoryContextProvider, type InjectionContext } from '../memory/MemoryContextProvider'
 import { PlanMemoryRecall, planMemoryRecall as defaultPlanMemoryRecall } from '../memory/PlanMemoryRecall'
 
 export class ChatExecutor {
@@ -152,6 +153,12 @@ export class ChatExecutor {
 
   /** ADR-013: Session Memory — 跨会话记忆检索与 compaction */
   private sessionMemory: SessionMemory
+
+  /** ADR-013 Phase 3: Context Injection — SessionMemory → ChatExecutor bridge */
+  private memoryContextProvider: MemoryContextProvider
+
+  /** ADR-013 Phase 3: 缓存的 injection context（toolLoop refresh 时复用） */
+  private currentInjectionCtx: InjectionContext | null = null
 
   /** 计划感知记忆恢复 — 按计划 ID 存储/检索对话上下文摘要 */
   private planMemoryRecall: PlanMemoryRecall
@@ -219,6 +226,7 @@ export class ChatExecutor {
     this.goalGuardrail = goalGuardrail
     this.errorClassifier = { classify: classifyError }
     this.sessionMemory = defaultSessionMemory
+    this.memoryContextProvider = new MemoryContextProvider(defaultSessionMemory)
     this.planMemoryRecall = defaultPlanMemoryRecall
   }
 
@@ -231,6 +239,7 @@ export class ChatExecutor {
   setEvaluationEmitter(emitter: EvaluationEmitter): void {
     this.evaluationEmitter = emitter
     this.sessionMemory.setEvaluationEmitter(emitter)
+    this.memoryContextProvider.setEvaluationEmitter(emitter)
   }
 
   /** 注入 MCP-Agent 混合流水线 */
@@ -325,7 +334,7 @@ export class ChatExecutor {
     }
   }
 
-  private refreshMemory(): void {
+  private refreshMemory(sessionMemCtx?: InjectionContext): void {
     if (!this.memoryService) return
 
     // TODO(v3): 切换为 this.knowledgeQuery.getCombinedContext() 统一获取，
@@ -336,6 +345,12 @@ export class ChatExecutor {
     } catch (err) {
       log('WARN', 'memory_get_formatted_context_failed', { error: String(err) })
       return
+    }
+    // ADR-013 Phase 3: merge session memory context into 【长期记忆】 section
+    if (sessionMemCtx?.text) {
+      memCtx = memCtx
+        ? `${memCtx}\n\n${sessionMemCtx.text}`
+        : sessionMemCtx.text
     }
     this.obsLogger?.logMemory(this.lastUserText, memCtx)
     const reflectCtx = this.reflectLoop.getFormattedContext()
@@ -637,27 +652,26 @@ export class ChatExecutor {
         }
       }
     }
-    // ADR-013 Phase 1: passive session memory retrieval (observe only, no context injection)
+    // ADR-013 Phase 3: context injection — retrieve AND inject session memory
     const attentionEntities = this.workingMemory.attention.getActive()
     this.sessionMemory.setAttention(attentionEntities)
-    const memContext = this.sessionMemory.buildContext({
+    const injectionCtx = this.memoryContextProvider.buildInjectionContext({
       userText: text,
       sessionId: effectiveSessionId,
       activeTopics: [],
       attentionEntities,
-    })
-    if (memContext.digests.length > 0) {
-      log('INFO', 'session_memory_passive_retrieval', {
+    }, rid)
+    this.currentInjectionCtx = injectionCtx
+    if (injectionCtx.text) {
+      log('INFO', 'session_memory_context_injected', {
         sessionId: effectiveSessionId,
-        digests: memContext.digests.length,
-        facts: memContext.facts.length,
-        decisions: memContext.decisions.length,
-        tokens: memContext.totalTokens,
-        sourceSessions: memContext.sourceSessions,
+        sources: injectionCtx.sourceSessions,
+        tokens: injectionCtx.tokenEstimate,
+        fallback: injectionCtx.fallbackMode,
       })
     }
     // 先刷新 memory（可能重建 context），再加用户消息，确保消息不丢失
-    try { this.refreshMemory() } catch (err) { log('WARN', 'refresh_memory_skipped', { error: String(err) }) }
+    try { this.refreshMemory(injectionCtx) } catch (err) { log('WARN', 'refresh_memory_skipped', { error: String(err) }) }
     this.workingMemory.addUser(text)
     eventBus.emit('agent.input.received', { text, requestId: rid, source })
     const contentCategory = classifyContent(text)
@@ -683,7 +697,12 @@ export class ChatExecutor {
       trimOrphanedToolCallsFrom(messages)
       const ctx = new RunContext(rid)
       this.runContext = ctx
-      const reply = await this.toolLoop(messages, ctx, rid, source)
+      let reply = await this.toolLoop(messages, ctx, rid, source)
+      // 统一过滤：去除工具调用 XML 序列化残留（如 <invoke name="centos_exec"> 等）
+      if (reply) {
+        const cleaned = reply.replace(/<invoke\b[^>]*>[\s\S]*?<\/invoke>/gi, '').trim()
+        reply = cleaned || '嗯，我在呢。'
+      }
       if (!reply) {
         this.obsLogger?.logOutput('NO_REPLY', Date.now() - t0)
         this.obsLogger?.flush()
@@ -913,7 +932,7 @@ export class ChatExecutor {
           return ''
         }
         if (i > 0 && i % 5 === 0 && this.memoryService) {
-          this.refreshMemory()
+          this.refreshMemory(this.currentInjectionCtx ?? undefined)
           const f = this.workingMemory.getMessages()
           if (f[0]?.role === 'system') messages[0] = f[0]
         }

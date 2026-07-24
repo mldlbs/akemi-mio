@@ -193,7 +193,7 @@ function extractEntities(messages: StoredMessage[]): EntityRecord[] {
     .slice(0, 15)
 }
 
-function estimateTokenCount(texts: string[]): number {
+export function estimateTokenCount(texts: string[]): number {
   let total = 0
   for (const t of texts) {
     // Rough estimate: ~2 chars per token for CJK, ~4 for ASCII
@@ -387,15 +387,12 @@ export class SessionMemory {
 
   /**
    * 检索与当前上下文相关的 session digests。
-   * Phase 1: passive observation — 返回结果但 caller 不注入 context。
-   * mode='context' 在 Phase 3 前禁用。
+   * Phase 1+2: passive observation — 返回结果但 caller 不注入 context。
+   * Phase 3: mode='context' 可用，ChatExecutor 负责注入决策。
+   *   retrieve() 本身不区分 mode — 差异在 ChatExecutor 层。
    * Phase 2: 每次检索后 emit memory.retrieval.scored / memory.scoring.attention_gap
    */
   retrieve(spec: RetrievalSpec): RetrievalResult[] {
-    if (spec.mode === 'context') {
-      log('WARN', 'session_memory_context_mode_blocked', { msg: 'Phase 1 invariant: context injection disabled by ADR-013' })
-      return []
-    }
     try {
       const allCompactions = this.getAllCompactions()
       if (allCompactions.length === 0) return []
