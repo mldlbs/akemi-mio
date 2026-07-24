@@ -52,11 +52,12 @@ import { PluginLoader, toolRegistry } from '../plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '../skill'
 import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
 import { setupStartupLogging, createWindow, setupWallpaperListener, getMainWindow } from '../core/Lifecycle'
-import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle, setUserContextOverride, setOrganizerPause, setOrganizerResume, setOrganizerSkip, setSubtitleToggle, setVoiceRoleSchemeSwitch, setTaskPanelToggle } from '../core/TrayManager'
+import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle, setUserContextOverride, setOrganizerPause, setOrganizerResume, setOrganizerSkip, setSubtitleToggle, setVoiceRoleSchemeSwitch, setTaskPanelToggle, setVoiceNoteToggle, setVoiceNoteSave } from '../core/TrayManager'
 import { initUpdater, setUpdateWindow } from '../updater/UpdaterService'
 import { EvolutionDashboardService, MemoryContextService, ConversationContextService, FileOrganizerProgressService } from '../wallpaper/WallpaperService'
 import { TaskPanelService } from '../wallpaper/TaskPanelService'
 import { WallpaperInteractiveService } from '../wallpaper/WallpaperInteractiveService'
+import { VoiceNoteService } from '../voicenote/VoiceNoteService'
 import { MonitoringService } from '../monitoring/MonitoringService'
 import { WallpaperEventBridge } from '../wallpaper/WallpaperEventBridge'
 import { initDatabase, closeDatabase, getRawDb, getEventRawDb } from '../db/connection'
@@ -160,6 +161,8 @@ export class AppRuntime {
     createServiceRef()
   private voiceBookmarkRef: ServiceRef<VoiceBookmarkService> = createServiceRef<VoiceBookmarkService>()
   private voiceBookmarkService?: VoiceBookmarkService
+  private voiceNoteRef: ServiceRef<VoiceNoteService> = createServiceRef<VoiceNoteService>()
+  private voiceNoteService?: VoiceNoteService
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
     this.crashGuard = crashGuard ?? { flushMemory: null }
@@ -568,6 +571,7 @@ export class AppRuntime {
       wallpaperInteractiveRef,
       restoreRef,
       this.conversationContextRef,
+      this.voiceNoteRef,
     )
 
     // === Stage 3: 核心服务（内存、插件、技能） ===
@@ -593,6 +597,34 @@ export class AppRuntime {
     setMemoryService(memoryService)
     setPlanManager(planManager)
     setToolSkillManager(skillManager)
+
+    // ── 智能并行任务协调器 ──
+    // 集成 plan-scheduler 到 Agent：自动管理多计划的 DAG 调度、心跳推进、对话干预
+    const { PlanSchedulerCoordinator, createAndStartSchedulerNotificationBridge } = await import('../plan-scheduler')
+    const { setPlanSchedulerCoordinator } = await import('../tool/deps')
+    const planSchedulerCoordinator = new PlanSchedulerCoordinator(
+      llmService,
+      agentService['toolScheduler'],
+      {
+        planManager,
+        llmService: { chatJson: (prompt: string, opts?: any) => llmService.chatJson(prompt, opts) },
+        emitEvent: (event) => {
+          const eventName = event.type.replace(/\./g, '_')
+          eventBus.emit(`plan_scheduler.${eventName}` as any, event as any)
+        },
+        log: (level, msg, meta) => log(level, msg, meta),
+      },
+      {
+        autoLoadActivePlans: true,
+        enableNotifications: true,
+        heartbeatIntervalMs: 30_000,
+        autoSyncIntervalMs: 60_000,
+      },
+    )
+    planSchedulerCoordinator.start()
+    setPlanSchedulerCoordinator(planSchedulerCoordinator)
+    // 启动调度事件 → TTS 通知桥接
+    createAndStartSchedulerNotificationBridge()
 
     // ── 语音记忆书签服务 ──
     const voiceBookmarkSvc = new VoiceBookmarkService()
@@ -1443,8 +1475,8 @@ export class AppRuntime {
         })
         // 注册基础 collector 和 executor（注入 SubAgentPoolAdapter 替代旧 SubAgentPool）
         pipeline.initDefaults(agentService.getSubAgentPool())
-        // Phase 3C+: 注入 Shadow Mode ExecutionPolicy（evaluate + emit, 不阻断执行）
-        pipeline.setExecutionPolicy(new ExecutionPolicy({ mode: 'shadow' }))
+        // Phase 3C.3: 注入 v1.1.0 Shadow Mode ExecutionPolicy（策略策略校准期）
+        pipeline.setExecutionPolicy(new ExecutionPolicy({ mode: 'shadow', policyVersion: '1.1.0' }))
         // 注册 Evolution 插件（ServiceLoader 模式）
         const { PluginServiceLoader, WallpaperPlugin, PluginCollectorAdapter, PluginExecutorAdapter } = await import('../evolution/plugin')
         const pluginLoader = PluginServiceLoader.getInstance()
@@ -1503,6 +1535,22 @@ export class AppRuntime {
         evolution.setPipeline(pipeline)
         // Memory × Evolution 深度融合：注入桥接器
         evolution.setMemoryBridge(memoryEvolutionBridge)
+
+        // ★ 自进化计划优化器初始化
+        {
+          const { planOptimizerEngine, planOptimizerCollector, planOptimizerExecutor } = await import('../evolution/plan-optimizer')
+          // 注入 LLM 分析能力
+          planOptimizerEngine.setAnalyzeFn((prompt: string, opts?: any) =>
+            llmService.chatJson(prompt, opts),
+          )
+          // 注入 PlanManager（与 evolution 共享同一实例）
+          planOptimizerCollector.setPlanManager(planManager)
+          planOptimizerExecutor.setPlanManager(planManager)
+          // 注册到管道（作为 Feature 来源的 Collector 和 Executor）
+          pipeline.addCollector(planOptimizerCollector)
+          pipeline.addExecutor(planOptimizerExecutor)
+          log('INFO', 'plan_optimizer_initialized')
+        }
 
         // Phase 3C.2: 将 policy.decision 事件持久化为 EvaluationEvent
         const { PolicyDecisionObserver } = await import('../core/evaluation/observers/PolicyDecisionObserver')
@@ -1949,6 +1997,33 @@ export class AppRuntime {
       },
     })
 
+    // 语音便签壁纸 — 全局快捷键 Ctrl+Shift+V + 托盘控制
+    this.lazyInit!.add({
+      name: 'voicenote',
+      priority: 'normal',
+      delayMs: 600,
+      fn: async () => {
+        const svc = new VoiceNoteService()
+        const win = getMainWindow()
+        if (win && !win.isDestroyed()) {
+          svc.setWindowRef(() => getMainWindow())
+        }
+        svc.start()
+        this.voiceNoteService = svc
+        this.voiceNoteRef.current = svc
+        // 托盘回调
+        setVoiceNoteToggle(() => {
+          const s = this.voiceNoteRef.current
+          if (s) s.toggle()
+        })
+        setVoiceNoteSave(async () => {
+          const s = this.voiceNoteRef.current
+          if (s) await s.save()
+        })
+        log('INFO', 'voicenote_service_started', {})
+      },
+    })
+
     // 用户行为追踪 — 驱动行为感知壁纸
     this.lazyInit!.add({
       name: 'user-behavior',
@@ -1972,6 +2047,28 @@ export class AppRuntime {
         })
 
         log('INFO', 'user_behavior_service_started')
+      },
+    })
+
+    // 行为周期性预测预加载服务（行为预测 + 哑提醒推送）
+    this.lazyInit!.add({
+      name: 'periodic-prediction',
+      priority: 'normal',
+      delayMs: 5000,
+      fn: async () => {
+        const { behaviorPeriodicPreloadService } = await import('../behavior/BehaviorPeriodicPreloadService')
+        const mainWindow = getMainWindow()
+
+        // 注入渲染进程通知函数（通过 IPC 推送哑提醒）
+        behaviorPeriodicPreloadService.setNotifyRenderer((event) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('behavior:prediction', event)
+          }
+        })
+
+        // 启动周期性检查（每 15 分钟）
+        behaviorPeriodicPreloadService.start()
+        log('INFO', 'periodic_prediction_service_started')
       },
     })
 

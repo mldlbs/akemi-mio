@@ -51,6 +51,9 @@ import { AgentPromptOptimizer } from './AgentPromptOptimizer'
 import { agentMonitor } from '../../agent/AgentMonitor'
 import { BlogOptimizationCollector } from '../blog/BlogOptimizationCollector'
 import { BlogOptimizationExecutor } from '../blog/BlogOptimizationExecutor'
+import { ParameterSelfEvolutionAnalyzer, parameterSelfEvolutionAnalyzer } from '../self-parameter/ParameterSelfEvolutionAnalyzer'
+import { ParameterSelfEvolutionExecutor } from '../self-parameter/ParameterSelfEvolutionExecutor'
+import { correctionPatternCollector } from './CorrectionPatternCollector'
 
 export interface PipelineConfig {
   projectRoot: string
@@ -98,6 +101,16 @@ export class PipelineOrchestrator {
   }
 
   /**
+   * 设置行为优先级权重（模块 → 权重倍数）。
+   * 权重由 BehaviorPriorityWeighter 根据用户行为热力图计算，
+   * 高频/高错误模块获得更高权重，低频模块获得低权重。
+   * 影响 ProblemQueue.sort() 中的问题优先级排序。
+   */
+  setBehaviorWeights(weights: Record<string, number> | null): void {
+    this.queue.setBehaviorWeights(weights)
+  }
+
+  /**
    * 初始化内置 Collector 和 Executor
    *
    * 两阶段初始化：
@@ -141,6 +154,10 @@ export class PipelineOrchestrator {
     // 博客工作流优化采集器
     const blogOptCollector = new BlogOptimizationCollector()
     registerCollector(blogOptCollector)
+    // 参数自进化采集器（记忆驱动的参数调优）
+    registerCollector(parameterSelfEvolutionAnalyzer)
+    // 重复纠正模式采集器（用户反复纠正同一问题 → 生成改进提案）
+    registerCollector(correctionPatternCollector)
 
     // Stage 3: 从注册表加载到本地
     for (const c of getAllCollectors()) {
@@ -183,6 +200,8 @@ export class PipelineOrchestrator {
     // 博客工作流优化执行器
     const blogOptExecutor = new BlogOptimizationExecutor()
     registerExecutor(blogOptExecutor)
+    // 参数自进化执行器（验证并应用参数调整提案）
+    registerExecutor(new ParameterSelfEvolutionExecutor())
 
     // Stage 5: 从注册表加载到本地
     for (const e of getAllExecutors()) {
@@ -340,7 +359,7 @@ export class PipelineOrchestrator {
       mode: this.executionPolicy ? this.executionPolicy.mode : 'disabled',
       executed,
       reason: verdict.reason,
-      policyVersion: this.executionPolicy ? '1.0.0' : '0.0.0',
+      policyVersion: this.executionPolicy ? this.executionPolicy.policyVersion : '0.0.0',
       timestamp: Date.now(),
     }
     eventBus.emit('policy.decision', event)

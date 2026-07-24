@@ -76,6 +76,32 @@ export interface PolicyDecisionEvent {
 // =============================================================================
 
 /**
+ * Policy v1.1.0 Strategy by Source:
+ *
+ * ── Protected Block ──
+ * cicd:   tsc compilation errors are high-certainty failures.
+ *         block → level_2_execute (deepseek/agent-sdk) serves as fallback.
+ *         Not changed to execute: no value in running executor before tsc error is resolved.
+ *
+ * ── Record-Only (skip) ──
+ * evidence:   external observation, no auto-fix target.
+ * memory:     system state, auto-execution high risk.
+ * agent:      agent behavior observations, manual review required.
+ *
+ * ── Candidate Execute (level_1_propose pending calibration) ──
+ * feature:   code/UI/behavior changes — potential execute candidate.
+ *            Shadow data shows all observed severity=info (auto-skip).
+ *            Re-evaluate when feature:error samples exist.
+ * behavior:  same as feature.
+ * tool:      configuration/analytics — low-risk, future execute candidate.
+ * tts:       voice preference tuning — low-risk, future execute candidate.
+ * blog:      content generation — supervised execution path.
+ *
+ * ── Execute ──
+ * tsc/test/lint/log/git/runtime: established auto-fix paths.
+ */
+
+/**
  * 按 source 分级的默认策略。
  * 每个 source 在没有被规则覆盖时使用此默认值。
  */
@@ -109,11 +135,12 @@ const LOCKED_LEVEL_0: ProblemSource[] = ['evidence', 'memory', 'agent']
 // =============================================================================
 
 export class ExecutionPolicy {
-  private policyVersion = '1.0.0'
+  readonly policyVersion: string
   readonly mode: ExecutionMode
 
-  constructor(options?: { mode?: ExecutionMode }) {
+  constructor(options?: { mode?: ExecutionMode; policyVersion?: string }) {
     this.mode = options?.mode ?? 'disabled'
+    this.policyVersion = options?.policyVersion ?? '1.0.0'
   }
 
   /**
