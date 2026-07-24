@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { log } from '../../logger/Logger'
 import { credentialsManager } from '../../credentials/CredentialsManager'
 import { voiceRoleManager } from '../../tts/VoiceRoleManager'
+import { emotionToneMap } from '../../tts/EmotionToneMap'
 import type { HandlerContext } from './context'
 
 export function registerTtsHandlers({ agentService, ttsService }: HandlerContext): void {
@@ -193,5 +194,35 @@ export function registerTtsHandlers({ agentService, ttsService }: HandlerContext
   ipcMain.handle('voice:role:forTask', async (_event, taskType: string) => {
     try { const r = voiceRoleManager.selectRoleForTask(taskType); return { success: true, ...r } }
     catch (err) { log('ERROR', 'voice_role_for_task_failed', { error: String(err) }); return { success: false } }
+  })
+
+  // ══════════════════════════════════════════
+  //  Emotion Mapping — 用户自定义情感映射
+  // ══════════════════════════════════════════
+
+  ipcMain.handle('tts:emotionMapping:set', async (_event, key: string, params: { voice: string; rate: string; pitch: string; label: string }) => {
+    try {
+      emotionToneMap.setUserOverride(key, params)
+      log('INFO', 'emotion_mapping_set_ipc', { key })
+      return { success: true }
+    } catch (err) { log('ERROR', 'emotion_mapping_set_failed', { error: String(err) }); return { success: false, error: String(err) } }
+  })
+
+  ipcMain.handle('tts:emotionMapping:remove', async (_event, key: string) => {
+    try { const removed = emotionToneMap.removeUserOverride(key); return { success: removed } }
+    catch (err) { log('ERROR', 'emotion_mapping_remove_failed', { error: String(err) }); return { success: false, error: String(err) } }
+  })
+
+  ipcMain.handle('tts:emotionMapping:getAll', async () => {
+    try {
+      const builtin = emotionToneMap.getAllMappings()
+      const overrides = emotionToneMap.getAllUserOverrides()
+      return { success: true, builtin, overrides }
+    } catch (err) { log('ERROR', 'emotion_mapping_get_all_failed', { error: String(err) }); return { success: false, error: String(err) } }
+  })
+
+  ipcMain.handle('tts:emotionMapping:clear', async () => {
+    try { emotionToneMap.clearUserOverrides(); log('INFO', 'emotion_mapping_clear_ipc'); return { success: true } }
+    catch (err) { log('ERROR', 'emotion_mapping_clear_failed', { error: String(err) }); return { success: false, error: String(err) } }
   })
 }

@@ -8,8 +8,8 @@
  */
 
 import { log } from '../../logger/Logger'
-import { piperOrchestrator } from '../../tts/PiperOrchestrator'
 import { ttsPiperBridge } from '../../tts/TtsPiperBridge'
+import { piperBehaviorSidecar } from '../../tts/PiperBehaviorSidecar'
 import type { StageExecutor, StageOutput, StageExecutionContext } from '../types'
 
 export class PiperSynthesisStage implements StageExecutor {
@@ -70,8 +70,8 @@ export class PiperSynthesisStage implements StageExecutor {
         timeoutMs: synthesisTimeoutMs,
       })
 
-      // 执行合成
-      const result = await piperOrchestrator.synthesize(request)
+      // 执行合成（通过边车：享受缓存 + 监控能力）
+      const result = await piperBehaviorSidecar.synthesize(request)
       const elapsed = Date.now() - t0
 
       if (result.success) {

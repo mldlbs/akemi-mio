@@ -209,3 +209,17 @@ export function setAdaptiveOrchestrator(orchestrator: any): void {
 export function getAdaptiveOrchestrator(): any {
   return _adaptiveOrchestrator
 }
+
+// ── PlanSchedulerCoordinator（供 PlanSchedulerTools 调用）──
+
+import type { PlanSchedulerCoordinator } from '../plan-scheduler/PlanSchedulerCoordinator'
+
+let _planSchedulerCoordinator: PlanSchedulerCoordinator | null = null
+
+export function setPlanSchedulerCoordinator(c: PlanSchedulerCoordinator | null): void {
+  _planSchedulerCoordinator = c
+}
+
+export function getPlanSchedulerCoordinator(): PlanSchedulerCoordinator | null {
+  return _planSchedulerCoordinator
+}

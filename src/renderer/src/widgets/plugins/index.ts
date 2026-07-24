@@ -24,6 +24,7 @@ import { conversationContextWidget } from './ConversationContextWidget'
 import { fileOrganizerProgressWidget } from './FileOrganizerProgressWidget'
 import { taskPanelWidget } from './TaskPanelWidget'
 import { voiceWallpaperWidget } from './VoiceWallpaperWidget'
+import { voiceNoteWidget } from './VoiceNoteWidget'
 import { blogKanbanWidget } from './BlogKanbanCanvas'
 
 /**
@@ -57,6 +58,9 @@ export function registerAllWidgets(): void {
 
   // overlay 区 — 桌面悬浮任务面板
   wallpaperWidgetRegistry.register(taskPanelWidget)
+
+  // overlay 区 — 语音便签壁纸
+  wallpaperWidgetRegistry.register(voiceNoteWidget)
 
   // monitor 区
   wallpaperWidgetRegistry.register(evolutionStatusWidget)

@@ -102,3 +102,15 @@ export type {
   ActiveTimeDistribution,
   PublishRecommendation,
 } from './BehaviorBlogBridge'
+
+// ── 行为周期性预测（查询内容 × 时间周期预测模型）──
+export { BehaviorPeriodicPredictor, behaviorPeriodicPredictor } from './BehaviorPeriodicPredictor'
+export type {
+  PeriodicQueryPrediction,
+  TimeSlotPrediction,
+  PeriodicPredictionModel,
+  PeriodicPredictionEvent,
+} from './BehaviorPeriodicPredictor'
+
+// ── 行为周期性预加载服务（空闲时段预加载 + 哑提醒推送）──
+export { BehaviorPeriodicPreloadService, behaviorPeriodicPreloadService } from './BehaviorPeriodicPreloadService'

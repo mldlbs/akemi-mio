@@ -14,6 +14,7 @@
  *   zh-CN-YunyangNeural    男声，专业播报风，适合新闻/公告
  */
 
+import { log } from '../logger/Logger'
 import type { SentimentResult, SentimentPolarity, EmotionTtsParams } from './types'
 
 // ══════════════════════════════════════════
@@ -26,6 +27,15 @@ const DEFAULT_PARAMS: EmotionTtsParams = {
   pitch: '+8Hz',
   label: '默认/日常',
 }
+
+// ══════════════════════════════════════════
+//  紧急度阈值
+// ══════════════════════════════════════════
+
+/**
+ * 紧急度阈值：超过此值启用紧急（urgent）映射
+ */
+const URGENCY_THRESHOLD = 0.4
 
 // ══════════════════════════════════════════
 //  情感→音色映射表
@@ -117,6 +127,51 @@ const TONE_MAP: Record<string, EmotionTtsParams> = {
     label: '严肃·代码',
   },
 
+  // ── 紧急内容 ──
+  // 紧急不分极性，紧凑节奏优先
+  'urgent:error': {
+    voice: 'zh-CN-YunjianNeural',
+    rate: '+12%',
+    pitch: '+4Hz',
+    label: '紧迫·告警',
+  },
+  'urgent:success': {
+    voice: 'zh-CN-XiaoxiaoNeural',
+    rate: '+20%',
+    pitch: '+12Hz',
+    label: '急促·成功',
+  },
+  'urgent:chat': {
+    voice: 'zh-CN-YunyangNeural',
+    rate: '+18%',
+    pitch: '+6Hz',
+    label: '紧凑·通知',
+  },
+  'urgent:weather': {
+    voice: 'zh-CN-YunjianNeural',
+    rate: '+15%',
+    pitch: '+5Hz',
+    label: '紧急·天气',
+  },
+  'urgent:news': {
+    voice: 'zh-CN-YunyangNeural',
+    rate: '+15%',
+    pitch: '+5Hz',
+    label: '加急·新闻',
+  },
+  'urgent:code': {
+    voice: 'zh-CN-YunjianNeural',
+    rate: '+15%',
+    pitch: '+4Hz',
+    label: '急修·代码',
+  },
+  'urgent:data': {
+    voice: 'zh-CN-YunyangNeural',
+    rate: '+12%',
+    pitch: '+4Hz',
+    label: '紧急·数据',
+  },
+
   // ── 中性情感 ──
   'neutral:weather': {
     voice: 'zh-CN-YunxiNeural',
@@ -162,25 +217,46 @@ const TONE_MAP: Record<string, EmotionTtsParams> = {
 
 export class EmotionToneMap {
   /**
+   * 用户自定义映射覆盖。
+   * key = `${polarity}:${contentType}`，value = 用户覆盖的 TTS 参数。
+   * 优先级高于 TONE_MAP 内置映射。
+   */
+  private userOverrides: Map<string, EmotionTtsParams> = new Map()
+
+  /**
    * 根据情感分析结果获取 TTS 参数
    *
    * 匹配优先级：
-   *   1. polarity + contentType 精确匹配
-   *   2. polarity + 'chat' 回退
-   *   3. 默认参数
+   *   1. 用户自定义覆盖（userOverrides）
+   *   2. urgency >= URGENCY_THRESHOLD 时，urgent:contentType 或 urgent:chat 回退
+   *   3. polarity + contentType 精确匹配
+   *   4. polarity + 'chat' 回退
+   *   5. 默认参数
    */
   getParams(result: SentimentResult): EmotionTtsParams {
-    const { polarity, contentType } = result
+    const { polarity, contentType, urgency } = result
 
-    // 1. 精确匹配
+    // 1. 用户自定义覆盖（key 格式同内置映射）
     const exactKey = `${polarity}:${contentType}`
+    const userOverride = this.userOverrides.get(exactKey)
+    if (userOverride) return userOverride
+
+    // 2. 紧急度触发紧急映射
+    if (urgency >= URGENCY_THRESHOLD) {
+      const urgentKey = `urgent:${contentType}`
+      if (TONE_MAP[urgentKey]) return TONE_MAP[urgentKey]
+      const urgentFallback = 'urgent:chat'
+      if (TONE_MAP[urgentFallback]) return TONE_MAP[urgentFallback]
+    }
+
+    // 3. 精确匹配（内置映射）
     if (TONE_MAP[exactKey]) return TONE_MAP[exactKey]
 
-    // 2. 同极性通用回退
+    // 4. 同极性通用回退
     const polarityFallback = `${polarity}:chat`
     if (TONE_MAP[polarityFallback]) return TONE_MAP[polarityFallback]
 
-    // 3. 默认参数
+    // 5. 默认参数
     return DEFAULT_PARAMS
   }
 
@@ -188,14 +264,75 @@ export class EmotionToneMap {
    * 将 polarity 和 contentType 分开传入（便利方法）
    */
   getByPolarityAndType(polarity: SentimentPolarity, contentType: string): EmotionTtsParams {
-    return this.getParams({ polarity, contentType, score: 0, matchedWords: [] })
+    return this.getParams({ polarity, contentType, score: 0, matchedWords: [], urgency: 0 })
+  }
+
+  // ══════════════════════════════════════════
+  //  用户自定义映射覆盖
+  // ══════════════════════════════════════════
+
+  /**
+   * 设置用户自定义情感映射覆盖。
+   *
+   * @param key 映射键，格式为 `${polarity}:${contentType}`，如 `positive:chat`、`negative:error`
+   * @param params 覆盖的 TTS 参数
+   */
+  setUserOverride(key: string, params: EmotionTtsParams): void {
+    this.userOverrides.set(key, { ...params })
+    log('INFO', 'emotion_tone_user_override_set', {
+      key,
+      voice: params.voice,
+      rate: params.rate,
+      pitch: params.pitch,
+      label: params.label,
+    })
   }
 
   /**
-   * 检查当前参数是否与目标不同（用于避免不必要的 TTS 进程重启）
+   * 移除指定映射的用户覆盖，恢复为内置映射。
    */
-  isDifferent(a: EmotionTtsParams, b: EmotionTtsParams): boolean {
-    return a.voice !== b.voice || a.rate !== b.rate || a.pitch !== b.pitch
+  removeUserOverride(key: string): boolean {
+    const existed = this.userOverrides.delete(key)
+    if (existed) {
+      log('INFO', 'emotion_tone_user_override_removed', { key })
+    }
+    return existed
+  }
+
+  /**
+   * 获取指定映射的用户覆盖（如不存在则返回 undefined）
+   */
+  getUserOverride(key: string): EmotionTtsParams | undefined {
+    return this.userOverrides.get(key)
+  }
+
+  /**
+   * 获取所有用户自定义覆盖
+   */
+  getAllUserOverrides(): Array<{ key: string; params: EmotionTtsParams }> {
+    return Array.from(this.userOverrides.entries()).map(([key, params]) => ({ key, params }))
+  }
+
+  /**
+   * 清除所有用户自定义覆盖
+   */
+  clearUserOverrides(): void {
+    this.userOverrides.clear()
+    log('INFO', 'emotion_tone_user_overrides_cleared')
+  }
+
+  /**
+   * 批量设置用户自定义映射覆盖
+   *
+   * @param overrides 覆盖映射表
+   */
+  setUserOverrides(overrides: Record<string, EmotionTtsParams>): void {
+    for (const [key, params] of Object.entries(overrides)) {
+      this.userOverrides.set(key, { ...params })
+    }
+    log('INFO', 'emotion_tone_user_overrides_batch_set', {
+      count: Object.keys(overrides).length,
+    })
   }
 
   /**

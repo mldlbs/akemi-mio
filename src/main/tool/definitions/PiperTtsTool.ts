@@ -25,6 +25,7 @@ import { formatToolResult, formatToolError } from '../types'
 import { log } from '../../logger/Logger'
 import { cleanTTS } from '../../tts/TtsService'
 import { piperOrchestrator, type PiperTaskTag, PIPER_MODEL_CATALOG } from '../../tts/PiperOrchestrator'
+import { piperBehaviorSidecar } from '../../tts/PiperBehaviorSidecar'
 import { voiceRoleManager } from '../../tts/VoiceRoleManager'
 import { VOICE_ROLE_MAP } from '../../tts/VoiceRoleTypes'
 import { BrowserWindow } from 'electron'
@@ -138,8 +139,8 @@ export const speakWithPiperTool = buildTool({
       queue_size: piperOrchestrator.getQueueStatus().queueSize,
     })
 
-    // 通过 Orchestrator 排队合成（串行处理，自动回退）
-    const result = await piperOrchestrator.synthesize({
+    // 通过边车排队合成（串行处理，自动回退，享受缓存+监控）
+    const result = await piperBehaviorSidecar.synthesize({
       text,
       taskTag: args.task_tag as PiperTaskTag | undefined,
       model: resolvedModel,

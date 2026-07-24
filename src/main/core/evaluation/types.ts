@@ -104,6 +104,10 @@ export type EventType =
   | 'guardrail.config.terminated'
   // ── Evolution Governance（Phase 3C.2）
   | 'evolution.policy.decision'
+  // ── Session Memory（ADR-013）
+  | 'session.digest.retrieved'
+  | 'session.digest.retrieved_noop'
+  | 'memory.compaction.failed'
 
 // ══════════════════════════════════════════════
 // 任务类别
@@ -509,6 +513,101 @@ export interface PolicyDecisionPayload {
   evaluatedAt: number
 }
 
+// ══════════════════════════════════════════════
+// Session Memory Payloads（ADR-013 — Phase 1 Observation）
+// ══════════════════════════════════════════════
+
+export interface SessionDigestRetrievedPayload {
+  /** 被召回的 session ID */
+  sessionId: string
+  /** 匹配的 compaction ID */
+  digestId: string
+  /** 综合得分 */
+  score: number
+  /** 各因子得分 */
+  matchedFactors: {
+    recency: number
+    attention?: number
+    frequency: number
+    importance: number
+  }
+  /** 估算 token 数 */
+  tokenEstimate: number
+  /** 来源 session */
+  sourceSessionId: string
+}
+
+export interface SessionDigestRetrievedNoopPayload {
+  /** 本次检索未匹配到任何 digest */
+  matchedCount: 0
+  /** 检索的会话 ID */
+  sessionId: string
+}
+
+export interface MemoryCompactionFailedPayload {
+  sessionId: string
+  error: string
+  messageCount: number
+}
+
+// ══════════════════════════════════════════════
+// Session Memory Payloads（ADR-013 — Phase 2 Scoring Evaluation）
+// ══════════════════════════════════════════════
+
+export interface MemoryRetrievalScoredPayload {
+  /** 被检索的 session ID */
+  sessionId: string
+  /** 目标 session 过滤（可选） */
+  specSessionId?: string
+  /** 数据库中的 compaction 总数 */
+  totalCompactions: number
+  /** score > 0 的 compaction 数 */
+  scoredCount: number
+  /** 本次检索是否传入了 attention entities */
+  attentionAvailable: boolean
+  /** 评分分布摘要 */
+  scoreDistribution: {
+    min: number
+    max: number
+    avg: number
+    median: number
+  }
+  /** Top 3 分数（gap 分析用） */
+  topScores: number[]
+  /** Token budget */
+  tokenBudget: number
+  /** 实际使用的 token */
+  tokenUtilized: number
+  /** 最终返回的 compaction 数 */
+  resultCount: number
+}
+
+export interface MemoryScoringAttentionGapPayload {
+  /** 被检索的 session ID */
+  sessionId: string
+  /** 使用 attention 分支的分数 */
+  attentionScore: number
+  /** 使用 fallback 分支的分数 */
+  fallbackScore: number
+  /** 差距绝对值 */
+  gap: number
+  /** attention 分支的 matchedFactors */
+  attentionFactors: {
+    recency: number
+    attention: number
+    frequency: number
+    importance: number
+  }
+  /** fallback 分支的 matchedFactors */
+  fallbackFactors: {
+    recency: number
+    frequency: number
+    importance: number
+  }
+  /** 活跃 attention entity 数量 */
+  attentionEntityCount: number
+}
+
 export type EventPayload =
   | ({ type: 'task.started' } & TaskStartedPayload)
   | ({ type: 'task.completed' } & TaskCompletedPayload)
@@ -545,6 +644,13 @@ export type EventPayload =
   | ({ type: 'guardrail.config.terminated' } & GuardrailConfigTerminatedPayload)
   // Phase 3C.2 — Evolution Governance
   | ({ type: 'evolution.policy.decision' } & PolicyDecisionPayload)
+  // ADR-013 — Session Memory
+  | ({ type: 'session.digest.retrieved' } & SessionDigestRetrievedPayload)
+  | ({ type: 'session.digest.retrieved_noop' } & SessionDigestRetrievedNoopPayload)
+  | ({ type: 'memory.compaction.failed' } & MemoryCompactionFailedPayload)
+  // ADR-013 Phase 2 — Scoring Quality
+  | ({ type: 'memory.retrieval.scored' } & MemoryRetrievalScoredPayload)
+  | ({ type: 'memory.scoring.attention_gap' } & MemoryScoringAttentionGapPayload)
 
 // ══════════════════════════════════════════════
 // 事件消费者接口（供 Metrics / Fitness / Evolution 使用）

@@ -142,8 +142,10 @@ export interface SidecarStats {
 // ══════════════════════════════════════════
 
 export class PiperBehaviorSidecar {
-  /** 包裹的 PiperOrchestrator 实例 */
-  private readonly orchestrator = piperOrchestrator
+  /** 包裹的 PiperOrchestrator 实例（惰性访问，避免 bundler 加载时序问题） */
+  private get orchestrator() {
+    return piperOrchestrator
+  }
 
   /** 当前行为上下文（从外部注入） */
   private behaviorInput: BehaviorSidecarInput = { ...DEFAULT_BEHAVIOR_INPUT }

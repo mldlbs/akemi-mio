@@ -34,6 +34,22 @@ export interface MemoryEmotionTag {
 }
 
 /** 语音记忆书签 */
+/**
+ * 计划对话记忆 — 按计划 ID 存储的对话上下文摘要
+ */
+export interface PlanConversationData {
+  /** 关联的计划 ID */
+  planId: string
+  /** 计划标题 */
+  planTitle: string
+  /** 用户消息摘要 */
+  userMessageSummary: string
+  /** 助手回复摘要 */
+  assistantReplySummary: string
+  /** 记录时间戳 */
+  timestamp: number
+}
+
 export interface VoiceBookmark {
   /** 书签 ID（与 MemoryEntry.id 一致） */
   id: string
@@ -59,7 +75,7 @@ export interface VoiceBookmark {
 
 export interface MemoryEntry {
   id: string
-  type: 'user_fact' | 'interaction' | 'task_state' | 'task_step' | 'user_profile' | 'fictional' | 'writing_feedback' | 'polishing_decision' | 'blog_memory' | 'voice_bookmark' | 'evolution_insight' | 'evolution_cycle'
+  type: 'user_fact' | 'interaction' | 'task_state' | 'task_step' | 'user_profile' | 'fictional' | 'writing_feedback' | 'polishing_decision' | 'blog_memory' | 'voice_bookmark' | 'evolution_insight' | 'evolution_cycle' | 'plan_snapshot' | 'plan_conversation'
   content: string
   confidence: number
   createdAt: number

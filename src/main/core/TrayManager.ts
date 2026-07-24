@@ -17,6 +17,12 @@ let taskPanelToggleCb: (() => void) | null = null
 /** 语音字幕切换回调 */
 let subtitleToggleCb: (() => void) | null = null
 
+/** 语音便签切换回调 */
+let voiceNoteToggleCb: (() => void) | null = null
+
+/** 语音便签保存回调 */
+let voiceNoteSaveCb: (() => void) | null = null
+
 // ── 角色方案切换 ──
 let voiceRoleSchemeCb: ((schemeId: string) => void) | null = null
 
@@ -63,6 +69,16 @@ export function setSubtitleToggle(cb: () => void): void {
 /** 注册桌面任务面板切换回调 */
 export function setTaskPanelToggle(cb: () => void): void {
   taskPanelToggleCb = cb
+}
+
+/** 注册语音便签切换回调 */
+export function setVoiceNoteToggle(cb: () => void): void {
+  voiceNoteToggleCb = cb
+}
+
+/** 注册语音便签保存回调 */
+export function setVoiceNoteSave(cb: () => void): void {
+  voiceNoteSaveCb = cb
 }
 
 export function initTray(mainWindow: () => BrowserWindow | null): void {
@@ -123,6 +139,19 @@ export function initTray(mainWindow: () => BrowserWindow | null): void {
         label: '切换语音字幕',
         click: () => {
           subtitleToggleCb?.()
+        },
+      },
+      { type: 'separator' },
+      {
+        label: '语音便签：切换',
+        click: () => {
+          voiceNoteToggleCb?.()
+        },
+      },
+      {
+        label: '语音便签：保存',
+        click: () => {
+          voiceNoteSaveCb?.()
         },
       },
       { type: 'separator' },

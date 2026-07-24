@@ -41,6 +41,7 @@ import { getMainWindow } from '../core/Lifecycle'
 import { evolutionCheckpointManager } from './EvolutionCheckpointManager'
 import type { MemoryEvolutionBridge, MemoryChangeEvent } from '../memory/MemoryEvolutionBridge'
 import type { CicdOrchestrator } from './cicd/CicdOrchestrator'
+import { behaviorPriorityWeighter } from './automation/BehaviorPriorityWeighter'
 
 // =============================================================================
 // 调度状态机状态枚举
@@ -620,6 +621,27 @@ export class SelfEvolutionService implements ISubsystem {
           log('INFO', 'evolution_cold_module_dampening', {
             coldModules: enhancedAny.coldModules,
           })
+        }
+      }
+
+      // ★ 行为驱动优先级加权：从热力图计算模块权重并应用到管道的 ProblemQueue
+      if (heatmapChecked && (preProcessData as any)?.heatmap && this.pipeline) {
+        const heatmap = (preProcessData as any).heatmap
+        if (heatmap.hasSufficientData) {
+          const weights = behaviorPriorityWeighter.compute(heatmap)
+          this.pipeline.setBehaviorWeights(weights)
+          log('INFO', 'evolution_behavior_weights_set', {
+            modules: Object.keys(weights).length,
+            topModules: Object.entries(weights)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 3)
+              .map(([m, w]) => `${m}:${w.toFixed(2)}x`)
+              .join(', '),
+          })
+        } else {
+          // 数据不足 → 清除权重（回归默认排序）
+          this.pipeline.setBehaviorWeights(null)
+          log('INFO', 'evolution_behavior_weights_cleared_insufficient_data')
         }
       }
 

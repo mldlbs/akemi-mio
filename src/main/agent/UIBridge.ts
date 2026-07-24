@@ -51,6 +51,7 @@ export class UIBridge {
     this.listen('agent.plan.created')
     this.listen('agent.plan.step')
     this.listen('agent.plan.completed')
+    this.listen('agent.plan.focus_switched')
 
     // OTPAR 阶段
     this.listen('agent.observe')

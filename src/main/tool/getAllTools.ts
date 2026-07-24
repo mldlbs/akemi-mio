@@ -5,7 +5,7 @@ import { editFileTool } from './definitions/EditFileTool'
 import { grepTool } from './definitions/GrepTool'
 import { listFilesTool } from './definitions/ListFilesTool'
 import { runCommandTool } from './definitions/RunCommandTool'
-import { createDevPlanTool, updatePlanProgressTool, listPlansTool, completePlanTool, abandonPlanTool } from './definitions/PlanTools'
+import { createDevPlanTool, updatePlanProgressTool, listPlansTool, completePlanTool, abandonPlanTool, voiceUpdatePlanStepTool, voiceSwitchPlanFocusTool } from './definitions/PlanTools'
 import { analyzeCodebaseTool } from './definitions/AnalyzeCodebaseTool'
 import { getCredentialTool, setCredentialTool, listCredentialsTool } from './definitions/CredentialTools'
 import { rememberFactTool } from './definitions/RememberFactTool'
@@ -115,6 +115,14 @@ import {
   blogPublishCredentialCheckTool,
   blogPublishWorkflowTool,
 } from './definitions/BlogPublishTools'
+import {
+  planSchedulerStatusTool,
+  planSchedulerPauseTool,
+  planSchedulerResumeTool,
+  planSchedulerSkipTaskTool,
+  planSchedulerRetryTaskTool,
+  planSchedulerConfirmTaskTool,
+} from './definitions/PlanSchedulerTools'
 
 export function getAllTools(): Tool[] {
   return [
@@ -129,6 +137,8 @@ export function getAllTools(): Tool[] {
     listPlansTool as Tool,
     completePlanTool as Tool,
     abandonPlanTool as Tool,
+    voiceUpdatePlanStepTool as Tool,
+    voiceSwitchPlanFocusTool as Tool,
     analyzeCodebaseTool as Tool,
     getCredentialTool as Tool,
     setCredentialTool as Tool,
@@ -258,5 +268,13 @@ export function getAllTools(): Tool[] {
     blogPublishRollbackTool as Tool,
     blogPublishCredentialCheckTool as Tool,
     blogPublishWorkflowTool as Tool,
+
+    // === 智能并行任务协调器 ===
+    planSchedulerStatusTool as Tool,
+    planSchedulerPauseTool as Tool,
+    planSchedulerResumeTool as Tool,
+    planSchedulerSkipTaskTool as Tool,
+    planSchedulerRetryTaskTool as Tool,
+    planSchedulerConfirmTaskTool as Tool,
   ]
 }

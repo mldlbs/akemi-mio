@@ -2986,3 +2986,181 @@
 .wp-interactive-active .wp-cc-panel {
   display: none !important;
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   PeriodicPredictionToast — 行为预测哑提醒
+   在桌面 overlay 右下角以非侵入方式展示周期预测
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ─── 容器 ─── */
+.prediction-toast-container {
+  position: fixed;
+  bottom: var(--space-lg, 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 10;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  max-width: min(80vw, 360px);
+}
+
+/* ─── 单个提醒项 ─── */
+.prediction-toast-item {
+  width: 100%;
+  background: var(--wp-bg-glass, oklch(0 0 0 / 0.25));
+  border: 1px solid var(--wp-border-glass, oklch(1 0 0 / 0.1));
+  border-radius: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  animation: prediction-toast-in 0.4s var(--ease-glass, ease) both;
+  will-change: opacity, transform;
+  overflow: hidden;
+}
+
+.prediction-toast-item:hover {
+  background: var(--wp-bg-glass-mid, oklch(0 0 0 / 0.3));
+  border-color: var(--wp-border-glass-light, oklch(1 0 0 / 0.15));
+}
+
+.prediction-toast-item.expanded {
+  background: var(--wp-bg-glass-strong, oklch(0 0 0 / 0.35));
+}
+
+@keyframes prediction-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ─── 紧凑视图 ─── */
+.prediction-toast-compact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prediction-toast-icon {
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.prediction-toast-text {
+  font-size: var(--fs-small, 12px);
+  font-weight: 500;
+  color: oklch(0.9 0.005 12);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prediction-toast-confidence {
+  font-size: 10px;
+  font-weight: 500;
+  color: oklch(0.65 0.005 12);
+  background: var(--wp-border-glass-light, oklch(1 0 0 / 0.06));
+  padding: 1px 6px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.prediction-toast-dismiss {
+  background: none;
+  border: none;
+  color: oklch(0.5 0.005 12);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.prediction-toast-dismiss:hover {
+  color: oklch(0.85 0.005 12);
+  background: oklch(1 0 0 / 0.08);
+  opacity: 1;
+}
+
+/* ─── 展开视图 ─── */
+.prediction-toast-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--wp-border-glass-light, oklch(1 0 0 / 0.06));
+  animation: prediction-toast-detail-in 0.25s ease both;
+}
+
+@keyframes prediction-toast-detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.prediction-toast-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: oklch(0.75 0.005 12);
+}
+
+.prediction-toast-detail-label {
+  font-weight: 500;
+  color: oklch(0.6 0.005 12);
+  min-width: 48px;
+}
+
+/* ─── 专注模式隐藏 ─── */
+.wp-mode-focus .prediction-toast-container {
+  display: none !important;
+}
+
+/* ─── 交互模式隐藏 ─── */
+.wp-interactive-active .prediction-toast-container {
+  display: none !important;
+}
+
+/* ─── 语音便签壁纸 ─── */
+
+@keyframes voicenote-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
+}
+
+.voicenote-widget::-webkit-scrollbar {
+  width: 4px;
+}
+
+.voicenote-widget::-webkit-scrollbar-thumb {
+  background: oklch(1 0 0 / 0.12);
+  border-radius: 2px;
+}

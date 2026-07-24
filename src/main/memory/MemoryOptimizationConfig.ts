@@ -40,6 +40,14 @@ export interface MemoryTunableConfig {
   /** 高效用阈值 (0.5-1) */
   utilityHighThreshold: number
 
+  /** ── 行为加权清洗参数 ── */
+  /** 行为加权清洗保护乘数阈值（>=此值视为受保护，降低清洗概率） */
+  behaviorCleanupProtectThreshold: number
+  /** 行为加权清洗惩罚乘数阈值（<=此值视为应惩罚，提高清洗概率） */
+  behaviorCleanupPenaltyThreshold: number
+  /** 话题新鲜度惩罚天数阈值（超过此天数的话题权重开始衰减） */
+  behaviorTopicStaleDays: number
+
   /** ── 层级容量 ── */
   /** 半永久层最大条目数 (10-100) */
   maxSemi: number
@@ -61,6 +69,9 @@ export const DEFAULT_MEMORY_CONFIG: MemoryTunableConfig = {
   utilityUserConfirmBoost: 0.15,
   utilityLowThreshold: 0.15,
   utilityHighThreshold: 0.7,
+  behaviorCleanupProtectThreshold: 1.5,
+  behaviorCleanupPenaltyThreshold: 0.8,
+  behaviorTopicStaleDays: 7,
   maxSemi: 30,
   maxEphemeral: 50,
 }
@@ -76,6 +87,9 @@ export const TUNABLE_RANGES: Record<keyof MemoryTunableConfig, { min: number; ma
   utilityUserConfirmBoost: { min: 0.05, max: 0.3 },
   utilityLowThreshold: { min: 0.05, max: 0.5 },
   utilityHighThreshold: { min: 0.5, max: 1.0 },
+  behaviorCleanupProtectThreshold: { min: 1.0, max: 3.0 },
+  behaviorCleanupPenaltyThreshold: { min: 0.1, max: 1.0 },
+  behaviorTopicStaleDays: { min: 1, max: 30 },
   maxSemi: { min: 10, max: 100 },
   maxEphemeral: { min: 10, max: 200 },
 }

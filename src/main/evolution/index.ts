@@ -170,6 +170,55 @@ export type {
 
 export { DEFAULT_EVOLUTION_PIPER_BRIDGE_CONFIG } from './piper'
 
+// ═══════════════════════════════════════════════
+//  记忆驱动的参数自进化系统
+// ═══════════════════════════════════════════════
+//
+// Parameter Self-Evolution — 利用 Memory 中的用户交互反馈
+// (点赞/踩、重复提问、中断率) 自动调优系统参数。
+//
+// 核心组件：
+//   - parameterRegistry — 可调参数注册中心
+//   - feedbackMetadataStore — 带时间戳的反馈数据存储
+//   - parameterSelfEvolutionAnalyzer — 24h 分析循环（Collector）
+//   - ParameterSelfEvolutionExecutor — 提案执行器
+//   - parameterHotReloader — 参数热更新 + 回滚
+//
+// 使用方式：
+//   1. feedbackMetadataStore.init(); parameterHotReloader.init()
+//   2. parameterSelfEvolutionAnalyzer.setLlmService(llmService)
+//   3. 已自动注册到 PipelineOrchestrator.initDefaults()
+//
+// 安全措施：
+//   - 所有参数有安全范围 (min/max)
+//   - 单次调整幅度有上限 (maxDeltaPerAdjustment)
+//   - 变更前自动创建快照，支持回滚
+//   - 自动检测指标恶化并建议回滚
+
+export {
+  ParameterRegistry,
+  parameterRegistry,
+  FeedbackMetadataStore,
+  feedbackMetadataStore,
+  ParameterSelfEvolutionAnalyzer,
+  parameterSelfEvolutionAnalyzer,
+  ParameterSelfEvolutionExecutor,
+  ParameterHotReloader,
+  parameterHotReloader,
+} from './self-parameter'
+
+export type {
+  TunableParameter,
+  ParameterCategory,
+  FeedbackDataPoint,
+  FeedbackMetricCategory,
+  FeedbackMetricAnalysis,
+  ParameterAdjustmentProposal,
+  ParameterSelfEvolutionReport,
+  ParameterSnapshot,
+  RollbackRecord,
+} from './self-parameter'
+
 // ═══════════════════════════════════════════
 //  Memory × Evolution 深度融合桥接器
 // ═══════════════════════════════════════════

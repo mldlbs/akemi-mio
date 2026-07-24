@@ -39,6 +39,7 @@ import type { UserBehaviorTtsNeed } from '../behavior/UserBehaviorTtsContract'
 import { SlidingWindow } from '../core/patterns/SlidingWindow'
 import { piperOrchestrator, type PiperSynthesizeResult, type PiperSynthesizeRequest } from './PiperOrchestrator'
 import { voiceRoleManager } from './VoiceRoleManager'
+import { piperBehaviorSidecar, type BehaviorSidecarInput } from './PiperBehaviorSidecar'
 
 // ══════════════════════════════════════════
 //  类型定义
@@ -120,6 +121,23 @@ function createDefaultContext(): TtsPiperSharedContext {
     piperQueueStatus: { pending: 0, isProcessing: false, currentModel: '' },
     piperLastSynthesis: null,
     piperRecentLatencyMs: -1,
+  }
+}
+
+/**
+ * 将 UserBehaviorTtsNeed 转换为 BehaviorSidecarInput。
+ *
+ * 转换层：桥接器将 UserBehavior 模块的类型映射为边车自身的轻量契约，
+ * 使边车不直接依赖 UserBehavior 模块。
+ */
+function needToBehaviorInput(need: UserBehaviorTtsNeed | null | undefined): BehaviorSidecarInput | null {
+  if (!need) return null
+  return {
+    outputMode: need.outputMode === 'normal' ? null : need.outputMode,
+    pauseTts: need.pauseTts,
+    rateSuggestion: need.rateSuggestion,
+    pitchSuggestion: need.pitchSuggestion,
+    volumeSuggestion: need.volumeSuggestion,
   }
 }
 
@@ -232,39 +250,6 @@ export class TtsPiperBridge {
       request.pitch = this.context.ttsContextVoiceConfig.piperPitch
     }
 
-    // ── 行为需求驱动的进一步调整 ──
-    if (this.context.ttsBehaviorNeed) {
-      const need = this.context.ttsBehaviorNeed
-      switch (need.outputMode) {
-        case 'efficient':
-          // 高效模式：加速
-          request.speed = (request.speed ?? 1.0) * 1.1
-          break
-        case 'gentle':
-          // 轻柔模式：减速、降音调
-          request.speed = (request.speed ?? 1.0) * 0.85
-          request.pitch = (request.pitch ?? 1.0) * 0.9
-          break
-        case 'minimal':
-          // 精简模式：微加速
-          request.speed = (request.speed ?? 1.0) * 1.05
-          break
-        case 'silent':
-        case 'normal':
-        case 'expressive':
-          // 不调整
-          break
-      }
-
-      // 根据 behaviorNeed 的 rateSuggestion/pitchSuggestion 微调
-      if (need.rateSuggestion !== 0) {
-        request.speed = (request.speed ?? 1.0) * (1 + need.rateSuggestion / 100)
-      }
-      if (need.pitchSuggestion !== 0) {
-        request.pitch = (request.pitch ?? 1.0) * (1 + need.pitchSuggestion / 100)
-      }
-    }
-
     // ── 隐式学习推荐：如果 emotion 和 context 都未指定语速/音调 ──
     if (request.speed === undefined && request.pitch === undefined && this.context.ttsImplicitRecommendation && this.context.ttsImplicitRecommendation.confidence > 0.3) {
       // 隐式推荐只在没有其他覆盖时作为基线（置信度高时使用）
@@ -309,8 +294,14 @@ export class TtsPiperBridge {
       behavior_mode: this.context.ttsBehaviorNeed?.outputMode ?? '(none)',
     })
 
-    // 通过 PiperOrchestrator 合成（享受队列、模型管理、回退等能力）
-    const result = await piperOrchestrator.synthesize(request)
+    // 将 UserBehavior 需求注入边车（边车过滤/转换层将据此处理）
+    piperBehaviorSidecar.setBehavior(needToBehaviorInput(this.context.ttsBehaviorNeed))
+
+    // 通过边车合成（享受缓存、过滤、转换、监控能力）
+    const result = await piperBehaviorSidecar.synthesize(request)
+
+    // 复位边车行为上下文，避免泄漏到其他请求方
+    piperBehaviorSidecar.setBehavior(null)
 
     // ── 记录 Piper 输出反馈 ──
     const latencyMs = Date.now() - t0

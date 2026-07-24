@@ -299,7 +299,8 @@ export class TelegramService {
           telegramMessageId: msg.messageId,
         })
         if (result.reply) {
-          this.enqueueReply(msg.chatId, result.reply, 'dialogue', botName)
+          const safeReply = result.reply.replace(/<invoke name="[^"]+">[\s\S]*?<\/invoke>/g, '').trim() || '正在检查，请稍候……'
+          this.enqueueReply(msg.chatId, safeReply, 'dialogue', botName)
         } else if (result.error === 'BUSY') {
           this.enqueueReply(
             msg.chatId,
@@ -377,7 +378,10 @@ export class TelegramService {
       clearTimeout(timeoutNoticeTimer)
 
       if (result.reply) {
-        const finalText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n🤖 秋山澪: ${result.reply}`
+        // 兜底：过滤原始 tool_calls XML 标签，避免暴露给用户
+        const safeReply = result.reply.replace(/<invoke name="[^"]+">[\s\S]*?<\/invoke>/g, '').trim()
+          || '正在检查，请稍候……'
+        const finalText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n🤖 秋山澪: ${safeReply}`
         editor.cancel()
         this.enqueueEdit(chatId, progressMsgId, finalText, botName)
         log('INFO', 'telegram_reply_enqueued', { chatId, msgId: progressMsgId, replyLen: result.reply.length })
@@ -788,7 +792,8 @@ export class TelegramService {
   private async handlePushResponse(chatId: number, reply: string, requestId: string): Promise<void> {
     const session = this.pushSessions.get(requestId)
     if (session) {
-      const finalText = `👤 你: ${session.userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n🤖 秋山澪: ${reply}`
+      const safeReply = reply.replace(/<invoke name="[^"]+">[\s\S]*?<\/invoke>/g, '').trim() || '正在检查，请稍候……'
+      const finalText = `👤 你: ${session.userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n🤖 秋山澪: ${safeReply}`
       session.editor.flushNow()
       this.enqueueEdit(chatId, session.messageId, finalText)
       this.cleanupPushSession(requestId)

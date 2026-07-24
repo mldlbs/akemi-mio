@@ -18,6 +18,7 @@ export type EventName =
   | 'agent.plan.created'
   | 'agent.plan.step'
   | 'agent.plan.completed'
+  | 'agent.plan.focus_switched'
   | 'tts.playback.started'
   | 'tts.playback.finished'
   | 'scheduler.tick'
@@ -118,6 +119,21 @@ export type EventName =
   | 'blog.analytics.report.ready'
   | 'blog.analytics.strategy.adjusted'
 
+  // ── Plan Scheduler 事件（Agent 驱动的智能调度器） ──
+  | 'plan_scheduler.plan_registered'
+  | 'plan_scheduler.plan_execution_started'
+  | 'plan_scheduler.plan_execution_completed'
+  | 'plan_scheduler.plan_execution_failed'
+  | 'plan_scheduler.task_state_changed'
+  | 'plan_scheduler.task_tool_selected'
+  | 'plan_scheduler.task_executing'
+  | 'plan_scheduler.task_completed'
+  | 'plan_scheduler.task_failed'
+  | 'plan_scheduler.task_degraded'
+  | 'plan_scheduler.task_needs_confirm'
+  | 'plan_scheduler.feedback_collected'
+  | 'plan_scheduler.suggestion_generated'
+
 export interface EventPayload {
   'task.lifecycle': { taskId: string; type: string; status: string; durationMs?: number; error?: string }
   'task.registered': { type: string; label: string }
@@ -134,6 +150,7 @@ export interface EventPayload {
   'agent.plan.created': { planId: string; title: string }
   'agent.plan.step': { planId: string; stepIndex: number; status: string; result?: string }
   'agent.plan.completed': { planId: string }
+  'agent.plan.focus_switched': { planId: string; planTitle: string; status: string; stepCount: number; doneCount: number }
   'tts.playback.started': { text: string }
   'tts.playback.finished': {}
   'scheduler.tick': { taskId: string; cron: string }
@@ -507,6 +524,70 @@ export interface EventPayload {
     adjustmentCount: number
     avoidTopics: string[]
     timestamp: number
+  }
+
+  // ── Plan Scheduler 事件（Agent 驱动的智能调度器） ──
+  'plan_scheduler.plan_registered': {
+    planId: string
+    planTitle: string
+  }
+  'plan_scheduler.plan_execution_started': {
+    planId: string
+    taskCount: number
+  }
+  'plan_scheduler.plan_execution_completed': {
+    planId: string
+    success: boolean
+  }
+  'plan_scheduler.plan_execution_failed': {
+    planId: string
+    error: string
+  }
+  'plan_scheduler.task_state_changed': {
+    taskId: string
+    planId: string
+    from: string
+    to: string
+  }
+  'plan_scheduler.task_tool_selected': {
+    taskId: string
+    toolName: string
+  }
+  'plan_scheduler.task_executing': {
+    taskId: string
+    toolName: string
+  }
+  'plan_scheduler.task_completed': {
+    taskId: string
+    planId: string
+    durationMs: number
+  }
+  'plan_scheduler.task_failed': {
+    taskId: string
+    planId: string
+    error: string
+    attempt: number
+  }
+  'plan_scheduler.task_degraded': {
+    taskId: string
+    planId: string
+    fallbackTool: string
+    reason: string
+  }
+  'plan_scheduler.task_needs_confirm': {
+    taskId: string
+    planId: string
+    issue: string
+  }
+  'plan_scheduler.feedback_collected': {
+    planId: string
+    stepIndex: number
+    toolUsed: string | null
+    success: boolean
+    durationMs: number
+  }
+  'plan_scheduler.suggestion_generated': {
+    suggestion: string
   }
 }
 

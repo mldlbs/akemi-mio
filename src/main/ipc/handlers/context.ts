@@ -10,6 +10,7 @@ import type { VoiceBookmarkService } from '../../memory/VoiceBookmarkService'
 import type { TaskPanelService } from '../../wallpaper/TaskPanelService'
 import type { WallpaperInteractiveService } from '../../wallpaper/WallpaperInteractiveService'
 import type { RuntimeRestoreService } from '../../runtime/RuntimeRestoreService'
+import type { VoiceNoteService } from '../../voicenote/VoiceNoteService'
 
 export interface HandlerContext {
   agentService: AgentService
@@ -27,4 +28,5 @@ export interface HandlerContext {
   wallpaperInteractiveRef?: { current: WallpaperInteractiveService | null }
   restoreRef?: { current: RuntimeRestoreService | null }
   conversationContextRef?: { current: ConversationContextService | null }
+  voiceNoteRef?: { current: VoiceNoteService | null }
 }

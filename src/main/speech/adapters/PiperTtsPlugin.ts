@@ -10,6 +10,7 @@
 
 import type { TtsPlugin, TtsPluginStatus, TtsSynthesizeOptions, TtsSynthesizeResult, SpeechPluginManifest } from '../types'
 import { piperOrchestrator, type PiperTaskTag } from '../../tts/PiperOrchestrator'
+import { piperBehaviorSidecar } from '../../tts/PiperBehaviorSidecar'
 
 export class PiperTtsPlugin implements TtsPlugin {
   readonly manifest: SpeechPluginManifest = {
@@ -35,7 +36,7 @@ export class PiperTtsPlugin implements TtsPlugin {
       requestId: `piper_plugin_${Date.now()}`,
     }
 
-    const result = await piperOrchestrator.synthesize(request)
+    const result = await piperBehaviorSidecar.synthesize(request)
 
     return {
       audioFile: result.audioFile ?? '',

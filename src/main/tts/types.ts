@@ -26,6 +26,12 @@ export interface SentimentResult {
   contentType: string
   /** 匹配到的情感词 */
   matchedWords: string[]
+  /**
+   * 紧急度 0–1
+   * 0 = 不紧急（闲聊、日常信息），1 = 非常紧急（错误告警、时间敏感通知）
+   * 由 SentimentAnalyzer 中的紧急关键词检测驱动
+   */
+  urgency: number
 }
 
 // ══════════════════════════════════════════

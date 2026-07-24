@@ -13,6 +13,7 @@ import type { VoiceBookmarkService } from '../memory/VoiceBookmarkService'
 import type { TaskPanelService } from '../wallpaper/TaskPanelService'
 import type { WallpaperInteractiveService } from '../wallpaper/WallpaperInteractiveService'
 import type { RuntimeRestoreService } from '../runtime/RuntimeRestoreService'
+import type { VoiceNoteService } from '../voicenote/VoiceNoteService'
 import { existsSync } from 'fs'
 import type { HandlerContext } from './handlers/context'
 import { registerWindowHandlers } from './handlers/window'
@@ -33,6 +34,8 @@ import { registerQuickTaskHandlers } from './handlers/quicktask'
 import { registerVoiceBookmarkHandlers } from './handlers/voice-bookmark'
 import { registerToolHandlers } from './handlers/tool'
 import { registerEvaluationHandlers } from './handlers/evaluation'
+import { registerMemoryHandlers } from './handlers/memory'
+import { registerVoiceNoteHandlers } from './handlers/voicenote'
 
 const sandboxWindows = new Map<string, BrowserWindow>()
 
@@ -68,12 +71,13 @@ export function registerHandlers(
   wallpaperInteractiveRef?: { current: WallpaperInteractiveService | null },
   restoreRef?: { current: RuntimeRestoreService | null },
   conversationContextRef?: { current: ConversationContextService | null },
+  voiceNoteRef?: { current: VoiceNoteService | null },
 ): void {
   const ctx: HandlerContext = {
     agentService, stateManager, ttsService, evolutionRef, metricsCollector,
     dashboardRef, memoryContextRef, decisionQueryRef, metricsQueryRef,
     organizerRef, voiceBookmarkRef, taskPanelRef, wallpaperInteractiveRef,
-    restoreRef, conversationContextRef,
+    restoreRef, conversationContextRef, voiceNoteRef,
   }
 
   // Window handlers require eventBus — inject it
@@ -95,4 +99,6 @@ export function registerHandlers(
   registerVoiceBookmarkHandlers(ctx)
   registerToolHandlers(ctx)
   registerEvaluationHandlers(ctx)
+  registerMemoryHandlers(ctx)
+  registerVoiceNoteHandlers(ctx)
 }

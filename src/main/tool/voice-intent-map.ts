@@ -168,6 +168,100 @@ export const VOICE_INTENT_MAP: VoiceIntentDef[] = [
     confirmMessage: '将查看当前开发计划',
   },
 
+  // ── 开发计划操作：查询、更新状态、完成、切换焦点 ──
+  {
+    intent: 'query_plan_status',
+    description: '查询开发计划进度和状态',
+    patterns: [
+      '计划进度', '计划状态', '进度如何', '看看计划',
+      '当前计划', '活跃计划', '开发进度', '计划情况',
+      'plan status', 'plan progress', 'progress',
+      '我的计划', '全部计划', '计划怎么样了',
+      '计划进行', '进度', '任务的进展',
+    ],
+    tools: [
+      { tool: 'list_plans', args: {} },
+    ],
+    confirmMessage: '将查看当前开发计划进度',
+    requireConfirmation: false,
+  },
+
+  {
+    intent: 'mark_step_done',
+    description: '标记计划步骤为已完成',
+    patterns: [
+      '标记完成', '完成了', '做好了', '搞定',
+      '步骤完成', '任务完成', '做完',
+      'mark done', 'step done', 'complete step',
+      '完成步骤', '这个完成了', '做完了',
+      '搞定了', '好了', '这个搞定',
+      '合并完成', '实现完成', '测试完成',
+    ],
+    slotExtractors: {
+      stepDescription: /(?:标记|完成|做完|做好|搞定|做|完成步骤)\s*(?:步骤|任务)?\s*[：:""]?([^""\s]{1,30})(?:完成|了|$)/,
+      stepIndex: /第\s*(\d+)\s*步/,
+    },
+    tools: [
+      { tool: 'voice_update_plan_step', args: { stepDescription: '{{slot.stepDescription}}', stepIndex: '{{slot.stepIndex}}', status: 'done' } },
+    ],
+    confirmMessage: '将标记步骤完成: {{slot.stepDescription || "第" + slot.stepIndex + "步"}}',
+  },
+
+  {
+    intent: 'mark_step_in_progress',
+    description: '标记计划步骤为进行中',
+    patterns: [
+      '开始做', '开始', '进行中', '正在做',
+      '开始步骤', '着手', '开始搞',
+      'start step', 'in progress', 'working on',
+      '开始任务', '开始这个',
+    ],
+    slotExtractors: {
+      stepDescription: /(?:开始|做|进行|着手)\s*(?:步骤|做|搞|任务)?\s*[：:""]?([^""\s]{1,30})/,
+      stepIndex: /第\s*(\d+)\s*步/,
+    },
+    tools: [
+      { tool: 'voice_update_plan_step', args: { stepDescription: '{{slot.stepDescription}}', stepIndex: '{{slot.stepIndex}}', status: 'in_progress' } },
+    ],
+    confirmMessage: '将标记步骤为进行中: {{slot.stepDescription || "第" + slot.stepIndex + "步"}}',
+  },
+
+  {
+    intent: 'complete_current_plan',
+    description: '完成当前活跃计划',
+    patterns: [
+      '完成计划', '计划完成', '结束计划',
+      'complete plan', 'finish plan',
+      '这个计划完成了', '计划结束',
+      '计划做完', '开发完成',
+    ],
+    tools: [
+      { tool: 'complete_plan', args: { plan_id: '' } },
+    ],
+    confirmMessage: '将标记当前活跃计划为已完成',
+    requireConfirmation: true,
+  },
+
+  {
+    intent: 'switch_plan_focus',
+    description: '切换工作焦点到指定计划',
+    patterns: [
+      '切换到', '切换', '聚焦到',
+      '打开计划', '查看计划',
+      'switch to plan', 'focus on plan',
+      '看看计划', '显示计划',
+      '切换到开发', '聚焦开发',
+      '这个计划', '那个计划',
+    ],
+    slotExtractors: {
+      planName: /(?:切换到|切换|聚焦|打开|查看|看|显示|到|聚焦)\s*[「」""''""]?([^「」""''""\s]{1,20})[「」""''""]?\s*(?:计划|开发)?/,
+    },
+    tools: [
+      { tool: 'voice_switch_plan_focus', args: { planTitle: '{{slot.planName}}' } },
+    ],
+    confirmMessage: '将切换工作焦点到计划: {{slot.planName}}',
+  },
+
   // ── 工作流操作 ──
   {
     intent: 'list_workflows',

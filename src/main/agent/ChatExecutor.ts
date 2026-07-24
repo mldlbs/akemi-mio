@@ -92,6 +92,8 @@ import type { VoiceEmotion } from '../asr/types'
 import type { McpAgentHybridPipeline } from '../hybrid/McpAgentHybridPipeline'
 import { narrativeEmotionController, type StyledTtsSegment } from '../tts/emotion'
 import { TaskStepRecorder } from '../memory/TaskStepRecorder'
+import { SessionMemory, sessionMemory as defaultSessionMemory } from '../memory/SessionMemory'
+import { PlanMemoryRecall, planMemoryRecall as defaultPlanMemoryRecall } from '../memory/PlanMemoryRecall'
 
 export class ChatExecutor {
   private llmService: LlmService
@@ -147,6 +149,12 @@ export class ChatExecutor {
 
   /** 跨会话任务步骤记录器 — 自动记录每轮工具调用的输入/输出 */
   private taskStepRecorder: TaskStepRecorder | null = null
+
+  /** ADR-013: Session Memory — 跨会话记忆检索与 compaction */
+  private sessionMemory: SessionMemory
+
+  /** 计划感知记忆恢复 — 按计划 ID 存储/检索对话上下文摘要 */
+  private planMemoryRecall: PlanMemoryRecall
 
   // ── 行为自适应对话策略 ──
   /** 当前轮检测到的场景标签 */
@@ -210,6 +218,8 @@ export class ChatExecutor {
     this.reflectLoop = reflectLoop
     this.goalGuardrail = goalGuardrail
     this.errorClassifier = { classify: classifyError }
+    this.sessionMemory = defaultSessionMemory
+    this.planMemoryRecall = defaultPlanMemoryRecall
   }
 
   /** 注入 GuardrailPipeline（启动时由 AppRuntime 调用） */
@@ -217,9 +227,10 @@ export class ChatExecutor {
     this.guardrailPipeline = pipeline
   }
 
-  /** 注入 EvaluationEmitter（启动时由 AppRuntime 调用，用于写入 Delivery Trace） */
+  /** 注入 EvaluationEmitter（启动时由 AppRuntime 调用，用于写入 Delivery Trace 和 Session Memory Event） */
   setEvaluationEmitter(emitter: EvaluationEmitter): void {
     this.evaluationEmitter = emitter
+    this.sessionMemory.setEvaluationEmitter(emitter)
   }
 
   /** 注入 MCP-Agent 混合流水线 */
@@ -377,6 +388,16 @@ export class ChatExecutor {
     // 工具默认参数推荐：基于学习到的用户偏好注入工具参数默认值
     const toolDefaultContext = toolDefaultAdjuster.adjust().formattedPrompt
     if (toolDefaultContext) extraModules.push(toolDefaultContext)
+    // 计划感知记忆恢复：活跃计划的历史对话摘要注入
+    if (this.sessionPlanIds.size > 0) {
+      try {
+        const planIds = Array.from(this.sessionPlanIds)
+        const planCtx = this.planMemoryRecall.getFormattedContext(planIds)
+        if (planCtx) extraModules.push(planCtx)
+      } catch (err) {
+        log('WARN', 'plan_memory_recall_context_failed', { error: String(err) })
+      }
+    }
     const allExtraModules = extraModules.length > 0 ? extraModules : undefined
     if (memCtx || reflectCtx || allExtraModules || this.identityContext) {
       this.workingMemory.refreshMemory(memCtx, reflectCtx, allExtraModules, this.identityContext || undefined)
@@ -392,6 +413,11 @@ export class ChatExecutor {
       return lastSid
     }
     return createSessionId()
+  }
+
+  /** 检测显式重置指令（返回 true 则请求方在外部新建 session） */
+  static isExplicitReset(text: string): boolean {
+    return /^(重置|reset|新会话|new session)/i.test(text.trim())
   }
 
   private persistAssistantMessage(reply: string, source: string): void {
@@ -611,6 +637,25 @@ export class ChatExecutor {
         }
       }
     }
+    // ADR-013 Phase 1: passive session memory retrieval (observe only, no context injection)
+    const attentionEntities = this.workingMemory.attention.getActive()
+    this.sessionMemory.setAttention(attentionEntities)
+    const memContext = this.sessionMemory.buildContext({
+      userText: text,
+      sessionId: effectiveSessionId,
+      activeTopics: [],
+      attentionEntities,
+    })
+    if (memContext.digests.length > 0) {
+      log('INFO', 'session_memory_passive_retrieval', {
+        sessionId: effectiveSessionId,
+        digests: memContext.digests.length,
+        facts: memContext.facts.length,
+        decisions: memContext.decisions.length,
+        tokens: memContext.totalTokens,
+        sourceSessions: memContext.sourceSessions,
+      })
+    }
     // 先刷新 memory（可能重建 context），再加用户消息，确保消息不丢失
     try { this.refreshMemory() } catch (err) { log('WARN', 'refresh_memory_skipped', { error: String(err) }) }
     this.workingMemory.addUser(text)
@@ -715,6 +760,20 @@ export class ChatExecutor {
           agentId: 'chat',
         })
       }
+      // ── 计划感知记忆恢复：活跃计划对话摘要存储 ──
+      if (reply && this.memoryService && this.sessionPlanIds.size > 0) {
+        try {
+          const planIds = Array.from(this.sessionPlanIds)
+          const planTitles = new Map<string, string>()
+          for (const pid of planIds) {
+            const plan = this.planManager.getPlan(pid)
+            planTitles.set(pid, plan?.title || pid)
+          }
+          this.planMemoryRecall.storeForPlans(planIds, planTitles, text, reply)
+        } catch (err) {
+          log('WARN', 'plan_memory_recall_store_failed', { error: String(err) })
+        }
+      }
       // 行为偏好持久化：交互结束后刷新偏好存储
       if (this.memoryService) {
         behaviorPreferenceStore.flush()
@@ -737,6 +796,8 @@ export class ChatExecutor {
           source,
         })
       }
+      // ADR-013 Phase 1: reply 后检查 compaction 条件（仅日志，不注入 context）
+      try { this.sessionMemory.checkCompaction(effectiveSessionId, source) } catch { /* noop */ }
       return { reply }
     } catch (err) {
       eventBus.emit('agent.error', { error: String(err), requestId: rid })
@@ -833,6 +894,8 @@ export class ChatExecutor {
     ctx.transition(RunState.RUNNING)
     this.guardrailPipeline?.reset()
     const MAX_TURNS = 300
+    /** 本轮调用了哪些工具，空 reply 时用于生成摘要 */
+    const executedToolNames = new Set<string>()
     /** 诊断：记录 LLM 返回 tool_calls 但未执行的路径 */
     const orphanSources: Record<string, number> = {}
     const tryRecordOrphan = (reason: string, msgsBefore: number) => {
@@ -990,6 +1053,7 @@ export class ChatExecutor {
           // 信用恢复：每个成功的工具调用降低一次拒绝计数
           for (const tr of toolResults) {
             if (tr.success) {
+              executedToolNames.add(tr.name)
               this.goalGuardrail.onToolSuccess()
               // 流程记忆：记录成功调用的工具名
               this.proceduralMemory?.recordHit(tr.name)
@@ -1176,8 +1240,29 @@ export class ChatExecutor {
           continue
         }
         ctx.transition(RunState.COMPLETED)
-        const finalReply = result.reply || ''
-        if (!finalReply) this.obsLogger?.logExit('empty_llm_reply', `step=${i}`)
+        let finalReply = result.reply || ''
+        if (!finalReply) {
+          // LLM 本轮调了工具但没生成文字回复 → 生成自然语言摘要
+          if (executedToolNames.size > 0) {
+            const toolList = [...executedToolNames]
+              .map((n) => {
+                const map: Record<string, string> = {
+                  centos_exec: '远程服务器',
+                  centos_read_file: '远程文件',
+                  centos_grep: '远程搜索',
+                  read_file: '文件',
+                  grep: '搜索',
+                  list_files: '目录',
+                  run_command: '命令',
+                  write_file: '写入文件',
+                  edit_file: '编辑文件',
+                }
+                return map[n] || n
+              })
+            finalReply = `正在${toolList.join('、')}，稍等~`
+          }
+          this.obsLogger?.logExit('empty_llm_reply', `step=${i} generated="${finalReply}"`)
+        }
         // 效用跟踪：检测 Agent 回复中是否引用了记忆
         if (finalReply && this.memoryService) {
           this.memoryService.recordAgentReference(finalReply)
@@ -1423,6 +1508,23 @@ export class ChatExecutor {
         }
       }
 
+      // ── 紧急度覆盖：高紧急内容使用紧凑节奏 ──
+      if (sentiment.urgency >= 0.4) {
+        finalParams = {
+          voice: finalParams.voice,
+          rate: emotionParams.rate,
+          pitch: emotionParams.pitch,
+          label: `${finalParams.label}·紧急`,
+        }
+        log('INFO', 'tts_urgency_applied', {
+          urgency: sentiment.urgency.toFixed(2),
+          contentType: sentiment.contentType,
+          rate: emotionParams.rate,
+          pitch: emotionParams.pitch,
+          label: finalParams.label,
+        })
+      }
+
       // 如果启用了语气记忆，混合用户语气基线 + 内容风格
       if (this.toneProfileEnabled && this.lastToneBaseline) {
         finalParams = toneToVoiceMapper.blend(this.lastToneBaseline, finalParams)
@@ -1563,6 +1665,7 @@ export class ChatExecutor {
         polarity: sentiment.polarity,
         contentType: sentiment.contentType,
         score: sentiment.score,
+        urgency: sentiment.urgency,
         voice: finalParams.voice,
         label: finalParams.label,
         matchedWords: sentiment.matchedWords.slice(0, 5),

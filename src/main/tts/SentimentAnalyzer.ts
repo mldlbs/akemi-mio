@@ -83,6 +83,36 @@ const INTENSIFIERS = new Set([
 ])
 
 // ══════════════════════════════════════════
+//  紧急度关键词
+// ══════════════════════════════════════════
+
+const URGENT_WORDS = new Set([
+  // 时间紧迫
+  '立刻', '马上', '尽快', '赶紧', '赶快', '紧急', '急切', '加急', '急事', '十万火急',
+  '立即', '即时', '当即', '从速', '从快',
+  // 警告/告警
+  '警告', '告警', 'alert', 'ALERT', 'warn', 'WARN', 'warning', 'WARNING',
+  '注意', '当心', '小心', '危险', '警惕',
+  // 系统紧急
+  '宕机', '崩溃', '断连', '中断', '停服', '停运', '下线', '故障', '事故',
+  '起火', '火灾', '地震', '海啸', '台风', '暴雨', '暴雪',
+  // 截止时间
+  '截止', '到期', '过期', 'deadline', 'DEADLINE', 'due', 'DUE',
+  '倒计时', '最后期限', '仅剩', '还剩',
+  // 高频/重复（表示紧迫感）
+  '!!!', '！！！', '??', '？？',
+  // 催办
+  '催', '等不及', '等着', '快', '加速',
+])
+
+// ══════════════════════════════════════════
+//  LRU 缓存配置
+// ══════════════════════════════════════════
+
+/** LRU 缓存最大条目数 */
+const LRU_CACHE_MAX = 64
+
+// ══════════════════════════════════════════
 //  内容类型检测关键词
 // ══════════════════════════════════════════
 
@@ -118,26 +148,29 @@ const CONTENT_TYPE_KEYWORDS: Array<{ type: string; words: string[] }> = [
 // ══════════════════════════════════════════
 
 export class SentimentAnalyzer {
-  /** 上次分析结果缓存（用于 debounce / 避免相同文本重复分析） */
-  private lastResult: SentimentResult | null = null
-  private lastText = ''
+  /** LRU 缓存：text hash → SentimentResult */
+  private cache: Map<string, SentimentResult> = new Map()
 
   /**
-   * 分析文本的情感极性和内容类型
+   * 分析文本的情感极性、内容类型和紧急度
    *
    * @param text 待分析文本
    * @returns SentimentResult
    */
   analyze(text: string): SentimentResult {
     if (!text || text.trim().length === 0) {
-      return { polarity: 'neutral', score: 0, contentType: 'unknown', matchedWords: [] }
+      return { polarity: 'neutral', score: 0, contentType: 'unknown', matchedWords: [], urgency: 0 }
     }
 
-    // 相同文本返回缓存结果
-    if (text === this.lastText && this.lastResult) {
-      return this.lastResult
+    // ── LRU 缓存查找 ──
+    const cacheKey = text + ':' + text.length
+    const cached = this.cache.get(cacheKey)
+    if (cached) {
+      // 移到末尾（LRU 策略）
+      this.cache.delete(cacheKey)
+      this.cache.set(cacheKey, cached)
+      return cached
     }
-    this.lastText = text
 
     // 归一化：全角→半角，统一大小写
     const normalized = text.toLowerCase()
@@ -213,14 +246,27 @@ export class SentimentAnalyzer {
       score = Math.min(1, negScore / (negScore + 1))
     }
 
-    // 3. 内容类型检测
+    // 3. 紧急度检测
+    const urgency = this._detectUrgency(text, normalized, polarity)
+
+    // 4. 内容类型检测
     const contentType = this._detectContentType(normalized, polarity)
 
-    const result: SentimentResult = { polarity, score, contentType, matchedWords }
-    this.lastResult = result
+    const result: SentimentResult = { polarity, score, contentType, matchedWords, urgency }
+
+    // ── 写入 LRU 缓存 ──
+    this.cache.set(cacheKey, result)
+    if (this.cache.size > LRU_CACHE_MAX) {
+      // 删除最久未使用的条目（Map 的第一个 key）
+      const oldestKey = this.cache.keys().next().value
+      if (oldestKey !== undefined) {
+        this.cache.delete(oldestKey)
+      }
+    }
 
     log('INFO', 'sentiment_analysis', {
       polarity,
+      urgency: urgency.toFixed(2),
       score: score.toFixed(2),
       content_type: contentType,
       matched_words: matchedWords.slice(0, 10).join(','),
@@ -253,6 +299,83 @@ export class SentimentAnalyzer {
     }
 
     return words
+  }
+
+  /**
+   * 检测文本紧急度
+   *
+   * @param rawText 原始文本（用于标点/emoji 检测）
+   * @param normalized 归一化后的文本（用于关键词匹配）
+   * @param polarity 已判定的情感极性（负面内容天然紧急度更高）
+   * @returns 紧急度 0–1
+   */
+  private _detectUrgency(rawText: string, normalized: string, polarity: SentimentPolarity): number {
+    let urgencyScore = 0
+    const signals: string[] = []
+
+    // 1. 紧急关键词匹配
+    const words = this._segmentWords(normalized)
+    for (const word of words) {
+      if (URGENT_WORDS.has(word)) {
+        urgencyScore += 0.15
+        signals.push(word)
+      }
+    }
+
+    // 2. 感叹号/问号聚集（!!! 或 ??? 表示急迫）
+    const exclCount = (rawText.match(/!/g) || []).length
+    const quesCount = (rawText.match(/\?/g) || []).length
+    if (exclCount >= 3) urgencyScore += Math.min(0.3, exclCount * 0.05)
+    if (quesCount >= 3) urgencyScore += Math.min(0.2, quesCount * 0.03)
+
+    // 3. 全大写英文单词（表示强调/紧急）
+    const upperWords = rawText.match(/\b[A-Z]{3,}\b/g)
+    if (upperWords) {
+      urgencyScore += Math.min(0.2, upperWords.length * 0.05)
+    }
+
+    // 4. 错误/负面内容提高紧急度基数
+    if (polarity === 'negative') {
+      urgencyScore += 0.1
+    }
+
+    // 5. 短文本 + 高比例感叹号/问号 → 紧急
+    if (rawText.length < 60 && (exclCount + quesCount) / Math.max(1, rawText.length) > 0.1) {
+      urgencyScore += 0.1
+    }
+
+    // 6. 中文"快"字开头的祈使句
+    if (/^快/.test(normalized.trim())) {
+      urgencyScore += 0.15
+    }
+
+    const clamped = Math.min(1, Math.max(0, urgencyScore))
+
+    if (clamped > 0.3) {
+      log('DEBUG', 'urgency_detected', {
+        urgency: clamped.toFixed(2),
+        signals: signals.slice(0, 8).join(','),
+        excl_count: exclCount,
+        text_snippet: rawText.slice(0, 60),
+      })
+    }
+
+    return clamped
+  }
+
+  /**
+   * 清除 LRU 缓存（供调试/测试用）
+   */
+  clearCache(): void {
+    this.cache.clear()
+    log('DEBUG', 'sentiment_analyzer_cache_cleared')
+  }
+
+  /**
+   * 获取当前缓存大小（供调试用）
+   */
+  getCacheSize(): number {
+    return this.cache.size
   }
 
   /**

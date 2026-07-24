@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useBehaviorAwareWallpaper } from '../hooks/useBehaviorAwareWallpaper'
 import { useFocusScore } from '../hooks/useFocusScore'
 import { BehaviorDash } from './BehaviorDash'
+import { PeriodicPredictionToast } from './PeriodicPredictionToast'
 import { TaskSwitcher } from './TaskSwitcher'
 import { TtsSubtitleOverlay } from './TtsSubtitleOverlay'
 import { WallpaperAgentPanel } from './WallpaperAgentPanel'
@@ -229,6 +230,9 @@ export function WallpaperOverlay() {
 
       {/* ── 壁纸交互模式：Agent 面板（Ctrl+Space 激活） ── */}
       {interactiveEnabled && <WallpaperAgentPanel />}
+
+      {/* ── 行为预测哑提醒（周期模式预测 + 预加载状态） ── */}
+      <PeriodicPredictionToast />
 
       {/* ── 状态标签 ── */}
       <div className="wallpaper-status-label">{statusLabel}</div>

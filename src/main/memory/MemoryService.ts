@@ -10,11 +10,12 @@ import { UnifiedMemoryQuery } from './UnifiedMemoryQuery'
 import { InteractionTracker } from './InteractionTracker'
 import { BehaviorWeightingService } from './BehaviorWeightingService'
 import { TopicTransitionPredictor } from './TopicTransitionPredictor'
+import { KeywordFrequencyTracker } from './KeywordFrequencyTracker'
 import { adaptToPlugin } from './IMemoryPlugin'
 import { FictionalMemoryGenerator } from './FictionalMemoryGenerator'
 import { MemoryUtilityTracker } from './MemoryUtilityTracker'
 import { AdaptiveOrchestrator } from './AdaptiveOrchestrator'
-import { MemoryCleaner } from './MemoryCleaner'
+import { MemoryCleaner, type BehaviorWeightingIntegration } from './MemoryCleaner'
 import { TaskMemoryCleaner } from './TaskMemoryCleaner'
 import { MemorySleepManager } from './MemorySleepManager'
 import { memoryConfigManager } from './MemoryOptimizationConfig'
@@ -127,6 +128,7 @@ export class MemoryService {
   private lastUserText: string = ''
   private removedIds = new Set<string>()
   private decayTimer: ReturnType<typeof setInterval> | null = null
+  private quickCleanupTimer: ReturnType<typeof setInterval> | null = null
   private lastCleanupTime: number = 0
 
   readonly summary: SummaryMemory
@@ -145,6 +147,7 @@ export class MemoryService {
   readonly taskCleaner: TaskMemoryCleaner
   readonly sleepManager: MemorySleepManager
   readonly adaptiveOrchestrator: AdaptiveOrchestrator
+  readonly keywordFreqTracker: KeywordFrequencyTracker
 
   constructor() {
     this.summary = new SummaryMemory()
@@ -154,7 +157,19 @@ export class MemoryService {
     this.decisionStore = new DecisionStore()
     this.fictionalGenerator = new FictionalMemoryGenerator()
     this.utilityTracker = new MemoryUtilityTracker()
-    this.cleaner = new MemoryCleaner(this.utilityTracker)
+
+    // 构造行为加权集成对象，将 BehaviorWeightingService 关联到 MemoryCleaner
+    const behaviorWeightingIntegration: BehaviorWeightingIntegration = {
+      computeCleanupMultiplier: (memoryTopics: string[]) => {
+        const interactions = this.interactionTracker?.getAll() ?? []
+        const profile = this.behaviorWeighting?.computeInterestProfile(interactions)
+        if (!profile) return 1.0
+        return this.behaviorWeighting.computeCleanupMultiplier(memoryTopics, interactions, profile)
+      },
+    }
+    this.cleaner = new MemoryCleaner(this.utilityTracker, {
+      behaviorWeighting: behaviorWeightingIntegration,
+    })
     this.taskCleaner = new TaskMemoryCleaner()
     this.lastCleanupTime = Date.now() // 初始化清理计时器
     this.metaController = new MetaController()
@@ -194,8 +209,15 @@ export class MemoryService {
     this.interactionTracker.load()
     // 从 InteractionTracker 中加载历史数据到话题转移预测器
     this.topicTransitionPredictor.loadFromInteractionRecords(this.interactionTracker.getAll())
+    // 初始化关键字频率跟踪器
+    this.keywordFreqTracker = new KeywordFrequencyTracker()
+    // 从现有交互记录中回填关键字频率
+    this.backfillKeywordFrequency()
+    this.keywordFreqTracker.startDecayTimer()
     // 启动定期衰减任务（同时管理效用衰减和清理）
     this.startDecayTimer()
+    // 启动快速清理定时器（每 6 小时清理长期未访问的低权重记忆）
+    this.startQuickCleanupTimer()
     // 初始化智能休眠管理器（空闲检测、低频压缩、活跃预加载）
     this.sleepManager = new MemorySleepManager(
       () => this.entries,
@@ -212,12 +234,14 @@ export class MemoryService {
     })
     // 初始挖掘一次模式（基于 InteractionTracker 数据）
     this.adaptiveOrchestrator.triggerMining()
+    const kwStats = this.keywordFreqTracker?.getStats()
     log('INFO', 'memory_loaded', {
       entries: this.entries.length,
       permanent: this.entries.filter((e) => e.tier === 'permanent').length,
       semi: this.entries.filter((e) => e.tier === 'semi').length,
       ephemeral: this.entries.filter((e) => e.tier === 'ephemeral').length,
       interactions: this.interactionTracker.getAll().length,
+      keywords: kwStats?.totalKeywords ?? 0,
     })
   }
 
@@ -255,6 +279,34 @@ export class MemoryService {
       }
     } catch (err) {
       log('WARN', 'memory_load_failed', { error: String(err) })
+    }
+  }
+
+  /**
+   * 从现有交互记录中回填关键字频率。
+   * 在构造时调用，使 KeywordFrequencyTracker 从已持久化的交互数据中学习初始频率。
+   */
+  private backfillKeywordFrequency(): void {
+    try {
+      const interactions = this.interactionTracker.getAll()
+      if (interactions.length === 0) return
+
+      const batchEntries: Array<{ keywords: string[]; timestamp: number }> = []
+      for (const record of interactions) {
+        if (record.topics && record.topics.length > 0) {
+          batchEntries.push({
+            keywords: record.topics,
+            timestamp: record.timestamp,
+          })
+        }
+      }
+
+      if (batchEntries.length > 0) {
+        this.keywordFreqTracker.recordKeywordsBatch(batchEntries)
+        log('INFO', 'keyword_freq_backfilled', { count: batchEntries.length })
+      }
+    } catch (err) {
+      log('WARN', 'keyword_freq_backfill_failed', { error: String(err) })
     }
   }
 
@@ -313,6 +365,14 @@ export class MemoryService {
 
     // 3. 新建条目（初始入临时层）
     const initialTier = options?.tier ?? 'ephemeral'
+    const entryTopics = this.extractTopics(content)
+
+    // ── 关键字驱动初始权重：记忆内容匹配高频关键字则提高初始权重 ──
+    const keywordMatchScore = this.keywordFreqTracker?.getKeywordMatchScore(entryTopics) ?? 0
+    // 匹配度 0-1，每 0.5 匹配度加 0.05 boost，最高加 0.1
+    const keywordBoost = Math.min(0.1, keywordMatchScore * 0.1)
+    const initialBehaviorScore = Math.min(BEHAVIOR_SCORE_MAX, BEHAVIOR_SCORE_INITIAL + keywordBoost)
+
     const entry: MemoryEntry = {
       id: nextId(),
       type,
@@ -320,7 +380,7 @@ export class MemoryService {
       confidence,
       tier: initialTier,
       reinforceCount: initialTier === 'permanent' ? 999 : 0,
-      behaviorScore: BEHAVIOR_SCORE_INITIAL,
+      behaviorScore: initialBehaviorScore,
       lastAccessedAt: Date.now(),
       accessCount: 0,
       isPinned: false,
@@ -331,7 +391,7 @@ export class MemoryService {
       lastUtilityUpdateAt: Date.now(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      topics: this.extractTopics(content),
+      topics: entryTopics,
       structuredData: options?.structuredData ?? null,
     }
     this.entries.push(entry)
@@ -344,6 +404,7 @@ export class MemoryService {
       type: entry.type,
       contentSnippet: entry.content.slice(0, 50),
       tier: entry.tier,
+      topics: entryTopics,
       timestamp: Date.now(),
     })
 
@@ -432,6 +493,11 @@ export class MemoryService {
         isExplicitRemember,
         rementionedMemoryIds: rementionedIds,
       })
+
+      // ── 关键字频率跟踪：将话题标签作为关键字记录 ──
+      if (topics.length > 0) {
+        this.keywordFreqTracker.recordKeywords(topics)
+      }
 
       // ── 话题转移预测与记忆预取 ──
       // 记录当前话题到转移矩阵，并触发下一话题预测和预取
@@ -702,6 +768,27 @@ export class MemoryService {
     return (limit ? scored.slice(0, limit) : scored).map((s) => s.entry)
   }
 
+  /**
+   * 按类型查询记忆条目。
+   * 用于快照管理、审计和调试场景。
+   */
+  getEntriesByType(type: MemoryEntry['type']): MemoryEntry[] {
+    return this.entries.filter((e) => e.type === type)
+  }
+
+  /**
+   * 直接移除指定 ID 的记忆条目。
+   * 用于快照过期清理等场景。
+   * @returns 是否找到并标记了移除
+   */
+  removeEntryById(id: string): boolean {
+    const idx = this.entries.findIndex((e) => e.id === id)
+    if (idx === -1) return false
+    this.entries.splice(idx, 1)
+    this.removedIds.add(id)
+    return true
+  }
+
   /** 批量应用每日衰减（由定时器调用） */
   applyDecay(): void {
     const now = Date.now()
@@ -728,7 +815,10 @@ export class MemoryService {
     // 同时应用效用衰减
     const utilityDecayed = this.utilityTracker.applyDecayToAll(this.entries)
 
-    if (decayed > 0 || utilityDecayed > 0) {
+    // 同时应用关键字频率衰减（按间隔自动执行）
+    const keywordDecayed = this.keywordFreqTracker?.decayFrequencies() ?? 0
+
+    if (decayed > 0 || utilityDecayed > 0 || keywordDecayed > 0) {
       log('INFO', 'behavior_score_decayed', { behaviorDecayed: decayed, utilityDecayed, total: this.entries.length })
       this.prune()
       eventBus.emit('memory.context.changed', {
@@ -756,6 +846,17 @@ export class MemoryService {
     this.decayTimer = setInterval(() => {
       this.applyDecay()
     }, DECAY_CHECK_INTERVAL)
+  }
+
+  /** 快速清理定时器（每 6 小时清理长期未访问的低权重记忆） */
+  private startQuickCleanupTimer(): void {
+    if (this.quickCleanupTimer) clearInterval(this.quickCleanupTimer)
+    const QUICK_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6 小时
+
+    this.quickCleanupTimer = setInterval(() => {
+      log('INFO', 'memory_quick_cleanup_tick')
+      this.cleaner.quickCleanup(this.entries, this.removedIds)
+    }, QUICK_CLEANUP_INTERVAL_MS)
   }
 
   // ══════════════════════════════════════════
@@ -1315,6 +1416,46 @@ export class MemoryService {
     this.cleaner.rejectCleanup()
   }
 
+  // ══════════════════════════════════════════
+  //  关键字频率跟踪集成
+  // ══════════════════════════════════════════
+
+  /**
+   * 获取关键字频率统计信息。
+   */
+  getKeywordFreqStats() {
+    return this.keywordFreqTracker?.getStats() ?? {
+      totalKeywords: 0,
+      highFreqCount: 0,
+      lowFreqCount: 0,
+      totalFrequency: 0,
+      lastDecayTime: 0,
+      topKeywords: [],
+    }
+  }
+
+  /**
+   * 获取高频关键字列表。
+   */
+  getHighFrequencyKeywords(k?: number): string[] {
+    return this.keywordFreqTracker?.getHighFrequencyKeywords(k) ?? []
+  }
+
+  /**
+   * 获取关键字频率详情（所有关键字）。
+   */
+  getAllKeywordFrequencies() {
+    return this.keywordFreqTracker?.getAllKeywords() ?? []
+  }
+
+  /**
+   * 计算内容与高频关键字的匹配度（用于外部查询）。
+   */
+  getContentKeywordMatch(content: string): number {
+    const topics = this.extractTopics(content)
+    return this.keywordFreqTracker?.getKeywordMatchScore(topics) ?? 0
+  }
+
   /** 按行为驱动得分排序（用于上下文注入，优先返回高价值记忆） */
   private getScoredEntries(tier: MemoryEntry['tier']): MemoryEntry[] {
     // 使用行为加权得分（基础分 + 当前兴趣 boost）
@@ -1337,14 +1478,28 @@ export class MemoryService {
       clearInterval(this.decayTimer)
       this.decayTimer = null
     }
+    if (this.quickCleanupTimer) {
+      clearInterval(this.quickCleanupTimer)
+      this.quickCleanupTimer = null
+    }
+    this.keywordFreqTracker?.stopDecayTimer()
     this.sleepManager.stop()
     this.cleaner.stop()
     this.flush()
   }
 
+  /**
+   * 立即触发快速清理（供外部手动调用）。
+   * @returns 被清理的条目数
+   */
+  runQuickCleanup(): number {
+    return this.cleaner.quickCleanup(this.entries, this.removedIds)
+  }
+
   clear(): void {
     this.entries = []
     this.messageCount = 0
+    this.keywordFreqTracker?.clearAll()
     log('INFO', 'memory_cleared')
   }
 

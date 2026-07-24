@@ -882,6 +882,59 @@ const MIGRATIONS: Migration[] = [
     revert: 'DROP TABLE IF EXISTS activity_hourly;',
     category: 'schema',
   },
+  {
+    version: 41,
+    sql: `
+      CREATE TABLE IF NOT EXISTS session_compactions (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        source TEXT NOT NULL CHECK(source IN ('electron', 'telegram')),
+        digest TEXT NOT NULL,
+        topics TEXT NOT NULL DEFAULT '[]',
+        entities TEXT NOT NULL DEFAULT '[]',
+        facts TEXT NOT NULL DEFAULT '[]',
+        decisions TEXT NOT NULL DEFAULT '[]',
+        unresolved TEXT NOT NULL DEFAULT '[]',
+        importance_score REAL NOT NULL DEFAULT 0.5,
+        message_count INTEGER NOT NULL DEFAULT 0,
+        token_count INTEGER NOT NULL DEFAULT 0,
+        session_start_at INTEGER NOT NULL,
+        session_end_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_session_compactions_session_id ON session_compactions(session_id);
+      CREATE INDEX IF NOT EXISTS idx_session_compactions_created_at ON session_compactions(created_at);
+      CREATE INDEX IF NOT EXISTS idx_session_compactions_source ON session_compactions(source);
+      -- 唯一约束：同一 session 的同一时间区段不重复 compact
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_session_compaction_range ON session_compactions(session_id, session_end_at);
+    `,
+    revert: 'DROP TABLE IF EXISTS session_compactions;',
+    category: 'schema',
+  },
+  {
+    version: 42,
+    sql: `
+      ALTER TABLE session_compactions ADD COLUMN trigger_reason TEXT NOT NULL DEFAULT 'production_threshold';
+      CREATE INDEX IF NOT EXISTS idx_session_compactions_trigger_reason ON session_compactions(trigger_reason);
+    `,
+    revert: 'DROP INDEX IF EXISTS idx_session_compactions_trigger_reason;',
+    category: 'schema',
+  },
+  {
+    version: 43,
+    sql: `
+      CREATE TABLE IF NOT EXISTS keyword_freq (
+        keyword TEXT PRIMARY KEY,
+        freq INTEGER NOT NULL DEFAULT 0,
+        last_seen INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_keyword_freq_freq ON keyword_freq(freq DESC);
+      CREATE INDEX IF NOT EXISTS idx_keyword_freq_last_seen ON keyword_freq(last_seen DESC);
+    `,
+    revert: 'DROP TABLE IF EXISTS keyword_freq;',
+    category: 'schema',
+  },
 ]
 
 // 导出迁移数组供测试验证

@@ -283,6 +283,14 @@ export function createElectronAPI(ipc: IpcRenderer) {
       return () => ipc.removeListener('agent:plan_completed', handler)
     },
 
+    onPlanFocusSwitched: (
+      callback: (data: { planId: string; planTitle: string; status: string; stepCount: number; doneCount: number }) => void,
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('agent:plan_focus_switched', handler)
+      return () => ipc.removeListener('agent:plan_focus_switched', handler)
+    },
+
     onAgentObserve: (
       callback: (data: { requestId: string; step: number; proceduresFound: number; patternsFound: number; durationMs: number }) => void,
     ) => {
@@ -765,6 +773,25 @@ export function createElectronAPI(ipc: IpcRenderer) {
       ipc.on('behavior:state', handler)
       return () => {
         ipc.removeListener('behavior:state', handler)
+      }
+    },
+
+    // ── 行为预测哑提醒（主进程 → 渲染进程） ──
+    onBehaviorPrediction: (
+      callback: (data: {
+        topic: string
+        description: string
+        confidence: number
+        associatedTool?: string
+        preloaded: boolean
+        eventId: string
+        expiresAt: number
+      }) => void,
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('behavior:prediction', handler)
+      return () => {
+        ipc.removeListener('behavior:prediction', handler)
       }
     },
 
@@ -1325,6 +1352,32 @@ export function createElectronAPI(ipc: IpcRenderer) {
     blogDeleteAudio: (
       entryId: string,
     ): Promise<{ success: boolean; error?: string }> => ipc.invoke('blog:deleteAudio', entryId),
+
+    // ── 语音便签壁纸 ──
+    voicenoteToggle: (): Promise<{ success: boolean; state: any }> => ipc.invoke('voicenote:toggle'),
+
+    voicenoteGetState: (): Promise<{ success: boolean; state: any }> => ipc.invoke('voicenote:getState'),
+
+    voicenoteSetText: (text: string): Promise<{ success: boolean }> => ipc.invoke('voicenote:setText', text),
+
+    voicenoteAppendText: (text: string): Promise<{ success: boolean }> => ipc.invoke('voicenote:appendText', text),
+
+    voicenoteClear: (): Promise<{ success: boolean }> => ipc.invoke('voicenote:clear'),
+
+    voicenoteCopy: (): Promise<{ success: boolean }> => ipc.invoke('voicenote:copy'),
+
+    voicenoteSave: (): Promise<{ success: boolean; path?: string; error?: string }> => ipc.invoke('voicenote:save'),
+
+    voicenoteSetDisplayMode: (mode: 'fixed' | 'scroll'): Promise<{ success: boolean }> =>
+      ipc.invoke('voicenote:setDisplayMode', mode),
+
+    onVoicenoteStateChange: (callback: (state: any) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: any) => callback(state)
+      ipc.on('voicenote:state-changed', handler)
+      return () => {
+        ipc.removeListener('voicenote:state-changed', handler)
+      }
+    },
   }
 }
 

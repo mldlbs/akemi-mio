@@ -26,6 +26,31 @@ const SEVERITY_WEIGHT: Record<Severity, number> = {
   info: 1,
 }
 
+/**
+ * ProblemSource → 行为模块名称的映射。
+ * 用于将行为优先级权重（按模块）映射到问题队列（按来源）。
+ * 未列出的来源默认映射到 'other'。
+ */
+const SOURCE_TO_MODULE: Record<string, string> = {
+  tsc: 'agent',
+  test: 'agent',
+  lint: 'agent',
+  log: 'agent',
+  git: 'agent',
+  runtime: 'agent',
+  feature: 'agent',
+  cicd: 'agent',
+  file_organizer: 'agent',
+  blog: 'agent',
+  evidence: 'agent',
+  agent: 'agent',
+  behavior: 'behavior',
+  tool: 'tool',
+  tts: 'tts',
+  memory: 'memory',
+  parameter: 'agent',
+}
+
 /** 修复失败时的默认错误消息（无显式错误时使用） */
 const DEFAULT_FAIL_MESSAGE = 'Fix attempt failed with no specific error'
 
@@ -40,9 +65,28 @@ export class ProblemQueue {
   private processingProblems = new Map<string, Problem>()
   private queuePath: string
 
+  /** 行为优先级权重（模块 → 权重倍数），由 BehaviorPriorityWeighter 提供 */
+  private behaviorWeights: Record<string, number> | null = null
+
   constructor(persistDir: string) {
     this.queuePath = join(persistDir, QUEUE_FILE)
     this.load()
+  }
+
+  /**
+   * 设置行为优先级权重。
+   * 权重影响 sort() 中的排序分数，使高频/高错误模块的问题优先处理。
+   * 传入 null 可清除权重（回归默认排序）。
+   */
+  setBehaviorWeights(weights: Record<string, number> | null): void {
+    this.behaviorWeights = weights
+    this.sort()
+    log('INFO', 'problem_queue_behavior_weights_set', {
+      modules: weights ? Object.keys(weights).length : 0,
+      topModule: weights
+        ? Object.entries(weights).sort(([, a], [, b]) => b - a)[0]?.[0]
+        : null,
+    })
   }
 
   /** 批量插入新问题（自动去重） */
@@ -291,11 +335,36 @@ export class ProblemQueue {
     return this.problems.find((existing) => existing.source === p.source && existing.file === p.file && existing.line === p.line)
   }
 
+  /** 获取某个问题的行为权重倍率 */
+  private getBehaviorWeight(problem: Problem): number {
+    if (!this.behaviorWeights) return 1.0
+
+    // 先按来源精确匹配
+    if (this.behaviorWeights[problem.source] !== undefined) {
+      return this.behaviorWeights[problem.source]
+    }
+
+    // 按来源→模块映射
+    const module = SOURCE_TO_MODULE[problem.source] || 'other'
+    return this.behaviorWeights[module] ?? 1.0
+  }
+
   private sort(): void {
+    if (!this.behaviorWeights) {
+      // 无行为权重：默认排序（severity × occurrenceCount）
+      this.problems.sort((a, b) => {
+        const scoreA = SEVERITY_WEIGHT[a.severity] * a.occurrenceCount
+        const scoreB = SEVERITY_WEIGHT[b.severity] * b.occurrenceCount
+        return scoreB - scoreA
+      })
+      return
+    }
+
+    // 有行为权重：severity × occurrenceCount × behaviorWeight
     this.problems.sort((a, b) => {
-      const scoreA = SEVERITY_WEIGHT[a.severity] * a.occurrenceCount
-      const scoreB = SEVERITY_WEIGHT[b.severity] * b.occurrenceCount
-      return scoreB - scoreA // 高分在前
+      const scoreA = SEVERITY_WEIGHT[a.severity] * a.occurrenceCount * this.getBehaviorWeight(a)
+      const scoreB = SEVERITY_WEIGHT[b.severity] * b.occurrenceCount * this.getBehaviorWeight(b)
+      return scoreB - scoreA
     })
   }
 

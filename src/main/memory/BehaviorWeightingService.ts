@@ -256,6 +256,96 @@ export class BehaviorWeightingService {
     return top.join(' > ')
   }
 
+  // ══════════════════════════════════════════
+  //  话题新鲜度分析（用于清洗周期加权）
+  // ══════════════════════════════════════════
+
+  /**
+   * 获取某个话题离现在多久未被提及（毫秒）。
+   * 从最近交互记录反向遍历，找到该话题最近一次出现的交互时间。
+   *
+   * @param topic 要查询的话题
+   * @param interactions 所有交互记录（按时间升序）
+   * @returns 毫秒数（距离上次提及的时间），如果从未被提及则返回 null
+   */
+  getTopicRecencyMs(topic: string, interactions: InteractionRecord[]): number | null {
+    if (!interactions || interactions.length === 0) return null
+
+    // 从最新到最旧遍历
+    for (let i = interactions.length - 1; i >= 0; i--) {
+      const record = interactions[i]
+      if (record.topics && record.topics.includes(topic)) {
+        return Date.now() - record.timestamp
+      }
+    }
+    return null
+  }
+
+  /**
+   * 计算记忆条目的行为加权清洗乘数。
+   *
+   * 用于 MemoryCleaner 的清洗周期中，作为 utilityScore 的乘数：
+   * - 乘数 > 1.0：话题处于当前兴趣中 → 保护该记忆，降低被清理概率
+   * - 乘数 = 1.0：话题最近被提及过 → 中性
+   * - 乘数 < 1.0：话题长期未出现 → 惩罚，提高被清理概率
+   *
+   * 算法：
+   * 1. 如果记忆有任何话题匹配当前兴趣分布 → 返回 2.0（强力保护）
+   * 2. 否则取所有话题中最高乘数（取最优，只要有一个话题是新鲜的即保护）：
+   *    - 7 天内被提及 → 1.0（中性）
+   *    - 超过 7 天 → 线性衰减至最低 0.5
+   *    - 从未被提及（有话题但从未出现过）→ 0.5（轻微惩罚）
+   * 3. 无话题标签 → 1.0（中性，不受影响）
+   *
+   * @param memoryTopics 记忆的话题标签列表
+   * @param interactions 交互记录（按时间升序）
+   * @param profile 当前兴趣分布
+   * @returns 0.5 ~ 2.0 的乘数
+   */
+  computeCleanupMultiplier(
+    memoryTopics: string[],
+    interactions: InteractionRecord[],
+    profile: InterestProfile,
+  ): number {
+    if (!memoryTopics || memoryTopics.length === 0) return 1.0
+
+    let bestMultiplier = 0.5 // 默认为最低，逐话题提升
+
+    for (const topic of memoryTopics) {
+      // 1. 话题在当前兴趣分布中 → 强力保护
+      if (profile.topicWeights.has(topic)) {
+        return 2.0
+      }
+
+      // 2. 检查话题新鲜度
+      const recencyMs = this.getTopicRecencyMs(topic, interactions)
+
+      if (recencyMs === null) {
+        // 从未被提及 → 0.5
+        // 不更新 bestMultiplier（0.5 已是最低），继续看其他话题能否提升
+      } else {
+        const daysSinceLastMention = recencyMs / (1000 * 60 * 60 * 24)
+        let multiplier: number
+        if (daysSinceLastMention <= 7) {
+          // 7 天内被提及 → 中性
+          multiplier = 1.0
+        } else {
+          // 超过 7 天 → 线性衰减至最低 0.5
+          // 公式：1.0 - min(0.5, (days - 7) * 0.03)
+          // 7 天: 1.0, 14天: 0.79, 21天: 0.58, 24天+: 0.5
+          const penalty = Math.min(0.5, (daysSinceLastMention - 7) * 0.03)
+          multiplier = Math.max(0.5, 1.0 - penalty)
+        }
+        // 取最优（最高乘数）——只要有一个话题近期被提及即可保护记忆
+        if (multiplier > bestMultiplier) {
+          bestMultiplier = multiplier
+        }
+      }
+    }
+
+    return bestMultiplier
+  }
+
   /** 清除缓存（强制下次检索重新计算） */
   invalidateCache(): void {
     this.cachedProfile = null
