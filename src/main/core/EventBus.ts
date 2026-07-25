@@ -78,6 +78,9 @@ export type EventName =
   | 'pipeline.started'
   | 'pipeline.completed'
   | 'pipeline.errored'
+
+  // ── Pipeline 可观测性事件 ──
+  | 'pipeline.collector.executed'
   | 'workflow.run.created'
   | 'workflow.run.updated'
   | 'workflow.run.step'

@@ -57,6 +57,18 @@ export class AsrLogCollector implements SignalCollector {
     return true
   }
 
+  getSkipReason(): string {
+    if (Date.now() - this.lastRunAt < ANALYSIS_WINDOW_MS) {
+      const remaining = Math.round((ANALYSIS_WINDOW_MS - (Date.now() - this.lastRunAt)) / 1000)
+      return `cooldown: ${remaining}s remaining`
+    }
+    const recentCorrections = asrLogStore.getCorrectionsSince(Date.now() - ANALYSIS_WINDOW_MS)
+    if (recentCorrections.length < MIN_CORRECTIONS_TO_ANALYZE) {
+      return `insufficient_corrections: ${recentCorrections.length}/${MIN_CORRECTIONS_TO_ANALYZE}`
+    }
+    return 'unknown'
+  }
+
   async collect(): Promise<Problem[]> {
     this.lastRunAt = Date.now()
     log('INFO', 'asr_log_collector_start')

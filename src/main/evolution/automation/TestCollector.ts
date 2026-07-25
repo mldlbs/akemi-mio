@@ -27,6 +27,15 @@ export class TestCollector implements SignalCollector {
     return true
   }
 
+  getSkipReason(): string {
+    if (!existsSync(this.projectRoot)) return 'project_root_not_found'
+    if (Date.now() - this.lastRun < this.minIntervalMs) {
+      const remaining = Math.round((this.minIntervalMs - (Date.now() - this.lastRun)) / 1000)
+      return `cooldown: ${remaining}s remaining`
+    }
+    return 'unknown'
+  }
+
   async collect(): Promise<Problem[]> {
     this.lastRun = Date.now()
     try {

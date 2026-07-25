@@ -34,6 +34,14 @@ export class BehaviorCollector implements SignalCollector {
     return true
   }
 
+  getSkipReason(): string {
+    if (Date.now() - this.lastRun < this.minIntervalMs) {
+      const remaining = Math.round((this.minIntervalMs - (Date.now() - this.lastRun)) / 1000)
+      return `cooldown: ${remaining}s remaining`
+    }
+    return 'unknown'
+  }
+
   async collect(): Promise<Problem[]> {
     this.lastRun = Date.now()
 

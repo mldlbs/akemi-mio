@@ -62,5 +62,5 @@ export {
 } from './registry'
 
 export type { CollectorDef, ExecutorDef } from './registry'
-export type { Problem, AssignedProblem, FixResult, SignalCollector, FixExecutor, ProblemSource, Severity, PipelineStats } from './types'
+export type { Problem, AssignedProblem, FixResult, SignalCollector, FixExecutor, ProblemSource, Severity, PipelineStats, CollectorExecutionEvent, SyntheticProblemDef } from './types'
 export type { ReasoningStep, ReasoningStepStatus, ReasoningChain } from './types'

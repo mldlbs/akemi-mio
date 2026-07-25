@@ -87,6 +87,15 @@ export class CorrectionPatternCollector implements SignalCollector {
     return true
   }
 
+  getSkipReason(): string {
+    if (!memoryEvolutionBridge.isReady()) return 'memory_bridge_not_ready'
+    if (Date.now() - this.lastRun < MIN_INTERVAL_MS) {
+      const remaining = Math.round((MIN_INTERVAL_MS - (Date.now() - this.lastRun)) / 1000)
+      return `cooldown: ${remaining}s remaining`
+    }
+    return 'unknown'
+  }
+
   async collect(): Promise<Problem[]> {
     try {
       this.lastRun = Date.now()

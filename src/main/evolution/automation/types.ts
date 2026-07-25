@@ -7,7 +7,7 @@
  */
 
 // ── 问题来源类型 ──
-export type ProblemSource = 'tsc' | 'test' | 'lint' | 'log' | 'git' | 'runtime' | 'feature' | 'behavior' | 'tool' | 'tts' | 'file_organizer' | 'cicd' | 'memory' | 'agent' | 'blog' | 'evidence' | 'parameter'
+export type ProblemSource = 'tsc' | 'test' | 'lint' | 'log' | 'git' | 'runtime' | 'feature' | 'behavior' | 'tool' | 'tts' | 'file_organizer' | 'cicd' | 'memory' | 'agent' | 'blog' | 'evidence' | 'parameter' | 'synthetic'
 
 // ── 问题严重度 ──
 export type Severity = 'error' | 'warning' | 'info'
@@ -49,6 +49,28 @@ export interface Problem {
   affectedCapability?: string
 }
 
+/**
+ * Collector 执行事件 — 用于管道可观测性。
+ * 记录每个 Collector 在单次 tick 中的执行决策和结果。
+ * 不记录 "collector failed" 等结果导向信息，只记录决策和计数。
+ */
+export interface CollectorExecutionEvent {
+  /** 采集器名称 */
+  collectorName: string
+  /** 管道 tick 标识（runOnce 调用标记） */
+  tickId: string
+  /** Collector 是否决定运行 */
+  shouldRun: boolean
+  /** 当 shouldRun=false 时的跳过原因（如 cooldown, no_signal, insufficient_data） */
+  skipReason?: string
+  /** collect() 返回的问题数量（仅在 shouldRun=true 时有意义） */
+  collectedCount: number
+  /** collect() 开始时间戳 */
+  startedAt: number
+  /** collect() 执行耗时（毫秒） */
+  durationMs: number
+}
+
 // ── 分配给 Executor 的问题 ──
 export interface AssignedProblem extends Problem {
   attempt: number
@@ -74,6 +96,8 @@ export interface SignalCollector {
   collect(): Promise<Problem[]>
   /** 采集器是否需要运行（跳过条件） */
   shouldRun(): boolean
+  /** 可选：当 shouldRun() 返回 false 时，提供可读的跳过原因（用于可观测性） */
+  getSkipReason?(): string
 }
 
 // ── Executor 接口 ──
@@ -143,4 +167,23 @@ export interface ReasoningChain {
   conclusion?: string
   /** 是否全部成功 */
   allSucceeded: boolean
+}
+
+// ── 合成证据（受控故障验证用） ──
+
+export interface SyntheticProblemDef {
+  /** 问题来源（模拟的 collector 来源） */
+  source: ProblemSource
+  /** 严重度 */
+  severity: Severity
+  /** 问题标题 */
+  title: string
+  /** 问题描述 */
+  description: string
+  /** 关联文件路径（可选） */
+  file?: string
+  /** 关联行号（可选） */
+  line?: number
+  /** 原始错误文本（可选，用于触发 AutoPatchExecutor 的模式匹配） */
+  raw?: string
 }

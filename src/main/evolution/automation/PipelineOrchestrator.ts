@@ -15,7 +15,8 @@
 
 import { log } from '../../logger/Logger'
 import { eventBus } from '../../core/EventBus'
-import type { SignalCollector, FixExecutor, FixResult } from './types'
+import { randomBytes } from 'crypto'
+import type { SignalCollector, FixExecutor, FixResult, CollectorExecutionEvent, SyntheticProblemDef } from './types'
 import { ProblemQueue } from './ProblemQueue'
 import { ExecutionPolicy } from './ExecutionPolicy'
 import type { VerdictAction, PolicyDecisionEvent } from './ExecutionPolicy'
@@ -220,16 +221,70 @@ export class PipelineOrchestrator {
     eventBus.emit('pipeline.started', { timestamp: this._lastRunAt })
 
     try {
-      // Phase 1: Collect
+      // Phase 1: Collect — emit observable events for ALL collectors
+      const tickId = `tick_${this._lastRunAt}_${randomBytes(3).toString('hex')}`
       const collectResults: Array<{ source: string; problems: import('./types').Problem[] }> = []
-      const collectPromises = this.collectors
-        .filter((c) => c.shouldRun())
-        .map(async (c) => {
-          const problems = await c.collect()
-          this.queue.push(problems)
-          this.totalCollected += problems.length
-          collectResults.push({ source: c.source, problems })
+
+      // 先记录所有 collector 的执行计划（包括跳过的）
+      const collectorExecutions: Array<{
+        collector: SignalCollector
+        willRun: boolean
+        skipReason: string | undefined
+      }> = this.collectors.map((c) => {
+        const willRun = c.shouldRun()
+        const skipReason = willRun ? undefined : (c.getSkipReason ? c.getSkipReason() : undefined)
+        return { collector: c, willRun, skipReason }
+      })
+
+      // 只跑 shouldRun=true 的 collector，但为所有 collector 发出事件
+      const collectPromises = collectorExecutions
+        .filter((ce) => ce.willRun)
+        .map(async (ce) => {
+          const startedAt = Date.now()
+          let collectedCount = 0
+          try {
+            const problems = await ce.collector.collect()
+            collectedCount = problems.length
+            this.queue.push(problems)
+            this.totalCollected += problems.length
+            collectResults.push({ source: ce.collector.source, problems })
+          } finally {
+            const event: CollectorExecutionEvent = {
+              collectorName: ce.collector.name,
+              tickId,
+              shouldRun: true,
+              collectedCount,
+              startedAt,
+              durationMs: Date.now() - startedAt,
+            }
+            eventBus.emit('pipeline.collector.executed' as any, event)
+            log('INFO', 'pipeline_collector_executed', {
+              collector: ce.collector.name,
+              collected: collectedCount,
+              durationMs: Date.now() - startedAt,
+            })
+          }
         })
+
+      // 为跳过的 collector 发出事件（无 collect 调用）
+      for (const ce of collectorExecutions) {
+        if (!ce.willRun) {
+          const event: CollectorExecutionEvent = {
+            collectorName: ce.collector.name,
+            tickId,
+            shouldRun: false,
+            skipReason: ce.skipReason,
+            collectedCount: 0,
+            startedAt: this._lastRunAt,
+            durationMs: 0,
+          }
+          eventBus.emit('pipeline.collector.executed' as any, event)
+          log('INFO', 'pipeline_collector_skipped', {
+            collector: ce.collector.name,
+            reason: ce.skipReason || 'shouldRun=false',
+          })
+        }
+      }
 
       await Promise.all(collectPromises)
 
@@ -406,5 +461,43 @@ export class PipelineOrchestrator {
       lastRunAt: this._lastRunAt,
       isRunning: this._isRunning,
     }
+  }
+
+  // ── 合成证据注入（受控故障验证用） ──
+
+  /**
+   * 注入一条合成问题到队列中。
+   * 用于受控故障验证：验证 ProblemQueue → Strategy → Execution → Review 全链路。
+   * 不修改 ADR，不调整 shouldRun 阈值。
+   *
+   * 注入后需手动调用 runOnce() 或等待下次调度触发执行。
+   * 注入的问题会被当作普通问题处理（去重、排序、策略门、执行）。
+   */
+  injectSynthetic(def: SyntheticProblemDef): string {
+    const id = `synthetic:${def.source}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
+    const problem: import('./types').Problem = {
+      id,
+      source: def.source,
+      severity: def.severity,
+      title: def.title,
+      description: def.description,
+      file: def.file,
+      line: def.line,
+      estimatedCostChars: def.description.length + 50,
+      lastSeen: Date.now(),
+      occurrenceCount: 1,
+      context: {
+        raw: def.raw || def.description,
+      },
+    }
+    const added = this.queue.push([problem])
+    log('INFO', 'pipeline_injected_synthetic', {
+      id,
+      source: def.source,
+      severity: def.severity,
+      title: def.title.slice(0, 60),
+      added,
+    })
+    return id
   }
 }

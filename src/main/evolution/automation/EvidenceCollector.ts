@@ -57,6 +57,10 @@ export class EvidenceCollector implements SignalCollector {
     return false
   }
 
+  getSkipReason(): string {
+    return 'passive_collector: triggered only by EvidenceBridge, never polled'
+  }
+
   /**
    * 将 RegressionReport 转换为 Problem[]。
    * 纯函数语义：相同输入产生相同输出（幂等性由调用方保证）。
