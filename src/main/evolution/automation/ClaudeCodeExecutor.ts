@@ -42,11 +42,11 @@ export class ClaudeCodeExecutor implements FixExecutor {
 
       log('INFO', 'agent_sdk_fix_start', { problemId: problem.id, proxy: 'deepseek' })
 
-      // 直接走 DeepSeek Anthropic 兼容接口，不依赖 cc-switch
+      // 通过 hjgo2claude (localhost:1841) 走 OpenCode 套餐
       const baseEnv: Record<string, string> = {
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
         ANTHROPIC_AUTH_TOKEN: llmKey,
-        ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:1841',
         ANTHROPIC_MODEL: 'deepseek-v4-flash',
         ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-flash',
         ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-flash',

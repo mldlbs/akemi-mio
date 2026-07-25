@@ -114,3 +114,22 @@ export type {
 
 // ── 行为周期性预加载服务（空闲时段预加载 + 哑提醒推送）──
 export { BehaviorPeriodicPreloadService, behaviorPeriodicPreloadService } from './BehaviorPeriodicPreloadService'
+
+// ── 行为模式预编排系统（PrefixSpan + 预编排引擎）──
+export { PatternMiner, patternMiner } from './PatternMiner'
+export type { MiningConfig, MiningResult } from './types'
+
+export { ToolPatternStore, toolPatternStore } from './ToolPatternStore'
+
+export { PreOrchestrationEngine, preOrchestrationEngine } from './PreOrchestrationEngine'
+export type { ToolCallContext, ConfirmationCallback, OrchestratorConfig } from './PreOrchestrationEngine'
+
+export type {
+  BehaviorPattern,
+  PatternStep,
+  PatternMatchResult,
+  PreOrchestrationPlan,
+  ResolvedStep,
+  ExecutionEntry,
+  ToolCallLogEntry,
+} from './types'

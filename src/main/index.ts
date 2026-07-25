@@ -5,8 +5,14 @@ import { AppRuntime } from './bootstrap/AppRuntime'
 // 禁用 GPU 加速 — 新版本 Electron/Chrome 的 GPU 进程有兼容性问题
 app.disableHardwareAcceleration()
 
+// 单实例锁：只允许启动一个实例
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+}
+
 // 远程调试端口 — 用于抓取渲染进程控制台日志
-app.commandLine.appendSwitch('remote-debugging-port', '9222')
+app.commandLine.appendSwitch('remote-debugging-port', '9224')
 
 // 透明窗口：阻止 Chromium 在失焦时暂停合成渲染，防止 DWM 刷白
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')

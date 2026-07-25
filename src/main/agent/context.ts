@@ -150,7 +150,7 @@ const PROMPT_TOOLS = `可用工具列表：
 - get_credential — 读取已保存的 API 密钥
 - set_credential — 保存用户提供的密钥
 - list_credentials — 查看已配置的密钥列表
-- list_mcp_servers — 查看已注册的 MCP 服务器
+- list_mcp_servers — 查看已注册的 MCP 服务器（包括 Playwright 浏览器自动化服务器）
 - remove_mcp_server — 移除 MCP 服务器
 - remember_fact — 记住重要信息（用户偏好、关键决定、项目需求），对话中主动使用
 - save_task_state — 保存多步骤任务进度，跨对话恢复（每完成一步主动调用）
@@ -168,6 +168,23 @@ const PROMPT_TOOLS = `可用工具列表：
 - list_workflow_runs — 查看工作流运行历史
 - enable_workflow / disable_workflow — 启用/停用工作流
 - approve_workflow_gate — 审批工作流中的审批门（gate），工作流暂停时使用
+- fanqie_publish_novel — 【内容获取】从写作系统获取小说章节的内容（标题+正文）。不操作浏览器。获取后使用 Playwright 浏览器工具在番茄小说作者平台完成发布
+- fanqie_auth_inspect — 【认证探针】检查 Playwright 浏览器当前上下文中的所有认证存储（cookie/localStorage/sessionStorage/IndexedDB），判断是否有登录态。操作目标平台前先调这个确认认证状态
+- browser_agent_execute — 【浏览器智能操作】执行语义级别的浏览器操作（观察页面、点击按钮、填入文本、提取信息）。基于 Stagehand SDK，自动理解页面 accessibility tree 定位元素。你只需描述"做什么"如"点击登录按钮"，不用写 selector
+
+🌐 浏览器自动化（Playwright MCP）— 系统已注册 Playwright MCP 服务器，可直接调用以下浏览器操作工具：
+- browser_navigate — 导航到指定 URL
+- browser_click — 点击页面元素（通过 accessibility snapshot 的 ref）
+- browser_snapshot — 获取页面 accessibility 快照，查看页面内容和结构
+- browser_fill_form — 填写表单字段
+- browser_type — 向输入框键入文本
+- browser_select_option — 选择下拉选项
+- browser_hover — 悬停元素
+- browser_evaluate — 在页面中执行 JavaScript
+- browser_console_messages — 查看浏览器控制台日志
+- browser_network_requests — 查看网络请求
+- browser_take_screenshot — 截图
+使用流程：browser_navigate → browser_snapshot（看清页面）→ browser_click / browser_type（操作）→ browser_snapshot（确认结果）
 
 端口和进程管理：
 - netstat -ano | findstr :端口号 — 检查端口占用

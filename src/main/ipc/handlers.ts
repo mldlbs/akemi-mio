@@ -60,6 +60,7 @@ export function registerHandlers(
   stateManager: StateManager,
   ttsService: TtsService,
   evolutionRef?: { current: SelfEvolutionService | null },
+  pipelineRef?: { current: import('../evolution/automation').PipelineOrchestrator | null },
   metricsCollector?: MetricsCollector,
   dashboardRef?: { current: EvolutionDashboardService | null },
   memoryContextRef?: { current: MemoryContextService | null },
@@ -74,7 +75,7 @@ export function registerHandlers(
   voiceNoteRef?: { current: VoiceNoteService | null },
 ): void {
   const ctx: HandlerContext = {
-    agentService, stateManager, ttsService, evolutionRef, metricsCollector,
+    agentService, stateManager, ttsService, evolutionRef, pipelineRef, metricsCollector,
     dashboardRef, memoryContextRef, decisionQueryRef, metricsQueryRef,
     organizerRef, voiceBookmarkRef, taskPanelRef, wallpaperInteractiveRef,
     restoreRef, conversationContextRef, voiceNoteRef,

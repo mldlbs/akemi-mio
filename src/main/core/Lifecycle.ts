@@ -91,8 +91,8 @@ export function createWindow(stateManager: StateManager): BrowserWindow {
           'Content-Security-Policy': [
             "default-src 'self'; " +
               "script-src 'self'; " +
-              "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/remixicon@4/; " +
-              "font-src 'self' https://cdn.jsdelivr.net/npm/remixicon@4/; " +
+              "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/remixicon@4/ https://fonts.googleapis.com; " +
+              "font-src 'self' https://cdn.jsdelivr.net/npm/remixicon@4/ https://fonts.gstatic.com; " +
               "img-src 'self' data: blob:; " +
               "media-src 'self' blob:; " +
               "connect-src 'self'; " +

@@ -59,7 +59,7 @@ export class CreativityExecutor implements FixExecutor {
       const baseEnv: Record<string, string> = {
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
         ANTHROPIC_AUTH_TOKEN: llmKey,
-        ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:1841',
         ANTHROPIC_MODEL: 'deepseek-v4-flash',
         ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-flash',
         ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-flash',

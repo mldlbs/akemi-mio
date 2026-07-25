@@ -1,9 +1,10 @@
 /**
  * SystemStabilityScore — Agent OS 系统稳定性评分。
  *
- * 六因子乘法模型：
- *   score = memoryHealth × taskFlowEfficiency × schedulerBalance × evolutionRiskControl × errorRateInverse × guardrailHealth
+ * 六因子加权平均模型：
+ *   score = Σ(wi × factor_i) / Σ(wi) × 100
  *
+ * 平均权重确保单个因子偏低不会拖垮整体，各因子独立贡献。
  * score ∈ [0, 100]，起始值 100，健康阈值 >= 70，临界阈值 < 40。
  */
 export interface StabilityFactors {
@@ -22,22 +23,38 @@ interface HistoryPoint {
   timestamp: number
 }
 
+/** 各因子权重 —— 默认等权，可根据业务重要性调整 */
+const DEFAULT_WEIGHTS: Record<keyof StabilityFactors, number> = {
+  memoryHealth: 1,
+  taskFlowEfficiency: 1,
+  schedulerBalance: 1,
+  evolutionRiskControl: 1,
+  errorRateInverse: 1,
+  guardrailHealth: 1,
+}
+
 export class SystemStabilityScore {
   private score = 100
   private history: HistoryPoint[] = []
   private readonly maxHistory = 60
+  private weights: Record<keyof StabilityFactors, number>
+
+  constructor(weights?: Partial<Record<keyof StabilityFactors, number>>) {
+    this.weights = { ...DEFAULT_WEIGHTS, ...weights }
+  }
 
   /** 计算稳定性分数并平滑更新 */
   compute(factors: StabilityFactors): number {
-    const raw =
-      factors.memoryHealth *
-      factors.taskFlowEfficiency *
-      factors.schedulerBalance *
-      factors.evolutionRiskControl *
-      factors.errorRateInverse *
-      factors.guardrailHealth
+    const weightSum = Object.values(this.weights).reduce((s, w) => s + w, 0)
+    const weightedSum =
+      factors.memoryHealth * this.weights.memoryHealth +
+      factors.taskFlowEfficiency * this.weights.taskFlowEfficiency +
+      factors.schedulerBalance * this.weights.schedulerBalance +
+      factors.evolutionRiskControl * this.weights.evolutionRiskControl +
+      factors.errorRateInverse * this.weights.errorRateInverse +
+      factors.guardrailHealth * this.weights.guardrailHealth
 
-    const computed = Math.round(Math.min(100, raw * 100))
+    const computed = Math.round(Math.min(100, (weightedSum / weightSum) * 100))
 
     // 指数平滑，避免剧烈跳变
     if (this.history.length === 0) {

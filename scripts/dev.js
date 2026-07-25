@@ -18,6 +18,8 @@ const child = spawn(process.execPath, [electronVite, 'dev'], {
     ...process.env,
     AKEMI_MIO_OBSERVABILITY: process.env.AKEMI_MIO_OBSERVABILITY || '',
     RUNTIME_ENABLED: process.env.RUNTIME_ENABLED || '1',
+    PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || 'C:\\Users\\gf191\\AppData\\Local\\ms-playwright',
+    LLM_KEY: process.env.LLM_KEY || '',
   },
 })
 

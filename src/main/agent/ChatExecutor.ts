@@ -698,9 +698,16 @@ export class ChatExecutor {
       const ctx = new RunContext(rid)
       this.runContext = ctx
       let reply = await this.toolLoop(messages, ctx, rid, source)
-      // 统一过滤：去除工具调用 XML 序列化残留（如 <invoke name="centos_exec"> 等）
+      // 统一过滤：去除工具调用 XML 序列化残留（如 <tool_calls>、<invoke>、<parameter> 等标签块）
       if (reply) {
-        const cleaned = reply.replace(/<invoke\b[^>]*>[\s\S]*?<\/invoke>/gi, '').trim()
+        const cleaned = reply
+          .replace(/<tool_calls>[\s\S]*?<\/tool_calls>/gi, '')
+          .replace(/<invoke\b[^>]*>[\s\S]*?<\/invoke>/gi, '')
+          .replace(/<parameter\b[^>]*>[\s\S]*?<\/parameter>/gi, '')
+          .replace(/<\w+\sname="[^"]*"[^>]*\/>/gi, '')
+          .replace(/<[a-z_]+\b[^>]*\/?>/gi, '')
+          .replace(/<\/[a-z_]+>/gi, '')
+          .trim()
         reply = cleaned || '嗯，我在呢。'
       }
       if (!reply) {

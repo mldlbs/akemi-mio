@@ -116,6 +116,12 @@ import {
   blogPublishWorkflowTool,
 } from './definitions/BlogPublishTools'
 import {
+  fanqiePublishNovelTool,
+  fanqieAuthInspectTool,
+} from './definitions/FanqiePublishTools'
+import { solveOdeTool } from './definitions/OdeSolverTool'
+import { browserAgentExecuteTool } from './definitions/BrowserAgentTools'
+import {
   planSchedulerStatusTool,
   planSchedulerPauseTool,
   planSchedulerResumeTool,
@@ -269,6 +275,13 @@ export function getAllTools(): Tool[] {
     blogPublishCredentialCheckTool as Tool,
     blogPublishWorkflowTool as Tool,
 
+    // === FanqiePublish 番茄小说 CDP 发布 ===
+    fanqiePublishNovelTool as Tool,
+    fanqieAuthInspectTool as Tool,
+
+    // === Browser Agent 浏览器智能操作 ===
+    browserAgentExecuteTool as Tool,
+
     // === 智能并行任务协调器 ===
     planSchedulerStatusTool as Tool,
     planSchedulerPauseTool as Tool,
@@ -276,5 +289,8 @@ export function getAllTools(): Tool[] {
     planSchedulerSkipTaskTool as Tool,
     planSchedulerRetryTaskTool as Tool,
     planSchedulerConfirmTaskTool as Tool,
+
+    // === 对话式 ODE 求解 ===
+    solveOdeTool as Tool,
   ]
 }

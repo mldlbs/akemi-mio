@@ -1,7 +1,7 @@
 /**
  * SystemStabilityScore 测试
  *
- * 验证六因子乘法模型、趋势检测、健康/临界状态判断和推荐策略。
+ * 验证六因子加权平均模型、趋势检测、健康/临界状态判断和推荐策略。
  */
 import { describe, it, expect } from 'vitest'
 
@@ -27,7 +27,7 @@ describe('SystemStabilityScore', () => {
     expect(ss.compute(factors)).toBe(100)
   })
 
-  it('0.5 因子计算正确 (0.5^6 * 100 ≈ 1.56)', () => {
+  it('全 0.5 因子 equals 50（加权平均：(0.5*6)/6*100）', () => {
     const ss = new SystemStabilityScore()
     const factors: StabilityFactors = {
       memoryHealth: 0.5,
@@ -37,13 +37,13 @@ describe('SystemStabilityScore', () => {
       errorRateInverse: 0.5,
       guardrailHealth: 0.5,
     }
-    expect(ss.compute(factors)).toBe(2)
+    expect(ss.compute(factors)).toBe(50)
   })
 
   it('isHealthy 返回 true 当 >= 70', () => {
     const ss = new SystemStabilityScore()
     expect(ss.isHealthy()).toBe(true)
-    // 0.95^6 = 0.735 → score 74 → healthy
+    // 0.95 avg → score 95 → healthy
     ss.compute({
       memoryHealth: 0.95,
       taskFlowEfficiency: 0.95,
@@ -155,14 +155,14 @@ describe('SystemStabilityScore', () => {
 
     it('40-69 返回 degraded', () => {
       const ss = new SystemStabilityScore()
-      // 0.88^6 = 0.464 → raw 46, smoothing converges to ~46 → degraded
+      // 0.55 avg → score 55 → degraded
       const factors: StabilityFactors = {
-        memoryHealth: 0.88,
-        taskFlowEfficiency: 0.88,
-        schedulerBalance: 0.88,
-        evolutionRiskControl: 0.88,
-        errorRateInverse: 0.88,
-        guardrailHealth: 0.88,
+        memoryHealth: 0.55,
+        taskFlowEfficiency: 0.55,
+        schedulerBalance: 0.55,
+        evolutionRiskControl: 0.55,
+        errorRateInverse: 0.55,
+        guardrailHealth: 0.55,
       }
       for (let i = 0; i < 20; i++) ss.compute(factors)
       expect(ss.getStatus()).toBe('degraded')

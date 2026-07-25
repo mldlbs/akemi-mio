@@ -17,6 +17,7 @@ export interface HandlerContext {
   stateManager: StateManager
   ttsService: TtsService
   evolutionRef?: { current: SelfEvolutionService | null }
+  pipelineRef?: { current: import('../../evolution/automation').PipelineOrchestrator | null }
   metricsCollector?: MetricsCollector
   dashboardRef?: { current: EvolutionDashboardService | null }
   memoryContextRef?: { current: MemoryContextService | null }

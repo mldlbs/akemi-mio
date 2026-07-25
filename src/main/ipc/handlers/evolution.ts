@@ -4,19 +4,46 @@ import { credentialsManager } from '../../credentials/CredentialsManager'
 import { planManager as planManagerImport } from '../../evolution'
 import type { HandlerContext } from './context'
 
-export function registerEvolutionHandlers({ agentService, evolutionRef, dashboardRef }: HandlerContext): void {
+export function registerEvolutionHandlers({ agentService, evolutionRef, pipelineRef, dashboardRef }: HandlerContext): void {
   if (evolutionRef) {
     ipcMain.handle('evolution:trigger', async () => {
       const svc = evolutionRef.current
       if (!svc) return { success: false, error: 'evolution not ready' }
       try { await svc.triggerNow(); return { success: true } }
-      catch (err) { log('ERROR', 'evolution_trigger_failed', { error: String(err) }); return { success: false, error: String(err) } }
+      catch (err: any) { log('ERROR', 'evolution_trigger_failed', { error: String(err) }); return { success: false, error: String(err) } }
     })
 
     ipcMain.handle('evolution:status', async () => {
       const svc = evolutionRef.current
       if (!svc) return { lastRun: null, consecutiveFailures: 0, isBusy: false }
       return { lastRun: svc.getLastRun(), consecutiveFailures: svc.getConsecutiveFailures(), isBusy: agentService.isBusy() }
+    })
+  }
+
+  // ── 合成证据注入（受控故障验证） ──
+  if (pipelineRef) {
+    ipcMain.handle('evolution:pipeline:inject', async (_event, def: import('../../evolution/automation').SyntheticProblemDef) => {
+      const pipeline = pipelineRef.current
+      if (!pipeline) return { success: false, error: 'pipeline not ready' }
+      try {
+        const id = pipeline.injectSynthetic(def)
+        return { success: true, problemId: id }
+      } catch (err: any) {
+        log('ERROR', 'pipeline_inject_failed', { error: String(err) })
+        return { success: false, error: String(err) }
+      }
+    })
+
+    ipcMain.handle('evolution:pipeline:runOnce', async () => {
+      const pipeline = pipelineRef.current
+      if (!pipeline) return { success: false, error: 'pipeline not ready' }
+      try {
+        const metrics = await pipeline.runOnce()
+        return { success: true, metrics }
+      } catch (err: any) {
+        log('ERROR', 'pipeline_run_once_failed', { error: String(err) })
+        return { success: false, error: String(err) }
+      }
     })
   }
 

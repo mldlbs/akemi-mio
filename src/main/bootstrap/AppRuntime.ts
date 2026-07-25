@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { join, dirname } from 'path'
 import { promises as fsp, readFileSync } from 'fs'
+import { ChildProcess, spawn } from 'child_process'
 import { log, initLogFile, getLogFilePath, sanitizeForLog } from '../logger/Logger'
 import { StateManager } from '../core/StateManager'
 import { eventBus, SubscriptionTracker } from '../core/EventBus'
@@ -163,6 +164,8 @@ export class AppRuntime {
   private voiceBookmarkService?: VoiceBookmarkService
   private voiceNoteRef: ServiceRef<VoiceNoteService> = createServiceRef<VoiceNoteService>()
   private voiceNoteService?: VoiceNoteService
+  /** hjgo2claude 子进程：将 Claude Agent SDK 的 Anthropic 请求转发到 OpenCode Go */
+  private hjgo2claudeProcess: ChildProcess | null = null
 
   constructor(crashGuard?: { flushMemory: (() => void) | null }) {
     this.crashGuard = crashGuard ?? { flushMemory: null }
@@ -179,6 +182,9 @@ export class AppRuntime {
     const llmKey = process.env.LLM_KEY
     const llmCodeKey = process.env.LLM_CODE_KEY
 
+    // ── hjgo2claude: Claude Agent SDK → OpenCode Go 代理 ──
+    this.startHjgo2claude()
+
     // === Stage 1: 核心基础设施 ===
     const stateManager = new StateManager()
     const mcpManager = new ServerManager()
@@ -187,14 +193,26 @@ export class AppRuntime {
     try {
       const pwMcpDir = dirname(require.resolve('@playwright/mcp/package.json'))
       const cliPath = join(pwMcpDir, 'cli.js')
+      const userDataDir = join(app.getPath('userData'), 'playwright-profile')
+
+      // 先删除持久化的脏配置，防止冲突
+      const sandboxDir = join(app.getPath('userData'), 'projects', '__sandbox__')
+      const staleConfig = join(sandboxDir, 'mcp_servers.json')
+      try { require('fs').unlinkSync(staleConfig) } catch {}
+
+      // 用 --headless 让初始化快速完成，不受 headed 窗口影响
+      // cookie 通过 --user-data-dir 持久化
       mcpManager
         .addServer({
-          name: 'playwright',
+          name: 'playwright-browser',
           transport: 'stdio',
           command: 'node',
-          args: [cliPath, '--headless'],
+          args: [cliPath, '--headless', `--user-data-dir=${userDataDir}`],
         })
         .catch((err) => log('WARN', 'playwright_mcp_start_failed', { error: String(err) }))
+
+      // 异步再将 playwright 进程切为 headed 模式？不，保留 headless
+      // headed 模式会让 MCP 初始化等待用户操作超时。headless + user-data-dir 就够。
     } catch {
       log('WARN', 'playwright_mcp_not_found')
     }
@@ -549,6 +567,7 @@ export class AppRuntime {
     // evolutionRef/dashboardRef — 延迟注入
     const evolutionRef = createServiceRef<SelfEvolutionService>()
     const dashboardRef = createServiceRef<EvolutionDashboardService>()
+    const pipelineRef = createServiceRef<PipelineOrchestrator>()
     const taskPanelRef = createServiceRef<TaskPanelService>()
     const wallpaperInteractiveRef = createServiceRef<WallpaperInteractiveService>()
 
@@ -560,7 +579,7 @@ export class AppRuntime {
       stateManager,
       ttsService,
       evolutionRef,
-      undefined,
+      pipelineRef,
       dashboardRef,
       this.memoryContextRef,
       decisionQueryRef,
@@ -1000,6 +1019,18 @@ export class AppRuntime {
           const trend = this.stabilityScore.getTrend()
           const status = this.stabilityScore.getStatus()
 
+          log('DEBUG', 'stability_factors', {
+            score,
+            status,
+            trend,
+            memoryHealth: factors.memoryHealth.toFixed(3),
+            taskFlowEfficiency: factors.taskFlowEfficiency.toFixed(3),
+            schedulerBalance: factors.schedulerBalance.toFixed(3),
+            evolutionRiskControl: factors.evolutionRiskControl.toFixed(3),
+            errorRateInverse: factors.errorRateInverse.toFixed(3),
+            guardrailHealth: factors.guardrailHealth.toFixed(3),
+          })
+
           // 当状态变化时发出事件（仅观测，不参与调度决策循环）
           eventBus.emit('stability.score.updated', { score, trend, status })
           if (status !== previousStabilityStatus) {
@@ -1270,8 +1301,66 @@ export class AppRuntime {
     this.memoryContextService?.destroy()
     this.lazyInit?.cancel()
     this.subs.dispose()
+    this.stopHjgo2claude()
     closeDatabase()
     log('INFO', 'memory_flushed_on_quit')
+  }
+
+  // ── hjgo2claude 生命周期 ──
+
+  /** 启动 hjgo2claude 代理进程（如果已安装） */
+  private startHjgo2claude(): void {
+    const opencodeKey = process.env.LLM_CODE_KEY
+    if (!opencodeKey) {
+      log('WARN', 'hjgo2claude_skip', { reason: 'LLM_CODE_KEY 未设置' })
+      return
+    }
+
+    try {
+      const child = spawn('hjgo2claude', ['serve', '--port', '1841'], {
+        env: { ...process.env, OPENCODE_API_KEY: opencodeKey },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      })
+
+      child.stdout?.on('data', (data: Buffer) => {
+        const line = data.toString().trim()
+        if (line) log('INFO', 'hjgo2claude', { msg: line })
+      })
+
+      child.stderr?.on('data', (data: Buffer) => {
+        const line = data.toString().trim()
+        if (line) log('INFO', 'hjgo2claude', { msg: line })
+      })
+
+      child.on('error', (err: Error) => {
+        log('WARN', 'hjgo2claude_spawn_error', { error: err.message })
+        this.hjgo2claudeProcess = null
+      })
+
+      child.on('exit', (code, signal) => {
+        log('INFO', 'hjgo2claude_exit', { code, signal })
+        this.hjgo2claudeProcess = null
+      })
+
+      this.hjgo2claudeProcess = child
+      log('INFO', 'hjgo2claude_started', { pid: child.pid, port: 1841 })
+    } catch (err: any) {
+      log('WARN', 'hjgo2claude_start_failed', { error: err.message })
+    }
+  }
+
+  /** 停止 hjgo2claude 代理进程 */
+  private stopHjgo2claude(): void {
+    if (this.hjgo2claudeProcess) {
+      try {
+        this.hjgo2claudeProcess.kill('SIGTERM')
+        log('INFO', 'hjgo2claude_stopped', { pid: this.hjgo2claudeProcess.pid })
+      } catch (err: any) {
+        log('WARN', 'hjgo2claude_stop_error', { error: err.message })
+      }
+      this.hjgo2claudeProcess = null
+    }
   }
 
   /**
@@ -1477,6 +1566,7 @@ export class AppRuntime {
         pipeline.initDefaults(agentService.getSubAgentPool())
         // Phase 3C.3: 注入 v1.1.0 Shadow Mode ExecutionPolicy（策略策略校准期）
         pipeline.setExecutionPolicy(new ExecutionPolicy({ mode: 'shadow', policyVersion: '1.1.0' }))
+        this.pipeline = pipeline
         // 注册 Evolution 插件（ServiceLoader 模式）
         const { PluginServiceLoader, WallpaperPlugin, PluginCollectorAdapter, PluginExecutorAdapter } = await import('../evolution/plugin')
         const pluginLoader = PluginServiceLoader.getInstance()
@@ -1570,6 +1660,7 @@ export class AppRuntime {
         log('INFO', 'cicd_orchestrator_initialized', { toolsLoaded: cicdOrchestrator.isReady() })
 
         this.pipeline = pipeline
+        if (pipelineRef) pipelineRef.current = pipeline
         evolution.scheduleEvolution(2)
         if (evolutionRef) evolutionRef.current = evolution
         // 创建 UserBehavior 上层增强层（由环境变量 USER_BEHAVIOR_FEATURES 控制）
