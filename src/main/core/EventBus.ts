@@ -81,6 +81,10 @@ export type EventName =
 
   // ── Pipeline 可观测性事件 ──
   | 'pipeline.collector.executed'
+
+  // ── 干预生命周期事件 ──
+  | 'intervention.started'
+  | 'intervention.completed'
   | 'workflow.run.created'
   | 'workflow.run.updated'
   | 'workflow.run.step'

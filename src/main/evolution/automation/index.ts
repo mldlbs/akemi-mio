@@ -41,6 +41,7 @@ export { EvidenceBridge, EVIDENCE_REPORT_READY } from './EvidenceBridge'
 export type { EvidenceReportReadyPayload, EvidenceEmitter } from './EvidenceBridge'
 export { ExecutionPolicy } from './ExecutionPolicy'
 export type { ExecutionLevel, ExecutionMode, ExecutionVerdict, VerdictAction, PolicyDecisionEvent } from './ExecutionPolicy'
+export { SyntheticTscExecutor, SYNTHETIC_EXECUTOR_NAME } from './SyntheticTscExecutor'
 
 // ═══════════════════════════════════════════
 //  MCP 模式迁移导出

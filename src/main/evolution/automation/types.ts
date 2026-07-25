@@ -187,3 +187,22 @@ export interface SyntheticProblemDef {
   /** 原始错误文本（可选，用于触发 AutoPatchExecutor 的模式匹配） */
   raw?: string
 }
+
+/** 最小干预回顾记录 — 只记录发生了什么，不做质量评估 */
+export interface InterventionReviewRecord {
+  interventionId: string
+  problemId: string
+  source: ProblemSource
+  success: boolean
+  summary: string
+  timestamp: number
+}
+
+/** SyntheticTscExecutor 执行事件 */
+export interface SyntheticExecutionEvent {
+  problemId: string
+  executorName: string
+  action: 'started' | 'completed' | 'skipped'
+  reason?: string
+  timestamp: number
+}
