@@ -63,9 +63,10 @@ export type EventType =
   // ── Tool（工具调用） ──
   | 'tool.invoked'
   | 'tool.completed'
-  // ── Capability（语义能力调用，ADR-015 P0） ──
+  // ── Capability（语义能力调用，ADR-015 P0/P1） ──
   | 'capability.invoked'
   | 'capability.completed'
+  | 'capability.suggested'
   // ── Model（LLM 调用） ──
   | 'model.invoked'
   | 'model.completed'
@@ -196,6 +197,17 @@ export interface CapabilityCompletedPayload {
   durationMs: number
   /** 错误消息（失败时） */
   error?: string
+}
+
+// ── Capability Shadow（ADR-015 P1.1） ──
+
+export interface CapabilitySuggestedPayload {
+  /** 语义能力 ID，如 "publishing" */
+  capability: string
+  /** 通过此 capability 可调用的相关工具列表 */
+  relatedTools: string[]
+  /** 事件来源，如 "llm_context"、"prompt_generation" */
+  contextSource: string
 }
 
 export interface ModelInvokedPayload {
@@ -689,6 +701,7 @@ export type EventPayload =
   // ── Capability（ADR-015 P0） ──
   | ({ type: 'capability.invoked' } & CapabilityInvokedPayload)
   | ({ type: 'capability.completed' } & CapabilityCompletedPayload)
+  | ({ type: 'capability.suggested' } & CapabilitySuggestedPayload)
   // M7 — Governance
   | ({ type: 'guardrail.recommendation.created' } & GuardrailRecommendationCreatedPayload)
   | ({ type: 'guardrail.recommendation.approved' } & GuardrailRecommendationApprovedPayload)

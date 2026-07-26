@@ -48,6 +48,8 @@ export class ToolEventBridge {
       // P0 (ADR-015): capability 事件桥接
       this.bus.on('capability.invoked', (p) => this.onCapabilityInvoked(p)),
       this.bus.on('capability.completed', (p) => this.onCapabilityCompleted(p)),
+      // P1.1 (ADR-015): capability shadow 事件
+      this.bus.on('capability.suggested', (p) => this.onCapabilitySuggested(p)),
     )
   }
 
@@ -134,6 +136,19 @@ export class ToolEventBridge {
       success: p.success,
       durationMs: p.durationMs,
       error: p.error,
+    })
+  }
+
+  // ══════════════════════════════════════════
+  // Capability Shadow (ADR-015 P1.1)
+  // ══════════════════════════════════════════
+
+  private onCapabilitySuggested(p: EventPayload['capability.suggested']): void {
+    this.emitter.emit('capability.suggested', {
+      type: 'capability.suggested',
+      capability: p.capability,
+      relatedTools: p.relatedTools,
+      contextSource: p.contextSource,
     })
   }
 }

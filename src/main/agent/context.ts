@@ -1,5 +1,6 @@
 import { log } from '../logger/Logger'
 import { PROMPT_WRITING } from './writing-prompt'
+import { CapabilitySchemaAdapter } from '../capability/CapabilitySchemaAdapter'
 
 export interface ToolCall {
   id: string
@@ -306,6 +307,21 @@ const PROMPT_SKILLS = `
 
 const BASE_PROMPT = `${PROMPT_TTS}\n\n---\n\n${PROMPT_CORE}\n\n${PROMPT_TOOLS}\n\n${PROMPT_CREDENTIALS}${PROMPT_PLUGIN}\n\n${PROMPT_DEBUG}\n\n${PROMPT_WRITING}${PROMPT_SKILLS}`
 
+/** CapabilitySchemaAdapter 实例（P1.1 shadow mode） */
+let _capabilityAdapter: CapabilitySchemaAdapter | null = null
+
+/**
+ * 设置 CapabilitySchemaAdapter 实例，用于在 system prompt 中注入 CAPABILITY_CONTEXT。
+ * P1.1 shadow mode：仅作为额外上下文显示，不影响 tool schema。
+ */
+export function setCapabilityAdapter(adapter: CapabilitySchemaAdapter | null): void {
+  _capabilityAdapter = adapter
+}
+
+export function getCapabilityAdapter(): CapabilitySchemaAdapter | null {
+  return _capabilityAdapter
+}
+
 export function buildSystemPrompt(
   memoryContext?: string,
   extraModules?: string[],
@@ -322,6 +338,15 @@ export function buildSystemPrompt(
   if (reflectionContext) {
     prompt += `\n\n${reflectionContext}`
   }
+
+  // P1.1 Shadow Mode: 注入 CAPABILITY_CONTEXT 作为额外上下文，不替代 PROMPT_TOOLS
+  if (_capabilityAdapter) {
+    const capCtx = _capabilityAdapter.buildContext()
+    if (capCtx) {
+      prompt += `\n\n---\n\n${capCtx}`
+    }
+  }
+
   return prompt
 }
 
