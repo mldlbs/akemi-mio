@@ -1,6 +1,14 @@
 /**
  * Capability Sandbox 类型定义
+ *
+ * 两个层次：
+ * 1. Permission Layer（已存在）— CapabilityAction: action-level sandbox
+ * 2. Semantic Layer（ADR-015 新增）— CapabilityDefinition: task → provider → tool
  */
+
+// ══════════════════════════════════════════
+// Permission Layer (existing)
+// ══════════════════════════════════════════
 
 /** 能力动作 — 粒度操作单元 */
 export type CapabilityAction =
@@ -66,4 +74,42 @@ export interface AuditEntry {
   granted: boolean
   reason?: string
   timestamp: number
+}
+
+// ══════════════════════════════════════════
+// Semantic Capability Layer (ADR-015)
+// ══════════════════════════════════════════
+
+/**
+ * 语义 Capability 定义 — 描述系统能完成的"任务"。
+ *
+ * 例：
+ * {
+ *   id: "publishing",
+ *   description: "发布内容到外部内容平台",
+ *   providers: [{ mcpServerId: "fanqie", tools: ["publish_novel", "draft"], defaultTool: "publish_novel" }]
+ * }
+ */
+export interface CapabilityDefinition {
+  id: string
+  description: string
+  providers: CapabilityProvider[]
+}
+
+export interface CapabilityProvider {
+  /** MCP Registry 中的 server id */
+  mcpServerId: string
+  /** 该服务器提供此 capability 时使用的工具列表 */
+  tools: string[]
+  /** 默认工具，当有多个工具可用时使用 */
+  defaultTool?: string
+}
+
+export interface ResolveResult {
+  capabilityId: string
+  provider: {
+    mcpServerId: string
+    tool: string
+  }
+  confidence: 1.0
 }

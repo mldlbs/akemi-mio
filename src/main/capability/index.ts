@@ -1,4 +1,9 @@
-export type { CapabilityAction, CapabilityToken, CapabilityRequest, CapabilityDecision, AuditEntry } from './types'
+export type {
+  CapabilityAction, CapabilityToken, CapabilityRequest, CapabilityDecision, AuditEntry,
+  CapabilityDefinition, CapabilityProvider, ResolveResult,
+} from './types'
 export { CapabilityEngine } from './CapabilityEngine'
 export { DelegationChain } from './CapabilityEngine'
 export { DEFAULT_CAPABILITIES, freezeDefaults, isDefaultsFrozen } from './CapabilityDefaults'
+export { CapabilityCatalog } from './CapabilityCatalog'
+export { CapabilityResolver } from './CapabilityResolver'
