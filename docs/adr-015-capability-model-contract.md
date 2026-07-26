@@ -1,7 +1,18 @@
 # ADR-015: Capability Model Contract — Semantic Capability Layer
 
-**Status:** Draft — Gate: ADR Frozen
+**Status:** ✅ Accepted — Frozen
 **Date:** 2026-07-26
+**Frozen at:** v2.0 — 2026-07-26, M5.1 + M5.2 (CapabilityBinding + Service + Invocation)
+**Phases:**
+- **M5.1 Semantic Discovery** — ✅ Frozen (2026-07-26)
+- **M5.2 Capability Invocation** — ✅ Frozen (2026-07-26)
+- **M5.3 Multi-provider / optimization** — ⏸ Deferred
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| M5.1 | CapabilityDefinition, Catalog (derived from Registry), Resolver (single provider) | ✅ Frozen |
+| M5.2 | CapabilityBinding, CapabilityService (resolve + invoke), Permission position freeze | ✅ Frozen |
+| M5.3 | Multi-provider ranking / fallback / optimization | ⏸ Deferred |
 **Supersedes:** None
 **Superseded by:** None
 **References:**
@@ -149,6 +160,45 @@ CapabilityResolver
     ↓ resolve(agent task)
 ```
 
+### 决策 5（M5.2）：CapabilityService 作为 Agent 隔离层
+
+Agent 不直接接触 MCP server id 或 tool name。所有能力调用通过 `CapabilityService`：
+
+```typescript
+interface ICapabilityService {
+  resolve(capability: string, toolHint?: string): Promise<CapabilityBinding | undefined>
+  invoke(binding: CapabilityBinding, input: unknown): Promise<unknown>
+  listCapabilities(): string[]
+}
+```
+
+**调用链：**
+
+```
+Agent
+  |
+CapabilityService.resolve("publishing")
+  | → CapabilityBinding { capability, provider: { type: "mcp", id: "fanqie" }, tool: "publish" }
+  |
+CapabilityService.invoke(binding, input)
+  | → ServerManager.callTool(tool, input)  ← 此路径含 Permission
+  | → MCP Server
+```
+
+**Agent 永远不知道：**
+- MCP server id
+- tool name
+- transport protocol
+
+### 决策 6（M5.2）：Permission 检查在 invoke 路径，不在 resolve 路径
+
+```
+resolve:  → Resolver  → Catalog       ← 无 Permission
+invoke:   → callTool  → CapabilityEngine  ← 有 Permission
+```
+
+Resolver 是发现阶段，执行前才需授权。Permission 检查仍在 `ServerManager.callTool()` 路径。`CapabilityService.invoke()` 不添加额外 Permission 检查。
+
 ---
 
 ## 契约
@@ -171,6 +221,18 @@ M1 中，对于每个 capability，如果只有一个 provider，返回它。如
 
 Catalog 只从 Registry 的 manifest.capabilities 构建。不接受外部直接注册。
 
+### C-5（M5.2）：CapabilityService.invoke() 不添加额外 Permission
+
+Permission 检查仅在 `ServerManager.callTool()` 路径执行。`CapabilityService` 不重复检查。
+
+**违反检测：** `CapabilityServiceImpl.ts` 中出现 `CapabilityEngine` import → C-5 违反。
+
+### C-6（M5.2）：Agent 无 tool name 硬编码
+
+Agent 业务代码通过 `Service.resolve()` + `Service.invoke()` 调用能力，不直接构造 `CapabilityBinding` 或调用 `ServerManager.callTool()`。
+
+**违反检测：** Agent 代码中出现 `serverManager.callTool("specific_tool_name", ...)` → C-6 违反（但有合理例外：`file.read`/`write` 等内置工具）。
+
 ---
 
 ## 影响
@@ -179,20 +241,21 @@ Catalog 只从 Registry 的 manifest.capabilities 构建。不接受外部直接
 
 | 文件 | 职责 |
 |------|------|
-| `src/main/capability/types.ts` | 追加 CapabilityDefinition, CapabilityProvider, ResolveResult |
+| `src/main/capability/types.ts` | 追加 CapabilityDefinition, CapabilityProvider, ResolveResult, CapabilityBinding, ICapabilityService |
 | `src/main/capability/CapabilityCatalog.ts` | 从 MCPRegistry 重建索引, getCapabilities(), getProviders() |
 | `src/main/capability/CapabilityResolver.ts` | resolve(capabilityId) → ResolveResult |
+| `src/main/capability/CapabilityServiceImpl.ts` | resolve() + invoke(), Agent 隔离层 |
 
 ### 修改文件
 
 | 文件 | 变化 |
 |------|------|
 | `src/main/capability/index.ts` | 导出新类型和类 |
-| `src/main/mcp/ServerManager.ts` | 可选：暴露 resolveCapability() 使 Agent 可通过 capability 调用 |
 
 ### 未改变
 
 - CapabilityEngine（permission layer）不变
+- ServerManager 不变（CapabilityService 作为消费者）
 - MCPControlPlane 不变
 - ProcessManager 不变
 - MCPRegistry 不变（Consumer 模式）
@@ -210,6 +273,20 @@ Catalog 只从 Registry 的 manifest.capabilities 构建。不接受外部直接
 | I-4 | 多 capability server 注册 | 各自 capability 独立解析 |
 | I-5 | 现有 CapabilityEngine 测试全部通过 | vitest run capability |
 | I-6 | ServerManager 5/5 不变 | vitest run tools.test |
+| I-7 | CapabilityService 不引用 CapabilityEngine | grep "CapabilityEngine" CapabilityServiceImpl.ts → 无匹配 |
+| I-8 | CapabilityService.invoke 委托 ServerManager.callTool | code review |
+
+---
+
+## 已知缺口
+
+| 缺口 | 说明 | 计划 |
+|------|------|------|
+| 多 Provider 选择 | 只有一个 provider 时总是选中 | M5.3 |
+| Agent 通过 capability 调用 | 当前 Agent 仍用 tool name | Agent Capability Integration |
+| 权限集成 | Permission check 在 tool call 层级独立 | 与语义层正交 |
+| Capability 健康感知 | Resolver 不考虑 provider 健康状态 | M5.3 |
+| CapabilityRegistry（能力持久化）| Catalog 派生自 MCPRegistry，无独立能力存储 | 与 Registry 耦合，暂无计划独立 |
 
 ---
 

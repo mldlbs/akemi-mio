@@ -113,3 +113,40 @@ export interface ResolveResult {
   }
   confidence: 1.0
 }
+
+// ══════════════════════════════════════════
+// Capability Invocation (ADR-015 M5.2)
+// ══════════════════════════════════════════
+
+/**
+ * CapabilityBinding — resolve 后的固定绑定结果。
+ *
+ * Agent/business 层通过此 binding 调用能力，
+ * 不直接接触 MCP server id 或 tool name。
+ */
+export interface CapabilityBinding {
+  capability: string
+  provider: {
+    type: 'mcp'
+    id: string
+  }
+  tool: string
+}
+
+/**
+ * CapabilityService — Agent 和 MCP 的隔离层。
+ *
+ * Agent 只通过 capability id 和 input 交互：
+ * - resolve(capability) → 发现谁能提供
+ * - invoke(binding, input) → 执行能力
+ *
+ * Agent 永远不知道：
+ * - MCP server id
+ * - tool name
+ * - transport protocol
+ */
+export interface ICapabilityService {
+  resolve(capability: string, toolHint?: string): Promise<CapabilityBinding | undefined>
+  invoke(binding: CapabilityBinding, input: unknown): Promise<unknown>
+  listCapabilities(): string[]
+}
