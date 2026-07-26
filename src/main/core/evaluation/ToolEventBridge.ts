@@ -45,6 +45,9 @@ export class ToolEventBridge {
       this.bus.on('agent.tool.invoked', (p) => this.onToolInvoked(p)),
       this.bus.on('agent.tool.completed', (p) => this.onToolCompleted(p)),
       this.bus.on('agent.tool.failed', (p) => this.onToolFailed(p)),
+      // P0 (ADR-015): capability 事件桥接
+      this.bus.on('capability.invoked', (p) => this.onCapabilityInvoked(p)),
+      this.bus.on('capability.completed', (p) => this.onCapabilityCompleted(p)),
     )
   }
 
@@ -106,5 +109,31 @@ export class ToolEventBridge {
     const pending = queue.shift()!
     if (queue.length === 0) this.pendingMap.delete(toolName)
     return pending
+  }
+
+  // ══════════════════════════════════════════
+  // Capability events (ADR-015 P0)
+  // ══════════════════════════════════════════
+
+  private onCapabilityInvoked(p: EventPayload['capability.invoked']): void {
+    this.emitter.emit('capability.invoked', {
+      type: 'capability.invoked',
+      capability: p.capability,
+      provider: p.provider,
+      tool: p.tool,
+      input: p.input,
+    })
+  }
+
+  private onCapabilityCompleted(p: EventPayload['capability.completed']): void {
+    this.emitter.emit('capability.completed', {
+      type: 'capability.completed',
+      capability: p.capability,
+      provider: p.provider,
+      tool: p.tool,
+      success: p.success,
+      durationMs: p.durationMs,
+      error: p.error,
+    })
   }
 }

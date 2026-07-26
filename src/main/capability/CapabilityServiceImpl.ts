@@ -2,6 +2,7 @@ import { log } from '../logger/Logger'
 import { CapabilityResolver } from './CapabilityResolver'
 import type { ServerManager } from '../mcp/ServerManager'
 import { CapabilityBinding, ICapabilityService } from './types'
+import { eventBus } from '../core/EventBus'
 
 /**
  * CapabilityServiceImpl — Agent 能力的统一入口。
@@ -62,21 +63,62 @@ export class CapabilityServiceImpl implements ICapabilityService {
   }
 
   async invoke(binding: CapabilityBinding, input: unknown): Promise<unknown> {
+    const startedAt = Date.now()
     log('INFO', 'capability_service.invoke', {
       capability: binding.capability,
       provider: binding.provider.id,
       tool: binding.tool,
     })
 
-    // 委托 ServerManager 执行，此路径包含 Permission 检查
-    const result = await this.serverManager.callTool(binding.tool, input as Record<string, any>)
-
-    log('INFO', 'capability_service.invoked', {
+    // 发射 capability.invoked 事件（P0 数据面）
+    eventBus.emit('capability.invoked', {
       capability: binding.capability,
-      success: true,
+      provider: binding.provider.id,
+      tool: binding.tool,
+      input,
     })
 
-    return result
+    try {
+      // 委托 ServerManager 执行，此路径包含 Permission 检查
+      const result = await this.serverManager.callTool(binding.tool, input as Record<string, any>)
+
+      const durationMs = Date.now() - startedAt
+      log('INFO', 'capability_service.invoked', {
+        capability: binding.capability,
+        success: true,
+        durationMs,
+      })
+
+      // 发射 capability.completed 事件（P0 数据面）
+      eventBus.emit('capability.completed', {
+        capability: binding.capability,
+        provider: binding.provider.id,
+        tool: binding.tool,
+        success: true,
+        durationMs,
+      })
+
+      return result
+    } catch (err: any) {
+      const durationMs = Date.now() - startedAt
+      log('WARN', 'capability_service.failed', {
+        capability: binding.capability,
+        error: err.message,
+        durationMs,
+      })
+
+      // 失败也发射 capability.completed（P0 数据面）
+      eventBus.emit('capability.completed', {
+        capability: binding.capability,
+        provider: binding.provider.id,
+        tool: binding.tool,
+        success: false,
+        durationMs,
+        error: err.message,
+      })
+
+      throw err
+    }
   }
 
   listCapabilities(): string[] {

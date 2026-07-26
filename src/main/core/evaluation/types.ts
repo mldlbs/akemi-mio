@@ -63,6 +63,9 @@ export type EventType =
   // ── Tool（工具调用） ──
   | 'tool.invoked'
   | 'tool.completed'
+  // ── Capability（语义能力调用，ADR-015 P0） ──
+  | 'capability.invoked'
+  | 'capability.completed'
   // ── Model（LLM 调用） ──
   | 'model.invoked'
   | 'model.completed'
@@ -164,6 +167,34 @@ export interface ToolCompletedPayload {
   /** 原始输出（截断到安全长度） */
   output?: string
   /** 原始错误消息 */
+  error?: string
+}
+
+// ── Capability（ADR-015 P0） ──
+
+export interface CapabilityInvokedPayload {
+  /** 语义能力 ID，如 "publishing" */
+  capability: string
+  /** 能力提供者 MCP Server ID */
+  provider: string
+  /** 底层使用的工具名 */
+  tool: string
+  /** 输入参数 */
+  input?: unknown
+}
+
+export interface CapabilityCompletedPayload {
+  /** 语义能力 ID */
+  capability: string
+  /** 能力提供者 MCP Server ID */
+  provider: string
+  /** 底层使用的工具名 */
+  tool: string
+  /** 是否成功 */
+  success: boolean
+  /** 耗时 ms */
+  durationMs: number
+  /** 错误消息（失败时） */
   error?: string
 }
 
@@ -655,6 +686,9 @@ export type EventPayload =
   | ({ type: 'guardrail.config.activated' } & GuardrailConfigActivatedPayload)
   | ({ type: 'guardrail.config.rollback' } & GuardrailConfigRollbackPayload)
   | ({ type: 'guardrail.outcome.observed' } & OutcomeObservedPayload)
+  // ── Capability（ADR-015 P0） ──
+  | ({ type: 'capability.invoked' } & CapabilityInvokedPayload)
+  | ({ type: 'capability.completed' } & CapabilityCompletedPayload)
   // M7 — Governance
   | ({ type: 'guardrail.recommendation.created' } & GuardrailRecommendationCreatedPayload)
   | ({ type: 'guardrail.recommendation.approved' } & GuardrailRecommendationApprovedPayload)
