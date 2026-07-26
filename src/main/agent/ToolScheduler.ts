@@ -3,6 +3,7 @@ import type { ToolCallInfo } from '../llm/LlmService'
 import { ServerManager } from '../mcp/ServerManager'
 import { classifyToolError, ToolErrorType } from '../tool/ToolErrorType'
 import { toolAvailabilityCache } from '../tool/ToolAvailabilityCache'
+import type { ToolInvocationRouter } from '../tool/ToolInvocationRouter'
 import {
   toolErrorAggregator,
   type ToolErrorAggregator,
@@ -76,17 +77,22 @@ export class ToolScheduler {
   private config: ToolSchedulerConfig
   private errorAggregator: ToolErrorAggregator
   private fallbackRegistry: ToolFallbackRegistry
+  /** P1.3a: capability 调用路由器（可选） */
+  private invocationRouter: ToolInvocationRouter | null = null
 
   constructor(
     mcpManager: ServerManager,
     config?: Partial<ToolSchedulerConfig>,
     errorAggregator?: ToolErrorAggregator,
     fallbackRegistry?: ToolFallbackRegistry,
+    /** P1.3a: capability 调用路由器（可选，null = 不使用 capability 路由） */
+    invocationRouter?: ToolInvocationRouter | null,
   ) {
     this.mcpManager = mcpManager
     this.config = { ...DEFAULT_CONFIG, ...config }
     this.errorAggregator = errorAggregator ?? toolErrorAggregator
     this.fallbackRegistry = fallbackRegistry ?? toolFallbackRegistry
+    this.invocationRouter = invocationRouter ?? null
   }
 
   /**
@@ -108,6 +114,13 @@ export class ToolScheduler {
    */
   getErrorAggregator(): ToolErrorAggregator {
     return this.errorAggregator
+  }
+
+  /**
+   * P1.3a: 设置 ToolInvocationRouter（可在构造后绑定，支持延迟初始化）
+   */
+  setInvocationRouter(router: ToolInvocationRouter | null): void {
+    this.invocationRouter = router
   }
 
   /**
@@ -532,6 +545,12 @@ export class ToolScheduler {
     args: Record<string, any>,
     abortSignal?: AbortSignal,
   ): Promise<string> {
+    // P1.3a: capability 函数经由 ToolInvocationRouter 转发，不经由 MCP
+    if (this.invocationRouter) {
+      const result = await this.invocationRouter.dispatch(toolName, args)
+      return result.result
+    }
+
     return new Promise<string>((resolve, reject) => {
       // 超时定时器
       const timer = setTimeout(() => {
@@ -571,7 +590,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** 简单信号量 */
+/** 简单的信号量实现 */
 class Semaphore {
   private max: number
   private current = 0

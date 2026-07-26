@@ -50,6 +50,8 @@ export class ToolEventBridge {
       this.bus.on('capability.completed', (p) => this.onCapabilityCompleted(p)),
       // P1.1 (ADR-015): capability shadow 事件
       this.bus.on('capability.suggested', (p) => this.onCapabilitySuggested(p)),
+      // P1.3a (ADR-015): capability LLM 选择事件
+      this.bus.on('capability.selected', (p) => this.onCapabilitySelected(p)),
     )
   }
 
@@ -149,6 +151,21 @@ export class ToolEventBridge {
       capability: p.capability,
       relatedTools: p.relatedTools,
       contextSource: p.contextSource,
+    })
+  }
+
+  // ══════════════════════════════════════════
+  // Capability Selected (ADR-015 P1.3a)
+  // ══════════════════════════════════════════
+
+  private onCapabilitySelected(p: EventPayload['capability.selected']): void {
+    this.emitter.emit('capability.selected', {
+      type: 'capability.selected',
+      capability: p.capability,
+      source: p.source,
+      toolCallId: p.toolCallId,
+      input: p.input,
+      matchedTool: p.matchedTool,
     })
   }
 }

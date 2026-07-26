@@ -1,0 +1,36 @@
+{
+  "startedAt": 1722054400000,
+  "version": "P1.1",
+  "completedAt": "2026-07-26T19:45:00+08:00",
+  "note": "P1.2 Shadow Evaluation completed. Finding: CAPABILITY_CONTEXT alone insufficient to change LLM tool selection. LLM tool selection driven by function schema (name + parameters), not prompt text. Next: P1.3a Capability Function Schema Adapter.",
+  "findings": [
+    "CapabilitySchemaAdapter.buildContext() correctly injects CAPABILITY_CONTEXT into LLM prompt (140 capability.suggested events collected)",
+    "Text-only capability exposure does NOT change LLM tool selection behavior (0% alignment, 0% MCP coverage)",
+    "LLM tool selection is driven by function-calling schema (name, parameters, description) not system prompt text",
+    "CapabilityService.invoke() path fully built but never reached via LLM — needs function schema adapter",
+    "P1.3 Formal Switch must replace Tool Contract (function schema), not just PROMPT_TOOLS text",
+    "Ongoing Mio dev server running for future sessions"
+  ],
+  "p1_3a": {
+    "frozenAt": "2026-07-26",
+    "completed": true,
+    "files": [
+      "src/main/capability/CapabilityFunctionSchemaAdapter.ts",
+      "src/main/tool/ToolSchemaProvider.ts",
+      "src/main/tool/ToolInvocationRouter.ts"
+    ],
+    "modified": [
+      "src/main/capability/types.ts — CapabilityDefinition.inputSchema",
+      "src/main/core/EventBus.ts — capability.selected event",
+      "src/main/core/evaluation/types.ts — EventType + Payload + CapabilitySelectedPayload",
+      "src/main/core/evaluation/ToolEventBridge.ts — onCapabilitySelected handler",
+      "src/main/capability/CapabilityCatalog.ts — inputSchema default",
+      "src/main/capability/index.ts — export CapabilityFunctionSchemaAdapter",
+      "src/main/tool/index.ts — export ToolSchemaProvider, ToolInvocationRouter",
+      "src/main/agent/ToolScheduler.ts — constructor param + setInvocationRouter + callMcpWithTimeout routing",
+      "src/main/llm/LlmService.ts — setSchemaProvider, _getFilteredSchemas uses ToolSchemaProvider",
+      "src/main/bootstrap/AppRuntime.ts — wiring"
+    ],
+    "next": "P1.3b: evaluate capability.selected data, determine if full schema switch is warranted"
+  }
+}

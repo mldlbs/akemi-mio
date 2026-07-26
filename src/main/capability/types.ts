@@ -87,12 +87,22 @@ export interface AuditEntry {
  * {
  *   id: "publishing",
  *   description: "发布内容到外部内容平台",
+ *   inputSchema: { type: "object", properties: { title: {...}, content: {...} }, required: ["title"] },
  *   providers: [{ mcpServerId: "fanqie", tools: ["publish_novel", "draft"], defaultTool: "publish_novel" }]
  * }
+ *
+ * ADR-015 C-8 (P1.3a): inputSchema 不允许为空（properties 和 required 均非空）
  */
 export interface CapabilityDefinition {
   id: string
   description: string
+  /** P1.3a: 用于生成 function calling schema 的 parameters。
+   *  M1 阶段从 provider 的 tool schema 推断。禁止为空 {}。 */
+  inputSchema: {
+    type: 'object'
+    properties: Record<string, { type: string; description: string }>
+    required: string[]
+  }
   providers: CapabilityProvider[]
 }
 

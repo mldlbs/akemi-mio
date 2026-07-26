@@ -11,6 +11,7 @@ import { validateToolCallChain } from '../agent/ContextIntegrityChecker'
 import { ChatResult, ChunkCallback } from './types'
 import { INTENT_CLASSIFY_PROMPT } from '../agent/intent/types'
 import { ServerManager } from '../mcp/ServerManager'
+import type { ToolSchemaProvider } from '../tool/ToolSchemaProvider'
 import {
   LLM_API_URL,
   LLM_CHAT_MODEL,
@@ -59,6 +60,8 @@ export class LlmService {
   private visionApiUrl = LLM_VISION_API_URL
   private mcpManager: ServerManager
   private evaluationEmitter?: EvaluationEmitter
+  /** P1.3a: schema provider（可选，未设时降级到 mcpManager.getAllSchemas()） */
+  private schemaProvider: ToolSchemaProvider | null = null
   /** setConfig() 已被调用 — refreshFromCredentials 不应再覆盖 key/url 等显式配置 */
   private _configured = false
 
@@ -73,6 +76,11 @@ export class LlmService {
 
   setMcpManager(manager: ServerManager): void {
     this.mcpManager = manager
+  }
+
+  /** P1.3a: 设置 ToolSchemaProvider（替换直接 mcpManager.getAllSchemas()） */
+  setSchemaProvider(provider: ToolSchemaProvider | null): void {
+    this.schemaProvider = provider
   }
 
   /** 从外部凭据存储（CredentialsManager）读取并刷新全部 LLM 配置 */
@@ -259,7 +267,10 @@ export class LlmService {
   }
 
   private _getFilteredSchemas(allowedToolNames?: string[]) {
-    const allSchemas = this.mcpManager.getAllSchemas()
+    // P1.3a: 优先使用 ToolSchemaProvider（含 capability schema），降级到 mcpManager
+    const allSchemas = this.schemaProvider
+      ? this.schemaProvider.getSchemas()
+      : this.mcpManager.getAllSchemas()
     // undefined → 不限制（向后兼容）
     if (allowedToolNames === undefined) return allSchemas
     // 显式传入数组（[] 表示无工具可用）→ 过滤

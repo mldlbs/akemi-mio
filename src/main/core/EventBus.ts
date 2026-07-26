@@ -15,10 +15,11 @@ export type EventName =
   | 'agent.tool.invoked'
   | 'agent.tool.completed'
   | 'agent.tool.failed'
-  // ── Capability events (ADR-015 P0/P1) ──
+  // ── Capability events (ADR-015 P0/P1/P1.3a) ──
   | 'capability.invoked'
   | 'capability.completed'
   | 'capability.suggested'
+  | 'capability.selected'
   | 'agent.plan.created'
   | 'agent.plan.step'
   | 'agent.plan.completed'
@@ -161,6 +162,7 @@ export interface EventPayload {
   'capability.invoked': { capability: string; provider: string; tool: string; input?: unknown }
   'capability.completed': { capability: string; provider: string; tool: string; success: boolean; durationMs: number; error?: string }
   'capability.suggested': { capability: string; relatedTools: string[]; contextSource: string }
+  'capability.selected': { capability: string; source: string; toolCallId: string; input?: unknown; matchedTool?: string }
   'agent.plan.created': { planId: string; title: string }
   'agent.plan.step': { planId: string; stepIndex: number; status: string; result?: string }
   'agent.plan.completed': { planId: string }

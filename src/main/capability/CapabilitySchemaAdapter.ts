@@ -1,5 +1,15 @@
 import { log } from '../logger/Logger'
 import type { CapabilityCatalog } from './CapabilityCatalog'
+import { eventBus } from '../core/EventBus'
+
+/**
+ * CapabilitySchemaAdapter — Capability → LLM-readable text 的适配器。
+ *
+ * ADR-015 P1.1 Shadow Mode：
+ * - 从 CapabilityCatalog 读取 capability 定义
+ * - 生成 LLM 可读的文本块（CAPABILITY_CONTEXT）
+ * - 不参与执行，不触发调用
+ * - 每次 buildContext() 调用时发射 capability.suggested（P1.2 观测）
 
 /**
  * CapabilitySchemaAdapter — Capability → LLM-readable text 的适配器。
@@ -54,6 +64,17 @@ export class CapabilitySchemaAdapter {
       capabilityCount: capabilities.length,
       contextLength: context.length,
     })
+
+    // P1.2: 每次 prompt 生成时发射 capability.suggested 事件
+    for (const cap of capabilities) {
+      const relatedTools = cap.providers.flatMap((p) => p.tools).filter(Boolean)
+      eventBus.emit('capability.suggested', {
+        capability: cap.id,
+        relatedTools,
+        contextSource: 'llm_context',
+      })
+    }
+
     return context
   }
 }

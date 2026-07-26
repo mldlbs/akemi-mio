@@ -66,3 +66,9 @@ export {
   type DegradationCondition,
   findMatchingRules,
 } from './ToolDegradationConfig'
+
+// ===== P1.3a: Tool Schema + Invocation Router =====
+export { ToolSchemaProvider } from './ToolSchemaProvider'
+export type { ToolSchema, ToolSchemaSource } from './ToolSchemaProvider'
+export { ToolInvocationRouter } from './ToolInvocationRouter'
+export type { DispatchResult } from './ToolInvocationRouter'

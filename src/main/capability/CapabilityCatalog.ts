@@ -30,10 +30,20 @@ export class CapabilityCatalog {
       for (const capId of manifest.capabilities) {
         let def = this.capabilities.get(capId)
         if (!def) {
-          // 通过依赖查找 description（M1 用 capId 作为 fallback）
           def = {
             id: capId,
             description: capId,
+            // P1.3a: M1 阶段用通用 inputSchema（非空，满足 C-8）
+            inputSchema: {
+              type: 'object',
+              properties: {
+                description: {
+                  type: 'string',
+                  description: `What you want "${capId}" to do. Describe the task or provide specific parameters.`,
+                },
+              },
+              required: ['description'],
+            },
             providers: [],
           }
           this.capabilities.set(capId, def)

@@ -63,7 +63,9 @@ import { MonitoringService } from '../monitoring/MonitoringService'
 import { WallpaperEventBridge } from '../wallpaper/WallpaperEventBridge'
 import { initDatabase, closeDatabase, getRawDb, getEventRawDb } from '../db/connection'
 import { ConstitutionEngine } from '../constitution'
-import { CapabilityEngine, freezeDefaults } from '../capability'
+import { CapabilityEngine, freezeDefaults, CapabilityCatalog, CapabilityResolver, CapabilityServiceImpl, CapabilitySchemaAdapter, CapabilityFunctionSchemaAdapter } from '../capability'
+import { setCapabilityAdapter } from '../agent/context'
+import { ToolSchemaProvider, ToolInvocationRouter } from '../tool'
 import { CognitiveService } from '../cognitive'
 import { AuditTrail } from '../plugin/AuditTrail'
 import { MemoryIndexer } from '../memory/MemoryIndexer'
@@ -187,6 +189,39 @@ export class AppRuntime {
     this.processManager = new ProcessManager()
     const mcpManager = new ServerManager(this.processManager)
 
+    // MCP Registry: 启动时加载持久化配置，重建 Capability Catalog
+    mcpRegistry.load()
+    const capabilityCatalog = new CapabilityCatalog(mcpRegistry)
+
+    // 手动注册 Playwright 和 fanqie-publish 的 manifest
+    mcpRegistry.register({
+      id: 'playwright',
+      name: 'Playwright Browser Automation',
+      version: '1.0.0',
+      runtime: { command: 'node', args: [] },
+      capabilities: ['browser.automation', 'web.scraping'],
+      permissions: ['browser'],
+    })
+    mcpRegistry.register({
+      id: 'fanqie-publish',
+      name: 'Fanqie Novel Publishing',
+      version: '1.0.0',
+      runtime: { command: 'node', args: [] },
+      capabilities: ['publishing', 'content.drafting'],
+      permissions: ['network.http'],
+    })
+
+    capabilityCatalog.rebuild()
+    const capabilityResolver = new CapabilityResolver(capabilityCatalog)
+    const capabilityService = new CapabilityServiceImpl(capabilityResolver, mcpManager)
+    const capabilitySchemaAdapter = new CapabilitySchemaAdapter(capabilityCatalog)
+    setCapabilityAdapter(capabilitySchemaAdapter)
+
+    // P1.3a: 创建 capability function schema adapter、tool schema provider、invocation router
+    const capabilityFnSchemaAdapter = new CapabilityFunctionSchemaAdapter(capabilityCatalog)
+    const toolSchemaProvider = new ToolSchemaProvider(mcpManager, capabilityFnSchemaAdapter)
+    const toolInvocationRouter = new ToolInvocationRouter(mcpManager, toolSchemaProvider, capabilityService)
+
     // 注册 Playwright MCP 服务器，赋予 AI 浏览器自动化能力
     try {
       const pwMcpDir = dirname(require.resolve('@playwright/mcp/package.json'))
@@ -225,6 +260,8 @@ export class AppRuntime {
     }
 
     const llmService = new LlmService(mcpManager)
+    // P1.3a: 将 ToolSchemaProvider 注入 LlmService（启用 capability function schema）
+    llmService.setSchemaProvider(toolSchemaProvider)
     const gpuEngine = new WhisperGpuEngine()
     const baiduEngine = new BaiduEngine()
     const asrService = new AsrService(gpuEngine, baiduEngine)
@@ -282,6 +319,10 @@ export class AppRuntime {
     // 将 TTS 引擎注册为 SpeechPluginRegistry 插件
     ttsService.registerPlugins()
 
+    // ── 任务完成→欢快语音反馈桥接器初始化 ──
+    // 监听 EventBus 的任务完成事件，任务完成时临时切换 TTS 为欢快风格
+    ttsService.initTaskCompletionHook()
+
     // ── 预检测网络状态（后台异步，不阻塞启动） ──
     import('../tts/NetworkMonitor').then(({ networkMonitor }) => {
       networkMonitor.refresh().catch(() => {})
@@ -289,6 +330,9 @@ export class AppRuntime {
 
     const agentService = new AgentService(llmService, asrService, ttsService, eventBus, mcpManager)
     this.agentServiceRef = agentService
+
+    // P1.3a: 将 ToolInvocationRouter 注入 AgentService 的 toolScheduler
+    agentService['toolScheduler'].setInvocationRouter(toolInvocationRouter)
 
     // ── 注册引擎到统一抽象层（通过 IEngineQueryable/IEngineService 接口管理） ──
     // 调用方可通过 engineProvider.getAll() 遍历所有引擎，无需感知具体实现

@@ -3,16 +3,21 @@
 **Status:** ✅ Accepted — Frozen
 **Date:** 2026-07-26
 **Frozen at:** v2.0 — 2026-07-26, M5.1 + M5.2 (CapabilityBinding + Service + Invocation)
+**P1.3a:** 2026-07-26, CapabilityFunctionSchemaAdapter + ToolSchemaProvider + ToolInvocationRouter
 **Phases:**
 - **M5.1 Semantic Discovery** — ✅ Frozen (2026-07-26)
 - **M5.2 Capability Invocation** — ✅ Frozen (2026-07-26)
+- **P1.3a Function Schema Adapter** — ✅ Frozen (2026-07-26)
 - **M5.3 Multi-provider / optimization** — ⏸ Deferred
+- **P1.3b Full Schema Switch** — ⏸ Deferred
 
 | Phase | Scope | Status |
 |-------|-------|--------|
 | M5.1 | CapabilityDefinition, Catalog (derived from Registry), Resolver (single provider) | ✅ Frozen |
 | M5.2 | CapabilityBinding, CapabilityService (resolve + invoke), Permission position freeze | ✅ Frozen |
+| P1.3a | CapabilityFunctionSchemaAdapter, ToolSchemaProvider, ToolInvocationRouter, capability.selected event, dual-track mode | ✅ Frozen |
 | M5.3 | Multi-provider ranking / fallback / optimization | ⏸ Deferred |
+| P1.3b | Full Schema Switch: remove PROMPT_TOOLS, remove original tool schemas | ⏸ Deferred |
 **Supersedes:** None
 **Superseded by:** None
 **References:**
@@ -199,6 +204,126 @@ invoke:   → callTool  → CapabilityEngine  ← 有 Permission
 
 Resolver 是发现阶段，执行前才需授权。Permission 检查仍在 `ServerManager.callTool()` 路径。`CapabilityService.invoke()` 不添加额外 Permission 检查。
 
+### 决策 7（P1.3a）：ToolSchemaProvider — LLM-facing schema 统一层
+
+不将 Capability schema 直接挂载到 ServerManager。新增 `ToolSchemaProvider` 作为 LLM-facing schema 的唯一入口：
+
+```
+LlmService
+   |
+   v
+ToolSchemaProvider
+   |
+   + Local Tool Schema（from getAllTools）
+   + MCP Tool Schema（from ServerManager.getAllSchemas）
+   + Capability Function Schema（from CapabilityFunctionSchemaAdapter）
+```
+
+ServerManager 继续只提供：
+```typescript
+getToolSchemas()  // MCP tool schemas only, no capability
+callTool()        // MCP tool routing only, no capability dispatch
+```
+
+**决策依据：** ServerManager 是 MCP/tool runtime facade，职责应限定在 tool discovery + MCP routing。合并 Capability 会导致职责混合。新增 `ToolSchemaProvider` 作为 schema 合并层，不改变现有组件边界。
+
+### 决策 8（P1.3a）：CapabilityDefinition 增加 inputSchema
+
+Capability function schema 的 parameters 不允许为空 `{}`。Function calling 中空 parameters 等价于"无约束"，会导致：
+- LLM 参数质量下降
+- invoke 输入不可预测
+- 后续 evaluation 无法分析参数结构
+
+CapabilityDefinition 增加 `inputSchema` 字段：
+
+```typescript
+interface CapabilityDefinition {
+  id: string
+  description: string
+  inputSchema: JSONSchema  // P1.3a: 非空，用于 function calling parameters
+  providers: CapabilityProvider[]
+}
+```
+
+`CapabilityFunctionSchemaAdapter` 从 `inputSchema` 生成 function.parameters：
+
+```
+CapabilityCatalog
+    |
+    v
+CapabilityFunctionSchemaAdapter
+    |
+    v
+function: { name, description, parameters: cap.inputSchema }
+```
+
+Catalog 构建时，从 Manifest 的 tool definitions 推断 inputSchema（M1 阶段所有 provider 共享第一个 provider 的 tool schema）。
+
+### 决策 9（P1.3a）：ToolInvocationRouter — 调用分发层
+
+LLM 返回的 tool_call 不直接进 ServerManager。新增 `ToolInvocationRouter` 负责分发：
+
+```
+LLM tool_call
+    |
+    v
+ToolInvocationRouter
+    |
+    + capability name → CapabilityService.invoke()
+    |
+    + normal tool → ServerManager.callTool()
+```
+
+判断依据：tool_call 的 function name 是否匹配某个 capability id。
+
+**决策依据：** 不允许 ServerManager 感知 Capability 概念。分发逻辑由 Router 独立承载，ServerManager 和 CapabilityService 彼此无直接引用。
+
+### 决策 10（P1.3a）：双轨模式 — 保留原始 tools
+
+P1.3a 是影子阶段的延伸，不移除原始 tool schema。LLM 同时看到两类函数：
+
+| Schema 来源 | 函数名 | 路由目标 | 生命周期 |
+|---|---|---|---|
+| 原始工具 | `read_file`、`write_file` 等 | `ServerManager.callTool()` | P1.3a 保留 |
+| Capability 函数 | `publishing`、`content.drafting` 等 | `CapabilityService.invoke()` | P1.3a 新增 |
+
+**P1.3a 不做的：**
+- 删除 PROMPT_TOOLS 文本
+- 删除原始 tool schema
+- Capability ranking / fallback
+- Agent 无 tool name 硬编码（C-6 目标保持推迟）
+
+### 决策 11（P1.3a）：capability.selected 事件
+
+LLM 主动选择 capability 函数时发射 `capability.selected` 事件。事件名静态化，不包含 capability id 变量。
+
+事件生命周期：
+
+```
+capability.suggested    ← P1.1: shadow 暴露
+    |
+    v
+capability.selected     ← P1.3a: LLM 主动选择了 capability 函数
+    |
+    v
+capability.invoked      ← P0: 开始执行
+    |
+    v
+capability.completed    ← P0: 执行完成
+```
+
+Payload 设计：
+
+```typescript
+interface CapabilitySelectedPayload {
+  capability: string        // "publishing"
+  source: 'llm_function_call'
+  toolCallId: string        // LLM 返回的 tool_call ID
+  input?: unknown           // LLM 传入的参数
+  matchedTool?: string      // 如果 LLM 同时通过原始 tool 名调用，记录对应关系
+}
+```
+
 ---
 
 ## 契约
@@ -233,6 +358,36 @@ Agent 业务代码通过 `Service.resolve()` + `Service.invoke()` 调用能力�
 
 **违反检测：** Agent 代码中出现 `serverManager.callTool("specific_tool_name", ...)` → C-6 违反（但有合理例外：`file.read`/`write` 等内置工具）。
 
+### C-7（P1.3a）：ToolSchemaProvider 是 LLM-facing schema 的唯一入口
+
+`LlmService` 获取 tools 时通过 `ToolSchemaProvider.getSchemas()`，不再直接调用 `ServerManager.getAllSchemas()`。ServerManager 不含 Capability schema。
+
+**违反检测：** LlmService 中出现 `mcpManager.getAllSchemas()` 或 `ServerManager.getAllSchemas()` → C-7 违反。
+
+### C-8（P1.3a）：Capability function schema 的 parameters 不为空
+
+`CapabilityDefinition.inputSchema` 必须包含非空的 properties 和 required。`CapabilityFunctionSchemaAdapter` 拒绝生成空 parameters 的 schema。
+
+**违反检测：** 生成的 capability function schema 中 `function.parameters.properties` 为 `{}` → C-8 违反。
+
+### C-9（P1.3a）：ServerManager 不感知 Capability
+
+ServerManager.callTool() 不检测 capability 函数名，不路由到 CapabilityService。分发由 ToolInvocationRouter 独立完成。
+
+**违反检测：** `ServerManager.ts` 中出现 `CapabilityService` import → C-9 违反。
+
+### C-10（P1.3a）：P1.3a 不删除原始 tool 路径
+
+原始 tool schema 在 P1.3a 阶段始终存在于提示中。Capability 函数 schema 是追加，不是替换。
+
+**违反检测：** `getAllTools()` 返回数量少于 P1.3a 之前 → C-10 违反（合理例外：新工具加入）。
+
+### C-11（P1.3a）：capability.selected 在 capability.invoked 之前发射
+
+对于 LLM 通过 capability 函数发起的调用，事件顺序必须为 `selected → invoked → completed`。selected 关联 tool_call_id 在 invoked 之前。
+
+**违反检测：** 同一次 trace 中 `capability.invoked` 出现在 `capability.selected` 之前 → C-11 违反。
+
 ---
 
 ## 影响
@@ -246,11 +401,27 @@ Agent 业务代码通过 `Service.resolve()` + `Service.invoke()` 调用能力�
 | `src/main/capability/CapabilityResolver.ts` | resolve(capabilityId) → ResolveResult |
 | `src/main/capability/CapabilityServiceImpl.ts` | resolve() + invoke(), Agent 隔离层 |
 
+### P1.3a 新增
+
+| 文件 | 职责 |
+|------|------|
+| `src/main/capability/CapabilityFunctionSchemaAdapter.ts` | CapabilityDefinition → OpenAI function schema 转换，过滤空 parameters |
+| `src/main/tool/ToolSchemaProvider.ts` | LLM-facing schema 统一入口，合并 tool + capability schema |
+| `src/main/tool/ToolInvocationRouter.ts` | LLM tool_call 分发：capability → CapabilityService，normal → ServerManager |
+
 ### 修改文件
 
 | 文件 | 变化 |
 |------|------|
 | `src/main/capability/index.ts` | 导出新类型和类 |
+| `src/main/capability/types.ts` | CapabilityDefinition 增加 inputSchema 字段；新增 CapabilitySelectedPayload |
+| `src/main/core/evaluation/types.ts` | EventType 追加 capability.selected |
+| `src/main/core/EventBus.ts` | 注册 capability.selected 事件名 |
+| `src/main/core/evaluation/ToolEventBridge.ts` | 新增 onCapabilitySelected handler |
+| `src/main/capability/index.ts` | 导出 CapabilityFunctionSchemaAdapter |
+| `src/main/tool/index.ts` | 导出 ToolSchemaProvider，ToolInvocationRouter |
+| `src/main/llm/LlmService.ts` | 改用 ToolSchemaProvider 获取 schemas |
+| `src/main/bootstrap/AppRuntime.ts` | 创建并注入 ToolSchemaProvider、ToolInvocationRouter、CapabilityFunctionSchemaAdapter |
 
 ### 未改变
 
@@ -275,6 +446,12 @@ Agent 业务代码通过 `Service.resolve()` + `Service.invoke()` 调用能力�
 | I-6 | ServerManager 5/5 不变 | vitest run tools.test |
 | I-7 | CapabilityService 不引用 CapabilityEngine | grep "CapabilityEngine" CapabilityServiceImpl.ts → 无匹配 |
 | I-8 | CapabilityService.invoke 委托 ServerManager.callTool | code review |
+| I-9 (P1.3a) | Capability function schema 出现在 LLM tools 中 | ToolSchemaProvider.getSchemas() 包含 capability 函数 |
+| I-10 (P1.3a) | Capability function schema 的 parameters 非空 | properties 不为 {}，required 不为 [] |
+| I-11 (P1.3a) | LLM 选择 capability 函数 → 路由到 CapabilityService | capability.selected 事件 + invoked 在同 trace |
+| I-12 (P1.3a) | LLM 选择原始工具 → 路由到 ServerManager（无回归） | 原始 tool.invoked 事件持续产生 |
+| I-13 (P1.3a) | ServerManager 不包含 CapabilityService import | grep "CapabilityService" ServerManager.ts → 无匹配 |
+| I-14 (P1.3a) | eventBus 正常发射 capability.selected | 事件可被 EvaluationRepository 持久化 |
 
 ---
 
@@ -283,10 +460,12 @@ Agent 业务代码通过 `Service.resolve()` + `Service.invoke()` 调用能力�
 | 缺口 | 说明 | 计划 |
 |------|------|------|
 | 多 Provider 选择 | 只有一个 provider 时总是选中 | M5.3 |
-| Agent 通过 capability 调用 | 当前 Agent 仍用 tool name | Agent Capability Integration |
+| Agent 通过 capability 调用 | 当前 Agent 仍用 tool name | P1.3b |
 | 权限集成 | Permission check 在 tool call 层级独立 | 与语义层正交 |
 | Capability 健康感知 | Resolver 不考虑 provider 健康状态 | M5.3 |
 | CapabilityRegistry（能力持久化）| Catalog 派生自 MCPRegistry，无独立能力存储 | 与 Registry 耦合，暂无计划独立 |
+| P1.3b Full Switch | 删除原始 tool schema + PROMPT_TOOLS | P1.3a 数据充分后启动 |
+| Capability inputSchema 自动推断 | M1 阶段从 provider tool schema 推断，非独立定义 | 需 Manifest 增强 |
 
 ---
 
@@ -294,7 +473,10 @@ Agent 业务代码通过 `Service.resolve()` + `Service.invoke()` 调用能力�
 
 | 缺口 | 说明 | 计划 |
 |------|------|------|
-| 多 Provider 选择 | 只有一个 provider 时总是选中 | M2 |
-| Agent 通过 capability 调用 | 当前 Agent 仍用 tool name | M3 |
+| 多 Provider 选择 | 只有一个 provider 时总是选中 | M5.3 |
+| Agent 通过 capability 调用 | 当前 Agent 仍用 tool name | P1.3b |
 | 权限集成 | Permission check 在 tool call 层级独立 | 与语义层正交 |
-| Capability 健康感知 | Resolver 不考虑 provider 健康状态 | Capability Layer M2 |
+| Capability 健康感知 | Resolver 不考虑 provider 健康状态 | M5.3 |
+| CapabilityRegistry（能力持久化）| Catalog 派生自 MCPRegistry，无独立能力存储 | 与 Registry 耦合，暂无计划独立 |
+| P1.3b Full Switch | 删除原始 tool schema + PROMPT_TOOLS | P1.3a 数据充分后启动 |
+| Capability inputSchema 自动推断 | M1 阶段从 provider tool schema 推断，非独立定义 | 需 Manifest 增强 |
