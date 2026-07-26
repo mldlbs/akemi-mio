@@ -47,6 +47,8 @@ export interface MCPToolDefinition {
   serverName: string
 }
 
+import type { ChildProcess } from 'child_process'
+
 export interface MCPServerConfig {
   name: string
   transport: 'stdio' | 'http' | 'sse'
@@ -61,4 +63,6 @@ export interface MCPServerConfig {
   requestTimeoutMs?: number
   /** 自定义 HTTP 请求头，用于 SSE/HTTP 传输模式（如 X-API-Key 认证） */
   headers?: Record<string, string>
+  /** 由 ProcessManager 预先 spawn 的 ChildProcess。设置后忽略 command/args/cwd/env */
+  existingProcess?: ChildProcess
 }

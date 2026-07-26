@@ -32,7 +32,13 @@ export class McpClient {
     } else {
       this.transportType = 'stdio'
       this.url = ''
-      this.transport = new StdioTransport(config.command!, config.args, config.env, config.cwd)
+      this.transport = new StdioTransport(
+        config.command!,
+        config.args,
+        config.env,
+        config.cwd,
+        config.existingProcess,
+      )
     }
     this.transport.onMessage((data) => this.handleResponse(data))
   }

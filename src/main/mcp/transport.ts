@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process'
+import { ChildProcess } from 'child_process'
 import { request as httpsRequest, RequestOptions } from 'https'
 import { request as httpRequest } from 'http'
 import { MCPResponse, MCPRequest } from './types'
@@ -9,25 +9,38 @@ export interface Transport {
   close(): Promise<void>
 }
 
+/**
+ * StdioTransport — 通过 stdio 与子进程通信的 MCP 传输层。
+ *
+ * 要求必须传入已启动的 ChildProcess（由 ProcessManager 提供），
+ * 不自行 spawn。测试场景应 mock Transport 接口而非绕过此约束。
+ *
+ * 构造函数参数保留 command/args/env/cwd 仅用于日志标识，
+ * 不用于 spawn。
+ *
+ * C-6：所有托管进程必须经过 ProcessManager。
+ */
 export class StdioTransport implements Transport {
   private process: ChildProcess
   private buffer = ''
   private handler: ((data: MCPResponse) => void) | null = null
   private lineHandler: ((line: string) => void) | null = null
-  private spawnError: Error | null = null
 
-  constructor(command: string, args: string[] = [], env?: Record<string, string>, cwd?: string) {
-    const mergedEnv = { ...process.env, ...env }
-    this.process = spawn(command, args, {
-      cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: mergedEnv,
-      windowsHide: true,
-    })
-
-    this.process.on('error', (err) => {
-      this.spawnError = err
-    })
+  constructor(
+    command: string,
+    args: string[] = [],
+    env?: Record<string, string>,
+    cwd?: string,
+    existingProcess: ChildProcess | null = null,
+  ) {
+    if (!existingProcess) {
+      throw new Error(
+        `StdioTransport requires an existing ChildProcess (C-6). ` +
+        `Use ProcessManager.registerSpawn() to create one. ` +
+        `Command attempted: ${command} ${args.join(' ')}`,
+      )
+    }
+    this.process = existingProcess
 
     this.process.stdout?.on('data', (chunk: Buffer) => {
       this.buffer += chunk.toString()
@@ -57,7 +70,6 @@ export class StdioTransport implements Transport {
   }
 
   async send(message: string): Promise<void> {
-    if (this.spawnError) throw this.spawnError
     return new Promise((resolve, reject) => {
       if (!this.process.stdin?.writable) {
         reject(new Error('stdin not writable'))
@@ -79,7 +91,6 @@ export class StdioTransport implements Transport {
   }
 
   async close(): Promise<void> {
-    if (this.spawnError) return
     if (!this.process.killed) {
       this.process.kill()
     }

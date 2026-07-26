@@ -181,22 +181,46 @@ export class AppRuntime {
 
     // === Stage 1: 核心基础设施 ===
     const stateManager = new StateManager()
-    const mcpManager = new ServerManager()
+
+    // Phase 4: Agent OS 子进程生命周期管理器 — 必须在 ServerManager 之前创建
+    this.processManager = new ProcessManager()
+    const mcpManager = new ServerManager(this.processManager)
 
     // 注册 Playwright MCP 服务器，赋予 AI 浏览器自动化能力
     try {
       const pwMcpDir = dirname(require.resolve('@playwright/mcp/package.json'))
       const cliPath = join(pwMcpDir, 'cli.js')
+      const userDataDir = join(app.getPath('userData'), 'playwright-profile')
+
+      // 启动前清理 mcp_servers.json 中的脏数据，防止与持久化配置冲突
+      const sandboxDir = join(app.getPath('userData'), 'projects', '__sandbox__')
+      try { require('fs').unlinkSync(join(sandboxDir, 'mcp_servers.json')) } catch {}
+
       mcpManager
         .addServer({
           name: 'playwright',
           transport: 'stdio',
           command: 'node',
-          args: [cliPath, '--headless'],
+          args: [cliPath, '--headless', `--user-data-dir=${userDataDir}`],
         })
         .catch((err) => log('WARN', 'playwright_mcp_start_failed', { error: String(err) }))
     } catch {
       log('WARN', 'playwright_mcp_not_found')
+    }
+
+    // 注册 Fanqie MCP Server（番茄小说发布）
+    try {
+      const fanqieMcpPath = join(process.cwd(), 'extensions', 'fanqie-mcp', 'fanqie-mcp.mjs')
+      mcpManager
+        .addServer({
+          name: 'fanqie-publish',
+          transport: 'stdio',
+          command: 'node',
+          args: [fanqieMcpPath],
+        })
+        .catch((err) => log('WARN', 'fanqie_mcp_start_failed', { error: String(err) }))
+    } catch {
+      log('WARN', 'fanqie_mcp_not_found')
     }
 
     const llmService = new LlmService(mcpManager)
@@ -231,7 +255,6 @@ export class AppRuntime {
     this.syscallBus = new SyscallBus()
     this.healthChecker = new HealthChecker(30_000)
     this.workerPool = new WorkerPool()
-    this.processManager = new ProcessManager()
 
     // Phase 1-3: 基础设施实例化
     this.resourceBudget = new ResourceBudget()

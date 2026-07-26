@@ -1,4 +1,4 @@
-import { ChildProcess, fork } from 'child_process'
+import { ChildProcess, fork, spawn } from 'child_process'
 import { join } from 'path'
 import { log } from '../logger/Logger'
 import { eventBus } from './EventBus'
@@ -19,6 +19,18 @@ export interface ProcessRegistration {
   healthPings: number
   failedPings: number
   pendingRequests: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>
+
+  /** spawn 进程专属字段（非 fork） */
+  spawnConfig?: {
+    command: string
+    args: string[]
+    cwd?: string
+    env?: Record<string, string>
+  }
+  /** per-process 重启预算，覆盖全局默认值 */
+  restartPolicy?: RestartPolicy
+  /** stdout/stderr 日志缓冲区，每个进程滚动保留最多 1000 行 */
+  logBuffer: LogEntry[]
 }
 
 export interface ProcessConfig {
@@ -27,6 +39,37 @@ export interface ProcessConfig {
   healthPingIntervalMs?: number
   maxRestarts?: number
   restartWindowMs?: number
+}
+
+export interface SpawnProcessConfig {
+  /** spawn 的可执行文件路径 */
+  command: string
+  /** spawn 的参数列表 */
+  args?: string[]
+  /** 工作目录 */
+  cwd?: string
+  /** 环境变量 */
+  env?: Record<string, string>
+  /** 重启预算，不设置则使用全局默认值 */
+  restartPolicy?: RestartPolicy
+}
+
+export interface RestartPolicy {
+  maxRetries: number
+  windowMs: number
+  cooldownMs: number
+}
+
+export interface LogEntry {
+  processId: string
+  timestamp: number
+  stream: 'stdout' | 'stderr'
+  message: string
+}
+
+export type SpawnResult = {
+  process: ChildProcess
+  processId: string
 }
 
 export type ProcessMessage =
@@ -46,11 +89,32 @@ const DEFAULT_CONFIG: Required<ProcessConfig> = {
   restartWindowMs: 300_000,
 }
 
+/** MCP Controller 默认重启预算：3 次/5 分钟，冷却 60 秒 */
+const MCP_RESTART_POLICY: RestartPolicy = { maxRetries: 3, windowMs: 300_000, cooldownMs: 60_000 }
+const MAX_LOG_LINES = 1000
+
 /**
- * ProcessManager — Agent OS 子进程生命周期管理器。
+ * ProcessManager — Agent OS 子进程生命周期管理器（Runtime Process Supervisor）。
  *
- * 使用 child_process.fork() 隔离重型服务（ASR/TTS/Evolution worker）。
- * 支持健康探针、自动重启、资源预算强制执行和优雅关闭。
+ * ## 职责边界 (ADR-014)
+ *
+ * ProcessManager owns:
+ * - 进程生命周期: spawn / stop / restart / gracefulShutdown
+ * - 资源追踪: PID, startTime, restartCount
+ * - 重启预算: per-process RestartPolicy, 超限锁定
+ * - 日志捕获: stdout/stderr → LogEntry 滚动缓冲区 (1000 行)
+ * - 健康探针: fork 进程的 IPC ping (spawn 进程用 exit 检测)
+ *
+ * ProcessManager does NOT own:
+ * - 协议握手: MCP initialize / shutdown 属于 MCPControlPlane
+ * - 工具发现: discoverTools 属于 MCPControlPlane
+ * - 工具调用路由: callTool 分发属于 ServerManager / MCPControlPlane
+ * - MCP 健康检查: MCP ping/pong 属于 MCPControlPlane
+ * - 注册表/持久化: Registry 属于上层
+ *
+ * ## 支持的进程类型
+ *
+ * 统一管理：启动/停止/重启、PID 追踪、stdout/stderr 捕获、健康探针、重启预算。
  */
 export class ProcessManager implements ISubsystem {
   readonly name = 'ProcessManager'
@@ -67,34 +131,33 @@ export class ProcessManager implements ISubsystem {
 
   // ==================== 进程注册与生命周期 ====================
 
-  /** 注册并启动一个子进程 */
+  /** 注册并启动一个 fork 子进程（IPC-based worker） */
   register(name: string, modulePath: string, config?: ProcessConfig): void {
     if (this.processes.has(name)) {
       log('WARN', 'processmgr.already_registered', { name })
       return
     }
 
-    const cfg = { ...this.configDefaults, ...config }
-    const reg: ProcessRegistration = {
-      name,
-      modulePath,
-      proc: null,
-      state: 'stopped',
-      startTime: 0,
-      restartCount: 0,
-      lastRestartTime: 0,
-      maxMemoryMb: cfg.maxMemoryMb,
-      maxCpuMs: cfg.maxCpuMs,
-      healthPings: 0,
-      failedPings: 0,
-      pendingRequests: new Map(),
-    }
-
+    const reg = this.createRegistration(name, { ...config, modulePath })
     this.processes.set(name, reg)
     this.startProcess(name)
   }
 
-  /** 子进程间通信（request/response） */
+  /** 注册并启动一个 spawn 子进程（stdio-based process，如 MCP Server） */
+  registerSpawn(name: string, spawnConfig: SpawnProcessConfig): SpawnResult {
+    if (this.processes.has(name)) {
+      log('WARN', 'processmgr.already_registered', { name })
+      const existing = this.processes.get(name)!
+      return { process: existing.proc!, processId: name }
+    }
+
+    const reg = this.createRegistration(name, undefined, spawnConfig)
+    this.processes.set(name, reg)
+    this.startSpawnProcess(name)
+    return { process: reg.proc!, processId: name }
+  }
+
+  /** 子进程间通信（request/response，仅 fork 模式支持） */
   async sendRequest(name: string, method: string, data: unknown, timeoutMs = 30_000): Promise<unknown> {
     const reg = this.processes.get(name)
     if (!reg || !reg.proc) throw new Error(`Process "${name}" not running`)
@@ -134,6 +197,21 @@ export class ProcessManager implements ISubsystem {
       running: reg.state === 'running',
       uptimeMs: reg.state === 'running' ? Date.now() - reg.startTime : 0,
     }
+  }
+
+  /** 获取进程 stdout/stderr 日志 */
+  getLogs(name: string, opts?: { tail?: number; stream?: 'stdout' | 'stderr' }): LogEntry[] {
+    const reg = this.processes.get(name)
+    if (!reg) return []
+
+    let entries = reg.logBuffer
+    if (opts?.stream) {
+      entries = entries.filter((e) => e.stream === opts.stream)
+    }
+    if (opts?.tail && opts.tail > 0) {
+      entries = entries.slice(-opts.tail)
+    }
+    return entries
   }
 
   // ==================== ISubsystem ====================
@@ -187,7 +265,37 @@ export class ProcessManager implements ISubsystem {
     }
   }
 
-  // ==================== 内部 ====================
+  // ==================== 内部：fork 进程 ====================
+
+  private createRegistration(
+    name: string,
+    forkConfig?: { modulePath: string } & Partial<ProcessConfig>,
+    spawnConfig?: SpawnProcessConfig,
+  ): ProcessRegistration {
+    const cfg = { ...this.configDefaults, ...forkConfig }
+    return {
+      name,
+      modulePath: forkConfig?.modulePath || '',
+      proc: null,
+      state: 'stopped',
+      startTime: 0,
+      restartCount: 0,
+      lastRestartTime: 0,
+      maxMemoryMb: cfg.maxMemoryMb,
+      maxCpuMs: cfg.maxCpuMs,
+      healthPings: 0,
+      failedPings: 0,
+      pendingRequests: new Map(),
+      spawnConfig: spawnConfig ? {
+        command: spawnConfig.command,
+        args: spawnConfig.args || [],
+        cwd: spawnConfig.cwd,
+        env: spawnConfig.env,
+      } : undefined,
+      restartPolicy: spawnConfig?.restartPolicy,
+      logBuffer: [],
+    }
+  }
 
   private startProcess(name: string): void {
     const reg = this.processes.get(name)!
@@ -223,6 +331,75 @@ export class ProcessManager implements ISubsystem {
     } catch (err: any) {
       log('ERROR', 'processmgr.spawn_failed', { name, error: err.message })
       reg.state = 'stopped'
+    }
+  }
+
+  // ==================== 内部：spawn 进程 ====================
+
+  private startSpawnProcess(name: string): void {
+    const reg = this.processes.get(name)!
+    if (reg.state === 'starting' || reg.state === 'running') return
+    reg.state = 'starting'
+
+    const sc = reg.spawnConfig!
+    const mergedEnv = { ...process.env, ...sc.env } as Record<string, string>
+
+    try {
+      const proc = spawn(sc.command, sc.args, {
+        cwd: sc.cwd,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: mergedEnv,
+        windowsHide: true,
+      })
+
+      reg.proc = proc
+      reg.startTime = Date.now()
+      reg.failedPings = 0
+
+      proc.stdout?.on('data', (chunk: Buffer) => {
+        this.appendLog(name, 'stdout', chunk.toString())
+      })
+
+      proc.stderr?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString()
+        this.appendLog(name, 'stderr', text)
+        console.error(`[MCP:${name}] ${text.trim()}`)
+      })
+
+      proc.on('error', (err) => {
+        log('ERROR', 'processmgr.process_error', { name, error: err.message })
+        reg.state = 'stopped'
+      })
+
+      proc.on('exit', (code) => {
+        console.error(`[MCP:${name}] process exited with code ${code}`)
+        this.handleExit(name, reg, code)
+      })
+
+      reg.state = 'running'
+      log('INFO', 'processmgr.spawned', { name, pid: proc.pid })
+    } catch (err: any) {
+      log('ERROR', 'processmgr.spawn_failed', { name, error: err.message })
+      reg.state = 'stopped'
+    }
+  }
+
+  // ==================== 内部：通用 ====================
+
+  private appendLog(name: string, stream: 'stdout' | 'stderr', text: string): void {
+    const reg = this.processes.get(name)
+    if (!reg) return
+
+    const lines = text.split('\n')
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      reg.logBuffer.push({ processId: name, timestamp: Date.now(), stream, message: trimmed })
+    }
+
+    // 超出上限时丢弃最旧的
+    if (reg.logBuffer.length > MAX_LOG_LINES) {
+      reg.logBuffer = reg.logBuffer.slice(-MAX_LOG_LINES)
     }
   }
 
@@ -267,7 +444,7 @@ export class ProcessManager implements ISubsystem {
   }
 
   private handleExit(name: string, reg: ProcessRegistration, code: number | null): void {
-    // Reject all pending requests
+    // Reject all pending requests (fork 进程可能有)
     for (const [reqId, handler] of reg.pendingRequests) {
       clearTimeout(handler.timer)
       handler.reject(new Error(`Process ${name} exited (code ${code})`))
@@ -284,28 +461,43 @@ export class ProcessManager implements ISubsystem {
     }
   }
 
+  private getRestartPolicy(reg: ProcessRegistration): { maxRetries: number; windowMs: number } {
+    if (reg.restartPolicy) {
+      return { maxRetries: reg.restartPolicy.maxRetries, windowMs: reg.restartPolicy.windowMs }
+    }
+    return { maxRetries: this.configDefaults.maxRestarts, windowMs: this.configDefaults.restartWindowMs }
+  }
+
   private attemptRestart(name: string): void {
     const reg = this.processes.get(name)
     if (!reg) return
 
+    const policy = this.getRestartPolicy(reg)
     const now = Date.now()
-    if (now - reg.lastRestartTime < this.configDefaults.restartWindowMs) {
+
+    if (now - reg.lastRestartTime < policy.windowMs) {
       reg.restartCount++
     } else {
       reg.restartCount = 1
     }
     reg.lastRestartTime = now
 
-    if (reg.restartCount > this.configDefaults.maxRestarts) {
-      log('ERROR', 'processmgr.restart_storm', { name, count: reg.restartCount })
-      eventBus.emit('process.restart_storm' as any, { name, count: reg.restartCount })
+    if (reg.restartCount > policy.maxRetries) {
+      log('ERROR', 'processmgr.restart_storm', { name, count: reg.restartCount, maxRetries: policy.maxRetries })
+      eventBus.emit('process.restart_storm' as any, { name, count: reg.restartCount, maxRetries: policy.maxRetries })
       return
     }
 
     const delay = Math.min(1000 * Math.pow(2, reg.restartCount - 1), 30_000)
     log('INFO', 'processmgr.scheduling_restart', { name, delayMs: delay, attempt: reg.restartCount })
 
-    setTimeout(() => this.startProcess(name), delay)
+    setTimeout(() => {
+      if (reg.spawnConfig) {
+        this.startSpawnProcess(name)
+      } else {
+        this.startProcess(name)
+      }
+    }, delay)
   }
 
   private async gracefulShutdown(reg: ProcessRegistration): Promise<void> {
@@ -327,7 +519,11 @@ export class ProcessManager implements ISubsystem {
       })
 
       try {
-        reg.proc!.send({ type: 'shutdown' })
+        if (typeof reg.proc!.send === 'function') {
+          reg.proc!.send({ type: 'shutdown' })
+        } else {
+          reg.proc!.kill('SIGTERM')
+        }
       } catch {
         clearTimeout(timeout)
         resolve()
@@ -339,8 +535,11 @@ export class ProcessManager implements ISubsystem {
     for (const [name, reg] of this.processes) {
       if (reg.state !== 'running' || !reg.proc) continue
       try {
-        reg.proc.send({ type: 'ping', id: Date.now() })
-        reg.failedPings = 0
+        if (typeof reg.proc.send === 'function') {
+          reg.proc.send({ type: 'ping', id: Date.now() })
+          reg.failedPings = 0
+        }
+        // spawn 进程用 exit 检测，不做 IPC ping
       } catch {
         reg.failedPings++
         if (reg.failedPings >= 2) {
