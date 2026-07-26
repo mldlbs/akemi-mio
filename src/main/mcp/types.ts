@@ -49,6 +49,26 @@ export interface MCPToolDefinition {
 
 import type { ChildProcess } from 'child_process'
 
+export interface MCPServerManifest {
+  id: string
+  name: string
+  version: string
+
+  runtime: {
+    command: string
+    args: string[]
+  }
+
+  capabilities: string[]
+
+  dependencies?: {
+    capability: string
+    optional?: boolean
+  }[]
+
+  permissions: string[]
+}
+
 export interface MCPServerConfig {
   name: string
   transport: 'stdio' | 'http' | 'sse'

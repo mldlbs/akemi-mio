@@ -15,6 +15,7 @@ import {
   TELEGRAM_ENABLED,
 } from '../config'
 import { ServerManager } from '../mcp/ServerManager'
+import { mcpRegistry } from '../mcp/MCPRegistry'
 import { LlmService } from '../llm/LlmService'
 import { WhisperGpuEngine } from '../asr/WhisperGpuEngine'
 import { BaiduEngine } from '../asr/BaiduEngine'
