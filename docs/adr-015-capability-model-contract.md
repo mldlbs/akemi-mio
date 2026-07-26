@@ -15,7 +15,7 @@
 |-------|-------|--------|
 | M5.1 | CapabilityDefinition, Catalog (derived from Registry), Resolver (single provider) | ✅ Frozen |
 | M5.2 | CapabilityBinding, CapabilityService (resolve + invoke), Permission position freeze | ✅ Frozen |
-| P1.3a | CapabilityFunctionSchemaAdapter, ToolSchemaProvider, ToolInvocationRouter, capability.selected event, dual-track mode | ✅ Frozen |
+| P1.3a | CapabilityFunctionSchemaAdapter, ToolSchemaProvider, ToolInvocationRouter, capability.selected event, dual-track mode | ✅ Frozen — Implementation ✅, Runtime ✅, Behavioral Adoption ❌ |
 | M5.3 | Multi-provider ranking / fallback / optimization | ⏸ Deferred |
 | P1.3b | Full Schema Switch: remove PROMPT_TOOLS, remove original tool schemas | ⏸ Deferred |
 **Supersedes:** None
@@ -469,14 +469,62 @@ ServerManager.callTool() 不检测 capability 函数名，不路由到 Capabilit
 
 ---
 
-## 已知缺口
+## P1.3a Observation
 
-| 缺口 | 说明 | 计划 |
+### 实验结论
+
+**问题：** Capability Function Schema 作为附加工具注入是否足以让 LLM 主动选择 capability？
+
+**方法：** 将 4 个 capability function schema 合并到 173 个原始 tool schema 中，通过 ToolSchemaProvider 统一提供给 LLM。
+
+**结果：** LLM 仍选择原始工具，capability.selected 事件为 0。
+
+**原因分析：**
+
+```
+假设:
+  old tools + capability tools → LLM 逐渐偏好 capability
+
+实际:
+  173 raw tools + 4 capability tools → 仍选择 raw tools
+```
+
+Capability schema 在数量上被淹没，LLM 的 tool selection 倾向于具体、已知的工具名。抽象 capability 函数在大量细粒度工具中不可见。
+
+**根本发现：** 增量式 schema 注入不足以改变 LLM 工具选择行为。形式化切换需要 capability-first 架构，即 LLM 只看到 capability 函数，背后由 CapabilityService → Provider → Tool 分解。
+
+### 对 P1.3b 的要求
+
+从当前模式：
+
+```
+Agent → [old tools + capability tools] → LLM selects raw tool → ServerManager.callTool()
+```
+
+变为：
+
+```
+Agent → [capability tools only] → LLM selects capability → CapabilityService.resolve()
+    ↓
+Provider.select()
+    ↓
+ServerManager.callTool()
+```
+
+### 已关闭的路径
+
+| 路径 | 结论 | 原因 |
 |------|------|------|
-| 多 Provider 选择 | 只有一个 provider 时总是选中 | M5.3 |
-| Agent 通过 capability 调用 | 当前 Agent 仍用 tool name | P1.3b |
-| 权限集成 | Permission check 在 tool call 层级独立 | 与语义层正交 |
-| Capability 健康感知 | Resolver 不考虑 provider 健康状态 | M5.3 |
-| CapabilityRegistry（能力持久化）| Catalog 派生自 MCPRegistry，无独立能力存储 | 与 Registry 耦合，暂无计划独立 |
-| P1.3b Full Switch | 删除原始 tool schema + PROMPT_TOOLS | P1.3a 数据充分后启动 |
-| Capability inputSchema 自动推断 | M1 阶段从 provider tool schema 推断，非独立定义 | 需 Manifest 增强 |
+| 增加 capability 描述 | ❌ 无效 | 信噪比问题，不是描述质量问题 |
+| 收集 suggested/selected 数据 | ❌ 不必要 | selected=0 已经回答问题 |
+| 调整 ranking | ❌ 超出 P1.3a 范围 | 属于 M5.3 多 Provider 选择 |
+| 调整 prompt | ❌ 无效 | 架构问题不能用 prompt 解决 |
+
+### P1.3a 最终状态
+
+| 维度 | 状态 | 说明 |
+|------|------|------|
+| Implementation | ✅ | Schema Adapter + Sanitization + Router + Synthetic Test 17/17 |
+| Runtime Compatibility | ✅ | API tools 兼容，capability schema 注入 |
+| Behavioral Adoption | ❌ | capability.selected = 0, raw tool selection 不变 |
+| Finding Generated | ✅ | 本 Observation 已记录 |

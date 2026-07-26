@@ -159,10 +159,52 @@ describe('P1.3a Capability Routing (Synthetic)', () => {
     expect(pub!.function.parameters.required.length).toBeGreaterThan(0)
   })
 
-  it('schema provider correctly identifies capability tools', () => {
+  it('sanitizes dot-containing capability ids in function names', () => {
+    const schemas = adapter.buildSchemas()
+
+    // browser.automation → browser_automation
+    const browser = schemas.find((s) => s.function.name === 'browser_automation')
+    expect(browser).toBeDefined()
+    expect(browser!.function.name).toBe('browser_automation')
+
+    // web.scraping → web_scraping
+    const scraping = schemas.find((s) => s.function.name === 'web_scraping')
+    expect(scraping).toBeDefined()
+    expect(scraping!.function.name).toBe('web_scraping')
+  })
+
+  it('resolves sanitized function name back to capability id', () => {
+    adapter.buildSchemas() // populates nameToCapability
+
+    expect(adapter.resolveCapabilityId('browser_automation')).toBe('browser.automation')
+    expect(adapter.resolveCapabilityId('web_scraping')).toBe('web.scraping')
+    expect(adapter.resolveCapabilityId('publishing')).toBe('publishing')
+    expect(adapter.resolveCapabilityId('non_existent')).toBeUndefined()
+  })
+
+  it('schema provider correctly identifies sanitized capability tools', () => {
     expect(schemaProvider.isCapabilityTool('publishing')).toBe(true)
+    // sanitized name
+    expect(schemaProvider.isCapabilityTool('browser_automation')).toBe(true)
+    // raw id also recognized (fallback)
     expect(schemaProvider.isCapabilityTool('browser.automation')).toBe(true)
     expect(schemaProvider.isCapabilityTool('non_existent_tool')).toBe(false)
+  })
+
+  it('routes capability with dot-containing id correctly', async () => {
+    const result = await router.dispatch('browser_automation', { url: 'https://baidu.com' })
+
+    expect(result.routedAs).toBe('capability')
+    expect(result.capability).toBe('browser.automation')
+    expect(result.result).toBeTruthy()
+  })
+
+  it('emits capability.selected with raw capability id for sanitized name', async () => {
+    await router.dispatch('browser_automation', { url: 'https://baidu.com' })
+
+    expect(capturedSelected.length).toBe(1)
+    // 事件中应该是原始 capability id
+    expect(capturedSelected[0].capability).toBe('browser.automation')
   })
 
   // ═════════════════════════════════════════════

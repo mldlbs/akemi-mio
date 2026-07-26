@@ -98,36 +98,39 @@ export class ToolInvocationRouter {
       return this.dispatchTool(capability, input)
     }
 
+    // 将 sanitized function name 解析回原始 capability id
+    const capId = this.schemaProvider.resolveCapabilityName?.(capability) ?? capability
+
     // 1. 发射 capability.selected（P1.3a 观测）
     eventBus.emit('capability.selected', {
-      capability,
+      capability: capId,
       source: 'llm_function_call',
       toolCallId: '',
       input,
     })
 
     // 2. resolve + invoke
-    const binding = await this.capabilityService.resolve(capability)
+    const binding = await this.capabilityService.resolve(capId)
     if (!binding) {
-      log('WARN', 'tool_router.resolve_failed', { capability })
+      log('WARN', 'tool_router.resolve_failed', { capability: capId })
       return {
-        result: `Error: Capability "${capability}" could not be resolved. The capability might not be available.`,
+        result: `Error: Capability "${capId}" could not be resolved. The capability might not be available.`,
         routedAs: 'capability',
-        capability,
+        capability: capId,
       }
     }
 
     try {
       const result = await this.capabilityService.invoke(binding, input)
       const text = typeof result === 'string' ? result : JSON.stringify(result)
-      log('INFO', 'tool_router.capability_success', { capability, tool: binding.tool })
-      return { result: text, routedAs: 'capability', capability }
+      log('INFO', 'tool_router.capability_success', { capability: capId, tool: binding.tool })
+      return { result: text, routedAs: 'capability', capability: capId }
     } catch (err: any) {
-      log('WARN', 'tool_router.capability_failed', { capability, error: err.message })
+      log('WARN', 'tool_router.capability_failed', { capability: capId, error: err.message })
       return {
-        result: `Error executing capability "${capability}": ${err.message}`,
+        result: `Error executing capability "${capId}": ${err.message}`,
         routedAs: 'capability',
-        capability,
+        capability: capId,
       }
     }
   }

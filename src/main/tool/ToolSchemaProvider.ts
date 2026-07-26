@@ -78,4 +78,9 @@ export class ToolSchemaProvider {
   isCapabilityTool(name: string): boolean {
     return this.capabilityAdapter?.isCapabilityTool(name) ?? false
   }
+
+  /** 将 sanitized function name 解析回原始 capability id */
+  resolveCapabilityName(sanitizedName: string): string | undefined {
+    return this.capabilityAdapter?.resolveCapabilityId(sanitizedName)
+  }
 }
