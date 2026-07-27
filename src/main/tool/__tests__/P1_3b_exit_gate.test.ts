@@ -181,6 +181,65 @@ describe('P1.3b Exit Gate — Provider Adapters', () => {
     expect(result.code).toBe('print(1+1)')
   })
 
+  // ═════════════════════════════════════════════════
+  // M5.4 Smoke: Canonical API → Tool params projection
+  // ═════════════════════════════════════════════════
+
+  it('[M5.4 smoke] file.management write → adapter → write_file params', () => {
+    const result = fileSystemAdapter(
+      { operation: 'write', path: 'test.txt', content: 'hello' },
+      'write_file',
+    ) as Record<string, unknown>
+    expect(result.path).toBe('test.txt')
+    expect(result.content).toBe('hello')
+    // No extra keys leaked
+    expect(result.operation).toBeUndefined()
+  })
+
+  it('[M5.4 smoke] file.management read → adapter → read_file params', () => {
+    const result = fileSystemAdapter(
+      { operation: 'read', path: '/tmp/a.txt' },
+      'read_file',
+    ) as Record<string, unknown>
+    expect(result.path).toBe('/tmp/a.txt')
+    expect(result.content).toBeUndefined()
+  })
+
+  it('[M5.4 smoke] search.retrieval grep → adapter → grep_search params', () => {
+    const result = searchAdapter(
+      { operation: 'grep', query: 'FIXME', scope: '/src' },
+      'grep_search',
+    ) as Record<string, unknown>
+    expect(result.pattern).toBe('FIXME')
+    expect(result.path).toBe('/src')
+  })
+
+  it('[M5.4 smoke] search.retrieval web_search → adapter → web_search params', () => {
+    const result = searchAdapter(
+      { operation: 'web_search', query: 'TypeScript news' },
+      'web_search',
+    ) as Record<string, unknown>
+    expect(result.query).toBe('TypeScript news')
+    expect(result.url).toBeUndefined()
+  })
+
+  it('[M5.4 smoke] system.execution command → adapter → run_command params', () => {
+    const result = systemAdapter(
+      { command: 'pwd', cwd: '/tmp' },
+      'run_command',
+    ) as Record<string, unknown>
+    expect(result.command).toBe('pwd')
+  })
+
+  it('[M5.4 smoke] system.execution python → adapter → execute_python params', () => {
+    const result = systemAdapter(
+      { command: 'print(1+1)' },
+      'execute_python',
+    ) as Record<string, unknown>
+    expect(result.code).toBe('print(1+1)')
+    expect(result.command).toBeUndefined()
+  })
+
   // ── adapter passthrough (no adapter = identity) ──
   it('CapabilityService invoke passes input through when no adapter registered', async () => {
     const serverManager = createMockServerManager()
