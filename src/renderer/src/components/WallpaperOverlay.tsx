@@ -11,6 +11,7 @@ import { wallpaperWidgetRegistry } from '../widgets/WallpaperWidgetRegistry'
 import { registerAllWidgets } from '../widgets/plugins'
 import { useWallpaperInteractionStore } from '../store/wallpaperInteractionStore'
 import { BehaviorQuickActions } from './BehaviorQuickActions'
+import { EmotionalWaveform } from './EmotionalWaveform'
 import type { WallpaperWidgetContext } from '../widgets/types'
 
 // =============================================================================
@@ -228,6 +229,9 @@ export function WallpaperOverlay() {
 
       {/* ── TTS 语音实时字幕 ── */}
       <TtsSubtitleOverlay />
+
+      {/* ── 情感叙事波形动画 ── */}
+      <EmotionalWaveform />
 
       {/* ── 壁纸交互模式：Agent 面板（Ctrl+Space 激活） ── */}
       {interactiveEnabled && <WallpaperAgentPanel />}
