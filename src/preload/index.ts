@@ -192,6 +192,78 @@ export function createElectronAPI(ipc: IpcRenderer) {
       }
     },
 
+    // ── 情感记忆语音叙事 ──
+    triggerEmotionalNarrative: (): Promise<{ success: boolean; message?: string; error?: string }> =>
+      ipc.invoke('emotional-narrative:trigger'),
+
+    cancelEmotionalNarrative: (): Promise<{ success: boolean }> =>
+      ipc.invoke('emotional-narrative:cancel'),
+
+    getEmotionalNarrativeState: (): Promise<{
+      success: boolean
+      state?: string
+      currentSegment?: number
+      totalSegments?: number
+      isActive?: boolean
+    }> => ipc.invoke('emotional-narrative:state'),
+
+    getEmotionalNarrativeContext: (): Promise<{
+      success: boolean
+      summary?: { dominantLabel: string; trend: string; entries: number } | null
+    }> => ipc.invoke('emotional-narrative:context'),
+
+    onEmotionalNarrativeStart: (callback: (data: {
+      trend: string
+      totalSegments: number
+      contextSummary: string
+    }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: {
+        trend: string
+        totalSegments: number
+        contextSummary: string
+      }) => callback(data)
+      ipc.on('emotional-narrative:start', handler)
+      return () => { ipc.removeListener('emotional-narrative:start', handler) }
+    },
+
+    onEmotionalNarrativeSegment: (callback: (data: {
+      text: string
+      index: number
+      total: number
+      label: string
+      durationMs: number
+    }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: {
+        text: string
+        index: number
+        total: number
+        label: string
+        durationMs: number
+      }) => callback(data)
+      ipc.on('emotional-narrative:segment', handler)
+      return () => { ipc.removeListener('emotional-narrative:segment', handler) }
+    },
+
+    onEmotionalNarrativeEnd: (callback: (data: {
+      totalSegments: number
+      totalDurationMs: number
+      success: boolean
+    }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: {
+        totalSegments: number
+        totalDurationMs: number
+        success: boolean
+      }) => callback(data)
+      ipc.on('emotional-narrative:end', handler)
+      return () => { ipc.removeListener('emotional-narrative:end', handler) }
+    },
+
+    onEmotionalNarrativeCancel: (callback: () => void) => {
+      const handler = () => callback()
+      ipc.on('emotional-narrative:cancel', handler)
+      return () => { ipc.removeListener('emotional-narrative:cancel', handler) }
+    },
+
     getCredential: (key: string): Promise<string | null> => ipc.invoke('credentials:get', key),
 
     getAllCredentials: (): Promise<Record<string, string>> => ipc.invoke('credentials:getAll'),
