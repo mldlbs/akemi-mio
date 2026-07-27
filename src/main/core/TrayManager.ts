@@ -26,9 +26,25 @@ let voiceNoteSaveCb: (() => void) | null = null
 // ── 角色方案切换 ──
 let voiceRoleSchemeCb: ((schemeId: string) => void) | null = null
 
+/** 当前引擎偏好（用于托盘菜单显示） */
+let currentEnginePreference: 'auto' | 'cloud' | 'local' = 'auto'
+
+/** TTS 引擎偏好切换回调 */
+let enginePreferenceCb: ((pref: 'auto' | 'cloud' | 'local') => void) | null = null
+
 /** 注册角色方案切换回调（由 AppRuntime 在 VoiceRoleManager 就绪后调用） */
 export function setVoiceRoleSchemeSwitch(cb: (schemeId: string) => void): void {
   voiceRoleSchemeCb = cb
+}
+
+/** 注册 TTS 引擎偏好切换回调（由 AppRuntime 在 TtsService 就绪后调用） */
+export function setEnginePreferenceToggle(cb: (pref: 'auto' | 'cloud' | 'local') => void): void {
+  enginePreferenceCb = cb
+}
+
+/** 更新当前引擎偏好（由 AppRuntime 在偏好变化时调用，用于托盘菜单展示） */
+export function updateEnginePreference(pref: 'auto' | 'cloud' | 'local'): void {
+  currentEnginePreference = pref
 }
 
 /** 注册仪表盘切换回调（由 AppRuntime 在仪表盘服务就绪后调用） */
@@ -197,6 +213,30 @@ export function initTray(mainWindow: () => BrowserWindow | null): void {
           {
             label: '柔和方案',
             click: () => voiceRoleSchemeCb?.('gentle'),
+          },
+        ],
+      },
+      { type: 'separator' },
+      {
+        label: '语音引擎',
+        submenu: [
+          {
+            label: '自动(智能路由)',
+            type: 'radio',
+            checked: currentEnginePreference === 'auto',
+            click: () => enginePreferenceCb?.('auto'),
+          },
+          {
+            label: '云端(Edge TTS)',
+            type: 'radio',
+            checked: currentEnginePreference === 'cloud',
+            click: () => enginePreferenceCb?.('cloud'),
+          },
+          {
+            label: '本地(Piper TTS)',
+            type: 'radio',
+            checked: currentEnginePreference === 'local',
+            click: () => enginePreferenceCb?.('local'),
           },
         ],
       },
