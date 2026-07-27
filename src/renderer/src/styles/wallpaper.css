@@ -1792,6 +1792,108 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+   情感叙事波形动画 — EmotionalWaveform
+   在桌面 TTS 字幕上方显示实时情感波形动画，增强沉浸感
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ─── 波形容器（固定在底部，字幕上方） ─── */
+.wp-emotional-waveform {
+  position: fixed;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: min(70vw, 600px);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  will-change: opacity;
+}
+
+/* ─── 渐变背景光晕 ─── */
+.wp-emotional-waveform-bg {
+  position: absolute;
+  inset: -20px -40px;
+  border-radius: 50%;
+  opacity: 0.15;
+  transition: background 0.5s ease;
+  pointer-events: none;
+}
+
+/* ─── 波形柱状图容器 ─── */
+.wp-emotional-waveform-bars {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 48px;
+  width: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── 单根波形柱条 ─── */
+.wp-emotional-waveform-bar {
+  border-radius: 2px;
+  min-width: 2px;
+  transition: height 0.1s ease, background 0.3s ease, box-shadow 0.3s ease;
+  animation: wp-waveform-pulse 1.5s ease-in-out infinite;
+  animation-delay: var(--bar-delay, 0s);
+}
+
+@keyframes wp-waveform-pulse {
+  0%, 100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(1.15);
+  }
+}
+
+/* ─── 底部状态区（进度点 + 标签） ─── */
+.wp-emotional-waveform-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── 进度点行 ─── */
+.wp-emotional-waveform-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ─── 单个进度点 ─── */
+.wp-emotional-waveform-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transition: all 0.4s ease;
+}
+
+/* ─── 情感标签 ─── */
+.wp-emotional-waveform-label {
+  font-size: var(--fs-caption, 11px);
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-shadow: 0 1px 4px oklch(0 0 0 / 0.5);
+  transition: color 0.4s ease;
+}
+
+/* ─── 专注模式下隐藏波形 ─── */
+.wp-mode-focus .wp-emotional-waveform {
+  display: none !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
    桌面悬浮任务面板 — TaskPanelWidget
    在桌面 overlay 上以卡片式 UI 显示 Agent 状态、计划和快捷操作
    ══════════════════════════════════════════════════════════════════════ */
