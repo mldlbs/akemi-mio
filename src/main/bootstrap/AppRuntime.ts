@@ -23,6 +23,7 @@ import { AsrService } from '../asr/AsrService'
 import { asrEvolutionManager } from '../asr/AsrEvolutionManager'
 import { TtsService } from '../tts/TtsService'
 import { piperOrchestrator } from '../tts/PiperOrchestrator'
+import { piperTtsEnvironmentMonitor } from '../tts/PiperTtsEnvironmentMonitor'
 import { engineProvider } from '../engine'
 import { ttsScheduler } from '../tts/TtsScheduler'
 import { ttsTypographyFeedbackLoop } from '../tts/TtsTypographyFeedbackLoop'
@@ -53,7 +54,7 @@ import { PluginLoader, toolRegistry } from '../plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '../skill'
 import { loadEnvFile, setupTransformers } from '../core/ModelLoader'
 import { setupStartupLogging, createWindow, setupWallpaperListener, getMainWindow } from '../core/Lifecycle'
-import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle, setUserContextOverride, setOrganizerPause, setOrganizerResume, setOrganizerSkip, setSubtitleToggle, setVoiceRoleSchemeSwitch, setTaskPanelToggle, setVoiceNoteToggle, setVoiceNoteSave } from '../core/TrayManager'
+import { initTray, destroyTray, setDashboardToggle, setContextualTtsToggle, setUserContextOverride, setOrganizerPause, setOrganizerResume, setOrganizerSkip, setSubtitleToggle, setVoiceRoleSchemeSwitch, setTaskPanelToggle, setVoiceNoteToggle, setVoiceNoteSave, setEnginePreferenceToggle, updateEnginePreference } from '../core/TrayManager'
 import { initUpdater, setUpdateWindow } from '../updater/UpdaterService'
 import { EvolutionDashboardService, MemoryContextService, ConversationContextService, FileOrganizerProgressService } from '../wallpaper/WallpaperService'
 import { TaskPanelService } from '../wallpaper/TaskPanelService'
@@ -428,6 +429,7 @@ export class AppRuntime {
       const savedPref = credentialsManager.get('tts_mode')
       if (savedPref === 'cloud' || savedPref === 'local' || savedPref === 'auto') {
         ttsService.setEnginePreference(savedPref)
+        updateEnginePreference(savedPref)
         log('INFO', 'tts_preference_restored', { preference: savedPref })
       }
     } catch (err) {
@@ -456,6 +458,10 @@ export class AppRuntime {
     // 调用方可通过 engineProvider.getAll() 遍历所有引擎，无需感知具体实现
     engineProvider.register(agentService)       // name='agent'
     engineProvider.register(piperOrchestrator)   // name='piper-tts'
+
+    // ── 启动 PiperTTS 环境信号监控（屏幕亮度、系统静音状态） ──
+    // 用于 PiperTtsStateMachine 的深夜/静默模式自动切换
+    piperTtsEnvironmentMonitor.start()
 
     // 将 SubAgentPool 引用注入到 SkillAgentTools 全局
     const { setSubAgentPool } = await import('../tool/definitions/SkillAgentTools')
@@ -562,6 +568,14 @@ export class AppRuntime {
       voiceRoleManager.setActiveScheme(schemeId).catch((err) => {
         log('WARN', 'voice_role_scheme_switch_failed', { error: String(err) })
       })
+    })
+
+    // ── TTS 引擎偏好 → 托盘菜单 ──
+    setEnginePreferenceToggle((pref: 'auto' | 'cloud' | 'local') => {
+      ttsService.setEnginePreference(pref)
+      updateEnginePreference(pref)
+      credentialsManager.set('tts_mode', pref)
+      log('INFO', 'tts_engine_tray_selection', { preference: pref })
     })
 
     // ── [混合 TTS 调度器] 初始化缓存 + 高频短语预生成 ──
@@ -798,6 +812,52 @@ export class AppRuntime {
       log('INFO', 'predictive_prewarmer_initialized', {
         transitionStats: memoryService.getTopicTransitionStats(),
       })
+    }
+
+    // ── 行为预测记忆引擎：持续分析行为模式，预加载 >80% 匹配的记忆 ──
+    {
+      const { behaviorPredictionMemoryEngine } = await import('../behavior/BehaviorPredictionMemoryEngine')
+
+      // 跟踪最新的行为状态（UserBehaviorService 通过 EventBus 发布）
+      const latestBehaviorState: { appCategory: string; activityState: string; idleTimeMs: number } = {
+        appCategory: 'other',
+        activityState: 'active',
+        idleTimeMs: 0,
+      }
+      this.subs.add(eventBus.on('behavior.state.updated' as any, (state: any) => {
+        latestBehaviorState.appCategory = state.appCategory ?? 'other'
+        latestBehaviorState.activityState = state.activityState ?? 'active'
+        latestBehaviorState.idleTimeMs = state.idleTimeMs ?? 0
+      }))
+
+      behaviorPredictionMemoryEngine.setDependencies({
+        getBehaviorContext: () => {
+          const now = new Date()
+          return {
+            hour: now.getHours(),
+            dayOfWeek: now.getDay(),
+            appCategory: latestBehaviorState.appCategory,
+            activityState: latestBehaviorState.activityState as 'active' | 'idle' | 'away',
+            idleTimeMs: latestBehaviorState.idleTimeMs,
+          }
+        },
+        getRecentInteractions: (limit: number) => memoryService.interactionTracker.getRecent(limit),
+        getRecentInteractionTopics: (limit: number) => {
+          const recents = memoryService.interactionTracker.getRecent(limit)
+          const topics = new Set<string>()
+          for (const r of recents) {
+            if (r.topics) r.topics.forEach((t: string) => topics.add(t))
+          }
+          return [...topics].slice(0, 10)
+        },
+        getMemoryEntries: () => memoryService.getEntries(),
+        getBehaviorWeightedEntries: (tier?: string, limit?: number) =>
+          memoryService.getBehaviorWeightedEntries(tier as any, limit),
+      })
+
+      // 启动引擎（5 分钟周期）
+      behaviorPredictionMemoryEngine.start()
+      log('INFO', 'prediction_memory_engine_started')
     }
 
     setPlanManager(planManager)
@@ -2055,6 +2115,13 @@ export class AppRuntime {
           if (chatExec) {
             chatExec.setUserContextOverride(mode as any)
           }
+        })
+        // 语音引擎偏好切换回调（系统托盘菜单）
+        setEnginePreferenceToggle((pref: 'auto' | 'cloud' | 'local') => {
+          ttsService.setEnginePreference(pref)
+          credentialsManager.set('tts_mode', pref)
+          updateEnginePreference(pref)
+          log('INFO', 'tts_engine_preference_tray', { preference: pref })
         })
         log('INFO', 'evolution_dashboard_started')
       },
