@@ -34,6 +34,7 @@
 import { log } from '../logger/Logger'
 import { networkMonitor } from './NetworkMonitor'
 import { shallowMerge } from '../core/utils/configMerge'
+import { qosEvaluator } from './QoSEvaluator'
 import type {
   TtsEngine,
   TtsUserPreference,
@@ -175,6 +176,33 @@ export class TtsRouter {
     }
     if (this.userPreference === 'local') {
       return this.makeDecision('local', 'user_preference_local', -1, true, qualityWeight, latencyWeight, emotionStrength, textLength)
+    }
+
+    // ── 第 2 层：QoS 服务质量评估 ──
+    // 在 auto 模式下，QoS 评估作为前置过滤：
+    //   - score < forceLocalThreshold (0.3): 强制本地引擎
+    //   - score < recommendLocalThreshold (0.5): 强倾向本地
+    // 即使网络状况良好，高负载也优先使用本地引擎避免加重系统负担
+    if (qosEvaluator.shouldForceLocal()) {
+      const qosScore = qosEvaluator.getLastScore()
+      return this.makeDecision(
+        'local',
+        `qos_force_local_score_${qosScore.score.toFixed(2)}_${qosScore.degradationReason}`,
+        qosScore.networkLatencyMs,
+        qosScore.networkLatencyMs >= 0,
+        qualityWeight,
+        latencyWeight,
+        emotionStrength,
+        textLength,
+      )
+    }
+    if (qosEvaluator.shouldUseLocal()) {
+      const qosScore = qosEvaluator.getLastScore()
+      // 仅当 QoS 明确推荐本地时覆盖；否则继续后续决策层
+      log('INFO', 'tts_router_qos_recommend_local', {
+        qosScore: qosScore.score.toFixed(2),
+        reason: qosScore.degradationReason,
+      })
     }
 
     // ── 第 2 层：Piper 性能感知 ──
@@ -367,6 +395,22 @@ export class TtsRouter {
     }
     if (this.userPreference === 'local') {
       return this.makeDecision('local', 'user_preference_local', -1, true, qualityWeight, latencyWeight, emotionStrength, textLength)
+    }
+
+    // ── QoS 服务质量评估（前置过滤） ──
+    // 当系统负载高或网络极差时，即使 auto 模式也强制本地引擎
+    if (qosEvaluator.shouldForceLocal()) {
+      const qosScore = qosEvaluator.getLastScore()
+      return this.makeDecision(
+        'local',
+        `sync_qos_force_local_score_${qosScore.score.toFixed(2)}_${qosScore.degradationReason}`,
+        qosScore.networkLatencyMs,
+        qosScore.networkLatencyMs >= 0,
+        qualityWeight,
+        latencyWeight,
+        emotionStrength,
+        textLength,
+      )
     }
 
     // ── Piper 性能感知 ──

@@ -4,6 +4,8 @@ import { extractContextFromSummaries, getEntityExtractorStats } from '../../asr/
 import { asrHotwordManager } from '../../asr/AsrHotwordManager'
 import { memoryAsrHybridPipeline } from '../../asr/MemoryAsrHybridPipeline'
 import { VoiceToolOrchestrator } from '../../tool/VoiceToolOrchestrator'
+import { voiceIntentLlmParser } from '../../tool/VoiceIntentLlmParser'
+import { voiceConfirmationSession, type ConfirmSessionEvent } from '../../tool/VoiceConfirmationSession'
 import { runVoiceMemoryShortcut } from '../../memory/VoiceMemoryShortcut'
 import { voiceOdeSession, McpOdeSolverInvoker } from '../../audio/VoiceOdeSession'
 import { eventBus } from '../../core/EventBus'
@@ -43,7 +45,27 @@ export function registerAsrHandlers({ agentService, ttsService }: HandlerContext
       if (hybridResult.text?.trim()) {
         const pcmSamples = new Int16Array(audioBuffer)
         audioDurationMs = Math.round((pcmSamples.length / 16000) * 1000)
-        userSpeechProfileTracker.recordInteraction(hybridResult.text.trim(), audioDurationMs)
+        // 传入 VoiceEmotion 声学特征（如可用），用于声学画像追踪
+        userSpeechProfileTracker.recordInteraction(
+          hybridResult.text.trim(),
+          audioDurationMs,
+          hybridResult.voiceEmotion
+            ? {
+                energy: hybridResult.voiceEmotion.features.energy,
+                pitchHz: hybridResult.voiceEmotion.features.pitchHz,
+                speechRate: hybridResult.voiceEmotion.features.speechRate,
+                silenceRatio: hybridResult.voiceEmotion.features.silenceRatio,
+              }
+            : undefined,
+        )
+      } else if (hybridResult.voiceEmotion) {
+        // 文本过滤后无声学记录，但声学特征仍需独立记录
+        userSpeechProfileTracker.recordAcousticFeatures({
+          energy: hybridResult.voiceEmotion.features.energy,
+          pitchHz: hybridResult.voiceEmotion.features.pitchHz,
+          speechRate: hybridResult.voiceEmotion.features.speechRate,
+          silenceRatio: hybridResult.voiceEmotion.features.silenceRatio,
+        })
       }
 
       if (hybridResult.voiceEmotion) {
@@ -313,14 +335,265 @@ export function registerAsrHandlers({ agentService, ttsService }: HandlerContext
     callTool: async (name: string, args: Record<string, any>) => agentService.getMcpManager().callTool(name, args),
   })
 
-  ipcMain.handle('voice:matchIntent', async (_event, text: string) => {
-    try { return voiceOrchestrator.match({ text }) }
-    catch (err) { log('ERROR', 'voice_match_intent_failed', { error: String(err) }); return { matched: false, fallbackText: text, error: String(err) } }
+  // 设置 TTS 播报回调（语音反馈）
+  if (ttsService) {
+    voiceOrchestrator.setTtsSpeaker(async (text: string) => {
+      try { await ttsService.speak(text) } catch { /* TTS not available */ }
+    })
+  }
+
+  // ── LLM 意图解析器 fallback ──
+  try {
+    const llmService = agentService.getLlmService()
+    if (llmService) {
+      voiceIntentLlmParser.setLlmCaller(async (userText: string, system: string) => {
+        return llmService.chatJson(userText, { system, temperature: 0.1, timeoutMs: 10000 })
+      })
+      log('INFO', 'voice_llm_parser_initialized')
+    }
+  } catch {
+    log('WARN', 'voice_llm_parser_init_failed', { note: 'LLM service not available, fallback disabled' })
+  }
+
+  // ── 确认会话事件 → TTS 播报 ──
+  voiceConfirmationSession.on((event: ConfirmSessionEvent) => {
+    switch (event.type) {
+      case 'confirm_requested':
+        // 确认请求由渲染进程的 UI 或语音播报处理
+        if (ttsService) {
+          const ttsText = `请确认：${event.confirmMessage}。请说确认或取消。`
+          ttsService.speak(ttsText).catch(() => {})
+        }
+        break
+      case 'session_complete':
+        if (event.result === 'confirmed' && ttsService) {
+          ttsService.speak('好的，开始执行。').catch(() => {})
+        } else if (event.result === 'rejected' && ttsService) {
+          ttsService.speak('已取消操作。').catch(() => {})
+        } else if (event.result === 'timeout' && ttsService) {
+          ttsService.speak('确认超时，操作已取消。').catch(() => {})
+        }
+        break
+      case 'session_error':
+        // 重试提示或超时提示由事件内容提供
+        break
+    }
+  })
+
+  // ── 语音意图匹配（关键词优先，LLM fallback）──
+  ipcMain.handle('voice:matchIntent', async (_event, text: string, useLlmFallback?: boolean) => {
+    try {
+      // 1. 关键词匹配
+      const keywordResult = voiceOrchestrator.match({ text })
+
+      // 2. 关键词匹配成功 → 直接返回
+      if (keywordResult.matched) {
+        return keywordResult
+      }
+
+      // 3. 关键词匹配失败，尝试 LLM fallback
+      if (useLlmFallback !== false && voiceIntentLlmParser.isReady()) {
+        const llmResult = await voiceIntentLlmParser.parse(text)
+        if (llmResult.success && llmResult.parsed) {
+          const p = llmResult.parsed
+          return {
+            matched: true,
+            intent: {
+              name: p.intent,
+              description: p.description,
+              confirmMessage: p.confirmMessage,
+              toolSequence: p.tools,
+              slots: p.slots,
+            },
+            fallbackText: text,
+            _source: 'llm',
+            _analysis: p.analysis,
+            _confidence: p.confidence,
+          }
+        }
+      }
+
+      return { matched: false, fallbackText: text }
+    } catch (err) {
+      log('ERROR', 'voice_match_intent_failed', { error: String(err) })
+      return { matched: false, fallbackText: text, error: String(err) }
+    }
   })
 
   ipcMain.handle('voice:executeChain', async (_event, intent: string, slots: Record<string, string>) => {
     try { return await voiceOrchestrator.execute({ intent, slots }) }
     catch (err) { log('ERROR', 'voice_execute_chain_failed', { error: String(err) }); return { success: false, steps: [], summary: String(err) } }
+  })
+
+  // ── 语音确认会话 ──
+  ipcMain.handle('voice:confirm:start', async (_event, params: {
+    intentName: string
+    confirmMessage: string
+    slots: Record<string, string>
+    tools: Array<{ tool: string; args: Record<string, string> }>
+    timeoutMs?: number
+  }) => {
+    try {
+      if (voiceConfirmationSession.isActive) {
+        voiceConfirmationSession.reset()
+      }
+
+      if (params.timeoutMs) {
+        voiceConfirmationSession.updateConfig({ timeoutMs: params.timeoutMs })
+      }
+
+      voiceConfirmationSession.start({
+        intentName: params.intentName,
+        confirmMessage: params.confirmMessage,
+        slots: params.slots,
+        tools: params.tools,
+      })
+
+      return { success: true, sessionId: voiceConfirmationSession.sessionId, state: voiceConfirmationSession.state }
+    } catch (err) {
+      log('ERROR', 'voice_confirm_start_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('voice:confirm:feed', async (_event, text: string) => {
+    try {
+      voiceConfirmationSession.feed(text)
+      return {
+        success: true,
+        state: voiceConfirmationSession.state,
+        result: voiceConfirmationSession.state === 'confirmed'
+          ? 'confirmed'
+          : voiceConfirmationSession.state === 'rejected' || voiceConfirmationSession.state === 'timeout'
+            ? 'rejected'
+            : 'pending',
+        slots: voiceConfirmationSession.slots,
+      }
+    } catch (err) {
+      log('ERROR', 'voice_confirm_feed_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('voice:confirm:state', async () => {
+    return {
+      active: voiceConfirmationSession.isActive,
+      state: voiceConfirmationSession.state,
+      sessionId: voiceConfirmationSession.sessionId,
+      intentName: voiceConfirmationSession.intentName,
+      confirmMessage: voiceConfirmationSession.confirmMessage,
+      slots: voiceConfirmationSession.slots,
+      elapsedMs: voiceConfirmationSession.elapsedMs,
+    }
+  })
+
+  ipcMain.handle('voice:confirm:reset', async () => {
+    voiceConfirmationSession.reset()
+    return { success: true }
+  })
+
+  // ── 一站式语音编排（匹配+确认+执行+TTS）──
+  ipcMain.handle('voice:orchestrate:full', async (_event, text: string, options?: {
+    useLlmFallback?: boolean
+    autoTts?: boolean
+    requireConfirm?: boolean
+    confirmTimeoutMs?: number
+  }) => {
+    try {
+      // 1. 匹配意图（关键词优先）
+      const keywordResult = voiceOrchestrator.match({ text })
+      let matched = keywordResult.matched
+      let intent: any = keywordResult.intent
+
+      if (!matched && (options?.useLlmFallback !== false) && voiceIntentLlmParser.isReady()) {
+        const llmResult = await voiceIntentLlmParser.parse(text)
+        if (llmResult.success && llmResult.parsed) {
+          const p = llmResult.parsed
+          const tools = p.tools.map((t) => ({ tool: t.tool, args: t.args }))
+          matched = true
+          intent = {
+            name: p.intent,
+            description: p.description,
+            confirmMessage: p.confirmMessage,
+            toolSequence: tools,
+            slots: p.slots,
+          }
+        }
+      }
+
+      if (!matched) {
+        return { matched: false, text }
+      }
+
+      // 2. 需要确认时启动确认会话
+      const needConfirm = options?.requireConfirm !== false
+      if (needConfirm && intent) {
+        voiceConfirmationSession.updateConfig({
+          timeoutMs: options?.confirmTimeoutMs ?? 30000,
+        })
+        voiceConfirmationSession.start({
+          intentName: intent.name,
+          confirmMessage: intent.confirmMessage,
+          slots: intent.slots,
+          tools: intent.toolSequence,
+        })
+
+        // 等待确认（通过轮询或回调）
+        // 注意：这需要等待渲染进程处理，当前实现立即返回状态
+        // 渲染进程应监听 voice:confirm:state 或等待 feed 响应
+        return {
+          matched: true,
+          awaitingConfirm: true,
+          intent: {
+            name: intent.name,
+            description: intent.description,
+            confirmMessage: intent.confirmMessage,
+            toolSequence: intent.toolSequence,
+            slots: intent.slots,
+          },
+          sessionId: voiceConfirmationSession.sessionId,
+          state: voiceConfirmationSession.state,
+        }
+      }
+
+      // 3. 无需确认，直接执行
+      const result = await voiceOrchestrator.execute({
+        intent: intent.name,
+        slots: intent.slots,
+      })
+
+      return { matched: true, awaitingConfirm: false, result }
+    } catch (err) {
+      log('ERROR', 'voice_orchestrate_full_failed', { error: String(err) })
+      return { matched: false, text, error: String(err) }
+    }
+  })
+
+  // ── 一站式：确认后继续执行 ──
+  ipcMain.handle('voice:orchestrate:confirmAndExecute', async (_event, intentName: string, slots: Record<string, string>) => {
+    try {
+      const result = await voiceOrchestrator.execute({ intent: intentName, slots })
+      return { success: result.success, result }
+    } catch (err) {
+      log('ERROR', 'voice_orchestrate_confirm_execute_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // ── LLM 意图解析（独立 API，供客户端直接调用）──
+  ipcMain.handle('voice:llmParseIntent', async (_event, text: string) => {
+    try {
+      const result = await voiceIntentLlmParser.parse(text)
+      return {
+        success: result.success,
+        parsed: result.parsed,
+        fallbackText: result.fallbackText,
+        error: result.error,
+      }
+    } catch (err) {
+      log('ERROR', 'voice_llm_parse_intent_failed', { error: String(err) })
+      return { success: false, parsed: null, fallbackText: text, error: String(err) }
+    }
   })
 
   // ── ODE 求解会话 ──

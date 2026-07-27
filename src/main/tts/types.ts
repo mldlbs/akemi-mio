@@ -1094,3 +1094,167 @@ export const LEISURE_PROCESS_PATTERNS: RegExp[] = [
   /taobao|jd|amazon|shopee|lazada|ebay|pinduoduo/i,
   /browser.*(?:shop|mall|buy|cart)/i,
 ]
+
+// ══════════════════════════════════════════
+//  Hybrid Engine — QoS 服务质量评估
+// ══════════════════════════════════════════
+
+/**
+ * 设备负载信息 — CPU 和内存使用率。
+ *
+ * 由 DeviceLoadMonitor 周期性采集，供 QoSEvaluator 评估整体服务质量。
+ */
+export interface DeviceLoadInfo {
+  /** CPU 使用率 0–100 */
+  cpuPercent: number
+  /** 内存使用率 0–100 */
+  memoryPercent: number
+  /** 采集时间戳 */
+  timestamp: number
+}
+
+/**
+ * 综合 QoS 评分 — 网络延迟 + 设备负载的聚合结果。
+ *
+ * score: 0（极差）→ 1（优秀）
+ *   - >= 0.8: 高质量，可流畅使用云端 TTS
+ *   - 0.5–0.8: 一般，可正常使用但考虑本地回退
+ *   - < 0.5: 较差，倾向本地引擎
+ *   - < 0.3: 极差，强制本地引擎
+ */
+export interface QoSScore {
+  /** 综合 QoS 评分 0–1 */
+  score: number
+  /** 网络延迟评分分量 0–1 */
+  networkScore: number
+  /** 设备负载评分分量 0–1 */
+  deviceScore: number
+  /** 当前网络延迟（ms），-1 不可用 */
+  networkLatencyMs: number
+  /** 当前设备负载信息 */
+  deviceLoad: DeviceLoadInfo
+  /** 推荐的引擎 */
+  recommendedEngine: 'cloud' | 'local'
+  /** 触发降级的原因（空字符串=无降级） */
+  degradationReason: string
+  /** 评估时间戳 */
+  timestamp: number
+}
+
+/** 服务质量评估器配置 */
+export interface QoSEvaluatorConfig {
+  /** 是否启用 QoS 评估 */
+  enabled: boolean
+  /** 网络延迟阈值（ms）：超过此值网络评分下降 */
+  networkLatencyThresholdMs: number
+  /** 网络延迟最大值（ms）：达到此值时网络评分为 0 */
+  networkLatencyMaxMs: number
+  /** CPU 负载阈值 %：超过此值设备评分下降 */
+  cpuThresholdPercent: number
+  /** CPU 负载最大值 %：达到此值时设备评分为 0 */
+  cpuMaxPercent: number
+  /** 内存负载阈值 % */
+  memoryThresholdPercent: number
+  /** 内存负载最大值 % */
+  memoryMaxPercent: number
+  /** 强制本地引擎的 QoS 阈值（低于此值强制本地） */
+  forceLocalThreshold: number
+  /** 推荐本地引擎的 QoS 阈值（低于此值推荐本地但不强制） */
+  recommendLocalThreshold: number
+  /** 设备负载监测间隔（ms） */
+  monitorIntervalMs: number
+  /** 网络缓存 TTL（ms） */
+  networkCacheTtlMs: number
+}
+
+/** 默认 QoS 评估器配置 */
+export const DEFAULT_QOS_EVALUATOR_CONFIG: QoSEvaluatorConfig = {
+  enabled: true,
+  networkLatencyThresholdMs: 200,
+  networkLatencyMaxMs: 1000,
+  cpuThresholdPercent: 60,
+  cpuMaxPercent: 90,
+  memoryThresholdPercent: 70,
+  memoryMaxPercent: 90,
+  forceLocalThreshold: 0.3,
+  recommendLocalThreshold: 0.5,
+  monitorIntervalMs: 10000,
+  networkCacheTtlMs: 5000,
+}
+
+// ══════════════════════════════════════════
+//  Hybrid Engine — 预加载缓冲
+// ══════════════════════════════════════════
+
+/**
+ * 预加载缓冲条目 — 使用备选引擎预先合成的音频。
+ */
+export interface PreloadBufferEntry {
+  /** 原始文本 */
+  text: string
+  /** 合成引擎标识 */
+  engine: 'cloud' | 'local'
+  /** 音频文件路径 */
+  audioFile: string
+  /** 合成时间戳 */
+  synthesizedAt: number
+  /** 情感参数快照 */
+  emotionParams: EmotionTtsParams
+  /** 是否已验证文件可用 */
+  verified: boolean
+}
+
+/** 预加载缓冲配置 */
+export interface PreloadBufferConfig {
+  /** 是否启用预加载 */
+  enabled: boolean
+  /** 最大缓冲条目数 */
+  maxEntries: number
+  /** 预加载提前量（字符数）：文本长度超过此值时开始预加载 */
+  preloadThresholdChars: number
+  /** 缓冲条目有效期（ms），过期后清除 */
+  entryTtlMs: number
+  /** 切换时最多使用缓冲条目的数量 */
+  maxUseOnSwitch: number
+}
+
+/** 默认预加载缓冲配置 */
+export const DEFAULT_PRELOAD_BUFFER_CONFIG: PreloadBufferConfig = {
+  enabled: true,
+  maxEntries: 5,
+  preloadThresholdChars: 30,
+  entryTtlMs: 60000,
+  maxUseOnSwitch: 3,
+}
+
+/**
+ * 预加载缓冲状态（调试/UI 展示用）。
+ */
+export interface PreloadBufferState {
+  /** 当前缓冲条目数 */
+  entryCount: number
+  /** 缓冲启用状态 */
+  enabled: boolean
+  /** 最近一次切换记录 */
+  lastSwitch: {
+    fromEngine: string
+    toEngine: string
+    usedPreloaded: boolean
+    timestamp: number
+  } | null
+  /** 累计使用预加载次数 */
+  totalPreloadHits: number
+  /** 累计成功切换次数 */
+  totalSwitches: number
+}
+
+/**
+ * QoS 完整状态（IPC 传输用）。
+ */
+export interface QosFullStatus {
+  evaluatorConfig: QoSEvaluatorConfig
+  currentScore: QoSScore | null
+  preloadState: PreloadBufferState
+  userPreference: TtsUserPreference
+  lastRoutingDecision: TtsRoutingDecision | null
+}

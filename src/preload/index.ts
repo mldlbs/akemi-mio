@@ -33,6 +33,7 @@ export function createElectronAPI(ipc: IpcRenderer) {
     // ── 语音工具编排 ──
     matchVoiceIntent: (
       text: string,
+      useLlmFallback?: boolean,
     ): Promise<{
       matched: boolean
       intent?: {
@@ -44,7 +45,10 @@ export function createElectronAPI(ipc: IpcRenderer) {
       }
       fallbackText?: string
       error?: string
-    }> => ipc.invoke('voice:matchIntent', text),
+      _source?: string
+      _analysis?: string
+      _confidence?: number
+    }> => ipc.invoke('voice:matchIntent', text, useLlmFallback),
 
     executeVoiceChain: (
       intent: string,
@@ -54,6 +58,89 @@ export function createElectronAPI(ipc: IpcRenderer) {
       steps: Array<{ tool: string; success: boolean; output: string; error?: string; durationMs: number }>
       summary: string
     }> => ipc.invoke('voice:executeChain', intent, slots),
+
+    // ── LLM 意图解析（fallback）──
+    llmParseIntent: (
+      text: string,
+    ): Promise<{
+      success: boolean
+      parsed: {
+        intent: string
+        description: string
+        matched: boolean
+        slots: Record<string, string>
+        tools: Array<{ tool: string; args: Record<string, string> }>
+        confirmMessage: string
+        requireConfirmation: boolean
+        analysis?: string
+        confidence?: number
+      } | null
+      fallbackText: string
+      error?: string
+    }> => ipc.invoke('voice:llmParseIntent', text),
+
+    // ── 语音确认会话 ──
+    voiceConfirmStart: (params: {
+      intentName: string
+      confirmMessage: string
+      slots: Record<string, string>
+      tools: Array<{ tool: string; args: Record<string, string> }>
+      timeoutMs?: number
+    }): Promise<{ success: boolean; sessionId?: string; state?: string; error?: string }> =>
+      ipc.invoke('voice:confirm:start', params),
+
+    voiceConfirmFeed: (text: string): Promise<{
+      success: boolean
+      state?: string
+      result?: string
+      slots?: Record<string, string>
+      error?: string
+    }> => ipc.invoke('voice:confirm:feed', text),
+
+    voiceConfirmState: (): Promise<{
+      active: boolean
+      state: string
+      sessionId: string
+      intentName: string
+      confirmMessage: string
+      slots: Record<string, string>
+      elapsedMs: number
+    }> => ipc.invoke('voice:confirm:state'),
+
+    voiceConfirmReset: (): Promise<{ success: boolean }> =>
+      ipc.invoke('voice:confirm:reset'),
+
+    // ── 一站式语音编排 ──
+    orchestratorFull: (
+      text: string,
+      options?: {
+        useLlmFallback?: boolean
+        autoTts?: boolean
+        requireConfirm?: boolean
+        confirmTimeoutMs?: number
+      },
+    ): Promise<{
+      matched: boolean
+      awaitingConfirm?: boolean
+      intent?: {
+        name: string
+        description: string
+        confirmMessage: string
+        toolSequence: Array<{ tool: string; args: Record<string, string> }>
+        slots: Record<string, string>
+      }
+      result?: { success: boolean; steps: Array<any>; summary: string }
+      sessionId?: string
+      state?: string
+      text?: string
+      error?: string
+    }> => ipc.invoke('voice:orchestrate:full', text, options),
+
+    orchestratorConfirmAndExecute: (
+      intentName: string,
+      slots: Record<string, string>,
+    ): Promise<{ success: boolean; result?: { success: boolean; steps: Array<any>; summary: string }; error?: string }> =>
+      ipc.invoke('voice:orchestrate:confirmAndExecute', intentName, slots),
 
     chat: (text: string, requestId?: string, sessionId?: string, noTts?: boolean): Promise<{ reply?: string; error?: string }> =>
       ipc.invoke('ai:chat', text, requestId, sessionId, noTts),

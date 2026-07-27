@@ -44,6 +44,7 @@ import { RuntimeValidator } from '../runtime/RuntimeValidator'
 import { RuntimeManagerImpl } from '../runtime/RuntimeManagerImpl'
 import { SupervisedAgentSupervisorImpl } from '../runtime/SupervisedAgentSupervisorImpl'
 import { behaviorPredictiveMemoryPrewarmer } from '../behavior/BehaviorPredictiveMemoryPrewarmer'
+import { behaviorPredictionMemoryEngine } from '../behavior/BehaviorPredictionMemoryEngine'
 
 export class AgentService implements IEngineService {
   /** IEngineService 引擎名 */
@@ -377,6 +378,11 @@ export class AgentService implements IEngineService {
       this.knowledgeQuery.register(new MemoryPluginAdapter(plugin))
     }
     log('INFO', 'memory_plugins_registered_to_knowledge', { pluginCount: memoryService.unifiedQuery.getAllPlugins().length })
+
+    // 记忆驱动的 Agent 主动服务：标记新会话并生成初始快照
+    memoryService.snapshotManager.markNewSession()
+    memoryService.snapshotManager.generateSnapshot()
+
     this.refreshMemoryInContext()
     this.updateRuntimeDeps()
 
@@ -409,7 +415,15 @@ export class AgentService implements IEngineService {
         // 依赖未注入或出错时静默降级
       }
 
-      return [memCtx, prewarmCtx, procCtx, reflectCtx, failCtx].filter(Boolean).join('\n\n')
+      // 行为预测记忆引擎：5 分钟周期持续分析行为模式，预加载 >80% 匹配的记忆
+      let predictionEngineCtx = ''
+      try {
+        predictionEngineCtx = behaviorPredictionMemoryEngine.getPreloadedContext()
+      } catch {
+        // 出错时静默降级
+      }
+
+      return [memCtx, prewarmCtx, predictionEngineCtx, procCtx, reflectCtx, failCtx].filter(Boolean).join('\n\n')
     }
 
     const skillModules = lastUserText

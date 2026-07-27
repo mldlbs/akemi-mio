@@ -162,6 +162,19 @@ export type {
 
 // ── 行为驱动的动态任务编排模式管理器 ──
 export { TaskOrchestrationModeManager, taskOrchestrationModeManager } from './TaskOrchestrationModeManager'
+
+// ── 行为预测记忆引擎（5 分钟周期 + 80% 阈值 + 时间戳标签匹配）──
+export {
+  BehaviorPredictionMemoryEngine,
+  behaviorPredictionMemoryEngine,
+} from './BehaviorPredictionMemoryEngine'
+export type {
+  BehaviorContext,
+  MatchScoreDetail,
+  PreloadBufferEntry,
+  EngineStats,
+  EngineDependencies,
+} from './BehaviorPredictionMemoryEngine'
 export type {
   TaskOrchestrationMode,
   BehaviorSignalType,
@@ -169,3 +182,12 @@ export type {
   OrchestrationModeChangedEvent,
   OrchestrationConfig,
 } from './TaskOrchestrationModeManager'
+
+// ── ASR 关键词动作跟踪（语音习惯 → 壁纸动作预测）──
+export { AsrKeywordActionTracker, asrKeywordActionTracker } from './AsrKeywordActionTracker'
+export type {
+  AsrActionCategory,
+  AsrActionPrediction,
+  TimeSlotActionPrediction,
+  AsrKeywordTrackerStats,
+} from './AsrKeywordActionTracker'

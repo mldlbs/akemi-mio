@@ -19,10 +19,12 @@
  *       │
  *       ▼
  *   PiperBehaviorSidecar.synthesize()
- *       ├── ① 缓存层：文本精确匹配 → 直接返回缓存结果
- *       ├── ② 过滤层：UserBehavior silent/pauseTts → 返回阻塞结果
- *       ├── ③ 转换层：behavior rateSuggestion/pitchSuggestion → 调整请求参数
- *       ├── ④ 监控层：记录延迟、缓存命中、过滤/转换计数
+ *       ├── ① 自动模式层：PiperBehaviorStateMachine 环境感知（时间/亮度/静音/会议）
+ *       │   + 与显式 setBehavior() 参数合并
+ *       ├── ② 缓存层：文本精确匹配 → 直接返回缓存结果
+ *       ├── ③ 过滤层：UserBehavior silent/pauseTts → 返回阻塞结果
+ *       ├── ④ 转换层：behavior rateSuggestion/pitchSuggestion → 调整请求参数
+ *       ├── ⑤ 监控层：记录延迟、缓存命中、过滤/转换计数
  *       │
  *       ▼
  *   PiperOrchestrator.synthesize()（主逻辑，不变）
@@ -45,6 +47,7 @@
 import { existsSync } from 'fs'
 import { log } from '../logger/Logger'
 import { piperOrchestrator, type PiperSynthesizeRequest, type PiperSynthesizeResult, DEFAULT_PIPER_MODEL } from './PiperOrchestrator'
+import type { PiperBehaviorStateMachine, PiperTtsState } from './PiperBehaviorStateMachine'
 
 // ══════════════════════════════════════════
 //  类型定义
@@ -153,6 +156,17 @@ export class PiperBehaviorSidecar {
   /** 缓存配置 */
   private readonly cacheConfig: SidecarCacheConfig
 
+  /** ── 自动模式检测 ── */
+
+  /** 行为状态机实例（由外部注入） */
+  private stateMachine: PiperBehaviorStateMachine | null = null
+
+  /** 是否启用自动模式检测（启用后，无显式 setBehavior 时自动根据环境决定行为参数） */
+  private autoModeEnabled = false
+
+  /** 最近一次自动模式检测到的状态 */
+  private autoDetectedState: PiperTtsState | null = null
+
   /** 文本 → 缓存条目 */
   private readonly cache = new Map<string, CacheEntry>()
 
@@ -191,6 +205,98 @@ export class PiperBehaviorSidecar {
    */
   getBehavior(): Readonly<BehaviorSidecarInput> {
     return Object.freeze({ ...this.behaviorInput })
+  }
+
+  // ══════════════════════════════════════════
+  //  自动模式检测（可选）
+  // ══════════════════════════════════════════
+
+  /**
+   * 设置行为状态机实例，用于自动模式检测。
+   *
+   * 当 autoMode 启用时，sidecar 在每次 synthesize 前自动调用
+   * stateMachine.evaluate() 获取环境感知的行为参数，
+   * 并与显式 setBehavior() 注入的参数合并（显式参数优先级更高）。
+   *
+   * @param sm PiperBehaviorStateMachine 实例
+   */
+  setStateMachine(sm: PiperBehaviorStateMachine | null): void {
+    this.stateMachine = sm
+    log('INFO', 'piper_sidecar_state_machine_set', { hasSm: !!sm })
+  }
+
+  /**
+   * 启用或禁用自动模式检测。
+   *
+   * 启用后，sidecar 会在每次 synthesize 前自动评估环境状态，
+   * 将状态机的结果作为行为参数的基线。
+   * 显式通过 setBehavior() 注入的参数会叠加在状态机结果之上。
+   *
+   * @param enabled 是否启用
+   */
+  setAutoMode(enabled: boolean): void {
+    this.autoModeEnabled = enabled
+    log('INFO', 'piper_sidecar_auto_mode', { enabled })
+  }
+
+  /**
+   * 获取自动模式是否启用。
+   */
+  isAutoMode(): boolean {
+    return this.autoModeEnabled
+  }
+
+  /**
+   * 获取最近一次自动检测的状态。
+   * 仅在有状态机且启用 autoMode 时有效。
+   */
+  getAutoDetectedState(): PiperTtsState | null {
+    return this.autoDetectedState
+  }
+
+  /**
+   * 运行自动模式检测，返回合并后的行为上下文。
+   *
+   * 规则：状态机的参数作为基线，显式 setBehavior() 的参数叠加覆盖。
+   * 叠加规则：
+   * - outputMode: 状态机的 mode 优先级低于显式设置（除非显式是 null/normal）
+   * - pauseTts: 任一 true → true
+   * - rateSuggestion/pitchSuggestion: 显式非零覆盖状态机
+   * - volumeSuggestion: 显式值覆盖状态机
+   */
+  private async resolveAutoBehavior(): Promise<BehaviorSidecarInput> {
+    if (!this.autoModeEnabled || !this.stateMachine) {
+      return { ...this.behaviorInput }
+    }
+
+    // 运行状态机获取环境感知参数
+    const smOutput = await this.stateMachine.evaluate()
+    this.autoDetectedState = smOutput.state
+    const smInput = smOutput.behaviorInput
+
+    // 如果显式行为是全默认（无约束），直接使用状态机结果
+    const explicit = this.behaviorInput
+    const isExplicitDefault =
+      explicit.outputMode === null &&
+      !explicit.pauseTts &&
+      explicit.rateSuggestion === 0 &&
+      explicit.pitchSuggestion === 0 &&
+      Math.abs(explicit.volumeSuggestion - 0.85) < 0.01
+
+    if (isExplicitDefault) {
+      return { ...smInput }
+    }
+
+    // 合并显式 + 状态机（显式覆盖）
+    return {
+      outputMode: explicit.outputMode ?? smInput.outputMode,
+      pauseTts: explicit.pauseTts || smInput.pauseTts,
+      rateSuggestion: explicit.rateSuggestion !== 0 ? explicit.rateSuggestion : smInput.rateSuggestion,
+      pitchSuggestion: explicit.pitchSuggestion !== 0 ? explicit.pitchSuggestion : smInput.pitchSuggestion,
+      volumeSuggestion: Math.abs(explicit.volumeSuggestion - 0.85) >= 0.01
+        ? explicit.volumeSuggestion
+        : smInput.volumeSuggestion,
+    }
   }
 
   // ══════════════════════════════════════════
@@ -408,19 +514,34 @@ export class PiperBehaviorSidecar {
    * 合成语音 — 边车处理的主入口。
    *
    * 所有 PiperTTS 请求应通过此方法，而非直接调用 PiperOrchestrator.synthesize()。
-   * 内部依次经过缓存层 → 过滤层 → 转换层 → PiperOrchestrator → 监控层。
+   * 内部依次经过自动模式检测层 → 缓存层 → 过滤层 → 转换层 → PiperOrchestrator → 监控层。
    *
    * 行为上下文由外部通过 setBehavior() 注入，边车内部不感知 UserBehavior 系统。
+   * 当 autoMode 启用时，自动模式检测层在缓存/过滤/转换之前运行，
+   * 将环境感知参数（时间/亮度/静音等）与显式 setBehavior() 参数合并。
    */
   async synthesize(request: PiperSynthesizeRequest): Promise<PiperSynthesizeResult> {
     this.totalRequests++
 
-    // ── ① 缓存层 ──
+    // ── ① 自动模式检测（可选）──
+    // 在缓存/过滤/转换之前运行，将环境感知参数与显式行为合并
+    const effectiveBehavior = await this.resolveAutoBehavior()
+    const savedInput = this.behaviorInput
+    if (this.autoModeEnabled && this.stateMachine) {
+      // 临时替换为合并后的行为，用于后续的 filter/transform
+      this.behaviorInput = effectiveBehavior
+    }
+
+    // ── ② 缓存层 ──
     if (this.cacheConfig.enabled) {
       const cacheKey = this.buildCacheKey(request)
       const cached = this.getFromCache(cacheKey)
       if (cached) {
         this.cacheHits++
+        // 恢复原始行为输入
+        if (this.autoModeEnabled && this.stateMachine) {
+          this.behaviorInput = savedInput
+        }
         log('DEBUG', 'piper_sidecar_cache_hit', {
           text_len: request.text.length,
           cache_size: this.cache.size,
@@ -429,16 +550,25 @@ export class PiperBehaviorSidecar {
       }
     }
 
-    // ── ② 过滤层 ──
+    // ── ③ 过滤层 ──
     const filtered = this.filterIfNeeded(request)
     if (filtered) {
+      // 恢复原始行为输入
+      if (this.autoModeEnabled && this.stateMachine) {
+        this.behaviorInput = savedInput
+      }
       return filtered
     }
 
-    // ── ③ 转换层 ──
+    // ── ④ 转换层 ──
     const transformedRequest = this.transformIfNeeded(request)
 
-    // ── ④ 委托给 PiperOrchestrator（主逻辑） ──
+    // 恢复原始行为输入（避免泄漏到后续请求）
+    if (this.autoModeEnabled && this.stateMachine) {
+      this.behaviorInput = savedInput
+    }
+
+    // ── ⑤ 委托给 PiperOrchestrator（主逻辑） ──
     const t0 = Date.now()
     let result: PiperSynthesizeResult
     try {
@@ -458,7 +588,7 @@ export class PiperBehaviorSidecar {
     const elapsed = Date.now() - t0
     this.recordSynthesis(elapsed, result.success)
 
-    // ── ⑤ 写入缓存（仅成功结果） ──
+    // ── ⑥ 写入缓存（仅成功结果） ──
     if (this.cacheConfig.enabled && result.success) {
       const cacheKey = this.buildCacheKey(request)
       this.setCache(cacheKey, result)
