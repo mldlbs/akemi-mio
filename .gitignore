@@ -70,6 +70,8 @@ scripts/launch.cjs
 scripts/merge-mcp.mjs
 scripts/verify-*.cjs
 C\357\200\272Usersgf191AppDataLocalTemp*
+run-tsc.bat
+scripts/m54-observe.mjs
 _run_tsc*
 _run_tsc_check.*
 _tsc_check.*
