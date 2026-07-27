@@ -115,6 +115,10 @@ export function createElectronAPI(ipc: IpcRenderer) {
       }
     },
 
+    /** 记录一次撤回/重做操作（撤销消息等），用于行为情绪推断 */
+    recordBehaviorRetraction: (): Promise<{ success: boolean; error?: string }> =>
+      ipc.invoke('tts:behaviorEmotion:recordRetraction'),
+
     // ── TTS 引擎路由 ──
     setEnginePreference: (pref: string): Promise<{ success: boolean; preference?: string; error?: string }> =>
       ipc.invoke('tts:engine-preference:set', pref),
@@ -795,6 +799,48 @@ export function createElectronAPI(ipc: IpcRenderer) {
       }
     },
 
+    // ── 行为频率计数（桌面快捷入口） ──
+    getBehaviorTopActions: (n?: number): Promise<{
+      success: boolean
+      actions: Array<{
+        actionId: string
+        category: string
+        label: string
+        icon: string
+        trigger: string
+        toolName?: string
+        frequency: number
+        lastUsedAt: number
+      }>
+      timestamp: number
+      error?: string
+    }> => ipc.invoke('wallpaper:getTopActions', n),
+
+    onBehaviorTopActions: (
+      callback: (data: {
+        actions: Array<{
+          actionId: string
+          category: string
+          label: string
+          icon: string
+          trigger: string
+          toolName?: string
+          frequency: number
+          lastUsedAt: number
+        }>
+        timestamp: number
+      }) => void,
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('wallpaper:top-actions', handler)
+      return () => {
+        ipc.removeListener('wallpaper:top-actions', handler)
+      }
+    },
+
+    recordBehaviorAction: (actionId: string): Promise<{ success: boolean; error?: string }> =>
+      ipc.invoke('wallpaper:recordAction', actionId),
+
     getWallpaperConfig: (): Promise<{
       enabled: boolean
       idleOverlay: boolean
@@ -1376,6 +1422,87 @@ export function createElectronAPI(ipc: IpcRenderer) {
       ipc.on('voicenote:state-changed', handler)
       return () => {
         ipc.removeListener('voicenote:state-changed', handler)
+      }
+    },
+
+    // ── 工具链编排进度 ──
+    onOrchestrationProgress: (callback: (data: {
+      type: string
+      planId: string
+      stepId?: string
+      stepName?: string
+      completedSteps: number
+      totalSteps: number
+      percent: number
+      message: string
+      error?: string
+      timestamp: number
+      stepStatuses: Array<{
+        id: string
+        name: string
+        status: string
+        toolName: string
+      }>
+    }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('orchestration:progress', handler)
+      return () => {
+        ipc.removeListener('orchestration:progress', handler)
+      }
+    },
+
+    // ── 语音 ODE 求解会话 ──
+    odeFeed: (
+      text: string,
+    ): Promise<{
+      active: boolean
+      state?: string
+      parsed?: {
+        equation?: string
+        initialCondition?: string
+        interval?: [number, number]
+        method?: string
+        stepSize?: number
+      }
+      solution?: {
+        xFinal: number
+        yFinal: number
+        method: string
+        steps: number
+        plotPath?: string
+        analyticalNote?: string | null
+      } | null
+      sessionId?: string
+      error?: string
+      matched?: boolean
+    }> => ipc.invoke('voice:ode:feed', text),
+
+    odeState: (): Promise<{
+      active: boolean
+      state: string
+      sessionId: string
+      parsed: any
+      hasSolution: boolean
+    }> => ipc.invoke('voice:ode:state'),
+
+    odeReset: (): Promise<{ success: boolean }> => ipc.invoke('voice:ode:reset'),
+
+    // ── 语音 ODE 求解事件（主进程 → 渲染进程，状态变更通知） ──
+    onOdeStateChange: (callback: (data: {
+      sessionId: string
+      state: string
+      hasSolution: boolean
+      solution?: {
+        xFinal: number
+        yFinal: number
+        method: string
+        steps: number
+      }
+    }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+      ipc.on('ode:state-change', handler)
+      return () => {
+        ipc.removeListener('ode:state-change', handler)
       }
     },
   }

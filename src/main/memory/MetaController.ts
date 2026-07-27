@@ -14,7 +14,7 @@
 import { log } from '../logger/Logger'
 import type { SummaryMemory } from '../memory/SummaryMemory'
 import type { DecisionStore } from '../memory/DecisionStore'
-import type { MemoryService } from '../memory/MemoryService'
+import type { MemoryService, UserProfileData } from '../memory/MemoryService'
 
 /** LLM 摘要生成的轻量接口（兼容 LlmService.chatJson 返回类型） */
 export interface SummaryLLM {
@@ -179,8 +179,23 @@ export class MetaController {
   "decisions": ["决策1"],
   "keyEntities": ["实体1"],
   "userIntent": "用户意图简述",
-  "failureRisk": "是否有失败风险及原因（无风险填'none'）"
+  "failureRisk": "是否有失败风险及原因（无风险填'none'）",
+  "preferences": [
+    {
+      "key": "偏好标识，如 style_formality",
+      "value": "偏好值",
+      "confidence": 0.8,
+      "category": "style|detail|language|preference|identity|other",
+      "source": "从对话中推断出的依据"
+    }
+  ]
 }
+
+注意事项：
+- preferences 字段：从对话中推断用户可能的新偏好（风格、详略、语言、个人偏好等）
+- 只提取本轮对话中明确体现的新偏好，不要重复已有信息
+- 如果没有发现新偏好，preferences 为空数组 []
+- category 必须严格是以下之一：style, detail, language, preference, identity, other
 
 用户：${context.userMessage.slice(0, 300)}
 助手：${context.assistantReply.slice(0, 500)}`
@@ -223,11 +238,46 @@ export class MetaController {
           }
         }
 
+        // ════════════════════════════════════════════════
+        //  P0→P1 — 用户偏好自动提取
+        //  ════════════════════════════════════════════════
+        //  从 LLM 回复中提取用户偏好并持久化到 UserProfileData。
+        //  偏好将在下一轮对话中通过 getUserProfileContext() 自动注入 system prompt。
+        const rawPreferences = result?.preferences
+        if (Array.isArray(rawPreferences) && rawPreferences.length > 0 && this.memory) {
+          let saved = 0
+          const allowedCategories = new Set(['style', 'detail', 'language', 'preference', 'identity', 'other'])
+          for (const pref of rawPreferences) {
+            if (!pref.key || typeof pref.key !== 'string') continue
+            if (!pref.value || typeof pref.value !== 'string') continue
+            const confidence = typeof pref.confidence === 'number' ? pref.confidence : 0.5
+            const category = allowedCategories.has(pref.category) ? pref.category : 'other'
+            const source = typeof pref.source === 'string' ? pref.source : `对话推断: ${context.userMessage.slice(0, 40)}`
+            try {
+              this.memory!.saveUserPreference({
+                key: pref.key,
+                value: pref.value,
+                confidence: Math.max(0.3, Math.min(1.0, confidence)),
+                category: category as UserProfileData['category'],
+                source: source,
+                updatedAt: Date.now(),
+              })
+              saved++
+            } catch (err) {
+              log('WARN', 'preference_extract_save_failed', { key: pref.key, error: String(err) })
+            }
+          }
+          if (saved > 0) {
+            log('INFO', 'preferences_extracted_from_conversation', { count: saved, source: 'llm_summary' })
+          }
+        }
+
         log('INFO', 'meta_llm_summary_created', {
           summary: summary.slice(0, 60),
           topics: topics.length,
           decisions: decisions.length,
           entities: keyEntities.length,
+          preferences: Array.isArray(rawPreferences) ? rawPreferences.length : 0,
         })
       })
       .catch((err: any) => {

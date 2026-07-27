@@ -3,6 +3,8 @@ import { log } from '../../logger/Logger'
 import { credentialsManager } from '../../credentials/CredentialsManager'
 import { voiceRoleManager } from '../../tts/VoiceRoleManager'
 import { emotionToneMap } from '../../tts/EmotionToneMap'
+import { emotionalNarrativeService } from '../../tts/emotion/EmotionalNarrativeService'
+import { getMemoryService } from '../../tool/deps'
 import type { HandlerContext } from './context'
 
 export function registerTtsHandlers({ agentService, ttsService }: HandlerContext): void {
@@ -36,6 +38,20 @@ export function registerTtsHandlers({ agentService, ttsService }: HandlerContext
   ipcMain.handle('tts:behaviorEmotion:state', async () => {
     try { const c = agentService.getChatExecutor(); return c ? { success: true, ...c.getBehaviorEmotionState() } : { success: true, enabled: false, result: null, metrics: null } }
     catch (err) { log('ERROR', 'tts_behavior_emotion_state_failed', { error: String(err) }); return { success: false } }
+  })
+
+  /** 记录一次撤回/重做操作（用户撤销消息、回退工具调用等），用于行为情绪推断 */
+  ipcMain.handle('tts:behaviorEmotion:recordRetraction', async () => {
+    try {
+      const chatExecutor = agentService.getChatExecutor()
+      if (!chatExecutor) return { success: false, error: 'chatExecutor not ready' }
+      chatExecutor.recordBehaviorRetraction()
+      log('INFO', 'behavior_emotion_retraction_recorded')
+      return { success: true }
+    } catch (err) {
+      log('WARN', 'behavior_emotion_retraction_record_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
   })
 
   // Implicit feedback
@@ -225,4 +241,82 @@ export function registerTtsHandlers({ agentService, ttsService }: HandlerContext
     try { emotionToneMap.clearUserOverrides(); log('INFO', 'emotion_mapping_clear_ipc'); return { success: true } }
     catch (err) { log('ERROR', 'emotion_mapping_clear_failed', { error: String(err) }); return { success: false, error: String(err) } }
   })
+
+  // ══════════════════════════════════════════
+  //  情感记忆语音叙事
+  // ══════════════════════════════════════════
+
+  // 注册叙事事件回调 → 转发到渲染进程
+  const notifyWindows = (channel: string, data: unknown) => {
+    const wins = BrowserWindow.getAllWindows()
+    for (const win of wins) {
+      if (!win.isDestroyed()) {
+        win.webContents.send(channel, data)
+      }
+    }
+  }
+
+  emotionalNarrativeService.setCallbacks({
+    onStart: (event) => notifyWindows('emotional-narrative:start', event),
+    onSegment: (event) => notifyWindows('emotional-narrative:segment', event),
+    onEnd: (event) => notifyWindows('emotional-narrative:end', event),
+    onCancel: () => notifyWindows('emotional-narrative:cancel', {}),
+  })
+
+  ipcMain.handle('emotional-narrative:trigger', async () => {
+    try {
+      const ms = getMemoryService()
+      if (!ms) return { success: false, error: 'memory service not ready' }
+
+      // 注入 TtsService（惰性注入，防止循环依赖）
+      emotionalNarrativeService.setTtsService(ttsService)
+
+      const result = await emotionalNarrativeService.triggerNarration(ms)
+      log('INFO', 'emotional_narrative_trigger_ipc', { result })
+      return { success: result.success, message: result.message }
+    } catch (err) {
+      log('ERROR', 'emotional_narrative_trigger_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('emotional-narrative:cancel', async () => {
+    try {
+      emotionalNarrativeService.cancel()
+      log('INFO', 'emotional_narrative_cancel_ipc')
+      return { success: true }
+    } catch (err) {
+      log('ERROR', 'emotional_narrative_cancel_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('emotional-narrative:state', async () => {
+    try {
+      return {
+        success: true,
+        state: emotionalNarrativeService.state,
+        currentSegment: emotionalNarrativeService.currentSegment,
+        totalSegments: emotionalNarrativeService.totalSegments,
+        isActive: emotionalNarrativeService.isActive,
+      }
+    } catch (err) {
+      log('ERROR', 'emotional_narrative_state_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('emotional-narrative:context', async () => {
+    try {
+      const ms = getMemoryService()
+      if (!ms) return { success: false, error: 'memory service not ready' }
+      const summary = emotionalNarrativeService.getContextSummary(ms)
+      return { success: true, summary }
+    } catch (err) {
+      log('ERROR', 'emotional_narrative_context_failed', { error: String(err) })
+      return { success: false, error: String(err) }
+    }
+  })
+
+  log('INFO', 'emotional_narrative_handlers_registered')
 }

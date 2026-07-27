@@ -30,30 +30,32 @@ export class CapabilityCatalog {
       for (const capId of manifest.capabilities) {
         let def = this.capabilities.get(capId)
         if (!def) {
+          const inputSchema = manifest.capabilitySchemas?.[capId] ?? {
+            type: 'object' as const,
+            properties: {
+              description: {
+                type: 'string',
+                description: `What you want "${capId}" to do. Describe the task or provide specific parameters.`,
+              },
+            },
+            required: ['description'],
+          }
           def = {
             id: capId,
             description: capId,
-            // P1.3a: M1 阶段用通用 inputSchema（非空，满足 C-8）
-            inputSchema: {
-              type: 'object',
-              properties: {
-                description: {
-                  type: 'string',
-                  description: `What you want "${capId}" to do. Describe the task or provide specific parameters.`,
-                },
-              },
-              required: ['description'],
-            },
+            inputSchema,
             providers: [],
           }
           this.capabilities.set(capId, def)
         }
 
         // 收集该 manifest 中对应此 capability 的工具
-        // 暂时没有明确的 capId→toolName 映射，默认用 manifest 的全部工具
-        const tools = manifest.dependencies
-          ?.filter((d) => d.capability === capId)
-          ?.map((d) => d.capability) ?? [capId]
+        // P1.3b Observation-B1: 优先用依赖中的 tool 名，回退到 manifest 全部工具
+        const depsForCap = manifest.dependencies?.filter((d) => d.capability === capId) ?? []
+        const tools = depsForCap.map((d) => d.tool ?? d.capability)
+        if (tools.length === 0) {
+          tools.push(capId)
+        }
 
         // 如果没有依赖映射，使用 Manifest 的 id 作为工具名近似
         const provider: CapabilityProvider = {

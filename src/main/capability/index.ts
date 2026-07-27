@@ -1,6 +1,6 @@
 export type {
   CapabilityAction, CapabilityToken, CapabilityRequest, CapabilityDecision, AuditEntry,
-  CapabilityDefinition, CapabilityProvider, ResolveResult,
+  CapabilityDefinition, CapabilityProvider, CapabilityProviderAdapter, ResolveResult,
   CapabilityBinding, ICapabilityService,
 } from './types'
 export { CapabilityEngine } from './CapabilityEngine'

@@ -114,3 +114,58 @@ export type {
 
 // ── 行为周期性预加载服务（空闲时段预加载 + 哑提醒推送）──
 export { BehaviorPeriodicPreloadService, behaviorPeriodicPreloadService } from './BehaviorPeriodicPreloadService'
+
+// ── 使用模式分析（行为驱动的自进化参数调整）──
+export { BehaviorUsagePatternAnalyzer, behaviorUsagePatternAnalyzer } from './BehaviorUsagePatternAnalyzer'
+export type {
+  UsagePatternReport,
+  TimePatternAnalysis,
+  QuestionTypeAnalysis,
+  SentimentAnalysis,
+  RepeatedPatternAnalysis,
+  QuestionType,
+  SentimentLabel,
+  AnalyzeOptions,
+} from './BehaviorUsagePatternAnalyzer'
+
+// ── 行为动作频率计数器（桌面快捷入口）──
+export { BehaviorActionCounter, behaviorActionCounter } from './BehaviorActionCounter'
+export type {
+  ActionCategory,
+  ActionEntry,
+  ActionEntryWithFrequency,
+  TopActionsPayload,
+} from './BehaviorActionCounter'
+
+// ── 行为调整日志（记录每次调整及其效果）──
+export { BehaviorAdjustmentJournal, behaviorAdjustmentJournal } from './BehaviorAdjustmentJournal'
+export type {
+  AdjustmentRecord,
+  AdjustmentType,
+  AdjustmentContext,
+  AdjustmentEffect,
+  AdjustmentJournalData,
+} from './BehaviorAdjustmentJournal'
+
+// ── 行为预测式记忆预热（交互间隔分析 + 话题转移预测 + Top-3 记忆预取）──
+export {
+  BehaviorPredictiveMemoryPrewarmer,
+  behaviorPredictiveMemoryPrewarmer,
+} from './BehaviorPredictiveMemoryPrewarmer'
+export type {
+  PrewarmedMemory,
+  PrewarmResult,
+  TopicScoreDetail,
+  InteractionIntervalResult,
+  PrewarmerDependencies,
+} from './BehaviorPredictiveMemoryPrewarmer'
+
+// ── 行为驱动的动态任务编排模式管理器 ──
+export { TaskOrchestrationModeManager, taskOrchestrationModeManager } from './TaskOrchestrationModeManager'
+export type {
+  TaskOrchestrationMode,
+  BehaviorSignalType,
+  BehaviorSignal,
+  OrchestrationModeChangedEvent,
+  OrchestrationConfig,
+} from './TaskOrchestrationModeManager'

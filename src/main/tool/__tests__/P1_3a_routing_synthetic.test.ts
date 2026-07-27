@@ -57,7 +57,7 @@ const FANQIE_MANIFEST: MCPServerManifest = {
   version: '1.0.0',
   runtime: { command: 'node', args: ['fanqie-mcp.mjs'] },
   capabilities: ['publishing'],
-  dependencies: [{ capability: 'publishing', optional: false }],
+  dependencies: [{ capability: 'publishing', tool: 'publish_novel', optional: false }],
   permissions: ['network.http'],
 }
 
@@ -68,8 +68,8 @@ const PLAYWRIGHT_MANIFEST: MCPServerManifest = {
   runtime: { command: 'node', args: ['playwright-cli.js'] },
   capabilities: ['browser.automation', 'web.scraping'],
   dependencies: [
-    { capability: 'browser.automation' },
-    { capability: 'web.scraping' },
+    { capability: 'browser.automation', tool: 'browser_navigate' },
+    { capability: 'web.scraping', tool: 'browser_navigate' },
   ],
   permissions: ['network.http'],
 }
@@ -240,7 +240,7 @@ describe('P1.3a Capability Routing (Synthetic)', () => {
     expect(binding!.capability).toBe('publishing')
     expect(binding!.provider.type).toBe('mcp')
     expect(binding!.provider.id).toBe('fanqie-publish')
-    expect(binding!.tool).toBe('publishing') // defaultTool from catalog
+    expect(binding!.tool).toBe('publish_novel') // tool from manifest.dependencies
   })
 
   it('returns undefined for non-existent capability', async () => {

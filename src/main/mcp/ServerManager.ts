@@ -12,7 +12,9 @@ import type { MemoryService } from '../memory/MemoryService'
 import { MemoryRetriever, ToolMemoryDefaults } from './ToolMemoryDefaults'
 import { MemoryResourceProvider } from './MemoryResourceProvider'
 import type { MemoryResourceDefinition, ResourceContent } from './MemoryResourceProvider'
-import { setMemoryResourceProvider } from '../tool/deps'
+import { AsrVocabularyResource } from './AsrVocabularyResource'
+import type { AsrResourceDefinition, AsrResourceContent } from './AsrVocabularyResource'
+import { setMemoryResourceProvider, setAsrVocabularyResource } from '../tool/deps'
 import { MEMORY_TOOL_PERSONALIZATION, BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE } from '../config'
 import { behaviorPredictor } from './BehaviorPredictor'
 import { toolCallLogStore } from '../tool/ToolCallLogStore'
@@ -93,6 +95,7 @@ export class ServerManager {
   private memoryRetriever: MemoryRetriever = new MemoryRetriever()
   private toolDefaults: ToolMemoryDefaults = new ToolMemoryDefaults(this.memoryRetriever)
   private memoryResourceProvider: MemoryResourceProvider = new MemoryResourceProvider()
+  private asrVocabularyResource: AsrVocabularyResource = new AsrVocabularyResource()
   private processManager: ProcessManager | null = null
   private controlPlane: MCPControlPlaneImpl
 
@@ -124,6 +127,7 @@ export class ServerManager {
     this.memoryInterceptor.setPersonalizationLevel(MEMORY_TOOL_PERSONALIZATION)
     this.memoryResourceProvider.setMemoryService(ms)
     setMemoryResourceProvider(this.memoryResourceProvider)
+    setAsrVocabularyResource(this.asrVocabularyResource)
   }
 
   getToolDefaults(): ToolMemoryDefaults {
@@ -142,11 +146,16 @@ export class ServerManager {
     return this.memoryResourceProvider
   }
 
-  getResourceDefinitions(): MemoryResourceDefinition[] {
-    return this.memoryResourceProvider.getResourceDefinitions()
+  getResourceDefinitions(): (MemoryResourceDefinition | AsrResourceDefinition)[] {
+    const memoryDefs = this.memoryResourceProvider.getResourceDefinitions()
+    const asrDefs = this.asrVocabularyResource.getResourceDefinitions()
+    return [...memoryDefs, ...asrDefs]
   }
 
-  async readResource(uri: string): Promise<ResourceContent> {
+  async readResource(uri: string): Promise<ResourceContent | AsrResourceContent> {
+    if (uri.startsWith('asr://')) {
+      return this.asrVocabularyResource.readResource(uri)
+    }
     return this.memoryResourceProvider.readResource(uri)
   }
 

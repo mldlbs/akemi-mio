@@ -110,6 +110,8 @@ import { ProgressObserver } from '../core/evaluation/ProgressObserver'
 import { GuardrailProgressAnalyzer } from '../core/evaluation/GuardrailProgressAnalyzer'
 // ToolEventBridge 已在第 99 行作为值导入，类型自动可用
 import type { MetricSnapshot, TimeWindow } from '../core/evaluation/types'
+import type { ToolChainOrchestrator, ToolChainDecomposer } from '../orchestrator'
+import type { OrchestrationBridge } from '../orchestrator/OrchestrationBridge'
 
 /**
  * AppRuntime — 应用启动生命周期编排器。
@@ -200,6 +202,10 @@ export class AppRuntime {
       version: '1.0.0',
       runtime: { command: 'node', args: [] },
       capabilities: ['browser.automation', 'web.scraping'],
+      dependencies: [
+        { capability: 'browser.automation', tool: 'browser_navigate' },
+        { capability: 'web.scraping', tool: 'browser_navigate' },
+      ],
       permissions: ['browser'],
     })
     mcpRegistry.register({
@@ -208,7 +214,88 @@ export class AppRuntime {
       version: '1.0.0',
       runtime: { command: 'node', args: [] },
       capabilities: ['publishing', 'content.drafting'],
+      dependencies: [
+        { capability: 'publishing', tool: 'publish_novel' },
+        { capability: 'content.drafting', tool: 'save_draft' },
+      ],
       permissions: ['network.http'],
+    })
+
+    // M5.4: File system tools — grouped as file.management
+    mcpRegistry.register({
+      id: 'file-system', name: 'File System Operations', version: '1.0.0',
+      runtime: { command: 'node', args: [] },
+      capabilities: ['file.management'],
+      capabilitySchemas: {
+        'file.management': {
+          type: 'object',
+          properties: {
+            operation: { type: 'string', description: 'Operation to perform: read, write, edit, delete, move, copy, list' },
+            path: { type: 'string', description: 'File path relative to workspace root' },
+            content: { type: 'string', description: 'File content for write/edit operations' },
+          },
+          required: ['operation', 'path'],
+        },
+      },
+      dependencies: [
+        { capability: 'file.management', tool: 'read_file' },
+        { capability: 'file.management', tool: 'write_file' },
+        { capability: 'file.management', tool: 'edit_file' },
+        { capability: 'file.management', tool: 'delete_file' },
+        { capability: 'file.management', tool: 'move_file' },
+        { capability: 'file.management', tool: 'copy_file' },
+        { capability: 'file.management', tool: 'create_directory' },
+        { capability: 'file.management', tool: 'list_files' },
+      ],
+      permissions: ['file.read', 'file.write'],
+    })
+
+    // M5.4: Search engine tools — grouped as search.retrieval
+    mcpRegistry.register({
+      id: 'search-engine', name: 'Search and Retrieval', version: '1.0.0',
+      runtime: { command: 'node', args: [] },
+      capabilities: ['search.retrieval'],
+      capabilitySchemas: {
+        'search.retrieval': {
+          type: 'object',
+          properties: {
+            operation: { type: 'string', description: 'Search operation: grep, glob, web_search, fetch' },
+            query: { type: 'string', description: 'Search query, pattern, or URL depending on operation' },
+            scope: { type: 'string', description: 'Search scope — file path pattern or domain filter' },
+          },
+          required: ['operation', 'query'],
+        },
+      },
+      dependencies: [
+        { capability: 'search.retrieval', tool: 'grep_search' },
+        { capability: 'search.retrieval', tool: 'glob_find' },
+        { capability: 'search.retrieval', tool: 'web_search' },
+        { capability: 'search.retrieval', tool: 'web_fetch' },
+      ],
+      permissions: ['file.read', 'network.http'],
+    })
+
+    // M5.4: System execution tools — grouped as system.execution
+    mcpRegistry.register({
+      id: 'system-executor', name: 'System Command Execution', version: '1.0.0',
+      runtime: { command: 'node', args: [] },
+      capabilities: ['system.execution'],
+      capabilitySchemas: {
+        'system.execution': {
+          type: 'object',
+          properties: {
+            command: { type: 'string', description: 'Command to execute' },
+            cwd: { type: 'string', description: 'Working directory (optional, defaults to workspace root)' },
+          },
+          required: ['command'],
+        },
+      },
+      dependencies: [
+        { capability: 'system.execution', tool: 'run_command' },
+        { capability: 'system.execution', tool: 'bash_execute' },
+        { capability: 'system.execution', tool: 'execute_python' },
+      ],
+      permissions: ['shell.execute'],
     })
 
     capabilityCatalog.rebuild()
@@ -221,6 +308,37 @@ export class AppRuntime {
     const capabilityFnSchemaAdapter = new CapabilityFunctionSchemaAdapter(capabilityCatalog)
     const toolSchemaProvider = new ToolSchemaProvider(mcpManager, capabilityFnSchemaAdapter)
     const toolInvocationRouter = new ToolInvocationRouter(mcpManager, toolSchemaProvider, capabilityService)
+
+    // P1.3b: 注册 provider adapters（canonical input → provider-specific params）
+    import('../capability/adapters').then(({ fanqiePublishAdapter, playwrightAdapter, fileSystemAdapter, searchAdapter, systemAdapter }) => {
+      capabilityService.setAdapter('fanqie-publish', 'publish_novel', fanqiePublishAdapter)
+      capabilityService.setAdapter('playwright', 'browser_navigate', playwrightAdapter)
+      // M5.4: file system adapters
+      capabilityService.setAdapter('file-system', 'read_file', fileSystemAdapter)
+      capabilityService.setAdapter('file-system', 'write_file', fileSystemAdapter)
+      capabilityService.setAdapter('file-system', 'edit_file', fileSystemAdapter)
+      capabilityService.setAdapter('file-system', 'delete_file', fileSystemAdapter)
+      capabilityService.setAdapter('file-system', 'move_file', fileSystemAdapter)
+      capabilityService.setAdapter('file-system', 'copy_file', fileSystemAdapter)
+      capabilityService.setAdapter('file-system', 'create_directory', fileSystemAdapter)
+      capabilityService.setAdapter('file-system', 'list_files', fileSystemAdapter)
+      // M5.4: search adapters
+      capabilityService.setAdapter('search-engine', 'grep_search', searchAdapter)
+      capabilityService.setAdapter('search-engine', 'glob_find', searchAdapter)
+      capabilityService.setAdapter('search-engine', 'web_search', searchAdapter)
+      capabilityService.setAdapter('search-engine', 'web_fetch', searchAdapter)
+      // M5.4: system adapters
+      capabilityService.setAdapter('system-executor', 'run_command', systemAdapter)
+      capabilityService.setAdapter('system-executor', 'bash_execute', systemAdapter)
+      capabilityService.setAdapter('system-executor', 'execute_python', systemAdapter)
+    }).catch(() => {
+      log('WARN', 'capability_adapters_load_failed', {})
+    })
+
+    // P1.3b Phase B: capability-first mode 为默认（CAPABILITY_FIRST_MODE=false 回退到 dual）
+    if (process.env.CAPABILITY_FIRST_MODE !== 'false') {
+      toolSchemaProvider.setMode('capability-first')
+    }
 
     // 注册 Playwright MCP 服务器，赋予 AI 浏览器自动化能力
     try {
@@ -663,6 +781,25 @@ export class AppRuntime {
     setSkillManagerSingleton(skillManager)
     agentService.setMemoryService(memoryService)
     setMemoryService(memoryService)
+
+    // ── 行为预测式记忆预热：注入 MemoryService 依赖 ──
+    {
+      const { behaviorPredictiveMemoryPrewarmer } = await import('../behavior/BehaviorPredictiveMemoryPrewarmer')
+      behaviorPredictiveMemoryPrewarmer.setDependencies({
+        getRecentInteractions: (limit: number) => memoryService.interactionTracker.getRecent(limit),
+        getAllInteractions: () => memoryService.interactionTracker.getAll(),
+        predictNextTopics: (currentTopics: string[], topK: number) =>
+          memoryService.topicTransitionPredictor.predictNextTopics(currentTopics, topK),
+        getBehaviorWeightedEntries: (tier?: string, limit?: number) =>
+          memoryService.getBehaviorWeightedEntries(tier as any, limit),
+        getEntries: () => memoryService.getEntries(),
+        getTopicTransitionStats: () => memoryService.getTopicTransitionStats(),
+      })
+      log('INFO', 'predictive_prewarmer_initialized', {
+        transitionStats: memoryService.getTopicTransitionStats(),
+      })
+    }
+
     setPlanManager(planManager)
     setToolSkillManager(skillManager)
 
@@ -693,6 +830,34 @@ export class AppRuntime {
     setPlanSchedulerCoordinator(planSchedulerCoordinator)
     // 启动调度事件 → TTS 通知桥接
     createAndStartSchedulerNotificationBridge()
+
+    // ── 工具链编排即服务（ToolChainOrchestrator）──
+    {
+      const { ToolChainOrchestrator, ToolChainDecomposer, OrchestrationBridge } = await import('../orchestrator')
+      const { setToolChainOrchestrator } = await import('../tool/deps')
+      const mcpManager = (llmService as any).mcpManager
+      const decomposer = new ToolChainDecomposer(
+        llmService,
+        () => {
+          try {
+            return mcpManager?.getAllSchemas()?.map((s: any) => ({
+              name: s.function.name,
+              description: s.function.description,
+              parameters: Object.entries(s.function.parameters?.properties || {})
+                .map(([key, val]: [string, any]) => `${key}: ${val.type}${val.description ? ` - ${val.description}` : ''}`)
+                .join('; '),
+              required: s.function.required || [],
+            })) || []
+          } catch { return [] }
+        },
+      )
+      const orchestrator = new ToolChainOrchestrator(decomposer, mcpManager)
+      setToolChainOrchestrator(orchestrator)
+      // 启动编排事件桥接（EventBus → IPC）
+      const bridge = new OrchestrationBridge()
+      bridge.start(getMainWindow())
+      log('INFO', 'toolchain_orchestrator_initialized')
+    }
 
     // ── 语音记忆书签服务 ──
     const voiceBookmarkSvc = new VoiceBookmarkService()
@@ -2137,6 +2302,18 @@ export class AppRuntime {
         // 启动周期性检查（每 15 分钟）
         behaviorPeriodicPreloadService.start()
         log('INFO', 'periodic_prediction_service_started')
+      },
+    })
+
+    // 行为频率计数器（桌面快捷入口）
+    this.lazyInit!.add({
+      name: 'behavior-action-counter',
+      priority: 'normal',
+      delayMs: 3000,
+      fn: async () => {
+        const { behaviorActionCounter } = await import('../behavior/BehaviorActionCounter')
+        behaviorActionCounter.start()
+        log('INFO', 'behavior_action_counter_started')
       },
     })
 

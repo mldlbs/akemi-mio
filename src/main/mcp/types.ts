@@ -61,8 +61,21 @@ export interface MCPServerManifest {
 
   capabilities: string[]
 
+  /**
+   * M5.4: 能力级别的 canonical inputSchema。
+   * key = capability id, value = 标准化的 JSON Schema。
+   * 未指定时使用通用 { description } schema（满足 C-8）。
+   */
+  capabilitySchemas?: Record<string, {
+    type: 'object'
+    properties: Record<string, { type: string; description: string }>
+    required: string[]
+  }>
+
   dependencies?: {
     capability: string
+    /** P1.3b Observation-B1: 实际 MCP tool name，不指定时回退到 capability id */
+    tool?: string
     optional?: boolean
   }[]
 

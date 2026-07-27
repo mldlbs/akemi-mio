@@ -440,6 +440,34 @@ export const VOICE_INTENT_MAP: VoiceIntentDef[] = [
     confirmMessage: '取消操作',
     requireConfirmation: false,
   },
+
+  // ── ODE 求解 ──
+  {
+    intent: 'solve_ode',
+    description: '语音描述微分方程并求解。支持中文和英文自然语言描述，自动提取方程、初值和区间',
+    patterns: [
+      '求解', '解方程', '微分方程', '常微分',
+      'dy/dx', "y'", '导数',
+      '求解微分方程',
+      'solve ode', 'solve differential', 'ode',
+      '微分', 'equation',
+      '求解dy/dx', '求解微分',
+      'solving', 'solve equation',
+      '计算积分', '积分',
+      '数值解', '求解数值',
+    ],
+    slotExtractors: {
+      equation: /(?:求解|计算|solve|calculate)\s*(?:微分方程|diff eq|ode|equation|ODE|)?\s*(?:dy\/dx|y'|y′)?\s*=?\s*(.+?)(?=\s+(?:初值|y\(|y0|初始|起始|从|在|区间|步长|step|from|with|using|use|method|,|$))/,
+      method: /(?:用|use|using|method)\s*(欧拉|euler|龙格|rk[_-]?4|runge|rk4)/i,
+    },
+    tools: [
+      // solve_ode 工具调用由 VoiceOdeSession 管理（多轮对话）
+      // 此处仅注册意图匹配，实际执行由 IPC 处理器路由到 VoiceOdeSession
+      { tool: 'solve_ode', args: { equation: '{{slot.equation}}', method: '{{slot.method}}' } },
+    ],
+    confirmMessage: '将进入微分方程求解模式，请描述你的方程',
+    requireConfirmation: false,
+  },
 ]
 
 // =============================================================================

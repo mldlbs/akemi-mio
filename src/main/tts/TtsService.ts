@@ -17,6 +17,7 @@ import { ttsCache } from './TtsCache'
 import { sentimentAnalyzer } from './SentimentAnalyzer'
 import type { StyledTtsSegment } from './emotion'
 import { piperSceneAdaptor as piperSceneAdaptorSingleton } from './PiperSceneAdaptor'
+import { taskCompletionTtsHook } from './TaskCompletionTtsHook'
 
 // ══════════════════════════════════════════
 //  语音字幕 — Subtitle Data Types
@@ -516,6 +517,22 @@ export class TtsService {
     this.enginePreference = pref
     ttsRouter.setUserPreference(pref)
     log('INFO', 'tts_engine_preference', { preference: pref })
+  }
+
+  /**
+   * 初始化任务完成→欢快语音反馈桥接器。
+   *
+   * 在 TtsService 完全就绪后调用一次，使 Hook 订阅 EventBus 的任务完成事件。
+   * Hook 通过 setEmotion() 和 getEmotionParams() 与 TtsService 交互。
+   *
+   * 若不需要此功能也可以不调用（hook 不初始化则不监听事件）。
+   */
+  initTaskCompletionHook(): void {
+    taskCompletionTtsHook.init({
+      setEmotion: (params) => this.setEmotion(params),
+      getEmotionParams: () => this.getEmotionParams(),
+    })
+    log('INFO', 'tts_task_completion_hook_initialized')
   }
 
   /** 获取当前引擎偏好 */

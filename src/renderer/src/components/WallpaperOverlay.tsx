@@ -10,6 +10,7 @@ import { WallpaperWidgetHost } from '../widgets/WallpaperWidgetHost'
 import { wallpaperWidgetRegistry } from '../widgets/WallpaperWidgetRegistry'
 import { registerAllWidgets } from '../widgets/plugins'
 import { useWallpaperInteractionStore } from '../store/wallpaperInteractionStore'
+import { BehaviorQuickActions } from './BehaviorQuickActions'
 import type { WallpaperWidgetContext } from '../widgets/types'
 
 // =============================================================================
@@ -233,6 +234,9 @@ export function WallpaperOverlay() {
 
       {/* ── 行为预测哑提醒（周期模式预测 + 预加载状态） ── */}
       <PeriodicPredictionToast />
+
+      {/* ── 行为感知快捷入口（高频动作浮动按钮） ── */}
+      {!hideDecoration && <BehaviorQuickActions />}
 
       {/* ── 状态标签 ── */}
       <div className="wallpaper-status-label">{statusLabel}</div>

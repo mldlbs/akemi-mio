@@ -60,6 +60,7 @@ import type { ToolDecision } from './toolPolicy/types'
 import { behaviorStateMachine } from '../behavior/BehaviorStateMachine'
 import type { BehaviorMode } from '../behavior/BehaviorStateMachine'
 import { correctionPatternLearner } from '../behavior/CorrectionPatternLearner'
+import { taskOrchestrationModeManager } from '../behavior/TaskOrchestrationModeManager'
 import { behaviorPreferenceStore } from '../behavior/BehaviorPreferenceStore'
 import { toolDefaultAdjuster } from '../behavior/ToolDefaultAdjuster'
 import { buildTtsNeed } from '../behavior/UserBehaviorTtsContract'
@@ -73,11 +74,13 @@ import { toneToVoiceMapper } from '../tts/ToneToVoiceMapper'
 import { toneProfileCache } from '../tts/UserToneProfileCache'
 import { voiceStyleMap } from '../tts/VoiceStyleMap'
 import { behaviorEmotionDetector } from '../tts/BehaviorEmotionDetector'
+import { userInputEmotionAnalyzer, type UserInputEmotionResult } from '../tts/UserInputEmotionAnalyzer'
 import { contextualTtsAdvisor } from '../tts/ContextualTtsAdvisor'
 import { memoryEmotionBridge } from '../tts/MemoryEmotionBridge'
 import { memoryTtsBridge } from '../tts/MemoryTtsBridge'
 import { userContextClassifier } from '../tts/UserContextClassifier'
 import { implicitFeedbackTracker } from '../tts/ImplicitFeedbackTracker'
+import { userSpeechProfileTracker } from '../tts/UserSpeechProfileTracker'
 import type {
   BehaviorEmotionResult,
   BehaviorMetrics,
@@ -501,6 +504,9 @@ export class ChatExecutor {
   /** 最新的用户语音情感分析结果（由 ASR 识别后通过 IPC 更新） */
   private userVoiceEmotion: VoiceEmotion | null = null
 
+  /** 用户输入文本情感分析结果（由 UserInputEmotionAnalyzer 驱动） */
+  private currentUserInputEmotion: UserInputEmotionResult | null = null
+
   // ══════════════════════════════════════════
   //  记忆情感上下文（从 Memory 对话历史情感分析驱动）
   // ══════════════════════════════════════════
@@ -544,6 +550,8 @@ export class ChatExecutor {
     userBehaviorAnalyzer.recordUserMessage(text)
     // 行为偏好学习：检测用户消息中的风格/参数纠正模式
     correctionPatternLearner.recordUserMessage(text)
+    // 行为驱动的动态编排：检测用户消息中的求助/困惑信号
+    taskOrchestrationModeManager.recordUserMessage(text)
     // 行为自适应对话策略：记录交互详情并分析场景
     this.currentDomainLabel = this._extractDomainLabel(text)
     userBehaviorAnalyzer.recordInteractionDetail({
@@ -584,6 +592,10 @@ export class ChatExecutor {
     // 行为情绪：记录用户交互用于 APM 计算
     if (this.behaviorEmotionEnabled) {
       behaviorEmotionDetector.recordInteraction()
+    }
+    // 用户输入文本情感分析：从用户输入文本推断情绪（愤怒/悲伤/喜悦）
+    if (text.trim().length > 0 && this.emotionTtsEnabled) {
+      this.currentUserInputEmotion = userInputEmotionAnalyzer.analyze(text)
     }
     // 交互情境：记录交互时间戳用于节奏检测
     if (this.contextualTtsEnabled) {
@@ -898,6 +910,7 @@ export class ChatExecutor {
     }
     this.executionGovernor.reset()
     this.progressGuardrail.reset()
+    taskOrchestrationModeManager.reset()
     // 停止行为情绪检测器的鼠标采样（释放定时器）
     behaviorEmotionDetector.stop()
     // 停止用户情境分类器轮询
@@ -928,6 +941,7 @@ export class ChatExecutor {
         ctx.step = i
         if (ctx.interruptFlag && !ctx.guardrailStop) {
           log('INFO', 'chat_toolLoop_interrupted', { step: i })
+          taskOrchestrationModeManager.recordCancellation('user_interrupt')
           this.obsLogger?.logExit('interrupted')
           return ''
         }
@@ -969,6 +983,39 @@ export class ChatExecutor {
           this.currentToolDecision = this.toolPolicyPlanner.decide(this.currentScene, this.lastUserText)
           this.sceneAllowedTools = this.toolPolicyPlanner.toToolFilter(this.currentToolDecision)
         }
+        // ── [ORCHESTRATION] 行为驱动的动态编排模式检查 ──
+        taskOrchestrationModeManager.startNewRound()
+        const modeRecs = taskOrchestrationModeManager.getModeRecommendations()
+
+        // 简化/引导模式：进一步限制工具链长度
+        if (modeRecs.reduceToolChain && this.sceneAllowedTools && this.sceneAllowedTools.length > 3) {
+          // 在场景允许工具之上再缩减，只保留前 3 个最相关的工具
+          this.sceneAllowedTools = this.sceneAllowedTools.slice(0, 3)
+        }
+
+        // 注入模式相关的 system prompt 片段（通过 scratchpad）
+        if (modeRecs.extraPromptModules.length > 0) {
+          for (const module of modeRecs.extraPromptModules) {
+            this.workingMemory.scratchpad.add('system_hint', module)
+          }
+          this.workingMemory.injectScratchpad(messages)
+        }
+
+        // 引导模式：连续求助 → 插入探测性问题确认用户意图
+        if (modeRecs.insertProbingQuestion) {
+          log('INFO', 'orchestration_probing_question_injected', {
+            mode: taskOrchestrationModeManager.getCurrentMode(),
+            signalStats: taskOrchestrationModeManager.getSignalStats(),
+            step: i,
+          })
+          messages.push({
+            role: 'user',
+            content: modeRecs.probingQuestionText,
+          })
+          // 插入探测性问题后跳过本轮 LLM 调用，让用户先回应
+          continue
+        }
+
         const result = await this.llmService.chatWithTools(
           messages,
           requestId,
@@ -1099,6 +1146,11 @@ export class ChatExecutor {
             if (c.length > 8000) c = c.slice(0, 8000) + `\n... [已截断，原长 ${c.length} 字符]`
             messages.push({ role: 'tool', tool_call_id: tr.id, content: c })
           }
+          // ── [ORCHESTRATION] 行为驱动的动态编排：反馈本轮工具执行结果 ──
+          taskOrchestrationModeManager.recordToolBatchResult(
+            toolResults.map((tr) => ({ name: tr.name, success: tr.success, error: tr.error })),
+          )
+          // 如果本轮全部成功且处于 Simplified/Guided 模式，模式管理器会自动考虑降级
           // ── [TASK STEP RECORDER] 记录本轮工具调用步骤 ──
           if (this.taskStepRecorder && this.currentSessionId) {
             try {
@@ -1571,6 +1623,38 @@ export class ChatExecutor {
         }
       }
 
+      // ── 用户输入文本情感混合（从用户输入关键词推断的情绪，约 25% 权重）──
+      if (this.currentUserInputEmotion && this.currentUserInputEmotion.confidence > 0.3 && this.currentUserInputEmotion.emotion !== 'neutral') {
+        const inputEmotionParams = this.currentUserInputEmotion.consecutiveEmotion
+          ? userInputEmotionAnalyzer.getStrengthenedParams(this.currentUserInputEmotion)
+          : this.currentUserInputEmotion.ttsParams
+        const currentRate = parseInt(finalParams.rate.replace(/[^0-9-]/g, '')) || 0
+        const inputRate = parseInt(inputEmotionParams.rate.replace(/[^0-9-]/g, '')) || 0
+        const currentPitch = parseInt(finalParams.pitch.replace(/[^0-9-]/g, '')) || 0
+        const inputPitch = parseInt(inputEmotionParams.pitch.replace(/[^0-9-]/g, '')) || 0
+
+        const blendedRate = Math.round(currentRate * 0.75 + inputRate * 0.25)
+        const blendedPitch = Math.round(currentPitch * 0.75 + inputPitch * 0.25)
+
+        finalParams = {
+          voice: finalParams.voice,
+          rate: `${blendedRate >= 0 ? '+' : ''}${blendedRate}%`,
+          pitch: `${blendedPitch >= 0 ? '+' : ''}${blendedPitch}Hz`,
+          label: `${finalParams.label}·${inputEmotionParams.label}`,
+        }
+
+        log('INFO', 'user_input_emotion_blended', {
+          emotion: this.currentUserInputEmotion.emotion,
+          confidence: this.currentUserInputEmotion.confidence,
+          consecutive: this.currentUserInputEmotion.consecutiveEmotion,
+          consecutiveCount: this.currentUserInputEmotion.consecutiveCount,
+          inputRate: inputEmotionParams.rate,
+          inputPitch: inputEmotionParams.pitch,
+          blendedRate,
+          blendedPitch,
+        })
+      }
+
       // ── 记忆情感混合（从 Memory 对话历史情感分析驱动，约 30% 权重）──
       if (this.memoryEmotionEnabled && this.memoryService) {
         try {
@@ -1666,6 +1750,16 @@ export class ChatExecutor {
         this.contextualTtsEnabled ? this.lastContextualContext : null,
         this.userContextClassifierEnabled ? this.lastUserContext : null,
       )
+
+      // ── 源 6: 用户语音特征画像（语速自适应） ──
+      // 基于最近 4 次语音交互的语速（字/秒），调整 TTS 合成语速，
+      // 使用户的听觉反馈更贴合其自然的沟通节奏。
+      const speechRecommendation = userSpeechProfileTracker.getRecommendation()
+      if (speechRecommendation.rateAdjustment !== 0) {
+        behaviorNeed.rateSuggestion = speechRecommendation.rateAdjustment
+        behaviorNeed.reason += `；${speechRecommendation.reason}`
+        behaviorNeed.sources.push('UserSpeechProfile')
+      }
 
       // 将行为需求应用到 TTS（TtsService 内部自动根据 need 调整 rate/pitch/路由）
       this.ttsService.applyBehaviorNeed(behaviorNeed, finalParams)
@@ -1895,6 +1989,12 @@ export class ChatExecutor {
       this.lastBehaviorEmotion = null
     }
     this.mainWindow?.webContents.send('tts:behaviorEmotion:enabled', { enabled })
+  }
+
+  /** 记录一次撤回/重做操作，用于行为情绪推断（供 IPC 调用） */
+  recordBehaviorRetraction(): void {
+    if (!this.behaviorEmotionEnabled) return
+    behaviorEmotionDetector.recordRetraction()
   }
 
   /** 获取当前行为情绪状态（供 IPC/调试） */

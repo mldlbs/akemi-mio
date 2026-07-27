@@ -77,6 +77,18 @@ export class ToolInvocationRouter {
    * @returns DispatchResult
    */
   async dispatch(name: string, args: Record<string, unknown>): Promise<DispatchResult> {
+    // P1.3b Observation #2: call_raw_tool — 记录来源分类
+    if (this.schemaProvider.isCallRawTool(name)) {
+      const reason = (args._reason as string) ?? 'unknown'
+      const toolName = (args.toolName as string) ?? ''
+      const toolArgs = (args.args as Record<string, unknown>) ?? {}
+      if (!toolName) {
+        return { result: 'Error: call_raw_tool requires "toolName" parameter', routedAs: 'tool' }
+      }
+      log('INFO', 'tool_router.raw_tool_fallback', { toolName, reason })
+      return this.dispatchTool(toolName, toolArgs)
+    }
+
     const isCap = this.schemaProvider.isCapabilityTool(name)
     if (isCap && this.capabilityService) {
       return this.dispatchCapability(name, args)

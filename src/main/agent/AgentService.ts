@@ -43,6 +43,7 @@ import type { IEngineService, EngineStatus, EngineMetrics } from '../engine/type
 import { RuntimeValidator } from '../runtime/RuntimeValidator'
 import { RuntimeManagerImpl } from '../runtime/RuntimeManagerImpl'
 import { SupervisedAgentSupervisorImpl } from '../runtime/SupervisedAgentSupervisorImpl'
+import { behaviorPredictiveMemoryPrewarmer } from '../behavior/BehaviorPredictiveMemoryPrewarmer'
 
 export class AgentService implements IEngineService {
   /** IEngineService 引擎名 */
@@ -400,7 +401,15 @@ export class AgentService implements IEngineService {
       const procCtx = this.proceduralMemory.getFormattedContext()
       const failCtx = this.failureAnalyzer?.getFormattedContext() ?? ''
 
-      return [memCtx, procCtx, reflectCtx, failCtx].filter(Boolean).join('\n\n')
+      // 行为预测式记忆预热：基于交互间隔和话题转移概率的 Top-3 记忆预取
+      let prewarmCtx = ''
+      try {
+        prewarmCtx = behaviorPredictiveMemoryPrewarmer.getPrewarmContext()
+      } catch {
+        // 依赖未注入或出错时静默降级
+      }
+
+      return [memCtx, prewarmCtx, procCtx, reflectCtx, failCtx].filter(Boolean).join('\n\n')
     }
 
     const skillModules = lastUserText

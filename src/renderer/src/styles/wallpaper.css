@@ -3143,6 +3143,108 @@
   display: none !important;
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   行为感知快捷入口 — BehaviorQuickActions
+   在桌面 overlay 右下角显示 Top-2 高频操作浮动按钮
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ─── 容器（固定在右下角，状态标签上方） ─── */
+.wp-quick-actions {
+  position: fixed;
+  bottom: 40px;
+  right: var(--space-lg, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 10;
+  pointer-events: none; /* 穿透到下层，子按钮覆盖 auto */
+  animation: wp-qa-in 0.5s var(--ease-glass, ease) both;
+  will-change: opacity, transform;
+}
+
+/* ─── 淡入动画 ─── */
+@keyframes wp-qa-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ─── 单个快捷按钮 ─── */
+.wp-qa-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  padding: 6px 12px 6px 10px;
+  background: oklch(0.12 0.005 280 / 0.7);
+  border: 1px solid var(--wp-border-glass, oklch(1 0 0 / 0.08));
+  border-radius: 20px;
+  color: oklch(0.88 0.005 280);
+  cursor: pointer;
+  pointer-events: auto; /* 覆盖父容器穿透，按钮可点击 */
+  transition: all 0.2s ease;
+  font-size: 12px;
+  line-height: 1;
+  font-family: inherit;
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+}
+
+.wp-qa-btn:hover {
+  background: oklch(0.18 0.008 280 / 0.8);
+  border-color: var(--wp-border-glass-light, oklch(1 0 0 / 0.15));
+  transform: scale(1.03);
+}
+
+.wp-qa-btn:active {
+  transform: scale(0.97);
+}
+
+.wp-qa-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ─── 执行中状态 ─── */
+.wp-qa-executing {
+  background: oklch(0.4 0.12 260 / 0.4) !important;
+  border-color: #60a5fa66 !important;
+}
+
+/* ─── 图标 ─── */
+.wp-qa-btn i {
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* ─── 标签文本 ─── */
+.wp-qa-label {
+  font-size: var(--fs-caption, 11px);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80px;
+}
+
+/* ─── 专注模式隐藏 ─── */
+.wp-mode-focus .wp-quick-actions {
+  display: none !important;
+}
+
+/* ─── 交互模式隐藏 ─── */
+.wp-interactive-active .wp-quick-actions {
+  display: none !important;
+}
+
 /* ─── 语音便签壁纸 ─── */
 
 @keyframes voicenote-pulse {

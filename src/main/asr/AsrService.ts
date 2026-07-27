@@ -2,14 +2,17 @@ import { log, createRequestId } from '../logger/Logger'
 import { WhisperGpuEngine } from './WhisperGpuEngine'
 import { WhisperEngine } from './WhisperEngine'
 import { BaiduEngine } from './BaiduEngine'
-import type { AsrConversationContext, VoiceEmotion } from './types'
+import type { AsrConversationContext, VoiceEmotion, HotwordHit } from './types'
+import type { MemoryEntry, InteractionRecord } from '../memory/types'
 import { audioFeatureExtractor } from '../audio/AudioFeatureExtractor'
 import { voiceEmotionClassifier } from './VoiceEmotionClassifier'
 import {
-  buildContextualHotwords,
+  buildEntityDrivenHotwords,
   buildContextualPrompt,
   formatHotwordPrefix,
   isContextMeaningful,
+  feedMemoryToEntityExtractor,
+  getEntityExtractorStats,
 } from './AsrContextBuilder'
 import { asrHotwordManager } from './AsrHotwordManager'
 import type { VocabEntry, DomainStats } from './AsrHotwordManager'
@@ -17,8 +20,10 @@ import { asrLogStore } from './AsrLogStore'
 import type { LowConfidenceSegment } from './AsrLogStore'
 import { AsrIdleDetector } from './AsrIdleDetector'
 import { asrFeedbackAnalyzer } from './AsrFeedbackAnalyzer'
+import { asrBehaviorPredictor } from './AsrBehaviorPredictor'
 import { asrConfidenceScorer, DEFAULT_CONFIDENCE_THRESHOLD } from './AsrConfidenceScorer'
 import { acousticEnvClassifier } from './AsrAcousticEnvironmentClassifier'
+import { voiceBehaviorAdaptiveLearner } from './VoiceBehaviorAdaptiveLearner'
 import { SpeechPluginRegistry, WhisperGpuAsrPlugin, WhisperCpuAsrPlugin, BaiduAsrPlugin } from '../speech'
 import { MultiPathDecoderManager, multiPathDecoderManager } from './multipath/MultiPathDecoderManager'
 import { fusionEngine } from './multipath/FusionEngine'
@@ -137,9 +142,22 @@ export class AsrService {
     // 从频率热词管理器获取高频词汇（行为驱动热词）
     const freqHotwords = asrHotwordManager.getHotwords()
 
+    // ── 获取行为模式预测优化 ──
+    let behaviorBoosts: string[] = []
+    let behaviorPromptBoost = ''
+    let behaviorHesitationMode: 'normal' | 'relaxed' | 'tolerant' = 'normal'
+    try {
+      const optimization = asrBehaviorPredictor.getAsrOptimization()
+      behaviorBoosts = optimization.hotwordBoosts
+      behaviorPromptBoost = optimization.promptBoost
+      behaviorHesitationMode = optimization.hesitationMode
+    } catch {
+      // 行为预测器不可用时优雅降级
+    }
+
     if (context && isContextMeaningful(context)) {
-      // 构建动态热词和提示词
-      let hotwords = buildContextualHotwords(context)
+      // 构建实体驱动热词（合并记忆中的命名实体 + 上下文）
+      let hotwords = buildEntityDrivenHotwords(context)
 
       // 合并频率热词：频率热词优先级最高（因为来自用户实际输入），放最前面
       if (freqHotwords.length > 0) {
@@ -148,7 +166,21 @@ export class AsrService {
         hotwords = [...newHotwords, ...hotwords]
       }
 
-      const dynamicPrompt = buildContextualPrompt(context)
+      // 合并行为预测热词
+      if (behaviorBoosts.length > 0) {
+        const existing = new Set(hotwords)
+        const newBoosts = behaviorBoosts.filter((w) => !existing.has(w))
+        if (newBoosts.length > 0) {
+          hotwords = [...hotwords, ...newBoosts]
+        }
+      }
+
+      let dynamicPrompt = buildContextualPrompt(context)
+
+      // 追加行为预测的 prompt 增强
+      if (behaviorPromptBoost) {
+        dynamicPrompt = `${dynamicPrompt} ${behaviorPromptBoost}`
+      }
 
       // 注入到 GPU 引擎
       this.gpuEngine.setHotwords(hotwords)
@@ -165,18 +197,31 @@ export class AsrService {
         entities: context.keyEntities.slice(0, 5),
         hotword_count: hotwords.length,
         freq_hotwords: freqHotwords.length,
+        behavior_boosts: behaviorBoosts.length,
+        hesitation_mode: behaviorHesitationMode,
         has_user_text: !!context.recentUserText,
       })
-    } else if (freqHotwords.length > 0) {
-      // 没有 Memory 上下文但有频率热词，仅应用频率热词
-      this.gpuEngine.setHotwords(freqHotwords)
+    } else if (freqHotwords.length > 0 || behaviorBoosts.length > 0) {
+      // 没有 Memory 上下文但有频率热词/行为预测热词
+      let mergedHotwords = [...freqHotwords]
+      if (behaviorBoosts.length > 0) {
+        const existing = new Set(mergedHotwords)
+        const newBoosts = behaviorBoosts.filter((w) => !existing.has(w))
+        mergedHotwords = [...mergedHotwords, ...newBoosts]
+      }
+
+      this.gpuEngine.setHotwords(mergedHotwords)
       if (this.cpuEngine) {
-        const hotwordPrefix = formatHotwordPrefix(freqHotwords)
-        this.cpuEngine.setInitialPrompt(hotwordPrefix)
+        let promptBase = formatHotwordPrefix(mergedHotwords)
+        if (behaviorPromptBoost) {
+          promptBase = `${behaviorPromptBoost} ${promptBase}`
+        }
+        this.cpuEngine.setInitialPrompt(promptBase)
       }
       log('INFO', 'asr_context_freq_only', {
-        freq_hotwords: freqHotwords.length,
-        sample: freqHotwords.slice(0, 5),
+        hotword_count: mergedHotwords.length,
+        behavior_boosts: behaviorBoosts.length,
+        hesitation_mode: behaviorHesitationMode,
       })
     } else {
       // 清除动态覆盖，恢复静态配置
@@ -271,6 +316,27 @@ export class AsrService {
     asrHotwordManager.feedUserText(text)
   }
 
+  /**
+   * 将 Memory 中的记忆条目和交互记录馈入实体提取器，
+   * 提取命名实体（人名、项目名、地名）并注入 ASR 热词系统。
+   *
+   * 在 MemoryService 初始化或定期刷新时调用。
+   * 这是"记忆唤醒语音热词"功能的入口点。
+   *
+   * @param entries 记忆条目列表
+   * @param interactions 交互记录列表（可选）
+   */
+  feedMemoryEntries(
+    entries: MemoryEntry[],
+    interactions?: InteractionRecord[],
+  ): void {
+    feedMemoryToEntityExtractor(entries, interactions)
+    log('INFO', 'asr_entity_extractor_fed', {
+      entries_count: entries.length,
+      has_interactions: !!interactions,
+    })
+  }
+
   /** 启用/禁用行为驱动热词增强 */
   toggleHotwordManager(enabled: boolean): void {
     asrHotwordManager.setEnabled(enabled)
@@ -285,6 +351,38 @@ export class AsrService {
       hotwords: asrHotwordManager.getHotwords(),
       totalInputs: state.totalInputs,
     }
+  }
+
+  /**
+   * 检测文本中是否包含当前 ASR 热词。
+   * 用于在 ASR 识别完成后，检查是否有记忆相关的热词被命中。
+   * 这是"记忆唤醒语音热词"功能的关键检测点。
+   *
+   * @param text ASR 识别文本
+   * @returns 命中的热词列表
+   */
+  detectHotwordHits(text: string): HotwordHit[] {
+    if (!text || text.trim().length === 0) return []
+
+    const hits: HotwordHit[] = []
+    const hotwords = asrHotwordManager.getHotwords()
+    const lowerText = text.toLowerCase()
+
+    for (const hw of hotwords) {
+      const lowerHw = hw.toLowerCase()
+      // 简单包含匹配（中文热词常用）
+      const count = (lowerText.match(new RegExp(this.escapeRegex(lowerHw), 'gi')) || []).length
+      if (count > 0) {
+        hits.push({ hotword: hw, count })
+      }
+    }
+
+    return hits
+  }
+
+  /** 转义正则特殊字符 */
+  private escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   }
 
   get useBaidu(): boolean {
@@ -391,6 +489,9 @@ export class AsrService {
 
     // 将修正后的文本喂入热词管理器，让系统学习正确词汇
     this.feedUserTextToHotwords(correctedText)
+
+    // ── 自适应学习：记录用户纠正 ──
+    voiceBehaviorAdaptiveLearner.recordCorrection(originalText, correctedText)
 
     // 用户反馈也视为语音活动，重置空闲计时
     this.idleDetector.recordActivity()
@@ -528,7 +629,7 @@ export class AsrService {
     return fusionEngine.getWeightTable()
   }
 
-  async transcribe(audioBuffer: ArrayBuffer, requestId?: string, options?: { useMultiPath?: boolean }): Promise<{ text: string; request_id: string; error?: string; voiceEmotion?: VoiceEmotion }> {
+  async transcribe(audioBuffer: ArrayBuffer, requestId?: string, options?: { useMultiPath?: boolean }): Promise<{ text: string; request_id: string; error?: string; voiceEmotion?: VoiceEmotion; hotwordHits?: HotwordHit[]; hasHotwordHit?: boolean }> {
     const rid = requestId || createRequestId()
     this._pendingRequests++
     // 通知空闲检测器有语音活动（重置空闲计时）
@@ -628,7 +729,29 @@ export class AsrService {
             })
           }
 
-          return { text: fusionResult.text, request_id: rid, voiceEmotion }
+          // ── 行为预测记录 ──
+          asrBehaviorPredictor.recordTranscription(
+            fusionResult.text,
+            fusionResult.confidence,
+            voiceEmotion,
+          )
+          // ── 自适应学习记录 ──
+          voiceBehaviorAdaptiveLearner.recordInteraction(
+            fusionResult.text,
+            fusionResult.confidence,
+            voiceEmotion,
+          )
+
+          // 多路径模式下检测热词命中（基于文本匹配当前热词列表）
+          const fusionHotwordHits = this.detectHotwordHits(fusionResult.text)
+          if (fusionHotwordHits.length > 0) {
+            log('INFO', 'asr_multipath_hotword_hit', {
+              request_id: rid,
+              hits: fusionHotwordHits.map((h: { hotword: string; count: number }) => `${h.hotword}(${h.count})`),
+            })
+          }
+
+          return { text: fusionResult.text, request_id: rid, voiceEmotion, hotwordHits: fusionHotwordHits, hasHotwordHit: fusionHotwordHits.length > 0 }
         } catch (mpErr) {
           const msg = mpErr instanceof Error ? mpErr.message : String(mpErr)
           log('WARN', 'asr_multipath_failed_fallback_sequential', { request_id: rid, error: msg })
@@ -658,7 +781,14 @@ export class AsrService {
                   confidence: cpuConfidence,
                 })
                 this.recordLowConfidenceIfNeeded(cpuResult.text, 'whisper_cpu', rid, audioDurationSec, cpuConfidence)
-                return { text: cpuResult.text, request_id: rid, voiceEmotion }
+
+                // ── 行为预测记录 ──
+                asrBehaviorPredictor.recordTranscription(cpuResult.text, cpuConfidence, voiceEmotion)
+                // ── 自适应学习记录 ──
+                voiceBehaviorAdaptiveLearner.recordInteraction(cpuResult.text, cpuConfidence, voiceEmotion)
+
+                const cpuHits = cpuResult.hits || []
+                return { text: cpuResult.text, request_id: rid, voiceEmotion, hotwordHits: cpuHits, hasHotwordHit: cpuHits.length > 0 }
               }
             } catch (cpuErr) {
               log('WARN', 'cpu_asr_fallback_failed', {
@@ -670,7 +800,9 @@ export class AsrService {
 
           if (isNoise(result.text)) {
             log('INFO', 'asr_noise_filtered', { request_id: rid, text: result.text })
-            return { text: '', request_id: rid, voiceEmotion }
+            // ── 自适应学习记录（无意义文本，标记低置信度） ──
+            voiceBehaviorAdaptiveLearner.recordInteraction('', 0, voiceEmotion)
+            return { text: '', request_id: rid, voiceEmotion, hotwordHits: [], hasHotwordHit: false }
           }
 
           const gpuConfidence = asrConfidenceScorer.score(result.text, audioFeatures)
@@ -679,7 +811,23 @@ export class AsrService {
             confidence: gpuConfidence,
           })
           this.recordLowConfidenceIfNeeded(result.text, 'whisper_gpu', rid, audioDurationSec, gpuConfidence)
-          return { text: result.text, request_id: rid, voiceEmotion }
+
+          // ── 行为预测记录 ──
+          asrBehaviorPredictor.recordTranscription(result.text, gpuConfidence, voiceEmotion)
+          // ── 自适应学习记录 ──
+          voiceBehaviorAdaptiveLearner.recordInteraction(result.text, gpuConfidence, voiceEmotion)
+
+          // 提取热词命中信息
+          const gpuHits = result.hits || []
+          if (gpuHits.length > 0) {
+            log('INFO', 'asr_hotword_hit_detected', {
+              request_id: rid,
+              hits: gpuHits.map((h: { hotword: string; count: number }) => `${h.hotword}(${h.count})`),
+              total_count: gpuHits.reduce((s: number, h: { count: number }) => s + h.count, 0),
+            })
+          }
+
+          return { text: result.text, request_id: rid, voiceEmotion, hotwordHits: gpuHits, hasHotwordHit: gpuHits.length > 0 }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           log('WARN', 'gpu_asr_fallback_to_baidu', { request_id: rid, error: msg })
@@ -708,14 +856,31 @@ export class AsrService {
             confidence: baiduConfidence,
           })
           this.recordLowConfidenceIfNeeded(text, 'baidu', rid, audioDurationSec, baiduConfidence)
-          return { text, request_id: rid, voiceEmotion }
+
+          // ── 行为预测记录 ──
+          asrBehaviorPredictor.recordTranscription(text, baiduConfidence, voiceEmotion)
+          // ── 自适应学习记录 ──
+          voiceBehaviorAdaptiveLearner.recordInteraction(text, baiduConfidence, voiceEmotion)
+
+          // 百度路径检测热词命中
+          const baiduHotwordHits = this.detectHotwordHits(text)
+          if (baiduHotwordHits.length > 0) {
+            log('INFO', 'asr_baidu_hotword_hit', {
+              request_id: rid,
+              hits: baiduHotwordHits.map((h: { hotword: string; count: number }) => `${h.hotword}(${h.count})`),
+            })
+          }
+
+          return { text, request_id: rid, voiceEmotion, hotwordHits: baiduHotwordHits, hasHotwordHit: baiduHotwordHits.length > 0 }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           log('ERROR', 'asr_all_failed', { request_id: rid, error: msg })
+          voiceBehaviorAdaptiveLearner.recordInteraction('', 0, voiceEmotion)
           return { text: '', request_id: rid, error: msg, voiceEmotion }
         }
       }
 
+      voiceBehaviorAdaptiveLearner.recordInteraction('', 0, voiceEmotion)
       return { text: '', request_id: rid, error: 'no ASR engine available', voiceEmotion }
     } finally {
       decrement()

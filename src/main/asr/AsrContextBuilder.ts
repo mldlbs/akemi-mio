@@ -3,13 +3,18 @@
  *
  * 功能：
  * 1. 从 SummaryMemory 的最近摘要中提取主题标签和关键实体
- * 2. 构建动态热词列表（实体 > 主题 > 静态配置）
- * 3. 构建 Whisper initial_prompt（注入当前对话上下文）
+ * 2. 从 MemoryEntityExtractor 提取记忆中的命名实体（人名、项目名、地名）
+ * 3. 构建动态热词列表（命名实体 > 关键实体 > 主题 > 静态配置）
+ * 4. 构建 Whisper initial_prompt（注入当前对话上下文）
+ *
+ * 集成实体提取后，即使用户首次提及记忆中的名称（如"上次说的那个项目"），
+ * ASR 也能借助热词准确识别，进而触发 Memory 检索。
  */
 
-import type { SummaryEntry } from '../memory/types'
+import type { SummaryEntry, MemoryEntry, InteractionRecord } from '../memory/types'
 import type { AsrConversationContext } from './types'
 import { ASR_HOTWORDS, ASR_INITIAL_PROMPT } from '../config'
+import { memoryEntityExtractor } from './MemoryEntityExtractor'
 
 /**
  * 从 SummaryMemory 的最近摘要中提取对话上下文。
@@ -105,4 +110,99 @@ export function formatHotwordPrefix(hotwords: string[], limit = 20): string {
   const display = hotwords.slice(0, limit)
   if (display.length === 0) return ''
   return `关键词: ${display.join(', ')}。`
+}
+
+// ══════════════════════════════════════════
+//  记忆实体提取集成
+// ══════════════════════════════════════════
+
+/**
+ * 将 Memory 中的记忆条目和交互记录馈入实体提取器。
+ * 在 MemoryService 初始化或定期刷新时调用。
+ *
+ * 提取的命名实体（人名、项目名、地名）会被后续的
+ * buildEntityDrivenHotwords() 用来生成 ASR 热词。
+ *
+ * @param entries 记忆条目列表
+ * @param interactions 交互记录列表（可选）
+ */
+export function feedMemoryToEntityExtractor(
+  entries: MemoryEntry[],
+  interactions?: InteractionRecord[],
+): void {
+  memoryEntityExtractor.feedEntries(entries, interactions)
+}
+
+/**
+ * 构建实体驱动热词列表：从 MemoryEntityExtractor 中提取命名实体，
+ * 与上下文热词合并后返回。
+ *
+ * 优先级：命名实体（人名/项目名/地名） > 上下文关键实体 > 主题 > 静态配置
+ *
+ * 这样即使用户说出"上次说到的那个项目"这样的模糊指代，
+ * ASR 也能根据已注入的项目名热词准确识别实际的项目名称。
+ *
+ * @param context 对话上下文（可选，无上下文时只返回实体热词）
+ * @param maxHotwords 最大热词数（默认 30）
+ * @returns 合并后的热词列表
+ */
+export function buildEntityDrivenHotwords(
+  context?: AsrConversationContext | null,
+  maxHotwords = 30,
+): string[] {
+  const result: string[] = []
+  const seen = new Set<string>()
+
+  // 1. 记忆实体提取器中的命名实体（最高优先级）
+  const entityNames = memoryEntityExtractor.getEntityNames()
+  for (const name of entityNames) {
+    if (!seen.has(name) && name.length >= 2) {
+      seen.add(name)
+      result.push(name)
+    }
+  }
+
+  // 2. 上下文关键实体
+  if (context?.keyEntities) {
+    for (const entity of context.keyEntities) {
+      if (!seen.has(entity) && entity.length >= 2) {
+        seen.add(entity)
+        result.push(entity)
+      }
+    }
+  }
+
+  // 3. 上下文主题标签
+  if (context?.topics) {
+    for (const topic of context.topics) {
+      if (!seen.has(topic) && topic.length >= 2) {
+        seen.add(topic)
+        result.push(topic)
+      }
+    }
+  }
+
+  // 4. 静态热词
+  for (const hw of ASR_HOTWORDS) {
+    if (!seen.has(hw)) {
+      seen.add(hw)
+      result.push(hw)
+    }
+  }
+
+  return result.slice(0, maxHotwords)
+}
+
+/**
+ * 获取实体提取器的统计信息（供调试/UI）。
+ */
+export function getEntityExtractorStats(): ReturnType<typeof memoryEntityExtractor.getStats> {
+  return memoryEntityExtractor.getStats()
+}
+
+/**
+ * 重置实体提取器的所有数据。
+ */
+export function resetEntityExtractor(): void {
+  memoryEntityExtractor.clear()
 }

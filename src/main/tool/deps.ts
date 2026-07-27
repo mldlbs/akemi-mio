@@ -14,6 +14,7 @@ import type { InsightService } from '../insight/InsightService'
 import type { ObserverService } from '../observer'
 import type { LocalModelService } from '../creativity/LocalModelService'
 import type { MemoryResourceProvider } from '../mcp/MemoryResourceProvider'
+import type { AsrVocabularyResource } from '../mcp/AsrVocabularyResource'
 
 import type { PersonaStateManager } from '../agent/PersonaStateManager'
 
@@ -21,6 +22,7 @@ let _planManager: PlanManagerLike | null = null
 let _credentialsManager: CredentialsManager | null = null
 let _memoryService: MemoryService | null = null
 let _memoryResourceProvider: MemoryResourceProvider | null = null
+let _asrVocabularyResource: AsrVocabularyResource | null = null
 let _skillManager: SkillManager | null = null
 let _proceduralMemory: ProceduralMemory | null = null
 let _cognitiveService: CognitiveService | null = null
@@ -62,6 +64,12 @@ export function getMemoryService(): MemoryService | null {
 }
 export function getMemoryResourceProvider(): MemoryResourceProvider | null {
   return _memoryResourceProvider
+}
+export function setAsrVocabularyResource(rp: AsrVocabularyResource | null): void {
+  _asrVocabularyResource = rp
+}
+export function getAsrVocabularyResource(): AsrVocabularyResource | null {
+  return _asrVocabularyResource
 }
 export function getSkillManager(): SkillManager | null {
   return _skillManager
@@ -222,4 +230,18 @@ export function setPlanSchedulerCoordinator(c: PlanSchedulerCoordinator | null):
 
 export function getPlanSchedulerCoordinator(): PlanSchedulerCoordinator | null {
   return _planSchedulerCoordinator
+}
+
+// ── ToolChainOrchestrator（供工具链编排工具调用）──
+
+import type { ToolChainOrchestrator } from '../orchestrator'
+
+let _toolChainOrchestrator: ToolChainOrchestrator | null = null
+
+export function setToolChainOrchestrator(orch: ToolChainOrchestrator | null): void {
+  _toolChainOrchestrator = orch
+}
+
+export function getToolChainOrchestrator(): ToolChainOrchestrator | null {
+  return _toolChainOrchestrator
 }

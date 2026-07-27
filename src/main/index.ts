@@ -15,6 +15,8 @@ app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
 // 禁用 GPU 加速避免渲染进程崩溃（Windows 上 GPU 驱动兼容性问题）
 app.commandLine.appendSwitch('disable-gpu')
 app.commandLine.appendSwitch('disable-software-rasterizer')
+// 允许 Playwright MCP 启动子进程 Chromium（无头浏览器）
+app.commandLine.appendSwitch('no-sandbox')
 
 // 全局崩溃防护
 import { log } from './logger/Logger'

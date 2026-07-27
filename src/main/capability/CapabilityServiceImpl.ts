@@ -1,7 +1,7 @@
 import { log } from '../logger/Logger'
 import { CapabilityResolver } from './CapabilityResolver'
 import type { ServerManager } from '../mcp/ServerManager'
-import { CapabilityBinding, ICapabilityService } from './types'
+import { CapabilityBinding, ICapabilityService, CapabilityProviderAdapter } from './types'
 import { eventBus } from '../core/EventBus'
 
 /**
@@ -13,6 +13,10 @@ import { eventBus } from '../core/EventBus'
  * - Permission 检查在 invoke 路径内（ServerManager 内部的 CapabilityEngine）
  * - Resolver 不执行权限检查（C-1）
  *
+ * P1.3b (Capability Schema Ownership D3):
+ * - 持有 providerAdapters 映射，将 canonical input 转换为 provider-specific params
+ * - 无 adapter 的 provider 保持向后兼容
+ *
  * Agent 调用链：
  *
  * ```
@@ -22,6 +26,7 @@ import { eventBus } from '../core/EventBus'
  *   | → CapabilityBinding { capability, provider, tool }
  *   |
  * CapabilityService.invoke(binding, input)
+ *   | → adapter(input)  ← P1.3b: 适配 canonical → tool params
  *   | → ServerManager.callTool(tool, input) ← 此路径含 Permission
  *   | → MCP Server
  * ```
@@ -34,10 +39,22 @@ import { eventBus } from '../core/EventBus'
 export class CapabilityServiceImpl implements ICapabilityService {
   private resolver: CapabilityResolver
   private serverManager: ServerManager
+  /** P1.3b: provider id + tool → canonical input adapter */
+  private providerAdapters = new Map<string, CapabilityProviderAdapter>()
 
   constructor(resolver: CapabilityResolver, serverManager: ServerManager) {
     this.resolver = resolver
     this.serverManager = serverManager
+  }
+
+  /** 注册 provider adapter: key = "{providerId}:{tool}" */
+  setAdapter(providerId: string, tool: string, adapter: CapabilityProviderAdapter): void {
+    this.providerAdapters.set(`${providerId}:${tool}`, adapter)
+  }
+
+  /** 获取 adapter key 对应的 adapter */
+  private getAdapter(providerId: string, tool: string): CapabilityProviderAdapter | undefined {
+    return this.providerAdapters.get(`${providerId}:${tool}`)
   }
 
   async resolve(capability: string, toolHint?: string): Promise<CapabilityBinding | undefined> {
@@ -79,8 +96,12 @@ export class CapabilityServiceImpl implements ICapabilityService {
     })
 
     try {
+      // P1.3b: 如果存在 provider adapter，转换 canonical input → tool-specific params
+      const adapter = this.getAdapter(binding.provider.id, binding.tool)
+      const toolInput = adapter ? adapter(input, binding.tool) : input
+
       // 委托 ServerManager 执行，此路径包含 Permission 检查
-      const result = await this.serverManager.callTool(binding.tool, input as Record<string, any>)
+      const result = await this.serverManager.callTool(binding.tool, toolInput as Record<string, any>)
 
       const durationMs = Date.now() - startedAt
       log('INFO', 'capability_service.invoked', {

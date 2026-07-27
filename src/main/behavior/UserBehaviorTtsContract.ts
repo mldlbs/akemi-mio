@@ -140,6 +140,20 @@ const EMOTION_TO_NEED: Record<BehaviorEmotion, Partial<UserBehaviorTtsNeed> | nu
     volumeSuggestion: 0.75,
     reason: '用户焦躁，轻柔安抚',
   },
+  tired: {
+    outputMode: 'gentle',
+    rateSuggestion: -12,
+    pitchSuggestion: -6,
+    volumeSuggestion: 0.65,
+    reason: '用户疲惫，温柔轻声',
+  },
+  joyful: {
+    outputMode: 'expressive',
+    rateSuggestion: 12,
+    pitchSuggestion: 8,
+    volumeSuggestion: 0.9,
+    reason: '用户愉悦，欢快共鸣',
+  },
   calm: {
     outputMode: 'normal',
     rateSuggestion: 0,
@@ -436,6 +450,28 @@ export function buildTtsNeed(
         pitchSuggestion: -5,
         volumeSuggestion: 0.7,
         reason: '鼠标抖动高+焦躁，加强轻柔',
+        sources: ['BehaviorMetrics'],
+      })
+    }
+    // 低 APM + 长时间隔 → 疲惫倾向，柔和输出
+    if (metrics.apm <= 3 && metrics.meanInteractionIntervalSec > 60) {
+      partials.push({
+        outputMode: 'gentle',
+        rateSuggestion: -8,
+        pitchSuggestion: -4,
+        volumeSuggestion: 0.7,
+        reason: '操作缓慢+低活跃，温柔伴随',
+        sources: ['BehaviorMetrics'],
+      })
+    }
+    // 适中 APM + 低撤回 + 低切换 → 愉悦倾向，表现力丰富
+    if (metrics.apm >= 8 && metrics.apm <= 25 && (metrics.retractionsPerMin ?? 0) < 2 && enrichedState.mode !== 'focus') {
+      partials.push({
+        outputMode: 'expressive',
+        rateSuggestion: 10,
+        pitchSuggestion: 6,
+        volumeSuggestion: 0.9,
+        reason: '适度活跃+稳定操作，愉悦表达',
         sources: ['BehaviorMetrics'],
       })
     }

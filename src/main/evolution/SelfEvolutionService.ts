@@ -42,6 +42,8 @@ import { evolutionCheckpointManager } from './EvolutionCheckpointManager'
 import type { MemoryEvolutionBridge, MemoryChangeEvent } from '../memory/MemoryEvolutionBridge'
 import type { CicdOrchestrator } from './cicd/CicdOrchestrator'
 import { behaviorPriorityWeighter } from './automation/BehaviorPriorityWeighter'
+import { moduleFeedbackManager } from './feedback/ModuleFeedbackManager'
+import { evolutionFeedbackCollector } from './feedback/EvolutionFeedbackCollector'
 
 // =============================================================================
 // 调度状态机状态枚举
@@ -303,6 +305,13 @@ export class SelfEvolutionService implements ISubsystem {
 
   async init(): Promise<void> {
     this.state = 'initializing'
+
+    // ★ 初始化进化行为反馈闭环（加载持久化的模块反馈状态）
+    moduleFeedbackManager.init()
+    log('INFO', 'evolution_feedback_module_manager_initialized', {
+      modules: moduleFeedbackManager.getTrackedModules().length,
+    })
+
     this.state = 'ready'
   }
 
@@ -638,6 +647,17 @@ export class SelfEvolutionService implements ISubsystem {
               .map(([m, w]) => `${m}:${w.toFixed(2)}x`)
               .join(', '),
           })
+
+          // ★ 进化行为反馈闭环：应用模块负反馈调整，降低用户拒绝模块的优先级
+          const feedbackResult = behaviorPriorityWeighter.applyFeedbackAdjustment()
+          if (Object.keys(feedbackResult.weights).length > 0) {
+            // 使用反馈调整后的权重覆盖热力图权重
+            this.pipeline.setBehaviorWeights(feedbackResult.weights)
+            log('INFO', 'evolution_feedback_weights_applied', {
+              adjustedCount: Object.keys(feedbackResult.weights).length,
+              regressionCount: Object.keys(feedbackResult.regression).length,
+            })
+          }
         } else {
           // 数据不足 → 清除权重（回归默认排序）
           this.pipeline.setBehaviorWeights(null)
@@ -747,6 +767,28 @@ export class SelfEvolutionService implements ISubsystem {
           this.tryRunFailures = 0
           this.lastSuccessTime = Date.now()
           this.recoveryCooldownUntil = 0
+
+          // ★ 进化行为反馈闭环：记录本次管道执行的模块修改，
+          //   供后续周期的 EvolutionFeedbackCollector 检测用户拒绝信号
+          try {
+            const fixedModules = this.extractModulesFromPipelineMetrics(metrics)
+            if (fixedModules.length > 0) {
+              evolutionFeedbackCollector.recordPlanExecution(
+                `管道执行 #${startedAt}`,
+                fixedModules.map((m) => ({
+                  moduleName: m,
+                  filePaths: [] as string[],
+                  changeType: 'fix' as const,
+                })),
+              )
+              log('INFO', 'evolution_feedback_plan_recorded', {
+                modules: fixedModules,
+                totalFixed: metrics.totalFixed,
+              })
+            }
+          } catch (feedbackErr: any) {
+            log('WARN', 'evolution_feedback_plan_record_error', { error: feedbackErr.message })
+          }
 
           // pre_pipeline 完成
           if (prePipelineCkpt) evolutionCheckpointManager.completeCheckpoint(prePipelineCkpt)
@@ -939,6 +981,45 @@ export class SelfEvolutionService implements ISubsystem {
     }
 
     return lines.join('\n')
+  }
+
+  /**
+   * 从管道指标中提取被修复的模块名列表。
+   * 如果管道修复了任何问题，结合热力图数据推断涉及的模块。
+   *
+   * @param metrics 管道执行后的指标
+   * @returns 被修复的模块名列表
+   */
+  private extractModulesFromPipelineMetrics(metrics: PipelineMetrics): string[] {
+    try {
+      if (metrics.totalFixed <= 0) return []
+
+      const modules = new Set<string>()
+
+      // 从热力图数据推断 — 高频和错误模块是进化管道的重点目标
+      if (this.lastHeatmap?.hasSufficientData) {
+        for (const entry of this.lastHeatmap.hotModules ?? []) {
+          modules.add(entry.module)
+        }
+        for (const entry of this.lastHeatmap.errorModules ?? []) {
+          modules.add(entry.module)
+        }
+      }
+
+      // 从反馈管理器已知的被跟踪模块中补充
+      for (const modName of moduleFeedbackManager.getTrackedModules()) {
+        modules.add(modName)
+      }
+
+      // 如果没有推断数据，使用通用标签
+      if (modules.size === 0) {
+        modules.add('pipeline')
+      }
+
+      return Array.from(modules)
+    } catch {
+      return ['pipeline']
+    }
   }
 
   // ==================== 完整性检查 ====================

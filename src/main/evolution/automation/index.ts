@@ -25,6 +25,8 @@ export { ToolEvolutionCollector } from './ToolEvolutionCollector'
 export { ToolAnalyticsCollector } from './ToolAnalyticsCollector'
 export { ToolEvolutionExecutor } from './ToolEvolutionExecutor'
 export { ToolConfigOptimizationExecutor } from './ToolConfigOptimizationExecutor'
+export { ToolCompositeCollector } from './ToolCompositeCollector'
+export { ToolCompositeExecutor } from './ToolCompositeExecutor'
 export { TtsPreferenceCollector } from './TtsPreferenceCollector'
 export { TtsConfigOptimizationExecutor } from './TtsConfigOptimizationExecutor'
 export { TtsTypographyCollector } from './TtsTypographyCollector'
@@ -35,6 +37,12 @@ export { CicdCollector } from '../cicd/CicdCollector'
 export { BlogOptimizationCollector } from '../blog/BlogOptimizationCollector'
 export { BlogOptimizationExecutor } from '../blog/BlogOptimizationExecutor'
 export { EvidenceCollector } from './EvidenceCollector'
+
+// ── 使用模式采集与参数调整（行为驱动的自进化优化）──
+export { BehaviorUsageCollector } from './BehaviorUsageCollector'
+export { BehaviorParamAdjustmentExecutor } from './BehaviorParamAdjustmentExecutor'
+export { UserErrorPatternCollector, userErrorPatternCollector } from './UserErrorPatternCollector'
+export { LearningCurveExecutor, learningCurveExecutor } from './LearningCurveExecutor'
 export { ParameterSelfEvolutionAnalyzer, parameterSelfEvolutionAnalyzer } from '../self-parameter/ParameterSelfEvolutionAnalyzer'
 export { ParameterSelfEvolutionExecutor } from '../self-parameter/ParameterSelfEvolutionExecutor'
 export { EvidenceBridge, EVIDENCE_REPORT_READY } from './EvidenceBridge'
@@ -42,6 +50,9 @@ export type { EvidenceReportReadyPayload, EvidenceEmitter } from './EvidenceBrid
 export { ExecutionPolicy } from './ExecutionPolicy'
 export type { ExecutionLevel, ExecutionMode, ExecutionVerdict, VerdictAction, PolicyDecisionEvent } from './ExecutionPolicy'
 export { SyntheticTscExecutor, SYNTHETIC_EXECUTOR_NAME } from './SyntheticTscExecutor'
+
+// ── 自适应步长求解器（自进化 ODE 求解器升级）──
+export { SolverScannerCollector, AdaptiveSolverExecutor } from '../adaptivesolver'
 
 // ═══════════════════════════════════════════
 //  MCP 模式迁移导出

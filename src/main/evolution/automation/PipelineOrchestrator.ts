@@ -41,6 +41,8 @@ import { TtsPreferenceCollector } from './TtsPreferenceCollector'
 import { TtsConfigOptimizationExecutor } from './TtsConfigOptimizationExecutor'
 import { TtsTypographyCollector } from './TtsTypographyCollector'
 import { TtsTypographyExecutor } from './TtsTypographyExecutor'
+import { ToolCompositeCollector } from './ToolCompositeCollector'
+import { ToolCompositeExecutor } from './ToolCompositeExecutor'
 import { TypeHealthCollector } from '../typehealth/TypeHealthCollector'
 import { TypeRefactorExecutor } from '../typehealth/TypeRefactorExecutor'
 import { FileOrganizerCollector } from '../file-organizer/FileOrganizerCollector'
@@ -55,6 +57,12 @@ import { BlogOptimizationExecutor } from '../blog/BlogOptimizationExecutor'
 import { ParameterSelfEvolutionAnalyzer, parameterSelfEvolutionAnalyzer } from '../self-parameter/ParameterSelfEvolutionAnalyzer'
 import { ParameterSelfEvolutionExecutor } from '../self-parameter/ParameterSelfEvolutionExecutor'
 import { correctionPatternCollector } from './CorrectionPatternCollector'
+import { BehaviorUsageCollector } from './BehaviorUsageCollector'
+import { BehaviorParamAdjustmentExecutor } from './BehaviorParamAdjustmentExecutor'
+import { SolverScannerCollector, AdaptiveSolverExecutor } from '../adaptivesolver'
+import { evolutionFeedbackCollector } from '../feedback/EvolutionFeedbackCollector'
+import { userErrorPatternCollector } from './UserErrorPatternCollector'
+import { learningCurveExecutor } from './LearningCurveExecutor'
 
 export interface PipelineConfig {
   projectRoot: string
@@ -159,6 +167,14 @@ export class PipelineOrchestrator {
     registerCollector(parameterSelfEvolutionAnalyzer)
     // 重复纠正模式采集器（用户反复纠正同一问题 → 生成改进提案）
     registerCollector(correctionPatternCollector)
+    // 使用模式采集器（行为驱动的自进化参数调整）
+    registerCollector(new BehaviorUsageCollector())
+    // 固定步长求解器扫描采集器（自进化自适应步长求解）
+    registerCollector(new SolverScannerCollector())
+    // 自进化行为反馈闭环采集器（用户拒绝信号检测）
+    registerCollector(evolutionFeedbackCollector)
+    // 用户错误模式采集器（学习曲线适配）
+    registerCollector(userErrorPatternCollector)
 
     // Stage 3: 从注册表加载到本地
     for (const c of getAllCollectors()) {
@@ -203,6 +219,15 @@ export class PipelineOrchestrator {
     registerExecutor(blogOptExecutor)
     // 参数自进化执行器（验证并应用参数调整提案）
     registerExecutor(new ParameterSelfEvolutionExecutor())
+    // 行为参数调整执行器（使用模式 → 系统参数调整）
+    registerExecutor(new BehaviorParamAdjustmentExecutor())
+    // 自适应求解器升级执行器（固定步长 → 自适应步长 RK45）
+    registerExecutor(new AdaptiveSolverExecutor())
+    // 学习曲线适配执行器（用户错误模式 → 代码改进补丁）
+    registerExecutor(learningCurveExecutor)
+    // 复合工具采集器与执行器（频繁序列 → 复合 MCP 工具）
+    registerCollector(new ToolCompositeCollector())
+    registerExecutor(new ToolCompositeExecutor())
 
     // Stage 5: 从注册表加载到本地
     for (const e of getAllExecutors()) {

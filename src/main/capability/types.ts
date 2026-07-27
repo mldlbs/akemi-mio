@@ -106,6 +106,17 @@ export interface CapabilityDefinition {
   providers: CapabilityProvider[]
 }
 
+/**
+ * CapabilityProviderAdapter — 将 canonical capability input 转换为 provider-specific tool params。
+ *
+ * P1.3b D3 (Capability Schema Ownership):
+ * - Capability 拥有 canonical inputSchema，Provider 适配器负责转换
+ * - 例如: publishing 的 canonical input { title, content, platform? }
+ *           → fanqie adapter 转换为 { novelName, content, category }
+ * - 无 adapter 时: input 直接透传给 provider tool（向后兼容）
+ */
+export type CapabilityProviderAdapter = (input: unknown, tool: string) => unknown
+
 export interface CapabilityProvider {
   /** MCP Registry 中的 server id */
   mcpServerId: string
@@ -113,6 +124,8 @@ export interface CapabilityProvider {
   tools: string[]
   /** 默认工具，当有多个工具可用时使用 */
   defaultTool?: string
+  /** P1.3b: canonical input → provider-specific params */
+  adapter?: CapabilityProviderAdapter
 }
 
 export interface ResolveResult {

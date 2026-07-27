@@ -153,13 +153,17 @@ export interface VoiceStyleInfo {
 // ══════════════════════════════════════════
 
 /**
- * 行为情绪标签 — 从用户实时交互行为（APM、窗口切换、鼠标抖动）推断的情绪状态。
+ * 行为情绪标签 — 从用户实时交互行为（APM、窗口切换、鼠标抖动、撤回频率、操作间隔）推断的情绪状态。
  *
  * 与 SentimentPolarity（基于 AI 回复内容的文本情感）互补：
  *   - SentimentPolarity: 内容说了什么 → 正面/负面/中性
- *   - BehaviorEmotion: 用户怎么交互 → 焦躁/平静/专注/中性
+ *   - BehaviorEmotion: 用户怎么交互 → 急躁/疲惫/愉悦/平静/专注/中性
+ *
+ * 新增疲惫/愉悦标签说明：
+ *   - tired (疲惫): 深夜+低APM+操作缓慢 → TTS 温柔轻声
+ *   - joyful (愉悦): 完成任务/高频但不急躁的交互 → TTS 欢快语调
  */
-export type BehaviorEmotion = 'anxious' | 'calm' | 'focused' | 'neutral'
+export type BehaviorEmotion = 'anxious' | 'tired' | 'joyful' | 'calm' | 'focused' | 'neutral'
 
 /** 行为情绪 → TTS 参数预设映射表 */
 export const BEHAVIOR_EMOTION_TTS_MAP: Record<BehaviorEmotion, EmotionTtsParams> = {
@@ -169,6 +173,20 @@ export const BEHAVIOR_EMOTION_TTS_MAP: Record<BehaviorEmotion, EmotionTtsParams>
     rate: '-8%',
     pitch: '-4Hz',
     label: '安抚·焦躁',
+  },
+  /** 疲惫 — 语速放缓、音调低沉、温柔轻声，提供共情陪伴 */
+  tired: {
+    voice: 'zh-CN-XiaoyiNeural',
+    rate: '-12%',
+    pitch: '-6Hz',
+    label: '温柔·疲惫',
+  },
+  /** 愉悦 — 语速轻快、音调偏高，传递共鸣喜悦 */
+  joyful: {
+    voice: 'zh-CN-XiaoxiaoNeural',
+    rate: '+18%',
+    pitch: '+12Hz',
+    label: '欢快·愉悦',
   },
   /** 平静 — 保持自然语速和语调 */
   calm: {
@@ -206,6 +224,77 @@ export const BEHAVIOR_EMOTION_TTS_MAP: Record<BehaviorEmotion, EmotionTtsParams>
  *   - BehaviorEmotion（行为情感）: 用户怎么操作 → 焦躁/平静/专注/中性
  *   - VoiceEmotionLabel（语音情感）: 用户怎么说 → 开心/悲伤/生气/平静/焦虑/中性
  */
+
+// ══════════════════════════════════════════
+//  用户输入文本情感 — 基于用户输入文本关键词分析的情绪检测
+// ══════════════════════════════════════════
+
+/**
+ * 用户输入文本情感标签 — 从用户输入的文本内容（关键词匹配）推断的情绪状态。
+ *
+ * 与 BehaviorEmotion（用户怎么操作 → 焦躁/平静/专注/中性）互补：
+ *   - BehaviorEmotion: 用户怎么操作（APM/窗口切换/鼠标抖动）
+ *   - UserInputEmotion: 用户说了什么（文本关键词 → 愤怒/悲伤/喜悦/中性）
+ *
+ * 用于 UserInputEmotionAnalyzer 的输出，驱动 TTS 同音色下的情绪匹配合成。
+ */
+export type UserInputEmotion = 'angry' | 'sad' | 'joyful' | 'neutral'
+
+/** 用户输入文本情感分析结果 */
+export interface UserInputEmotionResult {
+  /** 当前情绪标签 */
+  emotion: UserInputEmotion
+  /** 置信度 0–1 */
+  confidence: number
+  /** 匹配到的情感词 */
+  matchedWords: string[]
+  /** 对应的 TTS 参数预设 */
+  ttsParams: EmotionTtsParams
+  /** 是否检测到连续相同情绪（≥3次） */
+  consecutiveEmotion: boolean
+  /** 当前情绪的连续出现次数 */
+  consecutiveCount: number
+}
+
+/**
+ * 用户输入文本情感 → TTS 参数预设映射表。
+ *
+ * 设计原则：
+ *   angry  → 语速和音调显著提高（+20%），匹配用户的高涨情绪
+ *   sad    → 语速放缓、音调低沉，添加停顿感（温柔安慰）
+ *   joyful → 语速轻快、音调偏高，传递共鸣喜悦
+ *   neutral → 默认参数，不覆盖
+ */
+export const USER_INPUT_EMOTION_TTS_MAP: Record<UserInputEmotion, EmotionTtsParams> = {
+  /** 愤怒 — 语速加快、音调提高，匹配用户的激动情绪 */
+  angry: {
+    voice: 'zh-CN-YunjianNeural',
+    rate: '+20%',
+    pitch: '+15Hz',
+    label: '共鸣·愤怒',
+  },
+  /** 悲伤 — 语速放缓、音调低沉，温柔安慰 */
+  sad: {
+    voice: 'zh-CN-XiaoyiNeural',
+    rate: '-10%',
+    pitch: '-8Hz',
+    label: '安抚·悲伤',
+  },
+  /** 喜悦 — 语速轻快、音调偏高，传递共鸣喜悦 */
+  joyful: {
+    voice: 'zh-CN-XiaoxiaoNeural',
+    rate: '+18%',
+    pitch: '+12Hz',
+    label: '共鸣·喜悦',
+  },
+  /** 中性 — 默认参数，不覆盖 */
+  neutral: {
+    voice: 'zh-CN-XiaoxiaoNeural',
+    rate: '+10%',
+    pitch: '+8Hz',
+    label: '中性·用户输入',
+  },
+}
 
 /** 语音情感 → TTS 参数预设映射表 */
 export const VOICE_EMOTION_TTS_MAP: Record<VoiceEmotionLabel, EmotionTtsParams> = {
@@ -267,6 +356,12 @@ export interface BehaviorMetrics {
   totalActions: number
   /** 时间窗口内的窗口切换总数 */
   totalWindowSwitches: number
+  /** 时间窗口内的撤回/重做次数 */
+  totalRetractions: number
+  /** 每分钟撤回/重做次数 */
+  retractionsPerMin: number
+  /** 最近交互的平均间隔（秒），用于检测操作缓慢 */
+  meanInteractionIntervalSec: number
   /** 最后一次更新时间戳 */
   lastUpdated: number
 }

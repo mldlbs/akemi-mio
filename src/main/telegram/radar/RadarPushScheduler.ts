@@ -65,9 +65,6 @@ export class RadarPushScheduler {
   /** 最后一次推送时间（用于全局去重） */
   private lastGlobalPushTime = 0
 
-  /** 最后一次推送的消息 hash，用于内容级去重 */
-  private lastMessageHash = ''
-
   // ════════════════════════════════════════════════════════════════
   // 生命周期
   // ════════════════════════════════════════════════════════════════
@@ -226,15 +223,6 @@ export class RadarPushScheduler {
     })
 
     const message = await this.fetchRemoteRadarMessage(rule)
-
-    // 内容级去重：相同消息不重复推送
-    const hash = simpleHash(message)
-    if (hash === this.lastMessageHash) {
-      log('INFO', 'radar_push_duplicate_skipped', { hash })
-      this.emitPushCompleted(rule, message, false, Date.now() - t0, 'duplicate')
-      return
-    }
-    this.lastMessageHash = hash
 
     this.emitPushEvent(rule, message, 0)
     radarPushRuleStore.markPushed(rule.id)

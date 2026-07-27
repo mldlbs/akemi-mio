@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { log } from '../../logger/Logger'
 import { credentialsManager } from '../../credentials/CredentialsManager'
 import { blogKanbanBridge } from '../../wallpaper/BlogKanbanBridge'
+import { behaviorActionCounter } from '../../behavior/BehaviorActionCounter'
 import type { HandlerContext } from './context'
 
 export function registerWallpaperHandlers({ agentService, memoryContextRef, conversationContextRef, wallpaperInteractiveRef }: HandlerContext): void {
@@ -119,5 +120,27 @@ export function registerWallpaperHandlers({ agentService, memoryContextRef, conv
       blogKanbanBridge.refresh()
     }
     return { success: true }
+  })
+
+  // ── 行为频率计数：获取 Top-N 高频动作 ──
+  ipcMain.handle('wallpaper:getTopActions', async (_event, n?: number) => {
+    try {
+      const actions = behaviorActionCounter.getTopActions(n ?? 2)
+      return { success: true, actions, timestamp: Date.now() }
+    } catch (err: any) {
+      log('WARN', 'wallpaper_get_top_actions_failed', { error: String(err) })
+      return { success: false, actions: [], timestamp: Date.now(), error: String(err) }
+    }
+  })
+
+  // ── 行为频率计数：手动记录一个动作（从渲染进程触发） ──
+  ipcMain.handle('wallpaper:recordAction', async (_event, actionId: string) => {
+    try {
+      behaviorActionCounter.recordAction(actionId)
+      return { success: true }
+    } catch (err: any) {
+      log('WARN', 'wallpaper_record_action_failed', { actionId, error: String(err) })
+      return { success: false, error: String(err) }
+    }
   })
 }

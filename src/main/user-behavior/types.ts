@@ -49,6 +49,9 @@ export type UserBehaviorFeature =
   /** 反馈回路收敛自动切换：收敛后自动从 monitor 切到 auto */
   | 'feedback_loop_auto_switch'
 
+  /** 学习曲线适配：根据用户错误频率自动生成代码改进补丁 */
+  | 'learning_curve_adaptation'
+
   // ═════════════════════════════════════════════════════════════════
   //  ASR 适配器 — VoiceEmotion / AcousticEnvironment → BehaviorContext
   // ═════════════════════════════════════════════════════════════════
@@ -314,6 +317,7 @@ export function parseFeaturesFromEnv(): UserBehaviorFeature[] {
     'plan_behavior_replacement_suggestion',
     'plan_behavior_replacement_replacement',
     'asr_adapter',
+    'learning_curve_adaptation',
   ])
 
   return raw

@@ -8,3 +8,4 @@
 export { EmotionTimeSeriesStore, emotionTimeSeriesStore } from './EmotionTimeSeriesStore'
 export { NarrativeEmotionController, narrativeEmotionController, type NarrativeEmotionConfig } from './NarrativeEmotionController'
 export { SpeakingStyleGenerator, speakingStyleGenerator, type StyledTtsSegment, type SpeakingStyleResult } from './SpeakingStyleGenerator'
+export { EmotionalNarrativeService, emotionalNarrativeService, type NarrativeSegmentEvent, type NarrativeStartEvent, type NarrativeEndEvent, type NarrativeState } from './EmotionalNarrativeService'

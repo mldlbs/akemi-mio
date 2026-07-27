@@ -50,6 +50,7 @@ import {
   typeChallengeSubmitTool,
   typeChallengeSolutionTool,
 } from './definitions/LearningTools'
+import { odeSolverTool } from './definitions/OdeSolverTool'
 import {
   moveFileTool,
   copyFileTool,
@@ -123,6 +124,8 @@ import {
   planSchedulerRetryTaskTool,
   planSchedulerConfirmTaskTool,
 } from './definitions/PlanSchedulerTools'
+import { toolChainOrchestratorTools } from './definitions/ToolChainOrchestratorTools'
+import { injectAsrVocabularyTool, queryAsrVocabularyTool, clearAsrVocabularyTool } from './definitions/AsrVocabularyTool'
 
 export function getAllTools(): Tool[] {
   return [
@@ -276,5 +279,16 @@ export function getAllTools(): Tool[] {
     planSchedulerSkipTaskTool as Tool,
     planSchedulerRetryTaskTool as Tool,
     planSchedulerConfirmTaskTool as Tool,
+
+    // === 常微分方程（ODE）数值求解 ===
+    odeSolverTool as Tool,
+
+    // === 工具链编排即服务 ===
+    ...toolChainOrchestratorTools as Tool[],
+
+    // === 记忆唤醒语音热词（ASR 领域词表注入） ===
+    injectAsrVocabularyTool as Tool,
+    queryAsrVocabularyTool as Tool,
+    clearAsrVocabularyTool as Tool,
   ]
 }

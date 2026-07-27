@@ -5,11 +5,18 @@
  * 1. 将 BehaviorHeatmapService 生成的模块热力图转换为每模块优先级权重
  * 2. 对权重应用 EMA（指数移动平均）平滑，防止短期波动导致进化方向不稳定
  * 3. 权重用于 ProblemQueue.sort() 中修正问题优先级排序
+ * 4. 集成 ModuleFeedbackManager 负反馈信号，降低用户拒绝模块的修改优先级
+ *
+ * v2 增强 — 进化行为反馈闭环：
+ * - applyFeedbackAdjustment() 读取 ModuleFeedbackManager 的拒绝信号
+ * - 对用户拒绝（撤销/回滚/重试）的模块降低修改优先级
+ * - 提供 regressionWeights 用于回归测试优先级排序
  *
  * 权重策略：
  * - 高频模块（hot）:   权重 1.5x — 用户最常使用的功能区域，进化优先优化
  * - 高错误模块（error）: 权重 1.3x — 用户高频出错区域，进化优先修复
  * - 低频模块（cold）:   权重 0.5x — 用户很少使用，降低进化投入
+ * - 用户拒绝模块:      权重 *= feedbackPenalty — 用户不接受进化对该模块的修改
  * - 普通模块:          权重 1.0x — 按默认优先级处理
  *
  * 平滑机制：
@@ -20,6 +27,7 @@
 
 import { log } from '../../logger/Logger'
 import type { ModuleHeatmap, ModuleHeatmapEntry } from '../../user-behavior/types'
+import { moduleFeedbackManager } from '../feedback/ModuleFeedbackManager'
 
 // ════════════════════════════════════════════════════════════════
 //  常量
@@ -36,6 +44,9 @@ const COLD_MODULE_WEIGHT = 0.5
 
 /** 普通模块默认权重 */
 const NORMAL_WEIGHT = 1.0
+
+/** 负反馈模块最低权重（即使有很多负反馈也不低于此值） */
+const MIN_FEEDBACK_WEIGHT = 0.2
 
 /** EMA 平滑因子 α 默认值 */
 const DEFAULT_ALPHA = 0.3
@@ -59,12 +70,19 @@ const WEIGHT_HISTORY_KEY = 'behavior_priority_weights'
 /** 模块 → 优先级权重的映射 */
 export type BehaviorWeightMap = Record<string, number>
 
+/** 模块 → 回归测试优先级权重的映射 */
+export type RegressionWeightMap = Record<string, number>
+
 /** 加权器状态（包含历史权重快照，用于 EMA 计算） */
 export interface WeighterState {
   /** 当前权重（EMA 平滑后） */
   current: BehaviorWeightMap
   /** 上次计算的原始（未平滑）权重 */
   lastRaw: BehaviorWeightMap
+  /** 回归测试权重（负反馈模块的回归优先级） */
+  regression: RegressionWeightMap
+  /** 反馈调整后的权重（应用 ModuleFeedbackManager 后） */
+  feedbackAdjusted: BehaviorWeightMap
   /** 上次更新时的总调用数，用于自适应 α */
   lastTotalCalls: number
   /** 更新时间戳 */
@@ -76,10 +94,12 @@ export interface WeighterState {
 // ════════════════════════════════════════════════════════════════
 
 export class BehaviorPriorityWeighter {
-  /** 内部状态（含 EMA 历史） */
+  /** 内部状态（含 EMA 历史 + 反馈调整） */
   private state: WeighterState = {
     current: {},
     lastRaw: {},
+    regression: {},
+    feedbackAdjusted: {},
     lastTotalCalls: 0,
     updatedAt: 0,
   }
@@ -135,12 +155,91 @@ export class BehaviorPriorityWeighter {
   }
 
   /**
+   * 获取反馈调整后的权重。
+   * 如果尚未调整，返回空映射。
+   */
+  getFeedbackAdjustedWeights(): BehaviorWeightMap {
+    return { ...this.state.feedbackAdjusted }
+  }
+
+  /**
+   * 获取回归测试权重映射。
+   * 负反馈越多的模块回归测试优先级越高。
+   */
+  getRegressionWeights(): RegressionWeightMap {
+    return { ...this.state.regression }
+  }
+
+  /**
+   * 应用 ModuleFeedbackManager 的负反馈信号调整模块优先级。
+   *
+   * 调整策略：
+   * - 对 modificationPriority < 1.0 的模块（即用户拒绝过的）降低其进化权重
+   * - 对 regressionTestPriority > 0.5 的模块（即需回归验证的）生成回归权重
+   * - 负反馈越强，modificationPriority 越低，regressionTestPriority 越高
+   *
+   * @returns { weights: 调整后的权重, regression: 回归测试权重 }
+   */
+  applyFeedbackAdjustment(): { weights: BehaviorWeightMap; regression: RegressionWeightMap } {
+    try {
+      if (!moduleFeedbackManager.isInitialized()) {
+        return { weights: { ...this.state.current }, regression: {} }
+      }
+
+      const adjusted: BehaviorWeightMap = { ...this.state.current }
+      const regression: RegressionWeightMap = {}
+
+      // 遍历所有被跟踪的模块，应用负反馈调整
+      for (const moduleName of moduleFeedbackManager.getTrackedModules()) {
+        const modPriority = moduleFeedbackManager.getModuleModificationPriority(moduleName)
+        const regPriority = moduleFeedbackManager.getModuleRegressionPriority(moduleName)
+
+        // 如果当前权重映射中存在该模块，应用反馈调整
+        if (moduleName in adjusted) {
+          // 修改优先级调整为：热力图权重 × 反馈修正系数
+          // modPriority < 1.0 表示负反馈 → 降低权重
+          // modPriority > 1.0 表示正反馈 → 增加权重（但不超过原始热力图权重）
+          const feedbackFactor = modPriority // 0.1~1.5
+          adjusted[moduleName] = Math.max(
+            MIN_FEEDBACK_WEIGHT,
+            Math.min(adjusted[moduleName], adjusted[moduleName] * feedbackFactor),
+          )
+        }
+
+        // 回归测试权重直接从 ModuleFeedbackManager 获取
+        if (regPriority > 0.5) {
+          regression[moduleName] = regPriority
+        }
+      }
+
+      // 更新内部状态
+      this.state.feedbackAdjusted = { ...adjusted }
+      this.state.regression = { ...regression }
+
+      if (Object.keys(adjusted).length > 0 || Object.keys(regression).length > 0) {
+        log('INFO', 'behavior_feedback_adjustment_applied', {
+          adjustedCount: Object.keys(adjusted).length,
+          regressionCount: Object.keys(regression).length,
+          topReduced: this.getTopModules(adjusted, 3),
+        })
+      }
+
+      return { weights: adjusted, regression }
+    } catch (err: any) {
+      log('WARN', 'behavior_feedback_adjustment_error', { error: err.message })
+      return { weights: { ...this.state.current }, regression: {} }
+    }
+  }
+
+  /**
    * 获取加权器的状态快照（可用于持久化/恢复）。
    */
   getState(): WeighterState {
     return {
       current: { ...this.state.current },
       lastRaw: { ...this.state.lastRaw },
+      regression: { ...this.state.regression },
+      feedbackAdjusted: { ...this.state.feedbackAdjusted },
       lastTotalCalls: this.state.lastTotalCalls,
       updatedAt: this.state.updatedAt,
     }
@@ -153,12 +252,15 @@ export class BehaviorPriorityWeighter {
     this.state = {
       current: { ...state.current },
       lastRaw: { ...state.lastRaw },
+      regression: state.regression ? { ...state.regression } : {},
+      feedbackAdjusted: state.feedbackAdjusted ? { ...state.feedbackAdjusted } : {},
       lastTotalCalls: state.lastTotalCalls,
       updatedAt: state.updatedAt,
     }
     this.initialized = Object.keys(state.current).length > 0
     log('INFO', 'behavior_priority_weighter_restored', {
       modules: Object.keys(state.current).length,
+      feedbackModules: Object.keys(state.feedbackAdjusted ?? {}).length,
       updatedAt: state.updatedAt,
     })
   }
@@ -173,6 +275,8 @@ export class BehaviorPriorityWeighter {
     this.state = {
       current: {},
       lastRaw: {},
+      regression: {},
+      feedbackAdjusted: {},
       lastTotalCalls: 0,
       updatedAt: 0,
     }

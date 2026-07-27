@@ -219,6 +219,47 @@ export type {
   RollbackRecord,
 } from './self-parameter'
 
+// ═══════════════════════════════════════════════════════════════
+//  进化行为反馈闭环 — Evolution Feedback Loop
+// ═══════════════════════════════════════════════════════════════
+//
+// 自进化行为反馈闭环：让 Evolution 系统利用用户行为数据自动调整策略。
+// 在进化计划执行后，收集用户交互反馈（撤销操作、重试请求）作为负样本，
+// 用于调整代码分析器的权重。
+//
+// 核心组件：
+//   - moduleFeedbackManager — 模块级反馈状态管理器
+//   - evolutionFeedbackCollector — 进化反馈采集器（SignalCollector）
+//
+// 集成方式：
+//   1. moduleFeedbackManager.init() 在 SelfEvolutionService.init() 中调用
+//   2. ModuleFeedbackManager 在管道执行周期中自动被 BehaviorPriorityWeighter 读取
+//   3. EvolutionFeedbackCollector 作为 SignalCollector 注册到 PipelineOrchestrator
+//
+// 反馈策略：
+//   - Git 回滚: 降低 modificationPriority (-0.2), 提高 regressionPriority (+0.3)
+//   - 错误率飙升: 降低 modificationPriority (-0.15), 提高 regressionPriority (+0.2)
+//   - 工具重试: 降低 modificationPriority (-0.1), 提高 regressionPriority (+0.15)
+//   - 权重每日向默认值衰减 10%, 防止策略永久偏移
+
+export {
+  ModuleFeedbackManager,
+  moduleFeedbackManager,
+  EvolutionFeedbackCollector,
+  evolutionFeedbackCollector,
+} from './feedback'
+
+export type {
+  EvolutionModuleChange,
+  EvolutionPlanRecord,
+  RejectionSignalType,
+  RejectionSignal,
+  ModuleFeedbackState,
+  FeedbackStore,
+  EvolutionFeedbackSignalEvent,
+  ModuleWeightAdjustedEvent,
+} from './feedback'
+
 // ═══════════════════════════════════════════
 //  Memory × Evolution 深度融合桥接器
 // ═══════════════════════════════════════════

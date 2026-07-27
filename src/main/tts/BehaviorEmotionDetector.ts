@@ -66,6 +66,27 @@ const MIN_INTERACTIONS_FOR_CONFIDENCE = 3
 /** 置信度所需的最小窗口切换次数 */
 const MIN_SWITCHES_FOR_CONFIDENCE = 1
 
+/** 撤回频率阈值（次/分钟）：超过此值视为频繁撤回 */
+const RETRACTION_HIGH_THRESHOLD = 3
+
+/** 疲惫检测：低 APM 阈值，持续低于此值一段时间 → 疲惫 */
+const TIRED_APM_THRESHOLD = 3
+
+/** 疲惫检测：长时间无操作阈值（秒），超过此值 → 推测疲惫/休息 */
+const TIRED_IDLE_THRESHOLD_SEC = 180 // 3 分钟
+
+/** 愉悦检测：APM 适中范围下限 */
+const JOYFUL_APM_MIN = 8
+
+/** 愉悦检测：APM 适中范围上限 */
+const JOYFUL_APM_MAX = 25
+
+/** 愉悦检测：窗口切换适中，说明不是焦躁切换 */
+const JOYFUL_SWITCH_MAX = 4
+
+/** 平均交互间隔（秒）：超过此值视为操作缓慢（疲惫特征） */
+const SLOW_INTERVAL_THRESHOLD_SEC = 60
+
 // ══════════════════════════════════════════
 //  类型定义
 // ══════════════════════════════════════════
@@ -75,6 +96,10 @@ interface TimestampedAction {
 }
 
 interface TimestampedSwitch {
+  timestamp: number
+}
+
+interface TimestampedRetraction {
   timestamp: number
 }
 
@@ -94,6 +119,9 @@ export class BehaviorEmotionDetector {
 
   /** 窗口切换时间戳列表 */
   private windowSwitches: TimestampedSwitch[] = []
+
+  /** 撤回/重做操作时间戳列表 */
+  private retractions: TimestampedRetraction[] = []
 
   /** 鼠标采样历史（用于计算抖动度） */
   private mouseSamples: MouseSample[] = []
@@ -205,6 +233,16 @@ export class BehaviorEmotionDetector {
     this.recordInteraction()
   }
 
+  /**
+   * 记录一次撤回/重做操作（用户撤销消息、回退工具调用等）。
+   * 高频率撤回是焦躁/不确定的情绪信号。
+   */
+  recordRetraction(): void {
+    this.retractions.push({ timestamp: Date.now() })
+    this.pruneOldRetractions()
+    this.lastResult = null
+  }
+
   /** 记录一次窗口切换 */
   recordWindowSwitch(): void {
     this.windowSwitches.push({ timestamp: Date.now() })
@@ -264,6 +302,14 @@ export class BehaviorEmotionDetector {
     const totalWindowSwitches = recentSwitches.length
     const windowSwitchesPerMin = totalWindowSwitches / (this.windowSeconds / 60)
 
+    // 计算撤回频率
+    const recentRetractions = this.retractions.filter((r) => r.timestamp >= cutoff)
+    const totalRetractions = recentRetractions.length
+    const retractionsPerMin = totalRetractions / (this.windowSeconds / 60)
+
+    // 计算平均交互间隔（秒）
+    const meanInteractionIntervalSec = this.computeMeanInterval(recentActions)
+
     // 计算鼠标抖动度
     const mouseJitter = this.computeMouseJitter()
 
@@ -274,8 +320,25 @@ export class BehaviorEmotionDetector {
       windowSeconds: this.windowSeconds,
       totalActions,
       totalWindowSwitches,
+      totalRetractions,
+      retractionsPerMin: Math.round(retractionsPerMin * 10) / 10,
+      meanInteractionIntervalSec: Math.round(meanInteractionIntervalSec * 10) / 10,
       lastUpdated: now,
     }
+  }
+
+  /**
+   * 计算最近交互的平均间隔（秒）。
+   * 如果交互数少于 2，返回 0。
+   */
+  private computeMeanInterval(recentActions: TimestampedAction[]): number {
+    if (recentActions.length < 2) return 0
+    const sorted = [...recentActions].sort((a, b) => a.timestamp - b.timestamp)
+    let totalGap = 0
+    for (let i = 1; i < sorted.length; i++) {
+      totalGap += (sorted[i].timestamp - sorted[i - 1].timestamp) / 1000
+    }
+    return totalGap / (sorted.length - 1)
   }
 
   /**
@@ -333,13 +396,15 @@ export class BehaviorEmotionDetector {
    * 基于指标阈值规则分类行为情绪。
    *
    * 规则优先级（从高到低）：
-   *   1. 高 APM + 高窗口切换 + 高抖动 → anxious（焦躁）
-   *   2. 高 APM + 低窗口切换 + 低抖动 → focused（专注）
-   *   3. 低 APM + 低窗口切换 + 低抖动 → calm（平静）
-   *   4. 其他 → neutral（中性）
+   *   1. 高 APM + 高窗口切换 + 高抖动 + 高撤回 → anxious（焦躁）
+   *   2. 适中 APM + 适中窗口切换 + 低撤回 → joyful（愉悦）
+   *   3. 低 APM + 长时间隔 + 深夜时段 → tired（疲惫）
+   *   4. 高 APM + 低窗口切换 + 低抖动 → focused（专注）
+   *   5. 低 APM + 低窗口切换 + 低抖动 → calm（平静）
+   *   6. 其他 → neutral（中性）
    */
   private classifyEmotion(metrics: BehaviorMetrics): BehaviorEmotionResult {
-    const { apm, windowSwitchesPerMin, mouseJitter, totalActions, totalWindowSwitches } = metrics
+    const { apm, windowSwitchesPerMin, mouseJitter, retractionsPerMin, totalActions, totalWindowSwitches, totalRetractions, meanInteractionIntervalSec } = metrics
 
     // 数据充足性检查
     const hasEnoughData = totalActions >= MIN_INTERACTIONS_FOR_CONFIDENCE
@@ -350,10 +415,30 @@ export class BehaviorEmotionDetector {
     if (!hasEnoughData) {
       emotion = 'neutral'
       confidence = 0.1
-    } else if (apm >= APM_HIGH_THRESHOLD && windowSwitchesPerMin >= WINDOW_SWITCH_HIGH_THRESHOLD && mouseJitter >= JITTER_HIGH_THRESHOLD) {
-      // 高活跃 + 频繁切换 + 鼠标抖动 → 焦躁
+    } else if (
+      (apm >= APM_HIGH_THRESHOLD && windowSwitchesPerMin >= WINDOW_SWITCH_HIGH_THRESHOLD && mouseJitter >= JITTER_HIGH_THRESHOLD) ||
+      (retractionsPerMin >= RETRACTION_HIGH_THRESHOLD && apm >= APM_HIGH_THRESHOLD)
+    ) {
+      // 高活跃 + 频繁切换 + 鼠标抖动 + 高撤回 → 焦躁
       emotion = 'anxious'
       confidence = 0.75 + (apm / 100) * 0.25
+    } else if (
+      apm >= JOYFUL_APM_MIN && apm <= JOYFUL_APM_MAX &&
+      windowSwitchesPerMin <= JOYFUL_SWITCH_MAX &&
+      retractionsPerMin < RETRACTION_HIGH_THRESHOLD &&
+      mouseJitter < JITTER_HIGH_THRESHOLD
+    ) {
+      // 适中 APM + 低切换 + 低撤回 + 低抖动 → 愉悦
+      emotion = 'joyful'
+      confidence = 0.6 + (apm / 50) * 0.3
+    } else if (
+      apm <= TIRED_APM_THRESHOLD &&
+      meanInteractionIntervalSec >= SLOW_INTERVAL_THRESHOLD_SEC &&
+      this.isLateNight()
+    ) {
+      // 极低 APM + 长时间隔 + 深夜 → 疲惫
+      emotion = 'tired'
+      confidence = 0.7 + (1 - apm / TIRED_APM_THRESHOLD) * 0.3
     } else if (apm >= APM_HIGH_THRESHOLD && windowSwitchesPerMin < WINDOW_SWITCH_HIGH_THRESHOLD && mouseJitter < JITTER_HIGH_THRESHOLD) {
       // 高活跃 + 少切换 + 鼠标平稳 → 专注
       emotion = 'focused'
@@ -401,15 +486,25 @@ export class BehaviorEmotionDetector {
    * 计算各情绪标签的得分（0–1），用于混合信号时的软分类。
    */
   private computeEmotionScores(metrics: BehaviorMetrics): Record<BehaviorEmotion, number> {
-    const { apm, windowSwitchesPerMin, mouseJitter } = metrics
+    const { apm, windowSwitchesPerMin, mouseJitter, retractionsPerMin, meanInteractionIntervalSec } = metrics
 
     // 标准化各指标到 0–1
-    const apmNorm = Math.min(1, apm / 60)           // 60 APM = 1.0
+    const apmNorm = Math.min(1, apm / 60)               // 60 APM = 1.0
     const switchNorm = Math.min(1, windowSwitchesPerMin / 12) // 12 次/分钟 = 1.0
-    const jitterNorm = Math.min(1, mouseJitter)       // 已归一化
+    const jitterNorm = Math.min(1, mouseJitter)           // 已归一化
+    const retractNorm = Math.min(1, retractionsPerMin / 6) // 6 次/分钟撤回 = 1.0
+    const intervalNorm = Math.min(1, meanInteractionIntervalSec / TIRED_IDLE_THRESHOLD_SEC) // 长间隔归一化
+    const isLateNight = this.isLateNight() ? 1 : 0
 
-    // anxious 得分：高 APM + 高切换 + 高抖动
-    const anxiousScore = (apmNorm * 0.4 + switchNorm * 0.35 + jitterNorm * 0.25)
+    // anxious 得分：高 APM + 高切换 + 高抖动 + 高撤回
+    const anxiousScore = (apmNorm * 0.3 + switchNorm * 0.25 + jitterNorm * 0.2 + retractNorm * 0.25)
+
+    // joyful 得分：适中 APM + 低切换 + 低撤回 + 低抖动
+    const joyfulApmGoodness = apmNorm > 0.15 && apmNorm < 0.45 ? 1 - Math.abs(apmNorm - 0.3) * 2 : 0
+    const joyfulScore = (joyfulApmGoodness * 0.4 + (1 - switchNorm) * 0.2 + (1 - retractNorm) * 0.2 + (1 - jitterNorm) * 0.2)
+
+    // tired 得分：极低 APM + 长间隔 + 深夜
+    const tiredScore = ((1 - apmNorm) * 0.35 + intervalNorm * 0.25 + isLateNight * 0.4)
 
     // focused 得分：高 APM + 低切换 + 低抖动
     const focusedScore = (apmNorm * 0.5 + (1 - switchNorm) * 0.25 + (1 - jitterNorm) * 0.25)
@@ -418,20 +513,30 @@ export class BehaviorEmotionDetector {
     const calmScore = ((1 - apmNorm) * 0.4 + (1 - switchNorm) * 0.3 + (1 - jitterNorm) * 0.3)
 
     // neutral 得分：中等水平，作为兜底
-    const neutralScore = 1 - Math.max(anxiousScore, focusedScore, calmScore)
+    const neutralScore = 1 - Math.max(anxiousScore, joyfulScore, tiredScore, focusedScore, calmScore)
 
     // 归一化：确保总和为 1
-    const total = anxiousScore + focusedScore + calmScore + neutralScore
+    const total = anxiousScore + joyfulScore + tiredScore + focusedScore + calmScore + neutralScore
     if (total === 0) {
-      return { anxious: 0, calm: 0, focused: 0, neutral: 1 }
+      return { anxious: 0, calm: 0, focused: 0, neutral: 1, tired: 0, joyful: 0 }
     }
 
     return {
       anxious: Math.round(anxiousScore / total * 100) / 100,
+      joyful: Math.round(joyfulScore / total * 100) / 100,
+      tired: Math.round(tiredScore / total * 100) / 100,
       calm: Math.round(calmScore / total * 100) / 100,
       focused: Math.round(focusedScore / total * 100) / 100,
       neutral: Math.round(neutralScore / total * 100) / 100,
     }
+  }
+
+  /**
+   * 判断当前是否为深夜时段（23:00–06:00）。
+   */
+  private isLateNight(): boolean {
+    const hour = new Date().getHours()
+    return hour >= 23 || hour < 6
   }
 
   // ── 私有：鼠标采样 ──
@@ -539,7 +644,7 @@ export class BehaviorEmotionDetector {
   private neutralResult(reason: string): BehaviorEmotionResult {
     return {
       emotion: 'neutral',
-      scores: { anxious: 0, calm: 0, focused: 0, neutral: 1 },
+      scores: { anxious: 0, calm: 0, focused: 0, neutral: 1, tired: 0, joyful: 0 },
       metrics: {
         apm: 0,
         windowSwitchesPerMin: 0,
@@ -547,6 +652,9 @@ export class BehaviorEmotionDetector {
         windowSeconds: this.windowSeconds,
         totalActions: 0,
         totalWindowSwitches: 0,
+        totalRetractions: 0,
+        retractionsPerMin: 0,
+        meanInteractionIntervalSec: 0,
         lastUpdated: Date.now(),
       },
       confidence: 0,
@@ -573,9 +681,16 @@ export class BehaviorEmotionDetector {
   reset(): void {
     this.actions = []
     this.windowSwitches = []
+    this.retractions = []
     this.mouseSamples = []
     this.lastResult = null
     this.lastResultTime = 0
+  }
+
+  /** 清理窗口外的旧撤回记录 */
+  private pruneOldRetractions(): void {
+    const cutoff = Date.now() - this.windowSeconds * 2 * 1000
+    this.retractions = this.retractions.filter((r) => r.timestamp >= cutoff)
   }
 }
 

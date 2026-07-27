@@ -4,20 +4,26 @@
 **Date:** 2026-07-26
 **Frozen at:** v2.0 — 2026-07-26, M5.1 + M5.2 (CapabilityBinding + Service + Invocation)
 **P1.3a:** 2026-07-26, CapabilityFunctionSchemaAdapter + ToolSchemaProvider + ToolInvocationRouter
+**P1.3b Phase A:** 2026-07-27, Capability-first mode + ProviderAdapter + call_raw_tool fallback (Synthetic Runtime ✅, Production Default ⏸)
 **Phases:**
 - **M5.1 Semantic Discovery** — ✅ Frozen (2026-07-26)
 - **M5.2 Capability Invocation** — ✅ Frozen (2026-07-26)
 - **P1.3a Function Schema Adapter** — ✅ Frozen (2026-07-26)
+- **P1.3b Phase A Capability-First Schema Exposure** — ✅ Frozen (2026-07-27)
+- **P1.3b Phase B Capability-First Default** — ✅ Active (2026-07-27)
 - **M5.3 Multi-provider / optimization** — ⏸ Deferred
-- **P1.3b Full Schema Switch** — ⏸ Deferred
+- **M5.4 Capability Taxonomy Expansion** — ✅ Frozen (2026-07-27)
 
 | Phase | Scope | Status |
 |-------|-------|--------|
 | M5.1 | CapabilityDefinition, Catalog (derived from Registry), Resolver (single provider) | ✅ Frozen |
 | M5.2 | CapabilityBinding, CapabilityService (resolve + invoke), Permission position freeze | ✅ Frozen |
 | P1.3a | CapabilityFunctionSchemaAdapter, ToolSchemaProvider, ToolInvocationRouter, capability.selected event, dual-track mode | ✅ Frozen — Implementation ✅, Runtime ✅, Behavioral Adoption ❌ |
+| P1.3b Phase A | Capability-first mode (SchemaExposureMode), ProviderAdapter (CapabilityProviderAdapter), call_raw_tool escape hatch, canonical→provider param transformation, fanqie + playwright adapters | ✅ Frozen — Synthetic Runtime ✅, Production Default ⏸ |
+| P1.3b Phase B | Default enable capability-first mode (env-rollback via CAPABILITY_FIRST_MODE=false) | ✅ Active |
 | M5.3 | Multi-provider ranking / fallback / optimization | ⏸ Deferred |
-| P1.3b | Full Schema Switch: remove PROMPT_TOOLS, remove original tool schemas | ⏸ Deferred |
+| M5.4 | Capability Taxonomy Expansion: file.management, search.retrieval, system.execution — canonical grouped capabilities covering ~70% of daily tool usage | ⏳ Design Frozen — Implementation ⏳ |
+| P1.3b Phase C | Remove PROMPT_TOOLS, remove raw tool schemas | ⏸ Deferred |
 **Supersedes:** None
 **Superseded by:** None
 **References:**
@@ -528,3 +534,395 @@ ServerManager.callTool()
 | Runtime Compatibility | ✅ | API tools 兼容，capability schema 注入 |
 | Behavioral Adoption | ❌ | capability.selected = 0, raw tool selection 不变 |
 | Finding Generated | ✅ | 本 Observation 已记录 |
+
+---
+
+## P1.3b Observation — Phase B Runtime
+
+### 实验结论
+
+**问题：** Capability-first schema 暴露后，LLM 是否能正确选择 capability 并通过 Provider 绑定执行？
+
+**方法：** 
+1. capability-first mode（4+1 函数），通过 `window.electronAPI.chat` 发出真实 LLM 请求
+2. 首次验证：3 条消息（浏览器、搜索、创作），共触发 8 次 tool_calls
+3. Catalog 修复后二次验证：新 session 下浏览器任务
+
+### 结果
+
+**Layer 1 — Schema Selection: ✅ Capability 可被 LLM 主动选择**
+
+首次验证日志（session `pb_1`）:
+```
+tool_llm_tool_calls → ["browser_automation"]    ← LLM 选择 capability
+tool_llm_tool_calls → ["web_scraping"]           ← LLM 选择 capability
+tool_llm_tool_calls → ["call_raw_tool"]          ← fallback
+```
+
+P1.3a 的 173-tool 信噪比瓶颈被打破：当 LLM 只看到 4+1 个函数时，会主动选择 capability。
+
+**Layer 2 — Provider Binding: ⚠️ 原始实现有混淆，已修复**
+
+Catalog 构建时将 capability id 同时作为 tool name，导致:
+```
+resolve("browser.automation") → tool = "browser.automation"
+⇒ callTool("browser.automation") → MCP 不认识
+```
+
+修复（Observation-B1）:
+- `MCPServerManifest.dependencies[].tool` — 新增字段，显式指定 MCP tool name
+- `CapabilityCatalog.rebuild()` — 优先使用依赖中的 tool 名
+- `CapabilityProviderAdapter` 注册 key 与 tool name 对齐
+- 已通过 synthetic test 验证：46/46 pass
+
+**Layer 3 — Execution: ⏸ MemoryInterceptor 劫持（未闭环）**
+
+二次验证中 LLM 直接走 `call_raw_tool("browser_navigate")`，未选 capability。
+根因：MemoryInterceptor 将历史高频的 `browser_navigate` boost 为快捷方式，
+LLM 跳过 capability 抽象层直接调用 raw tool。
+
+### 新发现：Memory Layer 与 Capability 抽象层的跨层冲突
+
+```
+MemoryInterceptor (tool ← identity)
+        ↓
+boost history-matched tools
+        ↓
+LLM receives boosted tool schemas
+        ↓
+bypasses capability abstraction
+        ↓
+call_raw_tool(browser_navigate)  ← 即使 capability 可用
+```
+
+**本质问题：** Memory/Behavior/Optimization 层当前的学习对象是 **tool identity**，而不是 **capability identity**。Capability-first 只是 LLM 层的开关切换，但 Memory 层仍然在 tool 粒度操作。
+
+```
+目标状态:
+Memory 学习 "用户需要浏览能力" → 推荐 browser_automation
+当前状态:
+Memory 学习 "browser_navigate 成功" → 推荐 raw tool
+```
+
+### 对 Phase C 的影响
+
+Phase C（删除 raw schema exposure）前必须回答：
+- 如果 Memory 推荐的是 raw tool，删除 raw tool 后系统是否退化？
+- Memory 层的学习目标是否需要迁移到 capability identity？
+
+**当前决策：**
+- 不修补 Memory 层（属于独立课题，非 P1.3b 范围）
+- Phase B 观察继续
+- Phase C 推迟，等待 Memory alignment evidence
+
+### 新增指标
+
+| 指标 | 说明 |
+|------|------|
+| selection_source: capability | LLM 直接从 capability schema 选择 |
+| selection_source: memory_bias | MemoryInterceptor 工具偏好驱动 |
+| selection_source: raw_fallback | `call_raw_tool` 逃生通道 |
+
+### P1.3b 当前状态
+
+| 维度 | 状态 | 说明 |
+|------|------|------|
+| Capability-first Schema | ✅ | 4+1 函数，LLM 可主动选择 |
+| Provider Routing | ✅ | catalog→tool 映射已修复，synthetic verified |
+| Provider Adapter | ✅ | canonical→tool params 正确转换 |
+| call_raw_tool Escape Hatch | ✅ | 正常运作 |
+| Invoke Chain (selected→invoked→completed) | ⏸ | catalog 修复后未完成 E2E 闭环（Memory 劫持） |
+| Memory Alignment | ⚠️ | Memory 仍操作 tool identity，非 capability |
+| Phase C Decision | ⏸ | 等待 Memory evidence，不删除 raw schema |
+
+---
+
+## P1.3b Observation #2 — Memory Layer Tool Identity Bias
+
+### Finding
+
+MemoryInterceptor 仍然在 **tool identity** 粒度操作，绕过 Capability 抽象层。
+
+### Evidence
+
+```
+capability-first schema enabled:
+LLM capability selection works (pb_1: browser_automation selected)
+```
+
+但是在有 Memory 偏好的 session 中:
+```
+MemoryInterceptor boost: browser_navigate (matches: 5+)
+    ↓
+LLM tool_calls: ["call_raw_tool"]
+    ↓
+tool_router.raw_tool_fallback: browser_navigate
+    ↓
+Capability 抽象层被绕过
+```
+
+### Impact
+
+Memory 层的学习对象是 **tool name**，不是 **capability id**。
+即使 LLM 在 capability-first 模式下具备选择能力，Memory 的 tool-level 偏好会淹没这个优势。
+
+当前 Memory 的行为等价于:
+```text
+目标:
+  Memory: "用户需要浏览能力" → 推荐 browser.automation
+实际:
+  Memory: "browser_navigate 经常成功" → 推荐 raw tool
+  LLM: 跟随 → call_raw_tool
+  Capability-first: 被 bypass
+```
+
+### Decision
+
+- **不做** Memory 行为变更（不属于 P1.3b 范围）
+- **创建** 独立 Capability-Aware Memory migration 课题 (M6)
+- **Phase C 阻塞**: 在 Memory alignment 解决前，删除 raw schema 会导致退化
+- **来源分类**: 新增 `RawToolSelectionReason` 区分绕过原因
+
+### Tool→Capability 覆盖审计
+
+| 工具 | 对应 Capability | 覆盖率 |
+|------|----------------|--------|
+| browser_navigate | browser.automation | ✅ |
+| browser_snapshot | browser.automation | ✅ |
+| browser_click | browser.automation | ⏸ 未注册 |
+| read_file | — | ❌ 无 |
+| write_file | — | ❌ 无 |
+| grep/search | — | ❌ 无 |
+| publish_novel | publishing | ✅ |
+| save_draft | content.drafting | ✅ |
+| tts_speak | — | ❌ 无 |
+| run_command | — | ❌ 无 |
+
+覆盖率评估: ~8% (4/52+)，大量基础工具无 capability 映射。
+
+---
+
+## P1.3b Observation #3 — Capability Catalog Coverage Gap
+
+### Finding
+
+Phase B 的 Memory Alignment 阻塞根因不是 Memory 自身，而是 Capability Catalog 覆盖率过低。
+
+### Audit Result (34 known tools)
+
+| 分类 | 覆盖 |
+|------|------|
+| browser.* (6) | ✅ 100% mapped to browser.automation |
+| publishing + content.drafting (2) | ✅ 100% |
+| **File I/O** (read/write/edit/delete/...) | ❌ 0/9 |
+| **Search** (grep/glob/web_search/...) | ❌ 0/4 |
+| **System** (run_command/bash/python) | ❌ 0/3 |
+| TTS/Memory | ❌ 0/4 |
+| Builtin/Plan/Workflow | ❌ 0/6 |
+| **Total** | **8/34 = 24%** |
+
+### Root Cause
+
+Memory/Behavior 层只能学习已定义的抽象。Catalog 只有 4 条目时，Memory 推荐必然回退到 tool 粒度。Memory Alignment 的真正前置是 Capability Taxonomy Expansion。
+
+### Revised Decision
+
+| 阶段 | 状态 |
+|------|------|
+| P1.3b Phase B | ✅ Observations collected |
+| **M5.4 Capability Taxonomy Expansion** | **⬆️ NEW — before M6** |
+| M6 Capability-Aware Memory | ⏸ depends on M5.4 coverage |
+| Phase C | ⏸ blocked by M6 |
+
+**Tier 1 scope:**
+- `file.management` — read/write/edit/move/delete/copy/create_directory/list_files/append_file
+- `search.retrieval` — grep/glob/web_search/web_fetch
+- `system.execution` — run_command/bash/python
+
+Target: 24% → ~65% coverage.
+
+### Architecture Confirmation
+
+`call_raw_tool` design validated: capability coverage can grow incrementally without breaking existing functionality. This is the Agent OS pattern — abstraction priority = actual call frequency.
+
+### P1.3b Final Status
+
+| 维度 | 状态 |
+|------|------|
+| Capability-first Schema | ✅ |
+| Provider Routing | ✅ |
+| Provider Adapter | ✅ |
+| Escape Hatch | ✅ |
+| Catalog Coverage | ⚠️ 24% → M5.4 |
+| Memory Alignment | ⏸ blocked |
+| Phase C | ⏸ blocked |
+
+---
+
+## M5.4 Capability Taxonomy Expansion — Design Freeze
+
+### Problem
+
+P1.3b Phase B Observation #3: Capability Catalog coverage is 24% (8/34 tools). Memory/Behavior layer cannot learn capability-level patterns when the abstraction covers <1/3 of daily tool usage. The Memory alignment issue is not a Memory bug — it is a catalog coverage gap.
+
+### Decision D1 — Capability Granularity
+
+**Principle:** Capability ≠ tool rename. A capability expresses what user wants to achieve.
+
+**Correct:**
+```
+file.management
+  └─ operation: "read" | "write" | "edit" | "delete"
+  └─ path: string
+  └─ content?: string
+```
+
+**Incorrect (tool alias):**
+```
+file.read      ← 这只是 read_file 的别名
+file.write     ← 这只是 write_file 的别名
+```
+
+Three capabilities for M5.4 Phase 1:
+
+| Capability | Provider Tools | Canonical Input |
+|---|----|---|
+| `file.management` | read_file, write_file, edit_file, delete_file, move_file, copy_file, create_directory, list_files | `{ operation: string, path: string, content?: string }` |
+| `search.retrieval` | grep_search, glob_find, web_search, web_fetch | `{ query: string, scope?: string, source?: string }` |
+| `system.execution` | run_command, bash_execute, execute_python | `{ command: string, args?: string[], language?: string }` |
+
+### Decision D2 — Canonical Schema Ownership
+
+Per P1.3b D3: Each capability owns its canonical `inputSchema`. Provider adapters transform.
+
+```
+file.management.inputSchema
+  { operation, path, content? }
+      ↓
+fileSystemAdapter(input, "read_file")
+  → { path: input.path }
+
+fileSystemAdapter(input, "write_file")
+  → { path: input.path, content: input.content }
+```
+
+Adapter is NOT identity — it projects the canonical schema onto tool-specific params.
+
+### Decision D3 — Provider Mapping
+
+Manifest declares capability→tools mapping explicitly:
+
+```typescript
+{
+  id: 'file-system',
+  capabilities: ['file.management'],
+  dependencies: [
+    { capability: 'file.management', tool: 'read_file' },
+    { capability: 'file.management', tool: 'write_file' },
+    // ...
+  ],
+}
+```
+
+Catalog defaultTool = first dependency tool. Adapter key = `${providerId}:${tool}`.
+
+### Decision D4 — Coverage Target
+
+| Tier | Scope | Tools | Coverage |
+|------|-------|-------|----------|
+| Tier 1 (M5.4) | file.management, search.retrieval, system.execution | ~16 | 24% → ~70% |
+| Tier 2 (future) | TTS, Memory, Plan | ~8 | ~70% → ~94% |
+| Tier 3 (raw) | Low-frequency builtins | ~2 | 100% |
+
+Do not chase 100%. call_raw_tool remains for Tier 3.
+
+### Non-goals
+
+- ❌ Per-tool capability aliases
+- ❌ Rich inputSchema (generic `{description}` fallback stays)
+- ❌ CapabilityFunctionSchemaAdapter changes
+- ❌ Memory/Behavior layer changes
+- ❌ Phase C cleanup
+- ❌ Tier 2-3 coverage (TTS, Memory, Plan, Workflow)
+
+### Files
+
+| File | Change |
+|------|--------|
+| `src/main/capability/adapters/<category>-adapter.ts` | New — canonical → tool params projection |
+| `src/main/capability/adapters/index.ts` | Export |
+| `src/main/bootstrap/AppRuntime.ts` | Register 3 manifests + adapters |
+| `src/main/tool/__tests__/P1_3b_exit_gate.test.ts` | Assert contracts, not counts |
+
+### Verification
+
+1. `resolve("file.management") → { tool: "read_file", provider: "file-system" }`
+2. Adapter transforms `{ operation, path }` → tool-specific params
+3. Existing 46/46 tests pass
+4. Test asserts presence of capabilities, not count
+
+---
+
+## M5.4 Observation #1 — Canonical Schema Requirement
+
+### Finding
+
+Grouped capability without explicit canonical inputSchema cannot reliably participate in LLM function calling. The generic `{ description }` fallback schema is insufficient when a capability requires structured parameters (operation, path, query, etc.).
+
+### Evidence
+
+```
+file.management selected by LLM                 ✅
+CapabilityService received input: { description }
+CapabilityDefinition.inputSchema was generic    ❌
+file-system adapter cannot extract operation/path
+invocation failed: "path 参数缺失"               ❌
+fallback to call_raw_tool                      ⚠️
+```
+
+LLM **can** select grouped capabilities (proving taxonomy works), but the absence of canonical schema makes LLM produce natural-language input instead of structured parameters.
+
+### Resolution
+
+`MCPServerManifest` gains optional `capabilitySchemas` field:
+```typescript
+capabilitySchemas?: Record<string, {
+  type: 'object'
+  properties: Record<string, { type: string; description: string }>
+  required: string[]
+}>
+```
+
+`CapabilityCatalog.rebuild()` uses manifest schema as canonical source when present, falling back to generic `{ description }` schema for manifest-declared capabilities without explicit schema.
+
+All three M5.4 grouped capabilities now carry explicit canonical schemas:
+- `file.management` — `{ operation, path, content? }`
+- `search.retrieval` — `{ operation, query, scope? }`
+- `system.execution` — `{ command, cwd? }`
+
+### Impact
+
+- Observation Gate indicators now valid for measurement
+- No interference from schema insufficiency in coverage/projection data
+- Backward compatible: existing 4 capabilities (browser.automation, etc.) unchanged
+
+### Status
+
+✅ Resolved at implementation level.
+⏳ Pending runtime verification.
+
+---
+
+## M5.4.2 Observation Gate — Minimal Closure
+
+Before entering full Observation Window, verify each grouped capability completes a full `selected → invoked → completed(success)` cycle at least once.
+
+### Verification plan
+
+| Task | Capability | Expected adapter output |
+|------|-----------|------------------------|
+| "创建 test.txt, 内容 hello" | file.management | `{ path, content }` → write_file |
+| "读取 test.txt" | file.management | `{ path }` → read_file |
+| "重命名 test.txt → test2.txt" | file.management | `{ source, destination }` → move_file |
+| "搜索 grep TODO" | search.retrieval | `{ pattern }` → grep_search |
+| "执行 pwd" | system.execution | `{ command }` → run_command |
