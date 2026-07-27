@@ -28,6 +28,8 @@ logs.*
 *.tar.gz
 *.wav
 *.ps1
+_check*
+_typecheck*
 check-*.bat
 check-*.cmd
 check-*.js
@@ -78,3 +80,5 @@ out/
 .ssh/
 tsc-permission-test.json
 *.ts.tmp.*
+extensions/
+test-user-data/
