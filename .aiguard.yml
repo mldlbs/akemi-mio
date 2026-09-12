@@ -1,0 +1,57 @@
+# AIGuard Configuration
+# Documentation: https://github.com/GurjotSinghAulakh/aiguard
+
+# Rules configuration
+# Each rule can be enabled/disabled and configured individually
+rules:
+  AIG001:  # Shallow error handling
+    enabled: true
+    severity: warning
+  AIG002:  # Tautological code
+    enabled: true
+  AIG003:  # Over-commenting
+    enabled: true
+    max_comment_ratio: 0.6
+  AIG004:  # Hallucinated imports
+    enabled: true
+    severity: error
+  AIG005:  # Copy-paste duplication
+    enabled: true
+    similarity_threshold: 0.85
+  AIG006:  # Missing input validation
+    enabled: true
+  AIG007:  # Placeholder code
+    enabled: true
+  AIG008:  # Complex one-liners
+    enabled: true
+    max_depth: 4
+  AIG009:  # Unused variables
+    enabled: true
+  AIG010:  # Generic naming
+    enabled: true
+  AIG011:  # Prompt injection
+    enabled: true
+    severity: error
+  AIG012:  # Hidden content
+    enabled: true
+    severity: error
+  AIG013:  # Data exfiltration
+    enabled: true
+    severity: error
+  AIG014:  # Dangerous commands
+    enabled: true
+    severity: error
+
+# File patterns to ignore (glob syntax)
+ignore:
+  - "tests/**"
+  - "migrations/**"
+  - "**/vendor/**"
+
+# Scoring configuration
+score:
+  fail_threshold: 60   # CI exits non-zero if score < this
+  weights:
+    error: 10
+    warning: 3
+    info: 1

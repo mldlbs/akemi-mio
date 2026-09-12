@@ -1,0 +1,184 @@
+/* ============================================================
+   Nocturnal Atelier v2 - Warm Paper
+   Deep warm charcoal base, solid stepped surfaces, vermilion + gold.
+   Rebuilt for contrast: every surface is a clearly differentiated,
+   mostly opaque warm tone. No more translucent-on-black mud.
+   ============================================================ */
+:root {
+  /* ---- Type ---- */
+  --font-display: 'Fraunces', 'Instrument Serif', 'Noto Serif SC', 'Songti SC', serif;
+  --font-body: 'Sora', 'Noto Sans SC', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+
+  /* ---- Base: warm charcoal ladder ----
+     sRGB approx: base(30) < main(37) < surface(47) < paper(52) < raised(63) */
+  --bg-base: oklch(0.26 0.016 55);
+  --bg-main: oklch(0.28 0.017 52);
+  --bg-primary: oklch(0.3 0.017 50);
+  --bg-secondary: oklch(0.285 0.017 50);
+  --bg-tertiary: oklch(0.31 0.018 48);
+  --bg-canvas: oklch(0.235 0.014 57);
+  --bg-surface: oklch(0.32 0.018 48 / 0.97);
+  --bg-topbar: oklch(0.27 0.015 55 / 0.96);
+  --bg-input: oklch(0.24 0.014 53 / 0.96);
+
+  /* ---- Surfaces ---- */
+  --surface-paper: oklch(0.35 0.018 47);
+  --surface-paper-soft: oklch(0.315 0.017 50);
+  --surface-paper-warm: oklch(0.36 0.021 44);
+  --surface-raised: oklch(0.4 0.019 45);
+  --surface-pressed: oklch(0.28 0.016 51);
+  --surface-modal: oklch(0.3 0.017 49 / 0.99);
+  --surface-modal-rail: linear-gradient(180deg, oklch(0.34 0.018 47 / 0.99), oklch(0.26 0.016 52 / 0.97));
+  --surface-code: oklch(0.28 0.013 52 / 0.95);
+  --surface-quote: oklch(0.38 0.023 42 / 0.6);
+  --surface-thread: oklch(0.31 0.016 49 / 0.96);
+  --surface-thread-warm: oklch(0.33 0.02 45 / 0.96);
+  --color-presence: 8%;
+
+  /* ---- Accents ---- */
+  --accent-vermilion-muted: oklch(0.67 0.155 28);
+  --accent-aged-gold: oklch(0.84 0.125 80);
+  --accent-quiet-wash: oklch(0.67 0.155 28 / 0.22);
+  --trace-rail: linear-gradient(180deg, oklch(0.84 0.125 80 / 0.55), oklch(0.67 0.155 28 / 0.4), transparent);
+  --surface-rail: oklch(0.28 0.016 50 / 0.9);
+  --rail-binding: linear-gradient(180deg, oklch(0.95 0.02 90 / 0.1), oklch(0.67 0.155 28 / 0.24), oklch(0.84 0.125 80 / 0.14));
+
+  /* ---- Glass ---- */
+  --bg-glass: oklch(0.33 0.017 48 / 0.92);
+  --bg-glass-strong: oklch(0.37 0.018 46 / 0.95);
+  --bg-glass-hover: oklch(0.41 0.019 44 / 0.96);
+  --bg-glass-50: oklch(0.32 0.017 49 / 0.5);
+
+  /* ---- Text ---- */
+  --accent-ink: oklch(0.95 0.012 85);
+  --text-primary: oklch(0.93 0.012 85);
+  --text-secondary: oklch(0.78 0.015 82);
+  --text-muted: oklch(0.62 0.015 78);
+  --text-glass: oklch(0.9 0.012 85 / 0.85);
+  --text-error: oklch(0.72 0.18 28);
+  --text-normal: oklch(0.88 0.012 84);
+
+  /* ---- Borders ---- */
+  --border-glass: oklch(0.88 0.02 82 / 0.15);
+  --border-glass-hover: oklch(0.92 0.02 82 / 0.26);
+  --border-etched: oklch(0.85 0.02 80 / 0.13);
+  --border-hairline: oklch(0.85 0.02 80 / 0.09);
+  --border-color: oklch(0.88 0.02 82 / 0.16);
+  --border-subtle: oklch(0.88 0.02 82 / 0.09);
+
+  /* ---- Semantic accents ---- */
+  --accent: var(--accent-vermilion-muted);
+  --accent-soft: oklch(0.72 0.12 30);
+  --accent-glow: oklch(0.67 0.155 28 / 0.24);
+  --accent-bg: var(--accent-quiet-wash);
+  --accent-gold: var(--accent-aged-gold);
+  --accent-moss: oklch(0.64 0.1 145);
+  --accent-steel: oklch(0.62 0.09 232);
+  --accent-slot: oklch(0.6 0.09 235);
+  --accent-slot-glow: oklch(0.6 0.09 235 / 0.18);
+  --accent-cyan: oklch(0.66 0.09 210);
+  --accent-green: oklch(0.64 0.1 145);
+  --accent-red: oklch(0.68 0.18 28);
+  --accent-pink: oklch(0.66 0.12 350);
+  --accent-purple: oklch(0.62 0.11 290);
+  --accent-glass: oklch(0.85 0.03 84 / 0.5);
+  --accent-hover: oklch(0.7 0.15 30);
+  --acgent-bg: var(--accent-bg);
+  --status-error: oklch(0.68 0.18 28);
+  --success: oklch(0.66 0.12 150);
+  --warning: oklch(0.76 0.12 80);
+  --danger: oklch(0.68 0.18 28);
+  --red: oklch(0.68 0.18 28);
+
+  /* ---- Shadows ---- */
+  --shadow-paper: 0 1px 0 oklch(1 0 0 / 0.08) inset, 0 2px 8px oklch(0 0 0 / 0.22), 0 16px 36px oklch(0 0 0 / 0.28);
+  --shadow-float: 0 4px 14px oklch(0 0 0 / 0.3), 0 24px 60px oklch(0 0 0 / 0.5);
+  --shadow-hairline: 0 0 0 1px var(--border-hairline);
+  --shadow-dark: 0 12px 32px oklch(0 0 0 / 0.45);
+  --shadow-raised: 0 1px 0 oklch(1 0 0 / 0.08) inset, 0 6px 18px oklch(0 0 0 / 0.3);
+  --control-ring: 0 0 0 3px oklch(0.67 0.155 28 / 0.22);
+  --focus-ring: oklch(0.82 0.09 48 / 0.92);
+  --control-glint: linear-gradient(135deg, oklch(1 0 0 / 0.14), transparent 42%);
+  --control-pressed: linear-gradient(180deg, var(--surface-paper-soft), var(--surface-pressed));
+  --input-etched: linear-gradient(180deg, oklch(0 0 0 / 0.16), oklch(0.32 0.02 46 / 0.18));
+  --input-focus-beam: linear-gradient(90deg, var(--accent), var(--accent-gold), transparent);
+  --send-control-paper: linear-gradient(135deg, oklch(0.4 0.02 44 / 0.95), oklch(0.33 0.018 47 / 0.9));
+  --send-control-ink: oklch(0.9 0.012 88);
+  --send-control-border: oklch(0.6 0.03 60 / 0.28);
+
+  /* ---- Scrollbar ---- */
+  --scroll-etched: oklch(0.75 0.02 75 / 0.3);
+  --scroll-etched-hover: oklch(0.67 0.155 28 / 0.28);
+
+  /* ---- Selection & transient ---- */
+  --selection-wash: oklch(0.67 0.155 28 / 0.4);
+  --transient-paper: linear-gradient(135deg, oklch(0.4 0.019 46 / 0.92), oklch(0.34 0.017 48 / 0.94));
+  --transient-rail: linear-gradient(90deg, oklch(0.84 0.125 80 / 0.45), oklch(0.67 0.155 28 / 0.35), transparent 64%);
+
+  /* ---- Corner floats ---- */
+  --corner-float-paper: linear-gradient(135deg, oklch(0.42 0.019 45 / 0.96), oklch(0.36 0.017 47 / 0.94));
+  --corner-float-paper-soft: oklch(0.38 0.017 46 / 0.92);
+  --corner-float-ink: oklch(0.92 0.012 88);
+  --corner-float-muted: oklch(0.66 0.015 75);
+  --corner-float-border: oklch(0.7 0.02 65 / 0.22);
+  --corner-float-shadow: 0 10px 26px oklch(0 0 0 / 0.4);
+  --corner-float-edge-opacity: 0.6;
+  --right-bottom-floats-display: none;
+  --wallpaper-floating-ui-display: none;
+
+  /* ---- Metrics ---- */
+  --metric-track: oklch(0.42 0.01 50 / 0.5);
+  --metric-fill: linear-gradient(90deg, var(--accent-ink), var(--accent), var(--accent-gold));
+  --metric-fill-cool: linear-gradient(90deg, var(--accent-steel), var(--accent-slot));
+
+  /* ---- Type scale ---- */
+  --fs-display: 28px;
+  --fs-heading: 16px;
+  --fs-body: 14px;
+  --fs-small: 12px;
+  --fs-caption: 11px;
+
+  /* ---- Layout ---- */
+  --topbar-height: 58px;
+  --sidebar-width: 188px;
+  --chat-max-width: 760px;
+
+  /* ---- Radii ---- */
+  --radius-bubble: 12px;
+  --radius-card: 10px;
+  --radius-panel: 14px;
+  --radius-lg: 14px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
+  --panel-radius: 14px;
+  --panel-blur: 30px;
+
+  /* ---- Spacing ---- */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-xm: 10px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-xxl: 32px;
+
+  /* ---- Wallpaper ---- */
+  --wallpaper-overlay-opacity: 0.88;
+  --wallpaper-transition-duration: 0.6s;
+  --wallpaper-idle-text: oklch(0.95 0.012 85);
+  --wp-bg-glass-light: oklch(0.4 0.019 46 / 0.92);
+  --wp-bg-glass-mid: oklch(0.35 0.018 47 / 0.92);
+  --wp-bg-glass-strong: oklch(0.42 0.019 45 / 0.95);
+
+  /* ---- Workflow canvas nodes ---- */
+  --node-accent: oklch(0.67 0.155 28);
+
+  /* ---- Motion ---- */
+  --ease-glass: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 180ms;
+  --duration-normal: 320ms;
+  --duration-slow: 620ms;
+}

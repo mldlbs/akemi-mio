@@ -1,0 +1,190 @@
+{
+  "schemaVersion": "0.1",
+  "goldenVersion": "0.1.0",
+  "total": 44,
+  "byCategory": {
+    "analysis": 12,
+    "decision": 12,
+    "planning": 10,
+    "creation": 10
+  },
+  "generatedAt": "2026-07-15T05:45:15.239Z",
+  "cases": [
+    {
+      "caseId": "Q01",
+      "category": "analysis"
+    },
+    {
+      "caseId": "Q02",
+      "category": "analysis"
+    },
+    {
+      "caseId": "Q03",
+      "category": "analysis"
+    },
+    {
+      "caseId": "Q04",
+      "category": "analysis"
+    },
+    {
+      "caseId": "Q05",
+      "category": "analysis"
+    },
+    {
+      "caseId": "Q06",
+      "category": "analysis"
+    },
+    {
+      "caseId": "Q07",
+      "category": "analysis"
+    },
+    {
+      "caseId": "Q08",
+      "category": "analysis"
+    },
+    {
+      "caseId": "Q09",
+      "category": "analysis"
+    },
+    {
+      "caseId": "Q10",
+      "category": "analysis"
+    },
+    {
+      "caseId": "Q11",
+      "category": "analysis"
+    },
+    {
+      "caseId": "Q12",
+      "category": "analysis"
+    },
+    {
+      "caseId": "C01",
+      "category": "creation"
+    },
+    {
+      "caseId": "C02",
+      "category": "creation"
+    },
+    {
+      "caseId": "C03",
+      "category": "creation"
+    },
+    {
+      "caseId": "C04",
+      "category": "creation"
+    },
+    {
+      "caseId": "C05",
+      "category": "creation"
+    },
+    {
+      "caseId": "C06",
+      "category": "creation"
+    },
+    {
+      "caseId": "C07",
+      "category": "creation"
+    },
+    {
+      "caseId": "C08",
+      "category": "creation"
+    },
+    {
+      "caseId": "C09",
+      "category": "creation"
+    },
+    {
+      "caseId": "C10",
+      "category": "creation"
+    },
+    {
+      "caseId": "D01",
+      "category": "decision"
+    },
+    {
+      "caseId": "D02",
+      "category": "decision"
+    },
+    {
+      "caseId": "D03",
+      "category": "decision"
+    },
+    {
+      "caseId": "D04",
+      "category": "decision"
+    },
+    {
+      "caseId": "D05",
+      "category": "decision"
+    },
+    {
+      "caseId": "D06",
+      "category": "decision"
+    },
+    {
+      "caseId": "D07",
+      "category": "decision"
+    },
+    {
+      "caseId": "D08",
+      "category": "decision"
+    },
+    {
+      "caseId": "D09",
+      "category": "decision"
+    },
+    {
+      "caseId": "D10",
+      "category": "decision"
+    },
+    {
+      "caseId": "D11",
+      "category": "decision"
+    },
+    {
+      "caseId": "D12",
+      "category": "decision"
+    },
+    {
+      "caseId": "P01",
+      "category": "planning"
+    },
+    {
+      "caseId": "P02",
+      "category": "planning"
+    },
+    {
+      "caseId": "P03",
+      "category": "planning"
+    },
+    {
+      "caseId": "P04",
+      "category": "planning"
+    },
+    {
+      "caseId": "P05",
+      "category": "planning"
+    },
+    {
+      "caseId": "P06",
+      "category": "planning"
+    },
+    {
+      "caseId": "P07",
+      "category": "planning"
+    },
+    {
+      "caseId": "P08",
+      "category": "planning"
+    },
+    {
+      "caseId": "P09",
+      "category": "planning"
+    },
+    {
+      "caseId": "P10",
+      "category": "planning"
+    }
+  ]
+}

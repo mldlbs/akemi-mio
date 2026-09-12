@@ -1,0 +1,198 @@
+﻿/* ──────────────────────────────────────────────
+   Nocturnal Atelier — Wallpaper Overlay
+   Dark ambient glass floating on the wallpaper canvas
+   ────────────────────────────────────────────── */
+
+:root {
+  --wallpaper-overlay-opacity: 0.88;
+  --wallpaper-transition-duration: 0.6s;
+  --wallpaper-idle-text: oklch(0.92 0.015 85);
+  --wp-bg-glass: oklch(0.18 0.012 46 / 0.3);
+  --wp-bg-glass-strong: oklch(0.22 0.014 44 / 0.45);
+  --wp-bg-glass-mid: oklch(0.2 0.012 44 / 0.35);
+  --wp-border-glass: oklch(0.6 0.025 70 / 0.12);
+  --wp-border-glass-light: oklch(0.6 0.025 70 / 0.08);
+  --wp-bg-glass-light: oklch(0.25 0.015 42 / 0.2);
+}
+
+/* ── Overlay Container ── */
+.wallpaper-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Idle Panel ── */
+.wallpaper-idle-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xxl) var(--space-xl);
+  background: var(--wp-bg-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: 20px;
+  border: 1px solid var(--wp-border-glass);
+  animation: wp-idle-in 0.6s var(--ease-glass) both;
+  max-width: 380px;
+  user-select: none;
+}
+
+@keyframes wp-idle-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.wallpaper-time {
+  font-size: 64px;
+  font-weight: 300;
+  color: var(--wallpaper-idle-text);
+  letter-spacing: 0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-display);
+}
+
+.wallpaper-date {
+  font-size: var(--fs-body);
+  font-weight: 400;
+  color: oklch(0.7 0.01 85);
+  margin-bottom: var(--space-md);
+}
+
+/* ── Weather ── */
+.wallpaper-weather {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+  background: var(--wp-border-glass-light);
+  border-radius: 20px;
+}
+
+.wallpaper-weather-icon {
+  font-size: 22px;
+}
+
+.wallpaper-weather-temp {
+  font-size: var(--fs-heading);
+  font-weight: 500;
+  color: var(--wallpaper-idle-text);
+}
+
+.wallpaper-weather-condition {
+  font-size: var(--fs-small);
+  color: oklch(0.7 0.01 85);
+}
+
+/* ── Todos ── */
+.wallpaper-todos {
+  width: 100%;
+  margin-top: var(--space-sm);
+}
+
+.wallpaper-todos-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: oklch(0.7 0.01 85);
+  margin-bottom: var(--space-xs);
+}
+
+.wallpaper-todos-title i {
+  font-size: 14px;
+}
+
+.wallpaper-todos-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.wallpaper-todo-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--fs-body);
+  color: var(--wallpaper-idle-text);
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background 0.2s ease;
+}
+
+.wallpaper-todo-item i {
+  font-size: 12px;
+  color: oklch(0.7 0.01 85);
+  flex-shrink: 0;
+}
+
+.wallpaper-todo-item:hover {
+  background: var(--wp-border-glass-light);
+}
+
+.wallpaper-status-label {
+  position: fixed;
+  bottom: var(--space-lg);
+  right: var(--space-lg);
+  font-size: var(--fs-caption);
+  font-weight: 400;
+  color: oklch(0.6 0.01 75);
+  letter-spacing: 0.03em;
+  opacity: 0.5;
+  transition: opacity 0.3s ease;
+  user-select: none;
+}
+
+.wallpaper-status-label:hover {
+  opacity: 0.8;
+}
+
+/* ── Corner Float Widgets ── */
+.wp-context-badge,
+.wp-context-panel,
+.wp-task-switcher,
+.wp-privacy-blur,
+.wp-mem-panel,
+.wp-mem-panel--collapsed,
+.wp-mem-flash-wrapper,
+.wp-org-panel,
+.wp-tts-subtitle-overlay,
+.wp-emotional-waveform,
+.wp-tp-panel,
+.wp-agent-panel,
+.wp-cc-panel,
+.wp-cc-panel--collapsed,
+.prediction-toast-container,
+.wp-quick-actions,
+.wp-resource-panel,
+.wp-plan-panel,
+.wp-wf-panel {
+  display: var(--wallpaper-floating-ui-display, none) !important;
+}
+
+/* ── Right-bottom float stack ── */
+.system-dock,
+.wp-quick-actions,
+.wp-mem-flash-wrapper,
+.wp-cc-panel--collapsed,
+.wp-org-panel,
+.wp-tp-panel {
+  display: var(--right-bottom-floats-display, none) !important;
+}

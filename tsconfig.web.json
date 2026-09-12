@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "outDir": "./out",
+    // 与 tsconfig.node.json 对齐：让 tsc 与 rollup/esbuild 口径一致，
+    // 避免「tsc 全绿但构建炸」。经探针实测：开启前后 renderer 侧错误逐条一致（0 个 TS1484），
+    // 即 renderer 代码本就规范使用 import type，此处为纯对齐、零风险。
+    "verbatimModuleSyntax": true,
+    "types": [
+      "react",
+      "vitest/globals"
+    ]
+  },
+  "include": [
+    "src/renderer/src/**/*.ts",
+    "src/renderer/src/**/*.tsx"
+  ],
+  "exclude": [
+    "out/",
+    "dist-electron/",
+    "node_modules/",
+    "build/",
+    "coverage/"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@akemi-mio/runtime-contracts",
+  "version": "0.1.0",
+  "description": "Public contracts for Mio runtime modules",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "index.js",
+  "files": ["index.js"],
+  "scripts": {
+    "test": "node --test __tests__/contracts.test.js",
+    "check": "node --check index.js"
+  },
+  "engines": { "node": ">=18" }
+}

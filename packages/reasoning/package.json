@@ -1,0 +1,21 @@
+{
+  "name": "@akemi-mio/reasoning",
+  "version": "0.1.0",
+  "description": "Reasoning planner: pure functions for scoring-based reasoning directives (zero runtime dependencies)",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

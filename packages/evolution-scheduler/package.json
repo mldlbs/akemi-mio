@@ -1,0 +1,17 @@
+{
+  "name": "@akemi-mio/evolution-scheduler",
+  "version": "0.1.0",
+  "description": "Portable scheduling, budget, replay, and pipeline orchestration for Mio evolution runtime modules",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "index.js",
+  "files": ["index.js"],
+  "scripts": {
+    "test": "node --test __tests__/evolution-scheduler.test.js",
+    "check": "node --check index.js"
+  },
+  "dependencies": {
+    "@akemi-mio/runtime-foundation": "^0.1.0"
+  },
+  "engines": { "node": ">=18" }
+}

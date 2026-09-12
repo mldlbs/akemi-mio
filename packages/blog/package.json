@@ -1,0 +1,13 @@
+{
+  "name": "@akemi-mio/blog",
+  "version": "0.1.0",
+  "description": "Blog audio: voice recording and audio file management for blog drafts",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@akemi-mio/core": "workspace:*"
+  }
+}

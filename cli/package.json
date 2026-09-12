@@ -1,0 +1,16 @@
+{
+  "name": "@akemi-mio/cli-compat",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Repository compatibility entry for mio-agent-runtime",
+  "type": "commonjs",
+  "bin": {
+    "mio": "mio.js"
+  },
+  "scripts": {
+    "check": "node --check mio.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

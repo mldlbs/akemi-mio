@@ -1,0 +1,37 @@
+{
+  "caseId": "Q02",
+  "caseRef": {
+    "text": "系统崩溃的根本原因是什么？",
+    "expectations": [
+      "定位根因",
+      "分析因果链"
+    ]
+  },
+  "level1": {
+    "schemaVersion": "0.1",
+    "directive": {
+      "pattern": "cause_effect",
+      "goals": [
+        {
+          "type": "identify_root_cause"
+        },
+        {
+          "type": "explain_causality"
+        }
+      ],
+      "constraints": [],
+      "outputStyle": "causal_narrative"
+    }
+  },
+  "level2": null,
+  "changelog": [
+    {
+      "date": "2026-07-15T01:21:23.771Z",
+      "reason": "v0.1 initial golden capture from Benchmark v0.1",
+      "author": "golden-dataset-generator",
+      "level": "l1"
+    }
+  ],
+  "createdAt": "2026-07-15T01:21:23.771Z",
+  "updatedAt": "2026-07-15T01:21:23.771Z"
+}

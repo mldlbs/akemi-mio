@@ -1,0 +1,11 @@
+{
+  "name": "@akemi-mio/audit",
+  "version": "0.1.0",
+  "description": "Audit trail and event logging utilities",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@akemi-mio/core": "workspace:*",
+    "@akemi-mio/eventBus": "workspace:*"
+  }
+}

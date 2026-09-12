@@ -1,0 +1,17 @@
+{
+  "name": "@akemi-mio/evolution-piper-evolution",
+  "version": "1.0.0",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@akemi-mio/core": "workspace:*",
+    "@akemi-mio/audio": "workspace:*",
+    "@akemi-mio/evolution-plugin-system": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

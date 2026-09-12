@@ -1,0 +1,177 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { EvolutionAnalyzer } from '@akemi-mio/evolution/pipeline/EvolutionAnalyzer'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { mkdirSync, rmSync } from 'fs'
+
+vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))
+
+vi.mock('@akemi-mio/evolution/goals', () => ({
+  executionGoalStore: {
+    getStats: vi.fn(() => ({ total: 0, active: 0, blocked: 0, completed: 0, abandoned: 0, completionRate: 0 })),
+    getMethodologyStats: vi.fn(() => []),
+  },
+}))
+
+function makeTestPaths() {
+  const d = join(tmpdir(), `evolution-analyzer-test-${Date.now()}`)
+  mkdirSync(d, { recursive: true })
+  return { historyPath: join(d, 'history.json'), livingPlanDir: d }
+}
+
+describe('EvolutionAnalyzer', () => {
+  let analyzer: EvolutionAnalyzer
+  let paths: any
+  let agentService: any
+  let planManager: any
+
+  beforeEach(() => {
+    paths = makeTestPaths()
+    planManager = { getActivePlan: vi.fn(() => null), listPlans: vi.fn(() => []), getFormattedContext: vi.fn(() => '') }
+    agentService = {
+      runAgentTask: vi.fn().mockResolvedValue({ success: true, summary: '分析完成' }),
+      isBusy: vi.fn(() => false),
+      abortSelfTask: vi.fn(),
+    }
+    analyzer = new EvolutionAnalyzer(agentService, planManager, {
+      historyPath: paths.historyPath,
+      analysisTimeoutMs: 60000,
+      degenerationThreshold: 3,
+    })
+  })
+
+  afterEach(() => {
+    try {
+      rmSync(paths.livingPlanDir, { recursive: true })
+    } catch {}
+  })
+
+  it('init state 转换', async () => {
+    expect((analyzer as any).state).toBe('created')
+    await analyzer.init()
+    expect((analyzer as any).state).toBe('ready')
+  })
+
+  it('detectPlanMode 无计划返回 first_run', () => {
+    expect(analyzer.detectPlanMode().mode).toBe('first_run')
+  })
+
+  it('detectPlanMode 有活跃计划返回 continue_plan', () => {
+    planManager.getActivePlan = vi.fn(() => ({
+      id: 'p1',
+      title: '测试',
+      steps: [{ id: 's1', description: 's', status: 'pending' }],
+      status: 'active',
+    }))
+    planManager.listPlans = vi.fn(() => [
+      { id: 'p1', title: '测试', steps: [{ id: 's1', description: 's', status: 'pending' }], status: 'active' },
+    ])
+    expect(analyzer.detectPlanMode().mode).toBe('continue_plan')
+  })
+
+  it('isDegenerate 指纹不足时不退化', () => {
+    analyzer.recordFingerprint('A')
+    analyzer.recordFingerprint('B')
+    expect(analyzer.isDegenerate()).toBe(false)
+  })
+
+  it('isDegenerate 连续相同指纹触发退化', () => {
+    for (let i = 0; i < 3; i++) analyzer.recordFingerprint('相同内容')
+    expect(analyzer.isDegenerate()).toBe(true)
+  })
+
+  it('fingerprint > 10 截断', () => {
+    for (let i = 0; i < 15; i++) analyzer.recordFingerprint(`fp${i}`)
+    expect(analyzer.getFingerprints().length).toBeLessThanOrEqual(10)
+  })
+
+  it('shouldAnalyze 退化时返回 false', () => {
+    for (let i = 0; i < 3; i++) analyzer.recordFingerprint('same')
+    expect(analyzer.shouldAnalyze().shouldRun).toBe(false)
+  })
+
+  it('shouldAnalyze 有活跃计划时返回 false', () => {
+    planManager.getActivePlan = vi.fn(() => ({
+      id: 'p1',
+      title: 't',
+      steps: [{ id: 's', description: 's', status: 'pending' }],
+      status: 'active',
+    }))
+    expect(analyzer.shouldAnalyze().shouldRun).toBe(false)
+  })
+
+  it('shouldAnalyze 正常时返回 true', () => {
+    expect(analyzer.shouldAnalyze().shouldRun).toBe(true)
+  })
+
+  it('analyze 调用 agentService', async () => {
+    const input = {
+      mode: 'first_run' as any,
+      planContext: '',
+      historySummary: '',
+      safetyMode: 'auto',
+      livingPlanCtx: '',
+      cognitiveCtx: '',
+      strategyCtx: '',
+      promptMode: 'full' as any,
+    }
+    const result = await analyzer.analyze(input)
+    expect(agentService.runAgentTask).toHaveBeenCalled()
+    expect(result.success).toBe(true)
+  })
+
+  it('analyze 异常时返回 hadTimeout', async () => {
+    agentService.runAgentTask = vi.fn().mockRejectedValue(new Error('API error'))
+    const input = {
+      mode: 'first_run' as any,
+      planContext: '',
+      historySummary: '',
+      safetyMode: 'auto',
+      livingPlanCtx: '',
+      cognitiveCtx: '',
+      strategyCtx: '',
+      promptMode: 'full' as any,
+    }
+    const result = await analyzer.analyze(input)
+    expect(result.success).toBe(false)
+    expect(result.hadTimeout).toBe(true)
+  })
+
+  it('getHistorySummary 空历史返回首次运行提示', () => {
+    expect(analyzer.getHistorySummary()).toContain('首次运行')
+  })
+
+  it('builds execution goal context including abandoned stats', async () => {
+    const { executionGoalStore } = await import('@akemi-mio/evolution/goals')
+    executionGoalStore.getStats.mockReturnValue({
+      total: 5,
+      active: 0,
+      blocked: 1,
+      completed: 3,
+      abandoned: 1,
+      completionRate: 0.6,
+    })
+    executionGoalStore.getMethodologyStats.mockReturnValue([
+      { methodology: 'systematic_debugging', total: 3, completed: 2, blocked: 0, abandoned: 1, completionRate: 2 / 3 },
+    ])
+    try {
+      const context = (analyzer as any).buildExecutionGoalContext()
+      expect(context).toContain('放弃: 1')
+      expect(context).toContain('完成率: 60%')
+      expect(context).toContain('systematic_debugging: 2/3 完成')
+      expect(context).toContain('abandoned=1')
+    } finally {
+      executionGoalStore.getStats.mockReturnValue({ total: 0, active: 0, blocked: 0, completed: 0, abandoned: 0, completionRate: 0 })
+      executionGoalStore.getMethodologyStats.mockReturnValue([])
+    }
+  })
+
+  it('setter/getter 参数自适应', () => {
+    analyzer.setPromptTrimMode(true)
+    expect(analyzer.getPromptTrimMode()).toBe(true)
+    analyzer.setHistoryMaxEntries(10)
+    expect(analyzer.getHistoryMaxEntries()).toBe(10)
+    analyzer.setAnalysisTimeout(300000)
+    expect(analyzer.getAnalysisTimeout()).toBe(300000)
+  })
+})

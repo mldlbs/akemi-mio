@@ -1,0 +1,17 @@
+{
+  "name": "@akemi-mio/runtime-foundation",
+  "version": "0.1.0",
+  "description": "Minimal infrastructure for Mio runtime modules",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "index.js",
+  "files": ["index.js", "jsonl-store.js", "event-bus.js", "ids.js"],
+  "scripts": {
+    "test": "node --test __tests__/foundation.test.js",
+    "check": "node --check index.js && node --check jsonl-store.js && node --check event-bus.js && node --check ids.js"
+  },
+  "dependencies": {
+    "@akemi-mio/runtime-contracts": "^0.1.0"
+  },
+  "engines": { "node": ">=18" }
+}

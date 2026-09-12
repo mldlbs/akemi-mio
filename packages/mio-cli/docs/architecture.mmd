@@ -1,0 +1,67 @@
+%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '12px', 'nodeBorder': '1px'}}}%%
+graph LR
+  CLI["bin/mio.js"] --> ADX["codex"]
+  CLI --> AOC["opencode"]
+  CLI --> AWB["workbuddy"]
+  CLI --> AHR["hermes"]
+  ADX & AOC & AWB & AHR -->|"stdio JSON-RPC"| MCP
+
+  subgraph MCP["MCP Server — 41 Tools"]
+    direction TB
+    SW{"callTool"}
+    subgraph T1["Memory ×10"]
+      M["query·record·archive·migrate·analyze"]
+      X["experience.list·confirm·reuse"]
+      P["policy.check"]
+    end
+    subgraph T2["Observer ×12"]
+      W["world_model·trends·research·insights·status"]
+      C["collect·ferment·essays·dag"]
+      S["ingest·subscribe·digest"]
+    end
+    subgraph T3["Insight ×4"]
+      I["status·list·mark_reported·generate"]
+    end
+    subgraph T4["Creativity ×4"]
+      R["generate·ferment·list·status"]
+    end
+    subgraph T5["Idea+Evolution ×7"]
+      E["idea.generate·list"]
+      V["evolution.suggest·report·strategies"]
+      Z["phase0.report"]
+    end
+    SW --> T1 & T2 & T3 & T4 & T5
+  end
+
+  subgraph PKG["@akemi-mio/*"]
+    CR["creativity"] 
+    OB["observer"]
+    IN["insight"]
+    EX["experience-memory"]
+    EV["evolution-*"]
+  end
+
+  subgraph HOME["MIO_HOME"]
+    ML["memory.jsonl"]
+    TR["traces.jsonl"]
+    OC["observer/{observations·trends·research·insights·world_model·essays·summaries}"]
+    CR2["creativity/"]
+    IN2["insights/"]
+  end
+
+  R --> CR
+  T2 --> OB
+  I --> IN
+  M -.-> ML
+  CR2 -.-> CR2
+  IN2 -.-> IN2
+  OC -.-> OC
+
+  style MCP fill:#D5F5E3,stroke:#117A65
+  style PKG fill:#D4E6F1,stroke:#1A5276
+  style HOME fill:#FEF9E7,stroke:#F39C12
+  style T1 fill:#D6EAF8,stroke:#2E4053
+  style T2 fill:#D6EAF8,stroke:#2E4053
+  style T3 fill:#D6EAF8,stroke:#2E4053
+  style T4 fill:#D6EAF8,stroke:#2E4053
+  style T5 fill:#D6EAF8,stroke:#2E4053

@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true
+  },
+  "references": [
+    {
+      "path": "./tsconfig.node.json"
+    },
+    {
+      "path": "./tsconfig.web.json"
+    }
+  ],
+  "exclude": [
+    "out/",
+    "dist-electron/",
+    "node_modules/",
+    "build/",
+    "coverage/",
+    "evolution_workspace/",
+    "mcp_workspace/",
+    "sandbox/",
+    "tmp/"
+  ]
+}

@@ -1,0 +1,174 @@
+{
+  "pipelineId": "hybrid-tts-asr",
+  "description": "ASR-PiperTTS 混合流水线：双路径并行 → 交叉验证 → 仲裁融合。PiperTTS 合成的音频通过 ASR 转写回文本，与原文交叉验证，不一致时触发仲裁",
+  "version": "1.0.0",
+  "stages": [
+    {
+      "id": "emotion-analysis",
+      "stageType": "emotion-analysis",
+      "description": "分析情感，输出语速/音调调整值",
+      "dependsOn": [],
+      "config": {
+        "emotionWindow": 10
+      },
+      "inputSchema": {
+        "type": "object",
+        "description": "直接访问 MemoryService，不依赖上游 stage",
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "dominantLabel": { "type": "string", "description": "主导情感标签" },
+          "dominantPolarity": { "type": "string", "description": "主导极性" },
+          "rateDelta": { "type": "number", "description": "语速调整值" },
+          "pitchDelta": { "type": "number", "description": "音调调整值" },
+          "trend": { "type": "string", "description": "情感变化趋势" }
+        }
+      }
+    },
+    {
+      "id": "memory-context",
+      "stageType": "memory-context",
+      "description": "从 MemoryService 获取格式化的记忆上下文",
+      "dependsOn": [],
+      "config": {
+        "maxEntries": 5,
+        "includeEmotion": true,
+        "maxTextLength": 2000
+      },
+      "inputSchema": {
+        "type": "object",
+        "description": "本 Stage 无需上游依赖",
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "contextText": { "type": "string", "description": "格式化记忆上下文文本" },
+          "interestTopics": { "type": "array", "description": "用户近期兴趣话题" },
+          "lastUserText": { "type": "string", "description": "最近一条用户消息" }
+        }
+      }
+    },
+    {
+      "id": "tts-params",
+      "stageType": "tts-params",
+      "description": "将情感分析结果映射为 TTS 参数（voice/rate/pitch/model）",
+      "dependsOn": ["emotion-analysis"],
+      "config": {
+        "defaultVoice": "zh_CN-huayan-medium",
+        "emotionWeight": 0.3,
+        "baseRate": 10,
+        "basePitch": 8
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dominantLabel": { "type": "string" },
+          "rateDelta": { "type": "number" },
+          "pitchDelta": { "type": "number" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "voice": { "type": "string" },
+          "rate": { "type": "string" },
+          "pitch": { "type": "string" },
+          "model": { "type": "string" },
+          "piperSpeed": { "type": "number" },
+          "piperPitch": { "type": "number" }
+        }
+      }
+    },
+    {
+      "id": "text-processing",
+      "stageType": "text-processing",
+      "description": "清理记忆文本，输出干净文本供 Piper 合成和 ASR 交叉验证",
+      "dependsOn": ["memory-context"],
+      "config": {
+        "minTextLength": 15
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contextText": { "type": "string", "description": "来自 memory-context 的文本" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "cleanText": { "type": "string", "description": "清理后的文本" },
+          "charCount": { "type": "number" },
+          "keywords": { "type": "array" }
+        }
+      }
+    },
+    {
+      "id": "piper-synthesis",
+      "stageType": "piper-synthesis",
+      "description": "通过 PiperOrchestrator 合成语音（路径 A：Text → Audio）",
+      "dependsOn": ["text-processing", "tts-params"],
+      "config": {
+        "synthesisTimeoutMs": 30000
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cleanText": { "type": "string" },
+          "model": { "type": "string" },
+          "piperSpeed": { "type": "number" },
+          "piperPitch": { "type": "number" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "description": "合成是否成功" },
+          "audioFile": { "type": "string", "description": "音频文件路径" },
+          "model": { "type": "string", "description": "实际使用的模型" },
+          "synthesisDurationMs": { "type": "number" },
+          "fallbackUsed": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "id": "asr-cross-validation",
+      "stageType": "asr-cross-validation",
+      "description": "ASR 交叉验证：对 TTS 输出音频执行转写，与原文比较，仲裁质量（路径 B：Audio → ASR → Compare）",
+      "dependsOn": ["piper-synthesis", "text-processing"],
+      "config": {
+        "validationMode": "normal",
+        "similarityThreshold": 0.7,
+        "strictThreshold": 0.5,
+        "enableAutoRetry": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "description": "自动从 piper-synthesis（音频文件）和 text-processing（原始文本）获取数据",
+        "properties": {
+          "validationMode": { "type": "string", "description": "验证模式: 'normal' | 'strict' | 'relaxed'" },
+          "similarityThreshold": { "type": "number", "description": "通过阈值 (0-1)" },
+          "strictThreshold": { "type": "number", "description": "重试阈值 (0-1)" },
+          "enableAutoRetry": { "type": "boolean", "description": "是否启用自动重新合成" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "validated": { "type": "boolean", "description": "是否通过验证" },
+          "originalText": { "type": "string", "description": "原始文本" },
+          "asrText": { "type": "string", "description": "ASR 转写文本" },
+          "similarity": { "type": "number", "description": "综合相似度 (0-1)" },
+          "cer": { "type": "number", "description": "字符错误率 (0-1)" },
+          "overlapSimilarity": { "type": "number", "description": "Bigram 重叠相似度 (0-1)" },
+          "arbitrationResult": { "type": "string", "description": "仲裁结论: pass | warning | retry | error" },
+          "retryAttempted": { "type": "boolean", "description": "是否尝试过重试" },
+          "retrySuccess": { "type": "boolean", "description": "重试是否成功" },
+          "voiceEmotion": { "type": "object", "description": "ASR 检测的语音情感" }
+        }
+      }
+    }
+  ]
+}

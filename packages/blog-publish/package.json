@@ -1,0 +1,9 @@
+{
+  "name": "@akemi-mio/blog-publish",
+  "version": "0.1.0",
+  "description": "Blog publishing: image processing, platform publishing, credential-gated publishing",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "dependencies": { "@akemi-mio/core": "workspace:*" }
+}

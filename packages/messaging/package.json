@@ -1,0 +1,21 @@
+{
+  "name": "@akemi-mio/messaging",
+  "version": "0.1.0",
+  "description": "External message gateway: routes inbound external messages to an agent port and dispatches notifications via host-provided renderer + outbox (zero runtime dependencies; telegram/ adapters stay host-side)",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

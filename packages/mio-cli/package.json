@@ -1,0 +1,38 @@
+﻿{
+  "name": "mio-agent-runtime",
+  "version": "0.5.23",
+  "description": "Mio Agent Runtime installer and MCP intelligence layer",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "mio": "bin/mio.js"
+  },
+  "files": [
+    "bin/",
+    "server/",
+    "adapters/",
+    "observe/",
+    "scripts/",
+    "README.md",
+    "!server/mio-intelligence-mcp/__tests__"
+  ],
+  "scripts": {
+    "check": "node --check bin/mio.js && node --check adapters/host-utils.js && node --check adapters/codex.js && node --check adapters/opencode.js && node --check adapters/workbuddy.js && node --check adapters/hermes.js && node --check adapters/claude-code.js && node --check server/runtime-modules.js && node --check server/memory-store.js && node --check server/retention.js && node --check server/digest.js && node --check server/host-capabilities.js && node --check server/evolution-cutover.js && node --check server/mio-intelligence-mcp/index.js && node --check server/mio-intelligence-mcp/phase0.js && node --check observe/observer.js && node --check scripts/verify-packed-runtime.js",
+    "prepack": "npm run check",
+    "verify:pack-install": "node scripts/verify-packed-runtime.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@akemi-mio/runtime-contracts": "^0.1.0",
+    "@akemi-mio/runtime-foundation": "^0.1.0",
+    "@akemi-mio/experience-memory": "^0.1.0",
+    "@akemi-mio/evolution-learning": "^0.1.0",
+    "@akemi-mio/evolution-strategy": "^0.1.0",
+    "@akemi-mio/evolution-safety": "^0.1.0",
+    "@akemi-mio/evolution-scheduler": "^0.1.0",
+    "@akemi-mio/observer": "^0.1.0",
+    "@akemi-mio/insight": "^0.1.0"
+  }
+}

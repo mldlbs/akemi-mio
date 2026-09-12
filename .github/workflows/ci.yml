@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, 'refactor/**', 'feature/**', 'fix/**']
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  quality:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npx eslint src/ --ext .ts,.tsx
+
+      - name: Format check
+        run: npx prettier --check "src/**/*.{ts,tsx,json,css}"
+
+      - name: Build
+        run: npx electron-vite build
+
+  main-tests:
+    runs-on: windows-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Main process tests + coverage
+        run: npx vitest run --coverage
+
+  renderer-tests:
+    runs-on: windows-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Renderer tests + coverage
+        run: npx vitest run --config vitest.config.renderer.ts --coverage
+
+  preload-tests:
+    runs-on: windows-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Preload tests
+        run: npx vitest run --config vitest.config.preload.ts

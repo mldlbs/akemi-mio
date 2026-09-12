@@ -1,0 +1,78 @@
+﻿/* ──────────────────────────────────────────────
+   Nocturnal Atelier — Theme Palettes
+   Dark glass base with colored accent overrides
+   ────────────────────────────────────────────── */
+
+/* Default (Nocturnal Amber) — already set in tokens.css */
+
+/* ── Ocean Depths ── */
+[data-theme='ocean'] {
+  --accent: oklch(0.62 0.14 220);
+  --accent-soft: oklch(0.68 0.12 230);
+  --accent-glow: oklch(0.62 0.14 220 / 0.15);
+  --accent-steel: oklch(0.55 0.12 240);
+  --accent-slot: oklch(0.55 0.12 240);
+  --accent-slot-glow: oklch(0.55 0.12 240 / 0.12);
+  --border-glass: oklch(0.55 0.04 210 / 0.18);
+  --border-glass-hover: oklch(0.48 0.06 215 / 0.3);
+}
+
+/* ── Sunset Boulevard ── */
+[data-theme='sunset'] {
+  --accent: oklch(0.68 0.16 35);
+  --accent-soft: oklch(0.74 0.14 45);
+  --accent-glow: oklch(0.68 0.16 35 / 0.15);
+  --accent-steel: oklch(0.6 0.12 15);
+  --accent-slot: oklch(0.6 0.12 15);
+  --accent-slot-glow: oklch(0.6 0.12 15 / 0.12);
+  --border-glass: oklch(0.62 0.06 40 / 0.18);
+  --border-glass-hover: oklch(0.55 0.08 45 / 0.3);
+}
+
+/* ── Arctic Frost ── */
+[data-theme='arctic'] {
+  --accent: oklch(0.58 0.08 250);
+  --accent-soft: oklch(0.64 0.06 255);
+  --accent-glow: oklch(0.58 0.08 250 / 0.12);
+  --accent-steel: oklch(0.52 0.06 260);
+  --accent-slot: oklch(0.52 0.06 260);
+  --accent-slot-glow: oklch(0.52 0.06 260 / 0.1);
+  --border-glass: oklch(0.58 0.03 240 / 0.16);
+  --border-glass-hover: oklch(0.5 0.04 245 / 0.28);
+}
+
+/* ── Botanical Garden ── */
+[data-theme='garden'] {
+  --accent: oklch(0.6 0.12 145);
+  --accent-soft: oklch(0.66 0.1 155);
+  --accent-glow: oklch(0.6 0.12 145 / 0.15);
+  --accent-steel: oklch(0.62 0.14 75);
+  --accent-slot: oklch(0.62 0.14 75);
+  --accent-slot-glow: oklch(0.62 0.14 75 / 0.12);
+  --border-glass: oklch(0.6 0.05 140 / 0.18);
+  --border-glass-hover: oklch(0.52 0.07 145 / 0.3);
+}
+
+/* ── Tech Innovation ── */
+[data-theme='tech'] {
+  --accent: oklch(0.6 0.2 260);
+  --accent-soft: oklch(0.68 0.16 265);
+  --accent-glow: oklch(0.6 0.2 260 / 0.15);
+  --accent-steel: oklch(0.72 0.16 190);
+  --accent-slot: oklch(0.72 0.16 190);
+  --accent-slot-glow: oklch(0.72 0.16 190 / 0.12);
+  --border-glass: oklch(0.5 0.06 255 / 0.18);
+  --border-glass-hover: oklch(0.42 0.1 260 / 0.3);
+}
+
+/* ── Modern Minimalist ── */
+[data-theme='minimal'] {
+  --accent: oklch(0.72 0.02 260);
+  --accent-soft: oklch(0.78 0.02 260);
+  --accent-glow: oklch(0.72 0.02 260 / 0.1);
+  --accent-steel: oklch(0.6 0.02 260);
+  --accent-slot: oklch(0.6 0.02 260);
+  --accent-slot-glow: oklch(0.6 0.02 260 / 0.08);
+  --border-glass: oklch(0.5 0.01 260 / 0.18);
+  --border-glass-hover: oklch(0.4 0.02 260 / 0.3);
+}

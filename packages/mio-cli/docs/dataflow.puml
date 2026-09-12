@@ -1,0 +1,189 @@
+@startuml
+!theme plain
+title mio-agent-runtime — 数据流图
+
+skinparam backgroundColor #FEFEFE
+skinparam activity { BackgroundColor #D6EAF8 BorderColor #2E4053 }
+skinparam rectangle { BorderColor #117A65 BackgroundColor #D5F5E3 }
+skinparam database { BorderColor #1A5276 BackgroundColor #D4E6F1 }
+skinparam note { BorderColor #F39C12 BackgroundColor #FEF9E7 }
+
+' ════════════════════════════════════
+' 数据流 1: Agent 调用 MCP 工具
+' ════════════════════════════════════
+rectangle "Agent (Codex / OpenCode / WorkBuddy / Hermes)" as AGENT #E8DAEF
+
+rectangle "MCP Server (stdio)" as MCP #D5F5E3 {
+  :callTool(name, args);
+  switch (name)
+  case (mio.memory.*)
+    :queryMemory / recordMemory;
+    :readJsonl / writeJsonl;
+    case (mio.memory.query)
+      :返回 memory.jsonl 匹配记录;
+    case (mio.memory.record)
+      :追加到 memory.jsonl;
+  case (mio.observer.*)
+    switch (name)
+    case (world_model/trends/research/insights)
+      :读取 Observer Storage JSON;
+    case (collect)
+      :调用 ObserverService.collectBySource;
+      :写入 observations/*.json;
+    case (ferment)
+      :调用 FermentationEngine.ferment;
+      :写入 essays/draft/*.md;
+    case (dag)
+      :读取 summaries/*.jsonl;
+    endswitch
+  case (mio.insight.*)
+    :操作 InsightStore (JSON);
+    case (generate)
+      :调用 InsightGenerator (LLM);
+      :写入 insights/insights.json;
+    case (list/status)
+      :返回 InsightStore 数据;
+  case (mio.creativity.*)
+    :操作 CreativityEngine (JSONL);
+    case (generate)
+      :调用 LLM 概念生成;
+    case (ferment)
+      :交叉关联发酵;
+  case (mio.idea.*)
+    :idea_generate / idea_list;
+  case (mio.evolution.*)
+    :evolution_suggest / report;
+  endswitch
+}
+
+database "MIO_HOME" as DATA #D4E6F1 {
+  [memory.jsonl] as M
+  [traces.jsonl] as T
+  [insights/] as I
+  [creativity/] as C
+  [observer/] as O {
+    [observations/*.json] as O1
+    [trends/*.json] as O2
+    [research/*.json] as O3
+    [insights/*.json] as O4
+    [world_model/*.json] as O5
+    [essays/**/*.md] as O6
+    [summaries/*.jsonl] as O7
+  }
+}
+
+AGENT --> MCP : JSON-RPC (stdio)
+MCP --> DATA : 读写文件
+
+' ════════════════════════════════════
+' 数据流 2: Observer 自动采集
+' ════════════════════════════════════
+rectangle "Observer Pipeline (4h DAG 周期)" as PIPELINE #FEF9E7 {
+  :DAG StateMachine;
+
+  fork
+    :RSS Collector;
+  fork again
+    :Bilibili Collector;
+  fork again
+    :HackerNews Collector;
+  fork again
+    :GitHub Trending;
+  fork again
+    :Douyin Collector;
+  fork again
+    :Weibo Collector;
+  end fork
+
+  :写入 observations/*.json;
+
+  fork
+    :TrendEngine → trends/*.json;
+  fork again
+    :TensionFieldEngine;
+  fork again
+    :DeepResearchEngine → research/*.json;
+  fork again
+    :MultiBrainModel;
+  fork again
+    :InsightComposer → insights/*.json;
+  fork again
+    :WorldModelEngine → world_model/*.json;
+  end fork
+
+  :FermentationEngine;
+  :WritingGate (LLM 预算检查);
+
+  if (通过? (≥3 themes + LLM 预算)) then (yes)
+    :OutputLayer;
+    :LLM (Ollama/Qwen) 生成;
+    :写入 essays/published/*.md;
+  else (no)
+    :跳过;
+  endif
+
+  :SelfEvolutionEngine → 更新进化参数;
+}
+
+rectangle "MCP Server" as MCP2 #D5F5E3 {
+  :mio.observer.collect;
+  :mio.observer.ferment;
+  :mio.observer.status;
+}
+
+PIPELINE --> O1 : 写入
+PIPELINE --> O2 : 写入
+PIPELINE --> O3 : 写入
+PIPELINE --> O4 : 写入
+PIPELINE --> O5 : 写入
+PIPELINE --> O6 : 写入
+PIPELINE --> O7 : 写入
+
+MCP2 --> O : 读取
+
+' ════════════════════════════════════
+' 数据流 3: 被动观察 (mio observe)
+' ════════════════════════════════════
+rectangle "被动观察 (mio observe)" as OBS_PASSIVE #E8DAEF {
+  fork
+    :WorkBuddy *.jsonl;
+  fork again
+    :OpenCode DB;
+  fork again
+    :Hermes DB;
+  end fork
+
+  :解析 task_outcome / error;
+  :写入 MIO_HOME;
+  :写回工作区 AGENTS.md;
+}
+
+OBS_PASSIVE --> M : 写入
+OBS_PASSIVE --> T : 写入
+
+' ════════════════════════════════════
+' 数据流 4: LLM 调用
+' ════════════════════════════════════
+rectangle "外部 LLM" as LLM_EXT #ABB2B9 {
+  [OpenRouter / DeepSeek] as LLM1
+  [Ollama (Qwen2.5-7B)] as LLM2
+}
+
+rectangle "MCP Server" as MCP3 #D5F5E3 {
+  :chatJson (LLM_API_URL + LLM_KEY);
+}
+
+MCP3 --> LLM1 : HTTP (openai-compatible)
+MCP3 --> LLM2 : HTTP (local)
+LLM1 --> M : 记忆写入
+LLM2 --> O : 观察分析
+
+legend right
+  <size:10><b>4 条数据流</b></size>
+  <size:10>1. Agent → MCP → MIO_HOME</size>
+  <size:10>2. Observer 4h 自动采集 → Storage</size>
+  <size:10>3. 被动观察 → MIO_HOME + AGENTS.md</size>
+  <size:10>4. LLM 调用 → 洞察生成</size>
+endlegend
+
+@enduml

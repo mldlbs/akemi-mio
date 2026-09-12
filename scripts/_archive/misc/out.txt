@@ -1,0 +1,222 @@
+packages/audio/src/AsrContextBuilder.ts(14,67): error TS1109: Expression expected.
+packages/audio/src/AsrContextBuilder.ts(14,68): error TS1003: Identifier expected.
+packages/audio/src/AsrContextBuilder.ts(14,69): error TS1003: Identifier expected.
+packages/audio/src/AsrContextBuilder.ts(14,70): error TS1109: Expression expected.
+packages/audio/src/AsrContextBuilder.ts(14,71): error TS1003: Identifier expected.
+packages/audio/src/AsrContextBuilder.ts(14,72): error TS1003: Identifier expected.
+packages/audio/src/AsrContextBuilder.ts(14,98): error TS1005: ';' expected.
+packages/audio/src/AsrContextBuilder.ts(14,99): error TS1002: Unterminated string literal.
+packages/audio/src/AsrContextBuilder.ts(16,50): error TS1109: Expression expected.
+packages/audio/src/AsrContextBuilder.ts(16,51): error TS1003: Identifier expected.
+packages/audio/src/AsrContextBuilder.ts(16,52): error TS1003: Identifier expected.
+packages/audio/src/AsrContextBuilder.ts(16,53): error TS1109: Expression expected.
+packages/audio/src/AsrContextBuilder.ts(16,54): error TS1003: Identifier expected.
+packages/audio/src/AsrContextBuilder.ts(16,55): error TS1003: Identifier expected.
+packages/audio/src/AsrHotwordManager.ts(32,80): error TS1109: Expression expected.
+packages/audio/src/AsrHotwordManager.ts(32,81): error TS1003: Identifier expected.
+packages/audio/src/AsrHotwordManager.ts(32,82): error TS1003: Identifier expected.
+packages/audio/src/AsrHotwordManager.ts(32,83): error TS1109: Expression expected.
+packages/audio/src/AsrHotwordManager.ts(32,84): error TS1003: Identifier expected.
+packages/audio/src/AsrHotwordManager.ts(32,85): error TS1003: Identifier expected.
+packages/audio/src/AsrLogStore.ts(17,27): error TS1109: Expression expected.
+packages/audio/src/AsrLogStore.ts(17,28): error TS1003: Identifier expected.
+packages/audio/src/AsrLogStore.ts(17,29): error TS1003: Identifier expected.
+packages/audio/src/AsrLogStore.ts(17,30): error TS1109: Expression expected.
+packages/audio/src/AsrLogStore.ts(17,31): error TS1003: Identifier expected.
+packages/audio/src/AsrLogStore.ts(17,32): error TS1003: Identifier expected.
+packages/audio/src/AsrService.ts(6,53): error TS1109: Expression expected.
+packages/audio/src/AsrService.ts(6,54): error TS1003: Identifier expected.
+packages/audio/src/AsrService.ts(6,55): error TS1003: Identifier expected.
+packages/audio/src/AsrService.ts(6,56): error TS1109: Expression expected.
+packages/audio/src/AsrService.ts(6,57): error TS1003: Identifier expected.
+packages/audio/src/AsrService.ts(6,58): error TS1003: Identifier expected.
+packages/audio/src/AsrService.ts(6,84): error TS1005: ';' expected.
+packages/audio/src/AsrService.ts(6,85): error TS1002: Unterminated string literal.
+packages/audio/src/MemoryAsrHybridPipeline.ts(41,36): error TS1109: Expression expected.
+packages/audio/src/MemoryAsrHybridPipeline.ts(41,37): error TS1003: Identifier expected.
+packages/audio/src/MemoryAsrHybridPipeline.ts(41,38): error TS1003: Identifier expected.
+packages/audio/src/MemoryAsrHybridPipeline.ts(41,39): error TS1109: Expression expected.
+packages/audio/src/MemoryAsrHybridPipeline.ts(41,40): error TS1003: Identifier expected.
+packages/audio/src/MemoryAsrHybridPipeline.ts(41,41): error TS1003: Identifier expected.
+packages/audio/src/MemoryAsrHybridPipeline.ts(41,75): error TS1005: ';' expected.
+packages/audio/src/MemoryAsrHybridPipeline.ts(41,76): error TS1002: Unterminated string literal.
+packages/audio/src/MemoryAsrHypothesisGenerator.ts(22,36): error TS1109: Expression expected.
+packages/audio/src/MemoryAsrHypothesisGenerator.ts(22,37): error TS1003: Identifier expected.
+packages/audio/src/MemoryAsrHypothesisGenerator.ts(22,38): error TS1003: Identifier expected.
+packages/audio/src/MemoryAsrHypothesisGenerator.ts(22,39): error TS1109: Expression expected.
+packages/audio/src/MemoryAsrHypothesisGenerator.ts(22,40): error TS1003: Identifier expected.
+packages/audio/src/MemoryAsrHypothesisGenerator.ts(22,41): error TS1003: Identifier expected.
+packages/audio/src/MemoryAsrHypothesisGenerator.ts(22,75): error TS1005: ';' expected.
+packages/audio/src/MemoryAsrHypothesisGenerator.ts(22,76): error TS1002: Unterminated string literal.
+packages/audio/src/MemoryEmotionBridge.ts(22,36): error TS1109: Expression expected.
+packages/audio/src/MemoryEmotionBridge.ts(22,37): error TS1003: Identifier expected.
+packages/audio/src/MemoryEmotionBridge.ts(22,38): error TS1003: Identifier expected.
+packages/audio/src/MemoryEmotionBridge.ts(22,39): error TS1109: Expression expected.
+packages/audio/src/MemoryEmotionBridge.ts(22,40): error TS1003: Identifier expected.
+packages/audio/src/MemoryEmotionBridge.ts(22,41): error TS1003: Identifier expected.
+packages/audio/src/MemoryEmotionBridge.ts(22,75): error TS1005: ';' expected.
+packages/audio/src/MemoryEmotionBridge.ts(22,76): error TS1002: Unterminated string literal.
+packages/audio/src/MemoryEmotionBridge.ts(23,52): error TS1109: Expression expected.
+packages/audio/src/MemoryEmotionBridge.ts(23,53): error TS1003: Identifier expected.
+packages/audio/src/MemoryEmotionBridge.ts(23,54): error TS1003: Identifier expected.
+packages/audio/src/MemoryEmotionBridge.ts(23,55): error TS1109: Expression expected.
+packages/audio/src/MemoryEmotionBridge.ts(23,56): error TS1003: Identifier expected.
+packages/audio/src/MemoryEmotionBridge.ts(23,57): error TS1003: Identifier expected.
+packages/audio/src/MemoryEmotionBridge.ts(23,83): error TS1005: ';' expected.
+packages/audio/src/MemoryEmotionBridge.ts(23,84): error TS1002: Unterminated string literal.
+packages/audio/src/MemoryEntityExtractor.ts(20,53): error TS1109: Expression expected.
+packages/audio/src/MemoryEntityExtractor.ts(20,54): error TS1003: Identifier expected.
+packages/audio/src/MemoryEntityExtractor.ts(20,55): error TS1003: Identifier expected.
+packages/audio/src/MemoryEntityExtractor.ts(20,56): error TS1109: Expression expected.
+packages/audio/src/MemoryEntityExtractor.ts(20,57): error TS1003: Identifier expected.
+packages/audio/src/MemoryEntityExtractor.ts(20,58): error TS1003: Identifier expected.
+packages/audio/src/MemoryEntityExtractor.ts(20,84): error TS1005: ';' expected.
+packages/audio/src/MemoryEntityExtractor.ts(20,85): error TS1002: Unterminated string literal.
+packages/audio/src/MemoryTtsBridge.ts(22,36): error TS1109: Expression expected.
+packages/audio/src/MemoryTtsBridge.ts(22,37): error TS1003: Identifier expected.
+packages/audio/src/MemoryTtsBridge.ts(22,38): error TS1003: Identifier expected.
+packages/audio/src/MemoryTtsBridge.ts(22,39): error TS1109: Expression expected.
+packages/audio/src/MemoryTtsBridge.ts(22,40): error TS1003: Identifier expected.
+packages/audio/src/MemoryTtsBridge.ts(22,41): error TS1003: Identifier expected.
+packages/audio/src/MemoryTtsBridge.ts(22,75): error TS1005: ';' expected.
+packages/audio/src/MemoryTtsBridge.ts(22,76): error TS1002: Unterminated string literal.
+packages/audio/src/PiperOrchestrator.ts(31,57): error TS1109: Expression expected.
+packages/audio/src/PiperOrchestrator.ts(31,58): error TS1003: Identifier expected.
+packages/audio/src/PiperOrchestrator.ts(31,59): error TS1003: Identifier expected.
+packages/audio/src/PiperOrchestrator.ts(31,60): error TS1109: Expression expected.
+packages/audio/src/PiperOrchestrator.ts(31,61): error TS1003: Identifier expected.
+packages/audio/src/PiperOrchestrator.ts(31,62): error TS1003: Identifier expected.
+packages/audio/src/PiperOrchestrator.ts(33,50): error TS1109: Expression expected.
+packages/audio/src/PiperOrchestrator.ts(33,51): error TS1003: Identifier expected.
+packages/audio/src/PiperOrchestrator.ts(33,52): error TS1003: Identifier expected.
+packages/audio/src/PiperOrchestrator.ts(33,53): error TS1109: Expression expected.
+packages/audio/src/PiperOrchestrator.ts(33,54): error TS1003: Identifier expected.
+packages/audio/src/PiperOrchestrator.ts(33,55): error TS1003: Identifier expected.
+packages/audio/src/PiperOrchestrator.ts(33,82): error TS1005: ';' expected.
+packages/audio/src/PiperOrchestrator.ts(33,83): error TS1002: Unterminated string literal.
+packages/audio/src/PiperOrchestrator.ts(34,34): error TS1109: Expression expected.
+packages/audio/src/PiperOrchestrator.ts(34,35): error TS1003: Identifier expected.
+packages/audio/src/PiperOrchestrator.ts(34,36): error TS1003: Identifier expected.
+packages/audio/src/PiperOrchestrator.ts(34,37): error TS1109: Expression expected.
+packages/audio/src/PiperOrchestrator.ts(34,38): error TS1003: Identifier expected.
+packages/audio/src/PiperOrchestrator.ts(34,39): error TS1003: Identifier expected.
+packages/audio/src/PiperOrchestrator.ts(34,82): error TS1005: ';' expected.
+packages/audio/src/PiperOrchestrator.ts(34,83): error TS1002: Unterminated string literal.
+packages/audio/src/PreferenceEnhancer.ts(36,36): error TS1109: Expression expected.
+packages/audio/src/PreferenceEnhancer.ts(36,37): error TS1003: Identifier expected.
+packages/audio/src/PreferenceEnhancer.ts(36,38): error TS1003: Identifier expected.
+packages/audio/src/PreferenceEnhancer.ts(36,39): error TS1109: Expression expected.
+packages/audio/src/PreferenceEnhancer.ts(36,40): error TS1003: Identifier expected.
+packages/audio/src/PreferenceEnhancer.ts(36,41): error TS1003: Identifier expected.
+packages/audio/src/PreferenceEnhancer.ts(36,75): error TS1005: ';' expected.
+packages/audio/src/PreferenceEnhancer.ts(36,76): error TS1002: Unterminated string literal.
+packages/audio/src/PronunciationDictionary.ts(19,36): error TS1109: Expression expected.
+packages/audio/src/PronunciationDictionary.ts(19,37): error TS1003: Identifier expected.
+packages/audio/src/PronunciationDictionary.ts(19,38): error TS1003: Identifier expected.
+packages/audio/src/PronunciationDictionary.ts(19,39): error TS1109: Expression expected.
+packages/audio/src/PronunciationDictionary.ts(19,40): error TS1003: Identifier expected.
+packages/audio/src/PronunciationDictionary.ts(19,41): error TS1003: Identifier expected.
+packages/audio/src/PronunciationDictionary.ts(19,75): error TS1005: ';' expected.
+packages/audio/src/PronunciationDictionary.ts(19,76): error TS1002: Unterminated string literal.
+packages/audio/src/QoSEvaluator.ts(35,30): error TS1109: Expression expected.
+packages/audio/src/QoSEvaluator.ts(35,31): error TS1003: Identifier expected.
+packages/audio/src/QoSEvaluator.ts(35,32): error TS1003: Identifier expected.
+packages/audio/src/QoSEvaluator.ts(35,33): error TS1109: Expression expected.
+packages/audio/src/QoSEvaluator.ts(35,34): error TS1003: Identifier expected.
+packages/audio/src/QoSEvaluator.ts(35,35): error TS1003: Identifier expected.
+packages/audio/src/QoSEvaluator.ts(35,71): error TS1005: ';' expected.
+packages/audio/src/QoSEvaluator.ts(35,72): error TS1002: Unterminated string literal.
+packages/audio/src/SessionGreeting.ts(19,36): error TS1109: Expression expected.
+packages/audio/src/SessionGreeting.ts(19,37): error TS1003: Identifier expected.
+packages/audio/src/SessionGreeting.ts(19,38): error TS1003: Identifier expected.
+packages/audio/src/SessionGreeting.ts(19,39): error TS1109: Expression expected.
+packages/audio/src/SessionGreeting.ts(19,40): error TS1003: Identifier expected.
+packages/audio/src/SessionGreeting.ts(19,41): error TS1003: Identifier expected.
+packages/audio/src/SessionGreeting.ts(19,75): error TS1005: ';' expected.
+packages/audio/src/SessionGreeting.ts(19,76): error TS1002: Unterminated string literal.
+packages/audio/src/TaskCompletionTtsHook.ts(14,26): error TS1109: Expression expected.
+packages/audio/src/TaskCompletionTtsHook.ts(14,27): error TS1003: Identifier expected.
+packages/audio/src/TaskCompletionTtsHook.ts(14,28): error TS1003: Identifier expected.
+packages/audio/src/TaskCompletionTtsHook.ts(14,29): error TS1109: Expression expected.
+packages/audio/src/TaskCompletionTtsHook.ts(14,30): error TS1003: Identifier expected.
+packages/audio/src/TaskCompletionTtsHook.ts(14,31): error TS1003: Identifier expected.
+packages/audio/src/TaskCompletionTtsHook.ts(14,58): error TS1005: ';' expected.
+packages/audio/src/TaskCompletionTtsHook.ts(14,59): error TS1002: Unterminated string literal.
+packages/audio/src/TopicToneMatcher.ts(20,36): error TS1109: Expression expected.
+packages/audio/src/TopicToneMatcher.ts(20,37): error TS1003: Identifier expected.
+packages/audio/src/TopicToneMatcher.ts(20,38): error TS1003: Identifier expected.
+packages/audio/src/TopicToneMatcher.ts(20,39): error TS1109: Expression expected.
+packages/audio/src/TopicToneMatcher.ts(20,40): error TS1003: Identifier expected.
+packages/audio/src/TopicToneMatcher.ts(20,41): error TS1003: Identifier expected.
+packages/audio/src/TopicToneMatcher.ts(20,75): error TS1005: ';' expected.
+packages/audio/src/TopicToneMatcher.ts(20,76): error TS1002: Unterminated string literal.
+packages/audio/src/TtsConfigManager.ts(19,27): error TS1109: Expression expected.
+packages/audio/src/TtsConfigManager.ts(19,28): error TS1003: Identifier expected.
+packages/audio/src/TtsConfigManager.ts(19,29): error TS1003: Identifier expected.
+packages/audio/src/TtsConfigManager.ts(19,30): error TS1109: Expression expected.
+packages/audio/src/TtsConfigManager.ts(19,31): error TS1003: Identifier expected.
+packages/audio/src/TtsConfigManager.ts(19,32): error TS1003: Identifier expected.
+packages/audio/src/TtsPiperBridge.ts(39,31): error TS1109: Expression expected.
+packages/audio/src/TtsPiperBridge.ts(39,32): error TS1003: Identifier expected.
+packages/audio/src/TtsPiperBridge.ts(39,33): error TS1003: Identifier expected.
+packages/audio/src/TtsPiperBridge.ts(39,34): error TS1109: Expression expected.
+packages/audio/src/TtsPiperBridge.ts(39,35): error TS1003: Identifier expected.
+packages/audio/src/TtsPiperBridge.ts(39,36): error TS1003: Identifier expected.
+packages/audio/src/TtsPiperBridge.ts(39,77): error TS1005: ';' expected.
+packages/audio/src/TtsPiperBridge.ts(39,78): error TS1002: Unterminated string literal.
+packages/audio/src/TtsPreloadBuffer.ts(28,30): error TS1109: Expression expected.
+packages/audio/src/TtsPreloadBuffer.ts(28,31): error TS1003: Identifier expected.
+packages/audio/src/TtsPreloadBuffer.ts(28,32): error TS1003: Identifier expected.
+packages/audio/src/TtsPreloadBuffer.ts(28,33): error TS1109: Expression expected.
+packages/audio/src/TtsPreloadBuffer.ts(28,34): error TS1003: Identifier expected.
+packages/audio/src/TtsPreloadBuffer.ts(28,35): error TS1003: Identifier expected.
+packages/audio/src/TtsPreloadBuffer.ts(28,71): error TS1005: ';' expected.
+packages/audio/src/TtsPreloadBuffer.ts(28,72): error TS1002: Unterminated string literal.
+packages/audio/src/TtsRouter.ts(36,30): error TS1109: Expression expected.
+packages/audio/src/TtsRouter.ts(36,31): error TS1003: Identifier expected.
+packages/audio/src/TtsRouter.ts(36,32): error TS1003: Identifier expected.
+packages/audio/src/TtsRouter.ts(36,33): error TS1109: Expression expected.
+packages/audio/src/TtsRouter.ts(36,34): error TS1003: Identifier expected.
+packages/audio/src/TtsRouter.ts(36,35): error TS1003: Identifier expected.
+packages/audio/src/TtsRouter.ts(36,71): error TS1005: ';' expected.
+packages/audio/src/TtsRouter.ts(36,72): error TS1002: Unterminated string literal.
+packages/audio/src/TtsService.ts(8,31): error TS1109: Expression expected.
+packages/audio/src/TtsService.ts(8,32): error TS1003: Identifier expected.
+packages/audio/src/TtsService.ts(8,33): error TS1003: Identifier expected.
+packages/audio/src/TtsService.ts(8,34): error TS1109: Expression expected.
+packages/audio/src/TtsService.ts(8,35): error TS1003: Identifier expected.
+packages/audio/src/TtsService.ts(8,36): error TS1003: Identifier expected.
+packages/audio/src/TtsTypographyFeedbackLoop.ts(31,47): error TS1109: Expression expected.
+packages/audio/src/TtsTypographyFeedbackLoop.ts(31,48): error TS1003: Identifier expected.
+packages/audio/src/TtsTypographyFeedbackLoop.ts(31,49): error TS1003: Identifier expected.
+packages/audio/src/TtsTypographyFeedbackLoop.ts(31,50): error TS1109: Expression expected.
+packages/audio/src/TtsTypographyFeedbackLoop.ts(31,51): error TS1003: Identifier expected.
+packages/audio/src/TtsTypographyFeedbackLoop.ts(31,52): error TS1003: Identifier expected.
+packages/audio/src/TtsTypographyFeedbackLoop.ts(31,79): error TS1005: ';' expected.
+packages/audio/src/TtsTypographyFeedbackLoop.ts(31,80): error TS1002: Unterminated string literal.
+packages/audio/src/UserToneProfileCache.ts(16,27): error TS1109: Expression expected.
+packages/audio/src/UserToneProfileCache.ts(16,28): error TS1003: Identifier expected.
+packages/audio/src/UserToneProfileCache.ts(16,29): error TS1003: Identifier expected.
+packages/audio/src/UserToneProfileCache.ts(16,30): error TS1109: Expression expected.
+packages/audio/src/UserToneProfileCache.ts(16,31): error TS1003: Identifier expected.
+packages/audio/src/UserToneProfileCache.ts(16,32): error TS1003: Identifier expected.
+packages/audio/src/VoiceRoleManager.ts(39,26): error TS1109: Expression expected.
+packages/audio/src/VoiceRoleManager.ts(39,27): error TS1003: Identifier expected.
+packages/audio/src/VoiceRoleManager.ts(39,28): error TS1003: Identifier expected.
+packages/audio/src/VoiceRoleManager.ts(39,29): error TS1109: Expression expected.
+packages/audio/src/VoiceRoleManager.ts(39,30): error TS1003: Identifier expected.
+packages/audio/src/VoiceRoleManager.ts(39,31): error TS1003: Identifier expected.
+packages/audio/src/VoiceRoleManager.ts(39,58): error TS1005: ';' expected.
+packages/audio/src/VoiceRoleManager.ts(39,59): error TS1002: Unterminated string literal.
+packages/audio/src/WhisperEngine.ts(4,90): error TS1109: Expression expected.
+packages/audio/src/WhisperEngine.ts(4,91): error TS1003: Identifier expected.
+packages/audio/src/WhisperEngine.ts(4,92): error TS1003: Identifier expected.
+packages/audio/src/WhisperEngine.ts(4,93): error TS1109: Expression expected.
+packages/audio/src/WhisperEngine.ts(4,94): error TS1003: Identifier expected.
+packages/audio/src/WhisperEngine.ts(4,95): error TS1003: Identifier expected.
+packages/audio/src/WhisperGpuEngine.ts(8,67): error TS1109: Expression expected.
+packages/audio/src/WhisperGpuEngine.ts(8,68): error TS1003: Identifier expected.
+packages/audio/src/WhisperGpuEngine.ts(8,69): error TS1003: Identifier expected.
+packages/audio/src/WhisperGpuEngine.ts(8,70): error TS1109: Expression expected.
+packages/audio/src/WhisperGpuEngine.ts(8,71): error TS1003: Identifier expected.
+packages/audio/src/WhisperGpuEngine.ts(8,72): error TS1003: Identifier expected.

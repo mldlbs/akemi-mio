@@ -1,0 +1,18 @@
+{
+  "name": "@akemi-mio/evolution-safety",
+  "version": "0.1.0",
+  "description": "Portable proposal validation, regression checks, checkpoints, and rollback planning for Mio evolution runtime modules",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "index.js",
+  "files": ["index.js"],
+  "scripts": {
+    "test": "node --test __tests__/evolution-safety.test.js",
+    "check": "node --check index.js"
+  },
+  "dependencies": {
+    "@akemi-mio/runtime-contracts": "^0.1.0",
+    "@akemi-mio/runtime-foundation": "^0.1.0"
+  },
+  "engines": { "node": ">=18" }
+}

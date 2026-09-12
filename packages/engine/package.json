@@ -1,0 +1,13 @@
+{
+  "name": "@akemi-mio/engine",
+  "version": "0.1.0",
+  "description": "Engine abstraction layer: Agent and PiperTTS unified interface",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@akemi-mio/core": "workspace:*"
+  }
+}

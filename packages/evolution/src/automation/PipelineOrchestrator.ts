@@ -1,0 +1,643 @@
+/**
+ * PipelineOrchestrator — 自动化管道编排器
+ *
+ * 一个简单循环：
+ *   1. 对每个 Collector: collect() → push to ProblemQueue
+ *   2. 从 Queue pop() 最高优先级问题
+ *   3. 主执行器修复，失败则尝试备用
+ *   4. 结果写回 Queue
+ *
+ * 【MCP 模式迁移】
+ * - 集成 ProblemFixCache：执行前检查缓存，跳过已知不可修复问题
+ * - 集成 ProblemErrorType：markFailed() 时传递错误消息用于分类
+ * - 集成 AutomationRegistry：registerBuiltins() 通过注册表注册
+ */
+
+import { log } from '@akemi-mio/core/logger/Logger'
+import { eventBus } from '@akemi-mio/core/core/EventBus'
+import { randomBytes } from 'crypto'
+import { join } from 'path'
+import type {
+  SignalCollector,
+  FixExecutor,
+  FixResult,
+  CollectorExecutionEvent,
+  SyntheticProblemDef,
+  ShadowObservationCollector,
+  ShadowCollectorExecutionEvent,
+} from './types'
+import { ProblemQueue } from './ProblemQueue'
+import { ExecutionPolicy } from './ExecutionPolicy'
+import type { VerdictAction, PolicyDecisionEvent } from './ExecutionPolicy'
+import { TscCollector } from './TscCollector'
+import { TestCollector } from './TestCollector'
+import { EslintCollector } from './EslintCollector'
+import { ClaudeCodeExecutor } from './ClaudeCodeExecutor'
+import { DeepSeekExecutor } from './DeepSeekExecutor'
+import type { SubAgentPoolAdapter } from '@akemi-mio/intelligence/agent/SubAgentPoolAdapter'
+import { AsrLogCollector } from '@akemi-mio/evolution-asr'
+import { AsrOptimizationExecutor } from '@akemi-mio/evolution-asr'
+import { AsrVocabEvolutionExecutor } from '@akemi-mio/evolution-asr'
+import { AsrAcousticOptimizationExecutor } from '@akemi-mio/evolution-asr'
+import { AsrReasoningChainExecutor } from '@akemi-mio/evolution-asr'
+import { PlanLogCollector } from './PlanLogCollector'
+import { AutoPatchExecutor } from './AutoPatchExecutor'
+import { ToolEvolutionCollector } from './ToolEvolutionCollector'
+import { ToolAnalyticsCollector } from './ToolAnalyticsCollector'
+import { ToolEvolutionExecutor } from './ToolEvolutionExecutor'
+import { ToolConfigOptimizationExecutor } from './ToolConfigOptimizationExecutor'
+import { TtsPreferenceCollector } from '@akemi-mio/evolution-tts-automation'
+import { TtsConfigOptimizationExecutor } from '@akemi-mio/evolution-tts-automation'
+import { TtsTypographyCollector } from '@akemi-mio/evolution-tts-automation'
+import { TtsTypographyExecutor } from '@akemi-mio/evolution-tts-automation'
+import { ToolCompositeCollector } from './ToolCompositeCollector'
+import { ToolCompositeExecutor } from './ToolCompositeExecutor'
+import { CapabilityEvolutionShadowCollector } from './CapabilityEvolutionShadowCollector'
+import { CapabilityEvolutionShadowStore } from './CapabilityEvolutionShadowStore'
+import { evaluatePilotDecisionEligibility } from './CapabilityPilotDecisionGate'
+import { CapabilityPilotStore } from './CapabilityPilotStore'
+import { TypeHealthCollector } from '@akemi-mio/evolution-typehealth'
+import { TypeRefactorExecutor } from '@akemi-mio/evolution-typehealth'
+import { FileOrganizerCollector } from '@akemi-mio/evolution-file-organizer'
+import { FileOrganizerExecutor } from '@akemi-mio/evolution-file-organizer'
+import { CicdCollector } from '@akemi-mio/evolution-cicd'
+import { registerCollector, registerExecutor, getAllCollectors, getAllExecutors, getExecutorsBySource } from './registry'
+import { AgentPerformanceCollector } from './AgentPerformanceCollector'
+import { AgentPromptOptimizer } from './AgentPromptOptimizer'
+import { agentMonitor } from '@akemi-mio/intelligence/agent/AgentMonitor'
+import { BlogOptimizationCollector } from '@akemi-mio/evolution-blog'
+import { BlogOptimizationExecutor } from '@akemi-mio/evolution-blog'
+import { ParameterSelfEvolutionAnalyzer, parameterSelfEvolutionAnalyzer } from '@akemi-mio/evolution-self-parameter'
+import { ParameterSelfEvolutionExecutor } from '@akemi-mio/evolution-self-parameter'
+import { correctionPatternCollector } from './CorrectionPatternCollector'
+import { BehaviorUsageCollector } from './BehaviorUsageCollector'
+import { BehaviorParamAdjustmentExecutor } from './BehaviorParamAdjustmentExecutor'
+import { SolverScannerCollector, AdaptiveSolverExecutor } from '@akemi-mio/evolution-adaptivesolver'
+import { evolutionFeedbackCollector } from '@akemi-mio/evolution-feedback'
+import { userErrorPatternCollector } from './UserErrorPatternCollector'
+import { learningCurveExecutor } from './LearningCurveExecutor'
+
+export interface PipelineConfig {
+  projectRoot: string
+  persistDir: string
+  maxFixesPerCycle: number
+}
+
+export interface PipelineMetrics {
+  totalCollected: number
+  totalFixed: number
+  totalFailed: number
+  queueSize: number
+  lastRunAt: number
+  isRunning: boolean
+}
+
+export class PipelineOrchestrator {
+  private collectors: SignalCollector[] = []
+  private shadowCollectors: ShadowObservationCollector[] = []
+  private executors: FixExecutor[] = []
+  private queue: ProblemQueue
+  private config: PipelineConfig
+  private executionPolicy?: ExecutionPolicy
+  private _isRunning = false
+  private _lastRunAt = 0
+  private totalCollected = 0
+  private totalFixed = 0
+  private totalFailed = 0
+
+  constructor(config: PipelineConfig) {
+    this.config = config
+    this.queue = new ProblemQueue(config.persistDir)
+  }
+
+  addCollector(collector: SignalCollector): void {
+    this.collectors.push(collector)
+  }
+
+  addExecutor(executor: FixExecutor): void {
+    this.executors.push(executor)
+  }
+
+  addShadowCollector(collector: ShadowObservationCollector): void {
+    this.shadowCollectors.push(collector)
+  }
+
+  /** Phase 3C: 注入执行策略门 */
+  setExecutionPolicy(policy: ExecutionPolicy): void {
+    this.executionPolicy = policy
+  }
+
+  /**
+   * 设置行为优先级权重（模块 → 权重倍数）。
+   * 权重由 BehaviorPriorityWeighter 根据用户行为热力图计算，
+   * 高频/高错误模块获得更高权重，低频模块获得低权重。
+   * 影响 ProblemQueue.sort() 中的问题优先级排序。
+   */
+  setBehaviorWeights(weights: Record<string, number> | null): void {
+    this.queue.setBehaviorWeights(weights)
+  }
+
+  /**
+   * 初始化内置 Collector 和 Executor
+   *
+   * 两阶段初始化：
+   * 1. 先注册到中央注册表（使 getCollectors/getExecutors 发现）
+   * 2. 再添加到本地列表
+   *
+   * 【MCP 模式迁移】通过注册表统一管理，替代分散的 new 调用。
+   * 后续新增 Collector/Executor 只需在 registerBuiltins 中注册，
+   * 消费侧通过 getAllCollectors() / getAllExecutors() 发现。
+   */
+  initDefaults(subAgentPool?: SubAgentPoolAdapter): void {
+    // Stage 1: 创建内置采集器
+    const tscCollector = new TscCollector(this.config.projectRoot)
+    const testCollector = new TestCollector(this.config.projectRoot)
+    const eslintCollector = new EslintCollector(this.config.projectRoot)
+    const asrLogCollector = new AsrLogCollector()
+    const planLogCollector = new PlanLogCollector()
+    const toolEvolutionCollector = new ToolEvolutionCollector()
+    const toolAnalyticsCollector = new ToolAnalyticsCollector()
+    const ttsPreferenceCollector = new TtsPreferenceCollector()
+    const ttsTypographyCollector = new TtsTypographyCollector()
+    const fileOrganizerCollector = new FileOrganizerCollector()
+    const cicdCollector = new CicdCollector()
+    const capabilityShadowCollector = new CapabilityEvolutionShadowCollector({
+      store: new CapabilityEvolutionShadowStore(this.config.persistDir),
+    })
+    // type-health collector 已禁用：同步 readFileSync 840 文件阻塞 IPC，每次产出 0 问题
+
+    // Stage 2: 注册到中央注册表
+    registerCollector(tscCollector)
+    registerCollector(testCollector)
+    registerCollector(eslintCollector)
+    registerCollector(asrLogCollector)
+    registerCollector(planLogCollector)
+    registerCollector(toolEvolutionCollector)
+    registerCollector(toolAnalyticsCollector)
+    registerCollector(ttsPreferenceCollector)
+    registerCollector(ttsTypographyCollector) // type-health 已禁用
+    registerCollector(fileOrganizerCollector)
+    registerCollector(cicdCollector)
+    // Agent 性能监控采集器（依赖全局 agentMonitor 单例）
+    const agentPerfCollector = new AgentPerformanceCollector(agentMonitor)
+    registerCollector(agentPerfCollector)
+    // 博客工作流优化采集器
+    const blogOptCollector = new BlogOptimizationCollector()
+    registerCollector(blogOptCollector)
+    // 参数自进化采集器（记忆驱动的参数调优）
+    registerCollector(parameterSelfEvolutionAnalyzer)
+    // 重复纠正模式采集器（用户反复纠正同一问题 → 生成改进提案）
+    registerCollector(correctionPatternCollector)
+    // 使用模式采集器（行为驱动的自进化参数调整）
+    registerCollector(new BehaviorUsageCollector())
+    // 固定步长求解器扫描采集器（自进化自适应步长求解）
+    registerCollector(new SolverScannerCollector())
+    // 自进化行为反馈闭环采集器（用户拒绝信号检测）
+    registerCollector(evolutionFeedbackCollector)
+    // 用户错误模式采集器（学习曲线适配）
+    registerCollector(userErrorPatternCollector)
+
+    // Stage 3: 从注册表加载到本地
+    for (const c of getAllCollectors()) {
+      this.addCollector(c)
+    }
+    this.addShadowCollector(capabilityShadowCollector)
+
+    // Stage 4: 创建并注册内置执行器
+    const claudeCodeExecutor = new ClaudeCodeExecutor()
+    const asrReasoningChainExecutor = new AsrReasoningChainExecutor()
+    const asrOptimizationExecutor = new AsrOptimizationExecutor()
+    const asrVocabEvolutionExecutor = new AsrVocabEvolutionExecutor()
+    const asrAcousticOptimizationExecutor = new AsrAcousticOptimizationExecutor()
+    const autoPatchExecutor = new AutoPatchExecutor()
+    const toolEvolutionExecutor = new ToolEvolutionExecutor()
+    const toolConfigOptExecutor = new ToolConfigOptimizationExecutor()
+    const ttsConfigOptExecutor = new TtsConfigOptimizationExecutor()
+    const ttsTypographyExecutor = new TtsTypographyExecutor()
+    const typeRefactorExecutor = new TypeRefactorExecutor()
+    const fileOrganizerExecutor = new FileOrganizerExecutor()
+
+    registerExecutor(claudeCodeExecutor)
+    // 推理链执行器优先注册（ASR 问题首选推理链路径）
+    registerExecutor(asrReasoningChainExecutor)
+    registerExecutor(asrOptimizationExecutor)
+    registerExecutor(asrVocabEvolutionExecutor)
+    registerExecutor(asrAcousticOptimizationExecutor)
+    registerExecutor(autoPatchExecutor)
+    registerExecutor(toolEvolutionExecutor)
+    registerExecutor(toolConfigOptExecutor)
+    registerExecutor(ttsConfigOptExecutor)
+    registerExecutor(ttsTypographyExecutor)
+    registerExecutor(typeRefactorExecutor)
+    registerExecutor(fileOrganizerExecutor)
+    if (subAgentPool) {
+      registerExecutor(new DeepSeekExecutor(subAgentPool))
+    }
+    // Agent 提示词/行为优化执行器
+    const agentPromptOptimizer = new AgentPromptOptimizer()
+    registerExecutor(agentPromptOptimizer)
+    // 博客工作流优化执行器
+    const blogOptExecutor = new BlogOptimizationExecutor()
+    registerExecutor(blogOptExecutor)
+    // 参数自进化执行器（验证并应用参数调整提案）
+    registerExecutor(new ParameterSelfEvolutionExecutor())
+    // 行为参数调整执行器（使用模式 → 系统参数调整）
+    registerExecutor(new BehaviorParamAdjustmentExecutor())
+    // 自适应求解器升级执行器（固定步长 → 自适应步长 RK45）
+    registerExecutor(new AdaptiveSolverExecutor())
+    // 学习曲线适配执行器（用户错误模式 → 代码改进补丁）
+    registerExecutor(learningCurveExecutor)
+    // 复合工具采集器与执行器（频繁序列 → 复合 MCP 工具）
+    registerCollector(new ToolCompositeCollector())
+    registerExecutor(new ToolCompositeExecutor())
+
+    // Stage 5: 从注册表加载到本地
+    for (const e of getAllExecutors()) {
+      this.addExecutor(e)
+    }
+  }
+
+  async runOnce(): Promise<PipelineMetrics> {
+    if (this._isRunning) {
+      log('WARN', 'pipeline_already_running')
+      return this.getMetrics()
+    }
+
+    this._isRunning = true
+    this._lastRunAt = Date.now()
+    eventBus.emit('pipeline.started', { timestamp: this._lastRunAt })
+
+    try {
+      // Phase 1: Collect — emit observable events for ALL collectors
+      const tickId = `tick_${this._lastRunAt}_${randomBytes(3).toString('hex')}`
+      const collectResults: Array<{ source: string; problems: import('./types').Problem[] }> = []
+
+      // 先记录所有 collector 的执行计划（包括跳过的）
+      const collectorExecutions: Array<{
+        collector: SignalCollector
+        willRun: boolean
+        skipReason: string | undefined
+      }> = this.collectors.map((c) => {
+        const willRun = c.shouldRun()
+        const skipReason = willRun ? undefined : c.getSkipReason ? c.getSkipReason() : undefined
+        return { collector: c, willRun, skipReason }
+      })
+
+      // 只跑 shouldRun=true 的 collector，但为所有 collector 发出事件
+      const collectPromises = collectorExecutions
+        .filter((ce) => ce.willRun)
+        .map(async (ce) => {
+          const startedAt = Date.now()
+          let collectedCount = 0
+          try {
+            const problems = await ce.collector.collect()
+            collectedCount = problems.length
+            this.queue.push(problems)
+            this.totalCollected += problems.length
+            collectResults.push({ source: ce.collector.source, problems })
+          } finally {
+            const event: CollectorExecutionEvent = {
+              collectorName: ce.collector.name,
+              tickId,
+              shouldRun: true,
+              collectedCount,
+              startedAt,
+              durationMs: Date.now() - startedAt,
+            }
+            eventBus.emit('pipeline.collector.executed' as any, event)
+            log('INFO', 'pipeline_collector_executed', {
+              collector: ce.collector.name,
+              collected: collectedCount,
+              durationMs: Date.now() - startedAt,
+            })
+          }
+        })
+
+      // 为跳过的 collector 发出事件（无 collect 调用）
+      for (const ce of collectorExecutions) {
+        if (!ce.willRun) {
+          const event: CollectorExecutionEvent = {
+            collectorName: ce.collector.name,
+            tickId,
+            shouldRun: false,
+            skipReason: ce.skipReason,
+            collectedCount: 0,
+            startedAt: this._lastRunAt,
+            durationMs: 0,
+          }
+          eventBus.emit('pipeline.collector.executed' as any, event)
+          log('INFO', 'pipeline_collector_skipped', {
+            collector: ce.collector.name,
+            reason: ce.skipReason || 'shouldRun=false',
+          })
+        }
+      }
+
+      await Promise.all(collectPromises)
+
+      const shadowExecutions = this.shadowCollectors.map((collector) => {
+        const willRun = collector.shouldRun()
+        const skipReason = willRun ? undefined : collector.getSkipReason ? collector.getSkipReason() : undefined
+        return { collector, willRun, skipReason }
+      })
+
+      const shadowPromises = shadowExecutions
+        .filter((execution) => execution.willRun)
+        .map(async (execution) => {
+          const startedAt = Date.now()
+          let observationCount = 0
+          try {
+            const run = await execution.collector.collect()
+            observationCount = run.observations.length
+          } finally {
+            const event: ShadowCollectorExecutionEvent = {
+              collectorName: execution.collector.name,
+              tickId,
+              shouldRun: true,
+              observationCount,
+              startedAt,
+              durationMs: Date.now() - startedAt,
+            }
+            eventBus.emit('pipeline.shadow_collector.executed' as any, event)
+          }
+        })
+
+      for (const execution of shadowExecutions) {
+        if (!execution.willRun) {
+          const event: ShadowCollectorExecutionEvent = {
+            collectorName: execution.collector.name,
+            tickId,
+            shouldRun: false,
+            skipReason: execution.skipReason,
+            observationCount: 0,
+            startedAt: this._lastRunAt,
+            durationMs: 0,
+          }
+          eventBus.emit('pipeline.shadow_collector.executed' as any, event)
+        }
+      }
+
+      await Promise.all(shadowPromises)
+
+      // Phase 1.6: M5.6.5 capability-led pilot decision gate (read-only dual-write observer)
+      await this.evaluateCapabilityPilot(collectResults, tickId)
+
+      // Phase 1.5: Reconcile — 清除不再活跃的旧问题，避免修已修复的
+      for (const { source, problems } of collectResults) {
+        const freshIds = new Set(problems.map((p) => p.id))
+        this.queue.reconcile(source as import('./types').ProblemSource, freshIds)
+      }
+
+      // Phase 1.75: 【MCP 模式迁移】跳过已知不可修复的缓存问题
+      const skippedCount = this.queue.skipCachedUnfixable()
+      if (skippedCount > 0) {
+        log('INFO', 'pipeline_skipped_cached_unfixable', { count: skippedCount })
+      }
+
+      // Phase 2: Execute
+      let fixed = 0
+      let failed = 0
+      const fixDetails: Array<{
+        problemId: string
+        source: string
+        file: string
+        line: number | undefined
+        title: string
+        success: boolean
+        summary: string
+        durationMs: number
+        output?: string
+        error?: string
+      }> = []
+
+      for (let i = 0; i < this.config.maxFixesPerCycle; i++) {
+        if (this.queue.isEmpty) break
+
+        const problem = this.queue.pop()
+        if (!problem) break
+
+        // Phase 3C: ExecutionPolicy gate — mode 决定路由行为
+        if (this.executionPolicy) {
+          const verdict = this.executionPolicy.evaluate(problem)
+          const mode = this.executionPolicy.mode
+
+          if (mode === 'enforce') {
+            if (verdict.action === 'skip') {
+              this.queue.skip(problem.id)
+              this.emitPolicyDecision(problem.id, problem.source, verdict, false)
+              continue
+            }
+            if (verdict.action === 'block') {
+              this.queue.block(problem.id)
+              this.emitPolicyDecision(problem.id, problem.source, verdict, false)
+              continue
+            }
+            // action === 'execute' → emit executed=true, fall through to tryFix
+            this.emitPolicyDecision(problem.id, problem.source, verdict, true)
+          } else {
+            // disabled / shadow: emit executed=true, always fall through to tryFix
+            // shadow mode does NOT call skip()/block() — queue state is unchanged
+            this.emitPolicyDecision(problem.id, problem.source, verdict, true)
+          }
+        }
+
+        const result = await this.tryFix(problem)
+
+        fixDetails.push({
+          problemId: problem.id,
+          source: problem.source,
+          file: problem.file || '',
+          line: problem.line,
+          title: problem.title,
+          success: result.success,
+          summary: result.summary,
+          durationMs: result.durationMs,
+          output: result.output,
+          error: result.error,
+        })
+
+        if (result.success) {
+          this.queue.markCompleted(problem.id)
+          fixed++
+          this.totalFixed++
+        } else {
+          // 【MCP 模式迁移】传递错误消息给 markFailed 用于错误分类
+          this.queue.markFailed(problem.id, result.error || result.summary)
+          failed++
+          this.totalFailed++
+        }
+      }
+
+      log('INFO', 'pipeline_cycle_complete', {
+        collected: this.totalCollected,
+        fixed,
+        failed,
+        queueRemaining: this.queue.size,
+      })
+
+      eventBus.emit('pipeline.completed', {
+        collected: this.totalCollected,
+        fixed,
+        failed,
+        queueRemaining: this.queue.size,
+        timestamp: Date.now(),
+        durationMs: Date.now() - this._lastRunAt,
+        details: fixDetails,
+      })
+    } catch (err: any) {
+      log('ERROR', 'pipeline_cycle_error', { error: err.message })
+      eventBus.emit('pipeline.errored', { error: err.message })
+    } finally {
+      this._isRunning = false
+    }
+
+    return this.getMetrics()
+  }
+
+  /** Phase 3C+: 发出 policy.decision 事件（含 mode + executed） */
+  private emitPolicyDecision(
+    problemId: string,
+    source: string,
+    verdict: import('./ExecutionPolicy').ExecutionVerdict,
+    executed: boolean,
+  ): void {
+    const event: PolicyDecisionEvent = {
+      problemId,
+      source,
+      action: verdict.action,
+      mode: this.executionPolicy ? this.executionPolicy.mode : 'disabled',
+      executed,
+      reason: verdict.reason,
+      policyVersion: this.executionPolicy ? this.executionPolicy.policyVersion : '0.0.0',
+      timestamp: Date.now(),
+    }
+    eventBus.emit('policy.decision', event)
+    log('INFO', 'policy_decision', { problemId, action: verdict.action, mode: event.mode, executed })
+  }
+
+  /** 按优先级尝试主+备用执行器 */
+  private async tryFix(problem: import('./types').AssignedProblem): Promise<FixResult> {
+    // 【MCP 模式迁移】优先通过注册表查询匹配的执行器
+    const matching = this.executors.filter((e) => (e.supportedSources as string[]).includes(problem.source))
+
+    // 没有支持此类型问题的执行器 → 直接丢弃（不重试）
+    if (matching.length === 0) {
+      return { problemId: problem.id, success: true, summary: `无执行器支持 ${problem.source} 类型，已跳过`, durationMs: 0 }
+    }
+
+    // 第一个匹配的 executor 为主
+    const primary = matching[0]
+
+    if (primary && primary.isAvailable()) {
+      const result = await primary.execute(problem)
+      if (result.success) return result
+      log('INFO', 'pipeline_primary_failed', { primary: primary.name, problemId: problem.id })
+    }
+
+    // 备用：不同名的第二个 executor
+    const fallback = matching.find((e) => e.name !== primary?.name && e.isAvailable())
+
+    if (fallback) {
+      log('INFO', 'pipeline_fallback', { primary: primary?.name, fallback: fallback.name, problemId: problem.id })
+      return fallback.execute(problem)
+    }
+
+    // 全都不可用
+    return { problemId: problem.id, success: false, summary: '无可用执行器', durationMs: 0, error: 'no_available_executor' }
+  }
+
+  getMetrics(): PipelineMetrics {
+    return {
+      totalCollected: this.totalCollected,
+      totalFixed: this.totalFixed,
+      totalFailed: this.totalFailed,
+      queueSize: this.queue.size,
+      lastRunAt: this._lastRunAt,
+      isRunning: this._isRunning,
+    }
+  }
+
+  // ── 合成证据注入（受控故障验证用） ──
+
+  /**
+   * 注入一条合成问题到队列中。
+   * 用于受控故障验证：验证 ProblemQueue → Strategy → Execution → Review 全链路。
+   * 不修改 ADR，不调整 shouldRun 阈值。
+   *
+   * 注入后需手动调用 runOnce() 或等待下次调度触发执行。
+   * 注入的问题会被当作普通问题处理（去重、排序、策略门、执行）。
+   */
+  /**
+   * M5.6.5 pilot gate: derive capability-led decisions from the authoritative
+   * tool-source problems and record which would be dispatch-eligible against the
+   * shadow decision window. Read-only ? never touches the ProblemQueue or executors.
+   */
+  private async evaluateCapabilityPilot(
+    collectResults: Array<{ source: string; problems: import('./types').Problem[] }>,
+    tickId: string,
+  ): Promise<void> {
+    try {
+      const toolProblems = collectResults.filter((result) => result.source === 'tool').flatMap((result) => result.problems)
+      if (toolProblems.length === 0) return
+
+      const shadowStore = new CapabilityEvolutionShadowStore(this.config.persistDir)
+      const shadowRuns = shadowStore.getAll()
+      if (shadowRuns.length === 0) return
+
+      const record = evaluatePilotDecisionEligibility({
+        runId: `pilot-${tickId}`,
+        generatedAt: Date.now(),
+        authoritativeProblems: toolProblems,
+        shadowRuns,
+      })
+
+      const pilotStore = new CapabilityPilotStore(join(this.config.projectRoot, 'reports', 'm56', 'pilot'))
+      pilotStore.saveRun(record)
+
+      eventBus.emit('pipeline.pilot_gate.evaluated' as any, {
+        tickId,
+        decisionCount: record.decisionCount,
+        eligibleCount: record.eligibleCount,
+        eligibilityRate: record.eligibilityRate,
+      })
+
+      log('INFO', 'capability_pilot_gate.evaluated', {
+        tickId,
+        decisionCount: record.decisionCount,
+        eligibleCount: record.eligibleCount,
+        eligibilityRate: record.eligibilityRate,
+        shadowRunCount: record.shadowRunCount,
+      })
+    } catch (error: any) {
+      log('WARN', 'capability_pilot_gate_failed', { error: error.message })
+    }
+  }
+
+  injectSynthetic(def: SyntheticProblemDef): string {
+    const id = `synthetic:${def.source}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
+    const problem: import('./types').Problem = {
+      id,
+      source: def.source,
+      severity: def.severity,
+      title: def.title,
+      description: def.description,
+      file: def.file,
+      line: def.line,
+      estimatedCostChars: def.description.length + 50,
+      lastSeen: Date.now(),
+      occurrenceCount: 1,
+      context: {
+        raw: def.raw || def.description,
+      },
+    }
+    const added = this.queue.push([problem])
+    log('INFO', 'pipeline_injected_synthetic', {
+      id,
+      source: def.source,
+      severity: def.severity,
+      title: def.title.slice(0, 60),
+      added,
+    })
+    return id
+  }
+}

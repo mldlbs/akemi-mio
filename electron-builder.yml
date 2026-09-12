@@ -1,0 +1,61 @@
+appId: com.akemi-mio.wallpaper
+productName: AkemiMio
+directories:
+  output: dist-electron
+  buildResources: build
+afterPack: build/afterPack.js
+files:
+  - "out/**/*"
+  - "package.json"
+  - "!models/**"
+  - "!out/**/*.map"
+  - "!out/**/*.txt"
+  - "!out/electron.vite.config.*"
+  - "!out/tsconfig*.tsbuildinfo"
+  - "!out/src/**"
+  - "!docs/**"
+  - "!.claude*/**"
+  - "!.githooks/**"
+  - "!.swarm/**"
+  - "!.openclaude/**"
+  - "!.prettierrc"
+  - "!.aiguard.yml"
+  - "!src/**"
+  - "!mcp_workspace/**"
+  - "!evolution_workspace/**"
+  - "!vitest.config.*"
+  - "!eslint.config.*"
+  - "!tsconfig*.json"
+  - "!**/tsconfig*.json"
+  - "!logs.txt"
+  - "!logs/**"
+  - "!**/node_modules/**/*.map"
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: "${productName}-Setup-${version}.${ext}"
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AkemiMio
+  uninstallDisplayName: "AkemiMio 秋山澪 AI 语音助手"
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+extraResources:
+  - from: "."
+    filter:
+      - "icon.png"
+npmRebuild: false
+electronDist: node_modules/electron/dist
+publish:
+  - provider: generic
+    url: "https://skills.crlkcloud.cyou/update"
+    channel: latest

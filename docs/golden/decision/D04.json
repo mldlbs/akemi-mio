@@ -1,0 +1,49 @@
+{
+  "caseId": "D04",
+  "caseRef": {
+    "text": "自建 infra 还是用云服务？",
+    "expectations": [
+      "比较方案",
+      "分析各自适用条件",
+      "给出推荐"
+    ]
+  },
+  "level1": {
+    "schemaVersion": "0.1",
+    "directive": {
+      "pattern": "option_evaluation",
+      "goals": [
+        {
+          "type": "compare_options"
+        },
+        {
+          "type": "evaluate_tradeoffs"
+        }
+      ],
+      "constraints": [
+        {
+          "type": "scope",
+          "description": "在明确的标准下比较"
+        }
+      ],
+      "outputStyle": "structured_comparison"
+    }
+  },
+  "level2": null,
+  "changelog": [
+    {
+      "date": "2026-07-15T01:21:23.771Z",
+      "reason": "v0.1 initial golden capture from Benchmark v0.1",
+      "author": "golden-dataset-generator",
+      "level": "l1"
+    },
+    {
+      "date": "2026-08-15T03:29:00.512Z",
+      "reason": "ReasoningPlanner now classifies Chinese ?? alternatives as option_evaluation",
+      "author": "codex",
+      "level": "l1"
+    }
+  ],
+  "createdAt": "2026-07-15T01:21:23.771Z",
+  "updatedAt": "2026-08-15T03:29:31.399Z"
+}

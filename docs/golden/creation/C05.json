@@ -1,0 +1,31 @@
+{
+  "caseId": "C05",
+  "caseRef": {
+    "text": "帮我设计这个页面的布局",
+    "expectations": [
+      "设计方案",
+      "说明理由",
+      "描述交互流程"
+    ]
+  },
+  "level1": {
+    "schemaVersion": "0.1",
+    "directive": {
+      "pattern": "none",
+      "goals": [],
+      "constraints": [],
+      "outputStyle": "default"
+    }
+  },
+  "level2": null,
+  "changelog": [
+    {
+      "date": "2026-07-15T01:21:23.771Z",
+      "reason": "v0.1 initial golden capture from Benchmark v0.1",
+      "author": "golden-dataset-generator",
+      "level": "l1"
+    }
+  ],
+  "createdAt": "2026-07-15T01:21:23.771Z",
+  "updatedAt": "2026-07-15T01:21:23.771Z"
+}

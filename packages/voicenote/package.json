@@ -1,0 +1,9 @@
+{
+  "name": "@akemi-mio/voicenote",
+  "version": "0.1.0",
+  "description": "Voice note: global shortcut triggered voice note recording and clipboard management",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "dependencies": { "@akemi-mio/core": "workspace:*" }
+}

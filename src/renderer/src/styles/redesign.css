@@ -1,0 +1,6411 @@
+/* ============================================================
+   Nocturnal Atelier v2 - Visual Override Layer
+   Loaded last. Refines the high-visibility component families that
+   the token swap alone cannot fully lift: chat, workflow cards,
+   chrome, controls, dock, settings.
+   ============================================================ */
+
+/* ============================================================
+   1. Chrome - Topbar
+   ============================================================ */
+.topbar {
+  background: var(--bg-topbar);
+  border-bottom: 1px solid var(--border-glass);
+  box-shadow:
+    0 1px 0 oklch(0 0 0 / 0.2) inset,
+    0 8px 24px oklch(0 0 0 / 0.18);
+}
+
+.topbar-logo {
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbar-logo::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  margin-top: 10px;
+}
+
+.topbar-slot-trigger {
+  height: 32px;
+  border-radius: 999px;
+  padding: 0 14px;
+  background: var(--bg-glass);
+  border-color: var(--border-glass);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.topbar-slot-trigger:hover {
+  background: var(--bg-glass-strong);
+}
+
+.topbar-slot-menu {
+  background: var(--surface-modal);
+  border-color: var(--border-glass-hover);
+  border-radius: var(--radius-md);
+  padding: 6px;
+  box-shadow: var(--shadow-float);
+}
+
+.topbar-slot-option {
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.topbar-slot-option:hover {
+  background: var(--bg-glass-strong);
+  color: var(--text-primary);
+}
+
+.topbar-slot-option.active,
+.topbar-slot-option[aria-selected='true'] {
+  background: var(--accent-bg);
+  color: var(--accent-ink);
+}
+
+.topbar-btn,
+.topbar-window-btn,
+.topbar-close {
+  border-radius: 8px;
+}
+
+.topbar-btn:hover,
+.topbar-window-btn:hover {
+  background: var(--bg-glass-strong);
+  border-color: var(--border-glass-hover);
+}
+
+/* ============================================================
+   2. Chrome - Sidebar
+   ============================================================ */
+.sidebar {
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-glass);
+}
+
+.sidebar-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+.sidebar-section-label::before {
+  opacity: 1;
+}
+
+.sidebar-item {
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.sidebar-item:hover {
+  background: var(--bg-glass);
+}
+
+.sidebar-item.active {
+  background: var(--bg-glass-strong);
+  color: var(--text-primary);
+  box-shadow:
+    inset 2px 0 0 var(--accent),
+    0 0 0 1px var(--border-glass-hover) inset;
+  font-weight: 500;
+}
+
+/* ============================================================
+   3. Chat
+   ============================================================ */
+.chat-slot {
+  background: transparent;
+}
+
+.msg-row {
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+
+.msg-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.msg-row.assistant .msg-bubble {
+  width: fit-content;
+  max-width: 92%;
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  border: 1px solid var(--border-glass);
+  border-radius: 4px 14px 14px 14px;
+  box-shadow:
+    0 1px 0 oklch(1 0 0 / 0.06) inset,
+    0 8px 24px oklch(0 0 0 / 0.22);
+  padding: 12px 16px;
+  line-height: 1.75;
+}
+
+.msg-row.user .msg-bubble {
+  width: fit-content;
+  max-width: 92%;
+  margin-left: auto;
+  background: linear-gradient(135deg, oklch(0.71 0.15 30), oklch(0.63 0.15 26));
+  border-radius: 14px 14px 4px 14px;
+  color: oklch(0.97 0.01 30);
+  padding: 10px 14px;
+  box-shadow: 0 8px 20px oklch(0.45 0.12 26 / 0.35);
+  font-weight: 450;
+}
+
+.msg-row.user .msg-bubble code {
+  background: oklch(0 0 0 / 0.18);
+  color: oklch(0.97 0.01 30);
+}
+
+.msg-row.user .msg-bubble a {
+  color: oklch(1 0 0 0.85);
+}
+
+.msg-time {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.msg-copy-btn {
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+
+.msg-copy-btn:hover {
+  background: var(--bg-glass);
+  color: var(--text-primary);
+}
+
+.msg-row.user .msg-actions {
+  justify-content: flex-end;
+}
+.msg-row.user .msg-actions .msg-time {
+  margin-left: 0;
+}
+
+/* tool-call disclosure fused under the message bubble */
+.msg-tool-disclosure {
+  grid-column: 2;
+  margin-top: 2px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--surface-thread) 88%, transparent);
+  overflow: hidden;
+}
+.msg-tool-disclosure summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  transition: background var(--duration-fast) var(--ease-glass);
+}
+.msg-tool-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+.msg-tool-disclosure summary:hover {
+  background: oklch(1 0 0 / 0.045);
+}
+.msg-tool-disclosure summary > i {
+  font-size: 13px;
+  color: var(--accent);
+}
+.msg-tool-disclosure summary > span:nth-of-type(1) {
+  color: var(--text-primary);
+}
+.msg-tool-disclosure-hint {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+}
+.msg-tool-disclosure-hint::after {
+  content: '▾';
+  margin-left: 4px;
+  display: inline-block;
+  transition: transform var(--duration-fast) var(--ease-glass);
+}
+.msg-tool-disclosure[open] .msg-tool-disclosure-hint::after {
+  transform: rotate(180deg);
+}
+.msg-tool-disclosure-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 10px;
+  border-top: 1px dashed var(--border-hairline);
+  background: oklch(0 0 0 / 0.14);
+}
+.msg-tool-disclosure-list span {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent) 13%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 26%, transparent);
+  color: color-mix(in oklch, var(--accent-ink) 90%, var(--text-secondary));
+}
+.msg-row.user .msg-tool-disclosure {
+  margin-left: auto;
+}
+
+/* Tool disclosure cards */
+.tool-inline-group {
+  background: var(--surface-thread);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-paper);
+  overflow: hidden;
+}
+
+.tool-inline-group-header {
+  background: var(--bg-glass);
+}
+
+.tool-inline {
+  background: var(--surface-paper-soft);
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+}
+
+.tool-inline-running {
+  border-color: oklch(0.67 0.155 28 / 0.4);
+  box-shadow: 0 0 0 1px oklch(0.67 0.155 28 / 0.12);
+}
+
+/* Agent indicator */
+.agent-indicator {
+  background: var(--surface-paper);
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  box-shadow: var(--shadow-paper);
+}
+
+.agent-indicator-dot {
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* Empty state */
+.chat-empty {
+  gap: var(--space-md);
+}
+
+.chat-empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--surface-raised), var(--surface-paper));
+  border: 1px solid var(--border-glass);
+  box-shadow: var(--shadow-paper);
+  font-size: 24px;
+  color: var(--accent);
+}
+
+/* Cursor */
+.msg-cursor {
+  color: var(--accent);
+  text-shadow: 0 0 10px var(--accent-glow);
+}
+
+/* ============================================================
+   4. Input Bar
+   ============================================================ */
+.inputbar {
+  background: var(--bg-input);
+  border-top: 1px solid var(--border-glass);
+  box-shadow: 0 -8px 24px oklch(0 0 0 / 0.14);
+}
+
+.inputbar-field {
+  border-radius: 14px;
+  background: var(--surface-paper-soft);
+  border-color: var(--border-glass);
+  box-shadow: var(--input-etched);
+  min-height: 46px;
+}
+
+.inputbar-field:focus {
+  border-color: var(--accent);
+  background: var(--surface-paper);
+  box-shadow: var(--control-ring);
+}
+
+.inputbar-send,
+.inputbar-stop {
+  border-radius: 10px;
+  background: linear-gradient(135deg, oklch(0.71 0.15 30), oklch(0.63 0.15 26));
+  color: oklch(0.97 0.01 30);
+  border: 1px solid oklch(0.45 0.12 26 / 0.5);
+  box-shadow: 0 4px 14px oklch(0.45 0.12 26 / 0.3);
+  font-size: 15px;
+}
+
+.inputbar-send:hover {
+  filter: brightness(1.08);
+}
+
+/* ============================================================
+   5. Status Bar
+   ============================================================ */
+.status-bar {
+  background: var(--bg-main);
+  border-top: 1px solid var(--border-glass);
+}
+
+.persona-badge {
+  background: var(--accent-bg);
+  color: var(--accent-ink);
+  border-radius: 999px;
+  border: 1px solid oklch(0.67 0.155 28 / 0.3);
+}
+
+.status-health {
+  color: var(--success);
+}
+
+/* ============================================================
+   6. Workflow - list cards (warm paper, no more blue)
+   ============================================================ */
+.workflow-slot-content {
+  max-width: 1080px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.wf-action-bar {
+  margin-bottom: var(--space-lg);
+}
+
+.wf-search-box {
+  background: var(--surface-paper-soft);
+  border-radius: 10px;
+  padding: 8px 14px;
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.055),
+    inset 0 0 0 1px oklch(0 0 0 / 0.08),
+    0 1px 2px oklch(0 0 0 / 0.12);
+}
+
+.wf-search-box > i {
+  color: var(--text-secondary);
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+
+.wf-search-box:focus-within {
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.06),
+    inset 0 0 0 1px oklch(0.67 0.155 28 / 0.2),
+    var(--control-ring);
+}
+
+.wf-search-box:focus-within > i {
+  color: var(--accent-gold);
+}
+
+.wf-canvas-card {
+  background: linear-gradient(180deg, oklch(0.295 0.018 46), oklch(0.245 0.017 48));
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-panel);
+  box-shadow:
+    0 1px 0 oklch(1 0 0 / 0.07) inset,
+    0 10px 30px oklch(0 0 0 / 0.26);
+}
+
+.wf-canvas-card::before {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, oklch(0.67 0.155 28 / 0.6), oklch(0.84 0.125 80 / 0.4), transparent);
+  opacity: 0.85;
+}
+
+.wf-canvas-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-glass-hover);
+  box-shadow:
+    0 1px 0 oklch(1 0 0 / 0.08) inset,
+    0 16px 40px oklch(0 0 0 / 0.34);
+}
+
+.wf-canvas-card-name {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.wf-canvas-card-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.wf-canvas-card-dot.running {
+  background: var(--accent-gold);
+  box-shadow: 0 0 0 3px oklch(0.84 0.125 80 / 0.22);
+}
+
+.wf-canvas-card-dot.done,
+.wf-canvas-card-dot.success {
+  background: var(--success);
+  box-shadow: 0 0 0 3px oklch(0.66 0.12 150 / 0.2);
+}
+
+.wf-canvas-card-dot.danger,
+.wf-canvas-card-dot.failed {
+  background: var(--status-error);
+  box-shadow: 0 0 0 3px oklch(0.68 0.18 28 / 0.2);
+}
+
+/* Preset quick-start cards */
+.wf-preset-card {
+  background: var(--surface-paper);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-paper);
+  transition:
+    transform var(--duration-normal) var(--ease-glass),
+    border-color var(--duration-normal) var(--ease-glass),
+    box-shadow var(--duration-normal) var(--ease-glass);
+}
+
+.wf-preset-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-glass-hover);
+  box-shadow: var(--shadow-raised);
+}
+
+.wf-preset-card-icon {
+  color: var(--accent);
+}
+
+.wf-preset-card-play {
+  background: linear-gradient(135deg, oklch(0.71 0.15 30), oklch(0.63 0.15 26));
+  color: oklch(0.97 0.01 30);
+  border: none;
+}
+
+/* Pipeline / progress */
+.wf-pipeline-track {
+  background: var(--metric-track);
+}
+
+.wf-progress-bar {
+  background: var(--metric-track);
+}
+
+.wf-progress-fill {
+  background: var(--metric-fill);
+}
+
+/* History items */
+.wf-history-item {
+  background: var(--surface-paper-soft);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+}
+
+.wf-history-item:hover {
+  border-color: var(--border-glass-hover);
+  background: var(--surface-paper);
+}
+
+.wf-history-status-badge {
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Empty workflow state */
+.workflow-empty-icon {
+  color: var(--accent);
+}
+
+.workflow-empty-text {
+  font-family: var(--font-display);
+  font-size: var(--fs-display);
+}
+
+.wf-section-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+}
+
+/* ============================================================
+   7. Workflow - editor buttons & inputs
+   ============================================================ */
+.wf-editor-btn {
+  border-radius: 8px;
+}
+
+.wf-editor-btn-add {
+  background: linear-gradient(135deg, oklch(0.71 0.15 30), oklch(0.63 0.15 26));
+  color: oklch(0.97 0.01 30);
+  border: 1px solid oklch(0.45 0.12 26 / 0.5);
+  box-shadow: 0 4px 14px oklch(0.45 0.12 26 / 0.25);
+}
+
+.wf-editor-btn-add:hover {
+  filter: brightness(1.08);
+}
+
+/* ============================================================
+   8. Right Panel / Workbench drawer
+   ============================================================ */
+.right-panel {
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-glass);
+}
+
+.right-panel-tabs {
+  background: var(--bg-glass);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.right-panel-tab {
+  border-radius: 8px;
+}
+
+.right-panel-tab.active {
+  background: var(--surface-paper);
+  color: var(--accent-ink);
+  box-shadow: 0 1px 4px oklch(0 0 0 / 0.3);
+}
+
+.rp-task-item,
+.rp-mem-card,
+.rp-mon-block {
+  background: var(--surface-paper-soft);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+}
+
+.rp-tool-btn {
+  border-radius: 8px;
+}
+
+.rp-input,
+.rp-tool-input {
+  background: var(--surface-paper-soft);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  color: var(--text-primary);
+}
+
+/* ============================================================
+   9. System Dock
+   ============================================================ */
+.system-dock {
+  bottom: 20px;
+  right: 20px;
+}
+
+.sd-card {
+  background: var(--surface-modal);
+  border: 1px solid var(--border-glass-hover);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-float);
+}
+
+.sd-tabs {
+  background: var(--bg-glass);
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.sd-tab {
+  border-radius: 8px;
+}
+
+.sd-tab.active {
+  background: var(--surface-paper);
+  color: var(--accent-ink);
+}
+
+.sd-mem-card,
+.sd-task-item,
+.sd-mon-section {
+  background: var(--surface-paper-soft);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+}
+
+.sd-tool-btn {
+  border-radius: 8px;
+}
+
+.sd-collapsed-btn {
+  background: var(--surface-modal);
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  box-shadow: var(--shadow-float);
+}
+
+/* ============================================================
+   10. Settings modal
+   ============================================================ */
+.settings-overlay {
+  background: oklch(0.06 0.01 55 / 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.settings-panel {
+  background: var(--surface-modal);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
+}
+
+.settings-title {
+  font-family: var(--font-display);
+}
+
+/* ============================================================
+   11. Chat reading column - shared centering with InputBar
+   InputBar now lives inside MainArea, so both center on the same
+   containing block and stay aligned even with the workbench open.
+   ============================================================ */
+.chat-slot.chat-reading-column {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  background:
+    radial-gradient(120% 36% at 50% -4%, oklch(0.42 0.03 45 / 0.16), transparent 62%),
+    linear-gradient(180deg, oklch(0.28 0.016 50 / 0.7), oklch(0.255 0.015 52 / 0.45));
+  border-left: 1px solid var(--border-hairline);
+  border-right: 1px solid var(--border-hairline);
+  padding: var(--space-xxl) var(--space-lg) var(--space-md);
+}
+
+.history-view {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+.inputbar {
+  width: 100%;
+  padding: var(--space-md) var(--space-lg) max(var(--space-lg), env(safe-area-inset-bottom));
+  background: transparent;
+  border-top: 1px solid var(--border-glass);
+}
+
+.inputbar-row,
+.inputbar-intent-card {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+/* Old alignment media queries are neutralized by these rules */
+@media (min-width: 901px) {
+  .chat-slot.chat-reading-column,
+  .history-view,
+  .inputbar-row,
+  .inputbar-intent-card {
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+    max-width: 880px;
+  }
+}
+
+/* ============================================================
+   12. Workflow canvas - lifted to the new paper ladder
+   ============================================================ */
+.wf-canvas-viewport {
+  background:
+    radial-gradient(1400px 700px at 82% -12%, color-mix(in oklch, var(--accent) 8%, transparent), transparent 62%), oklch(0.225 0.014 56);
+}
+
+.wf-canvas-node {
+  background: oklch(0.33 0.017 46);
+  border: 1px solid oklch(0.88 0.02 80 / 0.26);
+  box-shadow:
+    0 18px 40px -16px oklch(0 0 0 / 0.65),
+    inset 0 1px 0 oklch(1 0 0 / 0.07);
+}
+
+.wf-canvas-node:hover {
+  border-color: oklch(0.92 0.02 82 / 0.4);
+}
+
+.wf-canvas-toolbar {
+  background: var(--surface-modal);
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  box-shadow: var(--shadow-float);
+  padding: 4px;
+}
+
+.wf-canvas-tb-btn {
+  border-radius: 999px;
+}
+
+.wf-canvas-tb-btn:hover {
+  background: var(--bg-glass-strong);
+}
+
+.wf-canvas-add-btn {
+  background: var(--surface-paper);
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  box-shadow: var(--shadow-float);
+  color: var(--text-secondary);
+}
+
+.wf-canvas-add-btn:hover {
+  color: var(--accent-ink);
+  background: var(--surface-raised);
+}
+
+/* ============================================================
+   13. Neutralize legacy "White Atelier" workbench layer
+   ============================================================ */
+.blog-editor,
+.blog-review,
+.workflow-slot,
+.qt-edit-modal {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  animation: none;
+}
+
+.blog-editor::before,
+.blog-review::before,
+.workflow-slot::before,
+.qt-edit-modal::before {
+  display: none;
+}
+
+.workflow-slot-content {
+  background: transparent;
+  padding: var(--space-xl);
+}
+
+/* ============================================================
+   14. Tool slot / preview slot consistency
+   ============================================================ */
+.tool-slot,
+.preview-slot,
+.devplan-slot,
+.otpar-slot,
+.blog-editor,
+.blog-review {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.tool-slot-content {
+  max-width: 1080px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ============================================================
+   15. Topbar slot tabs - primary workspace navigation
+   ============================================================ */
+.slot-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding: 3px;
+  margin-left: var(--space-sm);
+  margin-right: var(--space-md);
+  background: oklch(0.21 0.012 55 / 0.5);
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+}
+
+.slot-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-glass),
+    color var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass);
+  -webkit-app-region: no-drag;
+}
+
+.slot-tab i {
+  font-size: 15px;
+  line-height: 1;
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+
+.slot-tab:hover {
+  background: var(--bg-glass);
+  color: var(--text-primary);
+}
+
+.slot-tab.active {
+  background: var(--accent-bg);
+  color: var(--accent-ink);
+  box-shadow:
+    inset 0 0 0 1px oklch(0.67 0.155 28 / 0.34),
+    inset 0 1px 0 oklch(1 0 0 / 0.07);
+}
+
+.slot-tab.active i {
+  color: var(--accent);
+}
+
+.slot-tab:focus-visible {
+  outline: 2px solid var(--accent-glow);
+  outline-offset: -2px;
+}
+
+.topbar-status {
+  display: flex;
+  align-items: center;
+  margin-right: var(--space-xs);
+  -webkit-app-region: no-drag;
+}
+
+@media (max-width: 1180px) {
+  .slot-tabs {
+    margin-right: var(--space-sm);
+  }
+
+  .slot-tab {
+    padding: 0 9px;
+    gap: 0;
+  }
+
+  .slot-tab span {
+    display: none;
+  }
+}
+
+/* ============================================================
+   16. Sidebar - collapsed rail polish & tools footer
+   ============================================================ */
+.sidebar-collapsed-sep {
+  width: 24px;
+  height: 1px;
+  margin: 6px auto;
+  background: var(--border-hairline);
+}
+
+.sidebar-tools {
+  position: sticky;
+  bottom: 0;
+  margin: var(--space-md) calc(var(--space-sm) * -1) 0;
+  padding: var(--space-md) var(--space-sm) var(--space-sm);
+  background: linear-gradient(180deg, oklch(0.285 0.017 50 / 0), var(--bg-secondary) 30%);
+  border-top: 1px solid var(--border-glass);
+}
+
+.sidebar-tools .sidebar-section-label::before {
+  content: none;
+}
+
+/* ============================================================
+   17. Chat empty state - atelier seal & quick starts
+   ============================================================ */
+.chat-empty {
+  opacity: 1;
+  padding-bottom: 9vh;
+}
+
+.chat-empty-seal {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  border: 1px solid var(--border-glass-hover);
+  box-shadow: var(--shadow-paper);
+  color: var(--accent);
+  font-size: 26px;
+}
+
+.chat-empty-seal::before {
+  content: '';
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  border: 1px dashed oklch(0.84 0.125 80 / 0.4);
+  animation: seal-orbit 26s linear infinite;
+}
+
+.chat-empty-seal::after {
+  content: '';
+  position: absolute;
+  top: -11px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+@keyframes seal-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.chat-empty-title {
+  margin: var(--space-sm) 0 0;
+  font-family: var(--font-display);
+  font-size: 27px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.chat-empty-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.chat-empty-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
+}
+
+.chat-empty-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  background: var(--bg-glass-50);
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    transform var(--duration-fast) var(--ease-glass),
+    background var(--duration-fast) var(--ease-glass),
+    border-color var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass);
+}
+
+.chat-empty-suggestion i {
+  font-size: 15px;
+  color: var(--accent);
+}
+
+.chat-empty-suggestion:hover {
+  background: var(--bg-glass-strong);
+  color: var(--text-primary);
+  border-color: var(--border-glass-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-raised);
+}
+
+.chat-empty-suggestion:focus-visible {
+  outline: 2px solid var(--accent-glow);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   18. Message flow - role rhythm & grouping
+   Consecutive messages from the same speaker sit closer, while
+   speaker changes keep the full column rhythm.
+   ============================================================ */
+.msg-row.user + .msg-row.user,
+.msg-row.assistant + .msg-row.assistant {
+  margin-top: calc(-1 * var(--space-lg) + 4px);
+}
+
+.msg-row.assistant .msg-label::after,
+.msg-row.user .msg-label::after {
+  content: '';
+  display: block;
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+  margin: 5px 0 0 auto;
+  background: var(--accent);
+  opacity: 0.75;
+}
+
+.msg-row.user .msg-label::after {
+  background: var(--accent-gold);
+  opacity: 0.8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-empty-seal::before {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   19. Settings - centered atelier modal
+   ============================================================ */
+.settings-panel {
+  width: min(880px, 94vw);
+  height: auto;
+  max-height: min(760px, 86vh);
+  border-radius: 18px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: settings-rise 0.24s var(--ease-glass) both;
+}
+
+.settings-header {
+  -webkit-app-region: no-drag;
+  background: linear-gradient(180deg, oklch(0.3 0.017 49 / 0.99), oklch(0.27 0.016 52 / 0.98));
+}
+
+.settings-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 20px;
+}
+
+.settings-title::before {
+  content: '';
+  width: 4px;
+  height: 18px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent-gold), var(--accent));
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+@keyframes settings-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-panel {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   20. Workbench drawer - header & tab strip
+   ============================================================ */
+.right-panel-header {
+  grid-template-rows: auto auto;
+  gap: 8px;
+  padding: 14px 14px 12px 16px;
+  min-height: 0;
+  border-bottom: 1px solid var(--border-glass);
+  background: linear-gradient(180deg, oklch(0.28 0.016 51 / 0.6), transparent);
+}
+
+.right-panel-heading {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.right-panel-title {
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+
+.right-panel-title::after {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+  align-self: center;
+}
+
+.right-panel-context {
+  font-size: 10px;
+}
+
+.right-panel-tabs {
+  height: 34px;
+  padding: 3px;
+}
+
+.right-panel-tab {
+  height: 28px;
+  gap: 5px;
+}
+
+.right-panel-tab i {
+  font-size: 14px;
+}
+
+.right-panel-tab-name {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.right-panel-tab-index {
+  display: none;
+}
+
+.right-panel-tab.active::after {
+  display: none;
+}
+
+.right-panel-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+}
+
+/* ============================================================
+   21. History view - archived conversation document
+   ============================================================ */
+.history-view {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: var(--space-xxl) var(--space-lg) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  background:
+    radial-gradient(120% 36% at 50% -4%, oklch(0.42 0.03 45 / 0.14), transparent 62%),
+    linear-gradient(180deg, oklch(0.28 0.016 50 / 0.6), oklch(0.255 0.015 52 / 0.4));
+  border-left: 1px solid var(--border-hairline);
+  border-right: 1px solid var(--border-hairline);
+}
+
+.history-view-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding-bottom: var(--space-lg);
+  border-bottom: 1px solid var(--border-glass);
+}
+
+.history-view-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 13px;
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  background: var(--bg-glass);
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-glass),
+    color var(--duration-fast) var(--ease-glass),
+    border-color var(--duration-fast) var(--ease-glass);
+  flex-shrink: 0;
+}
+
+.history-view-back:hover {
+  background: var(--bg-glass-strong);
+  color: var(--text-primary);
+  border-color: var(--border-glass-hover);
+}
+
+.history-view-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.history-view-kicker {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.history-view-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-view .msg-time {
+  grid-column: 2;
+  justify-self: end;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+/* ============================================================
+   22. Focus rings & motion - unified keyboard affordance
+   ============================================================ */
+.right-panel {
+  animation: right-panel-in 0.28s var(--ease-glass) both;
+}
+
+@keyframes right-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.slot-tab:focus-visible,
+.sidebar-item:focus-visible,
+.sidebar-collapsed-icon:focus-visible,
+.settings-tab:focus-visible,
+.right-panel-tab:focus-visible,
+.history-view-back:focus-visible,
+.msg-copy-btn:focus-visible,
+.chat-empty-suggestion:focus-visible,
+.tool-inline-group-header:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .right-panel {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   23. Workflow canvas - ComfyUI-style node canvas
+   ============================================================ */
+
+/* Toolbar: anchored top-left as a dense control cluster */
+.wf-canvas-toolbar {
+  top: var(--space-sm);
+  left: var(--space-sm);
+  transform: none;
+  gap: 1px;
+  padding: 3px;
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--surface-modal) 88%, transparent);
+}
+
+.wf-canvas-tb-divider {
+  width: 1px;
+  height: 15px;
+  margin: 0 3px;
+  background: var(--border-glass);
+  flex-shrink: 0;
+}
+
+.wf-canvas-zoom-label {
+  min-width: 34px;
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+/* Node header: warm paper with a colored accent bar instead of a hot gradient */
+.wf-canvas-node-header {
+  position: relative;
+  padding-left: calc(var(--space-sm) + 4px);
+  background: linear-gradient(180deg, oklch(0.37 0.02 46), oklch(0.325 0.018 50));
+  color: var(--text-primary);
+  border-bottom: 1px solid oklch(0.88 0.02 80 / 0.14);
+}
+
+.wf-canvas-node-header::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--node-accent, var(--accent));
+  box-shadow: 0 0 10px color-mix(in oklch, var(--node-accent, var(--accent)) 55%, transparent);
+}
+
+.wf-canvas-node-header i {
+  font-size: 13px;
+  color: var(--node-accent, var(--accent));
+}
+
+.wf-canvas-node-status-dot {
+  width: 6px;
+  height: 6px;
+  background: color-mix(in oklch, var(--node-accent, var(--accent)) 72%, transparent);
+}
+
+.wf-canvas-node-status-dot[data-running='true'] {
+  background: var(--accent-gold);
+  box-shadow: 0 0 8px color-mix(in oklch, var(--accent-gold) 80%, transparent);
+}
+
+.wf-canvas-node-name {
+  letter-spacing: 0.01em;
+}
+
+.wf-canvas-node-type {
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+/* Running node: gold chip + blinking accent dot */
+.wf-canvas-node-running-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-gold);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent-gold) 14%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent-gold) 36%, transparent);
+}
+.wf-canvas-node-running-badge::before {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent-gold);
+  box-shadow: 0 0 6px color-mix(in oklch, var(--accent-gold) 85%, transparent);
+  animation: wf-node-running-dot 1.2s ease-in-out infinite;
+}
+@keyframes wf-node-running-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.68);
+  }
+}
+
+/* Canvas scene: paper grain over the warm-olive ground */
+.wf-canvas-viewport::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='0.5'/></svg>");
+  mix-blend-mode: soft-light;
+}
+
+/* Edges: warm hairline instead of cold grey */
+.wf-canvas-edge {
+  stroke: oklch(0.78 0.03 78 / 0.38);
+}
+
+.wf-canvas-edge-condition {
+  stroke: oklch(0.66 0.11 300 / 0.5);
+}
+
+.wf-canvas-edge-label {
+  fill: oklch(0.74 0.09 300 / 0.85);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.wf-canvas-edge-running {
+  stroke: var(--accent-gold);
+}
+
+/* Selected / running glow: ring + soft halo */
+.wf-canvas-node.selected {
+  border-color: color-mix(in oklch, var(--accent) 72%, var(--border-glass));
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--accent) 42%, transparent),
+    0 0 0 4px color-mix(in oklch, var(--accent) 9%, transparent),
+    0 18px 40px -16px oklch(0 0 0 / 0.55);
+}
+
+.wf-canvas-node.running {
+  border-color: color-mix(in oklch, var(--accent-gold) 78%, var(--border-glass));
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--accent-gold) 38%, transparent),
+    0 0 0 4px color-mix(in oklch, var(--accent-gold) 9%, transparent),
+    0 0 22px color-mix(in oklch, var(--accent-gold) 20%, transparent);
+}
+
+/* Ports: paper centers with colored rims */
+.wf-canvas-port {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+}
+
+.wf-canvas-port-input {
+  border-color: var(--accent);
+  background: var(--surface-paper);
+}
+
+.wf-canvas-port-output {
+  border-color: var(--accent-gold);
+  background: var(--surface-paper);
+}
+
+.wf-canvas-port:hover {
+  transform: translateY(-50%) scale(1.45);
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in oklch, var(--accent) 60%, transparent);
+}
+
+.wf-canvas-port-output:hover {
+  background: var(--accent-gold);
+  box-shadow: 0 0 10px color-mix(in oklch, var(--accent-gold) 60%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wf-canvas-edge-running {
+    animation: none;
+  }
+}
+
+/* Drag-to-connect draft edge */
+.wf-canvas-edge-draft {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  fill: none;
+  animation: wf-edge-flow 0.7s linear infinite;
+  filter: drop-shadow(0 0 4px color-mix(in oklch, var(--accent) 55%, transparent));
+}
+
+.wf-canvas-node .wf-canvas-port-output:active {
+  transform: translateY(-50%) scale(1.5);
+  background: var(--accent-gold);
+  box-shadow: 0 0 12px color-mix(in oklch, var(--accent-gold) 60%, transparent);
+}
+
+/* While dragging a connection, input ports light up as drop targets */
+.wf-canvas-viewport.connecting .wf-canvas-port-input {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 18%, transparent);
+}
+
+.wf-canvas-viewport.connecting .wf-canvas-port-input:hover {
+  background: var(--accent);
+  box-shadow: 0 0 12px color-mix(in oklch, var(--accent) 65%, transparent);
+}
+
+/* Node body: let the io row stretch full width so ports sit on the node edges */
+.wf-canvas-node-body {
+  align-items: stretch;
+}
+
+/* Edge hit layer: wide invisible stroke for hover/right-click, + sibling highlight */
+.wf-canvas-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.wf-canvas-edge-hit:hover + .wf-canvas-edge {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.wf-canvas-edge-hit:hover + .wf-canvas-edge.wf-canvas-edge-condition {
+  stroke: oklch(0.68 0.12 300 / 0.9);
+}
+
+/* Mini-map: bottom-left overview card */
+.wf-minimap {
+  position: absolute;
+  left: var(--space-sm);
+  bottom: var(--space-sm);
+  z-index: 16;
+  width: 208px;
+  height: 128px;
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--surface-modal) 84%, transparent);
+  backdrop-filter: blur(var(--panel-blur));
+  box-shadow: var(--shadow-float);
+  overflow: hidden;
+  cursor: crosshair;
+}
+
+.wf-minimap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, oklch(1 0 0 / 0.03), transparent 40%);
+}
+
+.wf-minimap svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.wf-minimap-edge {
+  stroke: oklch(0.8 0.03 78 / 0.45);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.wf-minimap-node {
+  fill-opacity: 0.4;
+  stroke: oklch(0.92 0.02 82 / 0.5);
+  stroke-width: 1;
+}
+
+.wf-minimap-vp {
+  fill: var(--accent);
+  fill-opacity: 0.14;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* ============================================================
+   Phase 8 - Workflow canvas polish
+   ============================================================ */
+.wf-canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: auto;
+  user-select: none;
+}
+.wf-canvas-empty-icon {
+  width: 84px;
+  height: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40px;
+  color: color-mix(in oklch, var(--accent) 62%, var(--text-muted));
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 30% 25%, color-mix(in oklch, var(--accent) 16%, transparent), transparent 65%), oklch(0.24 0.014 50 / 0.5);
+  border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--border-glass));
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.06),
+    0 20px 50px -20px oklch(0 0 0 / 0.7);
+  animation: wf-empty-float 3.2s var(--ease-glass) infinite;
+}
+@keyframes wf-empty-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+.wf-canvas-empty-title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+.wf-canvas-empty-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 320px;
+  text-align: center;
+  line-height: 1.6;
+}
+.wf-canvas-empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.wf-canvas-empty-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 18px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: oklch(0.24 0.014 50 / 0.6);
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-glass),
+    color var(--duration-fast) var(--ease-glass),
+    border-color var(--duration-fast) var(--ease-glass),
+    transform var(--duration-fast) var(--ease-glass);
+}
+.wf-canvas-empty-btn:hover {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  border-color: color-mix(in oklch, var(--accent) 40%, var(--border-glass));
+  transform: translateY(-1px);
+}
+.wf-canvas-empty-btn-primary {
+  color: var(--accent-ink, #fff);
+  background: linear-gradient(180deg, color-mix(in oklch, var(--accent) 88%, white 6%), var(--accent));
+  border-color: transparent;
+  box-shadow:
+    0 10px 26px -10px color-mix(in oklch, var(--accent) 65%, transparent),
+    inset 0 1px 0 oklch(1 0 0 / 0.22);
+}
+.wf-canvas-empty-btn-primary:hover {
+  background: linear-gradient(180deg, color-mix(in oklch, var(--accent) 96%, white 8%), var(--accent));
+  color: var(--accent-ink, #fff);
+  border-color: transparent;
+  transform: translateY(-1px);
+}
+
+/* node hover / drag polish */
+.wf-canvas-node {
+  transition:
+    border-color 140ms var(--ease-glass),
+    box-shadow 140ms var(--ease-glass),
+    filter 140ms var(--ease-glass);
+}
+.wf-canvas-node:hover {
+  border-color: color-mix(in oklch, var(--node-accent, var(--accent)) 65%, var(--border-glass));
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--node-accent, var(--accent)) 45%, transparent),
+    0 20px 46px -16px oklch(0 0 0 / 0.7);
+  filter: brightness(1.06);
+}
+.wf-canvas-node.selected {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 0 0 4px color-mix(in oklch, var(--accent) 14%, transparent),
+    0 18px 40px -16px oklch(0 0 0 / 0.6);
+  filter: brightness(1.05);
+}
+.wf-canvas-node-del {
+  opacity: 0;
+  transition:
+    opacity 120ms var(--ease-glass),
+    background 120ms var(--ease-glass),
+    color 120ms var(--ease-glass),
+    border-color 120ms var(--ease-glass);
+}
+.wf-canvas-node:hover .wf-canvas-node-del,
+.wf-canvas-node.selected .wf-canvas-node-del {
+  opacity: 1;
+}
+.wf-canvas-node-del:hover {
+  background: oklch(0.55 0.14 16 / 0.9) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+}
+
+/* context menu configure item */
+.wf-context-menu-configure {
+  color: color-mix(in oklch, var(--accent) 78%, var(--text-primary));
+  font-weight: 600;
+}
+.wf-context-menu-configure i {
+  color: var(--accent);
+}
+.wf-context-menu-configure:hover {
+  background: color-mix(in oklch, var(--accent) 14%, transparent) !important;
+  color: var(--accent) !important;
+}
+
+/* canvas dot-grid backdrop (ComfyUI-style, moves with pan/zoom) */
+.wf-canvas-grid {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 5000px;
+  height: 5000px;
+  pointer-events: none;
+  background-image: radial-gradient(circle, oklch(0.92 0.02 74 / 0.2) 1.1px, transparent 1.6px);
+  background-size: 26px 26px;
+  background-position: 8px 8px;
+  z-index: 0;
+}
+.wf-canvas-grid + *,
+.wf-canvas-node {
+  z-index: 1;
+}
+.wf-canvas-transform {
+  z-index: 2;
+}
+
+/* config drawer header - step identity */
+.wf-editor-config-drawer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.wf-editor-config-drawer-title > i {
+  font-size: 15px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.wf-editor-config-drawer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wf-editor-config-drawer-title > em {
+  flex-shrink: 0;
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+/* running chip in step config drawer header */
+.wf-editor-drawer-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  margin-left: 2px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-gold);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent-gold) 13%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent-gold) 34%, transparent);
+}
+.wf-editor-drawer-running::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-gold);
+  box-shadow: 0 0 7px color-mix(in oklch, var(--accent-gold) 85%, transparent);
+  animation: wf-node-running-dot 1.2s ease-in-out infinite;
+}
+
+/* node inline rename input */
+.wf-canvas-node-rename {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  background: oklch(0.17 0.012 50);
+  border: 1px solid color-mix(in oklch, var(--accent) 45%, transparent);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 6px;
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 16%, transparent);
+}
+.wf-canvas-node-rename:focus {
+  border-color: var(--accent);
+}
+
+/* canvas status bar */
+.wf-canvas-statusbar {
+  position: absolute;
+  right: 14px;
+  bottom: 56px;
+  z-index: 14;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: color-mix(in oklch, var(--surface-modal) 82%, transparent);
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  backdrop-filter: blur(var(--panel-blur));
+  box-shadow: var(--shadow-float);
+  user-select: none;
+  pointer-events: none;
+}
+.wf-canvas-statusbar i {
+  font-size: 11px;
+  color: color-mix(in oklch, var(--accent) 70%, var(--text-muted));
+}
+.wf-canvas-statusbar-divider {
+  width: 1px;
+  height: 10px;
+  background: var(--border-hairline);
+}
+
+/* multi-selection + marquee */
+.wf-canvas-node.multi-selected:not(.selected) {
+  border-color: color-mix(in oklch, var(--accent) 60%, var(--border-glass));
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--accent) 42%, transparent),
+    0 18px 40px -16px oklch(0 0 0 / 0.6);
+  filter: brightness(1.05);
+}
+.wf-canvas-marquee {
+  position: absolute;
+  z-index: 13;
+  background: color-mix(in oklch, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 55%, transparent);
+  pointer-events: none;
+}
+
+/* disconnect drag preview */
+.wf-canvas-edge-disconnect {
+  stroke: oklch(0.62 0.16 22) !important;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  opacity: 0.9;
+}
+
+/* running state must win over selected/hover */
+.wf-canvas-node.running,
+.wf-canvas-node.running.selected,
+.wf-canvas-node.running:hover {
+  border-color: var(--accent-gold);
+  filter: brightness(1.08);
+  animation: wf-node-running-pulse 1.6s ease-in-out infinite;
+}
+@keyframes wf-node-running-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px var(--accent-gold),
+      0 0 0 4px color-mix(in oklch, var(--accent-gold) 12%, transparent),
+      0 0 22px color-mix(in oklch, var(--accent-gold) 24%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px var(--accent-gold),
+      0 0 0 5px color-mix(in oklch, var(--accent-gold) 20%, transparent),
+      0 0 36px color-mix(in oklch, var(--accent-gold) 42%, transparent);
+  }
+}
+.wf-canvas-node.running .wf-canvas-node-header {
+  background: linear-gradient(180deg, color-mix(in oklch, var(--accent-gold) 16%, oklch(0.37 0.02 46)), oklch(0.325 0.018 50));
+}
+.wf-canvas-node.running .wf-canvas-node-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent-gold), transparent);
+  animation: wf-running-sweep 1.4s ease-in-out infinite;
+}
+@keyframes wf-running-sweep {
+  0% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0.2;
+  }
+}
+
+/* ============================================================
+   Phase 9 - Step config drawer polish
+   ============================================================ */
+.wf-editor-config-drawer {
+  background: linear-gradient(180deg, oklch(0.245 0.014 50), oklch(0.22 0.013 52));
+}
+.wf-editor-config-drawer-header {
+  position: relative;
+  background: linear-gradient(180deg, oklch(0.27 0.016 50), oklch(0.24 0.014 52));
+}
+.wf-editor-config-drawer-header::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), color-mix(in oklch, var(--accent) 35%, transparent));
+}
+.wf-editor-config-drawer-scroll {
+  padding: 0 var(--space-md) var(--space-lg);
+}
+.wf-editor-section-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 10px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--accent) 70%, var(--text-muted));
+}
+.wf-editor-section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, color-mix(in oklch, var(--accent) 30%, transparent), transparent);
+}
+.wf-editor-field {
+  margin-bottom: 12px;
+}
+.wf-editor-field label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.wf-editor-field input,
+.wf-editor-field textarea,
+.wf-editor-field select {
+  background: oklch(0.18 0.011 50 / 0.8);
+  border: 1px solid var(--border-hairline);
+  border-radius: 9px;
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.045),
+    inset 0 0 0 1px oklch(0 0 0 / 0.07);
+  transition:
+    border-color var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass),
+    background var(--duration-fast) var(--ease-glass);
+}
+.wf-editor-field input:hover,
+.wf-editor-field textarea:hover,
+.wf-editor-field select:hover {
+  border-color: var(--border-glass-hover);
+}
+.wf-editor-field input:focus,
+.wf-editor-field textarea:focus,
+.wf-editor-field select:focus {
+  border-color: var(--accent);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.05),
+    0 0 0 3px color-mix(in oklch, var(--accent) 14%, transparent);
+  background: oklch(0.19 0.012 50);
+}
+.wf-editor-field input::placeholder,
+.wf-editor-field textarea::placeholder {
+  color: color-mix(in oklch, var(--text-muted) 60%, transparent);
+}
+
+/* handler picker */
+.wf-editor-handler-opt {
+  border-radius: 10px;
+  background: oklch(0.19 0.012 50 / 0.7);
+  border: 1px solid var(--border-hairline);
+  transition:
+    transform var(--duration-fast) var(--ease-glass),
+    border-color var(--duration-fast) var(--ease-glass),
+    background var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass),
+    color var(--duration-fast) var(--ease-glass);
+}
+.wf-editor-handler-opt i {
+  font-size: 15px;
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+.wf-editor-handler-opt:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-glass-hover);
+  background: oklch(0.21 0.014 50);
+}
+.wf-editor-handler-opt.active {
+  border-color: color-mix(in oklch, var(--accent) 65%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--accent) 20%, oklch(0.21 0.014 50)),
+    color-mix(in oklch, var(--accent) 8%, oklch(0.21 0.014 50))
+  );
+  box-shadow:
+    0 6px 18px -8px color-mix(in oklch, var(--accent) 55%, transparent),
+    inset 0 1px 0 oklch(1 0 0 / 0.08);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+.wf-editor-handler-opt.active::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 18px;
+  height: 2px;
+  border-radius: 0 0 4px 4px;
+  background: var(--accent);
+}
+.wf-editor-handler-opt.active i {
+  color: var(--accent);
+  filter: drop-shadow(0 0 6px color-mix(in oklch, var(--accent) 55%, transparent));
+}
+
+/* keep handler choices breathable instead of a cramped equal-width 5-up grid */
+.wf-editor-handler-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+  gap: 6px;
+  justify-content: start;
+}
+
+.wf-editor-handler-opt {
+  min-width: 0;
+}
+
+/* dependency checkboxes */
+.wf-editor-dep-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: oklch(0.19 0.012 50 / 0.6);
+  border: 1px solid var(--border-hairline);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-glass),
+    border-color var(--duration-fast) var(--ease-glass);
+}
+.wf-editor-dep-checkbox:hover {
+  background: oklch(0.21 0.014 50);
+  border-color: var(--border-glass-hover);
+}
+.wf-editor-dep-checkbox input {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+}
+.wf-editor-dep-checkbox span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.wf-editor-dep-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* drawer scrollbar */
+.wf-editor-config-drawer-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.wf-editor-config-drawer-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-glass);
+  border-radius: 999px;
+}
+.wf-editor-config-drawer-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ============================================================
+   Phase 10 - ComfyUI-style inline node config editor
+   Clicking a node expands its core params in place on the canvas;
+   the side drawer becomes an opt-in "more params" surface.
+   ============================================================ */
+.wf-canvas-node.inline-open {
+  z-index: 30;
+  cursor: default;
+  border-color: color-mix(in oklch, var(--node-accent, var(--accent)) 68%, var(--border-glass));
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--node-accent, var(--accent)) 40%, transparent),
+    0 0 0 5px color-mix(in oklch, var(--accent) 8%, transparent),
+    0 26px 64px -18px oklch(0 0 0 / 0.72);
+}
+.wf-canvas-node.inline-open.running,
+.wf-canvas-node.inline-open.running.selected {
+  border-color: var(--accent-gold);
+}
+.wf-canvas-node.inline-open .wf-canvas-node-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--node-accent, var(--accent)), transparent);
+  opacity: 0.7;
+}
+
+.wf-canvas-node-inline {
+  padding: 10px 12px 12px;
+  background: linear-gradient(180deg, oklch(0.295 0.016 48), oklch(0.262 0.015 50));
+  border-top: 1px solid color-mix(in oklch, var(--node-accent, var(--accent)) 28%, transparent);
+  box-shadow:
+    inset 0 10px 16px -14px oklch(0 0 0 / 0.55),
+    inset 0 1px 0 oklch(1 0 0 / 0.04);
+}
+.wf-canvas-node-inline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--node-accent, var(--accent)) 80%, var(--text-muted));
+}
+.wf-canvas-node-inline-head::before {
+  content: '';
+  width: 3px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--node-accent, var(--accent));
+  box-shadow: 0 0 8px color-mix(in oklch, var(--node-accent, var(--accent)) 55%, transparent);
+  margin-right: 6px;
+}
+.wf-canvas-node-inline-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-hairline);
+  background: oklch(0.17 0.012 50 / 0.6);
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    color 120ms var(--ease-glass),
+    border-color 120ms var(--ease-glass),
+    background 120ms var(--ease-glass);
+}
+.wf-canvas-node-inline-more i {
+  font-size: 10px;
+  transition: transform 140ms var(--ease-glass);
+}
+.wf-canvas-node-inline-more:hover i {
+  transform: translateX(2px);
+}
+.wf-canvas-node-inline-more:hover {
+  color: var(--node-accent, var(--accent));
+  border-color: color-mix(in oklch, var(--node-accent, var(--accent)) 42%, transparent);
+  background: color-mix(in oklch, var(--node-accent, var(--accent)) 10%, transparent);
+}
+
+.wf-canvas-inline-field {
+  margin-bottom: 8px;
+}
+.wf-canvas-inline-field:last-child {
+  margin-bottom: 0;
+}
+.wf-canvas-inline-field > label {
+  display: block;
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.wf-canvas-inline-field input[type='text'],
+.wf-canvas-inline-field input[type='number'],
+.wf-canvas-inline-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: oklch(0.155 0.011 50 / 0.9);
+  border: 1px solid var(--border-hairline);
+  border-radius: 7px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+  padding: 6px 9px;
+  outline: none;
+  resize: vertical;
+  min-height: 34px;
+  transition:
+    border-color 120ms var(--ease-glass),
+    box-shadow 120ms var(--ease-glass),
+    background 120ms var(--ease-glass);
+}
+.wf-canvas-inline-field input:hover,
+.wf-canvas-inline-field textarea:hover {
+  border-color: var(--border-glass-hover);
+}
+.wf-canvas-inline-field input:focus,
+.wf-canvas-inline-field textarea:focus {
+  border-color: var(--node-accent, var(--accent));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--node-accent, var(--accent)) 14%, transparent);
+  background: oklch(0.185 0.013 50);
+}
+.wf-canvas-inline-field input::placeholder,
+.wf-canvas-inline-field textarea::placeholder {
+  color: color-mix(in oklch, var(--text-muted) 55%, transparent);
+}
+
+.wf-canvas-inline-seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+}
+.wf-canvas-inline-seg button {
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border-hairline);
+  background: oklch(0.17 0.012 50 / 0.6);
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 9.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 120ms var(--ease-glass),
+    border-color 120ms var(--ease-glass),
+    background 120ms var(--ease-glass);
+}
+.wf-canvas-inline-seg button:hover {
+  color: var(--text-primary);
+  border-color: var(--border-glass-hover);
+}
+.wf-canvas-inline-seg button.active {
+  color: var(--node-accent, var(--accent));
+  border-color: color-mix(in oklch, var(--node-accent, var(--accent)) 55%, transparent);
+  background: color-mix(in oklch, var(--node-accent, var(--accent)) 16%, oklch(0.18 0.012 50));
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.07);
+}
+
+.wf-canvas-inline-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: oklch(0.17 0.012 50 / 0.55);
+  border: 1px dashed var(--border-hairline);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 120ms var(--ease-glass),
+    color 120ms var(--ease-glass),
+    background 120ms var(--ease-glass);
+}
+.wf-canvas-inline-summary i {
+  color: var(--node-accent, var(--accent));
+  font-size: 11px;
+}
+.wf-canvas-inline-summary:hover {
+  border-color: color-mix(in oklch, var(--node-accent, var(--accent)) 45%, transparent);
+  color: var(--text-primary);
+  background: color-mix(in oklch, var(--node-accent, var(--accent)) 8%, oklch(0.17 0.012 50));
+}
+
+.wf-canvas-node.inline-open .wf-canvas-node-header {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--node-accent, var(--accent)) 20%, oklch(0.37 0.02 46)),
+    color-mix(in oklch, var(--node-accent, var(--accent)) 6%, oklch(0.325 0.018 50))
+  );
+}
+.wf-canvas-node.inline-open.running .wf-canvas-node-header {
+  background: linear-gradient(180deg, color-mix(in oklch, var(--accent-gold) 16%, oklch(0.37 0.02 46)), oklch(0.325 0.018 50));
+}
+
+/* expanded node: keep the node drag affordance on the header only */
+.wf-canvas-node.inline-open .wf-canvas-node-header {
+  cursor: grab;
+}
+.wf-canvas-node.inline-open:active .wf-canvas-node-header {
+  cursor: grabbing;
+}
+
+/* ============================================================
+   Phase 11 - Running workflow card (atelier + ComfyUI vibe)
+   ============================================================ */
+.wf-pipeline {
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  min-height: auto;
+  padding: 0;
+  background: linear-gradient(180deg, oklch(0.345 0.02 48), oklch(0.3 0.016 50));
+  border: 1px solid oklch(0.88 0.02 82 / 0.16);
+  border-radius: 16px;
+  box-shadow: 0 22px 50px -22px oklch(0 0 0 / 0.65);
+}
+.wf-pipeline::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent) 32%, var(--accent) 68%, transparent);
+  opacity: 0.45;
+  pointer-events: none;
+}
+.wf-pipeline.running {
+  border-color: color-mix(in oklch, var(--accent-gold) 48%, var(--border-glass));
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--accent-gold) 20%, transparent),
+    0 0 32px -6px color-mix(in oklch, var(--accent-gold) 26%, transparent),
+    0 26px 56px -22px oklch(0 0 0 / 0.72);
+}
+.wf-pipeline.running::before {
+  background: linear-gradient(90deg, transparent, var(--accent-gold), transparent);
+  opacity: 0.9;
+  animation: wf-running-sweep 1.6s ease-in-out infinite;
+}
+.wf-pipeline.failed {
+  border-color: color-mix(in oklch, oklch(0.62 0.16 22) 55%, var(--border-glass));
+}
+.wf-pipeline.failed::before {
+  background: linear-gradient(90deg, transparent, oklch(0.62 0.16 22), transparent);
+  opacity: 0.75;
+}
+
+/* header: icon chip + title + right controls */
+.wf-pipeline-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px 0;
+  margin-bottom: 0;
+}
+.wf-pipeline-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--accent) 24%, oklch(0.28 0.016 50)),
+    color-mix(in oklch, var(--accent) 9%, oklch(0.25 0.014 52))
+  );
+  border: 1px solid color-mix(in oklch, var(--accent) 34%, transparent);
+  color: var(--accent);
+  font-size: 15px;
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.07);
+}
+.wf-pipeline.running .wf-pipeline-icon {
+  color: var(--accent-gold);
+  border-color: color-mix(in oklch, var(--accent-gold) 42%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--accent-gold) 22%, oklch(0.28 0.016 50)),
+    color-mix(in oklch, var(--accent-gold) 8%, oklch(0.25 0.014 52))
+  );
+}
+.wf-pipeline.running .wf-pipeline-icon i {
+  animation: wf-icon-breathe 1.6s ease-in-out infinite;
+}
+@keyframes wf-icon-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+}
+.wf-pipeline-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.wf-pipeline-title-group h4 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+}
+.wf-pipeline-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  margin-left: 0;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--accent-gold);
+  background: color-mix(in oklch, var(--accent-gold) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent-gold) 32%, transparent);
+  flex-shrink: 0;
+  animation: none;
+}
+.wf-pipeline-badge.failed {
+  color: oklch(0.76 0.11 22);
+  background: color-mix(in oklch, oklch(0.62 0.16 22) 14%, transparent);
+  border-color: color-mix(in oklch, oklch(0.62 0.16 22) 38%, transparent);
+}
+.wf-pipeline-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.wf-pipeline-header-right .wf-elapsed {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  opacity: 1;
+}
+.wf-pipeline-header-right .wf-elapsed i {
+  font-size: 11px;
+  color: var(--accent-gold);
+}
+.wf-pipeline-header-right .wf-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, oklch(0.62 0.16 22) 40%, transparent);
+  background: color-mix(in oklch, oklch(0.62 0.16 22) 9%, transparent);
+  color: oklch(0.78 0.1 22);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 140ms var(--ease-glass),
+    color 140ms var(--ease-glass),
+    border-color 140ms var(--ease-glass),
+    transform 140ms var(--ease-glass);
+}
+.wf-pipeline-header-right .wf-cancel-btn:hover {
+  background: oklch(0.55 0.14 16 / 0.92);
+  color: #fff;
+  border-color: transparent;
+  transform: translateY(-1px);
+}
+
+/* progress: slim gold bar with sheen */
+.wf-pipeline-progress-main {
+  padding: 13px 18px 2px;
+  margin-bottom: 0;
+}
+.wf-pipeline-progress-info {
+  margin-bottom: 8px;
+}
+.wf-pipeline-step-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.wf-pipeline-step-label i {
+  color: var(--accent-gold);
+}
+.wf-progress-pct {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+.wf-pipeline.running .wf-progress-pct {
+  color: var(--accent-gold);
+}
+.wf-pipeline.failed .wf-progress-pct {
+  color: oklch(0.76 0.11 22);
+}
+.wf-progress-bar {
+  height: 7px;
+  border-radius: 999px;
+  background: oklch(0.16 0.011 50 / 0.85);
+  box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.35);
+  overflow: hidden;
+}
+.wf-progress-fill {
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), color-mix(in oklch, var(--accent) 55%, var(--accent-gold)));
+  transition: width var(--duration-slow) var(--ease-glass);
+}
+.wf-progress-fill.running {
+  position: relative;
+  background: linear-gradient(90deg, color-mix(in oklch, var(--accent-gold) 62%, var(--accent)), var(--accent-gold));
+  overflow: hidden;
+}
+.wf-progress-fill.running::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 0.55), transparent);
+  transform: translateX(-100%);
+  animation: wf-progress-sheen 1.4s ease-in-out infinite;
+}
+@keyframes wf-progress-sheen {
+  0% {
+    transform: translateX(-100%);
+  }
+  55%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+.wf-progress-fill.failed {
+  background: linear-gradient(90deg, oklch(0.58 0.13 20), oklch(0.5 0.12 16));
+}
+
+/* stage rail: scrollable, snap, no cramming */
+.wf-pipeline-track {
+  padding: 12px 18px 2px;
+  margin: 0;
+  height: auto;
+  overflow: hidden;
+}
+.wf-pipeline-track-line {
+  display: none;
+}
+.wf-pipeline-stages {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 4px 2px 10px;
+  scroll-snap-type: x proximity;
+  width: 100%;
+}
+.wf-pipeline-stages::-webkit-scrollbar {
+  display: none;
+}
+.wf-pipeline-stage {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+.wf-pipeline-stage-content {
+  flex-direction: column;
+  gap: 6px;
+  min-width: 66px;
+}
+.wf-stage-dot {
+  width: 22px;
+  height: 22px;
+  border-width: 2px;
+  background: oklch(0.18 0.012 50);
+  border-color: var(--border-glass);
+}
+.wf-stage-dot.done {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 9px color-mix(in oklch, var(--accent) 42%, transparent);
+}
+.wf-stage-dot.current {
+  background: var(--accent-gold);
+  border-color: var(--accent-gold);
+  color: oklch(0.28 0.03 80);
+  box-shadow: 0 0 15px color-mix(in oklch, var(--accent-gold) 55%, transparent);
+}
+.wf-stage-dot.failed {
+  background: oklch(0.55 0.14 16);
+  border-color: oklch(0.55 0.14 16);
+  color: #fff;
+}
+.wf-stage-dot .ri-loader-4-line {
+  font-size: 11px;
+}
+.wf-stage-label {
+  max-width: 96px;
+  font-size: 10px;
+}
+.wf-stage-connector {
+  min-width: 24px;
+  flex: 0 0 auto;
+  margin-bottom: 0;
+  height: 2.5px;
+  align-self: center;
+}
+.wf-stage-connector.done {
+  background: color-mix(in oklch, var(--accent) 65%, transparent);
+}
+.wf-stage-connector.active {
+  background: var(--accent-gold);
+}
+
+/* live log: dark terminal */
+.wf-pipeline-log {
+  margin: 8px 18px 0;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border-hairline);
+  background: oklch(0.15 0.011 250 / 0.55);
+}
+.wf-pipeline-log-header {
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--accent-gold) 72%, var(--text-muted));
+  border-bottom: 1px solid var(--border-hairline);
+  background: oklch(0.19 0.012 50 / 0.55);
+}
+.wf-pipeline-log-header i {
+  font-size: 11px;
+}
+.wf-pipeline-log-body {
+  max-height: 150px;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.wf-pipeline-log-line::before {
+  content: '\203a';
+  margin-right: 7px;
+  color: color-mix(in oklch, var(--accent-gold) 55%, transparent);
+}
+
+/* footer meta */
+.wf-pipeline-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 10px 18px 0;
+  padding: 10px 0 12px;
+  border-top: 1px dashed var(--border-hairline);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+.wf-pipeline-foot-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.wf-pipeline-foot-time i {
+  font-size: 11px;
+}
+.wf-pipeline-runid {
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* running definition cards in the board */
+.wf-canvas-card.running {
+  border-color: color-mix(in oklch, var(--accent-gold) 55%, var(--border-glass));
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--accent-gold) 22%, transparent),
+    0 22px 50px -20px oklch(0 0 0 / 0.62);
+}
+.wf-canvas-card-dot.running {
+  background: var(--accent-gold);
+  box-shadow: 0 0 9px color-mix(in oklch, var(--accent-gold) 70%, transparent);
+  animation: wf-dot-blink 1.2s ease-in-out infinite;
+}
+.wf-plan-badge.running {
+  color: var(--accent-gold);
+  border-color: color-mix(in oklch, var(--accent-gold) 42%, transparent);
+  background: color-mix(in oklch, var(--accent-gold) 12%, transparent);
+}
+
+/* ============================================================
+   Phase 12 - pipeline polish: scroll fades + canvas jump affordance
+   ============================================================ */
+.wf-pipeline-stages::before,
+.wf-pipeline-stages::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 8px;
+  width: 30px;
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+.wf-pipeline-stages::before {
+  left: 0;
+  background: linear-gradient(90deg, oklch(0.3 0.016 50), transparent);
+}
+.wf-pipeline-stages::after {
+  right: 0;
+  background: linear-gradient(270deg, oklch(0.3 0.016 50), transparent);
+}
+.wf-pipeline-stages.is-scroll-left::before {
+  opacity: 1;
+}
+.wf-pipeline-stages.is-scroll-right::after {
+  opacity: 1;
+}
+
+.wf-pipeline-stage {
+  cursor: pointer;
+  border-radius: 10px;
+  transition: background 0.18s ease;
+}
+.wf-pipeline-stage:hover {
+  background: color-mix(in oklch, var(--accent-gold) 9%, transparent);
+}
+.wf-pipeline-stage:hover .wf-stage-label {
+  color: var(--text-bright);
+}
+
+.wf-pipeline-title-group {
+  cursor: pointer;
+  border-radius: 8px;
+}
+.wf-pipeline-title-group:hover h4 {
+  color: var(--accent-gold);
+}
+
+.wf-pipeline-canvas-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklch, var(--accent-gold) 35%, transparent);
+  background: color-mix(in oklch, var(--accent-gold) 10%, transparent);
+  color: var(--accent-gold);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.wf-pipeline-canvas-btn:hover {
+  background: color-mix(in oklch, var(--accent-gold) 22%, transparent);
+  box-shadow: 0 0 14px -4px color-mix(in oklch, var(--accent-gold) 55%, transparent);
+}
+
+/* ============================================================
+   Phase 13 - warm paper node palette + context menu
+   ============================================================ */
+.wf-node-palette {
+  background: linear-gradient(180deg, oklch(0.245 0.014 53), oklch(0.21 0.012 55));
+  border: 1px solid oklch(0.88 0.02 82 / 0.18);
+  border-radius: 14px;
+  box-shadow:
+    0 24px 70px -18px oklch(0 0 0 / 0.7),
+    0 0 0 1px oklch(0.9 0.02 60 / 0.05),
+    inset 0 1px 0 oklch(1 0 0 / 0.06);
+}
+.wf-node-palette::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 1px;
+  z-index: 2;
+  background: linear-gradient(90deg, transparent, var(--accent-aged-gold) 30%, var(--accent-vermilion-muted) 70%, transparent);
+  opacity: 0.55;
+  pointer-events: none;
+}
+.wf-node-palette-header {
+  background: linear-gradient(180deg, oklch(0.27 0.015 52 / 0.95), oklch(0.235 0.014 54 / 0.9));
+  border-bottom: 1px solid oklch(0.88 0.02 82 / 0.1);
+  padding: 10px 12px;
+}
+.wf-node-palette-header > i {
+  color: var(--accent-aged-gold);
+}
+.wf-node-palette-header input {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+}
+.wf-node-palette-close {
+  border-radius: 7px;
+}
+.wf-node-palette-close:hover {
+  background: color-mix(in oklch, var(--accent-vermilion-muted) 12%, transparent);
+  color: var(--accent-vermilion-muted);
+}
+.wf-node-palette-list {
+  padding: 7px;
+}
+.wf-node-palette-item {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  border-radius: 9px;
+  padding: 8px 10px;
+  gap: 9px;
+}
+.wf-node-palette-item i {
+  color: var(--text-secondary);
+  transition: color 120ms var(--ease-glass);
+}
+.wf-node-palette-item.active,
+.wf-node-palette-item:hover {
+  background: linear-gradient(90deg, color-mix(in oklch, var(--accent-aged-gold) 14%, oklch(0.26 0.015 52)), oklch(0.285 0.016 50));
+  color: var(--accent-ink);
+}
+.wf-node-palette-item.active i,
+.wf-node-palette-item:hover i {
+  color: var(--accent-aged-gold);
+}
+.wf-node-palette-dot {
+  box-shadow: 0 0 8px -1px color-mix(in oklch, currentColor 55%, transparent);
+}
+.wf-node-palette-enter {
+  color: var(--accent-aged-gold) !important;
+}
+.wf-node-palette-empty {
+  padding: 18px 12px;
+}
+.wf-node-palette-foot {
+  background: oklch(0.23 0.013 54 / 0.85);
+  border-top: 1px solid oklch(0.88 0.02 82 / 0.09);
+}
+
+/* context menu: warm paper + gold hover */
+.wf-context-menu {
+  background: linear-gradient(180deg, oklch(0.245 0.014 53), oklch(0.22 0.012 55));
+  border: 1px solid oklch(0.88 0.02 82 / 0.16);
+  border-radius: 12px;
+  padding: 5px;
+  box-shadow:
+    0 20px 60px -16px oklch(0 0 0 / 0.65),
+    inset 0 1px 0 oklch(1 0 0 / 0.06);
+}
+.wf-context-menu-item {
+  padding: 7px 10px;
+  font-size: 12.5px;
+  border-radius: 7px;
+}
+.wf-context-menu-item i {
+  color: var(--text-muted);
+  transition: color 120ms var(--ease-glass);
+}
+.wf-context-menu-item:hover:not(:disabled) {
+  background: linear-gradient(90deg, color-mix(in oklch, var(--accent-aged-gold) 13%, oklch(0.27 0.015 52)), oklch(0.29 0.016 50));
+  color: var(--accent-ink);
+}
+.wf-context-menu-item:hover:not(:disabled) i {
+  color: var(--accent-aged-gold);
+}
+.wf-context-menu-item.wf-context-menu-danger:hover {
+  background: color-mix(in oklch, oklch(0.62 0.16 22) 12%, oklch(0.24 0.013 54));
+  color: oklch(0.72 0.18 28);
+}
+.wf-context-menu-item.wf-context-menu-danger:hover i {
+  color: oklch(0.72 0.18 28);
+}
+.wf-context-menu-item.wf-context-menu-configure {
+  color: var(--accent-aged-gold);
+}
+.wf-context-menu-item.wf-context-menu-configure i {
+  color: var(--accent-aged-gold);
+}
+.wf-context-menu-divider {
+  background: oklch(0.88 0.02 82 / 0.1);
+  margin: 5px 6px;
+}
+
+/* ============================================================
+   Phase 14 - warm the last cold-blue leftovers
+   ============================================================ */
+/* definition-card mini canvas: warm charcoal + faint warm grid */
+.wf-canvas-card-canvas {
+  background:
+    radial-gradient(oklch(0.9 0.02 60 / 0.05) 1px, transparent 1px) 0 0 / 16px 16px,
+    oklch(0.17 0.012 54 / 0.6);
+}
+
+/* MiniDag preview nodes / edges / ports -> warm paper */
+.wf-mini-dag-edge {
+  stroke: oklch(0.64 0.025 70 / 0.5);
+}
+.wf-mini-dag-arrow {
+  fill: oklch(0.64 0.025 70 / 0.65);
+}
+.wf-mini-dag-node-bg {
+  fill: oklch(0.24 0.015 52 / 0.95);
+}
+.wf-mini-dag-node:hover .wf-mini-dag-node-bg {
+  fill: oklch(0.29 0.018 50 / 0.98);
+}
+.wf-mini-dag-port {
+  fill: oklch(0.2 0.013 53);
+}
+
+/* io-row ports: warm inner ring instead of cold blue */
+.wf-canvas-io-row .wf-canvas-port,
+.wf-canvas-io-row .wf-canvas-port-output,
+.wf-canvas-io-row .wf-canvas-port:hover,
+.wf-canvas-io-row .wf-canvas-port-output:hover {
+  box-shadow: inset 0 0 0 2px oklch(0.2 0.013 53);
+}
+.wf-canvas-io-row .wf-canvas-port-output {
+  box-shadow: inset 0 0 0 2px oklch(0.2 0.013 53);
+}
+.wf-canvas-io-row .wf-canvas-port:hover {
+  box-shadow:
+    inset 0 0 0 2px oklch(0.2 0.013 53),
+    0 0 14px color-mix(in oklch, var(--accent) 55%, transparent);
+}
+.wf-canvas-io-row .wf-canvas-port-output:hover {
+  box-shadow:
+    inset 0 0 0 2px oklch(0.2 0.013 53),
+    0 0 14px color-mix(in oklch, var(--accent-gold) 55%, transparent);
+}
+
+/* ============================================================
+   Phase 15 - atelier seal empty states for other modules
+   ============================================================ */
+.tool-slot .tool-empty-icon,
+.devplan-empty-icon,
+.preview-empty-icon,
+.workflow-slot-content .workflow-empty-icon {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  border: 1px solid var(--border-glass-hover);
+  box-shadow: var(--shadow-paper);
+  color: var(--accent);
+  font-size: 26px;
+  opacity: 1;
+}
+.tool-slot .tool-empty-icon::before,
+.devplan-empty-icon::before,
+.preview-empty-icon::before,
+.workflow-slot-content .workflow-empty-icon::before {
+  content: '';
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  border: 1px dashed oklch(0.84 0.125 80 / 0.4);
+  animation: seal-orbit 26s linear infinite;
+  pointer-events: none;
+}
+.tool-slot .tool-empty-icon::after,
+.devplan-empty-icon::after,
+.preview-empty-icon::after,
+.workflow-slot-content .workflow-empty-icon::after {
+  content: '';
+  position: absolute;
+  top: -11px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+/* centered column layout for empty states */
+.tool-slot:has(.tool-empty-icon) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding-top: 12vh;
+}
+.devplan-empty,
+.preview-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding-top: 12vh;
+}
+.workflow-slot-content .workflow-empty {
+  gap: 14px;
+  padding: 60px 0;
+}
+
+/* history run-list empty state - atelier seal, matching other modules */
+.wf-history-empty-icon {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  border: 1px solid var(--border-glass-hover);
+  box-shadow: var(--shadow-paper);
+  color: var(--accent);
+  font-size: 23px;
+}
+.wf-history-empty-icon::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 1px dashed oklch(0.84 0.125 80 / 0.4);
+  animation: seal-orbit 26s linear infinite;
+  pointer-events: none;
+}
+.wf-history-empty-icon::after {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+.wf-history-empty-title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.wf-history-empty-sub {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  max-width: 360px;
+  line-height: 1.5;
+}
+
+/* text rhythm */
+.tool-slot .tool-empty-text,
+.preview-empty .chat-empty-text {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  text-align: center;
+  max-width: 440px;
+  line-height: 1.5;
+}
+.tool-slot .tool-empty-sub,
+.preview-empty-sub,
+.devplan-empty-sub,
+.workflow-slot-content .workflow-empty-sub {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  max-width: 420px;
+  line-height: 1.55;
+}
+.devplan-empty-text,
+.workflow-slot-content .workflow-empty-text {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+/* loading state inside the same container stays compact, no seal */
+.workflow-slot-content .workflow-empty:has(.ri-loader-4-line) {
+  gap: 10px;
+  padding: 20px 0;
+}
+.workflow-slot-content .workflow-empty:has(.ri-loader-4-line) .workflow-empty-icon {
+  width: 44px;
+  height: 44px;
+  font-size: 20px;
+}
+.workflow-slot-content .workflow-empty:has(.ri-loader-4-line) .workflow-empty-icon::before,
+.workflow-slot-content .workflow-empty:has(.ri-loader-4-line) .workflow-empty-icon::after {
+  display: none;
+}
+.workflow-slot-content .workflow-empty:has(.ri-loader-4-line) .workflow-empty-text {
+  font-size: 14px;
+  font-family: var(--font-body);
+  font-weight: 500;
+}
+
+/* ============================================================
+   Phase 16 - Workbench right-panel body: warm paper cards
+   ============================================================ */
+.right-panel-body {
+  overflow-y: auto;
+  padding: 16px 14px 26px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-etched) transparent;
+}
+.right-panel-body::-webkit-scrollbar {
+  width: 8px;
+}
+.right-panel-body::-webkit-scrollbar-thumb {
+  background: var(--scroll-etched);
+  border-radius: 999px;
+}
+.right-panel-body::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-etched-hover);
+}
+
+.right-panel-section {
+  display: flex;
+  flex-direction: column;
+}
+.right-panel-section > * + * {
+  margin-top: 12px;
+}
+
+/* shared card face */
+.rp-evo-plan,
+.rp-mon-block,
+.rp-tasks,
+.rp-mem-card {
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-paper);
+}
+
+/* ---- evolution tab ---- */
+.rp-evo-stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--border-glass);
+}
+
+.rp-evo-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--rp-stage, var(--accent)) !important;
+  color: oklch(0.22 0.02 50) !important;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.25),
+    0 2px 6px oklch(0 0 0 / 0.25);
+}
+
+.rp-evo-mode {
+  padding: 2px 8px;
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  background: var(--bg-glass);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.rp-evo-progress {
+  margin: 2px 0 0;
+}
+
+.rp-evo-track {
+  height: 6px;
+  border-radius: 999px;
+  background: oklch(0.16 0.011 50 / 0.85);
+  box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.35);
+  overflow: hidden;
+}
+
+.rp-evo-fill {
+  position: relative;
+  height: 100%;
+  border-radius: 999px;
+  box-shadow: 0 0 10px color-mix(in oklch, var(--accent-gold) 38%, transparent);
+  overflow: hidden;
+  transition: width var(--duration-slow) var(--ease-glass);
+}
+
+.rp-evo-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 0.35), transparent);
+  transform: translateX(-100%);
+  animation: wf-progress-sheen 2.4s ease-in-out infinite;
+}
+
+.rp-evo-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  background: var(--border-glass);
+  overflow: hidden;
+}
+
+.rp-evo-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: oklch(0.27 0.015 52 / 0.92);
+}
+
+.rp-evo-metric span {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.rp-evo-metric strong {
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--accent-gold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-evo-plan {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+}
+.rp-evo-plan:hover {
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  border-color: var(--border-glass-hover);
+}
+
+.rp-evo-plan-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rp-evo-plan-title {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-evo-plan-pct {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-gold);
+}
+
+.rp-evo-plan .rp-evo-track {
+  height: 4px;
+  margin-top: 9px;
+}
+
+.rp-evo-current {
+  display: block;
+  margin-top: 9px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.rp-evo-current::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+  vertical-align: 1px;
+}
+
+.rp-evo-summary {
+  margin: 0;
+  padding: 9px 12px;
+  border-left: 2px solid var(--accent-gold);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: linear-gradient(90deg, oklch(0.84 0.125 80 / 0.08), transparent 70%);
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.rp-evo-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rp-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  background: var(--bg-glass);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-secondary);
+}
+.rp-stat i {
+  font-size: 11px;
+}
+.rp-stat.good {
+  color: var(--success);
+  border-color: color-mix(in oklch, var(--success) 38%, transparent);
+  background: color-mix(in oklch, var(--success) 12%, transparent);
+}
+.rp-stat.bad {
+  color: oklch(0.76 0.13 26);
+  border-color: color-mix(in oklch, var(--accent-red) 40%, transparent);
+  background: color-mix(in oklch, var(--accent-red) 12%, transparent);
+}
+.rp-stat.queue {
+  color: var(--accent-gold);
+  border-color: color-mix(in oklch, var(--accent-gold) 38%, transparent);
+  background: color-mix(in oklch, var(--accent-gold) 10%, transparent);
+}
+
+.rp-evo-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.rp-evo-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+.rp-evo-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border: 1px solid oklch(0.45 0.12 26 / 0.5);
+  border-radius: 999px;
+  background: linear-gradient(135deg, oklch(0.71 0.15 30), oklch(0.63 0.15 26));
+  color: oklch(0.97 0.01 30);
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  box-shadow: 0 4px 14px oklch(0.45 0.12 26 / 0.25);
+  cursor: pointer;
+  transition:
+    filter var(--duration-fast) var(--ease-glass),
+    transform var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass);
+}
+.rp-evo-trigger:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px oklch(0.45 0.12 26 / 0.35);
+}
+.rp-evo-trigger:active {
+  transform: translateY(0);
+}
+
+/* ---- monitor tab ---- */
+.rp-mon-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.rp-mon-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--border-glass);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.rp-mon-header i {
+  font-size: 14px;
+  color: var(--accent-gold);
+}
+
+.rp-mon-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+
+.rp-mon-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rp-mon-label {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.rp-mon-value {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.rp-mon-trunc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-mon-status-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rp-mon-bar-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.rp-mon-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: oklch(0.16 0.011 50 / 0.85);
+  box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.35);
+  overflow: hidden;
+}
+
+.rp-mon-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), color-mix(in oklch, var(--accent) 55%, var(--accent-gold)));
+  transition: width var(--duration-slow) var(--ease-glass);
+}
+.rp-mon-fill.plan {
+  background: linear-gradient(90deg, var(--accent-gold), color-mix(in oklch, var(--accent-gold) 55%, var(--accent)));
+}
+.rp-mon-fill.mem {
+  background: linear-gradient(90deg, var(--accent-moss), color-mix(in oklch, var(--accent-moss) 55%, var(--accent-gold)));
+}
+
+.rp-mon-pct {
+  min-width: 30px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+.rp-mon-current {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.rp-mon-current::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent-gold);
+  box-shadow: 0 0 6px oklch(0.84 0.125 80 / 0.4);
+  vertical-align: 1px;
+}
+
+.rp-mon-lock-row {
+  display: flex;
+  justify-content: center;
+}
+
+.rp-mon-lock-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  background: var(--bg-glass);
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-glass),
+    color var(--duration-fast) var(--ease-glass),
+    background var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass);
+}
+.rp-mon-lock-btn:hover {
+  border-color: var(--border-glass-hover);
+  background: var(--bg-glass-strong);
+  color: var(--text-primary);
+}
+.rp-mon-lock-btn.locked {
+  border-color: color-mix(in oklch, var(--accent-gold) 55%, transparent);
+  background: color-mix(in oklch, var(--accent-gold) 12%, transparent);
+  color: var(--accent-gold);
+  box-shadow: 0 0 12px color-mix(in oklch, var(--accent-gold) 18%, transparent);
+}
+
+.rp-change-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 8px;
+}
+.rp-change-item:hover {
+  background: var(--bg-glass);
+}
+
+.rp-change-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+.rp-change-type.new {
+  color: var(--success);
+  background: color-mix(in oklch, var(--success) 14%, transparent);
+}
+.rp-change-type.deleted {
+  color: oklch(0.76 0.13 26);
+  background: color-mix(in oklch, var(--accent-red) 14%, transparent);
+}
+.rp-change-type.modified,
+.rp-change-type:not(.new):not(.deleted) {
+  color: var(--accent-gold);
+  background: color-mix(in oklch, var(--accent-gold) 14%, transparent);
+}
+
+.rp-change-file {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-empty {
+  margin: 24px 0;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ---- tools tab ---- */
+.rp-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rp-tool-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rp-tool-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 58px;
+  padding: 8px 6px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  box-shadow: var(--shadow-paper);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-glass),
+    transform var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass);
+}
+.rp-tool-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background: linear-gradient(180deg, oklch(1 0 0 / 0.06), transparent 40%);
+  pointer-events: none;
+}
+.rp-tool-btn i {
+  position: relative;
+  font-size: 17px;
+  color: var(--text-secondary);
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+.rp-tool-label {
+  position: relative;
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+
+.rp-tool-btn:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--accent-gold) 55%, transparent);
+  box-shadow:
+    0 5px 14px oklch(0 0 0 / 0.28),
+    inset 0 0 0 1px color-mix(in oklch, var(--accent-gold) 25%, transparent);
+  transform: translateY(-1px);
+}
+.rp-tool-btn:hover:not(:disabled) i {
+  color: var(--accent-gold);
+}
+.rp-tool-btn:hover:not(:disabled) .rp-tool-label {
+  color: var(--text-primary);
+}
+
+.rp-tool-btn.active {
+  border-color: color-mix(in oklch, var(--accent) 55%, transparent);
+  background: linear-gradient(180deg, oklch(0.4 0.02 44 / 0.95), oklch(0.33 0.018 47 / 0.95));
+}
+.rp-tool-btn.active i {
+  color: var(--accent);
+}
+.rp-tool-btn.active .rp-tool-label {
+  color: var(--accent-ink);
+}
+
+.rp-tool-btn.executing {
+  border-color: var(--accent-gold);
+}
+.rp-tool-btn.executing i {
+  color: var(--accent-gold);
+}
+.rp-tool-btn:disabled {
+  opacity: 0.72;
+  cursor: default;
+}
+
+.rp-tool-input {
+  padding: 0;
+}
+
+.rp-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  outline: none;
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.045),
+    inset 0 0 0 1px oklch(0 0 0 / 0.07);
+  transition:
+    border-color var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass);
+}
+.rp-input:focus {
+  border-color: var(--accent);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.05),
+    0 0 0 3px oklch(0.67 0.155 28 / 0.18);
+}
+.rp-input::placeholder {
+  color: var(--text-muted);
+}
+
+.rp-feedback {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 11px;
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.rp-feedback i {
+  font-size: 13px;
+}
+.rp-feedback.success {
+  border-color: color-mix(in oklch, var(--success) 35%, transparent);
+  background: color-mix(in oklch, var(--success) 10%, transparent);
+  color: var(--success);
+}
+.rp-feedback.error {
+  border-color: color-mix(in oklch, var(--accent-red) 35%, transparent);
+  background: color-mix(in oklch, var(--accent-red) 10%, transparent);
+  color: oklch(0.76 0.13 26);
+}
+
+.rp-tasks {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rp-tasks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border-bottom: 1px dashed var(--border-glass);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-glass);
+}
+.rp-tasks-header:hover {
+  color: var(--text-primary);
+}
+
+.rp-task-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 14px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.rp-task-item + .rp-task-item {
+  border-top: 1px solid var(--border-hairline);
+}
+.rp-task-item i {
+  font-size: 13px;
+}
+.rp-task-item.running i {
+  color: var(--accent-gold);
+}
+.rp-task-item.success i {
+  color: var(--success);
+}
+.rp-task-item.error i {
+  color: oklch(0.76 0.13 26);
+}
+
+.rp-task-title {
+  overflow: hidden;
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- memory tab ---- */
+.rp-mem-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rp-mem-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 14px;
+}
+.rp-mem-card:hover {
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  border-color: var(--border-glass-hover);
+}
+
+.rp-mem-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rp-mem-type {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  background: var(--bg-glass);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.rp-mem-tier {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+}
+
+.rp-mem-pinned {
+  font-size: 12px;
+  color: var(--accent-gold);
+}
+
+.rp-mem-conf {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.rp-mem-content {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.rp-mem-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.rp-mem-topic {
+  padding: 1px 7px;
+  border: 1px solid color-mix(in oklch, var(--accent-gold) 22%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent-gold) 9%, transparent);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--accent-gold);
+}
+
+.rp-mem-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 0 30px;
+  text-align: center;
+}
+
+.rp-mem-empty-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--border-glass-hover);
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  box-shadow: var(--shadow-paper);
+  color: var(--accent);
+  font-size: 22px;
+}
+.rp-mem-empty-icon::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border: 1px dashed oklch(0.84 0.125 80 / 0.4);
+  border-radius: 50%;
+  animation: seal-orbit 26s linear infinite;
+}
+.rp-mem-empty-icon::after {
+  content: '';
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.rp-mem-empty p {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.rp-evo-footer:has(.rp-evo-trigger:only-child) {
+  justify-content: flex-end;
+}
+
+/* ============================================================
+   Phase 17 - Blog editor: warm paper writing desk
+   ============================================================ */
+.blog-editor {
+  background: transparent;
+}
+
+/* ---- toolbar rail ---- */
+.blog-editor-toolbar {
+  background: linear-gradient(180deg, oklch(0.28 0.016 51 / 0.55), transparent);
+  border-bottom: 1px solid var(--border-glass);
+  padding: 8px 14px;
+  gap: 10px;
+}
+
+.blog-editor-toolbar-group {
+  gap: 2px;
+}
+.blog-editor-toolbar-group + .blog-editor-toolbar-group {
+  margin-left: 4px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-hairline);
+}
+
+.blog-editor-tb-btn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    border-color var(--duration-fast) var(--ease-glass),
+    background var(--duration-fast) var(--ease-glass),
+    color var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass);
+}
+.blog-editor-tb-btn:hover {
+  border-color: var(--border-glass-hover);
+  background: var(--bg-glass);
+  color: var(--accent-gold);
+  box-shadow: 0 2px 8px oklch(0 0 0 / 0.2);
+}
+.blog-editor-tb-btn.active {
+  border-color: color-mix(in oklch, var(--accent) 42%, transparent);
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 20%, transparent);
+}
+
+/* ---- paper sheet ---- */
+.blog-editor-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  padding: 22px 26px 0;
+  overflow: hidden;
+}
+
+.blog-editor-textarea,
+.blog-editor-preview {
+  width: 100%;
+  max-width: 860px;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-panel);
+  background:
+    radial-gradient(130% 70% at 50% 0%, oklch(0.84 0.125 80 / 0.07), transparent 58%),
+    linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  box-shadow: var(--shadow-paper);
+  color: var(--text-primary);
+}
+
+.blog-editor-textarea {
+  padding: 26px 32px;
+  caret-color: var(--accent);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.85;
+}
+.blog-editor-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.blog-editor-preview {
+  overflow-y: auto;
+  padding: 30px 36px;
+}
+
+/* ---- footer rail ---- */
+.blog-editor-footer {
+  background: linear-gradient(180deg, transparent, oklch(0.28 0.016 51 / 0.55));
+  border-top: 1px solid var(--border-glass);
+  padding: 10px 16px;
+}
+
+.blog-editor-rec-btn {
+  width: 38px;
+  height: 38px;
+  border: 1px solid color-mix(in oklch, var(--accent-gold) 45%, transparent);
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  color: var(--accent-gold);
+  box-shadow: var(--shadow-paper);
+  font-size: 17px;
+  transition:
+    border-color var(--duration-fast) var(--ease-glass),
+    background var(--duration-fast) var(--ease-glass),
+    color var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass),
+    transform var(--duration-fast) var(--ease-glass);
+}
+.blog-editor-rec-btn:hover {
+  border-color: var(--accent-gold);
+  background: color-mix(in oklch, var(--accent-gold) 12%, var(--surface-paper));
+  color: var(--accent-gold);
+  transform: scale(1.05);
+  box-shadow:
+    0 4px 14px oklch(0 0 0 / 0.3),
+    inset 0 0 0 1px color-mix(in oklch, var(--accent-gold) 25%, transparent);
+}
+.blog-editor-rec-btn.recording {
+  border-color: oklch(0.45 0.12 26 / 0.55);
+  background: linear-gradient(135deg, oklch(0.62 0.18 28), oklch(0.55 0.16 24));
+  color: oklch(0.97 0.01 30);
+  box-shadow: 0 0 18px oklch(0.55 0.16 24 / 0.45);
+  animation: breathe-glow-active 2s ease-in-out infinite;
+}
+.blog-editor-rec-btn.transcribing {
+  border-color: color-mix(in oklch, var(--accent-gold) 50%, transparent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-gold));
+  color: oklch(0.24 0.02 50);
+}
+
+.blog-editor-rec-timer {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rec-dot-pulse {
+  background: var(--accent-red);
+  box-shadow: 0 0 8px oklch(0.68 0.18 28 / 0.6);
+}
+
+.blog-editor-word-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.blog-editor-last-dictation {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.blog-editor-last-dictation i {
+  color: var(--accent-gold);
+}
+
+/* ---- recordings drawer ---- */
+.blog-editor-recordings {
+  border-top: 1px solid var(--border-glass);
+  background: var(--surface-modal-rail);
+}
+
+.blog-editor-recordings-header {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.blog-editor-rec-close {
+  border-radius: 7px;
+  transition:
+    background var(--duration-fast) var(--ease-glass),
+    color var(--duration-fast) var(--ease-glass);
+}
+.blog-editor-rec-close:hover {
+  background: var(--bg-glass);
+  color: var(--text-primary);
+}
+
+.blog-editor-recordings-empty {
+  font-family: var(--font-display);
+  color: var(--text-muted);
+}
+
+.blog-editor-recording-item {
+  transition: background var(--duration-fast) var(--ease-glass);
+}
+.blog-editor-recording-item:hover {
+  background: var(--bg-glass-50);
+}
+
+.blog-editor-recording-time,
+.blog-editor-recording-dur {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.blog-editor-recording-dur {
+  color: var(--accent-gold);
+}
+
+.blog-editor-recording-text {
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.blog-editor-rec-action {
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  transition:
+    border-color var(--duration-fast) var(--ease-glass),
+    background var(--duration-fast) var(--ease-glass),
+    color var(--duration-fast) var(--ease-glass);
+}
+.blog-editor-rec-action:hover {
+  border-color: var(--border-glass);
+  background: var(--bg-glass);
+  color: var(--accent-gold);
+}
+
+/* ---- preview markdown typography ---- */
+.blog-editor-preview .md-h1,
+.blog-editor-preview .md-h2,
+.blog-editor-preview .md-h3 {
+  font-family: var(--font-display);
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+.blog-editor-preview .md-h1 {
+  margin: 0 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--border-glass);
+  font-size: 26px;
+  font-weight: 600;
+}
+.blog-editor-preview .md-h2 {
+  margin: 24px 0 10px;
+  font-size: 20px;
+  font-weight: 600;
+}
+.blog-editor-preview .md-h3 {
+  margin: 18px 0 8px;
+  font-size: 16.5px;
+  font-weight: 600;
+}
+
+.blog-editor-preview .md-p {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+}
+.blog-editor-preview .md-bold {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.blog-editor-preview .md-inline-code {
+  padding: 1px 6px;
+  border: 1px solid var(--border-glass);
+  border-radius: 5px;
+  background: oklch(0.22 0.012 55 / 0.85);
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+.blog-editor-preview .md-link {
+  color: var(--accent);
+  text-decoration-color: oklch(0.67 0.155 28 / 0.4);
+  text-underline-offset: 3px;
+}
+.blog-editor-preview .md-link:hover {
+  color: var(--accent-gold);
+  text-decoration-color: var(--accent-gold);
+}
+
+.blog-editor-preview .md-code-block {
+  margin: 14px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, oklch(0.235 0.014 57 / 0.9), oklch(0.2 0.012 58 / 0.92));
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  overflow-x: auto;
+}
+
+.blog-editor-preview .md-blockquote {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border-glass);
+  border-left: 3px solid var(--accent-gold);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in oklch, var(--accent-gold) 7%, transparent);
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+}
+
+.blog-editor-preview .md-list {
+  margin: 8px 0 12px;
+  color: var(--text-secondary);
+}
+
+.blog-editor-preview .md-hr {
+  margin: 18px 0;
+  border: 0;
+  border-top: 1px dashed var(--border-glass);
+}
+
+.blog-editor-preview .md-empty {
+  font-family: var(--font-display);
+  color: var(--text-muted);
+}
+
+/* ============================================================
+   Phase 18 - Chat conversation craft & writing-desk input bar
+   Date divider, hanko seals, ruled-paper bubbles, framed input.
+   ============================================================ */
+
+/* ---- conversation date divider ---- */
+.conversation-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 2px 0 4px;
+  opacity: 0.9;
+}
+.conversation-divider-rule {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, oklch(0.88 0.02 82 / 0.28), transparent);
+}
+.conversation-divider-seal {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  transform: rotate(45deg);
+  border: 1px solid var(--accent-gold);
+  border-radius: 1px;
+  box-shadow: 0 0 8px oklch(0.84 0.125 80 / 0.35);
+}
+.conversation-divider-seal::after {
+  content: '';
+  position: absolute;
+  inset: 1.5px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+.conversation-divider-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ---- hanko avatar seals ---- */
+.msg-avatar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding-top: 2px;
+}
+.msg-seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+  flex-shrink: 0;
+}
+.msg-seal.assistant {
+  background: linear-gradient(160deg, oklch(0.73 0.15 30), oklch(0.6 0.14 24));
+  color: oklch(0.96 0.015 40 / 0.92);
+  border: 1px solid oklch(0.5 0.12 26 / 0.55);
+  transform: rotate(-3deg);
+  box-shadow:
+    0 3px 8px oklch(0.45 0.12 26 / 0.35),
+    inset 0 1px 0 oklch(1 0 0 / 0.18);
+  text-shadow: 0 1px 2px oklch(0.4 0.1 26 / 0.5);
+}
+.msg-seal.user {
+  background: linear-gradient(160deg, var(--surface-paper-warm), var(--surface-paper-soft));
+  color: var(--accent-gold);
+  border: 1px solid oklch(0.84 0.125 80 / 0.4);
+  transform: rotate(2deg);
+  box-shadow:
+    0 1px 0 oklch(1 0 0 / 0.05) inset,
+    0 2px 6px oklch(0 0 0 / 0.25);
+}
+.msg-avatar .msg-label {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  padding-top: 0;
+}
+.msg-avatar .msg-label::after {
+  display: none;
+}
+
+/* ---- ruled-paper bubbles ---- */
+.msg-row .msg-bubble {
+  position: relative;
+}
+.msg-row.assistant .msg-bubble {
+  padding: 12px 16px 12px 24px;
+}
+.msg-row.assistant .msg-bubble::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 16px;
+  bottom: 16px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, oklch(0.84 0.125 80 / 0.55), oklch(0.67 0.155 28 / 0.35), transparent);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.msg-row.user .msg-bubble::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 0.28), transparent);
+  pointer-events: none;
+}
+
+/* ---- writing-desk input bar ---- */
+.inputbar {
+  position: relative;
+}
+.inputbar::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  margin-left: -2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent-gold);
+  box-shadow: 0 0 8px oklch(0.84 0.125 80 / 0.55);
+}
+.inputbar-row {
+  position: relative;
+  background:
+    radial-gradient(120% 70% at 50% -30%, oklch(0.42 0.02 45 / 0.3), transparent 56%),
+    linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  border: 1px solid var(--border-glass-hover);
+  border-radius: 18px;
+  box-shadow:
+    var(--shadow-paper),
+    inset 0 1px 0 oklch(1 0 0 / 0.05);
+  padding: 8px 10px;
+  transition:
+    border-color var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass);
+}
+.inputbar-row:focus-within {
+  border-color: oklch(0.67 0.155 28 / 0.5);
+  box-shadow:
+    var(--shadow-paper),
+    inset 0 1px 0 oklch(1 0 0 / 0.05),
+    0 0 0 3px oklch(0.67 0.155 28 / 0.16),
+    0 0 26px oklch(0.67 0.155 28 / 0.12);
+}
+.inputbar-field {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  min-height: 42px;
+  padding: 8px 44px 8px 6px;
+}
+.inputbar-field:focus {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.inputbar-field::placeholder {
+  color: var(--text-muted);
+}
+.inputbar-send,
+.inputbar-stop {
+  bottom: 7px;
+  right: 9px;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(160deg, oklch(0.73 0.15 30), oklch(0.6 0.14 24));
+  border: 1px solid oklch(0.5 0.12 26 / 0.55);
+  box-shadow:
+    0 4px 14px oklch(0.45 0.12 26 / 0.35),
+    inset 0 1px 0 oklch(1 0 0 / 0.2);
+}
+.inputbar-send:hover:not(:disabled),
+.inputbar-stop:hover {
+  filter: brightness(1.1);
+  box-shadow:
+    0 6px 18px oklch(0.45 0.12 26 / 0.45),
+    inset 0 1px 0 oklch(1 0 0 / 0.25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-divider-seal {
+    box-shadow: none;
+  }
+}
+
+/* ---- quiet thread-end marker ---- */
+.thread-end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  opacity: 0.5;
+}
+.thread-end-rule {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, oklch(0.88 0.02 82 / 0.22), transparent);
+}
+.thread-end-seal {
+  width: 5px;
+  height: 5px;
+  transform: rotate(45deg);
+  border: 1px solid oklch(0.84 0.125 80 / 0.55);
+  border-radius: 1px;
+  box-shadow: 0 0 6px oklch(0.84 0.125 80 / 0.25);
+}
+
+/* ============================================================
+   Phase 19 - Sidebar rhythm & history view alignment
+   Category icons in session items, sealed messages in history.
+   ============================================================ */
+
+/* ---- sidebar session item icons ---- */
+.sidebar-item-icon {
+  width: 16px;
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+  opacity: 0.75;
+  text-align: center;
+  transition:
+    color var(--duration-fast) var(--ease-glass),
+    opacity var(--duration-fast) var(--ease-glass);
+}
+.sidebar-item:hover .sidebar-item-icon {
+  color: var(--accent-gold);
+  opacity: 1;
+}
+.sidebar-item.active .sidebar-item-icon {
+  color: var(--accent);
+  opacity: 1;
+}
+
+/* ---- "current" badge as a small gold-edged pill ---- */
+.sidebar-current-badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  color: var(--accent-gold);
+  border: 1px solid oklch(0.84 0.125 80 / 0.32);
+  background: oklch(0.84 0.125 80 / 0.08);
+  line-height: 1.4;
+}
+
+/* ---- history view message times as thread metadata ---- */
+.history-view .msg-time {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 4px;
+}
+.history-view .msg-time::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--accent-gold);
+  margin-right: 6px;
+  opacity: 0.7;
+}
+
+/* ============================================================
+   Phase 20 - Workbench drawer fills its full height
+   The drawer is a column flex; the body stretches and scrolls
+   internally instead of leaving a dead gap below the content.
+   ============================================================ */
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.right-panel-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.right-panel-section {
+  flex: 1;
+}
+/* workbench empty states center in the full-height drawer */
+.rp-mem-empty,
+.rp-empty {
+  margin: auto;
+}
+.right-panel::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 12px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, oklch(0.84 0.125 80 / 0.3), transparent);
+  pointer-events: none;
+}
+
+/* ---- drawer empty states: atelier seal consistency ---- */
+.rp-empty {
+  margin: auto;
+  padding: 28px 0 34px;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+}
+
+/* ============================================================
+   Phase 21 - Workbench trigger as an atelier seal control
+   Idle: warm paper pill with a gold icon. Active: lit vermilion
+   seal with a gold underline marker so the drawer state reads.
+   ============================================================ */
+.topbar-workbench-trigger {
+  position: relative;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 30px;
+  padding-inline: 12px;
+  gap: 6px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  border: 1px solid oklch(0.88 0.02 82 / 0.22);
+  color: var(--text-secondary);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.06),
+    0 1px 4px oklch(0 0 0 / 0.2);
+  transition:
+    background var(--duration-fast) var(--ease-glass),
+    border-color var(--duration-fast) var(--ease-glass),
+    color var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass),
+    transform var(--duration-fast) var(--ease-glass);
+}
+.topbar-workbench-trigger i {
+  font-size: 14px;
+  color: var(--accent-gold);
+  opacity: 0.9;
+  transition:
+    color var(--duration-fast) var(--ease-glass),
+    transform var(--duration-fast) var(--ease-glass);
+}
+.topbar-workbench-trigger:hover {
+  background: linear-gradient(180deg, var(--surface-paper-warm), var(--surface-paper));
+  border-color: oklch(0.84 0.125 80 / 0.42);
+  color: var(--text-primary);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.08),
+    0 2px 10px oklch(0 0 0 / 0.28);
+  transform: translateY(-1px);
+}
+.topbar-workbench-trigger:hover i {
+  color: var(--accent);
+}
+.topbar-workbench-trigger.active {
+  background: linear-gradient(160deg, oklch(0.7 0.13 30), oklch(0.58 0.12 25));
+  border-color: color-mix(in oklch, var(--accent) 38%, transparent);
+  color: oklch(0.97 0.01 30);
+  box-shadow:
+    0 0 0 1px oklch(0.5 0.12 26 / 0.22),
+    0 4px 14px oklch(0.45 0.12 26 / 0.24),
+    inset 0 1px 0 oklch(1 0 0 / 0.08);
+  transform: none;
+}
+.topbar-workbench-trigger.active i {
+  color: oklch(0.97 0.01 30);
+  opacity: 1;
+}
+.topbar-workbench-trigger.active::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  transform: translateX(-50%);
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent-gold);
+  box-shadow: 0 0 8px oklch(0.84 0.125 80 / 0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-workbench-trigger {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* ============================================================
+   Phase 22 - Workbench header controls: seal tabs & close
+   Tab rail reads as an etched track; the active tab is a warm
+   paper seal with a vermilion icon and a gold underline.
+   ============================================================ */
+.right-panel-tabs {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: max-content;
+  max-width: 100%;
+  height: 32px;
+  padding: 2px;
+  gap: 3px;
+  border: 1px solid oklch(0.12 0.005 40 / 0.35);
+  border-radius: 11px;
+  background: oklch(0.23 0.014 53 / 0.55);
+  box-shadow:
+    inset 0 1px 0 oklch(0 0 0 / 0.35),
+    inset 0 1px 3px oklch(0 0 0 / 0.28);
+}
+.right-panel-tab {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  gap: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  color: oklch(0.82 0.025 75);
+  transition:
+    color var(--duration-fast) var(--ease-glass),
+    background var(--duration-fast) var(--ease-glass),
+    box-shadow var(--duration-fast) var(--ease-glass);
+}
+.right-panel-tab i {
+  font-size: 15px;
+  color: oklch(0.82 0.025 75);
+  transition:
+    color var(--duration-fast) var(--ease-glass),
+    transform var(--duration-fast) var(--ease-glass);
+}
+.right-panel-tab-name,
+.right-panel-tab-index {
+  display: none;
+}
+.right-panel-tab:hover {
+  color: var(--text-secondary);
+  background: oklch(1 0 0 / 0.05);
+}
+.right-panel-tab:hover i {
+  color: var(--accent-gold);
+}
+.right-panel-tab.active {
+  background: linear-gradient(180deg, var(--accent-vermilion-muted), var(--accent));
+  color: oklch(0.97 0.012 30);
+  box-shadow:
+    0 2px 7px oklch(0.5 0.15 26 / 0.32),
+    inset 0 1px 0 oklch(1 0 0 / 0.08);
+}
+.right-panel-tab.active i {
+  color: inherit;
+  transform: none;
+  filter: drop-shadow(0 1px 1px oklch(0 0 0 / 0.35));
+}
+.right-panel-tab.active::after {
+  content: '';
+  display: block;
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent-gold);
+  box-shadow: 0 0 4px oklch(0.84 0.125 80 / 0.35);
+}
+
+/* ---- close control ---- */
+.right-panel-close {
+  width: 26px;
+  height: 26px;
+  border: 1px solid oklch(0.9 0.02 80 / 0.07);
+  border-radius: 8px;
+  background: var(--bg-glass);
+  color: var(--text-muted);
+  transition:
+    color var(--duration-fast) var(--ease-glass),
+    background var(--duration-fast) var(--ease-glass),
+    border-color var(--duration-fast) var(--ease-glass),
+    transform var(--duration-fast) var(--ease-glass);
+}
+.right-panel-close:hover {
+  background: oklch(0.67 0.155 28 / 0.16);
+  border-color: oklch(0.67 0.155 28 / 0.3);
+  color: var(--accent);
+  transform: rotate(90deg);
+}
+
+/* Workspace auth bar (collapsible) */
+.chat-workspace-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 4px 16px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.chat-workspace-summary {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  font-size: inherit;
+  text-align: left;
+}
+
+.chat-workspace-summary:hover {
+  color: var(--text-primary);
+}
+
+.chat-workspace-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--accent, #4f8cff);
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  padding: 0 5px;
+}
+
+.chat-workspace-chevron {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.chat-workspace-list {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-workspace-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-workspace-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.chat-workspace-active {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--accent, #4f8cff);
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.chat-workspace-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--border-base);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.chat-workspace-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+}
+
+.chat-workspace-btn--set {
+  color: var(--accent, #4f8cff);
+  border-color: var(--accent, #4f8cff);
+}
+
+.chat-workspace-btn--reset {
+  color: var(--text-danger, #e74c3c);
+  border-color: var(--text-danger, #e74c3c);
+}
+
+.chat-workspace-btn--reset:hover {
+  background: rgba(231, 76, 60, 0.08);
+}
+
+.chat-workspace-error {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-danger, #e74c3c);
+}
+
+/* ============================================================
+   Phase 23 - Workflow panel three-page tabs
+   defs / running / done - seal tab rail matching workbench.
+   ============================================================ */
+.wf-page-tabs {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: max-content;
+  max-width: 100%;
+  height: 32px;
+  padding: 2px;
+  margin-bottom: var(--space-md);
+  border: 1px solid oklch(0.12 0.005 40 / 0.35);
+  border-radius: 11px;
+  background: oklch(0.23 0.014 53 / 0.55);
+  box-shadow:
+    inset 0 1px 0 oklch(0 0 0 / 0.35),
+    inset 0 1px 3px oklch(0 0 0 / 0.28);
+}
+.wf-page-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: oklch(0.82 0.025 75);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-body);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color var(--duration-fast) var(--ease-glass),
+    background var(--duration-fast) var(--ease-glass);
+}
+.wf-page-tab i {
+  font-size: 14px;
+}
+.wf-page-tab:hover {
+  color: var(--text-secondary);
+  background: oklch(1 0 0 / 0.045);
+}
+.wf-page-tab:hover i {
+  color: var(--accent-gold);
+}
+.wf-page-tab.active {
+  background: linear-gradient(180deg, var(--accent-vermilion-muted), var(--accent));
+  color: oklch(0.97 0.012 30);
+  box-shadow:
+    0 2px 7px oklch(0.5 0.15 26 / 0.32),
+    inset 0 1px 0 oklch(1 0 0 / 0.08);
+}
+.wf-page-tab.active i {
+  color: inherit;
+  filter: drop-shadow(0 1px 1px oklch(0 0 0 / 0.35));
+}
+.wf-page-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent-gold);
+  box-shadow: 0 0 4px oklch(0.84 0.125 80 / 0.35);
+}
+.wf-page-count {
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 8px;
+  background: oklch(1 0 0 / 0.08);
+  color: inherit;
+}
+.wf-page-count.live {
+  background: var(--accent-gold);
+  color: oklch(0.2 0.02 50);
+  box-shadow: 0 0 6px oklch(0.84 0.125 80 / 0.5);
+}
+
+/* ---- page empty state ---- */
+.wf-page-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: 56px 24px;
+  color: var(--text-muted);
+  font-size: var(--fs-small);
+  border: 1px dashed oklch(0.88 0.02 82 / 0.1);
+  border-radius: var(--radius-panel);
+  background: oklch(0 0 0 / 0.06);
+}
+.wf-page-empty i {
+  font-size: 26px;
+  color: oklch(0.82 0.025 75);
+}
+.wf-page-empty .wf-editor-btn {
+  margin-top: var(--space-sm);
+}
+
+/* ---- history static titlebar ---- */
+.wf-history-titlebar {
+  display: flex;
+  align-items: center;
+  padding: var(--space-sm) 0;
+}
+
+/* ============================================================
+   Phase 25 - Replying state: quiet streaming ink
+   The live answer stays on warm paper. Only a faint vermilion
+   wash, a breathing ruled line and a thin brush-nib caret mark
+   it as in progress - no loud rim, no color glow.
+   ============================================================ */
+
+/* live bubble: warm paper + faint vermilion wash */
+.msg-row.assistant:has(.msg-cursor) .msg-bubble {
+  position: relative;
+  border-color: oklch(0.67 0.155 28 / 0.16);
+  background:
+    radial-gradient(120% 100% at 8% -20%, oklch(0.67 0.155 28 / 0.11), transparent 52%),
+    linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  box-shadow:
+    0 1px 0 oklch(1 0 0 / 0.06) inset,
+    0 0 0 1px oklch(0.67 0.155 28 / 0.05),
+    0 8px 24px oklch(0 0 0 / 0.2);
+  min-width: 96px;
+}
+
+/* ruled left line breathes quietly while streaming */
+.msg-row.assistant:has(.msg-cursor) .msg-bubble::before {
+  background: linear-gradient(180deg, var(--accent-gold), var(--accent), transparent);
+  opacity: 0.75;
+  animation: ink-write 2.6s ease-in-out infinite;
+}
+@keyframes ink-write {
+  0%,
+  100% {
+    opacity: 0.32;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+
+/* seal: soft breath, no color glow */
+.msg-row.assistant:has(.msg-cursor) .msg-seal.assistant {
+  animation: seal-breathe 3s ease-in-out infinite;
+}
+@keyframes seal-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 3px 8px oklch(0.45 0.12 26 / 0.32),
+      inset 0 1px 0 oklch(1 0 0 / 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px oklch(0.67 0.155 28 / 0.22),
+      0 4px 12px oklch(0.45 0.12 26 / 0.4),
+      inset 0 1px 0 oklch(1 0 0 / 0.18);
+  }
+}
+
+/* cursor: thin brush-nib caret, no glow */
+.msg-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.15em;
+  margin-left: 3px;
+  border-radius: 1px;
+  background: linear-gradient(180deg, oklch(0.84 0.125 80), oklch(0.67 0.155 28));
+  box-shadow: none;
+  vertical-align: text-bottom;
+  animation: blink-caret 1.1s ease-in-out infinite;
+}
+@keyframes blink-caret {
+  0%,
+  100% {
+    opacity: 0.95;
+  }
+  42%,
+  58% {
+    opacity: 0.2;
+  }
+}
+
+/* agent indicator: quiet paper chip */
+.agent-indicator {
+  background: linear-gradient(180deg, var(--surface-paper-warm), var(--surface-paper));
+  border: 1px solid var(--border-glass);
+  box-shadow:
+    0 1px 0 oklch(1 0 0 / 0.05) inset,
+    0 4px 14px oklch(0 0 0 / 0.16);
+  padding: 4px 14px;
+  border-radius: 999px;
+}
+.agent-indicator-dot {
+  background: var(--accent-gold);
+  box-shadow: 0 0 6px oklch(0.84 0.125 80 / 0.35);
+}
+.agent-indicator-text {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+/* ============================================================
+   Phase 26 - Tool calls + reply as one assistant turn
+   Tool cards and the live answer share the seal column and the
+   ruled ink line, so a working turn reads as one continuous
+   writing process: 研墨 -> 落笔. No separate grey boxes.
+   ============================================================ */
+
+.msg-row.assistant.turn .msg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* tool cards adopt the warm-paper bubble language */
+.msg-row.assistant.turn .tool-inline-group {
+  position: relative;
+  margin-left: 0;
+  width: fit-content;
+  max-width: 92%;
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  border: 1px solid var(--border-glass);
+  border-radius: 4px 14px 14px 14px;
+  box-shadow:
+    0 1px 0 oklch(1 0 0 / 0.06) inset,
+    0 8px 24px oklch(0 0 0 / 0.18);
+  padding: 8px 14px 8px 22px;
+  gap: 4px;
+  overflow: hidden;
+}
+
+/* same ruled ink line as the answer bubble */
+.msg-row.assistant.turn .tool-inline-group::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, oklch(0.84 0.125 80 / 0.5), oklch(0.67 0.155 28 / 0.3), transparent);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.msg-row.assistant.turn .tool-inline-group-header {
+  padding: 4px 0;
+  border-radius: 6px;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+.msg-row.assistant.turn .tool-inline-group-header:hover {
+  background: oklch(0.67 0.155 28 / 0.05);
+}
+.msg-row.assistant.turn .tool-inline-group-header.expanded {
+  border-bottom: 1px solid var(--border-hairline);
+  border-radius: 6px;
+}
+.msg-row.assistant.turn .tool-inline-items {
+  gap: 2px;
+}
+.msg-row.assistant.turn .tool-inline {
+  padding: 4px 8px;
+  min-height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+}
+
+/* running tool: faint vermilion wash + gold spinner, no rim */
+.msg-row.assistant.turn .tool-inline-running {
+  background: linear-gradient(180deg, oklch(0.67 0.155 28 / 0.07), oklch(0.67 0.155 28 / 0.02));
+}
+.msg-row.assistant.turn .tool-inline-running i {
+  color: var(--accent-gold);
+  font-size: 13px;
+}
+
+/* done tool: quiet, inked check */
+.msg-row.assistant.turn .tool-inline-done i {
+  color: oklch(0.55 0.12 150);
+  font-size: 13px;
+}
+.msg-row.assistant.turn .tool-inline-failed {
+  background: oklch(0.55 0.14 16 / 0.05);
+}
+.msg-row.assistant.turn .tool-inline-failed i {
+  color: oklch(0.55 0.14 16);
+  font-size: 13px;
+}
+.msg-row.assistant.turn .tool-inline-meta {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+/* running group header spinner keeps the gold ink accent */
+.msg-row.assistant.turn .tool-group-running-icon {
+  color: var(--accent-gold);
+}
+.msg-row.assistant.turn .tool-group-done-icon {
+  color: oklch(0.55 0.12 150);
+}
+.msg-row.assistant.turn .tool-group-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* the live answer bubble inside a turn keeps quiet ink styling */
+.msg-row.assistant.turn .msg-bubble {
+  width: fit-content;
+  max-width: 92%;
+}
+
+/* thinking state joins the turn: same seal column + ink line */
+.msg-row.assistant.turn.turn-thinking .msg-seal.assistant {
+  animation: seal-breathe 3s ease-in-out infinite;
+}
+.msg-row.assistant.turn .thinking-bubble {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  letter-spacing: 0.05em;
+}
+.msg-row.assistant.turn .thinking-bubble i {
+  color: var(--accent-gold);
+  font-size: 14px;
+}
+
+/* ============================================================
+   Phase 27 - Soften remaining etched input glints
+   Keep the white-paper top edge off small controls so the
+   border and icon stay in the same warm-paper register.
+   ============================================================ */
+.bookmark-search,
+.sd-input,
+.qt-edit-textarea,
+.blog-review-textarea {
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.045),
+    inset 0 0 0 1px oklch(0 0 0 / 0.07);
+}
+
+.bookmark-search.focused,
+.sd-input:focus,
+.qt-edit-textarea:focus,
+.blog-review-textarea:focus {
+  background: var(--bg-input);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.05),
+    0 0 0 3px oklch(0.67 0.155 28 / 0.18);
+}
+
+/* ============================================================
+   Phase 28 - Voice stop control
+   The .btn-icon stop control had no local skin, so the native
+   button chrome leaked through as a bright 2px outset border.
+   Give it the same quiet glass circle as the mic button.
+   ============================================================ */
+.voice-input .btn-icon,
+.btn-icon {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border: 1px solid color-mix(in oklch, var(--danger) 24%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--danger) 9%, var(--bg-glass));
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition:
+    color var(--duration-fast) var(--ease-glass),
+    background var(--duration-fast) var(--ease-glass),
+    border-color var(--duration-fast) var(--ease-glass),
+    opacity var(--duration-fast) var(--ease-glass);
+}
+
+.voice-input .btn-icon:hover:not(:disabled),
+.btn-icon:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--danger) 15%, var(--bg-glass-hover));
+  border-color: color-mix(in oklch, var(--danger) 34%, transparent);
+  color: var(--text-primary);
+}
+
+.voice-input .btn-icon:active:not(:disabled),
+.btn-icon:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.voice-input .btn-icon:focus-visible,
+.btn-icon:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px oklch(0.68 0.18 28 / 0.18);
+}
+
+.voice-input .btn-icon:disabled,
+.btn-icon:disabled {
+  cursor: not-allowed;
+  border-color: var(--border-glass);
+  background: var(--bg-glass);
+  color: var(--text-muted);
+  opacity: 0.42;
+}
+
+/* ============================================================
+   Phase 29 - Right rail: quieter tool cards + bookmark empty seal
+   Keep the small utility cards in the same register as the
+   paper bubble: barely-there rim, a soft top light, no hot edge.
+   ============================================================ */
+.rp-tool-btn {
+  border-color: var(--border-hairline);
+  box-shadow:
+    0 1px 0 oklch(1 0 0 / 0.05) inset,
+    0 8px 20px oklch(0 0 0 / 0.14);
+}
+
+.rp-tool-btn::after {
+  background: linear-gradient(180deg, oklch(1 0 0 / 0.05), transparent 42%);
+}
+
+.rp-tool-btn:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--accent-gold) 38%, transparent);
+  box-shadow:
+    0 5px 14px oklch(0 0 0 / 0.26),
+    inset 0 0 0 1px color-mix(in oklch, var(--accent-gold) 20%, transparent);
+}
+
+.rp-tool-btn.active {
+  border-color: color-mix(in oklch, var(--accent) 42%, transparent);
+  box-shadow:
+    0 5px 14px oklch(0 0 0 / 0.28),
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 18%, transparent);
+}
+
+/* Bookmark empty state: centered seal, not a floating left text */
+.bookmark-empty {
+  flex: 1;
+  min-height: 200px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 12px;
+  border-top: 0;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.bookmark-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  position: relative;
+  border: 1px solid var(--border-glass-hover);
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--surface-paper), var(--surface-paper-soft));
+  box-shadow: var(--shadow-paper);
+  color: var(--accent);
+  font-size: 20px;
+  opacity: 1;
+}
+
+.bookmark-empty-icon::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border: 1px dashed oklch(0.84 0.125 80 / 0.4);
+  border-radius: 50%;
+  animation: seal-orbit 26s linear infinite;
+}
+
+.bookmark-empty > span {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ============================================================
+   Phase 30 - Normalize compact chrome buttons
+   Explicitly drop native button appearance on the small rail
+   controls so Windows never injects a bright outset border.
+   ============================================================ */
+.right-panel-tab,
+.right-panel-close,
+.rp-tool-btn,
+.rp-tasks-header,
+.bookmark-panel-refresh,
+.bookmark-search-clear,
+.bookmark-action-btn {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* ============================================================
+   Phase 31 - Hover sheen: keep paper cards warm, not flashlight-bright
+   The old hover overlay used a 50% white sweep; too much against
+   the warm charcoal base. Replace it with a faint vermilion wash
+   and a very soft top edge.
+   ============================================================ */
+.bookmark-item::before,
+.rp-mem-card::before {
+  background:
+    linear-gradient(120deg, oklch(1 0 0 / 0.12), transparent 42%),
+    linear-gradient(90deg, color-mix(in oklch, var(--accent) 14%, transparent), transparent 74%);
+}
+
+.bookmark-item:hover::before,
+.rp-mem-card:hover::before {
+  opacity: 0.6;
+}
+
+/* ============================================================
+   Phase 32 - Focus and recording rims: visible, not glaring
+   Keep the vermilion attention states but move them from neon
+   edge to warm halo.
+   ============================================================ */
+.inputbar-row:focus-within {
+  border-color: oklch(0.67 0.155 28 / 0.38);
+  box-shadow:
+    var(--shadow-paper),
+    inset 0 1px 0 oklch(1 0 0 / 0.04),
+    0 0 0 3px oklch(0.67 0.155 28 / 0.13),
+    0 0 24px oklch(0.67 0.155 28 / 0.09);
+}
+
+.blog-editor-rec-btn.recording {
+  border-color: color-mix(in oklch, var(--accent-red) 42%, transparent);
+  box-shadow: 0 0 16px oklch(0.55 0.16 24 / 0.28);
+}
+
+/* ============================================================
+   Phase 33 - Primary actions: warm vermilion, not hot chrome
+   Reduce the white top-edge on send/trigger controls while keeping
+   the action clearly lit.
+   ============================================================ */
+.inputbar-send,
+.inputbar-stop {
+  border-color: color-mix(in oklch, var(--accent) 38%, transparent);
+  box-shadow:
+    0 4px 14px oklch(0.45 0.12 26 / 0.28),
+    inset 0 1px 0 oklch(1 0 0 / 0.08);
+}
+
+.inputbar-send:hover:not(:disabled),
+.inputbar-stop:hover {
+  box-shadow:
+    0 6px 18px oklch(0.45 0.12 26 / 0.34),
+    inset 0 1px 0 oklch(1 0 0 / 0.12);
+}
+
+.rp-evo-trigger {
+  border-color: color-mix(in oklch, var(--accent) 38%, transparent);
+  box-shadow: 0 4px 14px oklch(0.45 0.12 26 / 0.2);
+}
+
+.rp-evo-trigger:hover {
+  box-shadow: 0 6px 18px oklch(0.45 0.12 26 / 0.28);
+}
+
+/* ============================================================
+   Phase 34 - Seals and empty-primary: muted rim, soft top light
+   Small vermilion seals should not glow like buttons. Pull the
+   white top-edge and border back into the warm-paper register.
+   ============================================================ */
+.wf-canvas-empty-btn-primary {
+  box-shadow:
+    0 10px 26px -10px color-mix(in oklch, var(--accent) 60%, transparent),
+    inset 0 1px 0 oklch(1 0 0 / 0.12);
+}
+
+.rp-evo-badge {
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.12),
+    0 2px 6px oklch(0 0 0 / 0.22);
+}
+
+.msg-seal.assistant {
+  border-color: color-mix(in oklch, var(--accent) 38%, transparent);
+  box-shadow:
+    0 3px 8px oklch(0.45 0.12 26 / 0.28),
+    inset 0 1px 0 oklch(1 0 0 / 0.1);
+}
+
+@keyframes seal-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 3px 8px oklch(0.45 0.12 26 / 0.24),
+      inset 0 1px 0 oklch(1 0 0 / 0.1);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px oklch(0.67 0.155 28 / 0.16),
+      0 4px 12px oklch(0.45 0.12 26 / 0.3),
+      inset 0 1px 0 oklch(1 0 0 / 0.1);
+  }
+}
+
+/* ============================================================
+   Phase 35 - Workflow editor controls: quieter primary rims
+   The add/save/run actions and active handler tile were still using
+   fully saturated borders. Drop them to warm mixed rims so the
+   icon and fill lead the hierarchy instead of the edge.
+   ============================================================ */
+.wf-editor-btn-add {
+  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
+  box-shadow: 0 4px 14px oklch(0.45 0.12 26 / 0.2);
+}
+
+.wf-editor-btn-save {
+  border-color: color-mix(in oklch, var(--accent) 32%, transparent);
+}
+
+.wf-editor-btn-run {
+  border-color: color-mix(in oklch, var(--success) 32%, transparent);
+}
+
+.wf-editor-handler-opt.active {
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  box-shadow:
+    0 6px 18px -8px color-mix(in oklch, var(--accent) 38%, transparent),
+    inset 0 1px 0 oklch(1 0 0 / 0.06);
+}
+
+.wf-editor-handler-opt.active i {
+  filter: drop-shadow(0 0 6px color-mix(in oklch, var(--accent) 38%, transparent));
+}
+
+/* ============================================================
+   Phase 36 - Workflow chrome normalization
+   Drop native button chrome on workflow tabs/actions to avoid the
+   bright Windows outset edge.
+   ============================================================ */
+.wf-page-tab,
+.wf-editor-btn,
+.wf-canvas-action,
+.wf-canvas-card-actions button {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* ============================================================
+   Phase 37 - Small-panel quiet hierarchy
+   Tool / preview / dev-plan / quick-task / dock surfaces stay
+   in the warm paper register: soft rims, no flashlight top edge,
+   and compact controls that breathe instead of stretching.
+   ============================================================ */
+.qt-btn,
+.qt-btn-refresh,
+.sd-tab,
+.sd-close,
+.sd-tool-btn,
+.sd-tasks-header,
+.sd-lock-btn,
+.sd-collapsed-btn {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* --- Shared empty plates: sealed, centered, quiet --- */
+.tool-slot:has(.tool-empty-icon),
+.preview-slot .preview-empty,
+.devplan-slot .devplan-empty {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: min(100%, 560px);
+  min-height: 300px;
+  margin: 8vh auto 0;
+  padding: 34px 32px;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-panel);
+  background:
+    radial-gradient(120% 82% at 50% 0%, color-mix(in oklch, var(--surface-paper) 92%, transparent), transparent 58%),
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--surface-paper) 82%, transparent),
+      color-mix(in oklch, var(--surface-paper-soft) 72%, transparent)
+    );
+  box-shadow:
+    var(--shadow-paper),
+    inset 0 1px 0 oklch(1 0 0 / 0.05);
+}
+
+.tool-slot:has(.tool-empty-icon)::before,
+.preview-slot .preview-empty::before,
+.devplan-slot .devplan-empty::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, oklch(0.16 0.012 92 / 0.03) 1px, transparent 1px),
+    radial-gradient(circle at 18% 8%, oklch(1 0 0 / 0.14), transparent 30%);
+  background-size:
+    28px 100%,
+    100% 100%;
+  opacity: 0.45;
+}
+
+.tool-slot:has(.tool-empty-icon) {
+  flex: none;
+  align-self: center;
+  height: clamp(240px, 36vh, 320px);
+}
+
+.tool-slot .tool-empty-icon,
+.preview-empty-icon,
+.devplan-empty-icon {
+  box-shadow:
+    0 14px 28px -18px color-mix(in oklch, var(--accent) 62%, transparent),
+    inset 0 1px 0 oklch(1 0 0 / 0.07);
+}
+
+/* --- Tool trace cards --- */
+.tool-slot-content .tool-item {
+  min-height: 52px;
+  padding: 10px 12px;
+  border-color: var(--border-hairline);
+  border-radius: 12px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--surface-paper) 86%, transparent),
+    color-mix(in oklch, var(--surface-paper-soft) 78%, transparent)
+  );
+  box-shadow:
+    var(--shadow-paper),
+    inset 0 1px 0 oklch(1 0 0 / 0.05);
+}
+
+.tool-slot-content .tool-item:hover {
+  border-color: var(--border-glass-hover);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--surface-paper) 92%, transparent),
+    color-mix(in oklch, var(--surface-paper-soft) 84%, transparent)
+  );
+}
+
+.tool-slot-content .tool-item::after {
+  background:
+    linear-gradient(90deg, oklch(0.16 0.012 92 / 0.022) 1px, transparent 1px), linear-gradient(120deg, oklch(1 0 0 / 0.08), transparent 46%);
+  background-size:
+    32px 100%,
+    100% 100%;
+  opacity: 0.35;
+}
+
+.tool-slot-content .tool-item-running::after {
+  opacity: 0.52;
+}
+
+.tool-slot-content .tool-item-icon {
+  width: 28px;
+  height: 28px;
+  margin-top: 0;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface-paper) 76%, transparent);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05);
+}
+
+.tool-slot-heading {
+  position: relative;
+  margin-bottom: 10px;
+  padding-left: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tool-slot-heading::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 14px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-gold));
+  opacity: 0.65;
+}
+
+.tool-count-badge {
+  padding: 2px 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface-paper-soft));
+  color: var(--text-secondary);
+  line-height: 1.2;
+}
+
+.tool-args-toggle {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface-paper) 60%, transparent);
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+.tool-args-toggle:hover {
+  border-color: color-mix(in oklch, var(--accent) 38%, transparent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  color: var(--accent-ink);
+}
+
+.tool-cancel-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.tool-cancel-btn:hover {
+  border-color: color-mix(in oklch, var(--danger) 28%, transparent);
+  background: color-mix(in oklch, var(--danger) 12%, transparent);
+  color: var(--accent-red);
+}
+
+/* --- Quick task recommendation panel --- */
+.qt-panel {
+  gap: 6px;
+}
+
+.qt-panel-header {
+  padding: 9px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--surface-paper) 86%, transparent),
+    color-mix(in oklch, var(--surface-paper-soft) 78%, transparent)
+  );
+  box-shadow: var(--shadow-paper);
+}
+
+.qt-panel-header:hover {
+  border-color: var(--border-glass-hover);
+}
+
+.qt-panel-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.qt-unread-dot {
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.qt-panel-count {
+  border: 1px solid var(--border-hairline);
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface-paper-soft));
+  color: var(--text-secondary);
+}
+
+.qt-btn-refresh {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+
+.qt-btn-refresh:hover:not(:disabled) {
+  border-color: var(--border-hairline);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  color: var(--accent-ink);
+}
+
+.qt-panel-body {
+  gap: 8px;
+}
+
+.qt-empty {
+  min-height: 110px;
+  justify-content: center;
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--surface-paper-soft) 62%, transparent);
+}
+
+.qt-empty p {
+  color: var(--text-secondary);
+}
+
+.qt-card {
+  border-color: var(--border-hairline);
+  border-radius: 12px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--surface-paper) 88%, transparent),
+    color-mix(in oklch, var(--surface-paper-soft) 80%, transparent)
+  );
+  box-shadow: var(--shadow-paper);
+}
+
+.qt-card:hover {
+  border-color: var(--border-glass-hover);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--surface-paper) 94%, transparent),
+    color-mix(in oklch, var(--surface-paper-soft) 86%, transparent)
+  );
+}
+
+.qt-level-auto {
+  border-left-color: transparent;
+  box-shadow:
+    inset 3px 0 0 color-mix(in oklch, var(--accent) 42%, transparent),
+    var(--shadow-paper);
+}
+
+.qt-level-suggested {
+  border-left-color: transparent;
+  box-shadow:
+    inset 3px 0 0 color-mix(in oklch, var(--accent-steel) 32%, transparent),
+    var(--shadow-paper);
+}
+
+.qt-level-suppressed {
+  opacity: 0.58;
+}
+
+.qt-card-header {
+  padding: 10px 12px;
+}
+
+.qt-card-title {
+  font-weight: 600;
+}
+
+.qt-card-badge {
+  border: 1px solid var(--border-hairline);
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface-paper-soft));
+  color: var(--accent-ink);
+}
+
+.qt-card-steps {
+  padding: 8px 12px 10px;
+  border-top-color: var(--border-hairline);
+  gap: 5px;
+}
+
+.qt-step-index {
+  border: 1px solid var(--border-hairline);
+  background: color-mix(in oklch, var(--surface-paper-soft) 80%, transparent);
+}
+
+.qt-step-tool {
+  border: 1px solid var(--border-hairline);
+  background: color-mix(in oklch, var(--surface-paper) 60%, transparent);
+}
+
+.qt-card-actions {
+  padding: 8px 12px;
+  border-top-color: var(--border-hairline);
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.qt-btn {
+  border-color: var(--border-hairline);
+  border-radius: 8px;
+  padding: 5px 10px;
+  background: color-mix(in oklch, var(--surface-paper) 62%, transparent);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.04);
+}
+
+.qt-btn:hover {
+  border-color: var(--border-glass-hover);
+  background: color-mix(in oklch, var(--surface-paper) 78%, transparent);
+}
+
+.qt-btn-execute {
+  border-color: color-mix(in oklch, var(--success) 32%, transparent);
+  background: color-mix(in oklch, var(--success) 8%, var(--surface-paper-soft));
+  color: var(--accent-green);
+}
+
+.qt-btn-execute:hover {
+  border-color: color-mix(in oklch, var(--success) 42%, transparent);
+  background: color-mix(in oklch, var(--success) 13%, var(--surface-paper));
+}
+
+.qt-btn-edit {
+  border-color: color-mix(in oklch, var(--accent-steel) 30%, transparent);
+  background: color-mix(in oklch, var(--accent-steel) 7%, var(--surface-paper-soft));
+  color: var(--accent-steel);
+}
+
+.qt-btn-edit:hover {
+  border-color: color-mix(in oklch, var(--accent-steel) 42%, transparent);
+  background: color-mix(in oklch, var(--accent-steel) 12%, var(--surface-paper));
+}
+
+.qt-btn-dismiss:hover {
+  border-color: color-mix(in oklch, var(--danger) 28%, transparent);
+  background: color-mix(in oklch, var(--danger) 9%, transparent);
+  color: var(--accent-red);
+}
+
+.qt-feedback {
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--surface-paper-soft) 68%, transparent);
+}
+
+/* --- Quick task edit modal --- */
+.qt-edit-overlay {
+  background: oklch(0.06 0.01 55 / 0.52);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.qt-edit-modal {
+  width: 460px;
+  padding: 22px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--surface-modal), color-mix(in oklch, var(--surface-paper) 78%, transparent));
+  box-shadow:
+    var(--shadow-float),
+    inset 0 1px 0 oklch(1 0 0 / 0.05);
+}
+
+.qt-edit-modal h4 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.qt-edit-desc code {
+  border: 1px solid var(--border-hairline);
+  background: color-mix(in oklch, var(--surface-paper) 70%, transparent);
+}
+
+.qt-edit-textarea {
+  border-color: var(--border-hairline);
+  border-radius: 10px;
+  background: var(--input-etched);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.04),
+    inset 0 0 0 1px oklch(0 0 0 / 0.05);
+}
+
+.qt-edit-textarea:focus {
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  box-shadow: var(--control-ring);
+}
+
+.qt-edit-actions {
+  flex-wrap: wrap;
+}
+
+/* --- System dock mini-cards --- */
+.sd-card {
+  border-color: var(--border-hairline);
+  background: var(--surface-modal);
+  box-shadow: var(--shadow-float);
+}
+
+.sd-header {
+  border-bottom-color: var(--border-hairline);
+}
+
+.sd-tab {
+  border-radius: 8px;
+}
+
+.sd-tab.active,
+.sd-tool-btn.active {
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface-paper-soft));
+  color: var(--accent-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+.sd-tool-btn:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--surface-paper) 74%, transparent);
+}
+
+.sd-empty {
+  border: 1px dashed var(--border-hairline);
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--surface-paper-soft) 65%, transparent);
+}
+
+.sd-input:focus {
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  box-shadow: var(--control-ring);
+}
+
+.sd-collapsed-btn {
+  border-color: var(--border-hairline);
+  background: var(--surface-modal);
+  box-shadow: var(--shadow-paper);
+}
+
+/* --- Development plan active card --- */
+.devplan-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.devplan-header i {
+  color: var(--accent);
+}
+
+.devplan-card {
+  padding: 16px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--surface-paper) 90%, transparent),
+    color-mix(in oklch, var(--surface-paper-soft) 82%, transparent)
+  );
+  box-shadow: var(--shadow-paper);
+}
+
+.devplan-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.devplan-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.devplan-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface-paper-soft) 76%, transparent);
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.devplan-status--in_progress,
+.devplan-status--running {
+  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  background: color-mix(in oklch, var(--accent) 11%, transparent);
+  color: var(--accent-ink);
+}
+
+.devplan-status--done,
+.devplan-status--completed {
+  border-color: color-mix(in oklch, var(--success) 30%, transparent);
+  background: color-mix(in oklch, var(--success) 10%, transparent);
+  color: var(--accent-green);
+}
+
+.devplan-status--failed {
+  border-color: color-mix(in oklch, var(--danger) 30%, transparent);
+  background: color-mix(in oklch, var(--danger) 10%, transparent);
+  color: var(--accent-red);
+}
+
+.devplan-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.devplan-progress-bar {
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-glass-strong);
+}
+
+.devplan-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-gold));
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.devplan-progress-text {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.devplan-steps {
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--surface-paper-soft) 68%, transparent);
+}
+
+.devplan-steps-header {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-hairline);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.devplan-step {
+  display: flex;
+  gap: 10px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.devplan-step:last-child {
+  border-bottom: 0;
+}
+
+.devplan-step-icon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface-paper) 68%, transparent);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.devplan-step--done .devplan-step-icon {
+  border-color: color-mix(in oklch, var(--success) 30%, transparent);
+  background: color-mix(in oklch, var(--success) 12%, transparent);
+  color: var(--accent-green);
+}
+
+.devplan-step--running .devplan-step-icon {
+  border-color: color-mix(in oklch, var(--accent) 32%, transparent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  color: var(--accent-ink);
+}
+
+.devplan-step--failed .devplan-step-icon {
+  border-color: color-mix(in oklch, var(--danger) 30%, transparent);
+  background: color-mix(in oklch, var(--danger) 12%, transparent);
+  color: var(--accent-red);
+}
+
+.devplan-step-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.devplan-step-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.devplan-step-num {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.devplan-step-result {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.devplan-step-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in oklch, var(--accent) 24%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: devplan-spin 0.8s linear infinite;
+}
+
+@keyframes devplan-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@akemi-mio/intelligence-observer",
+  "version": "0.1.0",
+  "description": "Observer system: trend engine, fermentation, deep research, multi-brain model",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@akemi-mio/core": "workspace:*"
+  },
+  "devDependencies": {}
+}

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Pre-push hook: run tests + build before pushing
+
+echo "=== Pre-push: running vitest ==="
+npx vitest run || { echo "FAILED: tests"; exit 1; }
+
+echo "=== Pre-push: running build ==="
+npx electron-vite build || { echo "FAILED: build"; exit 1; }
+
+echo "=== Pre-push: all checks passed ==="

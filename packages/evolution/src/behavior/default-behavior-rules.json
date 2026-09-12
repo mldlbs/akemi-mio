@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "description": "Akemi Mio 行为驱动自适应默认规则表",
+  "updatedAt": 1733702400000,
+  "rules": [
+    {
+      "id": "detail_level_by_length_and_frequency",
+      "description": "平均消息长度>50字且交互>10次→回复详细度设为'高'",
+      "category": "reply_detail",
+      "conditions": {
+        "all": [
+          { "field": "avgMessageLength", "op": "gt", "value": 50 },
+          { "field": "totalInteractions", "op": "gt", "value": 10 }
+        ]
+      },
+      "actions": [{ "type": "set_detail_level", "value": "high", "priority": 80 }],
+      "metadata": {
+        "optimizable": true,
+        "rl_weight": 1.0,
+        "expected_impact": "减少冗余解释，提升回复效率"
+      }
+    },
+    {
+      "id": "detail_level_concise_by_short_msgs",
+      "description": "平均消息长度<20字且交互>5次→回复详细度设为'低'",
+      "category": "reply_detail",
+      "conditions": {
+        "all": [
+          { "field": "avgMessageLength", "op": "lt", "value": 20 },
+          { "field": "totalInteractions", "op": "gt", "value": 5 }
+        ]
+      },
+      "actions": [{ "type": "set_detail_level", "value": "low", "priority": 70 }],
+      "metadata": {
+        "optimizable": true,
+        "rl_weight": 0.9,
+        "expected_impact": "用户习惯短消息，Agent回复应同样简洁"
+      }
+    },
+    {
+      "id": "auto_tool_by_usage_rate",
+      "description": "工具使用率>30%→启用自动工具触发模式",
+      "category": "tool_behavior",
+      "conditions": {
+        "all": [{ "field": "toolUsageRatio", "op": "gt", "value": 0.3 }]
+      },
+      "actions": [{ "type": "enable_auto_tool_trigger", "value": true, "priority": 90 }],
+      "metadata": {
+        "optimizable": true,
+        "rl_weight": 1.2,
+        "expected_impact": "减少用户手动指定工具，Agent主动调用的效率提升"
+      }
+    },
+    {
+      "id": "favorite_tool_auto_invoke",
+      "description": "top1工具使用率超过50%（在所有工具调用中）→回复时自动建议该工具",
+      "category": "tool_behavior",
+      "conditions": {
+        "all": [
+          { "field": "toolUsageRatio", "op": "gt", "value": 0.1 },
+          { "field": "totalInteractions", "op": "gt", "value": 5 }
+        ],
+        "custom": "topToolDominance"
+      },
+      "actions": [{ "type": "suggest_top_tool", "value": true, "priority": 60 }],
+      "metadata": {
+        "optimizable": true,
+        "rl_weight": 0.8,
+        "expected_impact": "用户最常用工具自动建议，减少重复指令"
+      }
+    },
+    {
+      "id": "topic_focused_reply",
+      "description": "活跃话题>2个且置信度>0.5→回复中自动引用活跃话题上下文",
+      "category": "reply_content",
+      "conditions": {
+        "all": [
+          { "field": "activeTopicsCount", "op": "gt", "value": 2 },
+          { "field": "sceneConfidence", "op": "gt", "value": 0.5 }
+        ]
+      },
+      "actions": [{ "type": "enable_topic_context", "value": true, "priority": 50 }],
+      "metadata": {
+        "optimizable": true,
+        "rl_weight": 0.7,
+        "expected_impact": "回复更贴合用户当前关注的话题方向"
+      }
+    },
+    {
+      "id": "high_tool_success_prefer_tools",
+      "description": "工具成功率>0.9且工具使用率>0.2→回复中优先使用工具而非直接回答",
+      "category": "tool_behavior",
+      "conditions": {
+        "all": [
+          { "field": "toolSuccessRate", "op": "gt", "value": 0.9 },
+          { "field": "toolUsageRatio", "op": "gt", "value": 0.2 }
+        ]
+      },
+      "actions": [{ "type": "prefer_tool_over_direct", "value": true, "priority": 70 }],
+      "metadata": {
+        "optimizable": true,
+        "rl_weight": 0.9,
+        "expected_impact": "工具调用可靠时，Agent更倾向于用工具获取信息而非直接回答"
+      }
+    },
+    {
+      "id": "cold_start_default",
+      "description": "冷启动默认策略：交互<3次时保守模式",
+      "category": "cold_start",
+      "conditions": {
+        "all": [{ "field": "hasSufficientData", "op": "eq", "value": false }]
+      },
+      "actions": [
+        { "type": "set_detail_level", "value": "normal", "priority": 100 },
+        { "type": "enable_auto_tool_trigger", "value": false, "priority": 100 }
+      ],
+      "metadata": {
+        "optimizable": false,
+        "expected_impact": "冷启动时采用默认行为，不预判用户偏好"
+      }
+    },
+    {
+      "id": "scene_based_response_mode",
+      "description": "根据场景分析结果自动切换回复模式（覆盖默认场景映射）",
+      "category": "response_mode",
+      "conditions": {
+        "all": [
+          { "field": "sceneConfidence", "op": "gt", "value": 0.5 },
+          {
+            "field": "scene",
+            "op": "in",
+            "value": ["code_debugging", "quick_qa", "deep_discussion", "creative_writing", "system_evolution", "task_execution"]
+          }
+        ]
+      },
+      "actions": [{ "type": "apply_scene_mode", "value": true, "priority": 85 }],
+      "metadata": {
+        "optimizable": true,
+        "rl_weight": 0.8,
+        "expected_impact": "场景分析结果直接映射到回复风格"
+      }
+    },
+    {
+      "id": "repeated_pattern_stall",
+      "description": "检测到重复模式且总交互>8次→缩短回复周期避免陷入循环",
+      "category": "conversation_flow",
+      "conditions": {
+        "all": [{ "field": "totalInteractions", "op": "gt", "value": 8 }],
+        "custom": "repeatedPatternDetected"
+      },
+      "actions": [{ "type": "shorten_reply_cycle", "value": true, "priority": 60 }],
+      "metadata": {
+        "optimizable": true,
+        "rl_weight": 0.6,
+        "expected_impact": "避免重复提问场景下的无效循环"
+      }
+    }
+  ]
+}

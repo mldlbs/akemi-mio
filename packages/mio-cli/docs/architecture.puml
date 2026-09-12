@@ -1,0 +1,156 @@
+@startuml
+!theme plain
+title mio-agent-runtime — MCP Server 架构图
+
+skinparam backgroundColor #FEFEFE
+skinparam component { BorderColor #2E4053 BackgroundColor #D6EAF8 FontSize 12 }
+skinparam database { BorderColor #1A5276 BackgroundColor #D4E6F1 FontSize 11 }
+skinparam package { BorderColor #117A65 BackgroundColor #D5F5E3 }
+skinparam card { BorderColor #B03A2E BackgroundColor #FADBD8 }
+
+rectangle "<color:white><size:18>mio-agent-runtime</size></color>\nMCP Server (stdio)" as TITLE #1A5276
+
+' ════════════════════════════════════
+' 入口层
+' ════════════════════════════════════
+package "入口 (Entry Points)" as ENTRY #E8DAEF {
+  [bin/mio.js] as CLI
+  [adapters/codex.js] as ADAPTER_CODEX
+  [adapters/opencode.js] as ADAPTER_OPENCODE
+  [adapters/workbuddy.js] as ADAPTER_WB
+  [adapters/hermes.js] as ADAPTER_HERMES
+
+  CLI --> ADAPTER_CODEX
+  CLI --> ADAPTER_OPENCODE
+  CLI --> ADAPTER_WB
+  CLI --> ADAPTER_HERMES
+}
+
+' ════════════════════════════════════
+' MCP Server 核心
+' ════════════════════════════════════
+package "MCP Server (server/mio-intelligence-mcp/)" as MCP #D5F5E3 {
+  card "工具路由 (callTool)" as ROUTER {
+    [switch(name)] as SWITCH
+  }
+
+  card "Memory 模块 (10 Tools)" as MEM_TOOLS {
+    [queryMemory] as Q_MEM
+    [recordMemory] as R_MEM
+    [archiveMemory] as A_MEM
+    [migrateMemory] as M_MEM
+    [analyzeMemory] as ANA_MEM
+    [experienceList] as EXP_L
+    [experienceConfirm] as EXP_C
+    [experienceReuse] as EXP_R
+    [policyCheck] as POL
+  }
+
+  card "Observer 模块 (12 Tools)" as OBS_TOOLS {
+    [observerWorldModel] as OBS_WM
+    [observerTrends] as OBS_TR
+    [observerResearch] as OBS_RSR
+    [observerInsights] as OBS_INS
+    [observerStatus] as OBS_STS
+    [observerCollect] as OBS_COL
+    [observerFerment] as OBS_FERM
+    [observerEssays] as OBS_ESS
+    [observerDag] as OBS_DAG
+    [observerIngest] as OBS_ING
+    [observerSubscribe] as OBS_SUB
+    [observerDigest] as OBS_DG
+  }
+
+  card "Insight 模块 (4 Tools)" as INS_TOOLS {
+    [insightStatus] as INS_STS
+    [insightList] as INS_L
+    [insightMarkReported] as INS_MR
+    [insightGenerate] as INS_GEN
+  }
+
+  card "Creativity 模块 (4 Tools)" as CR_TOOLS {
+    [creativityGenerate] as CR_GEN
+    [creativityFerment] as CR_FERM
+    [creativityList] as CR_L
+    [creativityStatus] as CR_STS
+  }
+
+  card "Idea & Evolution (7 Tools)" as EVO_TOOLS {
+    [ideaGenerate] as IDEA_G
+    [ideaList] as IDEA_L
+    [evolutionSuggest] as EVO_SUG
+    [evolutionReport] as EVO_RPT
+    [evolutionStrategies] as EVO_STR
+    [phase0Report] as P0
+  }
+
+  SWITCH --> MEM_TOOLS
+  SWITCH --> OBS_TOOLS
+  SWITCH --> INS_TOOLS
+  SWITCH --> CR_TOOLS
+  SWITCH --> EVO_TOOLS
+}
+
+' ════════════════════════════════════
+' 引擎层
+' ════════════════════════════════════
+package "引擎 (Engines)" as ENGINES #FADBD8 {
+  [creativity-engine.js] as CR_ENGINE
+  [insight-store (JSON)] as INS_STORE
+  [runtime-modules.js] as RT_MOD
+  [evolution-cutover.js] as EVO_CUT
+  [host-capabilities.js] as HOST_CAP
+}
+
+' ════════════════════════════════════
+' 外部包依赖
+' ════════════════════════════════════
+package "@akemi-mio/* 包" as PACKAGES #D4E6F1 {
+  [@akemi-mio/core] as PKG_CORE
+  [@akemi-mio/creativity] as PKG_CR
+  [@akemi-mio/observer] as PKG_OBS
+  [@akemi-mio/insight] as PKG_INS
+  [@akemi-mio/experience-memory] as PKG_EXP
+  [@akemi-mio/evolution-*] as PKG_EVO
+}
+
+' ════════════════════════════════════
+' 数据层
+' ════════════════════════════════════
+database "MIO_HOME (~/.mio-intelligence)" as DATA {
+  [memory.jsonl] as D_MEM
+  [traces.jsonl] as D_TRACES
+  [insights/] as D_INS
+  [creativity/] as D_CR
+  [observer/] as D_OBS
+}
+
+' ════════════════════════════════════
+' 连接
+' ════════════════════════════════════
+ADAPTER_CODEX --> MCP : 启动
+ADAPTER_OPENCODE --> MCP : 启动
+ADAPTER_WB --> MCP : 启动
+ADAPTER_HERMES --> MCP : 启动
+
+CR_TOOLS --> CR_ENGINE
+INS_TOOLS --> INS_STORE
+MEM_TOOLS --> RT_MOD
+OBS_TOOLS --> PKG_OBS
+INS_TOOLS --> PKG_INS
+
+CR_ENGINE --> D_CR
+INS_STORE --> D_INS
+RT_MOD --> D_MEM
+RT_MOD --> D_TRACES
+
+PKG_OBS --> D_OBS
+
+legend right
+  <size:10><b>mio-agent-runtime v0.5.17</b></size>
+  <size:10>41 MCP Tools</size>
+  <size:10>5 Domains</size>
+  <size:10>13 @akemi-mio/* packages</size>
+endlegend
+
+@enduml

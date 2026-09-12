@@ -1,0 +1,32 @@
+{
+  "caseId": "C07",
+  "caseRef": {
+    "text": "画一个架构图来描述这个系统",
+    "expectations": [
+      "规划结构",
+      "列出组件",
+      "描述关系",
+      "说明分层"
+    ]
+  },
+  "level1": {
+    "schemaVersion": "0.1",
+    "directive": {
+      "pattern": "none",
+      "goals": [],
+      "constraints": [],
+      "outputStyle": "default"
+    }
+  },
+  "level2": null,
+  "changelog": [
+    {
+      "date": "2026-07-15T01:21:23.771Z",
+      "reason": "v0.1 initial golden capture from Benchmark v0.1",
+      "author": "golden-dataset-generator",
+      "level": "l1"
+    }
+  ],
+  "createdAt": "2026-07-15T01:21:23.771Z",
+  "updatedAt": "2026-07-15T01:21:23.771Z"
+}

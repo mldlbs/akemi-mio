@@ -1,0 +1,354 @@
+/**
+ * 自动化管道 — 核心类型
+ *
+ * 整个管道的契约定义。
+ * 所有 Collector 实现该接口，ProblemQueue 消费 ProduceProblem，
+ * Executor 消费 AssignedProblem。
+ */
+
+// ── 问题来源类型 ──
+export type ProblemSource =
+  | 'tsc'
+  | 'test'
+  | 'lint'
+  | 'log'
+  | 'git'
+  | 'runtime'
+  | 'feature'
+  | 'behavior'
+  | 'tool'
+  | 'tts'
+  | 'file_organizer'
+  | 'cicd'
+  | 'memory'
+  | 'agent'
+  | 'blog'
+  | 'evidence'
+  | 'parameter'
+  | 'synthetic'
+  | 'writing'
+  | 'chapter'
+
+// ── 问题严重度 ──
+export type Severity = 'error' | 'warning' | 'info'
+
+// ── Evidence 问题类型 ──
+export type EvidenceProblemType = 'critical_regression' | 'capability_regression' | 'performance' | 'info'
+
+// ── 一个被检测到的具体问题 ──
+export interface Problem {
+  id: string
+  source: ProblemSource
+  severity: Severity
+  title: string
+  description: string
+  file?: string
+  line?: number
+  /** 预估修复成本（字符数），用于排期 */
+  estimatedCostChars: number
+  /** 该问题最近一次出现时间戳 */
+  lastSeen: number
+  /** 出现次数（去重后的累计） */
+  occurrenceCount: number
+  /** 问题快照（足够让 Claude Code 理解和修复的上下文） */
+  context: {
+    /** 原始错误文本 */
+    raw: string
+    /** 文件内容片段（相关行） */
+    snippet?: string
+    /** 额外元数据 */
+    metadata?: Record<string, string>
+  }
+  /** Evidence 专有：关联的 RegressionReport ID */
+  evidenceRef?: string
+  /** Evidence 专有：退化类型分类 */
+  evidenceType?: EvidenceProblemType
+  /** Evidence 专有：置信度 [0, 1] */
+  confidence?: number
+  /** Evidence 专有：受影响的 ThinkingPattern */
+  affectedCapability?: string
+}
+
+/**
+ * Collector 执行事件 — 用于管道可观测性。
+ * 记录每个 Collector 在单次 tick 中的执行决策和结果。
+ * 不记录 "collector failed" 等结果导向信息，只记录决策和计数。
+ */
+export interface CollectorExecutionEvent {
+  /** 采集器名称 */
+  collectorName: string
+  /** 管道 tick 标识（runOnce 调用标记） */
+  tickId: string
+  /** Collector 是否决定运行 */
+  shouldRun: boolean
+  /** 当 shouldRun=false 时的跳过原因（如 cooldown, no_signal, insufficient_data） */
+  skipReason?: string
+  /** collect() 返回的问题数量（仅在 shouldRun=true 时有意义） */
+  collectedCount: number
+  /** collect() 开始时间戳 */
+  startedAt: number
+  /** collect() 执行耗时（毫秒） */
+  durationMs: number
+}
+
+export interface CapabilityEvolutionShadowObservation {
+  legacyIdentity: {
+    tools: string[]
+  }
+  capabilityIdentity: {
+    capability: string
+    operation?: string
+    provider?: string
+  }
+  metrics: {
+    count: number
+    successRate: number
+    errorRate: number
+    avgLatencyMs: number
+  }
+  legacyMetrics: {
+    count: number
+    successRate: number
+    errorRate: number
+    avgLatencyMs: number
+  }
+}
+
+export interface CapabilityEvolutionShadowRun {
+  runId: string
+  collectorName: string
+  generatedAt: number
+  observations: CapabilityEvolutionShadowObservation[]
+  summary: {
+    totalToolEvents: number
+    capabilityEvents: number
+    coverageRate: number
+    legacyBucketCount: number
+    capabilityBucketCount: number
+    aggregationGain: number
+    aggregationGainRate: number
+    trendSampleCount: number
+    trendCorrelation: number | null
+  }
+}
+
+export interface ShadowCollectorExecutionEvent {
+  collectorName: string
+  tickId: string
+  shouldRun: boolean
+  skipReason?: string
+  observationCount: number
+  startedAt: number
+  durationMs: number
+}
+
+export interface CapabilityProblemCandidate {
+  identity: CapabilityProblemIdentity
+  title: string
+  description: string
+  severity: Severity
+  source: ProblemSource
+  affectedTools: string[]
+  providers: string[]
+  legacyProblemIds: string[]
+  legacyToolNames: string[]
+  occurrenceCount: number
+  lastSeen: number
+  /** Shadow-only evidence linking a candidate to its authoritative legacy inputs. */
+  legacyEvidence?: Array<{
+    legacyProblemId: string
+    toolName: string
+    provider: string
+    raw: string
+  }>
+}
+
+export interface CapabilityDecisionCandidate {
+  identity: CapabilityProblemIdentity
+  capabilityKey: string
+  score: number
+  affectedTools: string[]
+  supportingProblemIds: string[]
+}
+
+export interface CapabilityMigrationComparisonReport {
+  runId: string
+  generatedAt: number
+  eligibleLegacyCount: number
+  capabilityCandidateCount: number
+  legacyOnlyProblemCount: number
+  matchedProblemCount: number
+  decisionConsistencyRate: number
+  /** Number of eligible legacy candidates consolidated by capability grouping. */
+  fragmentationReduction?: number
+  /** Fraction of eligible legacy candidates consolidated by capability grouping. */
+  fragmentationReductionRate?: number
+}
+
+export interface CapabilityMigrationGateInput {
+  observationWindow: {
+    candidateCount: number
+    observedDays: number
+  }
+  coverage: {
+    identityCoverage: number
+    traceabilityRate: number
+    legacyOnlyRatio: number
+  }
+  decision: {
+    consistencyRate: number
+    executorRegressionCount: number
+  }
+}
+
+// ── 分配给 Executor 的问题 ──
+export interface AssignedProblem extends Problem {
+  attempt: number
+  assignedAt: number
+}
+
+// ── 执行结果 ──
+export interface FixResult {
+  problemId: string
+  success: boolean
+  summary: string
+  durationMs: number
+  /** 产生的 diff / commit hash */
+  output?: string
+  error?: string
+}
+
+// ── Collector 接口 ──
+export interface SignalCollector {
+  readonly name: string
+  readonly source: ProblemSource
+  /** 采集一次，返回发现的问题列表 */
+  collect(): Promise<Problem[]>
+  /** 采集器是否需要运行（跳过条件） */
+  shouldRun(): boolean
+  /** 可选：当 shouldRun() 返回 false 时，提供可读的跳过原因（用于可观测性） */
+  getSkipReason?(): string
+}
+
+export interface ShadowObservationCollector {
+  readonly name: string
+  collect(): Promise<CapabilityEvolutionShadowRun>
+  shouldRun(): boolean
+  getSkipReason?(): string | undefined
+}
+
+// ── Executor 接口 ──
+export interface FixExecutor {
+  readonly name: string
+  /** 执行一个问题的修复 */
+  execute(problem: AssignedProblem): Promise<FixResult>
+  /** 当前是否可用（不忙） */
+  isAvailable(): boolean
+  /** 支持的来源类型 */
+  supportedSources: readonly ProblemSource[]
+  /** 单次执行超时 */
+  timeoutMs: number
+}
+
+// ── Pipeline 统计 ──
+export interface PipelineStats {
+  totalCollected: number
+  totalFixed: number
+  totalFailed: number
+  totalSkipped: number
+  avgDurationMs: number
+  lastRunAt: number
+  bySource: Record<ProblemSource, { collected: number; fixed: number; failed: number }>
+}
+
+// ═══════════════════════════════════════════
+//  推理链类型（ASR 引导 Plan 的中间步骤链）
+// ═══════════════════════════════════════════
+
+/** 推理链中单个步骤的状态 */
+export type ReasoningStepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped'
+
+/** 推理链中的单个中间步骤 */
+export interface ReasoningStep {
+  /** 步骤标识（格式: step_{index}_{timestamp}） */
+  id: string
+  /** 步骤序号（从 0 开始） */
+  index: number
+  /** 步骤描述 */
+  description: string
+  /** 步骤详细说明（executor 填充的上下文） */
+  detail?: string
+  /** 当前状态 */
+  status: ReasoningStepStatus
+  /** 执行结果文本 */
+  result?: string
+  /** 执行耗时（毫秒） */
+  durationMs?: number
+  /** 该步骤产生的输出（如补丁 ID、快照 ID） */
+  output?: Record<string, string>
+}
+
+/** 完整的推理链（包含中间步骤集合） */
+export interface ReasoningChain {
+  /** 关联的问题 ID */
+  problemId: string
+  /** 推理链标题 */
+  title: string
+  /** 步骤列表 */
+  steps: ReasoningStep[]
+  /** 创建时间戳 */
+  createdAt: number
+  /** 完成时间戳 */
+  completedAt?: number
+  /** 最终结论摘要 */
+  conclusion?: string
+  /** 是否全部成功 */
+  allSucceeded: boolean
+}
+
+// ── 合成证据（受控故障验证用） ──
+
+export interface SyntheticProblemDef {
+  /** 问题来源（模拟的 collector 来源） */
+  source: ProblemSource
+  /** 严重度 */
+  severity: Severity
+  /** 问题标题 */
+  title: string
+  /** 问题描述 */
+  description: string
+  /** 关联文件路径（可选） */
+  file?: string
+  /** 关联行号（可选） */
+  line?: number
+  /** 原始错误文本（可选，用于触发 AutoPatchExecutor 的模式匹配） */
+  raw?: string
+}
+
+/** 最小干预回顾记录 — 只记录发生了什么，不做质量评估 */
+export interface InterventionReviewRecord {
+  interventionId: string
+  problemId: string
+  source: ProblemSource
+  success: boolean
+  summary: string
+  timestamp: number
+}
+
+/** SyntheticTscExecutor 执行事件 */
+export interface SyntheticExecutionEvent {
+  problemId: string
+  executorName: string
+  action: 'started' | 'completed' | 'skipped'
+  reason?: string
+  timestamp: number
+}
+import type { CapabilityProblemIdentity } from './CapabilityProblemIdentity'
+
+export interface PlanManagerLike {
+  createPlan(title: string, description: string): Promise<{ id: string }>
+  getActivePlans(): Promise<Array<{ id: string; title: string; steps: Array<{ id: string; status: string }> }>>
+  getPlan(id: string): Promise<{ id: string; title: string; steps: Array<{ id: string; status: string }> } | null>
+  updatePlanStep(planId: string, stepId: string, status: string): Promise<void>
+  getFormattedContext(): string
+}

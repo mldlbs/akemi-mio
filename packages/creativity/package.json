@@ -1,0 +1,8 @@
+{
+  "name": "@akemi-mio/creativity",
+  "version": "0.1.0",
+  "description": "Creativity layer: ideas, writing, blog, image, inspiration",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": { "@akemi-mio/core": "workspace:*" }
+}

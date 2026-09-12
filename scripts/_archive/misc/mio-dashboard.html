@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mio Intelligence Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; }
+  h1 { font-size: 28px; margin-bottom: 6px; background: linear-gradient(135deg, #58a6ff, #bc8cff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .subtitle { color: #8b949e; font-size: 14px; margin-bottom: 24px; }
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .kpi { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; text-align: center; }
+  .kpi .num { font-size: 36px; font-weight: 700; }
+  .kpi .label { font-size: 13px; color: #8b949e; margin-top: 4px; }
+  .kpi.codex .num { color: #58a6ff; }
+  .kpi.workbuddy .num { color: #3fb950; }
+  .kpi.open .num { color: #bc8cff; }
+  .kpi.mcp .num { color: #f0883e; }
+  .kpi.mem .num { color: #f778ba; }
+  .kpi.exp .num { color: #ffa657; }
+  .kpi.success .num { color: #3fb950; }
+  .kpi.failure .num { color: #f85149; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
+  .card h2 { font-size: 16px; margin-bottom: 12px; color: #e6edf3; }
+  .card canvas { max-height: 300px; }
+  .full { grid-column: 1 / -1; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 12px; border-bottom: 2px solid #30363d; color: #8b949e; }
+  td { padding: 8px 12px; border-bottom: 1px solid #21262d; }
+  tr:hover td { background: #1c2128; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin: 1px 2px; }
+  .tag.decision { background: #1f3a5f; color: #58a6ff; }
+  .tag.problem { background: #5c1d1d; color: #f85149; }
+  .tag.context { background: #2a1f3d; color: #bc8cff; }
+  .tag.note { background: #1a2e1a; color: #3fb950; }
+  .phase-bar { display: flex; gap: 4px; margin-top: 12px; }
+  .phase-seg { height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; min-width: 40px; }
+  .footnote { text-align: center; color: #484f58; font-size: 12px; margin-top: 20px; }
+</style>
+</head>
+<body>
+
+<h1>🧠 Mio Intelligence Dashboard</h1>
+<p class="subtitle">Agent Control Plane · Phase 0 Evidence · Generated 2026-08-22</p>
+
+<!-- KPIs -->
+<div class="kpi-row">
+  <div class="kpi success"><div class="num">518</div><div class="label">✅ Tasks Success</div></div>
+  <div class="kpi failure"><div class="num">14</div><div class="label">❌ Tasks Failure</div></div>
+  <div class="kpi codex"><div class="num">246</div><div class="label">Codex Traces</div></div>
+  <div class="kpi workbuddy"><div class="num">212</div><div class="label">WorkBuddy Traces</div></div>
+  <div class="kpi open"><div class="num">8</div><div class="label">OpenCode Traces</div></div>
+  <div class="kpi mcp"><div class="num">69</div><div class="label">MCP Direct</div></div>
+  <div class="kpi mem"><div class="num">507</div><div class="label">📝 Memory Records</div></div>
+  <div class="kpi exp"><div class="num">44</div><div class="label">🔄 Experience Reuse</div></div>
+</div>
+
+<!-- Charts Row 1 -->
+<div class="grid">
+  <div class="card">
+    <h2>📈 Tasks by Host (daily)</h2>
+    <canvas id="chartHostDaily"></canvas>
+  </div>
+  <div class="card">
+    <h2>🍩 Trace Distribution</h2>
+    <canvas id="chartHostPie"></canvas>
+  </div>
+</div>
+
+<!-- Charts Row 2 -->
+<div class="grid">
+  <div class="card">
+    <h2>📊 Success Rate by Host</h2>
+    <canvas id="chartSuccessRate"></canvas>
+  </div>
+  <div class="card">
+    <h2>📝 Memory by Kind & Source</h2>
+    <canvas id="chartMemory"></canvas>
+  </div>
+</div>
+
+<!-- Charts Row 3 -->
+<div class="grid">
+  <div class="card">
+    <h2>🔄 Experience Reuse Pipeline</h2>
+    <div class="phase-bar">
+      <div class="phase-seg" style="background:#30363d; width:70%;">44 Auto Claims</div>
+      <div class="phase-seg" style="background:#1f6feb; width:16%;">7 Confirmed</div>
+      <div class="phase-seg" style="background:#3fb950; width:14%;">7 Verified</div>
+    </div>
+    <table style="margin-top:16px;">
+      <tr><th>Pipeline Stage</th><th>Count</th><th>% of Total</th><th>Description</th></tr>
+      <tr><td>auto_claim</td><td>44</td><td>100%</td><td>System-detected reuse via query→outcome matching</td></tr>
+      <tr><td>confirmed</td><td>7</td><td>15.9%</td><td>Agent/human verified the reuse was real</td></tr>
+      <tr><td>verified</td><td>7</td><td>15.9%</td><td>reuse + behaviorChanged + outcomeImproved</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h2>🏷️ Phase 0 Thresholds</h2>
+    <table>
+      <tr><th>Metric</th><th>Current</th><th>Target</th><th>Status</th></tr>
+      <tr><td>Hosts</td><td style="color:#3fb950;font-weight:700;">4</td><td>≥2</td><td>✅ Pass</td></tr>
+      <tr><td>Task Outcomes</td><td style="color:#3fb950;font-weight:700;">528</td><td>≥20</td><td>✅ Pass</td></tr>
+      <tr><td>Verified Reuse</td><td style="color:#3fb950;font-weight:700;">7</td><td>≥5</td><td>✅ Pass</td></tr>
+      <tr><td>Success Rate</td><td style="color:#3fb950;font-weight:700;">96.8%</td><td>>80%</td><td>✅ Pass</td></tr>
+      <tr><td>Cross-Agent Transfer</td><td style="color:#f0883e;font-weight:700;">partial</td><td>≥2</td><td>⚠️ WIP</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- Recent Memory Table -->
+<div class="grid">
+  <div class="card full">
+    <h2>🧠 Recent Memory Decisions & Problems</h2>
+    <table id="memTable">
+      <tr><th>Date</th><th>Kind</th><th>Source</th><th>Content (excerpt)</th><th>Evidence</th></tr>
+    </table>
+  </div>
+</div>
+
+<p class="footnote">Data: C:\Users\gf191\.mio-intelligence · Generated by Mio Intelligence MCP</p>
+
+<script>
+// === DATA ===
+const dates = ['08/15','08/16','08/17','08/18','08/19','08/20','08/21','08/22'];
+const hostDaily = {
+  codex:     [0,  0, 153, 26, 32,  4, 28, 3],
+  workbuddy: [0, 105, 29, 13, 23, 15, 26, 1],
+  mcp:       [2,  6,  38,  6,  0,  1,  8, 2],
+  opencode:  [0,  0,   4,  2,  1,  0,  0, 0],
+};
+const hostSuccess = { codex: 240, workbuddy: 212, mcp: 68, opencode: 7 };
+const hostTotal = { codex: 246, workbuddy: 212, mcp: 69, opencode: 8 };
+const memKinds = { note: 435, decision: 64, problem: 5, context: 3 };
+const memSources = { 'codex-observer': 220, 'workbuddy-observer': 201, 'codex': 68, 'opencode-observer': 7, 'mcp': 5, 'opencode': 4, 'codex-test': 2 };
+
+// Recent decisions/problems
+const recentMem = [
+  { date: '08/17', kind: 'decision', src: 'opencode', text: 'WorkBuddy 贡献 Phase 0 数据方案：沿用 passive observer，不引入 MCP 直连...', ev: '1 reuse · 1 confirmed' },
+  { date: '08/17', kind: 'decision', src: 'codex', text: '新增 mio.experience.confirm：auto_claim → confirm → verified 闭环...', ev: '2 reuse · 2 confirmed' },
+  { date: '08/17', kind: 'decision', src: 'codex', text: 'Phase 0 复用证据自动关联：跟踪最近 200 次非空 memory.query...', ev: '1 reuse · 1 confirmed' },
+  { date: '08/15', kind: 'decision', src: 'codex', text: 'Phase 0 EvidenceAnalyzer：≥2 hosts / ≥20 tasks / ≥5 verified...', ev: '' },
+  { date: '08/14', kind: 'decision', src: 'mcp', text: 'Mio MCP 改为全局 Agent Enhancement Layer，project 自动识别...', ev: '' },
+  { date: '08/14', kind: 'decision', src: 'mcp', text: 'Mio 战略定位升级：Agent Enhancement Layer → Agent Control Plane...', ev: '' },
+  { date: '08/22', kind: 'note', src: 'codex-observer', text: 'TTS、数据库、语音模型都正常初始化了', ev: '' },
+  { date: '08/22', kind: 'note', src: 'codex-observer', text: '质量门禁全部通过，修了 TypeScript 类型 + EventBus...', ev: '' },
+];
+
+// === CHARTS ===
+const chartFont = { family: "-apple-system, 'Segoe UI', sans-serif" };
+Chart.defaults.color = '#8b949e';
+Chart.defaults.font.family = chartFont.family;
+
+// 1. Stacked bar — tasks by host daily
+new Chart(document.getElementById('chartHostDaily'), {
+  type: 'bar',
+  data: {
+    labels: dates,
+    datasets: [
+      { label: 'Codex', data: hostDaily.codex, backgroundColor: '#58a6ff', borderRadius: 4 },
+      { label: 'WorkBuddy', data: hostDaily.workbuddy, backgroundColor: '#3fb950', borderRadius: 4 },
+      { label: 'MCP Direct', data: hostDaily.mcp, backgroundColor: '#f0883e', borderRadius: 4 },
+      { label: 'OpenCode', data: hostDaily.opencode, backgroundColor: '#bc8cff', borderRadius: 4 },
+    ]
+  },
+  options: {
+    responsive: true, plugins: { legend: { position: 'top' } },
+    scales: { x: { stacked: true, grid: { color: '#21262d' } }, y: { stacked: true, grid: { color: '#21262d' } } }
+  }
+});
+
+// 2. Doughnut — trace distribution
+new Chart(document.getElementById('chartHostPie'), {
+  type: 'doughnut',
+  data: {
+    labels: ['Codex', 'WorkBuddy', 'MCP Direct', 'OpenCode'],
+    datasets: [{ data: [246, 212, 69, 8], backgroundColor: ['#58a6ff', '#3fb950', '#f0883e', '#bc8cff'], borderWidth: 0, hoverOffset: 8 }]
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: { position: 'right' },
+      tooltip: { callbacks: { label: (c) => c.label + ': ' + c.parsed + ' (' + (c.parsed / 535 * 100).toFixed(1) + '%)' } }
+    }
+  }
+});
+
+// 3. Horizontal bar — success rate by host
+const hostLabels = ['Codex', 'WorkBuddy', 'MCP', 'OpenCode'];
+const hostKeys = ['codex', 'workbuddy', 'mcp', 'opencode'];
+const successRates = hostKeys.map(k => (hostSuccess[k] / hostTotal[k] * 100).toFixed(1));
+const failureRates = hostKeys.map(k => ((hostTotal[k] - hostSuccess[k]) / hostTotal[k] * 100).toFixed(1));
+new Chart(document.getElementById('chartSuccessRate'), {
+  type: 'bar',
+  data: {
+    labels: hostLabels,
+    datasets: [
+      { label: 'Success %', data: successRates, backgroundColor: '#3fb950', borderRadius: 4 },
+      { label: 'Failure %', data: failureRates, backgroundColor: '#f85149', borderRadius: 4 },
+    ]
+  },
+  options: {
+    indexAxis: 'y', responsive: true,
+    plugins: { legend: { position: 'top' } },
+    scales: {
+      x: { stacked: true, max: 100, grid: { color: '#21262d' }, ticks: { callback: v => v + '%' } },
+      y: { stacked: true, grid: { display: false } }
+    }
+  }
+});
+
+// 4. Memory kind + source
+new Chart(document.getElementById('chartMemory'), {
+  type: 'bar',
+  data: {
+    labels: Object.keys(memSources),
+    datasets: [{
+      label: 'Records',
+      data: Object.values(memSources),
+      backgroundColor: ['#3fb950', '#3fb950', '#58a6ff', '#bc8cff', '#f0883e', '#bc8cff', '#8b949e'],
+      borderRadius: 4
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: { x: { grid: { display: false } }, y: { grid: { color: '#21262d' } } }
+  }
+});
+
+// === TABLE ===
+const tbody = document.getElementById('memTable');
+recentMem.forEach(m => {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${m.date}</td><td><span class="tag ${m.kind}">${m.kind}</span></td><td>${m.src}</td><td>${m.text}</td><td style="color:#8b949e">${m.ev}</td>`;
+  tbody.appendChild(tr);
+});
+</script>
+</body>
+</html>

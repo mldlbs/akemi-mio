@@ -1,0 +1,15 @@
+{
+  "name": "@akemi-mio/capabilities",
+  "version": "0.1.0",
+  "description": "Capability layer: publishing, social, blog, tools",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@akemi-mio/core": "workspace:*"
+  },
+  "devDependencies": {}
+}

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "preset_evolution_followup",
+    "name": "进化后自动审查",
+    "description": "进化系统完成分析后自动触发代码审查工作流",
+    "inputSchema": "",
+    "enabled": true,
+    "trigger": {
+      "type": "event",
+      "event": "evolution.cycle.completed",
+      "defaultInput": "进化已完成，自动执行后续审查"
+    },
+    "maxConcurrency": 2,
+    "steps": [
+      {
+        "id": "s1",
+        "name": "审查进化结果",
+        "description": "读取进化系统产生的变更",
+        "handler": "subagent",
+        "config": {
+          "maxTurns": 10,
+          "prompt": "进化系统刚刚完成一个周期。审查变更内容，确认是否有需要跟踪的潜在问题。输出审查意见。",
+          "allowedTools": ["read_file", "grep"]
+        },
+        "dependsOn": []
+      },
+      {
+        "id": "s2",
+        "name": "通知",
+        "description": "发送系统事件通知",
+        "handler": "event",
+        "config": {
+          "event": {
+            "eventName": "workflow.followup.completed",
+            "payload": "{{steps.s1.result}}"
+          }
+        },
+        "dependsOn": ["s1"]
+      }
+    ]
+  }
+]

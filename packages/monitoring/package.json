@@ -1,0 +1,9 @@
+{
+  "name": "@akemi-mio/monitoring",
+  "version": "0.1.0",
+  "description": "System monitoring: BrowserWindow event observation, health metrics",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "dependencies": { "@akemi-mio/core": "workspace:*" }
+}

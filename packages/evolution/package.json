@@ -1,0 +1,8 @@
+{
+  "name": "@akemi-mio/evolution",
+  "version": "0.1.0",
+  "description": "Evolution layer: self-evolution, superpowers, governance",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": { "@akemi-mio/core": "workspace:*" }
+}

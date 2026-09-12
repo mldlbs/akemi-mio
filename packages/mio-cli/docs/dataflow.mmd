@@ -1,0 +1,45 @@
+%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '11px'}}}%%
+flowchart LR
+  A["Agent"] -->|"stdio"| MCP
+
+  subgraph MCP["MCP Server"]
+    direction TB
+    S{"switch"}
+    S -->|memory.*| F1["读写 memory.jsonl"]
+    S -->|observer.*| F2["读写 observer/"]
+    S -->|insight.*| F3["LLM 生成 → insights/"]
+    S -->|creativity.*| F4["LLM 生成 → creativity/"]
+    S -->|idea/evolution.*| F5["计算 + 报告"]
+  end
+
+  F2 --> OBS["observer/{observations·trends·research·insights·world_model·essays·summaries}"]
+  F3 --> INS["insights/insights.json"]
+  F4 --> CR["creativity/*.jsonl"]
+  F1 --> MEM["memory.jsonl + traces.jsonl"]
+
+  subgraph PIPE["Observer Pipeline — 4h DAG"]
+    direction TB
+    COL["6 Collectors"] --> OBS2["observations/*.json"]
+    OBS2 --> ENG["8 Engines"]
+    ENG --> WM["world_model/"]
+    ENG --> TRD["trends/"]
+    ENG --> RES["research/"]
+    ENG --> INSO["insights/"]
+    ENG --> FERM["FermentationEngine"]
+    FERM --> GATE{"WritingGate\n≥3 themes + LLM 预算?"}
+    GATE -->|yes| LLM["Ollama/Qwen"] --> ESS["essays/published/*.md"]
+    GATE -->|no| SKIP["跳过"]
+  end
+
+  subgraph PASS["被动观察 — mio observe"]
+    direction TB
+    WB["WorkBuddy *.jsonl"] & OC["OpenCode DB"] & HM["Hermes DB"] --> PARSE["解析 task_outcome"] --> W1["memory.jsonl"] & W2["AGENTS.md"]
+  end
+
+  PIPE -.->|"写入"| OBS
+  PASS -->|"写入"| MEM
+
+  style MCP fill:#D5F5E3,stroke:#117A65
+  style PIPE fill:#FEF9E7,stroke:#F39C12
+  style PASS fill:#E8DAEF,stroke:#7D3C98
+  style HOME fill:#D4E6F1,stroke:#1A5276
