@@ -13,6 +13,7 @@ import { TopicTransitionPredictor } from './TopicTransitionPredictor'
 import { KeywordFrequencyTracker } from './KeywordFrequencyTracker'
 import { adaptToPlugin } from './IMemoryPlugin'
 import { FictionalMemoryGenerator } from './FictionalMemoryGenerator'
+import { MemorySnapshotManager } from './MemorySnapshotManager'
 import { MemoryUtilityTracker } from './MemoryUtilityTracker'
 import { AdaptiveOrchestrator } from './AdaptiveOrchestrator'
 import { MemoryCleaner, type BehaviorWeightingIntegration } from './MemoryCleaner'
@@ -148,6 +149,8 @@ export class MemoryService {
   readonly sleepManager: MemorySleepManager
   readonly adaptiveOrchestrator: AdaptiveOrchestrator
   readonly keywordFreqTracker: KeywordFrequencyTracker
+  /** 记忆驱动的 Agent 主动服务 — 快照管理器 */
+  readonly snapshotManager: MemorySnapshotManager
 
   constructor() {
     this.summary = new SummaryMemory()
@@ -225,6 +228,12 @@ export class MemoryService {
       (entry) => this.upsertInDb(entry),
     )
     this.sleepManager.start()
+
+    // 初始化记忆快照管理器（记忆驱动的 Agent 主动服务）
+    this.snapshotManager = new MemorySnapshotManager()
+    this.snapshotManager.setDeps({ memory: this, summary: this.summary })
+    // 从已有摘要生成初始快照（非阻塞）
+    this.snapshotManager.generateSnapshot()
 
     // 初始化记忆驱动自适应编排器（仅依赖 Memory 自身的数据源）
     this.adaptiveOrchestrator = new AdaptiveOrchestrator({
@@ -1037,6 +1046,22 @@ export class MemoryService {
   }
 
   /**
+   * 获取最新记忆快照（记忆驱动的 Agent 主动服务）。
+   * 返回结构化快照，包含压缩摘要、话题标签、连续多日话题检测结果、
+   * 工具推荐和开场建议。Agent 启动时调用此方法注入系统提示。
+   */
+  getMemorySnapshot(): ReturnType<MemorySnapshotManager['getLatestSnapshot']> {
+    return this.snapshotManager.getLatestSnapshot()
+  }
+
+  /**
+   * 获取格式化后的记忆快照上下文（用于注入 system prompt）。
+   */
+  getSnapshotContext(): string {
+    return this.snapshotManager.getFormattedSnapshotContext()
+  }
+
+  /**
    * 获取虚构初始记忆上下文（用于暖启动）。
    * 仅在真实 user_fact 条目不足时返回，权重随真实记忆增长线性衰减。
    * 返回值已标注为虚构，且在真实记忆达到阈值后完全消失。
@@ -1230,6 +1255,13 @@ export class MemoryService {
       parts.push('')
       parts.push('【高效用记忆】以下记忆在实际对话中被频繁引用，具有较高价值：')
       highUtilityEntries.forEach((e) => parts.push('- ' + e.content))
+    }
+
+    // 记忆驱动的 Agent 主动服务：注入结构化记忆快照（含连续话题检测 + 工具推荐）
+    const snapshotCtx = this.getSnapshotContext()
+    if (snapshotCtx) {
+      parts.push('')
+      parts.push(snapshotCtx)
     }
 
     return parts.length > 0 ? parts.join('\n') : ''

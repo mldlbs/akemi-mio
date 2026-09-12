@@ -1857,3 +1857,11 @@ export const DEFAULT_PRELOAD_BUFFER_CONFIG: PreloadBufferConfig = {
   maxEntries: 10,
   entryTtlMs: 5 * 60 * 1000,
 }
+
+export interface QosFullStatus {
+  evaluatorConfig: QoSEvaluatorConfig
+  currentScore: QoSScore | null
+  preloadState: PreloadBufferState
+  userPreference: TtsUserPreference
+  lastRoutingDecision: TtsRoutingDecision | null
+}

@@ -21,6 +21,7 @@ import type { LowConfidenceSegment } from './AsrLogStore'
 import { AsrIdleDetector } from './AsrIdleDetector'
 import { asrFeedbackAnalyzer } from './AsrFeedbackAnalyzer'
 import { asrBehaviorPredictor } from './AsrBehaviorPredictor'
+import { asrKeywordActionTracker } from '@akemi-mio/evolution/behavior/AsrKeywordActionTracker'
 import { asrConfidenceScorer, DEFAULT_CONFIDENCE_THRESHOLD } from './AsrConfidenceScorer'
 import { acousticEnvClassifier } from './AsrAcousticEnvironmentClassifier'
 import { voiceBehaviorAdaptiveLearner } from './VoiceBehaviorAdaptiveLearner'
@@ -730,6 +731,8 @@ export class AsrService {
 
           // ── 行为预测记录 ──
           asrBehaviorPredictor.recordTranscription(fusionResult.text, fusionResult.confidence, voiceEmotion)
+          // ── ASR 关键词动作跟踪 ──
+          asrKeywordActionTracker.recordTranscription(fusionResult.text)
           // ── 自适应学习记录 ──
           voiceBehaviorAdaptiveLearner.recordInteraction(fusionResult.text, fusionResult.confidence, voiceEmotion)
 
@@ -781,6 +784,8 @@ export class AsrService {
 
                 // ── 行为预测记录 ──
                 asrBehaviorPredictor.recordTranscription(cpuResult.text, cpuConfidence, voiceEmotion)
+                // ── ASR 关键词动作跟踪 ──
+                asrKeywordActionTracker.recordTranscription(cpuResult.text)
                 // ── 自适应学习记录 ──
                 voiceBehaviorAdaptiveLearner.recordInteraction(cpuResult.text, cpuConfidence, voiceEmotion)
 
@@ -811,6 +816,8 @@ export class AsrService {
 
           // ── 行为预测记录 ──
           asrBehaviorPredictor.recordTranscription(result.text, gpuConfidence, voiceEmotion)
+          // ── ASR 关键词动作跟踪 ──
+          asrKeywordActionTracker.recordTranscription(result.text)
           // ── 自适应学习记录 ──
           voiceBehaviorAdaptiveLearner.recordInteraction(result.text, gpuConfidence, voiceEmotion)
 
@@ -856,6 +863,8 @@ export class AsrService {
 
           // ── 行为预测记录 ──
           asrBehaviorPredictor.recordTranscription(text, baiduConfidence, voiceEmotion)
+          // ── ASR 关键词动作跟踪 ──
+          asrKeywordActionTracker.recordTranscription(text)
           // ── 自适应学习记录 ──
           voiceBehaviorAdaptiveLearner.recordInteraction(text, baiduConfidence, voiceEmotion)
 

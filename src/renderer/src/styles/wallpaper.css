@@ -196,3 +196,23 @@
 .wp-tp-panel {
   display: var(--right-bottom-floats-display, none) !important;
 }
+
+/* ASR voice habit action hints (distinct from topic predictions) */
+.prediction-toast-item.asr-action-hint {
+  background: oklch(0.15 0.04 240 / 0.35);
+  border-color: oklch(0.4 0.08 240 / 0.25);
+}
+
+.prediction-toast-item.asr-action-hint:hover {
+  background: oklch(0.18 0.05 240 / 0.4);
+  border-color: oklch(0.5 0.1 240 / 0.35);
+}
+
+.prediction-toast-item.asr-action-hint.expanded {
+  background: oklch(0.2 0.05 240 / 0.45);
+}
+
+.prediction-toast-action-text {
+  font-weight: 600;
+  color: oklch(0.95 0.01 240);
+}

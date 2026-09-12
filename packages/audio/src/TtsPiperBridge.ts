@@ -40,6 +40,7 @@ import { SlidingWindow } from '@akemi-mio/core/core/patterns/SlidingWindow'
 import { piperOrchestrator, type PiperSynthesizeResult, type PiperSynthesizeRequest } from './PiperOrchestrator'
 import { voiceRoleManager } from './VoiceRoleManager'
 import { piperBehaviorSidecar, type BehaviorSidecarInput } from './PiperBehaviorSidecar'
+import { piperBehaviorStateMachine } from './PiperBehaviorStateMachine'
 
 // ══════════════════════════════════════════
 //  类型定义
@@ -302,10 +303,26 @@ export class TtsPiperBridge {
       behavior_mode: this.context.ttsBehaviorNeed?.outputMode ?? '(none)',
     })
 
+    // ── 行为状态机集成 ──
+    // 将当前 UserBehavior 上下文注入状态机，使其在评估时感知行为状态
+    const behaviorNeed = this.context.ttsBehaviorNeed
+    if (behaviorNeed) {
+      piperBehaviorStateMachine.setBehaviorContext({
+        mode: behaviorNeed.outputMode === 'normal' ? 'focus' : undefined,
+        activityState: behaviorNeed.pauseTts ? 'away' : 'active',
+        fullscreen: undefined,
+        focused: undefined,
+      })
+    }
+
+    // 确保边车已注册状态机并启用自动模式
+    piperBehaviorSidecar.setStateMachine(piperBehaviorStateMachine)
+    piperBehaviorSidecar.setAutoMode(true)
+
     // 将 UserBehavior 需求注入边车（边车过滤/转换层将据此处理）
     piperBehaviorSidecar.setBehavior(needToBehaviorInput(this.context.ttsBehaviorNeed))
 
-    // 通过边车合成（享受缓存、过滤、转换、监控能力）
+    // 通过边车合成（享受缓存、过滤、转换、监控、自动模式能力）
     const result = await piperBehaviorSidecar.synthesize(request)
 
     // 复位边车行为上下文，避免泄漏到其他请求方

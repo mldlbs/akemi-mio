@@ -933,6 +933,8 @@ export class ChatExecutor {
           planActive: this.sessionPlanIds.size > 0,
           agentId: 'chat',
         })
+        // 记忆驱动的 Agent 主动服务：更新记忆快照（非阻塞）
+        this.memoryService.snapshotManager.onInteractionEnd()
       }
       // ── 计划感知记忆恢复：活跃计划对话摘要存储 ──
       if (reply && this.memoryService && this.sessionPlanIds.size > 0) {
@@ -2086,13 +2088,18 @@ export class ChatExecutor {
         this.userContextClassifierEnabled ? this.lastUserContext : null,
       )
 
-      // ── 源 6: 用户语音特征画像（语速自适应） ──
-      // 基于最近 4 次语音交互的语速（字/秒），调整 TTS 合成语速，
-      // 使用户的听觉反馈更贴合其自然的沟通节奏。
-      const speechRecommendation = userSpeechProfileTracker.getRecommendation()
-      if (speechRecommendation.rateAdjustment !== 0) {
-        behaviorNeed.rateSuggestion = speechRecommendation.rateAdjustment
-        behaviorNeed.reason += `；${speechRecommendation.reason}`
+      // ── 源 6: 用户语音特征画像（语速+音调自适应） ──
+      // 基于最近 N 次语音交互的语速（字/秒）和声学特征（基频、能量），
+      // 综合调整 TTS 合成语速和音调，使用户的听觉反馈更贴合其自然的沟通风格。
+      const acousticRecommendation = userSpeechProfileTracker.getAcousticRecommendation()
+      if (acousticRecommendation.rateAdjustment !== 0) {
+        behaviorNeed.rateSuggestion = acousticRecommendation.rateAdjustment
+      }
+      if (acousticRecommendation.pitchAdjustment !== 0) {
+        behaviorNeed.pitchSuggestion = acousticRecommendation.pitchAdjustment
+      }
+      if (acousticRecommendation.rateAdjustment !== 0 || acousticRecommendation.pitchAdjustment !== 0) {
+        behaviorNeed.reason += `；${acousticRecommendation.reason}`
         behaviorNeed.sources.push('UserSpeechProfile')
       }
 

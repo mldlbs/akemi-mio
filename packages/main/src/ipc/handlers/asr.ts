@@ -39,13 +39,25 @@ export function registerAsrHandlers({ agentService, ttsService }: HandlerContext
       }
       const hybridResult = await memoryAsrHybridPipeline.run(audioBuffer, context, undefined, undefined)
 
-      // ── 记录语音交互特征（用户语速画像） ──
+      // ── 记录语音交互特征（用户语速画像 + 声学画像） ──
       // 从 PCM Int16 @ 16kHz 计算音频时长
       let audioDurationMs = 0
       if (hybridResult.text?.trim()) {
         const pcmSamples = new Int16Array(audioBuffer)
         audioDurationMs = Math.round((pcmSamples.length / 16000) * 1000)
-        userSpeechProfileTracker.recordInteraction(hybridResult.text.trim(), audioDurationMs)
+        // 传入 VoiceEmotion 声学特征（如可用），用于声学画像追踪
+        userSpeechProfileTracker.recordInteraction(
+          hybridResult.text.trim(),
+          audioDurationMs,
+          hybridResult.voiceEmotion
+            ? {
+                energy: hybridResult.voiceEmotion.features.energy,
+                pitchHz: hybridResult.voiceEmotion.features.pitchHz,
+                speechRate: hybridResult.voiceEmotion.features.speechRate,
+                silenceRatio: hybridResult.voiceEmotion.features.silenceRatio,
+              }
+            : undefined,
+        )
       }
 
       if (hybridResult.voiceEmotion) {

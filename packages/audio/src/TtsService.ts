@@ -5,6 +5,7 @@ import { tmpdir } from 'os'
 import { log } from '@akemi-mio/core/logger/Logger'
 import { type TtsStateCallback, type EmotionTtsParams, type TtsUserPreference, type ContextVoiceConfig } from './types'
 import type { UserBehaviorTtsNeed } from '@akemi-mio/evolution/behavior/UserBehaviorTtsContract'
+import { DEFAULT_TTS_NEED } from '@akemi-mio/evolution/behavior/UserBehaviorTtsContract'
 import { USE_LOCAL_TTS } from '@akemi-mio/core/config'
 import { findFfplay } from '@akemi-mio/core/utils/ffmpeg'
 import { ttsRouter } from './TtsRouter'
@@ -19,6 +20,10 @@ import { sentimentAnalyzer } from './SentimentAnalyzer'
 import type { StyledTtsSegment } from './emotion'
 import { piperSceneAdaptor as piperSceneAdaptorSingleton } from './PiperSceneAdaptor'
 import { taskCompletionTtsHook } from './TaskCompletionTtsHook'
+import { piperTtsStateMachine } from './PiperTtsStateMachine'
+import { qosEvaluator } from './QoSEvaluator'
+import { ttsPreloadBuffer } from './TtsPreloadBuffer'
+import type { QoSScore, QosFullStatus } from './types'
 
 // ══════════════════════════════════════════
 //  语音字幕 — Subtitle Data Types
@@ -161,6 +166,15 @@ export class TtsService {
   /** 当前延迟权重 0-1 */
   private latencyWeight = 0.4
 
+  /** QoS 评估是否启用 */
+  private qosEnabled = true
+
+  /** 最近使用的引擎（用于检测切换） */
+  private lastUsedEngine: 'cloud' | 'local' | null = null
+
+  /** 是否正在从预加载缓冲取数据（避免递归预加载） */
+  private isUsingPreloadBuffer = false
+
   // ══════════════════════════════════════════
   //  语音字幕 — 字幕回调
   // ══════════════════════════════════════════
@@ -231,6 +245,9 @@ export class TtsService {
     this.onAudioReady = onAudioReady ?? null
     // 初始化 TTS 配置管理器（确保目录和默认配置就绪）
     ttsConfigManager.initialize()
+
+    // 为预加载缓冲注入合成能力
+    ttsPreloadBuffer.setSynthesizeFn((text, outputFile, engine) => this._synthesizeToFile(text, outputFile, engine))
   }
 
   setAudioSink(cb: (filePath: string) => void): void {
@@ -522,6 +539,50 @@ export class TtsService {
     this.enginePreference = pref
     ttsRouter.setUserPreference(pref)
     log('INFO', 'tts_engine_preference', { preference: pref })
+  }
+
+  // ══════════════════════════════════════════
+  //  混合引擎 — QoS 服务质量评估
+  // ══════════════════════════════════════════
+
+  /** 获取当前 QoS 评分 */
+  getQosScore(): QoSScore | null {
+    if (!this.qosEnabled) return null
+    return qosEvaluator.getLastScore()
+  }
+
+  /** 强制刷新 QoS 评分 */
+  async refreshQosScore(): Promise<QoSScore | null> {
+    if (!this.qosEnabled) return null
+    return qosEvaluator.evaluate()
+  }
+
+  /** 获取完整 QoS 状态（供 IPC/UI 展示） */
+  getQosFullStatus(): QosFullStatus {
+    return {
+      evaluatorConfig: qosEvaluator.getConfig(),
+      currentScore: qosEvaluator.getLastScore(),
+      preloadState: ttsPreloadBuffer.getState(),
+      userPreference: this.enginePreference,
+      lastRoutingDecision: ttsRouter.getLastDecision(),
+    }
+  }
+
+  /** 启用/禁用 QoS 评估 */
+  setQosEnabled(enabled: boolean): void {
+    this.qosEnabled = enabled
+    qosEvaluator.updateConfig({ enabled })
+    log('INFO', 'tts_qos_toggle', { enabled })
+  }
+
+  /** QoS 评估是否启用 */
+  isQosEnabled(): boolean {
+    return this.qosEnabled
+  }
+
+  /** 获取预加载缓冲状态 */
+  getPreloadBufferState() {
+    return ttsPreloadBuffer.getState()
   }
 
   /**
@@ -939,6 +1000,7 @@ export class TtsService {
    */
   private syncTtsStateToBridge(): void {
     let mergedConfig: ContextVoiceConfig | null = this.contextVoiceConfig
+    let behaviorNeed = this.activeBehaviorNeed
 
     // ── 行为感知场景自适应 ──
     // 查询 PiperSceneAdaptor 获取细粒度场景的 Piper 参数
@@ -983,9 +1045,65 @@ export class TtsService {
       }
     }
 
+    // ── PiperTtsStateMachine 环境感知状态覆盖 ──
+    // 在场景自适应的基础上，叠加环境信号驱动的状态机输出。
+    // 状态机可覆盖：音量、语速、模型选择、暂停标志。
+    try {
+      const smResult = piperTtsStateMachine.getState()
+
+      if (!smResult.isManualOverride && smResult.state !== 'normal') {
+        // ── 静默模式：确保行为需求标记暂停 ──
+        if (smResult.pauseTts) {
+          behaviorNeed = {
+            ...(behaviorNeed ?? DEFAULT_TTS_NEED),
+            pauseTts: true,
+            outputMode: 'silent',
+            reason: `状态机[${smResult.state}]: ${smResult.description}`,
+          }
+        }
+
+        // ── 深夜/会议模式：覆盖合并配置中的 Piper 参数 ──
+        // 状态机的参数优先级高于场景自适应
+        if (mergedConfig) {
+          mergedConfig = {
+            ...mergedConfig,
+            piperModel: smResult.config.piperModel,
+            piperSpeed: smResult.config.piperSpeed,
+            piperPitch: smResult.config.piperPitch,
+            volume: smResult.config.volume,
+            label: `状态机·${smResult.config.label}`,
+          }
+        } else {
+          mergedConfig = {
+            voice: 'zh-CN-XiaoxiaoNeural',
+            rate: '+10%',
+            pitch: '+8Hz',
+            volume: smResult.config.volume,
+            piperModel: smResult.config.piperModel,
+            piperSpeed: smResult.config.piperSpeed,
+            piperPitch: smResult.config.piperPitch,
+            label: `状态机·${smResult.config.label}`,
+          }
+        }
+
+        log('DEBUG', 'tts_state_machine_applied', {
+          state: smResult.state,
+          confidence: smResult.confidence,
+          pauseTts: smResult.pauseTts,
+          piperModel: smResult.config.piperModel,
+          piperSpeed: smResult.config.piperSpeed,
+          volume: smResult.config.volume,
+          description: smResult.description,
+        })
+      }
+    } catch (err: any) {
+      // 状态机查询失败不阻塞合成，降级到场景自适应结果
+      log('WARN', 'tts_state_machine_error', { error: String(err) })
+    }
+
     ttsPiperBridge.syncTtsState({
       emotionParams: this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS,
-      behaviorNeed: this.activeBehaviorNeed,
+      behaviorNeed,
       contextVoiceConfig: mergedConfig,
       implicitRecommendation: implicitFeedbackTracker.getRecommendation(),
     })
@@ -1041,6 +1159,39 @@ export class TtsService {
       useLocal = true
     } else if (process.env.USE_LOCAL_TTS === 'false') {
       useLocal = false
+    } else if (this.qosEnabled && this.enginePreference === 'auto') {
+      // ── [混合引擎] QoS 注入路由决策 ──
+      // 在 TtsRouter 决策基础上，叠加 QoS 评分权重。
+      // QoS 评分低（网络差或负载高）时倾向本地引擎。
+      // 仅在 auto 模式下生效，用户手动选择时 QoS 不干预。
+      const qosScore = qosEvaluator.evaluateSync()
+
+      if (qosScore.score < qosEvaluator.getConfig().forceLocalThreshold) {
+        // QoS 极差 → 强制本地
+        useLocal = true
+        log('INFO', 'tts_qos_force_local', {
+          qosScore: qosScore.score.toFixed(2),
+          reason: qosScore.degradationReason,
+        })
+      } else {
+        // 正常路由决策
+        const decision = ttsRouter.decideSync({
+          qualityWeight: this.qualityWeight,
+          latencyWeight: this.latencyWeight,
+          emotionStrength,
+          textLength,
+        })
+        useLocal = decision.engine === 'local'
+
+        // QoS 评分低（但未到强制阈值）→ 倾向本地
+        if (qosScore.score < qosEvaluator.getConfig().recommendLocalThreshold && !useLocal) {
+          useLocal = true
+          log('INFO', 'tts_qos_recommend_local', {
+            qosScore: qosScore.score.toFixed(2),
+            reason: qosScore.degradationReason,
+          })
+        }
+      }
     } else {
       // 动态路由：使用缓存的网络状态同步决策（避免每次句子都检测网络）
       // 注入 emotionStrength 和 textLength 辅助路由
@@ -1051,6 +1202,35 @@ export class TtsService {
         textLength,
       })
       useLocal = decision.engine === 'local'
+    }
+
+    // ── [混合引擎] 检测引擎切换 → 尝试从预加载缓冲取音频 ──
+    const currentEngine: 'cloud' | 'local' = useLocal ? 'local' : 'cloud'
+    const isSwitching = this.lastUsedEngine !== null && this.lastUsedEngine !== currentEngine
+
+    if (isSwitching && !this.isUsingPreloadBuffer) {
+      const previousEngine = this.lastUsedEngine!
+      const preloadedFile = await ttsPreloadBuffer.getBuffered(text, this.emotionParams)
+      if (preloadedFile) {
+        try {
+          await fsp.copyFile(preloadedFile, outputFile)
+          ttsPreloadBuffer.recordSwitch(previousEngine, currentEngine, true)
+          this.lastUsedEngine = currentEngine
+          log('INFO', 'tts_engine_switch_with_preload', {
+            from: previousEngine,
+            to: currentEngine,
+          })
+          return
+        } catch (err) {
+          log('WARN', 'tts_preload_buffer_copy_failed', { error: String(err) })
+        }
+      } else {
+        ttsPreloadBuffer.recordSwitch(previousEngine, currentEngine, false)
+        log('INFO', 'tts_engine_switch_no_preload', {
+          from: previousEngine,
+          to: currentEngine,
+        })
+      }
     }
 
     try {
@@ -1069,6 +1249,12 @@ export class TtsService {
         } else {
           throw new Error('piper bridge returned no audio file')
         }
+
+        // ── [混合引擎] 记录当前引擎，尝试用备选引擎预加载 ──
+        this.lastUsedEngine = currentEngine
+        ttsPreloadBuffer.setCurrentEngine(currentEngine)
+        ttsPreloadBuffer.tryPreload(text, 'local', this.emotionParams)
+
         return
       }
       // ── 云端合成 ──
@@ -1092,12 +1278,51 @@ export class TtsService {
       // 键 = text + emotionLabel，下次相同文本+情感标签直接命中
       // 仅缓存云端结果，Piper 结果已有 PhrasePregenService 的预生成缓存
       ttsCache.setCache(outputFile, text, emotionLabel, 'cloud')
+
+      // ── [混合引擎] 记录当前引擎，尝试用备选引擎预加载 ──
+      this.lastUsedEngine = currentEngine
+      ttsPreloadBuffer.setCurrentEngine(currentEngine)
+      ttsPreloadBuffer.tryPreload(text, 'cloud', this.emotionParams)
     } catch (err) {
       if (attempt < maxAttempts) {
         log('WARN', 'tts_synthesis_retry', { attempt, error: String(err).slice(0, 100), text_len: text.length })
         return this._synthesize(text, outputFile, attempt + 1)
       }
       throw err
+    }
+  }
+
+  /**
+   * 将指定文本用指定引擎合成为音频文件。
+   *
+   * 供 TtsPreloadBuffer 作为合成回调使用。
+   * 与 _synthesize 的区别：不处理路由决策、不检查缓存、不触发预加载，
+   * 直接按指定引擎合成到指定输出文件。
+   *
+   * @param text 要合成的文本
+   * @param outputFile 输出文件路径
+   * @param engine 使用哪个引擎
+   */
+  private async _synthesizeToFile(text: string, outputFile: string, engine: 'cloud' | 'local'): Promise<void> {
+    if (engine === 'local') {
+      const result = await ttsPiperBridge.synthesizeWithPiper(text, this.emotionParams)
+      if (!result.success) throw new Error(result.error || 'piper bridge error')
+      if (result.audioFile) {
+        await fsp.copyFile(result.audioFile, outputFile)
+      } else {
+        throw new Error('piper bridge returned no audio file')
+      }
+    } else {
+      const params = this.emotionEnabled ? this.emotionParams : DEFAULT_EMOTION_PARAMS
+      const edgeTts = execFile(
+        'edge-tts',
+        ['--voice', params.voice, '--text', text, '--write-media', outputFile, '--rate', params.rate, '--pitch', params.pitch],
+        { timeout: 30000, windowsHide: true },
+      )
+      await new Promise<void>((resolve, reject) => {
+        edgeTts.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`edge-tts exit ${code}`))))
+        edgeTts.on('error', reject)
+      })
     }
   }
 
