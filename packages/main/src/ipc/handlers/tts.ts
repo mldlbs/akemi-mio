@@ -227,6 +227,32 @@ export function registerTtsHandlers({ agentService, ttsService }: HandlerContext
     }
   })
 
+  // ══════════════════════════════════════════
+  //  QoS 服务质量评估（混合引擎）
+  // ══════════════════════════════════════════
+
+  ipcMain.handle('tts:qos:status', async () => {
+    try { return { success: true, status: ttsService.getQosFullStatus() } }
+    catch (err) { log('ERROR', 'tts_qos_status_failed', { error: String(err) }); return { success: false } }
+  })
+
+  ipcMain.handle('tts:qos:refresh', async () => {
+    try {
+      const score = await ttsService.refreshQosScore()
+      return { success: true, score }
+    } catch (err) { log('ERROR', 'tts_qos_refresh_failed', { error: String(err) }); return { success: false } }
+  })
+
+  ipcMain.handle('tts:qos:toggle', async (_event, enabled: boolean) => {
+    try { ttsService.setQosEnabled(enabled); return { success: true, enabled } }
+    catch (err) { log('ERROR', 'tts_qos_toggle_failed', { error: String(err) }); return { success: false } }
+  })
+
+  ipcMain.handle('tts:preload:status', async () => {
+    try { return { success: true, state: ttsService.getPreloadBufferState() } }
+    catch (err) { log('ERROR', 'tts_preload_status_failed', { error: String(err) }); return { success: false } }
+  })
+
   // User context
   ipcMain.handle('tts:userContext:toggle', async (_event, enabled: boolean) => {
     try {

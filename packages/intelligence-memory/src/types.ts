@@ -171,61 +171,64 @@ export interface VectorEntry {
   createdAt: number
   updatedAt: number
 }
-// ============================================================
-//  ???? / ?????? / ??-????
-// ============================================================
+// ══════════════════════════════════════════
+//  记忆驱动的 Agent 主动服务（Memory Snapshot）
+// ══════════════════════════════════════════
 
-/** ??????? */
+/** 用户偏好摘要 */
 export interface PreferenceSummary {
   key: string
   value: string
   category: string
 }
 
-/** ????????? Agent ????? */
+/** 连续多日话题检测结果 */
 export interface ConsecutiveDayTopic {
-  /** ???? */
+  /** 话题标签 */
   topic: string
-  /** ?????? */
+  /** 连续讨论的天数（含当天） */
   consecutiveDayCount: number
-  /** ??????? */
+  /** 首次出现的时间戳 */
   firstSeenAt: number
-  /** ??????? */
+  /** 最后一次出现的时间戳 */
   lastSeenAt: number
-  /** ???????? */
+  /** 历史出现总天数 */
   totalDayCount: number
 }
 
-/** ???????? */
+/** 话题到工具的映射条目 */
 export interface TopicToolMapping {
-  /** ???? */
+  /** 话题关键字（匹配 extractTopics 的标签） */
   topic: string
-  /** ???????????? */
+  /** 建议预加载的工具名称列表 */
   tools: string[]
-  /** ?????? */
+  /** 工具用途描述 */
   description: string
 }
 
-/** ?????MemorySnapshotManager ????????? */
+/**
+ * 结构化的记忆快照 — 由 MemorySnapshotManager 在每次对话后生成。
+ * 压缩最近 N 轮对话摘要、话题标签、用户偏好，供 Agent 启动时注入系统提示。
+ */
 export interface MemorySnapshot {
-  /** ?? ID */
+  /** 快照 ID */
   id: string
-  /** ????? */
+  /** 创建时间戳 */
   createdAt: number
-  /** ?????????? */
+  /** 压缩后的摘要文本（最近 3-5 轮对话的关键信息） */
   compressedSummary: string
-  /** ?????? */
+  /** 聚合的话题标签（去重、按频率降序） */
   topTopics: string[]
-  /** ?????? */
+  /** 用户偏好摘要 */
   preferences: PreferenceSummary[]
-  /** ?????? */
+  /** 检测到的连续多日重复话题 */
   consecutiveDayTopics: ConsecutiveDayTopic[]
-  /** ????????? */
+  /** 建议预加载的工具名列表 */
   suggestedTools: string[]
-  /** ???????????? */
+  /** 开场建议文本 */
   openingSuggestion: string
-  /** ???? */
+  /** 快照版本（递增） */
   version: number
-  /** ???????? ID ?? */
+  /** 本次快照基于的 SummaryEntry ID 列表（用于增量更新） */
   basedOnSummaryIds: string[]
 }

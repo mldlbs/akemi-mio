@@ -5,6 +5,9 @@ import { useState, useEffect, useCallback } from 'react'
 // =============================================================================
 //
 // 从主进程接收行为预测事件，以非侵入方式展示预测内容。
+// 支持两种预测来源:
+//   1. BehaviorPeriodicPredictor — 查询话题预测（如"听音乐""查看天气"）
+//   2. AsrKeywordActionTracker — ASR 关键词驱动的动作预测（如"上午好，要打开浏览器吗？"）
 //
 // 轻打扰设计:
 //   - 小图标展示，不抢占焦点
@@ -30,27 +33,51 @@ interface PredictionEvent {
 // =============================================================================
 
 const TOPIC_ICONS: Record<string, string> = {
-  天气: '🌤️',
-  时间: '🕐',
-  新闻: '📰',
-  编程: '💻',
-  写作: '✍️',
-  学习: '📚',
-  翻译: '🔤',
-  图片: '🎨',
-  音乐: '🎵',
-  视频: '🎬',
-  搜索: '🔍',
-  设置: '⚙️',
-  帮助: '❓',
-  推荐: '👍',
-  日程: '📅',
-  交通: '🚗',
+  '天气': '🌤️',
+  '时间': '🕐',
+  '新闻': '📰',
+  '编程': '💻',
+  '写作': '✍️',
+  '学习': '📚',
+  '翻译': '🔤',
+  '图片': '🎨',
+  '音乐': '🎵',
+  '视频': '🎬',
+  '搜索': '🔍',
+  '设置': '⚙️',
+  '帮助': '❓',
+  '推荐': '👍',
+  '日程': '📅',
+  '交通': '🚗',
+  // ASR 关键词驱动的动作预测（英文 action category）
+  'browse': '🌐',
+  'music': '🎵',
+  'weather': '🌤️',
+  'news': '📰',
+  'code': '💻',
+  'schedule': '📅',
+  'write': '✍️',
+  'translate': '🔤',
+  'image': '🎨',
+  'study': '📚',
+  'video': '🎬',
+  'help': '❓',
 }
+
+/** ASR 动作类别列表（用于判断事件类型） */
+const ASR_ACTION_CATEGORIES = new Set([
+  'browse', 'music', 'weather', 'news', 'code',
+  'schedule', 'write', 'translate', 'image', 'study', 'video', 'help',
+])
 
 /** 根据话题获取图标 */
 function getTopicIcon(topic: string): string {
   return TOPIC_ICONS[topic] || '💡'
+}
+
+/** 判断事件是否为 ASR 语音习惯动作提示 */
+function isAsrActionHint(topic: string): boolean {
+  return ASR_ACTION_CATEGORIES.has(topic)
 }
 
 // =============================================================================
@@ -99,11 +126,12 @@ export function PeriodicPredictionToast() {
       {events.map((event) => {
         const isExpanded = expandedId === event.eventId
         const confidencePct = Math.round(event.confidence * 100)
+        const isAction = isAsrActionHint(event.topic)
 
         return (
           <div
             key={event.eventId}
-            className={`prediction-toast-item ${isExpanded ? 'expanded' : ''}`}
+            className={`prediction-toast-item ${isExpanded ? 'expanded' : ''} ${isAction ? 'asr-action-hint' : ''}`}
             onClick={() => toggleExpand(event.eventId)}
             role="button"
             tabIndex={0}
@@ -114,7 +142,9 @@ export function PeriodicPredictionToast() {
             {/* 紧凑视图：图标 + 简短描述 */}
             <div className="prediction-toast-compact">
               <span className="prediction-toast-icon">{getTopicIcon(event.topic)}</span>
-              <span className="prediction-toast-text">{event.description}</span>
+              <span className={`prediction-toast-text ${isAction ? 'prediction-toast-action-text' : ''}`}>
+                {event.description}
+              </span>
               <span className="prediction-toast-confidence">{confidencePct}%</span>
               <button
                 className="prediction-toast-dismiss"
@@ -132,6 +162,10 @@ export function PeriodicPredictionToast() {
             {/* 展开视图：详细信息 */}
             {isExpanded && (
               <div className="prediction-toast-detail">
+                <div className="prediction-toast-detail-row">
+                  <span className="prediction-toast-detail-label">类型</span>
+                  <span>{isAction ? '🎤 语音习惯预测' : '📊 行为模式预测'}</span>
+                </div>
                 <div className="prediction-toast-detail-row">
                   <span className="prediction-toast-detail-label">话题</span>
                   <span>{event.topic}</span>

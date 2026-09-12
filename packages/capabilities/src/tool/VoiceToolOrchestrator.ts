@@ -66,14 +66,35 @@ export interface ToolCaller {
   callTool(name: string, args: Record<string, any>): Promise<string>
 }
 
+/** TTS 播报回调 — 语音反馈执行结果 */
+export type TtsSpeaker = (text: string) => Promise<void>
+
 // ── 编排器 ──
 
 export class VoiceToolOrchestrator {
   private toolCaller: ToolCaller | null = null
+  private ttsSpeaker: TtsSpeaker | null = null
+  /** 是否在工具链执行后自动播报语音反馈 */
+  private _autoTtsFeedback = true
 
   /** 设置工具调用器（ServerManager 适配） */
   setToolCaller(caller: ToolCaller): void {
     this.toolCaller = caller
+  }
+
+  /** 设置 TTS 播报回调 */
+  setTtsSpeaker(speaker: TtsSpeaker): void {
+    this.ttsSpeaker = speaker
+  }
+
+  /** 启用/禁用自动语音反馈 */
+  setAutoTtsFeedback(enabled: boolean): void {
+    this._autoTtsFeedback = enabled
+  }
+
+  /** 获取自动语音反馈状态 */
+  get autoTtsFeedback(): boolean {
+    return this._autoTtsFeedback
   }
 
   /**
@@ -238,7 +259,128 @@ export class VoiceToolOrchestrator {
       success: true,
     })
 
+    // ── 自动语音播报执行结果 ──
+    if (this._autoTtsFeedback && this.ttsSpeaker) {
+      const ttsText = this.buildTtsFeedback(steps, req.intent)
+      if (ttsText) {
+        this.ttsSpeaker(ttsText).catch((err: unknown) =>
+          log('WARN', 'voice_orchestrate_tts_feedback_error', {
+            request_id: rid,
+            error: String(err),
+          }),
+        )
+      }
+    }
+
     return { success: true, steps, summary }
+  }
+
+  /**
+   * 构建执行结果语音播报文本。
+   * 只在有 TTS speaker 时调用。
+   */
+  private buildTtsFeedback(
+    steps: VoiceExecuteResult['steps'],
+    intentName: string,
+  ): string {
+    const successCount = steps.filter((s) => s.success).length
+    const totalCount = steps.length
+
+    if (successCount === 0) {
+      return `操作执行失败，${totalCount} 个步骤全部出错。`
+    }
+
+    // 简短播报：几步成功、几步失败
+    const successPart = `${successCount} 个步骤执行成功`
+    const failCount = totalCount - successCount
+    const failPart = failCount > 0 ? `，${failCount} 个步骤失败` : ''
+
+    // 取最后一步的输出摘要作为主要播报内容
+    const lastStep = steps[steps.length - 1]
+    let resultSummary = ''
+    if (lastStep.success && lastStep.output) {
+      // 清理输出中的标记和过长的内容
+      const clean = lastStep.output
+        .replace(/[#*`\[\]]/g, '')
+        .replace(/\n+/g, '，')
+        .trim()
+      resultSummary = clean.length > 120
+        ? clean.slice(0, 120) + '...'
+        : clean
+    }
+
+    if (resultSummary) {
+      return `${successPart}${failPart}。${resultSummary}`
+    }
+    return `${successPart}${failPart}。`
+  }
+
+  /**
+   * 一站式编排：匹配 → 确认（回调通知上层）→ 执行 → TTS 播报
+   *
+   * 适用于外部调用方（IPC handler）的一次性操作流程。
+   * 确认环节通过回调通知，由调用方（如 VoiceConfirmationSession）处理。
+   *
+   * @param text 用户语音文本
+   * @param onNeedConfirm 需要确认时的回调（intent 信息 → Promise<是否确认>）
+   * @param requestId 可选的请求 ID
+   * @returns 执行结果或匹配结果
+   */
+  async matchAndExecute(
+    text: string,
+    onNeedConfirm?: (info: {
+      intentName: string
+      description: string
+      confirmMessage: string
+      slots: Record<string, string>
+      tools: Array<{ tool: string; args: Record<string, string> }>
+    }) => Promise<boolean>,
+    requestId?: string,
+  ): Promise<
+    | { matched: false; fallbackText: string }
+    | { matched: true; result: VoiceExecuteResult }
+  > {
+    const rid = requestId || createRequestId()
+
+    // 第一步：匹配
+    const matchResult = this.match({ text, requestId: rid })
+    if (!matchResult.matched || !matchResult.intent) {
+      return { matched: false, fallbackText: text }
+    }
+
+    const intent = matchResult.intent
+    const requireConfirm = matchResult.intent.name ? true : true // 从意图定义读取
+
+    // 第二步：确认（如果注册了确认回调）
+    if (onNeedConfirm && requireConfirm) {
+      const confirmed = await onNeedConfirm({
+        intentName: intent.name,
+        description: intent.description,
+        confirmMessage: intent.confirmMessage,
+        slots: intent.slots,
+        tools: intent.toolSequence,
+      })
+
+      if (!confirmed) {
+        log('INFO', 'voice_orchestrate_user_cancelled', {
+          request_id: rid,
+          intent: intent.name,
+        })
+        return {
+          matched: true,
+          result: { success: false, steps: [], summary: '用户取消了操作' },
+        }
+      }
+    }
+
+    // 第三步：执行
+    const result = await this.execute({
+      intent: intent.name,
+      slots: intent.slots,
+      requestId: rid,
+    })
+
+    return { matched: true, result }
   }
 
   // ── 私有方法 ──

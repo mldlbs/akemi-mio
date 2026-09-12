@@ -76,6 +76,8 @@ import { SolverScannerCollector, AdaptiveSolverExecutor } from '@akemi-mio/evolu
 import { evolutionFeedbackCollector } from '@akemi-mio/evolution-feedback'
 import { userErrorPatternCollector } from './UserErrorPatternCollector'
 import { learningCurveExecutor } from './LearningCurveExecutor'
+import { MCPCacheOptimizationCollector } from './MCPCacheOptimizationCollector'
+import { MCPCacheOptimizationExecutor } from './MCPCacheOptimizationExecutor'
 
 export interface PipelineConfig {
   projectRoot: string
@@ -196,6 +198,8 @@ export class PipelineOrchestrator {
     registerCollector(evolutionFeedbackCollector)
     // 用户错误模式采集器（学习曲线适配）
     registerCollector(userErrorPatternCollector)
+    // MCP 缓存策略优化采集器（延迟驱动缓存调优）
+    registerCollector(new MCPCacheOptimizationCollector())
 
     // Stage 3: 从注册表加载到本地
     for (const c of getAllCollectors()) {
@@ -226,6 +230,7 @@ export class PipelineOrchestrator {
     registerExecutor(autoPatchExecutor)
     registerExecutor(toolEvolutionExecutor)
     registerExecutor(toolConfigOptExecutor)
+    registerExecutor(new MCPCacheOptimizationExecutor())
     registerExecutor(ttsConfigOptExecutor)
     registerExecutor(ttsTypographyExecutor)
     registerExecutor(typeRefactorExecutor)

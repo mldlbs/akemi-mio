@@ -34,6 +34,7 @@ import {
   type PeriodicQueryPrediction,
   type PeriodicPredictionEvent,
 } from './BehaviorPeriodicPredictor'
+import { asrKeywordActionTracker } from './AsrKeywordActionTracker'
 
 // ══════════════════════════════════════════
 //  常量
@@ -178,12 +179,54 @@ export class BehaviorPeriodicPreloadService {
         }
       }
 
-      if (toProcess.length === 0) {
+      // ── 3. ASR 关键词动作预测 ──
+      const asrHints: Array<{ message: string; icon: string; category: string; confidence: number }> = []
+      try {
+        const asrSlot = asrKeywordActionTracker.predictCurrentSlot()
+        if (asrSlot && asrSlot.actionable) {
+          for (const p of asrSlot.predictions) {
+            if (p.suggestHint) {
+              asrHints.push({
+                message: p.hintMessage,
+                icon: p.icon,
+                category: p.category,
+                confidence: p.confidence,
+              })
+            }
+          }
+        }
+      } catch {
+        // ASR 关键词跟踪器不可用时优雅降级
+      }
+
+      // ── 推送 ASR 动作提示 ──
+      if (asrHints.length > 0 && this.notifyRenderer) {
+        const now = Date.now()
+        for (const hint of asrHints) {
+          const eventId = `asr_${hint.category}_${now}`
+          const lastSent = this.sentEvents.get(`asr:${hint.category}`) ?? 0
+          if (now - lastSent < MIN_REPEAT_INTERVAL_MS) continue
+
+          const event: PeriodicPredictionEvent = {
+            topic: hint.category,
+            description: hint.message,
+            confidence: hint.confidence,
+            associatedTool: undefined,
+            preloaded: false,
+            eventId,
+            expiresAt: now + PREDICTION_EXPIRY_MS,
+          }
+          this.notifyRenderer(event)
+          this.sentEvents.set(`asr:${hint.category}`, now)
+        }
+      }
+
+      if (toProcess.length === 0 && asrHints.length === 0) {
         log('DEBUG', 'periodic_preload_no_actionable_predictions')
         return
       }
 
-      // 3. 按话题去重
+      // 4. 按话题去重
       const seenTopics = new Set<string>()
       const uniquePredictions = toProcess.filter(({ prediction }) => {
         if (seenTopics.has(prediction.topic)) return false
