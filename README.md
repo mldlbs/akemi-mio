@@ -26,7 +26,11 @@
 ## 环境要求
 
 - **Node.js 22** 或更新版本
-- **Windows** 用于打包构建。开发环境在 macOS 和 Linux 上也能跑。
+- **pnpm 9+**（推荐；本工程是 pnpm workspace，配置见 `pnpm-workspace.yaml`）
+- **Windows 11** 用于打包构建。开发环境在 macOS 和 Linux 上也能跑。
+- **原生模块编译环境**（首次安装需要）：
+  - Python 3.x（node-gyp 依赖）
+  - C/C++ 构建工具链（Windows 装 *Desktop development with C++* 工作负载或 VS Build Tools）
 
 > [!IMPORTANT]
 > `models/` 目录不在仓库里。语音输入要先准备模型权重才能用，详见 [模型权重](#模型权重)。
@@ -38,28 +42,59 @@
 ```bash
 git clone https://github.com/akemi-mio/akemi-mio.git
 cd akemi-mio
-npm install
+pnpm install
 ```
 
-这是个 workspace 工程，所以 `npm install` 会同时把 `packages/` 下的本地包链接好。
+`pnpm install` 按 `pnpm-workspace.yaml` 链接 `packages/` 下全部 68 个本地包，并依据 `allowBuilds` 为 `better-sqlite3` / `onnxruntime-node` / `sharp` 等原生模块构建 Electron prebuild。
+
+> 若只用 npm：`package.json` 已声明 `"workspaces": ["packages/*"]`，`npm install` 也能链接本地包。但仓库锁文件是 `pnpm-lock.yaml`，混用会导致依赖树漂移，建议坚持 pnpm。
+
+首次运行 `pnpm dev` 时，`scripts/dev.js` 会自动为 `better-sqlite3` 安装/校验 Electron 原生 prebuild，无需手动操作。
 
 ## 快速开始
 
-以开发模式启动：
+以开发模式启动（壁纸窗口出现，并注册全局快捷键）：
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
-壁纸会出现，应用同时注册全局快捷键。按 <kbd>Ctrl</kbd> + <kbd>Space</kbd> 切换交互模式，开始收音。
+启动期可用环境变量（仅本地调试，可选）：
 
-构建 Windows 免安装版本：
+| 变量 | 作用 | 默认值 |
+|---|---|---|
+| `RUNTIME_ENABLED` | 是否启用 mio 运行时 | `1` |
+| `LLM_KEY` | 直接注入 LLM API Key（绕过凭据库，仅本地调试） | 空 |
+| `AKEMI_MIO_OBSERVABILITY` | 打开运行时可观测性日志 | 空 |
+
+启动后按 <kbd>Ctrl</kbd> + <kbd>Space</kbd> 切换交互模式，开始收音。
+
+构建分发包：
 
 ```bash
-npm run build:win
+pnpm build:win            # Windows 免安装版 (portable) → dist-electron/
+pnpm build:win:installer  # Windows NSIS 安装包
+pnpm publish:win          # 构建并发布（含自动更新）
 ```
 
-产物输出到 `dist-electron/`。
+### Mio 运行时 CLI
+
+本仓库内置 `mio` 智能体运行时（`packages/mio-cli`），也可作为已发布的 `mio-agent-runtime` 独立安装：
+
+```bash
+# 仓库内直接调用
+node packages/mio-cli/bin/mio.js --help
+
+# 或全局安装发布版
+npm install -g mio-agent-runtime
+mio init                   # 初始化 MIO_HOME
+mio install workbuddy      # 接入宿主（codex|opencode|workbuddy|hermes|claude）
+mio status                 # 查看运行时与适配器状态
+mio observe --start        # 后台被动观察，自动沉淀任务结果到记忆库
+mio recall "上次失败的根因"   # 从终端检索 Mio 记忆
+```
+
+CLI 暴露 47 个 MCP 工具，覆盖记忆、观察管线、洞察自省、创意引擎与演化（evolution）五大域；运行时依赖 9 个 `@akemi-mio/*` 包，详见 [`packages/mio-cli/README.md`](packages/mio-cli/README.md)。
 
 ## 模型权重
 
@@ -103,28 +138,29 @@ models/
 
 ## 开发
 
-提 PR 之前先跑完这些检查：
+提 PR 之前先跑完这些检查（等价 `pnpm typecheck && pnpm lint && pnpm test`）：
 
 ```bash
-npm run typecheck
-npm run lint
-npm test
+pnpm typecheck
+pnpm lint
+pnpm test
 ```
 
 | 命令 | 作用 |
 |---|---|
-| `npm run dev` | 带热重载的开发构建 |
-| `npm run build` | 生产构建，不打包 |
-| `npm run build:win` | Windows 免安装版本 |
-| `npm run build:win:installer` | Windows NSIS 安装包 |
-| `npm run typecheck` | node 与 web 两个目标各做一次类型检查 |
-| `npm run lint` | 对 `src/` 跑 ESLint |
-| `npm test` | Vitest 测试套件 |
-| `npm run test:renderer` | 只跑渲染层测试 |
-| `npm run coverage` | 覆盖率报告 |
-| `npm run typecheck:budget` | 类型错误数超出预算时失败 |
+| `pnpm dev` | 带热重载的开发构建（启动壁纸 + 注册快捷键） |
+| `pnpm build` | 生产构建，不打包 |
+| `pnpm build:win` | Windows 免安装版本 |
+| `pnpm build:win:installer` | Windows NSIS 安装包 |
+| `pnpm typecheck` | node 与 web 两个目标各做一次类型检查 |
+| `pnpm lint` | 对 `src/` 跑 ESLint |
+| `pnpm test` | Vitest 测试套件 |
+| `pnpm test:renderer` | 只跑渲染层测试 |
+| `pnpm test:preload` | 只跑预加载层测试 |
+| `pnpm coverage` | 覆盖率报告 |
+| `pnpm typecheck:budget` | 类型错误数超出预算时失败 |
 
-测试用 Vitest。压力测试和基准测试收在 `npm run test:stress` 后面。
+测试用 Vitest。压力测试与基准测试收在 `pnpm test:stress` 后面。
 
 ## 仓库结构
 
@@ -168,17 +204,37 @@ akemi-mio/
 
 ## 参与贡献
 
-欢迎贡献。简化版流程如下：
+欢迎贡献。完整流程如下。
 
-1. Fork 并从 `main` 切分支。
-2. 改动保持聚焦，一个 PR 只做一件事。
-3. 跑 `npm run typecheck`、`npm run lint` 和 `npm test`。
-4. 说明你验证了什么，而不只是改了什么。
+### 起步
+1. Fork 并 `git clone` 你自己的副本。
+2. 从 `main` 切出功能分支：`git checkout -b feat/short-description`。
 
-请不要提交 API Key、模型权重，或 `test-user-data/` 里的任何内容。这些路径已在 gitignore 里，但提交前还是用 `git status` 过一眼。
+### 开发
+3. 用 **pnpm** 管理依赖，不要混用 npm。
+4. 改动保持聚焦——**一个 PR 只做一件事**。
+5. 提交前跑完质量门禁：
+
+   ```bash
+   pnpm typecheck   # node + web 两套类型检查
+   pnpm lint        # ESLint 仅扫 src/
+   pnpm test        # Vitest 全量
+   ```
+
+   也可只跑某个层面：`pnpm test:renderer`、`pnpm test:preload`、`pnpm typecheck:budget`。
+6. 提交信息用祈使句，聚焦「改了什么 / 为什么」；关联 issue 时写 `Fixes #123`。
+
+### 提交 PR
+7. PR 描述说明**你验证了什么**，而不只是改了什么——附复现步骤或测试输出。
+8. 不要提交任何敏感或体积大的产物：`API Key`、`models/` 权重、`test-user-data/`、`.env`、构建目录均已 gitignore，但提交前仍用 `git status` 过一眼。
+
+### 约定
+- 代码风格由 **ESLint + Prettier** 约束，可跑 `pnpm format` 自动格式化。
+- 新增 `packages/` 下的本地包时，只要落在 `pnpm-workspace.yaml` 的 glob（`packages/*`）内就会被自动链接，无需手改 `package.json` 的 workspaces。
+- 本仓库集成 Mio 记忆体系：`AGENTS.md` 记录了 `mio` 的记忆 / 观察 / 策略约定，AI 编程助手会自动遵循；涉及架构、依赖或长期行为的改动，记得让 Mio 记录决策（CLI `mio memory record` 或对应 MCP 工具）。
 
 > [!TIP]
-> `AGENTS.md` 记录了本仓库的 `mio` 记忆约定。如果你在这里用 AI 编程助手，它会自动遵循这些规则。
+> 不清楚该改哪层？渲染层在 `src/renderer/`，主进程入口在 `packages/main`，可独立复用的纯逻辑包在 `packages/`（如 `audio/`、`platform/`、`core/`），详见 [仓库结构](#仓库结构)。
 
 ## 许可证
 

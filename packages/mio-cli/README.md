@@ -4,7 +4,7 @@ Mio Agent Runtime 的可发布 CLI 包。
 
 安装一次，所有 Agent 自动接入 Mio。
 
-## Install
+## 安装
 
 ```bash
 npm install -g mio-agent-runtime
@@ -15,7 +15,7 @@ npm install -g mio-agent-runtime
 > 旧版本只有主动 MCP 规则注入，没有「无感存/取」。安装后执行一次
 > `mio init && mio install <host>`。
 
-## Commands
+## 命令
 
 ```text
 mio init                    Initialize MIO_HOME
@@ -47,95 +47,71 @@ mio memory migrate --ids a,b --scope global|project   Move records between the p
 mio policy check "<action>" Check the historical risk of an action before running it (--project; reads global MIO_HOME)
 mio creativity status        Show creativity hypothesis counts and recent top ideas (reads global MIO_HOME)
 mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
+mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
 mio --json status           Machine-readable status
 mio --json agents           Machine-readable agents
 mio --json evolution status Machine-readable evolution module health
 ```
 
-## MCP Tools
+## MCP 工具
 
-MCP server exposes 47 tools across 5 domains:
+MCP 服务端在 5 大域共暴露 47 个工具：
 
-### Memory (10)
+### 记忆（10）
 `mio.memory.query` · `mio.memory.record` · `mio.memory.archive` · `mio.memory.merge` · `mio.memory.migrate` · `mio.memory.analyze` · `mio.experience.list` · `mio.experience.confirm` · `mio.experience.reuse` · `mio.policy.check`
 
-### Observer Pipeline (14)
+### 观察管线（14）
 `mio.observer.world_model` · `mio.observer.trends` · `mio.observer.research` · `mio.observer.insights` · `mio.observer.status` · `mio.observer.collect` · `mio.observer.ferment` · `mio.observer.essays` · `mio.observer.dag` · `mio.observer.ingest` · `mio.observer.subscribe` · `mio.observer.digest`
-`mio.trace.query` — query the trace log (task outcomes, tool errors) by type/outcome/agent/project/time window; also available as `mio traces` on the CLI
-`mio.digest.generate` — aggregate recent data into an actionable digest (agent success rates, project activity, error hotspots, reuse evidence, suggestions); also available as `mio digest` on the CLI
+`mio.trace.query` — 按类型/结果/agent/项目/时间窗口查询 trace 日志（任务结果、工具错误）；CLI 上也可通过 `mio traces` 调用
+`mio.digest.generate` — 把近期数据聚合成可执行的 digest（agent 成功率、项目活跃度、错误热点、复用证据、建议）；CLI 上也可通过 `mio digest` 调用
 
-### Insight Self-Observation (4)
+### 洞察自省（4）
 `mio.insight.status` · `mio.insight.list` · `mio.insight.mark_reported` · `mio.insight.generate`
 
-### Creativity Engine (4)
+### 创意引擎（4）
 `mio.creativity.generate` · `mio.creativity.ferment` · `mio.creativity.list` · `mio.creativity.status`
 
-### Task, Agent & Evolution (15)
+### 任务、Agent 与演化（15）
 `mio.task.route` · `mio.task.record_outcome` · `mio.agent.register` · `mio.agent.list` · `mio.agent.report` · `mio.host.capabilities` · `mio.evolution.status` · `mio.evolution.report` · `mio.evolution.shadow.record` · `mio.evolution.dual_write.record` · `mio.evolution.cutover.readiness` · `mio.evolution.cutover.apply` · `mio.evolution.migration.plan` · `mio.evolution.authority.plan` · `mio.phase0.report`
 
-## Packages
+## 包
 
-`mio-agent-runtime` depends on 14 packages that are published to npm under the
-`@akemi-mio` scope. All 14 carry version `0.1.0` and are released only when
-their source changes, so a normal CLI release does not republish them.
+`mio-agent-runtime` 依赖发布在 `@akemi-mio` scope 下的 **9** 个包（声明于 `package.json`，均为 `0.1.0`）。它们仅在源码变更时才发布，所以普通的 CLI 发布不会重新发布这些包。
 
-| Package | Description |
+| 依赖 | 说明 |
 |---|---|
-| `@akemi-mio/runtime-contracts` | Shared type definitions |
-| `@akemi-mio/runtime-foundation` | Logging, EventBus, memory schemas |
-| `@akemi-mio/experience-memory` | Experience recording and retrieval |
-| `@akemi-mio/evolution-learning` | Evolution learning engine |
-| `@akemi-mio/evolution-strategy` | Evolution strategy engine |
-| `@akemi-mio/evolution-safety` | Safety guardrails |
-| `@akemi-mio/evolution-scheduler` | Evolution scheduler |
-| `@akemi-mio/analysis` | ModuleScanner — static analysis of package source trees (zero deps) |
-| `@akemi-mio/messaging` | ExternalMessageGateway — inbound message routing + notification dispatch via injected renderer/outbox (zero deps; telegram adapters stay host-side) |
-| `@akemi-mio/reasoning` | Reasoning planner — pure-function scoring for reasoning directives (injectable logger) |
-| `@akemi-mio/resource-control` | Resource budgets, background task runner, budget rebalancing (injectable runtime) |
-| `@akemi-mio/agent-persona` | Persona drift control, content classification, user behavior analysis (injectable logger) |
-| `@akemi-mio/observer` | ObserverService — multi-source data collection, trend analysis, deep research, world model, fermentation, DAG state machine, self-evolution engine (zero npm deps) |
-| `@akemi-mio/insight` | InsightService — LLM-based insight generation, conflict/drift/repetition/stalled-goal/friction detectors, presence service, insight scoring (zero npm deps) |
-| `mio-agent-runtime` | This package — CLI + MCP server |
+| `@akemi-mio/runtime-contracts` | 共享类型定义 |
+| `@akemi-mio/runtime-foundation` | 日志、EventBus、记忆 schema |
+| `@akemi-mio/experience-memory` | 经验记录与检索 |
+| `@akemi-mio/evolution-learning` | 演化学习引擎 |
+| `@akemi-mio/evolution-strategy` | 演化策略引擎 |
+| `@akemi-mio/evolution-safety` | 安全护栏 |
+| `@akemi-mio/evolution-scheduler` | 演化调度器 |
+| `@akemi-mio/observer` | ObserverService —— 多源数据采集、趋势分析、深度研究、世界模型、发酵、DAG 状态机、自演化引擎（零 npm 依赖） |
+| `@akemi-mio/insight` | InsightService —— 基于 LLM 的洞察生成、冲突/漂移/重复/停滞目标/摩擦检测器、在场服务、洞察打分（零 npm 依赖） |
 
-### Host-coupled packages (not published)
+以下 `@akemi-mio` 包同样位于本 monorepo 中并独立发布，但**不是**本 CLI 的依赖——其源码从不 import 它们，因此未声明在 `package.json` 里：
 
-`@akemi-mio/core` and `@akemi-mio/creativity` are consumed inside this
-monorepo through `workspace:*` links, so they are built from source and are
-**not** on npm. `packages/cli/` no longer exists. Do not add these to a
-downstream `package.json` — the install will fail.
+- `@akemi-mio/analysis` — ModuleScanner，对包源码树做静态分析（零依赖）
+- `@akemi-mio/messaging` — ExternalMessageGateway，入站消息路由 + 通知分发（零依赖）
+- `@akemi-mio/reasoning` — 纯函数打分规划器，用于推理指令
+- `@akemi-mio/resource-control` — 资源预算、后台任务运行器
+- `@akemi-mio/agent-persona` — 人格漂移控制、内容分类
 
-## Host notes
+它们可直接被其它 Node 项目消费。`mio-agent-runtime` 自身是 CLI + MCP server 包。
 
-- OpenCode uses `~/.config/opencode/opencode.json` for MCP registration and
-  `~/.config/opencode/AGENTS.md` for global instructions. `mio install opencode`
-  writes both files and injects Mio usage rules into `AGENTS.md` so OpenCode
-  calls Mio memory/observer/policy automatically. If OpenCode is already
-  running, restart it once so it reloads both files. `mio observe` also
-  passively tails the OpenCode session database (`opencode db`) without
-  requiring the model to call Mio tools.
-- Hermes uses `hermes mcp add mio-intelligence --command node --args <server>`
-  to register the Mio MCP server. Hermes has native memory and reads
-  AGENTS.md Context Files, so retrieval works without Mio rule injection.
-- Claude Code: `mio install claude` registers the Mio MCP server at user
-  scope in `~/.claude.json` (`mcpServers`) — no interactive approval needed,
-  unlike project-scope `.mcp.json` — and injects Mio usage rules into
-  `~/.claude/CLAUDE.md` (auto-loaded user memory) plus `<workspace>/CLAUDE.md`
-  (project memory). Restart running Claude Code sessions to reload both.
-  `mio observe` passively tails `<config-dir>/projects/<munged-cwd>/*.jsonl`
-  session transcripts: sidechain (subagent) lines are skipped, each user
-  prompt closes the previous turn, `tool_result.is_error` lines are recorded
-  as error traces, and successful turn summaries are written back into the
-  workspace `CLAUDE.md` MIO_CONTEXT block so the next session retrieves them
-  passively. Set `CLAUDE_CONFIG_DIR` to override the config dir.
-- WorkBuddy uses `~/.workbuddy/mcp.json` and requires each custom MCP server to
-  be approved in `~/.workbuddy/mcp-approvals.json`. `mio install workbuddy`
-  writes both files and injects Mio usage rules into
-  `~/.workbuddy/CODEBUDDY.md` (user-level memory rules, auto-loaded by
-  WorkBuddy into every session; the CLI hardcodes the CodeBuddy product name, so the file is CODEBUDDY.md not WORKBUDDY.md) plus `<workspace>/AGENTS.md` (project-level).
-  If WorkBuddy is already running, restart it once so it reloads the approval
-  and memory rule files.
+### 与宿主耦合的包（不发布）
 
-## Passive observer (`mio observe`)
+`@akemi-mio/core` 与 `@akemi-mio/creativity` 通过 `workspace:*` 链接在本 monorepo 内部消费，因此从源码构建，**不**发布到 npm。`packages/cli/` 已不存在。不要把这两个包加进下游 `package.json`——安装会失败。
+
+## 宿主说明
+
+- OpenCode 通过 `~/.config/opencode/opencode.json` 做 MCP 注册，通过 `~/.config/opencode/AGENTS.md` 做全局指令。`mio install opencode` 会写入这两个文件，并向 `AGENTS.md` 注入 Mio 使用规则，使 OpenCode 自动调用 Mio 的记忆/观察/策略。若 OpenCode 已在运行，重启一次以重新加载这两个文件。`mio observe` 还会被动跟踪 OpenCode 会话数据库（`opencode db`），无需模型主动调用 Mio 工具。
+- Hermes 使用 `hermes mcp add mio-intelligence --command node --args <server>` 来注册 Mio MCP server。Hermes 有原生记忆并读取 AGENTS.md Context Files，因此无需注入 Mio 规则也能检索。
+- Claude Code：`mio install claude` 在用户级 `~/.claude.json`（`mcpServers`）注册 Mio MCP server——不像项目级 `.mcp.json` 需要交互式审批——并向 `~/.claude/CLAUDE.md`（自动加载的用户记忆）与 `<workspace>/CLAUDE.md`（项目记忆）注入 Mio 使用规则。重启运行中的 Claude Code 会话以重新加载两者。`mio observe` 被动跟踪 `<config-dir>/projects/<munged-cwd>/*.jsonl` 会话记录：跳过 sidechain（子 agent）行，每个用户 prompt 结束上一轮，`tool_result.is_error` 行记为错误 trace，成功轮次的摘要写回 workspace 的 `CLAUDE.md` 的 `MIO_CONTEXT` 块，供下一会话被动取用。可用 `CLAUDE_CONFIG_DIR` 覆盖配置目录。
+- WorkBuddy 使用 `~/.workbuddy/mcp.json`，并要求每个自定义 MCP server 在 `~/.workbuddy/mcp-approvals.json` 中审批通过。`mio install workbuddy` 会写入这两个文件，并向 `~/.workbuddy/CODEBUDDY.md`（用户级记忆规则，由 WorkBuddy 自动加载进每次会话；CLI 硬编码了 CodeBuddy 产品名，所以文件名是 CODEBUDDY.md 而非 WORKBUDDY.md）以及 `<workspace>/AGENTS.md`（项目级）注入 Mio 使用规则。若 WorkBuddy 已在运行，重启一次以重新加载审批与记忆规则文件。
+
+## 被动观察器（`mio observe`）
 
 WorkBuddy 的默认模型不一定会主动调用 Mio MCP 工具，即使规则已注入
 (`CODEBUDDY.md` / `AGENTS.md`)。`mio observe` 是一个不依赖模型自觉的
@@ -196,7 +172,7 @@ Hermes 本身有原生记忆，Mio 只负责让 Hermes 经验进入跨 Agent 生
 
 默认 `~/.mio-intelligence`，可通过环境变量 `MIO_HOME` 覆盖。
 
-## Package layout
+## 包结构
 
 ```text
 packages/mio-cli
@@ -223,85 +199,39 @@ packages/mio-cli
 └── package.json
 ```
 
-`server/memory-store.js` is the single implementation of memory
-query/record ranking (Latin token + CJK bigram scoring, project/global
-scope layers, reuse-evidence weighting). Both the MCP server
-(`mio.memory.query` / `mio.memory.record`) and the CLI
-(`mio recall` / `mio remember`) go through it, so rankings are identical
-across entry points. The same module also implements the hygiene
-operations — `analyze` / `archive` / `merge` / `migrate` — so
-`mio.memory.analyze` and `mio memory analyze` can never drift apart.
-`server/experience-store.js` and `server/policy-store.js` follow the
-same pattern for `mio.experience.*` and `mio.policy.check`; the policy
-store reuses the memory store's tokenizer, so policy risk evidence and
-related-memory ranking agree with `mio.memory.query` by construction.
-`server/creativity-engine.js` is the shared implementation behind
-`mio.creativity.*` — the CLI's `mio creativity status`/`list` and the MCP
-tools call the same `CreativityEngine`, so hypothesis counts can never
-drift between entry points.
-`server/agent-store.js` is the shared implementation behind `mio.agent.list` /
-`register` / `report`; the CLI's `mio agents list`/`report` and the MCP tools
-read the identical store, so observed-agent telemetry is the same everywhere.
-`server/digest.js`
-aggregates traces/memory/reuse into actionable reports (also exposed as
-`mio.digest.generate`), and `server/retention.js` powers `mio prune`
-(age/expiry trimming with backups; `memory.jsonl` is never touched
-without explicit `--memory --yes`).
+`server/memory-store.js` 是记忆查询/记录排序（Latin token + CJK bigram 打分、project/global 作用域分层、复用证据加权）的唯一实现。MCP 服务端（`mio.memory.query` / `mio.memory.record`）与 CLI（`mio recall` / `mio remember`）都经过它，因此各入口的排序结果完全一致。同一个模块还实现了卫生操作——`analyze` / `archive` / `merge` / `migrate`——所以 `mio.memory.analyze` 与 `mio memory analyze` 不可能各自漂移。`server/experience-store.js` 与 `server/policy-store.js` 对 `mio.experience.*` 与 `mio.policy.check` 遵循同样的模式；策略存储复用了记忆存储的分词器，因此策略风险证据与相关记忆排序在构造上就与 `mio.memory.query` 一致。`server/creativity-engine.js` 是 `mio.creativity.*` 背后的共享实现——CLI 的 `mio creativity status`/`list` 与 MCP 工具调用的是同一个 `CreativityEngine`，因此假设计数在入口间不会漂移。`server/agent-store.js` 是 `mio.agent.list` / `register` / `report` 背后的共享实现；CLI 的 `mio agents list`/`report` 与 MCP 工具读取的是同一个存储，因此被观察 agent 的遥测数据在任何地方都相同。`server/digest.js` 把 traces/memory/reuse 聚合成可执行报告（同样以 `mio.digest.generate` 暴露），`server/retention.js` 驱动 `mio prune`（按年龄/过期裁剪并备份；没有显式的 `--memory --yes` 绝不触碰 `memory.jsonl`）。
 
-## Memory hygiene
+## 记忆卫生
 
-`mio.memory.analyze` can diagnose duplicates and low-quality records, but
-until now the only way to act on that was through the MCP server. The
-`mio memory` subcommands close that gap:
+`mio.memory.analyze` 能诊断重复项与低质量记录，但此前唯一的处置途径是通过 MCP 服务端。`mio memory` 子命令补上了这个缺口：
 
 ```bash
-mio memory analyze                       # what needs attention?
-mio memory archive --ids mem_a,mem_b     # preview (no --yes = no write)
-mio memory archive --ids mem_a,mem_b --yes   # apply
-mio memory restore --ids mem_a           # undo
-mio memory merge --ids mem_a,mem_b --yes # collapse duplicates into one survivor
-mio memory migrate --ids mem_a --scope global   # promote to the global layer
+mio memory analyze                       # 需要关注什么？
+mio memory archive --ids mem_a,mem_b     # 预览（不加 --yes = 不写入）
+mio memory archive --ids mem_a,mem_b --yes   # 执行
+mio memory restore --ids mem_a           # 撤销
+mio memory merge --ids mem_a,mem_b --yes # 把重复项合并为一个幸存者
+mio memory migrate --ids mem_a --scope global   # 提升到 global 层
 ```
 
-Notes:
+说明：
 
-- **Archive is reversible**, not a delete. Archived records stay in
-  `memory.jsonl` with `archived: true` and drop out of `recall` and
-  `analyze`. `mio prune --memory` is still the only operation that
-  permanently removes records, and it still requires `--yes`.
-- **`archive` previews by default.** Without `--yes` it prints what would
-  change and exits `1`; this applies in `--json` mode too, so a script
-  cannot archive by accident. The ids are shown in the preview, which is
-  where a typo gets caught.
-- **Ids are accepted as `--ids a,b` or as bare positionals**
-  (`mio memory archive mem_a mem_b`). Ids never contain commas.
-- **Nothing changed exits non-zero.** If every id is unknown, already
-  archived, or belongs to another project, the command reports
-  `not found` / `already archived` and exits `1` rather than pretending
-  success.
-- **Duplicates use Jaccard similarity over Latin tokens and CJK bigrams**
-  with a `0.75` threshold, union-find grouped so `A~B, B~C` collapses
-  into one group. Above 1500 active records the scan is skipped and
-  `duplicatesSkipped` is reported instead of hanging on O(n²) work.
+- **归档可逆，不是删除**。被归档的记录仍以 `archived: true` 留在 `memory.jsonl` 中，并从 `recall` 与 `analyze` 中消失。`mio prune --memory` 仍是唯一会永久删除记录的操作，且仍需要 `--yes`。
+- **`archive` 默认先预览**。不加 `--yes` 时打印将要发生的变更并以退出码 `1` 结束；`--json` 模式同样如此，脚本无法意外归档。预览中会展示 id，拼写错误在此被捕获。
+- **id 既可写作 `--ids a,b`，也可作裸位置参数**（`mio memory archive mem_a mem_b`）。id 中绝不含逗号。
+- **无变更时以非零退出**。若每个 id 都未知、已归档或属于其它项目，命令会报告 `not found` / `already archived` 并以退出码 `1` 结束，而非假装成功。
+- **重复项使用 Latin token 与 CJK bigram 的 Jaccard 相似度**，阈值 `0.75`，用并查集聚类，使 `A~B, B~C` 坍缩为一组。活跃记录超过 1500 条时跳过扫描，改为报告 `duplicatesSkipped`，避免在 O(n²) 工作上卡死。
 
-### Merging duplicates
+### 合并重复项
 
-`analyze` reports duplicate groups but cannot resolve them — archiving
-each member by hand leaves the survivor without any record of what it
-absorbed. `mio memory merge` fixes that:
+`analyze` 会报告重复组但无法消解——逐个手动归档会让幸存者丢失它吸收的那些内容。`mio memory merge` 解决了这个问题：
 
 ```bash
-mio memory merge --ids mem_a,mem_b --yes                    # newest wins
-mio memory merge --ids mem_a,mem_b --keep mem_a --yes       # choose the survivor
+mio memory merge --ids mem_a,mem_b --yes                    # 最新者胜出
+mio memory merge --ids mem_a,mem_b --keep mem_a --yes       # 指定幸存者
 ```
 
-**Merge only combines byte-identical content by default.** This is a
-deliberate safety stance, not an oversight: measured against a real
-860-record store, 19 of 22 duplicate groups were byte-identical and 3
-were not. Concatenating divergent bodies corrupts them — one real case
-produced a record carrying both `Token 来源` and `凭证来源` for the same
-field, plus a duplicated header. So when a group's members disagree,
-merge **refuses and prints the candidates** instead of guessing:
+**默认只合并字节完全一致的内容。** 这是刻意为之的安全立场，而非疏漏：在真实 860 条记录的存储上实测，22 个重复组中有 19 个字节完全一致，3 个不一致。拼接分歧内容会破坏它们——一个真实案例产生了一条同时携带 `Token 来源` 和 `凭证来源` 同一字段、还多了重复表头的记录。因此当组内成员不一致时，merge **会拒绝并打印候选**，而不是猜测：
 
 ```bash
 mio memory merge --ids mem_a,mem_b --yes
@@ -310,33 +240,22 @@ mio memory merge --ids mem_a,mem_b --yes
 #   - mem_b (1174 chars, 2026-09-09T14:31:00.898Z)
 ```
 
-To resolve such a group you must name the body that survives, which is
-what `--keep` is for; `--allow-divergent` acknowledges that the others
-are being dropped rather than combined:
+要消解这样的组，必须指定保留哪份内容，这正是 `--keep` 的用途；`--allow-divergent` 表示承认其它成员是被丢弃而非合并：
 
 ```bash
 mio memory merge --ids mem_a,mem_b --keep mem_b --allow-divergent --yes
 ```
 
-What a merge writes:
+合并会写入的内容：
 
-- The **survivor** keeps its own body verbatim and gains
-  `supersedes: [<archived ids>]`, `mergedAt`, `mergedCount`, and a
-  unioned tag list so no retrieval keyword is lost.
-- The **other members** are archived with
-  `archiveReason: "merged-into:<survivor>"` and a `mergedInto` pointer.
-- It is **reversible**: `mio memory restore --ids <archived ids>` brings
-  the group back. The audit fields stay on the record, so the merge
-  history survives an undo.
-- A re-run that has nothing left to merge exits `1` and reports
-  `nothing left to merge` — it does not print an undo command for
-  records it did not archive.
+- **幸存者**原样保留自己的正文，并获得 `supersedes: [<archived ids>]`、`mergedAt`、`mergedCount`，以及合并后的标签列表，不丢失任何检索关键词。
+- **其它成员**以 `archiveReason: "merged-into:<survivor>"` 归档，并带上 `mergedInto` 指针。
+- 它**可逆**：`mio memory restore --ids <archived ids>` 能把整组恢复。审计字段保留在记录上，因此合并历史在撤销后依然存在。
+- 没有可合并内容时的重跑会以退出码 `1` 报告 `nothing left to merge`——不会为它没归档的记录打印撤销命令。
 
-## Policy check
+## 策略检查
 
-`mio.policy.check` has always been able to answer "is this action
-historically risky?" from the trace log, but only over MCP. `mio policy
-check` brings it to the terminal:
+`mio.policy.check` 一直能从 trace 日志回答「这个动作历史上是否有风险？」，但此前只通过 MCP 提供。`mio policy check` 把它带到了终端：
 
 ```bash
 mio policy check "npm publish"
@@ -359,24 +278,11 @@ Related memory:
 Historically risky: ... 
 ```
 
-Notes:
+说明：
 
-- **It reads the global `MIO_HOME`, not a per-project directory.** The
-  MCP server resolves its data dir as
-  `MIO_DATA_DIR || cwd/.mio-intelligence`, so an MCP call from an
-  arbitrary directory sees an empty store; the CLI deliberately points
-  at the accumulated global log instead. Use `--project` to scope the
-  trace set to one project.
-- **Risk is the failure share**, with `>= 0.4` high and `>= 0.2`
-  moderate. `retry` and `aborted` count as failures alongside `failure`
-  and `error`. No matching history reports `UNKNOWN`, which is distinct
-  from `LOW` (a clean record).
-- **A match can be carried by generic tokens.** Matching is a loose OR
-  over tokens of the action, so an action like `task` matches almost
-  every trace because the key `task` is in nearly all payloads. When
-  *every* token in the action appears in at least half the candidate
-  traces, the CLI prints a warning instead of letting the level speak
-  for itself:
+- **它读取全局 `MIO_HOME`，而非每项目目录。** MCP 服务端把数据目录解析为 `MIO_DATA_DIR || cwd/.mio-intelligence`，因此从任意目录发起的 MCP 调用看到的是空存储；CLI 刻意指向累积的全局日志。用 `--project` 把 trace 集合限定到某个项目。
+- **风险即失败占比**，`>= 0.4` 为高，`>= 0.2` 为中。`retry` 与 `aborted` 与 `failure`、`error` 一并计为失败。无匹配历史报告 `UNKNOWN`，与 `LOW`（干净记录）不同。
+- **匹配可能被通用 token 带偏。** 匹配是对动作 token 的宽松 OR，所以像 `task` 这样的动作几乎匹配每条 trace，因为关键词 `task` 几乎出现在所有 payload 中。当动作中*每个* token 都至少出现在半数候选 trace 里时，CLI 会打印警告，而不是让等级自说自话：
 
   ```text
   WARNING: low-signal match. Every token in this action (task) appears in
@@ -384,21 +290,13 @@ Notes:
   Try a more specific action, e.g. mio policy check "npm publish".
   ```
 
-  This surfaces the weakness at the CLI layer; the MCP matching
-  behaviour is unchanged, and `diagnostics` is an additive field so
-  existing consumers keep working.
-- **Small samples are labelled.** Fewer than 5 matching traces prints
-  `NOTE: only N matching trace(s); treat the level above as a weak
-  signal.`
-- **Flags that belong to the action are kept.** Only `--project` and
-  `--json` are consumed as options, so `git reset --hard` is passed
-  through intact rather than being truncated to `git reset`.
+  这把弱点暴露在了 CLI 层；MCP 的匹配行为不变，且 `diagnostics` 是新增字段，既有消费者继续可用。
+- **小样本会标注。** 匹配 trace 少于 5 条时打印 `NOTE: only N matching trace(s); treat the level above as a weak signal.`
+- **属于动作的 flag 会被保留。** 只有 `--project` 与 `--json` 作为选项被消费，因此 `git reset --hard` 会原样透传，而非被截断成 `git reset`。
 
-## Creativity engine
+## 创意引擎
 
-`mio.creativity.status` and `mio.creativity.list` have been on the MCP
-surface since the engine landed, but had no terminal entry point. `mio
-creativity` brings the read-only side to the CLI:
+`mio.creativity.status` 与 `mio.creativity.list` 自引擎落地起就在 MCP 面上，但此前没有终端入口。`mio creativity` 把只读一侧带到了 CLI：
 
 ```bash
 mio creativity status
@@ -416,39 +314,23 @@ Recent top ideas:
     idea_1787936687555_0
 ```
 
-Notes:
+说明：
 
-- **It delegates to the same `CreativityEngine` the MCP server uses**, so a
-  terminal `mio creativity list` sees the identical hypotheses the
-  `mio.creativity.list` tool would return. The store lives at
-  `<MIO_HOME>/creativity/creativity-hypotheses.jsonl`; the CLI points at
-  the global `MIO_HOME`, matching `mio policy check`.
-- **Only read-only subcommands are exposed.** `generate` and `ferment`
-  call an LLM and remain MCP-only (`mio.creativity.generate` /
-  `mio.creativity.ferment`); the CLI rejects `generate`/`ferment` as
-  unknown subcommands rather than invoking an unconfigured model.
-- **An empty store is a normal state.** Before the engine has run,
-  `status` reports all-zero counts and `list` says "No hypotheses match."
-  Both are valid output, not errors.
+- **它委托给与 MCP 服务端相同的 `CreativityEngine`**，因此终端的 `mio creativity list` 看到的是与 `mio.creativity.list` 工具完全一致的假设。存储位于 `<MIO_HOME>/creativity/creativity-hypotheses.jsonl`；CLI 指向全局 `MIO_HOME`，与 `mio policy check` 一致。
+- **只暴露只读子命令。** `generate` 与 `ferment` 会调用 LLM，仍仅限 MCP（`mio.creativity.generate` / `mio.creativity.ferment`）；CLI 把 `generate`/`ferment` 当作未知子命令拒绝，而不是去调用一个未配置的模型。
+- **空存储是正常状态。** 引擎运行之前，`status` 报告全零计数，`list` 显示 "No hypotheses match." 两者都是有效输出，不是错误。
 
-## Agents
+## Agent
 
-There are two distinct "agent" notions in this repo, and the CLI keeps them
-separate so they are never confused:
+本仓库里有两种不同的「agent」概念，CLI 把它们分开以免混淆：
 
-- **Installed host adapters** (`mio agents`, no subcommand) come from
-  `config.json` — which hosts (codex/opencode/workbuddy/hermes/claude) have
-  been wired up via `mio install`. This is setup state.
-- **Observed agents** (`mio agents list` / `mio agents report`) come from
-  `agents.jsonl` plus a cross-reference of `traces.jsonl`, `memory.jsonl`, and
-  `experience_reuse.jsonl`. This is runtime telemetry: how many tasks each
-  agent ran, how many succeeded, how many memories and verified reuses it
-  produced.
+- **已安装的宿主适配器**（`mio agents`，无子命令）来自 `config.json`——哪些宿主（codex/opencode/workbuddy/hermes/claude）已通过 `mio install` 接好。这是配置状态。
+- **被观察的 agent**（`mio agents list` / `mio agents report`）来自 `agents.jsonl`，并交叉引用 `traces.jsonl`、`memory.jsonl` 与 `experience_reuse.jsonl`。这是运行时遥测：每个 agent 跑了多少任务、成功多少、产生了多少记忆与已验证复用。
 
 ```bash
-mio agents                      # installed host adapters
-mio agents list                # observed agents (--project to scope)
-mio agents report              # per-agent task/memory/reuse telemetry
+mio agents                      # 已安装的宿主适配器
+mio agents list                # 被观察的 agent（--project 限定范围）
+mio agents report              # 每 agent 的任务/记忆/复用遥测
 mio agents report --agent codex
 ```
 
@@ -460,23 +342,17 @@ codex (mcp)  idle
    last seen: 2026-09-06 00:57:03 | sessions=2
 ```
 
-Both subcommands delegate to `server/agent-store.js` — the same store the
-`mio.agent.list` / `mio.agent.report` / `mio.agent.register` MCP tools use, so
-the terminal and the MCP server report identical telemetry and can never drift.
-`list` reads `agents.jsonl`; `report` adds the trace/memory/reuse
-cross-reference. `register` (MCP-only) writes a new observed agent; the CLI
-exposes the read side.
+两个子命令都委托给 `server/agent-store.js`——与 `mio.agent.list` / `mio.agent.report` / `mio.agent.register` MCP 工具相同的存储，因此终端与 MCP 服务端报告一致的遥测，不可能漂移。`list` 读取 `agents.jsonl`；`report` 叠加 trace/memory/reuse 的交叉引用。`register`（仅 MCP）写入一个新的被观察 agent；CLI 暴露的是只读一侧。
 
-## Release verification
+## 发布验证
 
-Before publishing the runtime packages, run:
+发布运行时包之前，先运行：
 
 ```bash
 npm run verify:pack-install --workspace mio-agent-runtime
 ```
 
-For CI or reproducible release evidence through `npm run`, set deterministic
-directories through environment variables:
+对于 CI 或可通过 `npm run` 复现的发布证据，用环境变量设定确定性目录：
 
 ```bash
 MIO_PACK_ARTIFACT_DIR=./dist/mio-pack-artifacts \
@@ -485,7 +361,7 @@ MIO_PACK_REPORT_PATH=./dist/mio-pack-report.json \
 npm run verify:pack-install --workspace mio-agent-runtime
 ```
 
-PowerShell:
+PowerShell：
 
 ```powershell
 $env:MIO_PACK_ARTIFACT_DIR = './dist/mio-pack-artifacts'
@@ -494,7 +370,7 @@ $env:MIO_PACK_REPORT_PATH = './dist/mio-pack-report.json'
 npm run verify:pack-install --workspace mio-agent-runtime
 ```
 
-When invoking the script directly, command-line flags are also supported:
+直接调用脚本时也支持命令行 flag：
 
 ```bash
 node packages/mio-cli/scripts/verify-packed-runtime.js \

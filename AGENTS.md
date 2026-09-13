@@ -22,12 +22,10 @@ This workspace integrates Mio Intelligence MCP. Mio is an enhancement layer, not
 
 <!-- MIO_CONTEXT_BEGIN -->
 ## Mio 最近上下文（自动注入）
-- 2026/9/12 14:51:57 | success | 两份 README 已更新并提交（ 96dea00b ）。 packages/mio-cli/README.md - 升级提示： >=0.3.6 → >=0.5
-- 2026/9/12 14:19:41 | success | 发布完成，6 个包全部上线 npm 并回查验证通过。 | 包 | 版本 | 状态 |
-| | | |
-| mio-agent-runtime | 0.5.17 
-- 2026/9/12 14:11:57 | success | 这轮推进的是 发版前验证 ——「可复用」验证到 pack 出来能装、装上能跑才算数。两路验证全绿。 ① mio-cli verify:pack-install 
-- 2026/9/12 14:10:01 | success | 沙箱里 node spawnSync 找不到 cmd.exe 。改用 npm.cmd 直调（与 verify 脚本的 npmInvocation 同思路）：
-- 2026/9/12 10:01:51 | success | 复用改造收官（提交 a4ebab04 ）。 analysis + messaging 通用层 npm 面就绪 ，零代码改动、纯构建配置。 本批成果 - mess
-- 2026/9/12 09:48:53 | success | 第二批解耦收尾，但有个重要发现改变了判断。 完成：agent-persona 解耦（ fdf1a6c2 ） - 同模式 runtime.ts（ AGENT_PE
+- 2026/9/13 09:50:36 | success | 52/52 通过。跑全量回归确认没破坏别的东西：
+- 2026/9/13 09:46:17 | success | main 层测试用的是源码文本断言（因为 AppRuntime 依赖太重）。但对 Lifecycle 的形态逻辑，我可以做得更扎实——真正 import 并 m
+- 2026/9/13 09:43:25 | success | App 恢复 16/16，新 hook 9 个全绿。跑全量确认。
+- 2026/9/13 09:41:14 | success | Exactly my 5 files staged. Let me wait for verify:pack-install to finish before 
+- 2026/9/13 09:40:45 | success | Let me confirm the gate passed ( "ok": true ):
+- 2026/9/13 09:35:12 | success | zustand v5 的 subscribe((state) => ...) 签名正确。我给这个新 hook 补个测试——它用"订阅"替代"逐点调用"，值得验证
 <!-- MIO_CONTEXT_END -->

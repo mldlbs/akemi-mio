@@ -25,6 +25,7 @@ const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine } = require('../server/creativity-engine.js')
 const { createAgentStore } = require('../server/agent-store.js')
+const { loadPhase0, renderPhase0Markdown } = require('../server/mio-intelligence-mcp/phase0.js')
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
 
@@ -1373,6 +1374,45 @@ function printAgentReport(result) {
   }
 }
 
+function phase0Command(args, useJson) {
+  const sub = args[1]
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    console.log(`Usage:
+  mio phase0 report              Show the Phase 0 validation report (memory/trace/reuse evidence)
+  mio phase0 report --format markdown   Render as Markdown
+  mio phase0 report --json      Machine-readable report (same shape as mio.phase0.report)
+
+Options:
+  --project name     Project filter (defaults to the current directory name)
+  --format markdown  Human-readable Markdown instead of JSON`)
+    if (!sub) process.exitCode = 1
+    return
+  }
+  if (sub !== 'report') {
+    console.error(`Unknown phase0 subcommand: ${sub}`)
+    process.exitCode = 1
+    return
+  }
+
+  const flags = args.slice(2)
+  const format = (optionValue(flags, '--format') || '').toLowerCase()
+  let report
+  try {
+    report = loadPhase0(MIO_HOME, optionValue(flags, '--project') || projectName())
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+
+  if (useJson) {
+    return jsonOrText({ project: optionValue(flags, '--project') || projectName(), ...report }, true)
+  }
+  // Markdown is the human-readable form; the MCP tool exposes the same renderer
+  // via --format markdown, so text and MCP output cannot diverge.
+  console.log(renderPhase0Markdown(report))
+}
+
 function installCommand(host, useJson) {
   if (!host) {
     console.error('Usage: mio install <codex|opencode|workbuddy|hermes|claude>')
@@ -1504,6 +1544,7 @@ Usage:
   mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse
   mio creativity status        Show creativity hypothesis counts and recent top ideas
   mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
+  mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
   mio policy check "<action>" Check historical risk for an action before running it
   mio prune --days 30         Trim old traces/queries/reuse records and observe.log (--dry-run to preview; --memory needs --yes)
   mio digest --days 7         Aggregate traces/memory/reuse into an actionable report (--write-back feeds agent context files; --json)
@@ -1547,6 +1588,8 @@ async function main() {
       return policyCommand(args, useJson)
     case 'creativity':
       return creativityCommand(args, useJson)
+    case 'phase0':
+      return phase0Command(args, useJson)
     case 'prune':
       return pruneCommand(args, useJson)
     case 'digest':
