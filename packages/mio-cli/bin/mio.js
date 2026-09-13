@@ -24,6 +24,7 @@ const { createMemoryStore } = require('../server/memory-store.js')
 const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine } = require('../server/creativity-engine.js')
+const { createAgentStore } = require('../server/agent-store.js')
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
 
@@ -261,6 +262,12 @@ function cliPolicyStore() {
 function cliCreativityEngine() {
   const creativityDir = path.join(MIO_HOME, 'creativity')
   return new CreativityEngine(creativityDir, () => { throw new Error('LLM calls are not available from the CLI') })
+}
+
+// Observed-agent telemetry (agents.jsonl + traces/memory/reuse cross-reference)
+// shares one store with the MCP server, so CLI and MCP report identical agents.
+function cliAgentStore() {
+  return createAgentStore({ dataDir: MIO_HOME, projectName })
 }
 
 function splitTagsOption(args, name) {
@@ -1274,20 +1281,95 @@ function statusCommand(useJson) {
   console.log(`Observer: ${observer.isRunning(MIO_HOME) ? 'running (pid ' + observer.readPid(MIO_HOME) + ')' : 'not running'}`)
 }
 
-function agentsCommand(useJson) {
-  const config = readConfig()
-  const agents = config.agents || {}
-  if (useJson) {
-    jsonOrText(agents, true)
+function agentsCommand(args, useJson) {
+  const sub = args[1]
+
+  // `mio agents` with no subcommand lists installed host adapters (config) —
+  // distinct from the observed-agent telemetry below.
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    const config = readConfig()
+    const agents = config.agents || {}
+    if (useJson) {
+      jsonOrText(agents, true)
+      return
+    }
+    const names = Object.keys(agents)
+    if (names.length === 0) {
+      console.log('No agents installed. Run `mio agents list` for observed agents, or `mio install <host>` to add one.')
+      return
+    }
+    for (const name of names) {
+      console.log(`${name}\t${agents[name].installedAt || ''}`)
+    }
     return
   }
-  const names = Object.keys(agents)
-  if (names.length === 0) {
-    console.log('No agents installed.')
+
+  if (sub === 'list') {
+    const flags = args.slice(2)
+    let result
+    try {
+      result = cliAgentStore().listAgents({ project: optionValue(flags, '--project') })
+    } catch (error) {
+      console.error(error.message || error)
+      process.exitCode = 1
+      return
+    }
+    if (useJson) return jsonOrText(result, true)
+    return printAgentList(result)
+  }
+
+  if (sub === 'report') {
+    const flags = args.slice(2)
+    let result
+    try {
+      result = cliAgentStore().reportAgent({
+        agentId: optionValue(flags, '--agent'),
+        project: optionValue(flags, '--project'),
+      })
+    } catch (error) {
+      console.error(error.message || error)
+      process.exitCode = 1
+      return
+    }
+    if (useJson) return jsonOrText(result, true)
+    return printAgentReport(result)
+  }
+
+  console.error(`Unknown agents subcommand: ${sub}`)
+  console.error('Usage: mio agents [list|report] [--agent X] [--project Y]')
+  process.exitCode = 1
+}
+
+function printAgentList(result) {
+  console.log(`Observed agents: ${result.count} shown${result.project ? ` (project=${result.project})` : ''}`)
+  if (result.count === 0) {
+    console.log('No observed agents match.')
     return
   }
-  for (const name of names) {
-    console.log(`${name}\t${agents[name].installedAt || ''}`)
+  for (const a of result.agents) {
+    const caps = Array.isArray(a.capabilities) && a.capabilities.length > 0 ? ` [${a.capabilities.join(', ')}]` : ''
+    console.log(`${a.agentId} (${a.hostType})${caps}  project=${a.project || '-'}`)
+    console.log(
+      `   sessions=${a.sessionCount || 0} tasks=${a.taskCount} success=${a.successCount} failure=${a.failureCount} | ${a.id}`,
+    )
+  }
+}
+
+function printAgentReport(result) {
+  console.log(`Agent report${result.project ? ` (project=${result.project})` : ''}: ${result.count} agent(s)`)
+  if (result.count === 0) {
+    console.log('No observed agents match.')
+    return
+  }
+  for (const r of result.reports) {
+    const o = r.taskOutcomes
+    const when = r.lastSeenAt ? r.lastSeenAt.slice(0, 19).replace('T', ' ') : 'unknown'
+    console.log(`${r.agentId} (${r.hostType})  ${r.active ? 'active' : 'idle'}`)
+    console.log(
+      `   tasks: ${o.total} total, ${o.success} success, ${o.failure} failure (${o.successRate}% success)`,
+    )
+    console.log(`   memories: ${r.memories}  experience reuses: ${r.experienceReuses.total} (verified ${r.experienceReuses.verified})`)
+    console.log(`   last seen: ${when} | sessions=${r.sessionCount}`)
   }
 }
 
@@ -1397,7 +1479,9 @@ Usage:
   mio mcp                     Start Mio MCP server (stdio)
   mio install <host>          Install Mio into a host (codex|opencode|workbuddy|hermes|claude)
   mio status                  Show runtime and adapter status
-  mio agents                  List installed agents
+  mio agents                  List installed host adapters
+  mio agents list             List observed agents (from agents.jsonl, --project X)
+  mio agents report           Report per-agent task/memory/reuse telemetry (--agent X, --project Y)
   mio evolution status        Show composed evolution module health
   mio evolution shadow record      Record a shadow comparison sample
   mio evolution dual-write record  Record a dual-write comparison sample
@@ -1446,7 +1530,7 @@ async function main() {
     case 'status':
       return statusCommand(useJson)
     case 'agents':
-      return agentsCommand(useJson)
+      return agentsCommand(args, useJson)
     case 'observe':
       return observeCommand(args)
     case 'recall':

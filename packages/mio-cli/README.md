@@ -22,7 +22,9 @@ mio init                    Initialize MIO_HOME
 mio mcp                     Start Mio MCP server (stdio)
 mio install <host>          Install Mio into a host (codex|opencode|workbuddy|hermes|claude)
 mio status                  Show runtime and adapter status
-mio agents                  List installed agents
+mio agents                  List installed host adapters
+mio agents list             List observed agents (from agents.jsonl, --project X)
+mio agents report           Report per-agent task/memory/reuse telemetry (--agent X, --project Y)
 mio evolution status        Show composed evolution module health
 mio evolution shadow record      Record a shadow comparison sample
 mio evolution dual-write record  Record a dual-write comparison sample
@@ -237,6 +239,9 @@ related-memory ranking agree with `mio.memory.query` by construction.
 `mio.creativity.*` — the CLI's `mio creativity status`/`list` and the MCP
 tools call the same `CreativityEngine`, so hypothesis counts can never
 drift between entry points.
+`server/agent-store.js` is the shared implementation behind `mio.agent.list` /
+`register` / `report`; the CLI's `mio agents list`/`report` and the MCP tools
+read the identical store, so observed-agent telemetry is the same everywhere.
 `server/digest.js`
 aggregates traces/memory/reuse into actionable reports (also exposed as
 `mio.digest.generate`), and `server/retention.js` powers `mio prune`
@@ -425,6 +430,42 @@ Notes:
 - **An empty store is a normal state.** Before the engine has run,
   `status` reports all-zero counts and `list` says "No hypotheses match."
   Both are valid output, not errors.
+
+## Agents
+
+There are two distinct "agent" notions in this repo, and the CLI keeps them
+separate so they are never confused:
+
+- **Installed host adapters** (`mio agents`, no subcommand) come from
+  `config.json` — which hosts (codex/opencode/workbuddy/hermes/claude) have
+  been wired up via `mio install`. This is setup state.
+- **Observed agents** (`mio agents list` / `mio agents report`) come from
+  `agents.jsonl` plus a cross-reference of `traces.jsonl`, `memory.jsonl`, and
+  `experience_reuse.jsonl`. This is runtime telemetry: how many tasks each
+  agent ran, how many succeeded, how many memories and verified reuses it
+  produced.
+
+```bash
+mio agents                      # installed host adapters
+mio agents list                # observed agents (--project to scope)
+mio agents report              # per-agent task/memory/reuse telemetry
+mio agents report --agent codex
+```
+
+```text
+Agent report (project=akemi-mio): 2 agent(s)
+codex (mcp)  idle
+   tasks: 5 total, 5 success, 0 failure (100% success)
+   memories: 88  experience reuses: 54 (verified 6)
+   last seen: 2026-09-06 00:57:03 | sessions=2
+```
+
+Both subcommands delegate to `server/agent-store.js` — the same store the
+`mio.agent.list` / `mio.agent.report` / `mio.agent.register` MCP tools use, so
+the terminal and the MCP server report identical telemetry and can never drift.
+`list` reads `agents.jsonl`; `report` adds the trace/memory/reuse
+cross-reference. `register` (MCP-only) writes a new observed agent; the CLI
+exposes the read side.
 
 ## Release verification
 
