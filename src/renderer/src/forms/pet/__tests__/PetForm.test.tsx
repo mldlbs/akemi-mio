@@ -22,6 +22,16 @@ import { render, screen, act, fireEvent } from '@testing-library/react'
 let broadcastHandlers: Set<(m: unknown) => void> = new Set()
 let agentActivityHandlers: Set<(a: unknown) => void> = new Set()
 const broadcastSpy = vi.fn()
+const ignoreSpy = vi.fn()
+
+/**
+ * elementFromPoint 的命中结果。
+ *
+ * jsdom 不实现 elementFromPoint（它依赖真实布局），这里桩掉。
+ * 我们要测的是"命中之后该不该临时恢复交互"这段逻辑，
+ * 而不是浏览器怎么算命中 —— 后者只有真机能验。
+ */
+let hitTarget: Element | null = null
 
 /** 向所有广播订阅者派发一条消息（模拟主进程中继）。 */
 function emitBroadcast(msg: { from: string; type: string; payload: unknown }) {
@@ -51,7 +61,10 @@ vi.mock('../../runtime', () => ({
     }
   },
   setFormVisible: vi.fn().mockResolvedValue(undefined),
-  setIgnoreMouseEvents: vi.fn().mockResolvedValue(undefined),
+  setIgnoreMouseEvents: (v: boolean) => {
+    ignoreSpy(v)
+    return Promise.resolve()
+  },
 }))
 
 async function renderPet() {
@@ -71,6 +84,9 @@ beforeEach(() => {
   broadcastHandlers = new Set()
   agentActivityHandlers = new Set()
   broadcastSpy.mockClear()
+  ignoreSpy.mockClear()
+  hitTarget = null
+  document.elementFromPoint = (() => hitTarget) as typeof document.elementFromPoint
   vi.useFakeTimers()
 })
 
@@ -158,6 +174,10 @@ describe('PetForm 情绪状态机', () => {
     await renderPet()
     const stage = screen.getByRole('img').parentElement!
     fireEvent.click(stage)
+    // 单击延后 250ms 执行（等双击判定），要推进时间才会真正触发
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
     expect(broadcastSpy).toHaveBeenCalledWith('pet:poked', null)
   })
 
@@ -166,6 +186,78 @@ describe('PetForm 情绪状态机', () => {
     const stage = screen.getByRole('img').parentElement!
     fireEvent.doubleClick(stage)
     expect(broadcastSpy).toHaveBeenCalledWith('pet:summon-chat', null)
+  })
+
+  it('双击不会顺带广播两次 pet:poked', async () => {
+    await renderPet()
+    const stage = screen.getByRole('img').parentElement!
+    // 真实 DOM 序列：两次 click 之后才到 dblclick
+    fireEvent.click(stage)
+    fireEvent.click(stage)
+    fireEvent.dblClick(stage)
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+    expect(broadcastSpy).toHaveBeenCalledWith('pet:summon-chat', null)
+    expect(broadcastSpy).not.toHaveBeenCalledWith('pet:poked', null)
+  })
+})
+
+describe('PetForm 鼠标穿透（不能是单向操作）', () => {
+  /** 点开穿透开关，返回工具条元素。 */
+  function enablePassthrough(container: HTMLElement) {
+    fireEvent.click(screen.getByLabelText('开启鼠标穿透'))
+    return container.querySelector('.pet-toolbar')!
+  }
+
+  function movePointer(x: number, y: number) {
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mousemove', { clientX: x, clientY: y }))
+    })
+  }
+
+  it('开启时通知主进程忽略鼠标事件', async () => {
+    const { container } = await renderPet()
+    enablePassthrough(container)
+    expect(ignoreSpy).toHaveBeenLastCalledWith(true)
+  })
+
+  it('指针进入工具条时临时恢复交互（否则"关闭穿透"按钮自己点不到）', async () => {
+    const { container } = await renderPet()
+    const toolbar = enablePassthrough(container)
+    hitTarget = toolbar
+    movePointer(8, 8)
+    expect(ignoreSpy).toHaveBeenLastCalledWith(false)
+  })
+
+  it('指针离开工具条后恢复穿透', async () => {
+    const { container } = await renderPet()
+    const toolbar = enablePassthrough(container)
+    hitTarget = toolbar
+    movePointer(8, 8)
+    expect(ignoreSpy).toHaveBeenLastCalledWith(false)
+
+    hitTarget = null
+    movePointer(300, 300)
+    expect(ignoreSpy).toHaveBeenLastCalledWith(true)
+  })
+
+  it('关闭穿透后不会被 effect 清理又重新打开（否则又变回单向）', async () => {
+    const { container } = await renderPet()
+    const toolbar = enablePassthrough(container)
+    hitTarget = toolbar
+    movePointer(8, 8)
+    expect(ignoreSpy).toHaveBeenLastCalledWith(false)
+
+    // 此刻按钮是能点到的 —— 关闭穿透
+    fireEvent.click(screen.getByLabelText('恢复鼠标交互'))
+    expect(ignoreSpy).toHaveBeenLastCalledWith(false)
+  })
+
+  it('未开启穿透时不监听命中测试（不做无用功）', async () => {
+    await renderPet()
+    movePointer(8, 8)
+    expect(ignoreSpy).not.toHaveBeenCalled()
   })
 })
 

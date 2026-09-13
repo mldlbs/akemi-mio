@@ -31,6 +31,9 @@ const MOOD_HOLD_MS = 4200
 /** 空闲多久后打瞌睡。桌面宠物最讨喜的细节就是这个。 */
 const SLEEPY_AFTER_MS = 45_000
 
+/** 单击判定的延迟。太短的话双击仍会被算成两次单击（系统双击阈值在数百毫秒量级）。 */
+const CLICK_DEBOUNCE_MS = 250
+
 export function PetForm() {
   const [mood, setMood] = useState<PetMood>('idle')
   const [gesture, setGesture] = useState<PetGesture | null>(null)
@@ -40,6 +43,10 @@ export function PetForm() {
   const moodTimerRef = useRef<number | null>(null)
   const sleepyTimerRef = useRef<number | null>(null)
   const bubbleTimerRef = useRef<number | null>(null)
+  /** 单击延迟执行的句柄。dblclick 到达时取消，见 handleClick 的注释。 */
+  const clickTimerRef = useRef<number | null>(null)
+  /** 最后一次指针位置。开启穿透的瞬间要靠它立即命中测试一次。 */
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
 
   // ── 空闲进入 sleepy ──
   const resetIdleTimer = useCallback(() => {
@@ -66,7 +73,10 @@ export function PetForm() {
   // ── 交互唤醒：任何鼠标活动都重置瞌睡计时 ──
   useEffect(() => {
     resetIdleTimer()
-    const onActivity = () => {
+    const onActivity = (e: Event) => {
+      // 顺手记下指针位置：开启穿透的那一刻要用它立即命中测试一次，
+      // 否则指针已经停在工具条上时，用户得先动一下鼠标才点得到按钮。
+      if (e instanceof MouseEvent) lastPointerRef.current = { x: e.clientX, y: e.clientY }
       setMood((cur) => (cur === 'sleepy' ? 'idle' : cur))
       resetIdleTimer()
     }
@@ -78,6 +88,7 @@ export function PetForm() {
       if (sleepyTimerRef.current !== null) window.clearTimeout(sleepyTimerRef.current)
       if (moodTimerRef.current !== null) window.clearTimeout(moodTimerRef.current)
       if (bubbleTimerRef.current !== null) window.clearTimeout(bubbleTimerRef.current)
+      if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current)
     }
   }, [resetIdleTimer])
 
@@ -132,7 +143,7 @@ export function PetForm() {
       say(shown, 7000)
     }
 
-    return onAgentActivity((activity) => {
+    const off = onAgentActivity((activity) => {
       switch (activity.kind) {
         case 'thinking':
           setTransientMood('thinking')
@@ -175,6 +186,12 @@ export function PetForm() {
           break
       }
     })
+
+    return () => {
+      // 卸载时若还有未 flush 的流式文本，定时器会继续跑并对已卸载组件 setState。
+      if (flushTimer !== null) window.clearTimeout(flushTimer)
+      off()
+    }
   }, [say, setTransientMood])
 
   // ── 订阅主壳的真实 agent 状态 ──
@@ -208,13 +225,7 @@ export function PetForm() {
   }, [setTransientMood])
 
   // ── 点击行为 ── ──
-  const handleDoubleClick = useCallback(() => {
-    setGesture('wave')
-    broadcast('pet:summon-chat', null)
-    void setFormVisible('chat', true)
-  }, [])
-
-  const handleClick = useCallback(() => {
+  const poke = useCallback(() => {
     if (mood === 'sleepy') {
       setTransientMood('idle')
       say('唔……醒了。')
@@ -225,6 +236,32 @@ export function PetForm() {
     broadcast('pet:poked', null)
   }, [mood, say, setTransientMood])
 
+  /**
+   * 单击延后一拍再执行。
+   *
+   * DOM 规范里 dblclick 之前必然先触发**两次** click。若直接在 click 里响应，
+   * "双击唤起对话框"会顺带广播两次 pet:poked —— 监听方（比如统计被戳次数）
+   * 就会把一次双击算成两次。因此延后到双击阈值之后再判定，
+   * dblclick 到达时把待执行的单击取消掉。
+   */
+  const handleClick = useCallback(() => {
+    if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current)
+    clickTimerRef.current = window.setTimeout(() => {
+      clickTimerRef.current = null
+      poke()
+    }, CLICK_DEBOUNCE_MS)
+  }, [poke])
+
+  const handleDoubleClick = useCallback(() => {
+    if (clickTimerRef.current !== null) {
+      window.clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = null
+    }
+    setGesture('wave')
+    broadcast('pet:summon-chat', null)
+    void setFormVisible('chat', true)
+  }, [])
+
   const togglePassthrough = useCallback(() => {
     setPassthrough((prev) => {
       const next = !prev
@@ -232,6 +269,43 @@ export function PetForm() {
       return next
     })
   }, [])
+
+  // ── 穿透状态下的命中测试 ──
+  //
+  // 问题：窗口一旦忽略鼠标事件，连"关闭穿透"的那个按钮自己都点不到了 ——
+  // 开启就成了单向操作，只能重启应用。主进程侧用的是
+  // setIgnoreMouseEvents(on, { forward: true })，forward 让窗口仍能收到
+  // mousemove，于是这里据此做命中测试：指针进入标记为可交互的区域时
+  // 临时关掉穿透，离开后恢复。交互区域用 data-passthrough-hit 标注。
+  useEffect(() => {
+    if (!passthrough) return
+    let interactive = false
+
+    const apply = (hit: boolean) => {
+      if (hit === interactive) return
+      interactive = hit
+      void setIgnoreMouseEvents(!hit)
+    }
+    const test = (x: number, y: number) => {
+      const el = document.elementFromPoint(x, y)
+      apply(!!el?.closest('[data-passthrough-hit]'))
+    }
+
+    const onMove = (e: MouseEvent) => test(e.clientX, e.clientY)
+
+    // 开启瞬间用最后一次已知位置先判一次：指针恰好停在工具条上时，
+    // 等用户移动鼠标才恢复交互，看起来就是"点了没反应"。
+    const last = lastPointerRef.current
+    if (last) test(last.x, last.y)
+
+    window.addEventListener('mousemove', onMove)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      // 这里刻意不恢复穿透：关闭穿透由 togglePassthrough 负责。
+      // 若在 cleanup 里恢复，effect 的清理会先于状态更新跑完，
+      // 把用户刚关掉的穿透又盖回 true。
+    }
+  }, [passthrough])
 
   return (
     <div
@@ -241,7 +315,11 @@ export function PetForm() {
       title="单击互动 · 双击打开对话框 · 拖拽移动"
     >
       {/* 悬停工具条：常驻会挡住小人，所以只在靠近时浮现 */}
-      <div className="pet-toolbar form-no-drag" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="pet-toolbar form-no-drag"
+        data-passthrough-hit=""
+        onClick={(e) => e.stopPropagation()}
+      >
         <button
           className={`pet-tool-btn ${passthrough ? 'is-active' : ''}`}
           onClick={togglePassthrough}

@@ -50,6 +50,9 @@ export function ChatForm() {
   }, [])
 
   const submit = () => {
+    // 必须先挡一层再清输入框：send 内部有 !trimmed / sending 的早退，
+    // 先清空的话，被拒的输入就永久丢失了（用户输入了字，却什么都没发生）。
+    if (sending || !draft.trim()) return
     const text = draft
     setDraft('')
     void send(text)
