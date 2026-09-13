@@ -167,6 +167,12 @@ export function createWindow(stateManager: StateManager): BrowserWindow {
     log('INFO', 'window_close_dispose', { listeners: Object.keys(eventBus.getStats()) })
   })
 
+  // 把发往本窗口的 agent 事件镜像给形态窗口。
+  // 挂在这里而不是 AppRuntime 的启动流程里，是因为主窗口**可能被重建**
+  // （window-all-closed 后 activate 会再 createWindow 一次）；
+  // 若挂在外部，重建后的新窗口不会被镜像，宠物会静默失去真实对话流。
+  attachAgentEventMirrorFor(mainWindow)
+
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
     mainWindow.webContents.openDevTools()
@@ -293,6 +299,47 @@ interface StoredBounds {
   y: number
   width?: number
   height?: number
+  /**
+   * 所在显示器的 Electron display.id。
+   *
+   * 注意其**不保证跨会话稳定**：Electron 文档明确说明 display id 在重启后
+   * 不保证一致（驱动/热插拔都会变）。因此它只作为首选线索，
+   * 真正的判定依据是下面的几何指纹 —— 见 findDisplayFor。
+   */
+  displayId?: number
+  /** 显示器指纹：用分辨率+工作区原点描述，跨重启稳定。 */
+  displayKey?: string
+}
+
+/**
+ * 生成显示器指纹。
+ *
+ * 为什么不用 display.id：Electron 明确说它跨会话不保证稳定。
+ * 分辨率 + 工作区原点是一个在"用户重启电脑"这个尺度上相当稳定的组合，
+ * 且能区分常见的双屏布局（1920x1080@0,0 与 2560x1440@1920,0）。
+ * 代价是同型号同布局的显示器无法区分 —— 但那种情况下两者本就等价，
+ * 落到哪一块对用户没有差别。
+ */
+function displayKeyOf(display: Electron.Display): string {
+  const a = display.workArea
+  return `${display.size.width}x${display.size.height}@${a.x},${a.y}`
+}
+
+/**
+ * 找到某坐标所属的显示器。
+ * 先按 displayId 匹配（同会话内最准），失败再按几何指纹匹配（跨重启可用）。
+ */
+function findDisplayFor(b: StoredBounds): Electron.Display | null {
+  const all = screen.getAllDisplays()
+  if (b.displayId !== undefined) {
+    const byId = all.find((d) => d.id === b.displayId)
+    if (byId) return byId
+  }
+  if (b.displayKey) {
+    const byKey = all.find((d) => displayKeyOf(d) === b.displayKey)
+    if (byKey) return byKey
+  }
+  return null
 }
 
 const FORMS_STATE_FILE = 'forms-window-state.json'
@@ -359,11 +406,31 @@ export function saveFormBounds(kind: FormKind): void {
   if (win.isMinimized() || !win.isVisible()) return
   const b = win.getBounds()
   const state = readFormsState()
-  state[kind] = { x: b.x, y: b.y, width: b.width, height: b.height }
+
+  // 记录所在显示器：多屏用户把宠物放到副屏，重启后应该回到副屏。
+  let displayId: number | undefined
+  let displayKey: string | undefined
+  try {
+    const display = screen.getDisplayMatching(b)
+    displayId = display.id
+    displayKey = displayKeyOf(display)
+  } catch (err) {
+    log('WARN', 'form_display_lookup_failed', { kind, error: String(err) })
+  }
+
+  state[kind] = { x: b.x, y: b.y, width: b.width, height: b.height, displayId, displayKey }
   writeFormsState(state)
 }
 
-/** 恢复位置到窗口上（越界则丢弃，用默认位置）。 */
+/**
+ * 恢复位置到窗口上。
+ *
+ * 两种情形：
+ * 1. 原显示器仍在 → 直接还原坐标（多屏用户回到原来那块屏）。
+ * 2. 原显示器已消失（拔了外接屏）→ 丢弃坐标，退回主屏默认位置。
+ *    这一步不能省：把窗口恢复到不存在的屏幕坐标上，
+ *    表现为「应用启动了但看不见」，用户完全无从自救。
+ */
 function restoreFormBounds(kind: FormKind, win: BrowserWindow, spec: FormWindowSpec): void {
   if (kind === 'wallpaper') return
   const stored = readFormsState()[kind]
@@ -371,11 +438,27 @@ function restoreFormBounds(kind: FormKind, win: BrowserWindow, spec: FormWindowS
 
   const width = spec.size.width
   const height = spec.size.height
-  if (!isBoundsVisible(stored, width, height)) {
-    log('INFO', 'form_bounds_discarded', { kind, stored })
+
+  // 情形 1：记录了显示器且该显示器仍在 → 校验坐标确实落在它上面
+  const display = findDisplayFor(stored)
+  if (display) {
+    if (isBoundsVisible(stored, width, height)) {
+      win.setBounds({ x: stored.x, y: stored.y, width, height })
+      return
+    }
+    // 显示器还在但坐标越界（例如分辨率变了）→ 落到该屏的可见区域内
+    const a = display.workArea
+    const x = Math.min(Math.max(stored.x, a.x), a.x + Math.max(0, a.width - width))
+    const y = Math.min(Math.max(stored.y, a.y), a.y + Math.max(0, a.height - height))
+    win.setBounds({ x, y, width, height })
+    log('INFO', 'form_bounds_clamped', { kind, from: stored, to: { x, y } })
     return
   }
-  win.setBounds({ x: stored.x, y: stored.y, width, height })
+
+  // 情形 2：显示器已不存在 → 不恢复，用默认位置（主屏居中附近）
+  if (stored.displayId !== undefined || stored.displayKey !== undefined) {
+    log('INFO', 'form_display_gone', { kind, displayId: stored.displayId, displayKey: stored.displayKey })
+  }
 }
 
 
@@ -714,6 +797,69 @@ export function unregisterFormShortcuts(): void {
 /** 查询某形态的快捷键（用于设置界面展示）。 */
 export function getFormShortcut(kind: FormKind): string {
   return FORM_SHORTCUTS[kind]
+}
+
+// ════════════════════════════════════════════════════════════════
+// Agent 事件镜像到形态窗口
+//
+// 问题：AgentService / ChatExecutor 只把 `ai:chunk`、`tool:status` 等事件发给
+// mainWindow（它们的字段就叫 mainWindow），形态窗口完全收不到，
+// 于是宠物小人只能靠形态间广播自娱自乐，无法反映真实对话状态。
+//
+// 为什么不改 AgentService 去遍历所有窗口：
+// 那会把"形态"这个概念泄漏进 intelligence 包（它不该知道桌面宠物的存在），
+// 且要在多个发送点各改一遍。改为在窗口创建时**给主窗口挂一个镜像**：
+// 主窗口收到的 agent 事件同步转发给形态窗口。发送方零改动。
+//
+// 只镜像白名单内的事件 —— 形状不匹配会让形态侧解析出 undefined，
+// 而 `tts:*` 这类含音频二进制的事件更不该无谓地复制一份。
+// ════════════════════════════════════════════════════════════════
+
+/** 需要镜像到形态窗口的 agent 事件频道。 */
+const MIRRORED_CHANNELS = ['ai:chunk', 'tool:status', 'agent:state'] as const
+
+/**
+ * 给指定（主）窗口挂上 agent 事件镜像。
+ *
+ * 幂等由 webContents 上的标记保证，而**不用模块级布尔量** ——
+ * 主窗口可能被销毁重建，模块级标志会让新窗口漏挂镜像（静默失效）。
+ */
+export function attachAgentEventMirrorFor(win: BrowserWindow | null): void {
+  if (!win || win.isDestroyed()) return
+  patchMainWindowSend(win.webContents)
+}
+
+/**
+ * 包装主窗口 webContents.send，把白名单频道额外投递给形态窗口。
+ *
+ * 说明：之所以包装 send 而不是监听 ipc-message，是因为后者拿不到参数载荷；
+ * 之所以不改 AgentService，是为了把"形态"这层概念挡在 intelligence 包之外。
+ * 原 send 行为完全保留（先调原方法），只做增量转发。
+ */
+function patchMainWindowSend(wc: Electron.WebContents): void {
+  const original = wc.send.bind(wc) as (channel: string, ...args: unknown[]) => void
+  if ((wc as unknown as { __formMirrorPatched?: boolean }).__formMirrorPatched) return
+
+  const patched = (channel: string, ...args: unknown[]) => {
+    // 先保证原行为不受影响
+    original(channel, ...args)
+    if (!(MIRRORED_CHANNELS as readonly string[]).includes(channel)) return
+    // 增量：转发给形态窗口。
+    // 用 setImmediate 让镜像不占用主窗口的同步路径，避免拖慢聊天渲染。
+    setImmediate(() => {
+      for (const [kind, win] of formWindows) {
+        if (win.isDestroyed()) continue
+        try {
+          win.webContents.send(`forms:mirror:${channel}`, ...args)
+        } catch {
+          /* 单个窗口失败不影响其余；通常是正在销毁 */
+        }
+      }
+    })
+  }
+
+  ;(wc as unknown as { send: typeof patched }).send = patched
+  ;(wc as unknown as { __formMirrorPatched?: boolean }).__formMirrorPatched = true
 }
 
 export function setupWallpaperListener(stateManager: StateManager, deps: WallpaperDeps): void {

@@ -1802,4 +1802,33 @@ contextBridge.exposeInMainWorld('akemiForms', {
     ipcRenderer.invoke('forms:setIgnoreMouseEvents', ignore),
 
   startWindowDrag: (): Promise<void> => ipcRenderer.invoke('forms:startDrag'),
+
+  /**
+   * 订阅从主窗口镜像过来的 agent 事件。
+   *
+   * 形态窗口本身不在 AgentService 的发送列表里（那边只发给 mainWindow），
+   * 因此主进程在窗口创建时给主窗口的 send 挂了镜像转发：
+   * 频道 `ai:chunk` → `forms:mirror:ai:chunk`。
+   *
+   * 这里为白名单内的每个频道注册监听，统一交给一个 handler，
+   * 并带上 channel 名让调用方区分来源。
+   */
+  onAgentMirror: (
+    handler: (payload: { channel: string; args: unknown[] }) => void,
+  ): (() => void) => {
+    const channels = ['ai:chunk', 'tool:status', 'agent:state']
+    const listeners: { channel: string; fn: (...a: unknown[]) => void }[] = []
+
+    for (const channel of channels) {
+      const fn = (_e: unknown, ...args: unknown[]) => handler({ channel, args })
+      ipcRenderer.on(`forms:mirror:${channel}`, fn)
+      listeners.push({ channel, fn })
+    }
+
+    return () => {
+      for (const { channel, fn } of listeners) {
+        ipcRenderer.removeListener(`forms:mirror:${channel}`, fn)
+      }
+    }
+  },
 })

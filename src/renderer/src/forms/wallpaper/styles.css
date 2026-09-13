@@ -165,3 +165,24 @@
   0% { opacity: 0; transform: translateY(10px); }
   100% { opacity: 1; transform: translateY(0); }
 }
+
+/* 信息卡的进度条 —— 仅在有进行中任务时出现 */
+.wp-info-progress {
+  margin-top: 8px;
+  height: 3px;
+  width: 100%;
+  border-radius: 2px;
+  overflow: hidden;
+  background: oklch(0.4 0.02 265 / 0.5);
+}
+
+.wp-info-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    oklch(0.72 0.14 calc(var(--wp-hue) + 20)),
+    oklch(0.84 0.125 80)
+  );
+  transition: width 0.6s cubic-bezier(0.34, 1.2, 0.64, 1);
+}

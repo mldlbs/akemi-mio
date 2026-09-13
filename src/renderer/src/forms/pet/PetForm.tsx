@@ -13,7 +13,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PetAvatar } from './PetAvatar'
 import type { PetGesture, PetMood } from '../types'
-import { broadcast, hasFormBridge, onBroadcast, setFormVisible, setIgnoreMouseEvents } from '../runtime'
+import {
+  broadcast,
+  hasFormBridge,
+  onAgentActivity,
+  onBroadcast,
+  setFormVisible,
+  setIgnoreMouseEvents,
+} from '../runtime'
+import { toolLabel } from '../types'
 import './styles.css'
 
 /** 情绪自动回落：临时情绪（happy/alert）展示一段时间后回到 idle，
@@ -96,6 +104,73 @@ export function PetForm() {
           if (p?.mood) setTransientMood(p.mood)
           break
         }
+        default:
+          break
+      }
+    })
+  }, [say, setTransientMood])
+
+  // ── 订阅真实 Agent 活动 ──
+  //
+  // 与上面的形态间广播（chat:thinking 等，属于"形态自己说的话"）不同，
+  // 这一路是**真实对话流的镜像**：主窗口收到 ai:chunk / tool:status 后转发过来。
+  // 宠物因此能反映真实工作状态，而不只是形态间自娱自乐。
+  useEffect(() => {
+    // ai:chunk 是逐块流式的（几十毫秒一块），若每块都 say() 会导致
+    // 气泡疯狂闪烁、且把 streaming 文本整段重复弹出。因此累积到
+    // 静默 700ms 才认为是"说完了"，只展示最终结果。
+    let pending = ''
+    let flushTimer: number | null = null
+
+    const flush = () => {
+      flushTimer = null
+      const text = pending.trim()
+      pending = ''
+      if (!text) return
+      // 过长的回复不适合塞进小气泡，截断并加省略号
+      const shown = text.length > 90 ? `${text.slice(0, 90)}…` : text
+      say(shown, 7000)
+    }
+
+    return onAgentActivity((activity) => {
+      switch (activity.kind) {
+        case 'thinking':
+          setTransientMood('thinking')
+          break
+
+        case 'tool': {
+          // 工具调用是"正在干活"的明确信号
+          setTransientMood('thinking')
+          const label = activity.text ? toolLabel(activity.text) : ''
+          if (label) say(`${label}…`, 4000)
+          break
+        }
+
+        case 'speaking':
+          pending += activity.text
+          if (flushTimer !== null) window.clearTimeout(flushTimer)
+          flushTimer = window.setTimeout(flush, 700)
+          break
+
+        case 'done':
+          // 收尾：若有未 flush 的文本立即展示，并露出"完成"的表情
+          if (flushTimer !== null) {
+            window.clearTimeout(flushTimer)
+            flushTimer = null
+          }
+          if (pending.trim()) {
+            flush()
+          } else {
+            setTransientMood('happy')
+            setGesture('bounce')
+          }
+          break
+
+        case 'error':
+          setTransientMood('alert')
+          if (activity.text) say(activity.text, 6000)
+          break
+
         default:
           break
       }

@@ -10,7 +10,7 @@
  * 这样 vite devserver 直接访问 pet.html 也能预览，而不是白屏。
  */
 
-import { FORM_REGISTRY, isFormKind, type FormBroadcast, type FormBridge, type FormKind } from './types'
+import { FORM_REGISTRY, isFormKind, type AgentActivity, type FormBroadcast, type FormBridge, type FormKind } from './types'
 
 /** 从全局对象上找到 preload 注入的形态桥接。 */
 function readBridge(): FormBridge | null {
@@ -137,4 +137,207 @@ export async function startWindowDrag(): Promise<void> {
   } catch {
     /* 静默 */
   }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 真实数据源订阅（壁纸信息层用）
+//
+// 这两个数据源都已存在于主壳的 preload 里（electronAPI），
+// 壁纸形态直接复用而不是另造 —— 数据本就该只有一份真相。
+// 但访问需防御：形态窗口的 preload 与主壳共用，字段仍可能缺失（版本错配、
+// 后端未启用），因此一律做形状校验后再交给 UI。
+// ════════════════════════════════════════════════════════════════
+
+/** 对话语境：摘要 + 活跃任务进度。壁纸信息卡的主要来源。 */
+export interface ConversationContext {
+  summary: string
+  summaryConfidence: number
+  activeTasks: {
+    taskId: string
+    title: string
+    status: string
+    progressPercent: number
+    completedSteps: number
+    totalSteps: number
+  }[]
+  completedTasks: number
+  totalTasks: number
+  progressPercent: number
+  hasData: boolean
+  error?: string
+}
+
+/** 记忆卡片：桌面记忆浮窗的数据。 */
+export interface MemoryCard {
+  id: string
+  content: string
+  type: string
+  confidence: number
+  isPinned: boolean
+  topics: string[]
+  updatedAt: number
+}
+
+interface LooseDataBridge {
+  onConversationContextData?: (cb: (data: unknown) => void) => (() => void) | void
+  onMemoryContextData?: (cb: (data: unknown) => void) => (() => void) | void
+}
+
+function readDataBridge(): LooseDataBridge | null {
+  const w = window as unknown as { electronAPI?: LooseDataBridge }
+  return w.electronAPI ?? null
+}
+
+/**
+ * 把上游载荷归一为 ConversationContext。载荷形状无编译期保障，逐字段校验。
+ * 认不出结构时返回 null，宁可信息卡不显示，也不显示 undefined。
+ */
+export function parseConversationContext(raw: unknown): ConversationContext | null {
+  if (!raw || typeof raw !== 'object') return null
+  const d = raw as Record<string, unknown>
+  if (d.hasData !== true) return null
+
+  const num = (v: unknown, fallback = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback)
+  const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback)
+
+  const rawTasks = Array.isArray(d.activeTasks) ? d.activeTasks : []
+  const activeTasks = rawTasks
+    .filter((t): t is Record<string, unknown> => !!t && typeof t === 'object')
+    .map((t) => ({
+      taskId: str(t.taskId),
+      title: str(t.title),
+      status: str(t.status),
+      progressPercent: num(t.progressPercent),
+      completedSteps: num(t.completedSteps),
+      totalSteps: num(t.totalSteps),
+    }))
+    // 没有标题的任务无法展示，直接丢弃而不是渲染空行
+    .filter((t) => t.title.length > 0)
+
+  return {
+    summary: str(d.summary),
+    summaryConfidence: num(d.summaryConfidence),
+    activeTasks,
+    completedTasks: num(d.completedTasks),
+    totalTasks: num(d.totalTasks),
+    progressPercent: num(d.progressPercent),
+    hasData: true,
+    error: typeof d.error === 'string' ? d.error : undefined,
+  }
+}
+
+/** 归一记忆卡片列表。同一套防御策略。 */
+export function parseMemoryCards(raw: unknown): MemoryCard[] {
+  if (!raw || typeof raw !== 'object') return []
+  const d = raw as Record<string, unknown>
+  if (d.hasData !== true) return []
+  const cards = Array.isArray(d.cards) ? d.cards : []
+  return cards
+    .filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
+    .map((c) => ({
+      id: typeof c.id === 'string' ? c.id : '',
+      content: typeof c.content === 'string' ? c.content : '',
+      type: typeof c.type === 'string' ? c.type : '',
+      confidence: typeof c.confidence === 'number' ? c.confidence : 0,
+      isPinned: c.isPinned === true,
+      topics: Array.isArray(c.topics) ? c.topics.filter((t): t is string => typeof t === 'string') : [],
+      updatedAt: typeof c.updatedAt === 'number' ? c.updatedAt : 0,
+    }))
+    .filter((c) => c.content.length > 0)
+}
+
+/** 订阅对话语境更新。无桥接时返回 no-op 取消函数。 */
+export function onConversationContext(handler: (ctx: ConversationContext) => void): () => void {
+  const bridge = readDataBridge()
+  const subscribe = bridge?.onConversationContextData
+  if (typeof subscribe !== 'function') return () => {}
+  try {
+    const off = subscribe((raw) => {
+      const parsed = parseConversationContext(raw)
+      if (parsed) handler(parsed)
+    })
+    return typeof off === 'function' ? off : () => {}
+  } catch {
+    return () => {}
+  }
+}
+
+/** 订阅记忆卡片更新。 */
+export function onMemoryCards(handler: (cards: MemoryCard[]) => void): () => void {
+  const bridge = readDataBridge()
+  const subscribe = bridge?.onMemoryContextData
+  if (typeof subscribe !== 'function') return () => {}
+  try {
+    const off = subscribe((raw) => {
+      const parsed = parseMemoryCards(raw)
+      if (parsed.length > 0) handler(parsed)
+    })
+    return typeof off === 'function' ? off : () => {}
+  } catch {
+    return () => {}
+  }
+}
+
+/**
+ * 订阅镜像过来的 agent 事件（已归一为 AgentActivity）。
+ *
+ * 形态窗口不在 AgentService 的发送列表里，靠主进程的镜像转发拿到事件。
+ * 这里承担两件事：解析脆弱的跨进程载荷 + 归一成语义化的活动描述，
+ * 让每个形态都只需处理 `{kind, text}`，而不是各自猜字段。
+ */
+export function onAgentActivity(handler: (activity: AgentActivity) => void): () => void {
+  const bridge = readBridge()
+  if (!bridge || typeof bridge.onAgentMirror !== 'function') return () => {}
+
+  try {
+    return bridge.onAgentMirror(({ channel, args }) => {
+      const activity = normalizeAgentEvent(channel, args)
+      if (activity) handler(activity)
+    })
+  } catch {
+    return () => {}
+  }
+}
+
+/**
+ * 把原始镜像事件转成语义化的活动描述。无法理解的事件返回 null（静默忽略）。
+ *
+ * 载荷形状来自 AgentService / ChatExecutor 的实际发送点：
+ *   ai:chunk      → (text: string)
+ *   tool:status   → ({ type, tool, message })
+ *   agent:state   → ({ state: 'thinking' | 'idle' | ... })
+ * 这些形状没有类型保障（跨进程传的是裸值），所以每个分支都做防御性检查。
+ */
+export function normalizeAgentEvent(channel: string, args: unknown[]): AgentActivity | null {
+  if (channel === 'ai:chunk') {
+    const text = args[0]
+    if (typeof text !== 'string' || text.length === 0) return null
+    return { kind: 'speaking', text }
+  }
+
+  if (channel === 'tool:status') {
+    const payload = args[0] as { type?: unknown; tool?: unknown; message?: unknown } | null
+    if (!payload || typeof payload !== 'object') return null
+    const tool = typeof payload.tool === 'string' ? payload.tool : ''
+    const message = typeof payload.message === 'string' ? payload.message : ''
+    // 工具状态既可能表示开始也可能表示结束，用 type 区分；
+    // 拿不到 type 时按"正在工作"处理（比误报 done 更安全）。
+    if (payload.type === 'end' || payload.type === 'done' || payload.type === 'complete') {
+      return { kind: 'done', text: message }
+    }
+    return { kind: 'tool', text: tool || message }
+  }
+
+  if (channel === 'agent:state') {
+    const payload = args[0] as { state?: unknown; message?: unknown } | null
+    if (!payload || typeof payload !== 'object') return null
+    const state = typeof payload.state === 'string' ? payload.state : ''
+    const message = typeof payload.message === 'string' ? payload.message : ''
+    if (state === 'thinking' || state === 'running') return { kind: 'thinking', text: message }
+    if (state === 'error') return { kind: 'error', text: message }
+    if (state === 'idle' || state === 'done') return { kind: 'done', text: message }
+    return null
+  }
+
+  return null
 }

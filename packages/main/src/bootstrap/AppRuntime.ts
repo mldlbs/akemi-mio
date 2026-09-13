@@ -775,6 +775,8 @@ export class AppRuntime {
     const win = createWindow(stateManager)
     // 注册形态切换快捷键（Ctrl+Shift+P / L / W）。
     // 放在主窗口创建之后：此时应用已就绪，且 globalShortcut 要求 app ready。
+    // 注：agent 事件镜像不在这里挂 —— 它由 createWindow 内部处理，
+    // 因为主窗口可能被销毁重建，挂在启动流程里会导致重建后漏挂。
     registerFormShortcuts()
     const t0 = Date.now()
     agentService.setMainWindow(win)

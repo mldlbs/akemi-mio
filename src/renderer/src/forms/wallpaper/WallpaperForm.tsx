@@ -14,7 +14,8 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { hasFormBridge, onBroadcast } from '../runtime'
+import { hasFormBridge, onBroadcast, onConversationContext, onMemoryCards } from '../runtime'
+import type { ConversationContext, MemoryCard } from '../runtime'
 import type { PetMood } from '../types'
 import './styles.css'
 
@@ -40,10 +41,14 @@ function seededStars(count: number, seed = 20260913) {
   return stars
 }
 
-/** 壁纸上的信息卡内容 —— 目前由广播驱动，后续可接真实数据源。 */
+/** 壁纸上的信息卡内容 —— 由真实数据源驱动（对话语境 / 记忆卡片）。 */
 interface WallpaperInfo {
   title: string
   body: string
+  /** 进度条百分比，undefined 表示不显示进度条 */
+  progress?: number
+  /** 来源标记，用于区分展示样式 */
+  source: 'conversation' | 'memory'
 }
 
 const MOOD_HUE: Record<PetMood, number> = {
@@ -52,6 +57,43 @@ const MOOD_HUE: Record<PetMood, number> = {
   thinking: 250,
   alert: 30,
   sleepy: 290,
+}
+
+/** 把对话语境转成信息卡内容。优先展示进行中的任务，其次展示摘要。 */
+function infoFromConversation(ctx: ConversationContext): WallpaperInfo | null {
+  const running = ctx.activeTasks.filter((t) => t.status !== 'completed' && t.status !== 'done')
+  if (running.length > 0) {
+    const top = running[0]
+    const more = running.length > 1 ? ` · 另有 ${running.length - 1} 项` : ''
+    return {
+      title: '进行中',
+      body: `${top.title}${more}`,
+      progress: top.progressPercent,
+      source: 'conversation',
+    }
+  }
+  if (ctx.summary.trim()) {
+    const s = ctx.summary.trim()
+    return {
+      title: '最近',
+      body: s.length > 120 ? `${s.slice(0, 120)}…` : s,
+      source: 'conversation',
+    }
+  }
+  return null
+}
+
+/** 把记忆卡片转成信息卡。优先展示置顶的。 */
+function infoFromMemory(cards: MemoryCard[]): WallpaperInfo | null {
+  if (cards.length === 0) return null
+  const pinned = cards.find((c) => c.isPinned) ?? cards[0]
+  const text = pinned.content.trim()
+  if (!text) return null
+  return {
+    title: pinned.isPinned ? '置顶记忆' : '记忆',
+    body: text.length > 120 ? `${text.slice(0, 120)}…` : text,
+    source: 'memory',
+  }
 }
 
 export function WallpaperForm() {
@@ -75,11 +117,41 @@ export function WallpaperForm() {
         const p = msg.payload as { mood?: PetMood } | undefined
         if (p?.mood) setMood(p.mood)
       }
+      // 广播可作为临时覆盖（如"正在思考"），但真实数据源到达时会替换掉它
       if (msg.type === 'wallpaper:info') {
         const p = msg.payload as WallpaperInfo | null | undefined
         setInfo(p ?? null)
       }
     })
+  }, [])
+
+  // ── 真实数据源 ──
+  //
+  // 两个来源共享同一张信息卡槽位，优先级为：对话语境 > 记忆卡片。
+  // 理由：用户此刻更关心"手上的活在做什么"，而不是"我记住了什么"。
+  // 两者都无数据时卡片不显示（不占位、不留空框）。
+  useEffect(() => {
+    let conv: ConversationContext | null = null
+    let mem: MemoryCard[] = []
+
+    const recompute = () => {
+      const fromConv = conv ? infoFromConversation(conv) : null
+      setInfo(fromConv ?? infoFromMemory(mem))
+    }
+
+    const offConv = onConversationContext((ctx) => {
+      conv = ctx
+      recompute()
+    })
+    const offMem = onMemoryCards((cards) => {
+      mem = cards
+      recompute()
+    })
+
+    return () => {
+      offConv()
+      offMem()
+    }
   }, [])
 
   const hue = MOOD_HUE[mood]
@@ -126,6 +198,11 @@ export function WallpaperForm() {
           <div className="wp-info">
             <p className="wp-info-title">{info.title}</p>
             <p className="wp-info-body">{info.body}</p>
+            {typeof info.progress === 'number' && (
+              <div className="wp-info-progress" role="progressbar" aria-valuenow={Math.round(info.progress)} aria-valuemin={0} aria-valuemax={100}>
+                <div className="wp-info-progress-fill" style={{ width: `${Math.min(100, Math.max(0, info.progress))}%` }} />
+              </div>
+            )}
           </div>
         )}
       </div>

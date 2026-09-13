@@ -174,4 +174,52 @@ export interface FormBridge {
   setIgnoreMouseEvents(ignore: boolean): Promise<void>
   /** 拖拽当前窗口（无边框窗口的自定义标题栏拖拽） */
   startWindowDrag(): Promise<void>
+  /** 订阅从主窗口镜像来的 agent 事件（形态窗口不在 AgentService 的发送列表里） */
+  onAgentMirror(handler: (payload: { channel: string; args: unknown[] }) => void): () => void
 }
+
+/**
+ * 从主窗口镜像过来的 agent 事件。
+ *
+ * 存在的原因：AgentService / ChatExecutor 只把事件发给 mainWindow，
+ * 形态窗口收不到。主进程在窗口创建时给主窗口的 send 挂了镜像转发，
+ * 频道变为 `forms:mirror:<原频道>`。
+ */
+export type AgentMirrorChannel = 'ai:chunk' | 'tool:status' | 'agent:state'
+
+export interface AgentMirrorEvent {
+  channel: AgentMirrorChannel | string
+  args: unknown[]
+}
+
+/**
+ * 把镜像事件归一到"一句话摘要"。
+ *
+ * 形态窗口不需要完整载荷 —— 宠物只要知道"在干活 / 说了什么 / 出错了"。
+ * 这里做归一是为了把解析逻辑收在一处，避免每个形态各写一份脆弱的字段猜测。
+ */
+export type AgentActivityKind = 'thinking' | 'speaking' | 'tool' | 'done' | 'error'
+
+export interface AgentActivity {
+  kind: AgentActivityKind
+  /** 可展示的文本（可能为空） */
+  text: string
+}
+
+/** 工具名 → 中文动作，用于宠物气泡与壁纸信息卡的可读性。 */
+export const TOOL_LABELS: Record<string, string> = {
+  Read: '读取文件',
+  Write: '写入文件',
+  Edit: '修改文件',
+  Bash: '执行命令',
+  Glob: '查找文件',
+  Grep: '搜索内容',
+  WebFetch: '访问网页',
+  WebSearch: '联网搜索',
+  Task: '调度子任务',
+}
+
+export function toolLabel(tool: string): string {
+  return TOOL_LABELS[tool] ?? tool
+}
+
