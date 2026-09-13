@@ -272,9 +272,12 @@ const TEST_KERNEL_PREFIXES = [
 describe('isKernelPath', () => {
   it('protects the relocated kernel modules by default', () => {
     const root = process.cwd().replace(/\\/g, '/')
+    // constitution 包已拆分为 packages/evolution-constitution，
+    // 旧路径 packages/evolution/src/constitution 已不存在 ——
+    // 保护一个不存在的目录等于没保护，所以这里必须跟到新位置。
     expect(getKernelPrefixes()).toEqual([
       `${root}/packages/core/src/core/`,
-      `${root}/packages/evolution/src/constitution/`,
+      `${root}/packages/evolution-constitution/src/`,
       `${root}/packages/main/src/bootstrap/`,
     ])
   })

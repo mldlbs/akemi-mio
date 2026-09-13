@@ -107,36 +107,69 @@ function legacyPackageResolver(): Plugin {
     return null
   }
 
-  /** 在同 group 的各拆分包里按「完整剩余路径 / 去掉首段 / 仅最后一段」三种写法探测 */
+  /**
+   * 定位旧路径的新家。**规则按置信度从高到低排列，低置信度规则只在
+   * 高置信度规则全部落空时才用。**
+   *
+   * 这个顺序是被 bug 逼出来的：最初一上来就按包名遍历 + 匹配"最后一段文件名"，
+   * 结果 `@akemi-mio/evolution/constitution/types` 被解析到了
+   * evolution-asr 包的 src/types.ts —— 注意 `types` 这种通用名在
+   * 各个 evolution- 前缀的包里有十几份，按字母序先撞上谁就是谁。
+   * 这比解析不到更糟：静默指向错误模块，
+   * 表现为 `isKernelPath is not a function` 这种完全看不出根因的报错。
+   */
   const probe = (group: string, restRaw: string, source: string): string | null => {
     const segs = restRaw.split(/[\\/]/).filter(Boolean)
     if (segs.length === 0) return null
 
-    // 精确规则：整个子目录被独立成包（@akemi-mio/evolution/goals →
-    // packages/evolution-goals/src/index.ts）。必须**先于**模糊探测，
-    // 否则 @akemi-mio/evolution/SandboxValidator 会被误配到某个包的入口上。
+    // 规则 1（精确）：整个子目录被独立成包
+    //   @akemi-mio/evolution/goals → packages/evolution-goals/src/index.ts
     if (segs.length === 1) {
       const exact = resolve(packagesDir, `${group}-${segs[0]}`, 'src', 'index.ts')
-      if (existsSync(exact)) return record(source, exact)
+      if (existsSync(exact)) return record(source, exact, 'exact')
     }
 
-    const variants = [segs.join('/'), segs.slice(1).join('/'), segs[segs.length - 1]]
+    // 规则 2（精确）：用路径前缀拼出包名，剩下的作为包内路径
+    //   evolution/constitution/types → evolution-constitution/src/types
+    //   intelligence/memory/MemoryService → intelligence-memory/src/MemoryService
+    for (let k = segs.length - 1; k >= 1; k--) {
+      const pkgName = `${group}-${segs.slice(0, k).join('-')}`
+      const found = resolveFile(resolve(packagesDir, pkgName, 'src', segs.slice(k).join('/')))
+      if (found) return record(source, found, 'exact')
+    }
+
+    // 规则 3（精确）：没有子目录 → 落在 <group>-core
+    //   evolution/SandboxValidator → evolution-core/src/SandboxValidator
+    if (segs.length === 1) {
+      const found = resolveFile(resolve(packagesDir, `${group}-core`, 'src', segs[0]))
+      if (found) return record(source, found, 'exact')
+    }
+
+    // 规则 4（低置信度）：同 group 任意包下的同名文件。
+    // 只有在**整个 group 内唯一**时才敢用 —— 有歧义就宁可不解析，
+    // 让测试明确报"找不到"，也不要猜一个错的。
+    const leaf = segs[segs.length - 1]
+    const candidates: string[] = []
     for (const pkg of packagesFor(group)) {
-      for (const v of variants) {
-        if (!v) continue
-        const found = resolveFile(resolve(packagesDir, pkg, 'src', v))
-        if (found) return record(source, found)
-      }
+      const found = resolveFile(resolve(packagesDir, pkg, 'src', leaf))
+      if (found) candidates.push(found)
+    }
+    if (candidates.length === 1) return record(source, candidates[0], 'fuzzy')
+    if (candidates.length > 1) {
+      console.warn(
+        `[legacy-alias] ${source} 有 ${candidates.length} 个同名候选，拒绝猜测（请显式改 import）`,
+      )
     }
     return null
   }
 
   /** 记录一次兜底命中并首次告警，让漂移可见而不是被静默消化 */
-  const record = (source: string, target: string): string => {
+  const record = (source: string, target: string, confidence: 'exact' | 'fuzzy'): string => {
     if (!legacyHits.has(source)) {
       legacyHits.set(source, target)
+      const tag = confidence === 'fuzzy' ? '低置信度' : '精确'
       console.warn(
-        `[legacy-alias] ${source} -> ${relative(process.cwd(), target)}（旧 import，应改为新包路径）`,
+        `[legacy-alias] ${source} -> ${relative(process.cwd(), target)}（${tag}；旧 import，应改为新包路径）`,
       )
     }
     return target

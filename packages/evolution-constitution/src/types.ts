@@ -36,12 +36,22 @@ export interface ConstitutionCheck {
  */
 function resolveKernelPrefixes(): string[] {
   const thisDir = __dirname.replace(/\\/g, '/')
-  const sourceMarker = '/packages/evolution/src/constitution'
-  const sourceRoot = thisDir.endsWith(sourceMarker) ? thisDir.slice(0, -sourceMarker.length) : null
-  if (sourceRoot) {
+  // 包拆分后本模块由 packages/evolution/src/constitution 迁到了
+  // packages/evolution-constitution/src。两个位置都认：只认新的话，
+  // 未重建的旧产物会掉到下面的兜底分支；只认旧的（原实现）则 dev 下
+  // 匹配不上，同样掉到兜底分支 —— 而兜底的 parentDir 推导在新位置下
+  // 会产出 packages/evolution-constitution/core/ 这种根本不存在的目录，
+  // 后果是 constitution 目录**完全失去保护且没有任何报错**。
+  const sourceMarkers = [
+    '/packages/evolution-constitution/src',
+    '/packages/evolution/src/constitution',
+  ]
+  for (const marker of sourceMarkers) {
+    if (!thisDir.endsWith(marker)) continue
+    const sourceRoot = thisDir.slice(0, -marker.length)
     return [
       `${sourceRoot}/packages/core/src/core/`,
-      `${sourceRoot}/packages/evolution/src/constitution/`,
+      `${sourceRoot}/packages/evolution-constitution/src/`,
       `${sourceRoot}/packages/main/src/bootstrap/`,
     ]
   }

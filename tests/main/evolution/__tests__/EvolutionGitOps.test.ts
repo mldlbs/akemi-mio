@@ -13,6 +13,10 @@ describe('EvolutionGitOps', () => {
   let gitOps: EvolutionGitOps
 
   beforeEach(() => {
+    // git 写操作受 MIO_EVOLUTION_GIT_WRITES 门禁保护（默认关，避免
+    // evolution 在无人看管时对当前分支做 add/commit/stash）。
+    // 本文件的用例就是要验证这些 git 操作本身，因此显式打开门禁。
+    process.env.MIO_EVOLUTION_GIT_WRITES = '1'
     gitOps = new EvolutionGitOps()
     vi.clearAllMocks()
   })
@@ -73,5 +77,35 @@ describe('EvolutionGitOps', () => {
     ;(execAsync as any).mockRejectedValueOnce(new Error('error'))
     const branch = await gitOps.getCurrentBranch()
     expect(branch).toBe('unknown')
+  })
+})
+
+// 与上面的 describe 相反：验证门禁**默认关闭**时的行为。
+// 这些 git 写曾在无人看管时对当前分支执行 add -A / commit / stash，
+// 把用户无关的在途改动一起吸进去，历史上有过丢失本地提交的事故，
+// 因此必须锁死"默认不写"。
+describe('EvolutionGitOps git 写门禁（默认关闭）', () => {
+  beforeEach(() => {
+    delete process.env.MIO_EVOLUTION_GIT_WRITES
+    vi.clearAllMocks()
+  })
+
+  it('autoGitCommit 不执行任何 git 命令', async () => {
+    await new EvolutionGitOps().autoGitCommit('测试计划')
+    expect(execAsync).not.toHaveBeenCalled()
+  })
+
+  it('workspacePreCheck 既不 stash 也不 add', async () => {
+    ;(execAsync as any).mockResolvedValue(' M f1\n M f2\n M f3\n M f4\n M f5\n M f6\n')
+    const result = await new EvolutionGitOps().workspacePreCheck(0)
+    expect(result).toBe(false)
+    const calls = (execAsync as any).mock.calls.map((c: unknown[]) => String(c[0]))
+    expect(calls.some((c: string) => c.startsWith('git stash'))).toBe(false)
+    expect(calls.some((c: string) => c.startsWith('git add'))).toBe(false)
+  })
+
+  it('workspacePostRestore 不执行 git stash pop', async () => {
+    await new EvolutionGitOps().workspacePostRestore()
+    expect(execAsync).not.toHaveBeenCalled()
   })
 })

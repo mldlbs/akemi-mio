@@ -60,6 +60,8 @@ const configMock = vi.hoisted(() => ({
   GGML_MODELS_DIR: '/dev/null',
   ASR_SAMPLE_RATE: 16000,
   ASR_MAX_AUDIO_SECONDS: 25,
+  ASR_HOTWORD_WINDOW_SIZE: 16,
+  BEHAVIOR_MEMORY_ANALYZER_WINDOW: 70,
   ASR_INITIAL_PROMPT: '',
   FFPLAY_PATHS: ['ffplay'],
   PIPER_SCRIPT: '/dev/null',
@@ -96,7 +98,15 @@ const configMock = vi.hoisted(() => ({
   BLOG_MEMORY_DEFAULT_CONFIDENCE: 0.8,
 }))
 
-vi.mock('@akemi-mio/core/config', () => configMock)
+// configMock 只列本测试关心的键，其余从真实 config 继承。
+// 原先是完全替换，config 每加一个常量这里就漏一个（已连续漏过
+// BEHAVIOR_MEMORY_ANALYZER_WINDOW / BEHAVIOR_MEMORY_TFIDF_TOP_K…），
+// 症状是 `No "X" export is defined on the mock`，与被测代码无关，
+// 却让整个测试文件在加载阶段就死掉。
+vi.mock('@akemi-mio/core/config', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  ...configMock,
+}))
 vi.mock('@akemi-mio/audio/MemoryAsrHybridPipeline', () => ({
   memoryAsrHybridPipeline: {
     run: vi.fn().mockResolvedValue({ text: '识别文本', requestId: 'req-1', arbitrationTriggered: false }),

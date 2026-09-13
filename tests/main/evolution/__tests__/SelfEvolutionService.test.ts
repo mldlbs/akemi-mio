@@ -22,7 +22,13 @@ vi.mock('electron', () => ({
   app: { getAppPath: () => process.cwd(), getPath: () => process.cwd() },
 }))
 
-vi.mock('@akemi-mio/core/config', () => ({
+// 以真实 config 为底、只覆盖本测试关心的键。
+// 原先是手工列举全部导出，config 每加一个常量这里就漏一个
+// （已连续漏过 ASR_HOTWORD_WINDOW_SIZE / ASR_HOTWORD_FREQ_THRESHOLD…），
+// 症状是 `No "X" export is defined on the mock`，与代码实现无关却让整个
+// 测试文件在加载阶段就死掉。铺底后新增 config 导出会被自动继承。
+vi.mock('@akemi-mio/core/config', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
   LLM_API_URL: 'https://api.example.com/chat',
   LLM_CHAT_MODEL: 'test-model',
   LLM_CODE_MODEL: 'test-model',
@@ -42,6 +48,7 @@ vi.mock('@akemi-mio/core/config', () => ({
   ASR_HOTWORDS: [],
   ASR_SAMPLE_RATE: 16000,
   ASR_MAX_AUDIO_SECONDS: 25,
+  ASR_HOTWORD_WINDOW_SIZE: 16,
   WAKE_WORDS: ['mio'],
   WINDOW_WIDTH: 420,
   WINDOW_HEIGHT: 640,
