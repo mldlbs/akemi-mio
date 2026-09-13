@@ -43,6 +43,10 @@ __*
 .claude/tool-call-log-*.test.json
 # electron-vite 每次构建落下的临时配置（electron.vite.config.<时间戳>.mjs）
 electron.vite.config.*.mjs
+# scripts/launch-*.cjs 的截图输出目录
+.forms-capture/
+.main-capture/
+.launch-capture/
 .claude-flow/
 .swarm/
 .playwright-mcp/
