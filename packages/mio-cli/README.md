@@ -43,6 +43,8 @@ mio memory restore --ids a,b    Un-archive previously archived records
 mio memory merge --ids a,b  Merge duplicate records into one survivor (--keep/--allow-divergent; --yes required)
 mio memory migrate --ids a,b --scope global|project   Move records between the project and global layers
 mio policy check "<action>" Check the historical risk of an action before running it (--project; reads global MIO_HOME)
+mio creativity status        Show creativity hypothesis counts and recent top ideas (reads global MIO_HOME)
+mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
 mio --json status           Machine-readable status
 mio --json agents           Machine-readable agents
 mio --json evolution status Machine-readable evolution module health
@@ -231,6 +233,10 @@ operations — `analyze` / `archive` / `merge` / `migrate` — so
 same pattern for `mio.experience.*` and `mio.policy.check`; the policy
 store reuses the memory store's tokenizer, so policy risk evidence and
 related-memory ranking agree with `mio.memory.query` by construction.
+`server/creativity-engine.js` is the shared implementation behind
+`mio.creativity.*` — the CLI's `mio creativity status`/`list` and the MCP
+tools call the same `CreativityEngine`, so hypothesis counts can never
+drift between entry points.
 `server/digest.js`
 aggregates traces/memory/reuse into actionable reports (also exposed as
 `mio.digest.generate`), and `server/retention.js` powers `mio prune`
@@ -382,6 +388,43 @@ Notes:
 - **Flags that belong to the action are kept.** Only `--project` and
   `--json` are consumed as options, so `git reset --hard` is passed
   through intact rather than being truncated to `git reset`.
+
+## Creativity engine
+
+`mio.creativity.status` and `mio.creativity.list` have been on the MCP
+surface since the engine landed, but had no terminal entry point. `mio
+creativity` brings the read-only side to the CLI:
+
+```bash
+mio creativity status
+mio creativity list --status rejected --limit 10
+mio creativity list --json
+```
+
+```text
+Creativity engine:
+  hypotheses: 5  combos: 3  experiments: 1
+  active: 2  validated: 1  rejected: 1
+
+Recent top ideas:
+- Plugin architecture  (novelty=80 feasibility=70 impact=90 score=240)
+    idea_1787936687555_0
+```
+
+Notes:
+
+- **It delegates to the same `CreativityEngine` the MCP server uses**, so a
+  terminal `mio creativity list` sees the identical hypotheses the
+  `mio.creativity.list` tool would return. The store lives at
+  `<MIO_HOME>/creativity/creativity-hypotheses.jsonl`; the CLI points at
+  the global `MIO_HOME`, matching `mio policy check`.
+- **Only read-only subcommands are exposed.** `generate` and `ferment`
+  call an LLM and remain MCP-only (`mio.creativity.generate` /
+  `mio.creativity.ferment`); the CLI rejects `generate`/`ferment` as
+  unknown subcommands rather than invoking an unconfigured model.
+- **An empty store is a normal state.** Before the engine has run,
+  `status` reports all-zero counts and `list` says "No hypotheses match."
+  Both are valid output, not errors.
 
 ## Release verification
 

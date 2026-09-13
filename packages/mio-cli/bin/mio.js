@@ -23,6 +23,7 @@ const { createEvolutionCutoverTools } = require('../server/evolution-cutover.js'
 const { createMemoryStore } = require('../server/memory-store.js')
 const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
+const { CreativityEngine } = require('../server/creativity-engine.js')
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
 
@@ -251,6 +252,15 @@ function cliPolicyStore() {
     projectName,
     memoryStore,
   })
+}
+
+// The creativity engine is the single implementation behind mio.creativity.*;
+// the CLI points it at the global MIO_HOME so a terminal `mio creativity list`
+// sees the same hypotheses the MCP server would after it has run. generate/
+// ferment need an LLM, so the CLI only exposes the read-only status and list.
+function cliCreativityEngine() {
+  const creativityDir = path.join(MIO_HOME, 'creativity')
+  return new CreativityEngine(creativityDir, () => { throw new Error('LLM calls are not available from the CLI') })
 }
 
 function splitTagsOption(args, name) {
@@ -1094,6 +1104,94 @@ function policyCommand(args, useJson) {
   printPolicyCheck(result)
 }
 
+function creativityUsage() {
+  console.log(`Usage:
+  mio creativity status              Show hypothesis counts and recent top ideas
+  mio creativity list                List hypotheses (--status active|validated|rejected|draft, --limit N)
+
+Options:
+  --status name      Filter list by status
+  --limit N          Max results for list (default 20)
+  --json             Machine-readable output (same shape as mio.creativity.status / mio.creativity.list)
+
+Examples:
+  mio creativity status
+  mio creativity list --status rejected --limit 10
+
+The CLI exposes the read-only side of the creativity engine. generate/ferment
+call an LLM and are only available over MCP (mio.creativity.generate /
+mio.creativity.ferment).`)
+}
+
+function printCreativityStatus(result) {
+  console.log('Creativity engine:')
+  console.log(`  hypotheses: ${result.hypotheses}  combos: ${result.combos}  experiments: ${result.experiments}`)
+  console.log(`  active: ${result.active}  validated: ${result.validated}  rejected: ${result.rejected}`)
+  if (result.recentIdeas.length === 0) {
+    console.log('No hypotheses yet.')
+    return
+  }
+  console.log('\nRecent top ideas:')
+  for (const idea of result.recentIdeas) {
+    console.log(`- ${idea.title}  (novelty=${idea.novelty} feasibility=${idea.feasibility} impact=${idea.impact} score=${idea.score})`)
+    console.log(`    ${idea.id}`)
+  }
+}
+
+function printCreativityList(items) {
+  if (items.length === 0) {
+    console.log('No hypotheses match.')
+    return
+  }
+  console.log(`Hypotheses: ${items.length} shown`)
+  items.forEach((h, index) => {
+    const when = h.createdAt ? new Date(h.createdAt).toISOString().slice(0, 19).replace('T', ' ') : ''
+    const labels = Array.isArray(h.sourceLabels) && h.sourceLabels.length > 0 ? h.sourceLabels.join(' + ') : '—'
+    console.log(`${index + 1}. [${h.status}] ${h.title}  (N=${h.novelty} F=${h.feasibility} I=${h.impact} score=${h.score})`)
+    console.log(`   ${labels} | ${when} | ${h.id}`)
+    if (h.fermentCount) console.log(`   fermented ${h.fermentCount}x`)
+  })
+}
+
+function creativityCommand(args, useJson) {
+  const sub = args[1]
+
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    creativityUsage()
+    if (!sub) process.exitCode = 1
+    return
+  }
+  if (!['status', 'list'].includes(sub)) {
+    console.error(`Unknown creativity subcommand: ${sub}`)
+    creativityUsage()
+    process.exitCode = 1
+    return
+  }
+
+  const flags = args.slice(2)
+  const engine = cliCreativityEngine()
+
+  let result
+  try {
+    if (sub === 'status') {
+      result = engine.status()
+    } else {
+      result = engine.list({
+        status: optionValue(flags, '--status'),
+        limit: parseNumberOption(flags, '--limit'),
+      })
+    }
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+
+  if (useJson) return jsonOrText(result, true)
+  if (sub === 'status') printCreativityStatus(result)
+  else printCreativityList(result)
+}
+
 function readConfig() {
   const fallback = { version: 1, home: MIO_HOME, agents: {} }
   if (!fs.existsSync(CONFIG_FILE)) return fallback
@@ -1320,6 +1418,8 @@ Usage:
   mio experience list        List experience reuse (--status pending|confirmed|verified)
   mio experience confirm --ids a,b   Confirm auto-claimed reuse (bulk supported)
   mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse
+  mio creativity status        Show creativity hypothesis counts and recent top ideas
+  mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
   mio policy check "<action>" Check historical risk for an action before running it
   mio prune --days 30         Trim old traces/queries/reuse records and observe.log (--dry-run to preview; --memory needs --yes)
   mio digest --days 7         Aggregate traces/memory/reuse into an actionable report (--write-back feeds agent context files; --json)
@@ -1361,6 +1461,8 @@ async function main() {
       return experienceCommand(args, useJson)
     case 'policy':
       return policyCommand(args, useJson)
+    case 'creativity':
+      return creativityCommand(args, useJson)
     case 'prune':
       return pruneCommand(args, useJson)
     case 'digest':
