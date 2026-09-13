@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { InsightGenerator } from '@akemi-mio/intelligence/insight/InsightGenerator'
-import { InsightScorer } from '@akemi-mio/intelligence/insight/InsightScorer'
-import type { DetectionContext, RawDetection, Insight } from '@akemi-mio/intelligence/insight/types'
+import { InsightGenerator } from '@akemi-mio/intelligence-insight/InsightGenerator'
+import { InsightScorer } from '@akemi-mio/intelligence-insight/InsightScorer'
+import type { DetectionContext, RawDetection, Insight } from '@akemi-mio/intelligence-insight/types'
 
 vi.mock('@akemi-mio/core/core/EventBus', () => ({
   eventBus: { emit: vi.fn() },

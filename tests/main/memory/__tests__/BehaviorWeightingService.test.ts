@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { BehaviorWeightingService } from '@akemi-mio/intelligence/memory/BehaviorWeightingService'
-import type { InteractionRecord } from '@akemi-mio/intelligence/memory/types'
+import { BehaviorWeightingService } from '@akemi-mio/intelligence-memory/BehaviorWeightingService'
+import type { InteractionRecord } from '@akemi-mio/intelligence-memory/types'
 
 vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))
 

@@ -4,9 +4,9 @@ import { useIsolatedTestDatabase } from '../db/__tests__/testDatabase'
 
 vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))
 
-import { MemoryService } from '@akemi-mio/intelligence/memory/MemoryService'
-import { DecisionStore } from '@akemi-mio/intelligence/memory/DecisionStore'
-import { SummaryMemory } from '@akemi-mio/intelligence/memory/SummaryMemory'
+import { MemoryService } from '@akemi-mio/intelligence-memory/MemoryService'
+import { DecisionStore } from '@akemi-mio/intelligence-memory/DecisionStore'
+import { SummaryMemory } from '@akemi-mio/intelligence-memory/SummaryMemory'
 import { EventBus, eventBus as defaultBus } from '@akemi-mio/core/core/EventBus'
 
 describe('资源消耗基线', () => {

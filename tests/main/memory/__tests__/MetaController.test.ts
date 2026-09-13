@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { MetaController, DEFAULT_POLICY } from '@akemi-mio/intelligence/memory/MetaController'
+import { MetaController, DEFAULT_POLICY } from '@akemi-mio/intelligence-memory/MetaController'
 
 describe('MetaController', () => {
   let mc: MetaController

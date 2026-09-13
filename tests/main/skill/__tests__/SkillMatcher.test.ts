@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { SkillMatcher } from '@akemi-mio/intelligence/skill/SkillMatcher'
-import type { SkillManifest } from '@akemi-mio/intelligence/skill/SkillTypes'
+import { SkillMatcher } from '@akemi-mio/intelligence-skill/SkillMatcher'
+import type { SkillManifest } from '@akemi-mio/intelligence-skill/SkillTypes'
 
 function makeSkill(overrides: Partial<SkillManifest> & { name: string }): SkillManifest {
   return {

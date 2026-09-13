@@ -8,7 +8,7 @@
  * ═══════════════════════════════════════════════════════
  * 使用示例（ReasoningChainTools 中）:
  *
- *   import { evolutionConsumerBridge } from '@akemi-mio/evolution/consumer'
+ *   import { evolutionConsumerBridge } from '@akemi-mio/evolution-consumer'
  *
  *   const ctx = evolutionConsumerBridge.getContext('plan_reasoning_chain')
  *   if (ctx?.knownIssues.length > 0) {

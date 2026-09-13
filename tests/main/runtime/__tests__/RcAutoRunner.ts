@@ -8,7 +8,7 @@
  *   npx tsx src/main/runtime/__tests__/RcAutoRunner.ts
  */
 
-import { ServerManager } from '@akemi-mio/intelligence/mcp/ServerManager'
+import { ServerManager } from '@akemi-mio/intelligence-mcp/ServerManager'
 import type { ToolCallInfo } from '@akemi-mio/intelligence/llm/LlmService'
 import { RuntimeManagerImpl } from '@akemi-mio/intelligence/runtime/RuntimeManagerImpl'
 import { SupervisedAgentSupervisorImpl } from '@akemi-mio/intelligence/runtime/SupervisedAgentSupervisorImpl'

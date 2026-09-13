@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { MetaController } from '@akemi-mio/intelligence/memory/MetaController'
+import { MetaController } from '@akemi-mio/intelligence-memory/MetaController'
 
 describe('MetaController 压力测试', () => {
   let mc: MetaController

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { ResponseValidator, formatValidationSummary } from '@akemi-mio/evolution/ResponseValidator'
+import { ResponseValidator, formatValidationSummary } from '@akemi-mio/evolution-core/ResponseValidator'
 import { eventBus } from '@akemi-mio/core/core/EventBus'
 
 vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))

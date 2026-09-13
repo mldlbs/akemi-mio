@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
-import { MemoryAwareInterceptor } from '@akemi-mio/intelligence/mcp/MemoryAwareInterceptor'
-import { MemoryRetriever } from '@akemi-mio/intelligence/mcp/ToolMemoryDefaults'
+import { MemoryAwareInterceptor } from '@akemi-mio/intelligence-mcp/MemoryAwareInterceptor'
+import { MemoryRetriever } from '@akemi-mio/intelligence-mcp/ToolMemoryDefaults'
 import type { CapabilityResolver } from '@akemi-mio/capabilities/capability/CapabilityResolver'
-import type { MemoryService } from '@akemi-mio/intelligence/memory/MemoryService'
+import type { MemoryService } from '@akemi-mio/intelligence-memory/MemoryService'
 
 vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))
 

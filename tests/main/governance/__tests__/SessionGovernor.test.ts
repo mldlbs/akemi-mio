@@ -2,11 +2,11 @@
  * SessionGovernor 组件单元测试
  */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { SessionHealthScorer } from '@akemi-mio/evolution/governance/SessionHealthScorer'
-import { SessionStateMachine } from '@akemi-mio/evolution/governance/SessionStateMachine'
-import { CheckpointV2 } from '@akemi-mio/evolution/governance/CheckpointV2'
+import { SessionHealthScorer } from '@akemi-mio/evolution-governance/SessionHealthScorer'
+import { SessionStateMachine } from '@akemi-mio/evolution-governance/SessionStateMachine'
+import { CheckpointV2 } from '@akemi-mio/evolution-governance/CheckpointV2'
 import { SessionRecoveryManager } from '@akemi-mio/intelligence/agent/SessionRecoveryManager'
-import { getHealthLevel, TRANSITION_RULES, RECOVERY_ACTIONS } from '@akemi-mio/evolution/governance/SessionGovernorTypes'
+import { getHealthLevel, TRANSITION_RULES, RECOVERY_ACTIONS } from '@akemi-mio/evolution-governance/SessionGovernorTypes'
 
 // =============================================================================
 // SessionHealthScorer

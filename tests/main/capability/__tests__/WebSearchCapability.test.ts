@@ -7,10 +7,10 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { MCPRegistry } from '@akemi-mio/intelligence/mcp/MCPRegistry'
+import { MCPRegistry } from '@akemi-mio/intelligence-mcp/MCPRegistry'
 import { CapabilityCatalog } from '@akemi-mio/capabilities/capability/CapabilityCatalog'
 import { CapabilityResolver } from '@akemi-mio/capabilities/capability/CapabilityResolver'
-import type { MCPServerManifest } from '@akemi-mio/intelligence/mcp/types'
+import type { MCPServerManifest } from '@akemi-mio/intelligence-mcp/types'
 
 const WEB_SEARCH_MANIFEST: MCPServerManifest = {
   id: 'web-search',

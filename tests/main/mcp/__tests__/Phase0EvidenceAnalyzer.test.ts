@@ -8,7 +8,7 @@ import {
   type Phase0MemoryRecord,
   type Phase0TraceRecord,
   type Phase0ExperienceReuseRecord,
-} from '@akemi-mio/intelligence/mcp/Phase0EvidenceAnalyzer'
+} from '@akemi-mio/intelligence-mcp/Phase0EvidenceAnalyzer'
 
 const tempDirs: string[] = []
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BehaviorPredictor } from '@akemi-mio/intelligence/mcp/BehaviorPredictor'
+import { BehaviorPredictor } from '@akemi-mio/intelligence-mcp/BehaviorPredictor'
 
 describe('BehaviorPredictor shadow identity', () => {
   it('records optional shadow identity metadata on recent calls', () => {

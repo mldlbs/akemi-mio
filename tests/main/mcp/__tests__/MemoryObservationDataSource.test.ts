@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { loadObservedMemories, loadObservedMemoriesViaElectron } from '@akemi-mio/intelligence/mcp/MemoryObservationDataSource'
+import { loadObservedMemories, loadObservedMemoriesViaElectron } from '@akemi-mio/intelligence-mcp/MemoryObservationDataSource'
 
 describe('MemoryObservationDataSource', () => {
   it('uses an Electron-backed SQLite query so observation can see WAL-backed memory writes', () => {

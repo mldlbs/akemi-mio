@@ -5,8 +5,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { CapabilityCatalog } from '@akemi-mio/capabilities/capability/CapabilityCatalog'
 import { CapabilityResolver } from '@akemi-mio/capabilities/capability/CapabilityResolver'
-import { MCPRegistry } from '@akemi-mio/intelligence/mcp/MCPRegistry'
-import type { MCPServerManifest } from '@akemi-mio/intelligence/mcp/types'
+import { MCPRegistry } from '@akemi-mio/intelligence-mcp/MCPRegistry'
+import type { MCPServerManifest } from '@akemi-mio/intelligence-mcp/types'
 
 const workspaceRoot = process.cwd()
 const appRuntimePath = join(workspaceRoot, 'packages', 'main', 'src', 'bootstrap', 'AppRuntime.ts')

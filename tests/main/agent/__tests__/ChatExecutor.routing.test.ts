@@ -68,7 +68,7 @@ import { RunContext } from '@akemi-mio/intelligence/agent/runstate'
 import type { Message } from '@akemi-mio/intelligence/agent/context'
 import { userBehaviorAnalyzer } from '@akemi-mio/intelligence/agent/UserBehaviorAnalyzer'
 import { taskOrchestrationModeManager } from '@akemi-mio/evolution/behavior/TaskOrchestrationModeManager'
-import { executionGoalStore } from '@akemi-mio/evolution/goals'
+import { executionGoalStore } from '@akemi-mio/evolution-goals'
 
 function createExecutor() {
   const llmService = {

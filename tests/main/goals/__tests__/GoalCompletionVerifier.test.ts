@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildGoalVerificationPrompt, parseGoalVerificationReply, verifyGoalCompletion } from '@akemi-mio/evolution/goals/GoalCompletionVerifier'
-import type { ExecutionGoal } from '@akemi-mio/evolution/goals/types'
+import { buildGoalVerificationPrompt, parseGoalVerificationReply, verifyGoalCompletion } from '@akemi-mio/evolution-goals/GoalCompletionVerifier'
+import type { ExecutionGoal } from '@akemi-mio/evolution-goals/types'
 
 function goal(overrides: Partial<ExecutionGoal> = {}): ExecutionGoal {
   return {

@@ -16,8 +16,8 @@ vi.mock('@akemi-mio/core/logger/Logger', () => ({
   log: vi.fn(),
 }))
 
-import { AsrBehaviorAdapter } from '@akemi-mio/evolution/user-behavior/asr-adapter/AsrBehaviorAdapter'
-import type { AsrVoiceEmotionInput, AsrEnvironmentInput, AsrConfidenceInput } from '@akemi-mio/evolution/user-behavior/asr-adapter/AsrBehaviorTypes'
+import { AsrBehaviorAdapter } from '@akemi-mio/evolution-asr-adapter/AsrBehaviorAdapter'
+import type { AsrVoiceEmotionInput, AsrEnvironmentInput, AsrConfidenceInput } from '@akemi-mio/evolution-asr-adapter/AsrBehaviorTypes'
 
 describe('AsrBehaviorAdapter', () => {
   let adapter: AsrBehaviorAdapter

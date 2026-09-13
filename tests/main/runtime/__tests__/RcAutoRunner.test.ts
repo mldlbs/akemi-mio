@@ -9,10 +9,10 @@ import { RuntimeManagerImpl } from '@akemi-mio/intelligence/runtime/RuntimeManag
 import { SupervisedAgentSupervisorImpl } from '@akemi-mio/intelligence/runtime/SupervisedAgentSupervisorImpl'
 import { RuntimeValidator } from '@akemi-mio/intelligence/runtime/RuntimeValidator'
 import { ReplayRunner, SCENARIO_SINGLE_TASK, SCENARIO_PARALLEL_5 } from '@akemi-mio/intelligence/runtime/ReplayRunner'
-import { ServerManager } from '@akemi-mio/intelligence/mcp/ServerManager'
+import { ServerManager } from '@akemi-mio/intelligence-mcp/ServerManager'
 import { eventBus } from '@akemi-mio/core/core/EventBus'
 
-vi.mock('@akemi-mio/intelligence/mcp/ServerManager', () => {
+vi.mock('@akemi-mio/intelligence-mcp/ServerManager', () => {
   const Mock = vi.fn()
   Mock.prototype.callTool = vi.fn().mockResolvedValue('mock_tool_result')
   return { ServerManager: Mock }

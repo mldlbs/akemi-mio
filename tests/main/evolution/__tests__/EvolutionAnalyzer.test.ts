@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { EvolutionAnalyzer } from '@akemi-mio/evolution/pipeline/EvolutionAnalyzer'
+import { EvolutionAnalyzer } from '@akemi-mio/evolution-pipeline/EvolutionAnalyzer'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { mkdirSync, rmSync } from 'fs'

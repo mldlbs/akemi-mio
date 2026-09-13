@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
-import { MCPRegistry } from '@akemi-mio/intelligence/mcp/MCPRegistry'
+import { MCPRegistry } from '@akemi-mio/intelligence-mcp/MCPRegistry'
 import { CapabilityCatalog } from '@akemi-mio/capabilities/capability/CapabilityCatalog'
 import { CapabilityResolver } from '@akemi-mio/capabilities/capability/CapabilityResolver'
 import { CapabilityServiceImpl } from '@akemi-mio/capabilities/capability/CapabilityServiceImpl'
 import { socialPublishAdapter } from '@akemi-mio/capabilities/capability/adapters/social-publish-adapter'
 import { eventBus } from '@akemi-mio/core/core/EventBus'
-import type { MCPServerManifest } from '@akemi-mio/intelligence/mcp/types'
+import type { MCPServerManifest } from '@akemi-mio/intelligence-mcp/types'
 
 const PUBLISHING_SCHEMA = {
   type: 'object' as const,

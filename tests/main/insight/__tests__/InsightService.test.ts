@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { InsightService } from '@akemi-mio/intelligence/insight/InsightService'
-import { PresenceService } from '@akemi-mio/intelligence/insight/PresenceService'
-import type { InsightStoreLike, Insight } from '@akemi-mio/intelligence/insight/types'
+import { InsightService } from '@akemi-mio/intelligence-insight/InsightService'
+import { PresenceService } from '@akemi-mio/intelligence-insight/PresenceService'
+import type { InsightStoreLike, Insight } from '@akemi-mio/intelligence-insight/types'
 
 vi.mock('@akemi-mio/core/core/EventBus', () => ({
   eventBus: { on: vi.fn(), emit: vi.fn() },

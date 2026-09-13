@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { VerificationRunner } from '@akemi-mio/evolution/VerificationRunner'
-import { ProposalValidator } from '@akemi-mio/evolution/ProposalValidator'
-import { RegressionDetector } from '@akemi-mio/evolution/RegressionDetector'
+import { VerificationRunner } from '@akemi-mio/evolution-core/VerificationRunner'
+import { ProposalValidator } from '@akemi-mio/evolution-core/ProposalValidator'
+import { RegressionDetector } from '@akemi-mio/evolution-core/RegressionDetector'
 
 describe('VerificationRunner', () => {
   it('should create with default config', () => {

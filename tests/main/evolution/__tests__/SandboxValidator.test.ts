@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { validateSandboxHtml, validateAllSandboxes } from '@akemi-mio/evolution/SandboxValidator'
+import { validateSandboxHtml, validateAllSandboxes } from '@akemi-mio/evolution-core/SandboxValidator'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { mkdirSync, writeFileSync, rmSync } from 'fs'

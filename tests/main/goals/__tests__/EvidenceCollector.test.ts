@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { collectEvidence } from '@akemi-mio/evolution/goals/EvidenceCollector'
+import { collectEvidence } from '@akemi-mio/evolution-goals/EvidenceCollector'
 import type { ToolCallInfo } from '@akemi-mio/intelligence/llm/LlmService'
 import type { ToolResult } from '@akemi-mio/intelligence/agent/ToolScheduler'
 

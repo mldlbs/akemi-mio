@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { EvolutionSelfEvaluator } from '@akemi-mio/evolution/EvolutionSelfEvaluator'
+import { EvolutionSelfEvaluator } from '@akemi-mio/evolution-core/EvolutionSelfEvaluator'
 
 describe('EvolutionSelfEvaluator', () => {
   let evaluator: EvolutionSelfEvaluator

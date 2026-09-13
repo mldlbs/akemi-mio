@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { PlanIntegrityChecker } from '@akemi-mio/evolution/PlanIntegrityChecker'
+import { PlanIntegrityChecker } from '@akemi-mio/evolution-core/PlanIntegrityChecker'
 import type { DevPlan } from '@akemi-mio/evolution/types'
 
 function makePlan(overrides: Partial<DevPlan> = {}): DevPlan {

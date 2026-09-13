@@ -16,7 +16,7 @@ vi.mock('electron', () => ({
   app: { getAppPath: () => process.cwd(), getPath: () => process.cwd() },
 }))
 
-import { ToolRegistry, Permission, expandPermissions } from '@akemi-mio/intelligence/plugin/registry'
+import { ToolRegistry, Permission, expandPermissions } from '@akemi-mio/intelligence-plugin/registry'
 
 // =============================================================================
 // 辅助

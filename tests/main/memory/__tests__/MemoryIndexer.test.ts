@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { MemoryIndexer } from '@akemi-mio/intelligence/memory/MemoryIndexer'
+import { MemoryIndexer } from '@akemi-mio/intelligence-memory/MemoryIndexer'
 
 describe('MemoryIndexer', () => {
   beforeEach(() => {

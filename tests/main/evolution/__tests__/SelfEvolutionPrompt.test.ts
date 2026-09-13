@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { buildEvolutionSystemPrompt, getEvolutionPromptTokens } from '@akemi-mio/evolution/SelfEvolutionPrompt'
+import { buildEvolutionSystemPrompt, getEvolutionPromptTokens } from '@akemi-mio/evolution-core/SelfEvolutionPrompt'
 import { getBasePromptTokens } from '@akemi-mio/intelligence/agent/context'
 
 describe('SelfEvolutionPrompt — 精简提示体积验证', () => {

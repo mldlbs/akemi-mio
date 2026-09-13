@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ServerManager } from '@akemi-mio/intelligence/mcp/ServerManager'
-import { LocalProvider } from '@akemi-mio/intelligence/mcp/LocalProvider'
-import { toolRegistry } from '@akemi-mio/intelligence/plugin/registry'
-import managementPlugin from '@akemi-mio/intelligence/plugin/builtin/management.plugin'
+import { ServerManager } from '@akemi-mio/intelligence-mcp/ServerManager'
+import { LocalProvider } from '@akemi-mio/intelligence-mcp/LocalProvider'
+import { toolRegistry } from '@akemi-mio/intelligence-plugin/registry'
+import managementPlugin from '@akemi-mio/intelligence-plugin/builtin/management.plugin'
 
 vi.mock('electron', () => ({
   app: {

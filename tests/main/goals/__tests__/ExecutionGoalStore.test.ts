@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { closeDatabase, initDatabase } from '@akemi-mio/core/db/connection'
 import { useIsolatedTestDatabase } from '../../db/__tests__/testDatabase'
-import { ExecutionGoalStore } from '@akemi-mio/evolution/goals/ExecutionGoalStore'
-import type { Evidence } from '@akemi-mio/evolution/goals/types'
+import { ExecutionGoalStore } from '@akemi-mio/evolution-goals/ExecutionGoalStore'
+import type { Evidence } from '@akemi-mio/evolution-goals/types'
 
 describe('ExecutionGoalStore', () => {
   let dispose: () => void

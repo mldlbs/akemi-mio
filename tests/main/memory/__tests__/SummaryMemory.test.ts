@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { SummaryMemory } from '@akemi-mio/intelligence/memory/SummaryMemory'
+import { SummaryMemory } from '@akemi-mio/intelligence-memory/SummaryMemory'
 import { initDatabase, closeDatabase, getRawDb } from '@akemi-mio/core/db/connection'
 import { useIsolatedTestDatabase } from '../../db/__tests__/testDatabase'
 

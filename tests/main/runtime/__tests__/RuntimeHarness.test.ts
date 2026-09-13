@@ -20,11 +20,11 @@ import { RuntimeManagerImpl } from '@akemi-mio/intelligence/runtime/RuntimeManag
 import { SupervisedAgentSupervisorImpl } from '@akemi-mio/intelligence/runtime/SupervisedAgentSupervisorImpl'
 import { eventBus } from '@akemi-mio/core/core/EventBus'
 import { RUNTIME_EVENT } from '@akemi-mio/intelligence/runtime/RuntimeMessage'
-import { ServerManager } from '@akemi-mio/intelligence/mcp/ServerManager'
+import { ServerManager } from '@akemi-mio/intelligence-mcp/ServerManager'
 
 // ── Mock MCP / LLM 依赖 ──
 
-vi.mock('@akemi-mio/intelligence/mcp/ServerManager', () => {
+vi.mock('@akemi-mio/intelligence-mcp/ServerManager', () => {
   const MockServerManager = vi.fn()
   MockServerManager.prototype.callTool = vi.fn().mockResolvedValue('mock_tool_result')
   return { ServerManager: MockServerManager }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { HackerNewsCollector } from '@akemi-mio/intelligence/observer/collectors/HackerNewsCollector'
+import { HackerNewsCollector } from '@akemi-mio/intelligence-observer/collectors/HackerNewsCollector'
 
 const mockFetch = vi.fn()
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 import { resolve } from 'path'
 
-import { collectObservationSamples } from '@akemi-mio/intelligence/mcp/MemoryObservationCollector'
+import { collectObservationSamples } from '@akemi-mio/intelligence-mcp/MemoryObservationCollector'
 
 type CliOptions = {
   days: number

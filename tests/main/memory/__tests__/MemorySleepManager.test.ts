@@ -10,10 +10,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { MemorySleepManager } from '@akemi-mio/intelligence/memory/MemorySleepManager'
+import { MemorySleepManager } from '@akemi-mio/intelligence-memory/MemorySleepManager'
 import { initDatabase, closeDatabase } from '@akemi-mio/core/db/connection'
 import { useIsolatedTestDatabase } from '../../db/__tests__/testDatabase'
-import type { MemoryEntry } from '@akemi-mio/intelligence/memory/types'
+import type { MemoryEntry } from '@akemi-mio/intelligence-memory/types'
 
 vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { MemoryService } from '@akemi-mio/intelligence/memory/MemoryService'
+import { MemoryService } from '@akemi-mio/intelligence-memory/MemoryService'
 import { initDatabase, closeDatabase, getRawDb } from '@akemi-mio/core/db/connection'
 
 vi.mock('electron', () => ({

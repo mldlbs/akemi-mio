@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectPlanMode, pickBestPlan, buildPlanInjection, ANALYSIS_PROMPT, PLAN_EXECUTE_PROMPT } from '@akemi-mio/evolution/EvolutionPromptBuilder'
+import { detectPlanMode, pickBestPlan, buildPlanInjection, ANALYSIS_PROMPT, PLAN_EXECUTE_PROMPT } from '@akemi-mio/evolution-core/EvolutionPromptBuilder'
 import type { DevPlan } from '@akemi-mio/evolution/types'
 
 function makePlan(overrides: Partial<DevPlan> = {}): DevPlan {

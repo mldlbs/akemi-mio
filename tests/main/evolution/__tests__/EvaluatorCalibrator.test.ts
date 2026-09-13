@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { EvaluatorCalibrator, type DimensionKey } from '@akemi-mio/evolution/EvaluatorCalibrator'
+import { EvaluatorCalibrator, type DimensionKey } from '@akemi-mio/evolution-core/EvaluatorCalibrator'
 
 describe('EvaluatorCalibrator', () => {
   let calibrator: EvaluatorCalibrator

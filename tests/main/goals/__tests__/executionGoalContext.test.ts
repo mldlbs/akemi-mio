@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatExecutionGoalContext } from '@akemi-mio/evolution/goals/executionGoalContext'
+import { formatExecutionGoalContext } from '@akemi-mio/evolution-goals/executionGoalContext'
 
 describe('formatExecutionGoalContext', () => {
   it('returns empty string when no goals exist', () => {

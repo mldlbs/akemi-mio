@@ -25,8 +25,8 @@ import { CapabilityFunctionSchemaAdapter } from '@akemi-mio/capabilities/capabil
 import { CapabilityCatalog } from '@akemi-mio/capabilities/capability/CapabilityCatalog'
 import { CapabilityResolver } from '@akemi-mio/capabilities/capability/CapabilityResolver'
 import { CapabilityServiceImpl } from '@akemi-mio/capabilities/capability/CapabilityServiceImpl'
-import { MCPRegistry } from '@akemi-mio/intelligence/mcp/MCPRegistry'
-import type { MCPServerManifest } from '@akemi-mio/intelligence/mcp/types'
+import { MCPRegistry } from '@akemi-mio/intelligence-mcp/MCPRegistry'
+import type { MCPServerManifest } from '@akemi-mio/intelligence-mcp/types'
 import { eventBus } from '@akemi-mio/core/core/EventBus'
 
 // ═════════════════════════════════════════════════

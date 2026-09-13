@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { MetaLearner } from '@akemi-mio/evolution/MetaLearner'
+import { MetaLearner } from '@akemi-mio/evolution-core/MetaLearner'
 
 describe('MetaLearner', () => {
   let learner: MetaLearner

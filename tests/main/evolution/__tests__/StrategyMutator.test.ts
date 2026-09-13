@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { EvolutionStrategyLearner, StrategyMutator, type StrategyConfig } from '@akemi-mio/evolution/EvolutionStrategy'
+import { EvolutionStrategyLearner, StrategyMutator, type StrategyConfig } from '@akemi-mio/evolution-core/EvolutionStrategy'
 
 /** 创建一个已有一个非默认策略的 mutator */
 function createMutator(): { mutator: StrategyMutator; history: Array<any> } {

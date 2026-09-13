@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { existsSync, unlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { MetaCycle } from '@akemi-mio/intelligence/cognitive/MetaCycle'
-import { IdentityModule } from '@akemi-mio/intelligence/identity/IdentityModule'
+import { IdentityModule } from '@akemi-mio/intelligence-identity/IdentityModule'
 import { initDatabase, closeDatabase, getRawDb } from '@akemi-mio/core/db/connection'
 import { ProceduralMemory } from '@akemi-mio/intelligence/agent/ProceduralMemory'
-import { EngineeringMemory } from '@akemi-mio/intelligence/memory/EngineeringMemory'
+import { EngineeringMemory } from '@akemi-mio/intelligence-memory/EngineeringMemory'
 import { useIsolatedTestDatabase } from '../../db/__tests__/testDatabase'
 
 const TEST_CONSTITUTION = join(process.cwd(), 'test-meta-constitution.md')

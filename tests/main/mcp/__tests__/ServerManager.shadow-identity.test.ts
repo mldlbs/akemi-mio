@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CapabilityResolver } from '@akemi-mio/capabilities/capability/CapabilityResolver'
-import { ServerManager } from '@akemi-mio/intelligence/mcp/ServerManager'
+import { ServerManager } from '@akemi-mio/intelligence-mcp/ServerManager'
 import { toolCallLogStore } from '@akemi-mio/capabilities/tool/ToolCallLogStore'
-import { behaviorPredictor } from '@akemi-mio/intelligence/mcp/BehaviorPredictor'
+import { behaviorPredictor } from '@akemi-mio/intelligence-mcp/BehaviorPredictor'
 
 vi.mock('electron', () => ({
   app: {

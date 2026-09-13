@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))
 
-import { KnowledgeBaseService } from '@akemi-mio/intelligence/memory/KnowledgeBaseService'
+import { KnowledgeBaseService } from '@akemi-mio/intelligence-memory/KnowledgeBaseService'
 
 describe('KnowledgeBaseService', () => {
   let kbs: KnowledgeBaseService

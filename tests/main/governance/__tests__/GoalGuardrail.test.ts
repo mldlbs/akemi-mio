@@ -8,9 +8,9 @@
  * - ConstitutionEngine 桥接验证
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import { RejectionTracker } from '@akemi-mio/evolution/governance/RejectionTracker'
-import { GoalGuardrail } from '@akemi-mio/evolution/governance/GoalGuardrail'
-import type { ConstitutionEngine } from '@akemi-mio/evolution/constitution/ConstitutionEngine'
+import { RejectionTracker } from '@akemi-mio/evolution-governance/RejectionTracker'
+import { GoalGuardrail } from '@akemi-mio/evolution-governance/GoalGuardrail'
+import type { ConstitutionEngine } from '@akemi-mio/evolution-constitution/ConstitutionEngine'
 import type { GoalEngine, Goal } from '@akemi-mio/intelligence/cognitive/GoalEngine'
 import type { ToolCallInfo } from '@akemi-mio/intelligence/llm/LlmService'
 import type { RunContext } from '@akemi-mio/intelligence/agent/runstate'

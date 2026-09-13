@@ -4,7 +4,7 @@ import {
   analyzeStoredEventCoverage,
   parseObservedMemoryEntry,
   type ObservedMemoryEntry,
-} from '@akemi-mio/intelligence/mcp/MemoryObservationAnalyzer'
+} from '@akemi-mio/intelligence-mcp/MemoryObservationAnalyzer'
 
 describe('MemoryObservationAnalyzer', () => {
   it('parses capability-aware memory entries with identity tokens', () => {

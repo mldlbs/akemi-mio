@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest'
 import type { Problem, ProblemSource, Severity, AssignedProblem, FixResult, SignalCollector, FixExecutor } from '@akemi-mio/evolution/automation/types'
 import { ReportGenerator } from '@akemi-mio/reasoning/golden/ReportGenerator'
-import { ProposalValidator } from '@akemi-mio/evolution/ProposalValidator'
+import { ProposalValidator } from '@akemi-mio/evolution-core/ProposalValidator'
 import type { RegressionReport, ReplayResult } from '@akemi-mio/reasoning/golden/types'
 
 // =============================================================================

@@ -6,11 +6,11 @@ import { join, resolve } from 'path'
 import {
   analyzeMemoryObservation,
   analyzeStoredEventCoverage,
-} from '@akemi-mio/intelligence/mcp/MemoryObservationAnalyzer'
+} from '@akemi-mio/intelligence-mcp/MemoryObservationAnalyzer'
 import {
   type ObservationMemorySource,
   loadObservedMemories,
-} from '@akemi-mio/intelligence/mcp/MemoryObservationDataSource'
+} from '@akemi-mio/intelligence-mcp/MemoryObservationDataSource'
 
 type CliOptions = {
   days: number

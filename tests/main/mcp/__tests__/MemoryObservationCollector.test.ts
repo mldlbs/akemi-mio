@@ -4,7 +4,7 @@ import { tmpdir } from 'os'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { collectObservationSamples, runObservationCommand } from '@akemi-mio/intelligence/mcp/MemoryObservationCollector'
+import { collectObservationSamples, runObservationCommand } from '@akemi-mio/intelligence-mcp/MemoryObservationCollector'
 
 const tempDirs: string[] = []
 

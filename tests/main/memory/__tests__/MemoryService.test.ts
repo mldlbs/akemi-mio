@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { MemoryService } from '@akemi-mio/intelligence/memory/MemoryService'
+import { MemoryService } from '@akemi-mio/intelligence-memory/MemoryService'
 import { initDatabase, closeDatabase } from '@akemi-mio/core/db/connection'
 import { useIsolatedTestDatabase } from '../../db/__tests__/testDatabase'
 

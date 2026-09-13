@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { PromptEvolutionManager } from '@akemi-mio/evolution/PromptEvolutionManager'
+import { PromptEvolutionManager } from '@akemi-mio/evolution-core/PromptEvolutionManager'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { mkdirSync, rmSync } from 'fs'

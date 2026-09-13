@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { DecisionStore, type DecisionCategory, type DecisionOutcome } from '@akemi-mio/intelligence/memory/DecisionStore'
+import { DecisionStore, type DecisionCategory, type DecisionOutcome } from '@akemi-mio/intelligence-memory/DecisionStore'
 import { initDatabase, closeDatabase } from '@akemi-mio/core/db/connection'
 import { useIsolatedTestDatabase } from '../../db/__tests__/testDatabase'
 

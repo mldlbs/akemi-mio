@@ -4,7 +4,7 @@ import { useIsolatedTestDatabase } from '../../db/__tests__/testDatabase'
 
 vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))
 
-import { MemoryService } from '@akemi-mio/intelligence/memory/MemoryService'
+import { MemoryService } from '@akemi-mio/intelligence-memory/MemoryService'
 
 describe('MemoryService 压力测试', () => {
   let ms: MemoryService

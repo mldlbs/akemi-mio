@@ -10,9 +10,9 @@
  *   - PipelineOrchestrator 行为
  */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { ProposalValidator } from '@akemi-mio/evolution/ProposalValidator'
-import { ConstitutionEngine } from '@akemi-mio/evolution/constitution/ConstitutionEngine'
-import type { Proposal } from '@akemi-mio/evolution/ProposalValidator'
+import { ProposalValidator } from '@akemi-mio/evolution-core/ProposalValidator'
+import { ConstitutionEngine } from '@akemi-mio/evolution-constitution/ConstitutionEngine'
+import type { Proposal } from '@akemi-mio/evolution-core/ProposalValidator'
 
 // =============================================================================
 // 辅助：快速构造 Proposal

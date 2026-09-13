@@ -9,9 +9,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { existsSync, unlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { IdentityModule } from '@akemi-mio/intelligence/identity/IdentityModule'
+import { IdentityModule } from '@akemi-mio/intelligence-identity/IdentityModule'
 import { initDatabase, closeDatabase } from '@akemi-mio/core/db/connection'
-import { buildIdentityPrompt } from '@akemi-mio/intelligence/identity/prompts'
+import { buildIdentityPrompt } from '@akemi-mio/intelligence-identity/prompts'
 import { useIsolatedTestDatabase } from '../../db/__tests__/testDatabase'
 
 const TEST_CONSTITUTION = join(process.cwd(), 'test-CONSTITUTION.md')

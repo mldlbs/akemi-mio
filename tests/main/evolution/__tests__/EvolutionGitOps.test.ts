@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { EvolutionGitOps } from '@akemi-mio/evolution/EvolutionGitOps'
+import { EvolutionGitOps } from '@akemi-mio/evolution-core/EvolutionGitOps'
 import { WORKSPACE } from '@akemi-mio/core/config'
 
 vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))

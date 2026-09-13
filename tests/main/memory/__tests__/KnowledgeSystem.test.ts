@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { UnifiedMemoryQuery } from '@akemi-mio/intelligence/memory/UnifiedMemoryQuery'
-import { LLMKnowledgeExtractor } from '@akemi-mio/intelligence/memory/extractors/LLMKnowledgeExtractor'
+import { UnifiedMemoryQuery } from '@akemi-mio/intelligence-memory/UnifiedMemoryQuery'
+import { LLMKnowledgeExtractor } from '@akemi-mio/intelligence-memory/extractors/LLMKnowledgeExtractor'
 
 describe('UnifiedMemoryQuery', () => {
   let umq: UnifiedMemoryQuery

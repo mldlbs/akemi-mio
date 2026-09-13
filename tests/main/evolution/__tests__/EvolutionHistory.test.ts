@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { EvolutionHistoryManager } from '@akemi-mio/evolution/EvolutionHistory'
+import { EvolutionHistoryManager } from '@akemi-mio/evolution-core/EvolutionHistory'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { mkdirSync, rmSync } from 'fs'

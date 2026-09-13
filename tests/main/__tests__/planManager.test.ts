@@ -1,38 +1,29 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { PlanManager } from '@akemi-mio/evolution/PlanManager'
-import { existsSync, unlinkSync, readdirSync } from 'fs'
-import { resolve } from 'path'
-
-vi.mock('electron', () => ({
-  app: {
-    getPath: () => resolve(process.cwd(), 'test-user-data'),
-  },
-}))
-
-const TEST_DIR = resolve(process.cwd(), 'test-user-data')
-
-function cleanAllTestFiles() {
-  try {
-    if (existsSync(TEST_DIR)) {
-      for (const f of readdirSync(TEST_DIR)) {
-        if (f.endsWith('.json') || f.endsWith('.tmp')) {
-          unlinkSync(resolve(TEST_DIR, f))
-        }
-      }
-    }
-  } catch {}
-}
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { closeDatabase, initDatabase } from '@akemi-mio/core/db/connection'
+import { useIsolatedTestDatabase } from '../db/__tests__/testDatabase'
+// 拆分前这里是 '@akemi-mio/evolution/PlanManager'。该类已随包拆分改名为
+// DrizzlePlanManager 并迁入 @akemi-mio/evolution-core，方法集未变
+// （createPlan / getPlan / listPlans / updateStep / completePlan / abandonPlan /
+//  getActivePlan / getFormattedContext），故这里只改指向、保留原用例。
+//
+// 注意：DrizzlePlanManager 全程依赖 getRawDb()，拿不到库时所有读方法会静默返回
+// 空值（listPlans→[]、getPlan→undefined、updateStep→false、getFormattedContext→''）。
+// 所以这里必须真正 initDatabase()，否则「starts with no plans」这类断言全是假通过。
+import { DrizzlePlanManager as PlanManager } from '@akemi-mio/evolution-core'
 
 describe('PlanManager', () => {
   let pm: PlanManager
+  let dispose: () => void
 
-  beforeEach(() => {
-    cleanAllTestFiles()
+  beforeEach(async () => {
+    dispose = useIsolatedTestDatabase()
+    await initDatabase()
     pm = new PlanManager()
   })
 
   afterEach(() => {
-    cleanAllTestFiles()
+    closeDatabase()
+    dispose()
   })
 
   it('starts with no plans', () => {

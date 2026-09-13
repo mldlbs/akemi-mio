@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { SystemBus } from '@akemi-mio/core/core/SystemBus'
-import { GoalGuardrail } from '@akemi-mio/evolution/governance/GoalGuardrail'
+import { GoalGuardrail } from '@akemi-mio/evolution-governance/GoalGuardrail'
 import type { GoalEngine } from '@akemi-mio/intelligence/cognitive/GoalEngine'
 import type { ToolCallInfo } from '@akemi-mio/intelligence/llm/LlmService'
 import type { RunContext } from '@akemi-mio/intelligence/agent/runstate'

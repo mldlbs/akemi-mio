@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { evaluateGoal } from '@akemi-mio/evolution/goals/GoalEvaluator'
-import type { Evidence, ExecutionGoal } from '@akemi-mio/evolution/goals/types'
+import { evaluateGoal } from '@akemi-mio/evolution-goals/GoalEvaluator'
+import type { Evidence, ExecutionGoal } from '@akemi-mio/evolution-goals/types'
 
 function goal(criteria: string[], evidence: Evidence[]): ExecutionGoal {
   return {

@@ -12,7 +12,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { RuntimeState } from '@akemi-mio/intelligence/runtime/RuntimeState'
 import { RuntimeManagerImpl } from '@akemi-mio/intelligence/runtime/RuntimeManagerImpl'
 import { SupervisedAgentSupervisorImpl } from '@akemi-mio/intelligence/runtime/SupervisedAgentSupervisorImpl'
-import { ServerManager } from '@akemi-mio/intelligence/mcp/ServerManager'
+import { ServerManager } from '@akemi-mio/intelligence-mcp/ServerManager'
 import { snapshotRuntimeTask, toCheckpointContext, planRestore, mapStateToSafePoint } from '@akemi-mio/intelligence/runtime/RuntimeCheckpointAdapter'
 import { MockCheckpointManager } from './MockCheckpointManager'
 import { ComponentRegistryImpl } from '@akemi-mio/intelligence/runtime/ComponentRegistry'
@@ -20,7 +20,7 @@ import { CheckpointRestoreCoordinatorImpl } from '@akemi-mio/intelligence/runtim
 
 // ── Mock MCP / LLM 依赖 ──
 
-vi.mock('@akemi-mio/intelligence/mcp/ServerManager', () => {
+vi.mock('@akemi-mio/intelligence-mcp/ServerManager', () => {
   const MockServerManager = vi.fn()
   MockServerManager.prototype.callTool = vi.fn().mockResolvedValue('mock_tool_result')
   return { ServerManager: MockServerManager }

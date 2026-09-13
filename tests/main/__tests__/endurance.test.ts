@@ -6,7 +6,7 @@ import { getTestMainDatabasePath, useIsolatedTestDatabase } from '../db/__tests_
 vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))
 
 import { EventBus, eventBus as defaultBus } from '@akemi-mio/core/core/EventBus'
-import { DecisionStore } from '@akemi-mio/intelligence/memory/DecisionStore'
+import { DecisionStore } from '@akemi-mio/intelligence-memory/DecisionStore'
 import { EventAuditor } from '@akemi-mio/audit/EventAuditor'
 
 describe('长时间耐力测试', () => {

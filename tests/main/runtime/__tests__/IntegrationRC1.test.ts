@@ -8,10 +8,10 @@ import { describe, it, expect, vi } from 'vitest'
 import { RuntimeManagerImpl } from '@akemi-mio/intelligence/runtime/RuntimeManagerImpl'
 import { SupervisedAgentSupervisorImpl } from '@akemi-mio/intelligence/runtime/SupervisedAgentSupervisorImpl'
 import { RuntimeValidator } from '@akemi-mio/intelligence/runtime/RuntimeValidator'
-import { ServerManager } from '@akemi-mio/intelligence/mcp/ServerManager'
+import { ServerManager } from '@akemi-mio/intelligence-mcp/ServerManager'
 import { eventBus } from '@akemi-mio/core/core/EventBus'
 
-vi.mock('@akemi-mio/intelligence/mcp/ServerManager', () => {
+vi.mock('@akemi-mio/intelligence-mcp/ServerManager', () => {
   const Mock = vi.fn()
   Mock.prototype.callTool = vi.fn().mockResolvedValue('mock_tool_result')
   return { ServerManager: Mock }

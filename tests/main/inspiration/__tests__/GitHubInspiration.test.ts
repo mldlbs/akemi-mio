@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdirSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { GitHubInspiration } from '@akemi-mio/intelligence/inspiration/GitHubInspiration'
+import { GitHubInspiration } from '@akemi-mio/intelligence-inspiration/GitHubInspiration'
 
 function tmpDir(): string {
   const d = join(tmpdir(), `insp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)

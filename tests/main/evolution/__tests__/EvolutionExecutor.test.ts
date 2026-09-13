@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { EvolutionExecutor } from '@akemi-mio/evolution/pipeline/EvolutionExecutor'
+import { EvolutionExecutor } from '@akemi-mio/evolution-pipeline/EvolutionExecutor'
 
 vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))
 

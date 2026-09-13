@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { ProtectedPaths } from '@akemi-mio/evolution/constitution/ProtectedPaths'
-import { ConstitutionEngine } from '@akemi-mio/evolution/constitution/ConstitutionEngine'
-import { validateConstitution, createDefaultJson } from '@akemi-mio/evolution/constitution/ConstitutionDocument'
-import { getKernelPrefixes, isKernelPath } from '@akemi-mio/evolution/constitution/types'
+import { ProtectedPaths } from '@akemi-mio/evolution-constitution/ProtectedPaths'
+import { ConstitutionEngine } from '@akemi-mio/evolution-constitution/ConstitutionEngine'
+import { validateConstitution, createDefaultJson } from '@akemi-mio/evolution-constitution/ConstitutionDocument'
+import { getKernelPrefixes, isKernelPath } from '@akemi-mio/evolution-constitution/types'
 
 // ─── ProtectedPaths ───
 

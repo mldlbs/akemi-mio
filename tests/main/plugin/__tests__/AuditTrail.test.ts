@@ -4,7 +4,7 @@ import { useIsolatedTestDatabase } from '../../db/__tests__/testDatabase'
 
 vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))
 
-import { AuditTrail } from '@akemi-mio/intelligence/plugin/AuditTrail'
+import { AuditTrail } from '@akemi-mio/intelligence-plugin/AuditTrail'
 
 describe('AuditTrail', () => {
   let audit: AuditTrail

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { ScopedAgent } from '@akemi-mio/intelligence/agent/scoped/ScopedAgent'
-import type { SkillAgentDef } from '@akemi-mio/intelligence/skill/SkillAgentRegistry'
+import type { SkillAgentDef } from '@akemi-mio/intelligence-skill/SkillAgentRegistry'
 
 function makeAgentDef(overrides: Partial<SkillAgentDef> = {}): SkillAgentDef {
   return {
