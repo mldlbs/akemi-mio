@@ -35,6 +35,7 @@ import { MemoryService } from '@akemi-mio/intelligence-memory/MemoryService'
 import { VoiceBookmarkService } from '@akemi-mio/intelligence-memory/VoiceBookmarkService'
 import { memoryEvolutionBridge } from '@akemi-mio/intelligence-memory/MemoryEvolutionBridge'
 import { memoryTtsBridge } from '@akemi-mio/audio/MemoryTtsBridge'
+import { resolveConstitutionPath } from './constitution-path'
 import { registerHandlers, createServiceRef } from '../ipc/handlers'
 import type { ServiceRef } from '../ipc/handlers'
 import { credentialsManager } from '@akemi-mio/core/credentials/CredentialsManager'
@@ -1551,7 +1552,14 @@ export class AppRuntime {
     // 启动延迟到 stage 5（懒加载服务组）
 
     const cognitiveService = new CognitiveService()
-    await cognitiveService.initialize(join(RUNTIME_ROOT, 'CONSTITUTION.md'), {
+    // CONSTITUTION.md 并不总在 RUNTIME_ROOT 下（打包后是 app.asar，直跑是 out/main），
+    // 交给 resolver 依次尝试候选位置；找不到时保留首选路径，日志里才看得出缺在哪
+    const constitutionPath = resolveConstitutionPath(RUNTIME_ROOT)
+    log('INFO', 'identity_constitution_path', {
+      path: constitutionPath,
+      found: existsSync(constitutionPath),
+    })
+    await cognitiveService.initialize(constitutionPath, {
       engineeringMemory: memoryService.engineering,
       proceduralMemory: agentService.proceduralMemory,
       llmService,
