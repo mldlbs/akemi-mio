@@ -42,6 +42,7 @@ import { registerEvaluationHandlers } from './handlers/evaluation'
 import { registerMemoryHandlers } from './handlers/memory'
 import { registerVoiceNoteHandlers } from './handlers/voicenote'
 import { registerWorkspaceHandlers } from './handlers/workspace'
+import { registerFormHandlers } from './handlers/forms'
 
 const sandboxWindows = new Map<string, BrowserWindow>()
 
@@ -114,6 +115,9 @@ export function registerHandlers(
 
   // Window handlers require eventBus 鈥?inject it
   registerWindowHandlers({ ...ctx, eventBus })
+  // 多形态（宠物小人 / 对话框 / 全屏壁纸）窗口控制。
+  // 无依赖注入：形态窗口全部由 core/Lifecycle 自行持有，不需要 AgentService 等上下文。
+  registerFormHandlers()
   registerAgentHandlers(ctx)
   registerAsrHandlers(ctx)
   registerTtsHandlers(ctx)

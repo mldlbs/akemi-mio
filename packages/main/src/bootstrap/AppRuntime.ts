@@ -61,7 +61,15 @@ import {
 import { PluginLoader, toolRegistry } from '@akemi-mio/intelligence-plugin'
 import { SkillManager, setSkillManager as setSkillManagerSingleton } from '@akemi-mio/intelligence-skill'
 import { loadEnvFile, setupTransformers } from '@akemi-mio/core/core/ModelLoader'
-import { setupStartupLogging, createWindow, setupWallpaperListener, getMainWindow } from '@akemi-mio/core/core/Lifecycle'
+import {
+  setupStartupLogging,
+  createWindow,
+  setupWallpaperListener,
+  getMainWindow,
+  closeAllFormWindows,
+  registerFormShortcuts,
+  unregisterFormShortcuts,
+} from '@akemi-mio/core/core/Lifecycle'
 import {
   initTray,
   destroyTray,
@@ -765,6 +773,9 @@ export class AppRuntime {
     )
 
     const win = createWindow(stateManager)
+    // 注册形态切换快捷键（Ctrl+Shift+P / L / W）。
+    // 放在主窗口创建之后：此时应用已就绪，且 globalShortcut 要求 app ready。
+    registerFormShortcuts()
     const t0 = Date.now()
     agentService.setMainWindow(win)
     ttsService.setAudioSink(async (filePath) => {
@@ -1709,6 +1720,12 @@ export class AppRuntime {
 
     // === before-quit ===
     app.on('before-quit', () => {
+      // 形态快捷键必须先注销：全局快捷键不随窗口销毁而释放，
+      // 残留注册会让其它程序在该组合键上失效。
+      unregisterFormShortcuts()
+      // 形态窗口（宠物/对话框/壁纸）含置顶与全屏层，必须显式销毁，
+      // 否则退出时会残留"关不掉的幽灵小窗"。
+      closeAllFormWindows()
       this.shutdown()
       destroyTray()
     })

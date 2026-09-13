@@ -3,8 +3,7 @@ import type { IpcRenderer } from 'electron'
 
 export function createElectronAPI(ipc: IpcRenderer) {
   return {
-    closeWindow: (): Promise<{ success: boolean }> => ipc.invoke('window:close'),
-    minimizeWindow: (): Promise<{ success: boolean }> => ipc.invoke('window:minimize'),
+    closeWindow: (): Promise<{ success: boolean }> => ipc.invoke('window:close'),    minimizeWindow: (): Promise<{ success: boolean }> => ipc.invoke('window:minimize'),
     maximizeWindow: (): Promise<{ success: boolean; isMaximized: boolean }> => ipc.invoke('window:maximize'),
     isMaximized: (): Promise<{ isMaximized: boolean }> => ipc.invoke('window:isMaximized'),
     toggleFullscreen: (): Promise<{ success: boolean; isFullScreen: boolean }> => ipc.invoke('window:fullscreen'),
@@ -1745,3 +1744,62 @@ const electronAPI = createElectronAPI(ipcRenderer)
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)
 
 export type ElectronAPI = ReturnType<typeof createElectronAPI>
+
+// ════════════════════════════════════════════════════════════════
+// 多形态桥接（window.akemiForms）
+//
+// 为什么单独挂一个全局对象而不是并进 electronAPI：
+// 三形态窗口（pet/chat/wallpaper）只需要"我是谁 / 切换形态 / 广播"这几件事，
+// 而 electronAPI 有 1700+ 行、上百个与形态无关的接口。
+// 形态页面引用一个窄接口，既降低耦合，也让降级判断（有无桥接）更清晰。
+//
+// kind 是**同步属性**而非异步方法：形态页面在首屏就要知道自己是谁，
+// 走一次 IPC 往返会让渲染多等一个 tick，可能导致首帧布局抖动。
+// 主进程在创建窗口时已通过 URL 决定形态，这里在 preload 阶段即可解析。
+// ════════════════════════════════════════════════════════════════
+
+type FormKind = 'pet' | 'chat' | 'wallpaper'
+
+/** 从 preload 自身的 URL 解析当前形态 —— 与主进程 forms:whoami 的判断口径一致。 */
+function resolveFormKind(): FormKind | null {
+  const url = window.location.pathname + window.location.search
+  if (url.includes('pet.html')) return 'pet'
+  if (url.includes('chat.html')) return 'chat'
+  if (url.includes('wallpaper.html')) return 'wallpaper'
+  // dev 模式 vite 可能带查询串，这里做一次后缀兜底
+  if (/[?&]form=pet\b/.test(url)) return 'pet'
+  if (/[?&]form=chat\b/.test(url)) return 'chat'
+  if (/[?&]form=wallpaper\b/.test(url)) return 'wallpaper'
+  return null
+}
+
+const formKind = resolveFormKind()
+
+contextBridge.exposeInMainWorld('akemiForms', {
+  kind: formKind,
+
+  toggleForm: (kind: FormKind): Promise<boolean> => ipcRenderer.invoke('forms:toggle', kind),
+
+  setFormVisible: (kind: FormKind, visible: boolean): Promise<void> =>
+    ipcRenderer.invoke('forms:setVisible', kind, visible),
+
+  isFormVisible: (kind: FormKind): Promise<boolean> => ipcRenderer.invoke('forms:isVisible', kind),
+
+  broadcast: (message: { from: FormKind; type: string; payload: unknown }): void => {
+    void ipcRenderer.invoke('forms:broadcast', message)
+  },
+
+  onBroadcast: (handler: (message: { from: FormKind; type: string; payload: unknown }) => void): (() => void) => {
+    const listener = (_e: unknown, message: { from: FormKind; type: string; payload: unknown }) => handler(message)
+    ipcRenderer.on('forms:broadcast', listener)
+    // 返回取消订阅函数 —— 组件卸载时必须调用，否则热重载会累积监听器
+    return () => {
+      ipcRenderer.removeListener('forms:broadcast', listener)
+    }
+  },
+
+  setIgnoreMouseEvents: (ignore: boolean): Promise<void> =>
+    ipcRenderer.invoke('forms:setIgnoreMouseEvents', ignore),
+
+  startWindowDrag: (): Promise<void> => ipcRenderer.invoke('forms:startDrag'),
+})

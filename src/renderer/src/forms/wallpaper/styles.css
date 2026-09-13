@@ -1,0 +1,167 @@
+/* ============================================================
+   全屏壁纸形态专属样式
+   定位：最底层画布。所有元素 pointer-events:none，
+   因为主进程已把窗口设为鼠标穿透 —— 这里的规则是双保险。
+   ============================================================ */
+
+.wp-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* 基色偏深，让上层的暖色晕显得通透 */
+  background: oklch(0.19 0.02 265);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── 色晕：两团缓慢流动的大面积渐变 ──
+   色相由 --wp-hue 驱动，随情绪变化，但过渡极慢（18s），
+   这样颜色变化是"感觉到的"而不是"看到的"。 */
+.wp-aurora {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.5;
+  will-change: transform;
+}
+
+.wp-aurora-a {
+  width: 62%;
+  height: 62%;
+  left: -12%;
+  top: -14%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    oklch(0.6 0.15 var(--wp-hue) / 0.55),
+    oklch(0.5 0.12 var(--wp-hue) / 0.18) 45%,
+    transparent 72%
+  );
+  animation: wp-drift-a 26s ease-in-out infinite;
+}
+
+.wp-aurora-b {
+  width: 58%;
+  height: 58%;
+  right: -10%;
+  bottom: -16%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    oklch(0.55 0.13 calc(var(--wp-hue) + 42) / 0.5),
+    oklch(0.45 0.1 calc(var(--wp-hue) + 42) / 0.16) 48%,
+    transparent 74%
+  );
+  animation: wp-drift-b 32s ease-in-out infinite;
+}
+
+/* 细微噪点，消除大面积渐变的色带（banding）*/
+.wp-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.035;
+  background-image: repeating-conic-gradient(
+    oklch(1 0 0 / 0.5) 0% 25%,
+    transparent 0% 50%
+  );
+  background-size: 3px 3px;
+  mix-blend-mode: overlay;
+}
+
+/* ── 星图层 ── */
+.wp-stars {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.wp-star {
+  animation: wp-twinkle 4.2s ease-in-out infinite;
+}
+
+/* ── 信息层 ── */
+.wp-hud {
+  position: absolute;
+  right: 40px;
+  bottom: 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  text-align: right;
+}
+
+.wp-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.wp-clock-time {
+  font-family: 'Sora', 'JetBrains Mono', 'Segoe UI', sans-serif;
+  font-size: 58px;
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: oklch(0.97 0.008 85 / 0.92);
+  text-shadow: 0 2px 24px oklch(0.1 0.02 265 / 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+.wp-clock-date {
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  color: oklch(0.82 0.012 82 / 0.75);
+  text-shadow: 0 1px 12px oklch(0.1 0.02 265 / 0.6);
+}
+
+.wp-info {
+  max-width: 320px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  text-align: left;
+  background: oklch(0.24 0.02 265 / 0.55);
+  border: 1px solid oklch(0.7 0.03 265 / 0.25);
+  backdrop-filter: blur(10px);
+  animation: wp-info-in 0.5s cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+.wp-info-title {
+  margin: 0 0 3px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: oklch(0.9 0.01 85 / 0.92);
+}
+
+.wp-info-body {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: oklch(0.78 0.012 82 / 0.8);
+}
+
+/* ── 关键帧 ── */
+
+/* 极缓慢的位移与缩放：18~30s 级的周期，肉眼几乎察觉不到"在动" */
+@keyframes wp-drift-a {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(6%, 5%) scale(1.14); }
+}
+
+@keyframes wp-drift-b {
+  0%, 100% { transform: translate(0, 0) scale(1.06); }
+  50% { transform: translate(-7%, -4%) scale(1); }
+}
+
+@keyframes wp-twinkle {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.9; }
+}
+
+@keyframes wp-info-in {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}

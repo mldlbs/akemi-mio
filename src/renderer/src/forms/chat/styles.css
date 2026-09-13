@@ -1,0 +1,282 @@
+/* ============================================================
+   对话框形态专属样式
+   一张悬浮卡片：无系统边框的窗口里，卡片本身承担全部视觉。
+   卡片外的区域保持透明，所以窗口能"贴"在桌面上看不出边界。
+   ============================================================ */
+
+.chat-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  /* 卡片自带圆角与描边 —— 窗口是方的，视觉靠这里收边 */
+  border-radius: 16px;
+  overflow: hidden;
+  background: oklch(0.29 0.017 50 / 0.97);
+  border: 1px solid oklch(0.42 0.019 45 / 0.75);
+  box-shadow:
+    0 16px 44px oklch(0.14 0.01 50 / 0.5),
+    inset 0 1px 0 oklch(0.95 0.02 90 / 0.06);
+}
+
+/* ── 标题栏 ── */
+.chat-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, oklch(0.33 0.018 48 / 0.9), oklch(0.29 0.017 50 / 0.7));
+  border-bottom: 1px solid oklch(0.4 0.019 45 / 0.5);
+}
+
+.chat-avatar-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: oklch(0.67 0.155 28);
+  box-shadow: 0 0 8px oklch(0.67 0.155 28 / 0.8);
+  animation: chat-dot-pulse 2.6s ease-in-out infinite;
+}
+
+.chat-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: oklch(0.95 0.012 85);
+}
+
+.chat-subtitle {
+  font-size: 11px;
+  color: oklch(0.62 0.015 78);
+  margin-left: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-titlebar-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.chat-icon-btn {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  color: oklch(0.78 0.015 82);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chat-icon-btn:hover:not(:disabled) {
+  background: oklch(0.4 0.019 45 / 0.7);
+  color: oklch(0.97 0.01 85);
+}
+
+.chat-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.chat-icon-btn-close:hover {
+  background: oklch(0.67 0.155 28 / 0.4);
+  color: oklch(1 0 0);
+}
+
+/* ── 消息流 ── */
+.chat-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 14px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.45 0.02 45 / 0.7) transparent;
+}
+
+.chat-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-list::-webkit-scrollbar-thumb {
+  background: oklch(0.45 0.02 45 / 0.6);
+  border-radius: 3px;
+}
+
+.chat-empty {
+  margin: auto;
+  text-align: center;
+  padding: 20px 0;
+}
+
+.chat-empty-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: oklch(0.78 0.015 82);
+}
+
+.chat-empty-hint {
+  margin: 0;
+  font-size: 11px;
+  color: oklch(0.56 0.014 78);
+}
+
+.chat-row {
+  display: flex;
+  animation: chat-row-in 0.24s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.chat-row-user {
+  justify-content: flex-end;
+}
+
+.chat-row-assistant {
+  justify-content: flex-start;
+}
+
+.chat-bubble {
+  position: relative;
+  max-width: 82%;
+  padding: 8px 11px 16px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.chat-bubble-user {
+  background: oklch(0.67 0.155 28 / 0.85);
+  color: oklch(0.99 0.005 85);
+  border-bottom-right-radius: 4px;
+}
+
+.chat-bubble-assistant {
+  background: oklch(0.36 0.019 46);
+  color: oklch(0.92 0.012 85);
+  border-bottom-left-radius: 4px;
+  border: 1px solid oklch(0.44 0.019 45 / 0.6);
+}
+
+.chat-bubble-text {
+  /* 允许用户在气泡里选中文字复制 —— 全局禁用了选择，这里要放开 */
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.chat-time {
+  position: absolute;
+  right: 8px;
+  bottom: 3px;
+  font-size: 9.5px;
+  opacity: 0.55;
+  color: inherit;
+}
+
+/* 流式生成时的光标 */
+.chat-caret {
+  display: inline-block;
+  width: 2px;
+  height: 12px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: oklch(0.88 0.14 85);
+  animation: chat-caret-blink 1s steps(2, start) infinite;
+}
+
+/* ── 输入区 ── */
+.chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  flex-shrink: 0;
+  border-top: 1px solid oklch(0.4 0.019 45 / 0.5);
+  background: oklch(0.27 0.016 52 / 0.8);
+}
+
+.chat-input {
+  flex: 1;
+  min-height: 32px;
+  max-height: 96px;
+  resize: none;
+  padding: 7px 10px;
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: oklch(0.93 0.012 85);
+  background: oklch(0.24 0.014 53 / 0.95);
+  border: 1px solid oklch(0.4 0.019 45 / 0.7);
+  outline: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.chat-input:focus {
+  border-color: oklch(0.67 0.155 28 / 0.75);
+  box-shadow: 0 0 0 3px oklch(0.67 0.155 28 / 0.14);
+}
+
+.chat-input::placeholder {
+  color: oklch(0.52 0.014 78);
+}
+
+.chat-send {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 9px;
+  font-size: 15px;
+  font-weight: 600;
+  color: oklch(0.99 0.005 85);
+  background: oklch(0.67 0.155 28);
+  cursor: pointer;
+  transition: background 0.16s ease, transform 0.12s ease;
+}
+
+.chat-send:hover:not(:disabled) {
+  background: oklch(0.72 0.16 28);
+}
+
+.chat-send:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.chat-send:disabled {
+  background: oklch(0.4 0.019 45);
+  color: oklch(0.6 0.014 78);
+  cursor: default;
+}
+
+/* ── 关键帧 ── */
+@keyframes chat-row-in {
+  0% { opacity: 0; transform: translateY(5px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes chat-caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes chat-dot-pulse {
+  0%, 100% { opacity: 0.7; box-shadow: 0 0 6px oklch(0.67 0.155 28 / 0.6); }
+  50% { opacity: 1; box-shadow: 0 0 12px oklch(0.67 0.155 28 / 1); }
+}

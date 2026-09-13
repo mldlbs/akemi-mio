@@ -1,5 +1,6 @@
 import { useSlots } from '../slots/SlotContext'
 import { StatusBar } from './StatusBar'
+import { FormSwitcher } from './FormSwitcher'
 import type { ActiveSlot } from '../slots/types'
 
 interface TopBarProps {
@@ -53,6 +54,7 @@ export function TopBar({ onOpenSettings }: TopBarProps) {
         <button className="topbar-btn" onClick={onOpenSettings} title="设置">
           <i className="ri-settings-3-line" />
         </button>
+        <FormSwitcher />
         <button
           className={`topbar-slot-trigger topbar-workbench-trigger${uiState.rightPanelOpen ? ' active' : ''}`}
           onClick={toggleRightPanel}

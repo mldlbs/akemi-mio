@@ -86,6 +86,12 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),
           agent: resolve(__dirname, 'src/renderer/agent.html'),
+          // 多形态入口：宠物小人 / 对话框 / 全屏壁纸。
+          // 与 src/renderer/src/forms/types.ts 的 FORM_REGISTRY.htmlFile 必须逐字一致 ——
+          // 主进程按该表推导加载路径，此处漏注册会在运行期变成"窗口空白"而非构建报错。
+          pet: resolve(__dirname, 'src/renderer/pet.html'),
+          chat: resolve(__dirname, 'src/renderer/chat.html'),
+          wallpaper: resolve(__dirname, 'src/renderer/wallpaper.html'),
         },
       },
     },

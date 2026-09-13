@@ -10072,3 +10072,126 @@
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
+
+/* ============================================================
+   形态切换器（FormSwitcher）
+   顶栏右侧的下拉，用于把 Mio 送到桌面上（宠物 / 对话框 / 壁纸）。
+   ============================================================ */
+.form-switcher {
+  position: relative;
+  display: inline-flex;
+}
+
+.form-switcher .topbar-btn.is-active {
+  color: var(--accent-aged-gold);
+}
+
+.form-switcher-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 268px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--surface-modal);
+  border: 1px solid oklch(0.44 0.019 45 / 0.8);
+  box-shadow: 0 14px 36px oklch(0.14 0.01 50 / 0.55);
+  animation: form-menu-in 0.18s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.form-switcher-title {
+  margin: 2px 4px 7px;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.form-switcher-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 9px;
+  border: none;
+  border-radius: 9px;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.form-switcher-item:hover {
+  background: oklch(0.4 0.019 45 / 0.6);
+}
+
+.form-switcher-item > i {
+  flex-shrink: 0;
+  font-size: 16px;
+  color: var(--text-secondary);
+}
+
+.form-switcher-item.is-on > i {
+  color: var(--accent-aged-gold);
+}
+
+.form-switcher-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.form-switcher-item-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.form-switcher-item-desc {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* 右侧状态点：亮起表示该形态窗口当前可见 */
+.form-switcher-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: oklch(0.45 0.02 45);
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.form-switcher-dot.is-on {
+  background: var(--accent-vermilion-muted);
+  box-shadow: 0 0 8px oklch(0.67 0.155 28 / 0.9);
+}
+
+@keyframes form-menu-in {
+  0% { opacity: 0; transform: translateY(-5px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 快捷键提示：用 kbd 元素而非 span，语义正确且便于样式统一 */
+.form-switcher-kbd {
+  flex-shrink: 0;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: oklch(0.26 0.016 52);
+  border: 1px solid oklch(0.42 0.019 45 / 0.8);
+  white-space: nowrap;
+}
+
+.form-switcher-item:hover .form-switcher-kbd {
+  color: var(--text-secondary);
+  border-color: oklch(0.5 0.02 45 / 0.9);
+}
