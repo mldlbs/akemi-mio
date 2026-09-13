@@ -425,11 +425,18 @@ export function saveFormBounds(kind: FormKind): void {
 /**
  * 恢复位置到窗口上。
  *
- * 两种情形：
- * 1. 原显示器仍在 → 直接还原坐标（多屏用户回到原来那块屏）。
- * 2. 原显示器已消失（拔了外接屏）→ 丢弃坐标，退回主屏默认位置。
+ * 三种情形，按信号强度从强到弱判定：
+ * 1. 坐标在当前任一显示器上仍然可见 → 原样还原（最强信号）。
+ * 2. 坐标越界，但归属的那块显示器还在（如分辨率调小了）→ 夹回该屏可见区。
+ * 3. 显示器已消失（拔了外接屏）→ 丢弃坐标，退回默认位置。
  *    这一步不能省：把窗口恢复到不存在的屏幕坐标上，
  *    表现为「应用启动了但看不见」，用户完全无从自救。
+ *
+ * 为什么把"坐标可见"排在"显示器身份匹配"之前：
+ * 坐标可见本身就是比显示器身份更直接的判据。老版本状态文件没有 displayKey、
+ * 或上次 screen.getDisplayMatching 抛错时，记录里就只有坐标 ——
+ * 若此时苛求显示器身份，会把一个完全可用的位置白白丢掉，
+ * 用户表现为"我明明没动过它，重启后位置却变了"。
  */
 function restoreFormBounds(kind: FormKind, win: BrowserWindow, spec: FormWindowSpec): void {
   if (kind === 'wallpaper') return
@@ -439,14 +446,15 @@ function restoreFormBounds(kind: FormKind, win: BrowserWindow, spec: FormWindowS
   const width = spec.size.width
   const height = spec.size.height
 
-  // 情形 1：记录了显示器且该显示器仍在 → 校验坐标确实落在它上面
+  // 情形 1：坐标仍落在某块当前显示器的可见区域内 → 直接用
+  if (isBoundsVisible(stored, width, height)) {
+    win.setBounds({ x: stored.x, y: stored.y, width, height })
+    return
+  }
+
+  // 情形 2：坐标越界但显示器还在 → 夹回该屏（分辨率/工作区变化时的兜底）
   const display = findDisplayFor(stored)
   if (display) {
-    if (isBoundsVisible(stored, width, height)) {
-      win.setBounds({ x: stored.x, y: stored.y, width, height })
-      return
-    }
-    // 显示器还在但坐标越界（例如分辨率变了）→ 落到该屏的可见区域内
     const a = display.workArea
     const x = Math.min(Math.max(stored.x, a.x), a.x + Math.max(0, a.width - width))
     const y = Math.min(Math.max(stored.y, a.y), a.y + Math.max(0, a.height - height))
@@ -455,7 +463,7 @@ function restoreFormBounds(kind: FormKind, win: BrowserWindow, spec: FormWindowS
     return
   }
 
-  // 情形 2：显示器已不存在 → 不恢复，用默认位置（主屏居中附近）
+  // 情形 3：无处可落 → 用默认位置（主屏居中附近）
   if (stored.displayId !== undefined || stored.displayKey !== undefined) {
     log('INFO', 'form_display_gone', { kind, displayId: stored.displayId, displayKey: stored.displayKey })
   }
