@@ -7,12 +7,13 @@
  * - 测试 trait 演化、会话记录、hash 变更检测
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { existsSync, unlinkSync, writeFileSync } from 'fs'
+import { writeFileSync } from 'fs'
 import { join } from 'path'
 import { IdentityModule } from '@akemi-mio/intelligence-identity/IdentityModule'
 import { initDatabase, closeDatabase } from '@akemi-mio/core/db/connection'
 import { buildIdentityPrompt } from '@akemi-mio/intelligence-identity/prompts'
 import { useIsolatedTestDatabase } from '../../db/__tests__/testDatabase'
+import { removeQuietly } from '../../test-cleanup'
 
 const TEST_CONSTITUTION = join(process.cwd(), 'test-CONSTITUTION.md')
 
@@ -76,7 +77,7 @@ describe('IdentityModule', () => {
   let restoreTestDatabase: () => void
 
   beforeEach(async () => {
-    if (existsSync(TEST_CONSTITUTION)) unlinkSync(TEST_CONSTITUTION)
+    removeQuietly(TEST_CONSTITUTION)
     restoreTestDatabase = useIsolatedTestDatabase()
     await initDatabase()
     writeFileSync(TEST_CONSTITUTION, SAMPLE_CONSTITUTION, 'utf-8')
@@ -85,7 +86,7 @@ describe('IdentityModule', () => {
 
   afterEach(() => {
     closeDatabase()
-    if (existsSync(TEST_CONSTITUTION)) unlinkSync(TEST_CONSTITUTION)
+    removeQuietly(TEST_CONSTITUTION)
     restoreTestDatabase()
   })
 
@@ -196,7 +197,7 @@ describe('IdentityModule', () => {
   })
 
   it('should handle missing constitution file gracefully', async () => {
-    if (existsSync(TEST_CONSTITUTION)) unlinkSync(TEST_CONSTITUTION)
+    removeQuietly(TEST_CONSTITUTION)
     await identity.initialize('/nonexistent/path.md')
     expect(identity.getFormattedContext()).toBe('')
     expect(identity.getCoreIdentity()).toBeNull()

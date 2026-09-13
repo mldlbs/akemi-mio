@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { removeQuietly } from '../../test-cleanup'
 import { ToolCallLogStore } from '@akemi-mio/capabilities/tool/ToolCallLogStore'
 import { buildToolCallIdentityBackfillResolver } from '@akemi-mio/capabilities/tool/ToolCallIdentityGapAnalyzer'
 import type { ToolCallRecord } from '@akemi-mio/capabilities/tool/ToolCallLogStore'
@@ -25,7 +26,7 @@ function legacyRecord(overrides: Partial<ToolCallRecord>): ToolCallRecord {
 describe('ToolCallLogStore capability backfill', () => {
   afterEach(() => {
     if (existsSync(absoluteLogFile)) {
-      rmSync(absoluteLogFile, { force: true })
+      removeQuietly(absoluteLogFile)
     }
   })
 

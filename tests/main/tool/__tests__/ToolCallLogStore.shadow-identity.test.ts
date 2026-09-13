@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, writeFileSync } from 'fs'
+import { removeQuietly } from '../../test-cleanup'
 import { ToolCallLogStore } from '@akemi-mio/capabilities/tool/ToolCallLogStore'
 
 const logFile = '.claude/tool-call-log-shadow-identity.test.json'
@@ -8,7 +9,7 @@ const absoluteLogFile = `${process.cwd()}\\${logFile}`
 describe('ToolCallLogStore shadow identity', () => {
   afterEach(() => {
     if (existsSync(absoluteLogFile)) {
-      rmSync(absoluteLogFile, { force: true })
+      removeQuietly(absoluteLogFile)
     }
   })
 

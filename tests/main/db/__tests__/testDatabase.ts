@@ -1,5 +1,6 @@
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { removeQuietly } from '../../test-cleanup'
 
 export const TEST_USER_DATA_DIR = join(process.cwd(), 'test-user-data', 'db-isolation')
 export const TEST_DATABASE_DIR = join(TEST_USER_DATA_DIR, 'databases')
@@ -17,7 +18,7 @@ export function useIsolatedTestDatabase(): () => void {
   process.env.USER_DATA_DIR = isolatedUserDataDir
 
   return () => {
-    rmSync(isolatedUserDataDir, { recursive: true, force: true })
+    removeQuietly(isolatedUserDataDir, true)
     if (previousUserDataDir === undefined) {
       delete process.env.USER_DATA_DIR
     } else {

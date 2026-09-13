@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { existsSync, unlinkSync, writeFileSync } from 'fs'
+import { writeFileSync } from 'fs'
 import { join } from 'path'
 import { MetaCycle } from '@akemi-mio/intelligence/cognitive/MetaCycle'
 import { IdentityModule } from '@akemi-mio/intelligence-identity/IdentityModule'
@@ -7,6 +7,7 @@ import { initDatabase, closeDatabase, getRawDb } from '@akemi-mio/core/db/connec
 import { ProceduralMemory } from '@akemi-mio/intelligence/agent/ProceduralMemory'
 import { EngineeringMemory } from '@akemi-mio/intelligence-memory/EngineeringMemory'
 import { useIsolatedTestDatabase } from '../../db/__tests__/testDatabase'
+import { removeQuietly } from '../../test-cleanup'
 
 const TEST_CONSTITUTION = join(process.cwd(), 'test-meta-constitution.md')
 
@@ -32,7 +33,7 @@ describe('MetaCycle', () => {
   let restoreTestDatabase: () => void
 
   beforeEach(async () => {
-    if (existsSync(TEST_CONSTITUTION)) unlinkSync(TEST_CONSTITUTION)
+    removeQuietly(TEST_CONSTITUTION)
     restoreTestDatabase = useIsolatedTestDatabase()
     await initDatabase()
     writeFileSync(TEST_CONSTITUTION, SAMPLE_CONSTITUTION, 'utf-8')
@@ -58,7 +59,7 @@ describe('MetaCycle', () => {
 
   afterEach(() => {
     closeDatabase()
-    if (existsSync(TEST_CONSTITUTION)) unlinkSync(TEST_CONSTITUTION)
+    removeQuietly(TEST_CONSTITUTION)
     restoreTestDatabase()
   })
 

@@ -1,6 +1,7 @@
 node_modules
 dist
 dist-electron
+dist-electron*/
 build/icon-preview.png
 *.exe
 .env
@@ -39,6 +40,7 @@ __*
 !__tests__/
 .claude/projects/
 .claude/tool_call_log.json
+.claude/tool-call-log-*.test.json
 .claude-flow/
 .swarm/
 .playwright-mcp/
@@ -97,6 +99,10 @@ tsc-permission-test.json
 *.ts.tmp.*
 extensions/
 test-user-data/
+# 测试夹具：IdentityModule / MetaCycle 会把 constitution 临时写在仓库根目录，
+# 跑完才删；清理失败时会残留，别让它被 `git add -A` 收进去
+test-CONSTITUTION.md
+test-meta-constitution.md
 .worktrees/
 
 # Temp art/design artifacts
