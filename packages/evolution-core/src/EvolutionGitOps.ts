@@ -4,6 +4,23 @@ import { WORKSPACE } from '@akemi-mio/core/config'
 
 const EVO_CWD = WORKSPACE.evolution
 
+/**
+ * Git *writes* are opt-in.
+ *
+ * These helpers used to run `git add -A` + `git commit` on whatever branch was
+ * checked out, and `git stash push`/`pop` around analysis. Both are unsafe to
+ * run unattended against a working repository: the auto-commit silently
+ * absorbed unrelated in-progress work into `[evolution]` commits on the current
+ * branch, and an unconditional `git stash pop` could restore a stash it never
+ * created. A repo here lost five local commits and had its packfiles destroyed.
+ *
+ * Read-only inspection (`git status`, `git diff`) stays enabled — analysis
+ * depends on it and it cannot damage the object store.
+ */
+function gitWritesEnabled(): boolean {
+  return process.env.MIO_EVOLUTION_GIT_WRITES === '1'
+}
+
 export enum RollbackLevel {
   TASK = 'task',
   MODULE = 'module',
@@ -18,6 +35,10 @@ export class EvolutionGitOps {
   constructor() {}
 
   async autoGitCommit(planTitle: string): Promise<void> {
+    if (!gitWritesEnabled()) {
+      log('INFO', 'evolution_auto_commit_disabled', { planTitle })
+      return
+    }
     try {
       await execAsync('git add -A', { cwd: EVO_CWD, timeout: 15000 })
       await execAsync(`git commit -m "[evolution] ${planTitle}"`, { cwd: EVO_CWD, timeout: 15000 })
@@ -28,6 +49,7 @@ export class EvolutionGitOps {
   }
 
   async workspacePreCheck(lastSuccessTime: number): Promise<boolean> {
+    if (!gitWritesEnabled()) return false
     try {
       const oneHourAgo = Date.now() - 60 * 60 * 1000
       if (lastSuccessTime > 0 && lastSuccessTime > oneHourAgo) return false
@@ -45,6 +67,9 @@ export class EvolutionGitOps {
   }
 
   async workspacePostRestore(): Promise<void> {
+    // Must stay in lockstep with workspacePreCheck: it used to pop even when
+    // nothing was stashed, restoring an unrelated stash the user created.
+    if (!gitWritesEnabled()) return
     try {
       await execAsync('git stash pop', { cwd: EVO_CWD, timeout: 15000 })
       log('INFO', 'evolution_workspace_stash_restored')

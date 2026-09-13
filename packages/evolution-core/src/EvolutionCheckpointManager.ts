@@ -407,6 +407,13 @@ export class EvolutionCheckpointManager {
         // 可能没有 commit
       }
 
+      // Git writes are opt-in: this path runs `git add -A` + `git commit` on the
+      // checked-out branch and stashes around it, which silently absorbs
+      // unrelated in-progress work and can damage the object store.
+      if (process.env.MIO_EVOLUTION_GIT_WRITES !== '1') {
+        return { snapshotBranch: null, stashMessage: null, headHash }
+      }
+
       // 检查是否有未提交变更
       let stashMessage: string | null = null
       try {
