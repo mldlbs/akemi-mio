@@ -78,7 +78,11 @@ Write-Output ("saved " + $b.Width + "x" + $b.Height)
 // 且 Logger 自己再建一层 logs/，所以真实路径是 logs\logs\app-YYYY-MM-DD.log。
 // dev 直跑走的是 %APPDATA%\Electron。这里两个都扫，取最新的那个。
 function logDirs() {
-  const appData = process.env.APPDATA
+  // Git Bash 里根本没有 APPDATA 这个环境变量，必须用 USERPROFILE 兜底，
+  // 否则下面所有候选目录都不存在，日志永远读不到（会误判成"exe 没写日志"）
+  const appData =
+    process.env.APPDATA ||
+    (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, 'AppData', 'Roaming') : '')
   if (!appData) return []
   const names = ['akemi-mio', 'AkemiMio', 'Electron']
   const dirs = []

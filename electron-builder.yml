@@ -31,6 +31,13 @@ files:
   - "!logs.txt"
   - "!logs/**"
   - "!**/node_modules/**/*.map"
+# MCP 服务器是 spawn 出来的**独立 node 进程**，裸 node 读不了 asar 里的文件
+# （表现为 Cannot find module ...app.asar\node_modules\@playwright\mcp\cli.js）。
+# 所以这几个包必须解包到 app.asar.unpacked，运行时再把路径指过去。
+asarUnpack:
+  - "node_modules/@playwright/mcp/**/*"
+  - "node_modules/playwright/**/*"
+  - "node_modules/playwright-core/**/*"
 win:
   icon: build/icon.ico
   target:

@@ -164,6 +164,20 @@ import type { ToolChainOrchestrator, ToolChainDecomposer } from '@akemi-mio/inte
 import type { OrchestrationBridge } from '@akemi-mio/intelligence/orchestrator/OrchestrationBridge'
 
 /**
+ * 把 asar 内的路径映射到解包目录。
+ *
+ * 打包后 `require.resolve` 返回的是 `...\resources\app.asar\node_modules\...`，
+ * 而 asar 里的文件**只有 Electron 进程的 patched fs 能读**。任何由我们 spawn 出去的
+ * 独立进程（这里是 MCP 服务器，用系统 `node` 启动）拿这种路径一定 MODULE_NOT_FOUND。
+ * electron-builder 已把相关包 asarUnpack 到 `app.asar.unpacked`，这里负责指过去。
+ * 未打包（dev 直跑）时路径里没有 app.asar，原样返回。
+ */
+function toUnpacked(p: string): string {
+  if (!p.includes('app.asar') || p.includes('app.asar.unpacked')) return p
+  return p.replace('app.asar', 'app.asar.unpacked')
+}
+
+/**
  * AppRuntime — 应用启动生命周期编排器。
  * 封装 index.ts 中原本的模块级初始化逻辑，提供清晰的启动阶段。
  */
@@ -232,6 +246,20 @@ export class AppRuntime {
 
   async start(): Promise<void> {
     const startMs = Date.now()
+
+    // ── 启动阶段看门狗 ──
+    // 教训：打包版曾卡在 ASR 插件注册之后、TTS 之前的一个永不 resolve 的 await 上，
+    // 现象是进程活着、stdout 静默、窗口不出、文件日志一行没有 —— 完全没有报错可查。
+    // 所以每一步都留一个标记，卡超时就把最后一步打出来。
+    let startupStep = 'stage0_cli_flags'
+    const markStep = (step: string): void => {
+      startupStep = step
+      log('INFO', 'startup_step', { step, elapsedMs: Date.now() - startMs })
+    }
+    const stallGuard = setTimeout(() => {
+      log('ERROR', 'startup_stalled', { step: startupStep, elapsedMs: Date.now() - startMs })
+    }, 60_000)
+    stallGuard.unref?.()
 
     // === Stage 0: CLI flags & env ===
     setupStartupLogging()
@@ -529,8 +557,9 @@ export class AppRuntime {
 
     // 注册 Playwright MCP 服务器，赋予 AI 浏览器自动化能力
     try {
-      const pwMcpDir = dirname(require.resolve('@playwright/mcp/package.json'))
+      const pwMcpDir = toUnpacked(dirname(require.resolve('@playwright/mcp/package.json')))
       const cliPath = join(pwMcpDir, 'cli.js')
+      log('INFO', 'playwright_mcp_cli_path', { path: cliPath, exists: existsSync(cliPath) })
       const userDataDir = join(app.getPath('userData'), 'playwright-profile')
 
       // 先删除持久化的脏配置，防止冲突
@@ -592,11 +621,28 @@ export class AppRuntime {
       })
     // 将 ASR 服务注入进化管理器（供 ASR 自优化使用）
     asrEvolutionManager.setAsrService(asrService)
+    markStep('asr_plugins')
     // 将 ASR 引擎注册为 SpeechPluginRegistry 插件
     asrService.registerPlugins()
 
+    markStep('core_event_bus')
     this.registerCoreEventBus()
-    this.logModelConfig(app.isPackaged ? credentialsManager.get('llm_key') || undefined : llmKey)
+
+    // 打包版在这里读凭据库**太早**：DB 要到 Stage 2 之后才初始化，
+    // credentialsManager.get() → getRawDb() 会直接抛 "Database not initialized"，
+    // 整个 start() 因此拒绝 —— 现象是进程活着但窗口永远不出（已实测卡在 core_event_bus）。
+    // 打包版的 key 本来就是 DB 就绪后再 hydrate（见下面 if (app.isPackaged) 分支），
+    // 这里读不到就退回环境变量，并且必须容错：绝不能让一次配置读取打断启动。
+    let modelConfigKey = llmKey
+    if (app.isPackaged) {
+      try {
+        modelConfigKey = credentialsManager.get('llm_key') || llmKey
+      } catch (err) {
+        log('DEBUG', 'llm_key_read_deferred', { error: String(err).slice(0, 60) })
+        modelConfigKey = llmKey
+      }
+    }
+    this.logModelConfig(modelConfigKey)
 
     if (app.isPackaged) {
       // Packaged builds hydrate LLM configuration from the persisted credential store after DB init.
@@ -606,6 +652,7 @@ export class AppRuntime {
       log('WARN', 'missing_api_key')
     }
 
+    markStep('phase4_infra')
     // Phase 4: Agent OS 基础设施
     this.syscallBus = new SyscallBus()
     this.healthChecker = new HealthChecker(30_000)
@@ -615,11 +662,13 @@ export class AppRuntime {
     this.resourceBudget = new ResourceBudget()
     this.stabilityScore = new SystemStabilityScore()
     this.metricsCollector = new MetricsCollector()
+    markStep('import_evolution_core')
     const { ProposalValidator } = await import('@akemi-mio/evolution-core')
     const { EvolutionGitOps } = await import('@akemi-mio/evolution-core')
     this.proposalValidator = new ProposalValidator()
     this.gitOps = new EvolutionGitOps()
 
+    markStep('tts_service')
     const ttsService = new TtsService((state) => stateManager.update(state))
 
     // ── TTS 路由：从凭据存储恢复用户的引擎偏好 ──
@@ -634,6 +683,7 @@ export class AppRuntime {
       // 凭据存储可能尚未就绪
       log('DEBUG', 'tts_preference_restore_skipped', { error: String(err).slice(0, 60) })
     }
+    markStep('tts_plugins')
     // 将 TTS 引擎注册为 SpeechPluginRegistry 插件
     ttsService.registerPlugins()
 
@@ -669,6 +719,7 @@ export class AppRuntime {
     agentService.setRecoveryManager(recoveryManager)
 
     // 初始化 WorkflowScheduler V2
+    markStep('workflow_scheduler')
     const { WorkflowSchedulerV2, setWorkflowScheduler } = await import('@akemi-mio/capabilities/workflow/WorkflowScheduler')
     const { workflowStore } = await import('@akemi-mio/capabilities/workflow/WorkflowStoreV2')
     const scheduler = new WorkflowSchedulerV2({
@@ -732,15 +783,18 @@ export class AppRuntime {
 
     // 初始化 WorkflowTriggerManager（cron + event 触发）
     // 注意: .start() 延后到 initDatabase() 之后调用，避免 DB 未就绪的竞态
+    markStep('workflow_trigger_manager')
     const { WorkflowTriggerManager } = await import('@akemi-mio/capabilities/workflow/WorkflowTriggerManager')
     const triggerManager = new WorkflowTriggerManager()
 
     const telegramService = new TelegramService(agentService)
 
     // === Stage 2: Electron 窗口 ===
+    markStep('app_when_ready')
     await app.whenReady()
     log('PERF', 'startup_stage', { stage: 'app_ready', ms: Date.now() })
     initLogFile(WORKSPACE.logs)
+    clearTimeout(stallGuard)
     log('INFO', 'log_file_ready', { path: getLogFilePath() })
 
     // Register IPC before the renderer starts loading. Service refs are filled as
