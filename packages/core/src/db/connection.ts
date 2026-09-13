@@ -15,15 +15,33 @@ import { runMigrations } from './migration'
 // 底层使用 better-sqlite3（mmap 按需加载）
 // =============================================================================
 
-class CompatStatement {
+export class CompatStatement {
   private stmt: any
   private _columns: string[] = []
   private _rows: any[] | null = null
   private _rowIndex: number = 0
 
+  /**
+   * better-sqlite3 的 columns() **只对返回数据的语句有效**：
+   * `prepare('UPDATE ...')` / `prepare('INSERT ...')` 调它会抛
+   * `TypeError: The columns() method is only for statements that return data`。
+   *
+   * 构造期无条件取列名 = 所有写语句的 prepare 直接失败。受害最重的是
+   * migrateLegacyEvents()：它在 prepare 抛错后连 DROP TABLE 都走不到，
+   * 于是迁移永远失败、表永远不删，每次启动重试一遍，旧事件永远进不了新库。
+   * 真实用户库有历史数据时才会触发，dev/测试的空库整段被跳过，所以一直没暴露。
+   */
+  private static readColumns(stmt: any): string[] {
+    try {
+      return stmt.columns().map((c: any) => c.name)
+    } catch {
+      return []
+    }
+  }
+
   constructor(stmt: any) {
-    this._columns = stmt.columns().map((c: any) => c.name)
     this.stmt = stmt
+    this._columns = CompatStatement.readColumns(stmt)
   }
 
   bind(params: any[]): this {
@@ -60,7 +78,17 @@ class CompatStatement {
     return this._columns.map((c: string) => this._currentRow[c])
   }
   reset(): void {
-    this.stmt.reset()
+    // better-sqlite3 的 Statement 没有 reset()（sql.js / node:sqlite 才有，
+    // step() 与 free() 同样不存在，见上面两处兼容处理）。迁移与分类回填的循环
+    // 每一步都调 reset，裸透传会在第一次迭代就抛 TypeError，整段被外层 catch 吞掉。
+    //
+    // 只重置本地游标，**不要清空 _rows**：写语句的 _rows 是 step() 里兜底得到的
+    // 空数组，清掉会让下一次 step() 重新 run() —— 同一条写语句被执行两遍。
+    if (typeof this.stmt.reset === 'function') {
+      try {
+        this.stmt.reset()
+      } catch {}
+    }
     this._currentRow = null
     this._rowIndex = 0
   }
@@ -73,7 +101,7 @@ class CompatStatement {
   }
 }
 
-class CompatDatabase {
+export class CompatDatabase {
   private db: any
   constructor(db: any) {
     this.db = db

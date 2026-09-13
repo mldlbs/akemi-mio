@@ -2638,11 +2638,19 @@ export class AppRuntime {
       delayMs: 3000,
       fn: async () => {
         setupWallpaperListener(stateManager, { isWallpaperMode, onWallpaperEvent })
-        // 启动 CSS 热重载监听
-        const { startWallpaperCssWatcher } = await import('@akemi-mio/platform/wallpaper/WallpaperService')
-        const win = getMainWindow()
-        if (win) {
-          startWallpaperCssWatcher(process.cwd(), [win])
+        // CSS 热重载监听的是**源码树**里的 <projectRoot>/src/renderer/src/styles，
+        // 打包产物里没有 src/，所以这个 watcher 只对 dev 有意义
+        //（仓库内也没有任何代码写这两个 css，是留给外部/进化系统改样式的）。
+        // 打包版传 process.cwd() 只换来一个永不存在的目录 + 一条永远无法处理的
+        // WARN —— dev 下 cwd 正好是仓库根，路径才对得上。
+        if (app.isPackaged) {
+          log('DEBUG', 'wallpaper_css_watcher_skipped_packaged')
+        } else {
+          const { startWallpaperCssWatcher } = await import('@akemi-mio/platform/wallpaper/WallpaperService')
+          const win = getMainWindow()
+          if (win) {
+            startWallpaperCssWatcher(process.cwd(), [win])
+          }
         }
       },
     })
