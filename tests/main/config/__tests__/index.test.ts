@@ -35,18 +35,23 @@ function createTempRuntimeDirs() {
   return { projectRoot, userDataRoot }
 }
 
+function setInjectedElectronApp(app: unknown): void {
+  // config/index 用 require('electron')，在 ESM 下 require 不存在且 vi.mock 拦不到它，
+  // 所以必须走 @akemi-mio/core/config 提供的注入点，否则会静默回退到 process.cwd()
+  // 并读走仓库根目录的真实 .env。
+  ;(globalThis as any).__AKEMI_MIO_ELECTRON_APP__ = app
+}
+
 async function importConfigFor(opts: { isPackaged: boolean; projectRoot: string; userDataRoot: string }): Promise<ConfigModule> {
   vi.resetModules()
-  vi.doMock('electron', () => ({
-    app: {
-      isPackaged: opts.isPackaged,
-      getAppPath: () => opts.projectRoot,
-      getPath: (name: string) => {
-        if (name === 'userData') return opts.userDataRoot
-        throw new Error(`unexpected path lookup: ${name}`)
-      },
+  setInjectedElectronApp({
+    isPackaged: opts.isPackaged,
+    getAppPath: () => opts.projectRoot,
+    getPath: (name: string) => {
+      if (name === 'userData') return opts.userDataRoot
+      throw new Error(`unexpected path lookup: ${name}`)
     },
-  }))
+  })
 
   for (const key of LLM_ENV_KEYS) delete process.env[key]
 
@@ -56,7 +61,7 @@ async function importConfigFor(opts: { isPackaged: boolean; projectRoot: string;
 describe('config', () => {
   afterEach(() => {
     vi.resetModules()
-    vi.doUnmock('electron')
+    delete (globalThis as any).__AKEMI_MIO_ELECTRON_APP__
     for (const key of Object.keys(process.env)) delete process.env[key]
     Object.assign(process.env, envSnapshot)
   })
@@ -83,12 +88,19 @@ describe('config', () => {
   it('does not load userData .env for packaged mode', async () => {
     const { projectRoot, userDataRoot } = createTempRuntimeDirs()
 
+    // 项目根也写一份：dev 模式读的正是这一份，所以「packaged 下必须忽略它」才是本用例
+    // 真正有区分力的断言。只写 userData 那份的话，dev 与 packaged 结果相同，断言形同虚设。
+    writeFileSync(join(projectRoot, '.env'), 'LLM_API_URL=https://project.example/v1\nLLM_CHAT_MODEL=project-model\n')
     writeFileSync(join(userDataRoot, '.env'), 'LLM_API_URL=https://userdata.example/v1\nLLM_CHAT_MODEL=userdata-model\n')
 
     const config = await importConfigFor({ isPackaged: true, projectRoot, userDataRoot })
 
     expect(config.LLM_API_URL).toBe('https://opencode.ai/zen/go/v1/chat/completions')
     expect(config.LLM_CHAT_MODEL).toBe('deepseek-v4-flash')
+    // 上面两条单独看不够：仓库根的真实 .env 里 LLM_API_URL / LLM_CHAT_MODEL 恰好就等于
+    // 这两个内置默认值，所以即使 .env 被误读，前两条也照样通过。LLM_KEY 才是判别点 ——
+    // 默认为空，一旦读进任何 .env 就会变成真实密钥。
+    expect(config.LLM_KEY).toBe('')
   })
 
   it('exports WORKSPACE_ROOT with defaults', async () => {

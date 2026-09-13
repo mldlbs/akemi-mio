@@ -4,13 +4,30 @@ import { existsSync, readFileSync } from 'fs'
 let _electronApp: any = null
 let _electronLoaded = false
 
+/**
+ * 惰性获取 electron 的 `app`。
+ *
+ * 这里历史上直接 `require('electron')`，但本文件在 ESM/SSR 语境（vitest、vite-node）下
+ * `require` 根本不存在，会直接抛错并**静默回退**到 `process.cwd()` —— 后果有两个：
+ *   1. 开发态总能读到仓库根目录的真实 `.env`（含真实 LLM_KEY），并把密钥带进测试输出；
+ *   2. `vi.mock('electron')` 只拦 ESM import、拦不到 `require`，测试里的 electron mock
+ *      形同虚设，`isPackagedApp()` 恒为 false，packaged 分支永远覆盖不到。
+ *
+ * 因此优先读取注入点 `globalThis.__AKEMI_MIO_ELECTRON_APP__`：生产环境从不设置它，
+ * 行为与改动前完全一致；测试可注入假 app，从而真正覆盖 packaged 分支与项目根目录解析。
+ */
 function getElectronApp(): any {
   if (!_electronLoaded) {
     _electronLoaded = true
-    try {
-      _electronApp = require('electron').app
-    } catch {
-      _electronApp = null
+    const injected = (globalThis as any).__AKEMI_MIO_ELECTRON_APP__
+    if (injected !== undefined) {
+      _electronApp = injected
+    } else {
+      try {
+        _electronApp = require('electron').app
+      } catch {
+        _electronApp = null
+      }
     }
   }
   return _electronApp

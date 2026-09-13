@@ -33,6 +33,9 @@ async function importRuntimeConfig(isPackaged: boolean) {
   const appPath = createTempProjectRoot()
 
   vi.resetModules()
+  // runtimeConfig 自己用 ESM `import { app } from 'electron'`，vi.doMock 拦得住；
+  // 但它依赖的 @akemi-mio/core/config 是 require('electron')，拦不住 —— 必须再走注入点，
+  // 否则 config 会回退到 process.cwd() 读走仓库根的真实 .env（并把真实 LLM_KEY 覆盖进来）。
   vi.doMock('electron', () => ({
     app: {
       isPackaged,
@@ -40,6 +43,11 @@ async function importRuntimeConfig(isPackaged: boolean) {
       getPath: () => appPath,
     },
   }))
+  ;(globalThis as any).__AKEMI_MIO_ELECTRON_APP__ = {
+    isPackaged,
+    getAppPath: () => appPath,
+    getPath: () => appPath,
+  }
 
   return import('@akemi-mio/intelligence/llm/runtimeConfig')
 }
@@ -48,6 +56,7 @@ describe('runtime LLM config resolver', () => {
   afterEach(() => {
     vi.resetModules()
     vi.doUnmock('electron')
+    delete (globalThis as any).__AKEMI_MIO_ELECTRON_APP__
 
     for (const key of Object.keys(process.env)) delete process.env[key]
     Object.assign(process.env, envSnapshot)
