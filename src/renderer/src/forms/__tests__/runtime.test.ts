@@ -64,6 +64,58 @@ describe('形态识别', () => {
     clearBridge()
     const rt = await loadRuntime('/unknown-thing.html')
     expect(rt.getFormKind()).toBe('pet')
+    expect(rt.getBroadcastSource()).toBe('pet')
+  })
+
+  // ── 主壳识别（回归防护）──
+  //
+  // 曾经的主壳会掉进末尾的 `return 'pet'` 兜底，于是广播时谎报 from:'pet'，
+  // 接收方会把主壳的对话状态当成自己的回声。必须锁死。
+  it('index.html 识别为 shell 而非 pet', async () => {
+    clearBridge()
+    const rt = await loadRuntime('/index.html')
+    expect(rt.isShell()).toBe(true)
+    expect(rt.getBroadcastSource()).toBe('shell')
+  })
+
+  it('agent.html 也识别为 shell', async () => {
+    clearBridge()
+    const rt = await loadRuntime('/agent.html')
+    expect(rt.isShell()).toBe(true)
+  })
+
+  it('根路径识别为 shell', async () => {
+    clearBridge()
+    const rt = await loadRuntime('/')
+    expect(rt.isShell()).toBe(true)
+  })
+
+  it('shell 的 getFormKind 回退为 pet 但广播源保持 shell', async () => {
+    clearBridge()
+    const rt = await loadRuntime('/index.html')
+    // 渲染兜底：主壳不渲染形态 UI，返回最小形态即可
+    expect(rt.getFormKind()).toBe('pet')
+    // 但广播源绝不能被污染
+    expect(rt.getBroadcastSource()).toBe('shell')
+  })
+
+  it('主壳查形态元数据不返回 undefined（结构完整才安全）', async () => {
+    clearBridge()
+    const rt = await loadRuntime('/index.html')
+    expect(rt.getFormDescriptor()).toBeDefined()
+    expect(rt.getFormDescriptor().htmlFile).toBe('pet.html')
+  })
+
+  it('?form=shell 也识别为 shell', async () => {
+    clearBridge()
+    const rt = await loadRuntime('/x.html', '?form=shell')
+    expect(rt.isShell()).toBe(true)
+  })
+
+  it('形态页面不会被误判为 shell', async () => {
+    clearBridge()
+    const rt = await loadRuntime('/pet.html')
+    expect(rt.isShell()).toBe(false)
   })
 
   it('preload 存在但 kind 非法时回退到 URL 推断', async () => {
@@ -135,6 +187,19 @@ describe('有 preload 时的转发', () => {
     const rt = await loadRuntime('/chat.html')
     rt.broadcast('chat:thinking', null)
     expect(broadcast).toHaveBeenCalledWith({ from: 'chat', type: 'chat:thinking', payload: null })
+  })
+
+  it('主壳广播时来源为 shell（不得谎报成形态）', async () => {
+    const broadcast = vi.fn()
+    // 主壳的 preload 拿不到 kind（URL 是 index.html），桥接仍存在
+    installBridge({ broadcast } as Partial<FormBridge>)
+    const rt = await loadRuntime('/index.html')
+    rt.broadcast('agent:state', { state: 'thinking' })
+    expect(broadcast).toHaveBeenCalledWith({
+      from: 'shell',
+      type: 'agent:state',
+      payload: { state: 'thinking' },
+    })
   })
 
   it('onBroadcast 转发给 handler 并传递取消订阅', async () => {

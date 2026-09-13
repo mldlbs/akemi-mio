@@ -177,7 +177,37 @@ export function PetForm() {
     })
   }, [say, setTransientMood])
 
-  // ── 点击行为 ──
+  // ── 订阅主壳的真实 agent 状态 ──
+  //
+  // 与 ai:chunk 的区别：chunk 是"已经说出话了"，而这个状态覆盖
+  // **用户发问到第一个字之间的空窗期** —— 那几秒宠物若毫无反应，
+  // 看起来就像坏了。这是 from='shell' 的广播，不是形态间自说自话。
+  useEffect(() => {
+    return onBroadcast((msg) => {
+      if (msg.from !== 'shell' || msg.type !== 'agent:state') return
+      const p = msg.payload as { state?: string } | null | undefined
+      switch (p?.state) {
+        case 'thinking':
+          setTransientMood('thinking')
+          break
+        case 'tool':
+          setTransientMood('thinking')
+          break
+        case 'replying':
+          // 开始输出正文，不在气泡里重复（正文由 ai:chunk 负责展示）
+          setTransientMood('happy')
+          break
+        case 'idle':
+          // 回到空闲：'idle' 会清掉临时情绪定时器，让空闲计时器接管（久坐会打瞌睡）
+          setTransientMood('idle')
+          break
+        default:
+          break
+      }
+    })
+  }, [setTransientMood])
+
+  // ── 点击行为 ── ──
   const handleDoubleClick = useCallback(() => {
     setGesture('wave')
     broadcast('pet:summon-chat', null)

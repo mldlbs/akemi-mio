@@ -719,8 +719,14 @@ export function closeAllFormWindows(): void {
   formWindows.clear()
 }
 
-/** 向所有形态窗口广播一条消息（发送方可按 from 自行忽略）。 */
-export function broadcastToForms(from: FormKind, type: string, payload: unknown): void {
+/**
+ * 向所有形态窗口广播一条消息。
+ *
+ * from 允许为 'shell'（主壳）：真实对话状态只存在于主壳的渲染进程里，
+ * 必须经它广播，宠物才能知道"用户刚发问、还没出第一个字"。
+ * 主壳不是形态窗口，因此不会出现在 formWindows 里，也就不会收到自己的回声。
+ */
+export function broadcastToForms(from: FormKind | 'shell', type: string, payload: unknown): void {
   for (const [kind, win] of formWindows) {
     if (kind === from) continue
     if (win.isDestroyed()) continue

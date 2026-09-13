@@ -6,6 +6,9 @@ import { resetAllStores } from '../store/reset'
 
 vi.mock('../hooks', () => ({
   useSessions: () => {},
+  // 主壳→形态的状态广播。App 自身测试不关心广播内容，
+  // 因此置为 no-op；其行为由 hooks/__tests__/useFormAgentSync.test.ts 覆盖。
+  useFormAgentSync: () => {},
   useDeviceStatus: () => ({
     active: false,
     ttsPlaying: false,

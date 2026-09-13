@@ -10,7 +10,15 @@
  * 这样 vite devserver 直接访问 pet.html 也能预览，而不是白屏。
  */
 
-import { FORM_REGISTRY, isFormKind, type AgentActivity, type FormBroadcast, type FormBridge, type FormKind } from './types'
+import {
+  FORM_REGISTRY,
+  isFormKind,
+  type AgentActivity,
+  type BroadcastSource,
+  type FormBroadcast,
+  type FormBridge,
+  type FormKind,
+} from './types'
 
 /** 从全局对象上找到 preload 注入的形态桥接。 */
 function readBridge(): FormBridge | null {
@@ -26,34 +34,68 @@ function readBridge(): FormBridge | null {
  * 顺序很关键：先信 preload 的显式声明（主进程最清楚），
  * 再退到 URL 文件名（dev 直连时没有 preload，但文件名仍然是可靠信号）。
  */
-function detectKind(): FormKind {
+/**
+ * 推断当前窗口身份：`'shell'`（主壳）或某个形态。
+ *
+ * 必须**先判主壳**：主壳的 URL（index.html / 根路径 / agent.html）不匹配任何
+ * 形态 htmlFile，若让流程继续往下掉，会命中末尾的 `return 'pet'` 兜底 ——
+ * 主壳于是谎报自己是宠物。后果是主壳发出的广播被标记为 from:'pet'，
+ * 宠物会把主壳的对话状态当成自己的回声，语义彻底错乱。
+ */
+function detectIdentity(): BroadcastSource {
   const bridge = readBridge()
   if (bridge && isFormKind(bridge.kind)) return bridge.kind
 
-  // 回退：从 URL 路径末段推断，例如 /src/renderer/pet.html 或 /pet.html
   const path = window.location.pathname
+
+  // 主壳判定：根路径、index.html、agent.html 都算主壳
+  if (path.endsWith('/index.html') || path.endsWith('/agent.html') || path === '/' || path === '') {
+    return 'shell'
+  }
+
+  // 形态判定：从 URL 末段匹配 htmlFile
   for (const kind of Object.keys(FORM_REGISTRY) as FormKind[]) {
     const file = FORM_REGISTRY[kind].htmlFile
     if (path.endsWith(`/${file}`) || path === `/${file}`) return kind
   }
-  // 再回退：查询串 ?form=pet（便于手工调试）
+
+  // 查询串兜底，便于手工调试（?form=pet）
   const query = new URLSearchParams(window.location.search).get('form')
   if (isFormKind(query)) return query
+  if (query === 'shell') return 'shell'
 
   // 最终兜底：宠物形态最小、依赖最少，最容易安全渲染
   return 'pet'
 }
 
-const currentKind: FormKind = detectKind()
+const currentIdentity: BroadcastSource = detectIdentity()
 
-/** 当前窗口的形态标识。模块加载时即确定，运行期不变。 */
+/**
+ * 当前窗口的形态标识。
+ * 主壳返回 'pet' —— 它不渲染形态 UI，这里只是为了满足返回类型，
+ * 且兜底到最小形态可保证即使误用也不会崩。需区分主壳请用 isShell()。
+ */
 export function getFormKind(): FormKind {
-  return currentKind
+  return currentIdentity === 'shell' ? 'pet' : currentIdentity
 }
 
-/** 当前形态的元数据。 */
+/** 当前窗口是否为主壳。 */
+export function isShell(): boolean {
+  return currentIdentity === 'shell'
+}
+
+/** 广播来源标识（主壳为 'shell'，形态为自身 kind）。 */
+export function getBroadcastSource(): BroadcastSource {
+  return currentIdentity
+}
+
+/**
+ * 当前形态的元数据。
+ * 主壳返回 pet 的元数据 —— 与 getFormKind() 的兜底策略保持一致
+ * （主壳不渲染形态 UI，这里只需保证调用方拿到结构完整的数据而非 undefined）。
+ */
 export function getFormDescriptor() {
-  return FORM_REGISTRY[currentKind]
+  return FORM_REGISTRY[getFormKind()]
 }
 
 /** 当前环境是否具备 Electron 形态桥接。 */
@@ -97,7 +139,9 @@ export function broadcast(type: string, payload: unknown): void {
   const bridge = readBridge()
   if (!bridge) return
   try {
-    bridge.broadcast({ from: currentKind, type, payload })
+    // 用 getBroadcastSource() 而非 currentKind 的兜底值：
+    // 主壳发出的广播必须标为 'shell'，否则接收方会误判为形态自身回声。
+    bridge.broadcast({ from: getBroadcastSource(), type, payload })
   } catch {
     /* 静默 */
   }

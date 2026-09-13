@@ -18,7 +18,7 @@ import { SettingsModal } from './components/SettingsModal'
 import { RightPanel } from './components/RightPanel'
 import { WallpaperOverlay } from './components/WallpaperOverlay'
 import { useSlots } from './slots/SlotContext'
-import { useSessions, useAIOutput, useTools, useDeviceStatus, usePlans, useWorkflowDefinitions } from './hooks'
+import { useSessions, useAIOutput, useTools, useDeviceStatus, usePlans, useWorkflowDefinitions, useFormAgentSync } from './hooks'
 import { useSessionStore } from './store/sessionStore'
 import { useHistoryViewStore } from './store/historyViewStore'
 import type { MessageItem } from './slots/types'
@@ -48,6 +48,8 @@ function AppInner() {
   useTools()
   usePlans()
   useWorkflowDefinitions()
+  // 把主壳的 agent 状态广播给桌面形态（宠物据此显示"思考中/干活中"）
+  useFormAgentSync()
   const { uiState } = useSlots()
   const { viewing } = useHistoryViewStore()
 

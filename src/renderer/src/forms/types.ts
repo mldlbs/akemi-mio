@@ -16,6 +16,21 @@
 /** 形态标识。新增形态时在此追加，并补齐 FORM_REGISTRY 中的元数据。 */
 export type FormKind = 'pet' | 'chat' | 'wallpaper'
 
+/**
+ * 主壳（index.html / agent.html）的广播源标识。
+ *
+ * 它不是一种"形态" —— 主壳是完整工作台，不参与形态切换。
+ * 但它是**合法的广播源**：真实对话状态（思考中 / 回复中）只存在于主壳的
+ * 渲染进程里，必须经它广播出去，宠物才能知道"用户刚发问、还没出第一个字"。
+ *
+ * 之所以要单列而不复用 FormKind：主壳若谎报成某个形态，
+ * 广播接收方会把自己的回声当成别人的事件，语义立刻错乱。
+ */
+export type ShellSource = 'shell'
+
+/** 广播来源：三形态 + 主壳。 */
+export type BroadcastSource = FormKind | ShellSource
+
 /** 全部形态，供遍历与校验使用（顺序即默认优先级）。 */
 export const FORM_KINDS: readonly FormKind[] = ['pet', 'chat', 'wallpaper'] as const
 
@@ -149,8 +164,8 @@ export interface FormMessage {
 
 /** 跨形态广播的载荷 —— 形态间通过主进程中继，不直接互相引用。 */
 export interface FormBroadcast {
-  /** 来源形态 */
-  from: FormKind
+  /** 广播来源：三形态之一，或主壳 'shell' */
+  from: BroadcastSource
   /** 事件名，如 'pet:mood' / 'chat:message' */
   type: string
   payload: unknown

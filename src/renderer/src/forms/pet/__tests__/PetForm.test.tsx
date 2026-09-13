@@ -11,27 +11,43 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act, fireEvent } from '@testing-library/react'
 
-/** 捕获 broadcast 订阅回调，用于手工触发跨形态事件。 */
-let broadcastHandler: ((m: { from: string; type: string; payload: unknown }) => void) | null = null
-/** 捕获 agent 活动订阅回调，用于手工注入真实对话流事件。 */
-let agentActivityHandler: ((a: { kind: string; text: string }) => void) | null = null
+/**
+ * 订阅者集合（而非单个变量）。
+ *
+ * 真实 preload 的 ipcRenderer.on 支持**多个**监听器，组件里也确实有
+ * 多个 useEffect 各自订阅（形态间广播 / 主壳状态）。用一个变量存 handler
+ * 会让后订阅者覆盖前者，导致前一个订阅永远收不到事件 ——
+ * 这是 mock 的失真，不是被测代码的问题。
+ */
+let broadcastHandlers: Set<(m: unknown) => void> = new Set()
+let agentActivityHandlers: Set<(a: unknown) => void> = new Set()
 const broadcastSpy = vi.fn()
+
+/** 向所有广播订阅者派发一条消息（模拟主进程中继）。 */
+function emitBroadcast(msg: { from: string; type: string; payload: unknown }) {
+  for (const h of [...broadcastHandlers]) h(msg)
+}
+
+/** 向所有 agent 活动订阅者派发一条活动。 */
+function emitAgentActivity(activity: { kind: string; text: string }) {
+  for (const h of [...agentActivityHandlers]) h(activity)
+}
 
 vi.mock('../../runtime', () => ({
   hasFormBridge: () => true,
   broadcast: (...args: unknown[]) => broadcastSpy(...args),
   onBroadcast: (handler: (m: unknown) => void) => {
-    broadcastHandler = handler as typeof broadcastHandler
+    broadcastHandlers.add(handler)
     return () => {
-      broadcastHandler = null
+      broadcastHandlers.delete(handler)
     }
   },
   // 真实对话流（主进程镜像）入口。PetForm 会订阅它，
   // mock 必须提供，否则组件挂载即抛错导致全部用例失败。
   onAgentActivity: (handler: (a: unknown) => void) => {
-    agentActivityHandler = handler as typeof agentActivityHandler
+    agentActivityHandlers.add(handler)
     return () => {
-      agentActivityHandler = null
+      agentActivityHandlers.delete(handler)
     }
   },
   setFormVisible: vi.fn().mockResolvedValue(undefined),
@@ -52,8 +68,8 @@ function currentMood(): string {
 }
 
 beforeEach(() => {
-  broadcastHandler = null
-  agentActivityHandler = null
+  broadcastHandlers = new Set()
+  agentActivityHandlers = new Set()
   broadcastSpy.mockClear()
   vi.useFakeTimers()
 })
@@ -72,7 +88,7 @@ describe('PetForm 情绪状态机', () => {
   it('收到 chat:thinking 广播后进入 thinking', async () => {
     await renderPet()
     act(() => {
-      broadcastHandler?.({ from: 'chat', type: 'chat:thinking', payload: null })
+      emitBroadcast({ from: 'chat', type: 'chat:thinking', payload: null })
     })
     expect(currentMood()).toBe('thinking')
   })
@@ -80,7 +96,7 @@ describe('PetForm 情绪状态机', () => {
   it('临时情绪到期后回落 idle（不会永远笑）', async () => {
     await renderPet()
     act(() => {
-      broadcastHandler?.({ from: 'chat', type: 'chat:thinking', payload: null })
+      emitBroadcast({ from: 'chat', type: 'chat:thinking', payload: null })
     })
     expect(currentMood()).toBe('thinking')
 
@@ -94,7 +110,7 @@ describe('PetForm 情绪状态机', () => {
   it('chat:reply 进入 happy 并显示气泡', async () => {
     await renderPet()
     act(() => {
-      broadcastHandler?.({ from: 'chat', type: 'chat:reply', payload: '做好了' })
+      emitBroadcast({ from: 'chat', type: 'chat:reply', payload: '做好了' })
     })
     expect(currentMood()).toBe('happy')
     expect(screen.getByText('做好了')).toBeTruthy()
@@ -103,7 +119,7 @@ describe('PetForm 情绪状态机', () => {
   it('chat:error 进入 alert 并显示错误气泡', async () => {
     await renderPet()
     act(() => {
-      broadcastHandler?.({ from: 'chat', type: 'chat:error', payload: '出错了' })
+      emitBroadcast({ from: 'chat', type: 'chat:error', payload: '出错了' })
     })
     expect(currentMood()).toBe('alert')
     expect(screen.getByText('出错了')).toBeTruthy()
@@ -112,7 +128,7 @@ describe('PetForm 情绪状态机', () => {
   it('忽略来自自身的广播（不回环）', async () => {
     await renderPet()
     act(() => {
-      broadcastHandler?.({ from: 'pet', type: 'chat:thinking', payload: null })
+      emitBroadcast({ from: 'pet', type: 'chat:thinking', payload: null })
     })
     expect(currentMood()).toBe('idle')
   })
@@ -157,7 +173,7 @@ describe('PetForm 消费真实对话流（主进程镜像）', () => {
   it('thinking 活动进入思考情绪', async () => {
     await renderPet()
     act(() => {
-      agentActivityHandler?.({ kind: 'thinking', text: '' })
+      emitAgentActivity({ kind: 'thinking', text: '' })
     })
     expect(currentMood()).toBe('thinking')
   })
@@ -165,7 +181,7 @@ describe('PetForm 消费真实对话流（主进程镜像）', () => {
   it('工具活动显示中文动作名', async () => {
     await renderPet()
     act(() => {
-      agentActivityHandler?.({ kind: 'tool', text: 'Read' })
+      emitAgentActivity({ kind: 'tool', text: 'Read' })
     })
     expect(currentMood()).toBe('thinking')
     // Read 应被翻译成「读取文件」而不是原样显示工具名
@@ -175,7 +191,7 @@ describe('PetForm 消费真实对话流（主进程镜像）', () => {
   it('未知工具名原样显示（不显示 undefined）', async () => {
     await renderPet()
     act(() => {
-      agentActivityHandler?.({ kind: 'tool', text: 'SomeNewTool' })
+      emitAgentActivity({ kind: 'tool', text: 'SomeNewTool' })
     })
     expect(screen.getByText('SomeNewTool…')).toBeTruthy()
   })
@@ -184,9 +200,9 @@ describe('PetForm 消费真实对话流（主进程镜像）', () => {
     await renderPet()
     // 模拟逐块到达
     act(() => {
-      agentActivityHandler?.({ kind: 'speaking', text: '我' })
-      agentActivityHandler?.({ kind: 'speaking', text: '在做' })
-      agentActivityHandler?.({ kind: 'speaking', text: '这件事' })
+      emitAgentActivity({ kind: 'speaking', text: '我' })
+      emitAgentActivity({ kind: 'speaking', text: '在做' })
+      emitAgentActivity({ kind: 'speaking', text: '这件事' })
     })
     // 尚未静默，不应显示气泡（否则会疯狂闪烁）
     expect(screen.queryByText('我在做这件事')).toBeNull()
@@ -202,7 +218,7 @@ describe('PetForm 消费真实对话流（主进程镜像）', () => {
     await renderPet()
     const long = 'A'.repeat(200)
     act(() => {
-      agentActivityHandler?.({ kind: 'speaking', text: long })
+      emitAgentActivity({ kind: 'speaking', text: long })
       vi.advanceTimersByTime(800)
     })
     expect(screen.getByText(`${'A'.repeat(90)}…`)).toBeTruthy()
@@ -211,7 +227,7 @@ describe('PetForm 消费真实对话流（主进程镜像）', () => {
   it('error 活动进入 alert 并显示原因', async () => {
     await renderPet()
     act(() => {
-      agentActivityHandler?.({ kind: 'error', text: '工具失败' })
+      emitAgentActivity({ kind: 'error', text: '工具失败' })
     })
     expect(currentMood()).toBe('alert')
     expect(screen.getByText('工具失败')).toBeTruthy()
@@ -220,7 +236,7 @@ describe('PetForm 消费真实对话流（主进程镜像）', () => {
   it('done 且无待展示文本时露出开心表情', async () => {
     await renderPet()
     act(() => {
-      agentActivityHandler?.({ kind: 'done', text: '' })
+      emitAgentActivity({ kind: 'done', text: '' })
     })
     expect(currentMood()).toBe('happy')
   })
@@ -228,9 +244,72 @@ describe('PetForm 消费真实对话流（主进程镜像）', () => {
   it('done 时若有未展示文本则优先展示文本', async () => {
     await renderPet()
     act(() => {
-      agentActivityHandler?.({ kind: 'speaking', text: '完成的内容' })
-      agentActivityHandler?.({ kind: 'done', text: '' })
+      emitAgentActivity({ kind: 'speaking', text: '完成的内容' })
+      emitAgentActivity({ kind: 'done', text: '' })
     })
     expect(screen.getByText('完成的内容')).toBeTruthy()
+  })
+})
+
+describe('PetForm 消费主壳 agent 状态广播', () => {
+  it('shell 的 thinking 让宠物进入思考（覆盖首字未出的空窗期）', async () => {
+    await renderPet()
+    act(() => {
+      emitBroadcast({ from: 'shell', type: 'agent:state', payload: { state: 'thinking' } })
+    })
+    expect(currentMood()).toBe('thinking')
+  })
+
+  it('shell 的 tool 状态也进入思考', async () => {
+    await renderPet()
+    act(() => {
+      emitBroadcast({ from: 'shell', type: 'agent:state', payload: { state: 'tool' } })
+    })
+    expect(currentMood()).toBe('thinking')
+  })
+
+  it('replying 时露出开心（正文由 chunk 展示，不重复气泡）', async () => {
+    await renderPet()
+    act(() => {
+      emitBroadcast({ from: 'shell', type: 'agent:state', payload: { state: 'replying' } })
+    })
+    expect(currentMood()).toBe('happy')
+  })
+
+  it('idle 时回到空闲', async () => {
+    await renderPet()
+    act(() => {
+      emitBroadcast({ from: 'shell', type: 'agent:state', payload: { state: 'thinking' } })
+    })
+    expect(currentMood()).toBe('thinking')
+    act(() => {
+      emitBroadcast({ from: 'shell', type: 'agent:state', payload: { state: 'idle' } })
+    })
+    expect(currentMood()).toBe('idle')
+  })
+
+  it('忽略形态自己发出的 agent:state（只认 shell 来源）', async () => {
+    await renderPet()
+    act(() => {
+      emitBroadcast({ from: 'chat', type: 'agent:state', payload: { state: 'thinking' } })
+    })
+    // 来源不是 shell，应被忽略
+    expect(currentMood()).toBe('idle')
+  })
+
+  it('缺少 state 字段时不崩溃', async () => {
+    await renderPet()
+    act(() => {
+      emitBroadcast({ from: 'shell', type: 'agent:state', payload: null })
+    })
+    expect(currentMood()).toBe('idle')
+  })
+
+  it('未知 state 值不改变情绪', async () => {
+    await renderPet()
+    act(() => {
+      emitBroadcast({ from: 'shell', type: 'agent:state', payload: { state: 'whatever' } })
+    })
+    expect(currentMood()).toBe('idle')
   })
 })

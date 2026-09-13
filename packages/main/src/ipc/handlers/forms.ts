@@ -15,6 +15,16 @@ function isFormKind(value: unknown): value is FormKind {
   return value === 'pet' || value === 'chat' || value === 'wallpaper'
 }
 
+/**
+ * 广播来源校验：三形态 + 主壳。
+ *
+ * 必须是白名单而非"非 undefined 即可"：from 字段决定了接收方
+ * 是否把事件当作自己的回声丢弃，伪造来源会直接导致语义错乱。
+ */
+function isBroadcastSource(value: unknown): value is FormKind | 'shell' {
+  return value === 'shell' || isFormKind(value)
+}
+
 export function registerFormHandlers(): void {
   ipcMain.handle('forms:toggle', async (_event, kind: unknown): Promise<boolean> => {
     if (!isFormKind(kind)) return false
@@ -57,7 +67,7 @@ export function registerFormHandlers(): void {
   /** 跨形态广播：由主进程中继，而非渲染进程之间直连（后者会被 contextIsolation 挡住）。 */
   ipcMain.handle('forms:broadcast', async (_event, message: unknown): Promise<void> => {
     const msg = message as { from?: unknown; type?: unknown; payload?: unknown } | null
-    if (!msg || !isFormKind(msg.from) || typeof msg.type !== 'string') return
+    if (!msg || !isBroadcastSource(msg.from) || typeof msg.type !== 'string') return
     broadcastToForms(msg.from, msg.type, msg.payload)
   })
 
