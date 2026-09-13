@@ -42,6 +42,7 @@ mio memory archive --ids a,b    Archive records, hiding them from recall/analyze
 mio memory restore --ids a,b    Un-archive previously archived records
 mio memory merge --ids a,b  Merge duplicate records into one survivor (--keep/--allow-divergent; --yes required)
 mio memory migrate --ids a,b --scope global|project   Move records between the project and global layers
+mio policy check "<action>" Check the historical risk of an action before running it (--project; reads global MIO_HOME)
 mio --json status           Machine-readable status
 mio --json agents           Machine-readable agents
 mio --json evolution status Machine-readable evolution module health
@@ -210,6 +211,8 @@ packages/mio-cli
 │   ├── runtime-modules.js
 │   ├── creativity-engine.js
 │   ├── memory-store.js
+│   ├── experience-store.js
+│   ├── policy-store.js
 │   ├── retention.js
 │   ├── digest.js
 │   └── mio-intelligence-mcp/index.js
@@ -224,6 +227,10 @@ scope layers, reuse-evidence weighting). Both the MCP server
 across entry points. The same module also implements the hygiene
 operations — `analyze` / `archive` / `merge` / `migrate` — so
 `mio.memory.analyze` and `mio memory analyze` can never drift apart.
+`server/experience-store.js` and `server/policy-store.js` follow the
+same pattern for `mio.experience.*` and `mio.policy.check`; the policy
+store reuses the memory store's tokenizer, so policy risk evidence and
+related-memory ranking agree with `mio.memory.query` by construction.
 `server/digest.js`
 aggregates traces/memory/reuse into actionable reports (also exposed as
 `mio.digest.generate`), and `server/retention.js` powers `mio prune`
@@ -313,6 +320,68 @@ What a merge writes:
 - A re-run that has nothing left to merge exits `1` and reports
   `nothing left to merge` — it does not print an undo command for
   records it did not archive.
+
+## Policy check
+
+`mio.policy.check` has always been able to answer "is this action
+historically risky?" from the trace log, but only over MCP. `mio policy
+check` brings it to the terminal:
+
+```bash
+mio policy check "npm publish"
+mio policy check "git reset --hard" --project akemi-mio
+mio policy check "npm publish" --json
+```
+
+```text
+Policy check: "npm publish" (project=akemi-mio)
+risk: HIGH (0.5)
+evidence: 2 matching trace(s), 1 failure(s)
+outcomes: failure=1 success=1
+
+Recent failures:
+  - E403 token lacks bypass_2fa
+
+Related memory:
+  - mem_pub  npm publish requires a granular token with bypass_2fa enabled
+
+Historically risky: ... 
+```
+
+Notes:
+
+- **It reads the global `MIO_HOME`, not a per-project directory.** The
+  MCP server resolves its data dir as
+  `MIO_DATA_DIR || cwd/.mio-intelligence`, so an MCP call from an
+  arbitrary directory sees an empty store; the CLI deliberately points
+  at the accumulated global log instead. Use `--project` to scope the
+  trace set to one project.
+- **Risk is the failure share**, with `>= 0.4` high and `>= 0.2`
+  moderate. `retry` and `aborted` count as failures alongside `failure`
+  and `error`. No matching history reports `UNKNOWN`, which is distinct
+  from `LOW` (a clean record).
+- **A match can be carried by generic tokens.** Matching is a loose OR
+  over tokens of the action, so an action like `task` matches almost
+  every trace because the key `task` is in nearly all payloads. When
+  *every* token in the action appears in at least half the candidate
+  traces, the CLI prints a warning instead of letting the level speak
+  for itself:
+
+  ```text
+  WARNING: low-signal match. Every token in this action (task) appears in
+  most traces regardless of subject, so the level above is not meaningful.
+  Try a more specific action, e.g. mio policy check "npm publish".
+  ```
+
+  This surfaces the weakness at the CLI layer; the MCP matching
+  behaviour is unchanged, and `diagnostics` is an additive field so
+  existing consumers keep working.
+- **Small samples are labelled.** Fewer than 5 matching traces prints
+  `NOTE: only N matching trace(s); treat the level above as a weak
+  signal.`
+- **Flags that belong to the action are kept.** Only `--project` and
+  `--json` are consumed as options, so `git reset --hard` is passed
+  through intact rather than being truncated to `git reset`.
 
 ## Release verification
 

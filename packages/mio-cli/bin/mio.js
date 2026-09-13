@@ -22,6 +22,7 @@ const { getEvolutionStatus, formatEvolutionStatusText } = require('../server/run
 const { createEvolutionCutoverTools } = require('../server/evolution-cutover.js')
 const { createMemoryStore } = require('../server/memory-store.js')
 const { createExperienceStore } = require('../server/experience-store.js')
+const { createPolicyStore } = require('../server/policy-store.js')
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
 
@@ -236,6 +237,19 @@ function cliMemoryStore() {
     dataDir: MIO_HOME,
     projectName,
     agentId: () => 'cli',
+  })
+}
+
+// policy.check deliberately reads the *global* MIO_HOME rather than a
+// per-project directory, so its history matches `mio recall` and `mio traces`.
+// It shares the memory store's tokenizer and scoring, so risk evidence and
+// related-memory ranking line up with `mio.memory.query`.
+function cliPolicyStore() {
+  const memoryStore = cliMemoryStore()
+  return createPolicyStore({
+    dataDir: MIO_HOME,
+    projectName,
+    memoryStore,
   })
 }
 
@@ -945,6 +959,141 @@ function experienceCommand(args, useJson) {
   }
 }
 
+// mio.policy.check has always been able to answer "has this action failed
+// before?", but only from inside an MCP session -- so in practice nobody asked
+// before running the command. This gives it a terminal entry point.
+function policyUsage() {
+  console.log(`Usage:
+  mio policy check "<action>"     Historical risk for an action, from trace + memory evidence
+
+Options:
+  --project name     Project filter (defaults to current directory name)
+  --json             Machine-readable output (same shape as mio.policy.check)
+
+Examples:
+  mio policy check "npm publish"
+  mio policy check "git reset --hard" --project akemi-mio
+
+Reading the result:
+  unknown   no history for this action; treat as normal risk
+  low       history exists and is mostly clean
+  moderate  add verification before proceeding
+  low/high  driven by the failure share of matching traces`)
+}
+
+function printPolicyCheck(result) {
+  const level = result.riskLevel.toUpperCase()
+  console.log(`Policy check: "${result.action}" (project=${result.project || 'all'})`)
+  console.log(`risk: ${level}${result.risk === null ? '' : ` (${result.risk})`}`)
+  if (result.total === 0) {
+    console.log('evidence: no matching traces')
+  } else {
+    console.log(`evidence: ${result.total} matching trace(s), ${result.failures} failure(s)`)
+    const outcomes = Object.entries(result.outcomeCounts)
+    if (outcomes.length > 0) {
+      console.log(`outcomes: ${outcomes.map(([k, v]) => `${k}=${v}`).join(', ')}`)
+    }
+  }
+
+  // A risk level derived from tokens that match most of the corpus looks
+  // authoritative but means nothing. Say so instead of letting it stand.
+  const diag = result.diagnostics
+  if (diag && diag.lowSignal) {
+    console.log('')
+    console.log(
+      `WARNING: low-signal match. Every token in this action (${diag.genericTokens.join(', ')}) ` +
+        'appears in most traces regardless of subject, so the level above is not meaningful.',
+    )
+    console.log('Try a more specific action, e.g. mio policy check "npm publish".')
+  } else if (diag && diag.lowSample) {
+    console.log('')
+    console.log(
+      `NOTE: only ${diag.sampleSize} matching trace(s); treat the level above as a weak signal.`,
+    )
+  }
+
+  console.log(`\n${result.suggestion}`)
+
+  if (result.failureExamples.length > 0) {
+    console.log('\nRecent failures:')
+    for (const example of result.failureExamples) {
+      const when = example.timestamp ? example.timestamp.slice(0, 19).replace('T', ' ') : 'unknown time'
+      console.log(`- [${example.outcome || 'failure'}] ${when}`)
+      console.log(`    ${example.summary}`)
+      if (example.trace_id) console.log(`    trace: ${example.trace_id}`)
+    }
+  }
+
+  if (result.guidance.level !== 'none') {
+    console.log(`\nGuidance (${result.guidance.level}): ${result.guidance.rationale}`)
+    if (result.guidance.avoid.length > 0) {
+      console.log('avoid repeating:')
+      for (const item of result.guidance.avoid) console.log(`- ${item}`)
+    }
+    for (const step of result.guidance.verificationSteps) console.log(`- ${step}`)
+  }
+
+  if (result.related_memories.length > 0) {
+    console.log('\nRelated memory:')
+    for (const record of result.related_memories) {
+      const badge = record.evidence ? ` [verified x${record.evidence.reuseCount}]` : ''
+      console.log(`- ${record.id}${badge} ${String(record.content).replace(/\s+/g, ' ').slice(0, 110)}`)
+    }
+  }
+}
+
+function policyCommand(args, useJson) {
+  const sub = args[1]
+
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    policyUsage()
+    if (!sub) process.exitCode = 1
+    return
+  }
+  if (sub !== 'check') {
+    console.error(`Unknown policy subcommand: ${sub}`)
+    policyUsage()
+    process.exitCode = 1
+    return
+  }
+
+  const flags = args.slice(2)
+  // The action is a positional, and may be quoted as one argument or passed as
+  // several words (`mio policy check npm publish`). Only flags this command
+  // actually understands are treated as options -- anything else, including
+  // `--hard` in `git reset --hard`, belongs to the action being described.
+  const POLICY_KNOWN_FLAGS = new Set(['--project', '--json'])
+  const actionParts = []
+  for (let i = 0; i < flags.length; i += 1) {
+    const token = flags[i]
+    if (POLICY_KNOWN_FLAGS.has(token)) continue
+    if (i > 0 && POLICY_KNOWN_FLAGS.has(flags[i - 1])) continue
+    actionParts.push(token)
+  }
+  const action = actionParts.join(' ').trim()
+
+  if (!action) {
+    console.error('mio policy check requires an action, e.g. mio policy check "npm publish"')
+    process.exitCode = 1
+    return
+  }
+
+  let result
+  try {
+    result = cliPolicyStore().policyCheck({
+      action,
+      project: optionValue(flags, '--project'),
+    })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+
+  if (useJson) return jsonOrText(result, true)
+  printPolicyCheck(result)
+}
+
 function readConfig() {
   const fallback = { version: 1, home: MIO_HOME, agents: {} }
   if (!fs.existsSync(CONFIG_FILE)) return fallback
@@ -1171,6 +1320,7 @@ Usage:
   mio experience list        List experience reuse (--status pending|confirmed|verified)
   mio experience confirm --ids a,b   Confirm auto-claimed reuse (bulk supported)
   mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse
+  mio policy check "<action>" Check historical risk for an action before running it
   mio prune --days 30         Trim old traces/queries/reuse records and observe.log (--dry-run to preview; --memory needs --yes)
   mio digest --days 7         Aggregate traces/memory/reuse into an actionable report (--write-back feeds agent context files; --json)
   mio --json status           Machine-readable status
@@ -1209,6 +1359,8 @@ async function main() {
       return memoryCommand(args, useJson)
     case 'experience':
       return experienceCommand(args, useJson)
+    case 'policy':
+      return policyCommand(args, useJson)
     case 'prune':
       return pruneCommand(args, useJson)
     case 'digest':

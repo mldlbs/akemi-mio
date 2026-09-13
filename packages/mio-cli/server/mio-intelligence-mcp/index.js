@@ -11,6 +11,7 @@ const { listHostCapabilities } = require('../host-capabilities.js')
 const { createEvolutionCutoverTools } = require('../evolution-cutover.js')
 const { createMemoryStore } = require('../memory-store.js')
 const { createExperienceStore, REUSE_STATUS_FILTERS } = require('../experience-store.js')
+const { createPolicyStore } = require('../policy-store.js')
 const { createDigest } = require('../digest.js')
 
 const { CreativityEngine } = require('../creativity-engine.js')
@@ -274,6 +275,17 @@ const {
   loadEvidenceWeights,
 } = memoryStore
 
+// policy.check reuses the memory store's tokenizer and scoring so its risk
+// evidence and related-memory ranking match mio.memory.query exactly.
+const policyStore = createPolicyStore({
+  dataDir,
+  projectName,
+  memoryStore,
+  tracePath,
+  memoryPath,
+})
+const { policyCheck } = policyStore
+
 function ingestObservation(args = {}) {
   const traceId = String(args.trace_id || '').trim()
   const eventType = String(args.event_type || '').trim()
@@ -525,156 +537,6 @@ function observerDigest(args = {}) {
   }
 }
 
-const FAILURE_OUTCOMES = new Set(['failure', 'error', 'aborted', 'retry'])
-
-function isFailureOutcome(value) {
-  return FAILURE_OUTCOMES.has(String(value || '').toLowerCase())
-}
-
-function summarizeTrace(event) {
-  const payload = event.payload
-  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    if (typeof payload.summary === 'string' && payload.summary.trim()) {
-      return payload.summary.trim().slice(0, 160)
-    }
-    if (typeof payload.tool === 'string' && payload.tool.trim()) {
-      return `tool: ${payload.tool.trim().slice(0, 120)}`
-    }
-    if (typeof payload.error === 'string' && payload.error.trim()) {
-      return payload.error.trim().slice(0, 160)
-    }
-  }
-  return String(event.event_type || 'trace').slice(0, 120)
-}
-
-function buildPolicyGuidance({ total, failures, risk, failureExamples, relatedMemories }) {
-  const guidance = {
-    level: 'none',
-    rationale: null,
-    saferAlternatives: [],
-    verificationSteps: [],
-    avoid: [],
-    hardGate: false,
-  }
-  if (total === 0) {
-    guidance.rationale =
-      'No historical evidence for this action yet. Treat as normal risk and record the outcome.'
-    return guidance
-  }
-  const verifiedMemories = relatedMemories.filter((record) => record.evidence)
-  const hasVerified = verifiedMemories.length > 0
-  if (risk >= 0.4 && failures >= 2) {
-    guidance.level = hasVerified ? 'actionable' : 'advisory'
-    guidance.rationale =
-      'Repeated historical failures. Prefer an alternative approach and add rollback/verification.'
-    guidance.avoid = failureExamples
-      .map((example) => example.summary)
-      .filter(Boolean)
-      .slice(0, 3)
-  } else if (risk >= 0.2 || hasVerified) {
-    guidance.level = hasVerified ? 'actionable' : 'advisory'
-    guidance.rationale = hasVerified
-      ? 'Verified experience exists for this action; apply it before proceeding.'
-      : 'Moderate historical risk. Add verification before proceeding.'
-  } else {
-    guidance.level = 'advisory'
-    guidance.rationale = 'Low historical risk. Proceed with normal checks and record the outcome.'
-  }
-  if (hasVerified) {
-    guidance.saferAlternatives = verifiedMemories.slice(0, 3).map((record) => ({
-      memoryId: record.id,
-      reuseCount: record.evidence.reuseCount,
-      content: String(record.content || '').slice(0, 300),
-    }))
-  }
-  guidance.verificationSteps = [
-    'Add an explicit verification step after execution (dry-run, rollback plan, or assertion).',
-    'Record the outcome with mio.observer.ingest so the evidence base improves.',
-  ]
-  return guidance
-}
-
-function policyCheck(args = {}) {
-  const action = String(args.action || '').trim()
-  if (!action) throw new Error('policy.check requires action')
-  const project = args.project || projectName()
-  const actionTokens = tokenize(action)
-  const traces = readJsonl(tracePath).filter((event) => {
-    if (project && event.project && event.project !== project) return false
-    const haystack = tokenize(
-      `${event.event_type || ''} ${JSON.stringify(event.payload || {})}`
-    )
-    return actionTokens.some((token) => haystack.includes(token))
-  })
-  const total = traces.length
-  const failures = traces.filter((event) => isFailureOutcome(event.outcome)).length
-  const risk = total > 0 ? failures / total : null
-  const riskLevel = total === 0 ? 'unknown' : risk >= 0.4 ? 'high' : risk >= 0.2 ? 'moderate' : 'low'
-  const outcomeCounts = traces.reduce((counts, event) => {
-    const outcome = String(event.outcome || 'unknown').toLowerCase() || 'unknown'
-    counts[outcome] = (counts[outcome] || 0) + 1
-    return counts
-  }, {})
-  const failureExamples = traces
-    .filter((event) => isFailureOutcome(event.outcome))
-    .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
-    .slice(0, 3)
-    .map((event) => ({
-      trace_id: event.trace_id || event.id || null,
-      event_type: event.event_type || null,
-      outcome: event.outcome || null,
-      timestamp: event.timestamp || null,
-      agent: event.agent || null,
-      summary: summarizeTrace(event),
-    }))
-  let suggestion
-  if (total === 0) {
-    suggestion = 'No history for this action. Treat as normal risk and record the outcome.'
-  } else if (risk >= 0.4) {
-    suggestion = 'Historically risky. Prefer an alternative approach or add rollback/verification.'
-  } else if (risk >= 0.2) {
-    suggestion = 'Moderate risk. Add verification before proceeding.'
-  } else {
-    suggestion = 'Low historical risk. Proceed with normal checks.'
-  }
-  const evidence = loadEvidenceWeights()
-  const relatedMemories = readJsonl(memoryPath)
-    .filter((record) => scoreRecord(record, action, project, evidence) > 0)
-    .sort((a, b) => scoreRecord(b, action, project, evidence) - scoreRecord(a, action, project, evidence))
-    .slice(0, 3)
-    .map((record) => {
-      const ev = evidence.get(record.id)
-      return {
-        id: record.id,
-        timestamp: record.timestamp,
-        kind: record.kind,
-        content: record.content,
-        tags: record.tags,
-        evidence: ev
-          ? { reuseCount: ev.reuseCount, confirmedCount: ev.confirmedCount }
-          : null,
-      }
-    })
-  return {
-    action,
-    project,
-    total,
-    failures,
-    risk: risk === null ? null : Number(risk.toFixed(3)),
-    riskLevel,
-    outcomeCounts,
-    failureExamples,
-    suggestion,
-    guidance: buildPolicyGuidance({
-      total,
-      failures,
-      risk,
-      failureExamples,
-      relatedMemories,
-    }),
-    related_memories: relatedMemories,
-  }
-}
 
 function registerAgent(args = {}) {
   const agentId = String(args.agentId || '').trim()
