@@ -47,6 +47,11 @@ mio memory migrate --ids a,b --scope global|project   Move records between the p
 mio policy check "<action>" Check the historical risk of an action before running it (--project; reads global MIO_HOME)
 mio creativity status        Show creativity hypothesis counts and recent top ideas (reads global MIO_HOME)
 mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
+mio insight status           Insight counts: total, reported, unreported, high-value (needs @akemi-mio/insight)
+mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)
+mio insight mark-reported    Mark insights as reported (--ids a,b)
+mio observer <view>          Observer research pipeline views (research pipeline, not the observe daemon):
+                             status|world-model|trends|research|insights|essays|dag (--base-dir DIR)
 mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
 mio --json status           Machine-readable status
 mio --json agents           Machine-readable agents
@@ -319,6 +324,35 @@ Recent top ideas:
 - **它委托给与 MCP 服务端相同的 `CreativityEngine`**，因此终端的 `mio creativity list` 看到的是与 `mio.creativity.list` 工具完全一致的假设。存储位于 `<MIO_HOME>/creativity/creativity-hypotheses.jsonl`；CLI 指向全局 `MIO_HOME`，与 `mio policy check` 一致。
 - **只暴露只读子命令。** `generate` 与 `ferment` 会调用 LLM，仍仅限 MCP（`mio.creativity.generate` / `mio.creativity.ferment`）；CLI 把 `generate`/`ferment` 当作未知子命令拒绝，而不是去调用一个未配置的模型。
 - **空存储是正常状态。** 引擎运行之前，`status` 报告全零计数，`list` 显示 "No hypotheses match." 两者都是有效输出，不是错误。
+
+## 洞察自省与观察管线
+
+`mio.insight.*` 与 `mio.observer.*` 此前都只有 MCP 入口：agent 会话里能读到，终端里看不到。`mio insight` 与 `mio observer` 补上了这两块的终端入口。
+
+```bash
+# 洞察自省（需要可选包 @akemi-mio/insight）
+mio insight status
+mio insight list --unreported --min-score 0.7
+mio insight mark-reported --ids ins_1,ins_2
+
+# 观察研究管线（纯文件读取，不依赖可选包）
+mio observer status
+mio observer trends --limit 5
+mio observer trends --date 2026-09-12
+mio observer dag --days 14
+mio observer essays --type published
+mio observer world-model
+mio observer research --json
+mio observer trends --base-dir /path/to/.local/observer
+```
+
+说明：
+
+- **两者都委托给与 MCP 服务端完全相同的共享实现** —— `server/insight-store.js` 与 `server/observer-store.js`。这是 `memory-store.js` / `experience-store.js` / `policy-store.js` / `creativity-engine.js` / `agent-store.js` 一路沿用的同一个模式：一份实现、两个入口，因此不可能各自漂移。
+- **只暴露不需要 LLM、不发起网络请求的子命令。** `insight generate`、`observer collect`、`observer ferment` 仍是 MCP 专有（`mio.insight.generate` / `mio.observer.collect` / `mio.observer.ferment`），CLI 把三者当作未知子命令拒绝——与 `creativity generate` 的处理方式一致。
+- **数据位置不同，这是有意的。** 洞察存储在 `<MIO_HOME>/insights/insights.json`，与 `mio recall` / `mio policy check` 同处全局 `MIO_HOME`；观察研究管线则是按项目的，默认 `<cwd>/.local/observer`（与 MCP 服务端的默认值一致），可用 `--base-dir` 覆盖。
+- **`@akemi-mio/insight` 是可选依赖。** 未安装时 `mio insight status` 会失败并提示 `@akemi-mio/insight not installed`，而不是报告一个「看起来没有洞察」的全零结果——全零会掩盖「引擎根本没装」这件事。
+- **观察管线的空目录是正常状态。** 管线没跑过时，`observer status` 各阶段计数为 0 并提示 "No pipeline data yet."，其余视图显示 "No ... found."，都是有效输出而非错误。
 
 ## Agent
 

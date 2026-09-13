@@ -1,0 +1,118 @@
+'use strict'
+
+// Shared insight self-observation store: the single implementation behind the
+// mio.insight.* MCP tools and the `mio insight` CLI command. Same rationale as
+// memory-store.js / experience-store.js / policy-store.js -- one implementation,
+// two entry points, so CLI and MCP cannot drift.
+//
+// @akemi-mio/insight is an *optional* dependency: every entry point throws the
+// same "not installed" error, and isInsightAvailable() lets the MCP server gate
+// tool registration on it.
+
+const path = require('path')
+
+let InsightStore = null
+let InsightGenerator = null
+try {
+  const insight = require('@akemi-mio/insight')
+  InsightStore = insight.InsightStore
+  InsightGenerator = insight.InsightGenerator
+} catch {}
+
+function isInsightAvailable() {
+  return Boolean(InsightStore)
+}
+
+// Score at or above which an unreported insight is counted as high-value in the
+// status summary.
+const INSIGHT_HIGH_VALUE_SCORE = 0.7
+const INSIGHT_HIGH_VALUE_LIMIT = 50
+
+function createInsightStore(options = {}) {
+  const dataDir = options.dataDir
+  const chatJson = options.chatJson
+  const storePath =
+    options.storePath || (dataDir ? path.join(dataDir, 'insights', 'insights.json') : null)
+
+  // Built on first use rather than at construction: the MCP server used to
+  // build it eagerly at module load, which touched the filesystem even when no
+  // insight tool was ever called.
+  let store = null
+  function requireStore() {
+    if (!InsightStore) throw new Error('@akemi-mio/insight not installed')
+    if (!storePath) throw new Error('insight store requires dataDir or storePath')
+    if (!store) store = new InsightStore(storePath)
+    return store
+  }
+
+  function status() {
+    const s = requireStore()
+    const all = s.getAll()
+    const unreported = s.getUnreported()
+    return {
+      total: all.length,
+      unreported: unreported.length,
+      reported: all.length - unreported.length,
+      highValue: s.getHighValueUnreported(INSIGHT_HIGH_VALUE_LIMIT, INSIGHT_HIGH_VALUE_SCORE).length,
+    }
+  }
+
+  function list(args = {}) {
+    const s = requireStore()
+    let insights = s.getAll()
+    if (args.unreported) insights = s.getUnreported()
+    if (args.minScore) insights = insights.filter((i) => i.score >= args.minScore)
+    if (args.detector) insights = insights.filter((i) => i.detector === args.detector)
+    if (args.limit) insights = insights.slice(-args.limit)
+    return insights
+  }
+
+  function markReported(args = {}) {
+    const s = requireStore()
+    if (!args.ids || !Array.isArray(args.ids)) throw new Error('ids array required')
+    for (const id of args.ids) s.markReported(id)
+    return { marked: args.ids.length }
+  }
+
+  async function generate(args = {}) {
+    if (!InsightGenerator) throw new Error('@akemi-mio/insight not installed')
+    const generator = new InsightGenerator({ chatJson })
+    const ctx = {
+      memoryEntries: (args.memories || []).map((m) => ({
+        type: m.kind || m.type || 'note',
+        content: m.content || '',
+        createdAt: m.createdAt || m.timestamp || Date.now(),
+      })),
+      summaries: args.summaries || [],
+      interactionCount: 0,
+      plans: (args.plans || []).map((p) => ({
+        title: p.title || p.name || '',
+        status: p.status || 'unknown',
+        updatedAt: p.updatedAt || Date.now(),
+        steps: p.steps || [],
+        createdAt: p.createdAt || Date.now(),
+      })),
+      eventCount: 0,
+    }
+    const insights = await generator.generate(ctx)
+    if (InsightStore && storePath) {
+      requireStore().addMany(insights)
+    }
+    return { generated: insights.length, insights }
+  }
+
+  return {
+    storePath,
+    status,
+    list,
+    markReported,
+    generate,
+  }
+}
+
+module.exports = {
+  createInsightStore,
+  isInsightAvailable,
+  INSIGHT_HIGH_VALUE_SCORE,
+  INSIGHT_HIGH_VALUE_LIMIT,
+}

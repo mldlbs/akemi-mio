@@ -16,26 +16,12 @@ const { createAgentStore } = require('../agent-store.js')
 const { createDigest } = require('../digest.js')
 
 const { CreativityEngine } = require('../creativity-engine.js')
-
-// Observer research pipeline (optional — installed via @akemi-mio/observer)
-let ObserverStore = null
-let ObserverService = null
-try {
-  const obs = require('@akemi-mio/observer')
-  ObserverStore = obs.ObserverStore
-  ObserverService = obs.ObserverService
-} catch {}
-
-// Insight self-observation engine (optional — installed via @akemi-mio/insight)
-let InsightStore = null
-let InsightGenerator = null
-let PresenceService = null
-try {
-  const insight = require('@akemi-mio/insight')
-  InsightStore = insight.InsightStore
-  InsightGenerator = insight.InsightGenerator
-  PresenceService = insight.PresenceService
-} catch {}
+// The observer and insight engines are optional dependencies. Their stores own
+// the require and expose isObserverAvailable() / isInsightAvailable() so tool
+// registration can be gated on them, and both the MCP server and the CLI share
+// one implementation (see ../observer-store.js and ../insight-store.js).
+const { createObserverStore, isObserverAvailable } = require('../observer-store.js')
+const { createInsightStore, isInsightAvailable } = require('../insight-store.js')
 
 const SERVER_INFO = { name: 'mio-intelligence-mcp', version: '0.1.0' }
 const PROTOCOL_VERSION = '2024-11-05'
@@ -98,7 +84,10 @@ fs.mkdirSync(dataDir, { recursive: true })
 const { loadPhase0, summarizePhase0, renderPhase0Markdown } = require('./phase0')
 const evolutionCutover = createEvolutionCutoverTools({ dataDir, appendJsonl, readJsonl, projectName })
 const creativityEngine = new CreativityEngine(path.join(dataDir, 'creativity'), chatJson)
-const insightStore = InsightStore ? new InsightStore(path.join(dataDir, 'insights', 'insights.json')) : null
+const insightStore = createInsightStore({ dataDir, chatJson })
+// baseDir defaults to <cwd>/.local/observer, matching the previous inline
+// behaviour; individual calls may still override it via args.baseDir.
+const observerStore = createObserverStore({})
 
 let runtimeContext = {}
 try {
@@ -1203,7 +1192,7 @@ const TOOLS = [
 
   // ═══ Insight Self-Observation ═══
 
-  ...(insightStore ? [{
+  ...(isInsightAvailable() ? [{
     name: 'mio.insight.status',
     description: 'Get insight engine status: total insights, unreported count, cooldown.',
     inputSchema: { type: 'object', properties: {} },
@@ -1247,7 +1236,7 @@ const TOOLS = [
 
   // ═══ Observer Research Pipeline ═══
 
-  ...(ObserverStore ? [{
+  ...(isObserverAvailable() ? [{
     name: 'mio.observer.world_model',
     description: 'Query the Observer world model: entities, events, trends, narratives, uncertainties, and relations.',
     inputSchema: {
@@ -1351,204 +1340,64 @@ const TOOLS = [
 ]
 
 // ═══ Insight Self-Observation Handlers ═══
+// Thin delegates to ../insight-store.js: the store owns the implementation so
+// `mio insight` (CLI) and mio.insight.* (MCP) cannot drift.
 
 function insightStatus() {
-  if (!insightStore) throw new Error('@akemi-mio/insight not installed')
-  const all = insightStore.getAll()
-  const unreported = insightStore.getUnreported()
-  return {
-    total: all.length,
-    unreported: unreported.length,
-    reported: all.length - unreported.length,
-    highValue: insightStore.getHighValueUnreported(50, 0.7).length,
-  }
+  return insightStore.status()
 }
 
 function insightList(args = {}) {
-  if (!insightStore) throw new Error('@akemi-mio/insight not installed')
-  let insights = insightStore.getAll()
-  if (args.unreported) insights = insightStore.getUnreported()
-  if (args.minScore) insights = insights.filter(i => i.score >= args.minScore)
-  if (args.detector) insights = insights.filter(i => i.detector === args.detector)
-  if (args.limit) insights = insights.slice(-args.limit)
-  return insights
+  return insightStore.list(args)
 }
 
 function insightMarkReported(args = {}) {
-  if (!insightStore) throw new Error('@akemi-mio/insight not installed')
-  if (!args.ids || !Array.isArray(args.ids)) throw new Error('ids array required')
-  for (const id of args.ids) insightStore.markReported(id)
-  return { marked: args.ids.length }
+  return insightStore.markReported(args)
 }
 
 async function insightGenerate(args = {}) {
-  if (!InsightGenerator) throw new Error('@akemi-mio/insight not installed')
-  const generator = new InsightGenerator({ chatJson })
-  const ctx = {
-    memoryEntries: (args.memories || []).map(m => ({
-      type: m.kind || m.type || 'note',
-      content: m.content || '',
-      createdAt: m.createdAt || m.timestamp || Date.now(),
-    })),
-    summaries: args.summaries || [],
-    interactionCount: 0,
-    plans: (args.plans || []).map(p => ({
-      title: p.title || p.name || '',
-      status: p.status || 'unknown',
-      updatedAt: p.updatedAt || Date.now(),
-      steps: p.steps || [],
-      createdAt: p.createdAt || Date.now(),
-    })),
-    eventCount: 0,
-  }
-  const insights = await generator.generate(ctx)
-  if (insightStore) {
-    for (const i of insights) insightStore.addMany([i])
-  }
-  return { generated: insights.length, insights }
+  return insightStore.generate(args)
 }
 
 // ═══ Observer Research Pipeline Handlers ═══
-
-function getObserverStore(baseDir) {
-  if (!ObserverStore) throw new Error('@akemi-mio/observer not installed')
-  return new ObserverStore(baseDir || path.join(process.cwd(), '.local', 'observer'))
-}
-
-function getObserverBaseDir(args) {
-  return args.baseDir || path.join(process.cwd(), '.local', 'observer')
-}
-
-function readJsonSafe(filePath) {
-  if (!fs.existsSync(filePath)) return null
-  try { return JSON.parse(fs.readFileSync(filePath, 'utf8')) } catch { return null }
-}
-
-function readJsonlSafe(filePath) {
-  if (!fs.existsSync(filePath)) return []
-  try {
-    return fs.readFileSync(filePath, 'utf8').trim().split('\n').filter(Boolean)
-      .map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
-  } catch { return [] }
-}
+// Thin delegates to ../observer-store.js (same rationale as above).
+// readJsonSafe / readJsonlSafe / getObserverBaseDir used to live here; they now
+// live with the store, which is their only consumer.
 
 function observerWorldModel(args = {}) {
-  const baseDir = getObserverBaseDir(args)
-  const wmDir = path.join(baseDir, 'world_model')
-  return {
-    entities: readJsonSafe(path.join(wmDir, 'entities.json')) || [],
-    events: readJsonSafe(path.join(wmDir, 'events.json')) || [],
-    trends: readJsonSafe(path.join(wmDir, 'trends.json')) || [],
-    narratives: readJsonSafe(path.join(wmDir, 'narratives.json')) || [],
-  }
+  return observerStore.worldModel(args)
 }
 
 function observerTrends(args = {}) {
-  const baseDir = getObserverBaseDir(args)
-  const trendsDir = path.join(baseDir, 'trends')
-  if (!fs.existsSync(trendsDir)) return []
-  if (args.date) {
-    const report = readJsonSafe(path.join(trendsDir, `${args.date}.json`))
-    return report ? [report] : []
-  }
-  const files = fs.readdirSync(trendsDir).filter(f => f.endsWith('.json')).sort().reverse()
-  return files.slice(0, args.limit || 7).map(f => readJsonSafe(path.join(trendsDir, f))).filter(Boolean)
+  return observerStore.trends(args)
 }
 
 function observerResearch(args = {}) {
-  const baseDir = getObserverBaseDir(args)
-  const researchDir = path.join(baseDir, 'research')
-  if (!fs.existsSync(researchDir)) return []
-  const files = fs.readdirSync(researchDir).filter(f => f.endsWith('.json')).sort().reverse()
-  return files.slice(0, args.limit || 10).map(f => readJsonSafe(path.join(researchDir, f))).filter(Boolean)
+  return observerStore.research(args)
 }
 
 function observerInsights(args = {}) {
-  const baseDir = getObserverBaseDir(args)
-  const insightsDir = path.join(baseDir, 'insights')
-  if (!fs.existsSync(insightsDir)) return []
-  const files = fs.readdirSync(insightsDir).filter(f => f.endsWith('.json')).sort().reverse()
-  return files.slice(0, args.limit || 20).map(f => readJsonSafe(path.join(insightsDir, f))).filter(Boolean)
+  return observerStore.insights(args)
 }
 
 function observerStatus(args = {}) {
-  const baseDir = getObserverBaseDir(args)
-  const dirs = ['observations', 'trends', 'topics', 'research', 'insights', 'world_model', 'essays']
-  const status = {}
-  for (const d of dirs) {
-    const dir = path.join(baseDir, d)
-    if (fs.existsSync(dir)) {
-      status[d] = fs.readdirSync(dir).filter(f => !f.startsWith('.')).length
-    } else {
-      status[d] = 0
-    }
-  }
-  return status
+  return observerStore.status(args)
 }
 
 function observerCollect(args = {}) {
-  if (!ObserverService) throw new Error('@akemi-mio/observer not installed')
-  const baseDir = getObserverBaseDir(args)
-  const service = new ObserverService({ baseDir, collectorConfig: {} })
-  const sources = args.sources || ['bilibili', 'hackernews', 'github', 'douyin', 'rss']
-  const allObs = []
-  for (const src of sources) {
-    try {
-      const collectFn = service.collectBySource ? service.collectBySource : service.collect
-      if (collectFn) {
-        const result = collectFn.call(service, [src], args.keywords || [], args.limit || 20)
-        if (Array.isArray(result)) allObs.push(...result)
-        else if (result && typeof result === 'object') {
-          for (const [key, items] of Object.entries(result)) allObs.push(...items)
-        }
-      }
-    } catch (e) {
-      allObs.push({ source: src, error: e.message })
-    }
-  }
-  return { collected: allObs.length, observations: allObs }
+  return observerStore.collect(args)
 }
 
 function observerFerment(args = {}) {
-  if (!ObserverService) throw new Error('@akemi-mio/observer not installed')
-  const baseDir = getObserverBaseDir(args)
-  const service = new ObserverService({ baseDir, collectorConfig: {} })
-  const session = args.session || 'afternoon'
-  try {
-    const fermentation = service.getFermentation()
-    if (fermentation && fermentation.ferment) return fermentation.ferment(session)
-    return { status: 'fermentation engine available but no ferment method' }
-  } catch (e) {
-    return { error: e.message }
-  }
+  return observerStore.ferment(args)
 }
 
 function observerEssays(args = {}) {
-  const baseDir = getObserverBaseDir(args)
-  const type = args.type || 'published'
-  const essaysDir = path.join(baseDir, 'essays', type)
-  if (!fs.existsSync(essaysDir)) return []
-  const files = fs.readdirSync(essaysDir).filter(f => f.endsWith('.md')).sort().reverse()
-  return files.slice(0, args.limit || 10).map(f => {
-    const content = fs.readFileSync(path.join(essaysDir, f), 'utf8')
-    return { file: f, type, content, created: fs.statSync(path.join(essaysDir, f)).birthtime.toISOString() }
-  })
+  return observerStore.essays(args)
 }
 
 function observerDag(args = {}) {
-  const baseDir = getObserverBaseDir(args)
-  const days = args.days || 7
-  const summaries = []
-  const todayDate = new Date()
-  for (let i = 0; i < days; i++) {
-    const d = new Date(todayDate)
-    d.setDate(d.getDate() - i)
-    const dateStr = d.toISOString().slice(0, 10)
-    const filePath = path.join(baseDir, 'summaries', `${dateStr}.jsonl`)
-    const items = readJsonlSafe(filePath)
-    if (items.length) summaries.push({ date: dateStr, summaries: items })
-  }
-  return { summaries, summaryCount: summaries.reduce((a, s) => a + s.summaries.length, 0) }
+  return observerStore.dag(args)
 }
 
 async function callTool(name, args = {}) {

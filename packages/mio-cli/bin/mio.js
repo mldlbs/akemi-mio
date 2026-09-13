@@ -25,6 +25,8 @@ const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine } = require('../server/creativity-engine.js')
 const { createAgentStore } = require('../server/agent-store.js')
+const { createInsightStore } = require('../server/insight-store.js')
+const { createObserverStore } = require('../server/observer-store.js')
 const { loadPhase0, renderPhase0Markdown } = require('../server/mio-intelligence-mcp/phase0.js')
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
@@ -1112,6 +1114,276 @@ function policyCommand(args, useJson) {
   printPolicyCheck(result)
 }
 
+// ═════════════════════════════════════════════════════════════
+// mio insight — terminal entry point for mio.insight.*
+//
+// The insight engine (self-observation) shipped MCP-only: an agent could read
+// its own insights, but there was no way to see them from a terminal. These
+// commands delegate to the same shared store as the MCP tools, so the two
+// cannot disagree.
+//
+// `generate` is deliberately not exposed. It needs an LLM and the CLI has no
+// LLM wiring; the same call was made for creativity generate/ferment.
+// ═════════════════════════════════════════════════════════════
+function cliInsightStore() {
+  return createInsightStore({ dataDir: MIO_HOME })
+}
+
+function insightUsage() {
+  console.log(`Usage:
+  mio insight status                    Insight counts: total, reported, unreported, high-value
+  mio insight list                      List insights
+  mio insight mark-reported --ids a,b   Mark insights as reported (acknowledged)
+
+Options:
+  --unreported       Only unreported insights (list)
+  --min-score N      Minimum score (list)
+  --detector name    Filter by detector (list)
+  --limit N          Max insights (list)
+  --ids a,b          Comma-separated insight ids (mark-reported)
+  --json             Machine-readable output (same shape as mio.insight.*)
+
+The insight engine is an optional package (@akemi-mio/insight). If it is not
+installed these commands say so, rather than reporting a misleading empty list.`)
+}
+
+function printInsightStatus(result) {
+  console.log('Insight engine')
+  console.log(`  total:      ${result.total}`)
+  console.log(`  reported:   ${result.reported}`)
+  console.log(`  unreported: ${result.unreported}`)
+  console.log(`  high-value: ${result.highValue}`)
+  if (result.unreported > 0) {
+    console.log('\nUnreported insights are waiting: mio insight list --unreported')
+  }
+}
+
+function printInsightList(insights) {
+  if (insights.length === 0) {
+    console.log('No insights match.')
+    return
+  }
+  for (const item of insights) {
+    const score = typeof item.score === 'number' ? item.score.toFixed(2) : 'n/a'
+    const state = item.reported ? 'reported' : 'unreported'
+    const detector = item.detector ? `, ${item.detector}` : ''
+    console.log(`- [${score}] ${item.id || '(no id)'} (${state}${detector})`)
+    const text = String(item.content || item.summary || item.title || '')
+    if (text) console.log(`    ${text.replace(/\s+/g, ' ').slice(0, 140)}`)
+  }
+  console.log(`\n${insights.length} insight(s)`)
+}
+
+function insightCommand(args, useJson) {
+  const sub = args[1]
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    insightUsage()
+    if (!sub) process.exitCode = 1
+    return
+  }
+  if (!['status', 'list', 'mark-reported'].includes(sub)) {
+    console.error(`Unknown insight subcommand: ${sub}`)
+    insightUsage()
+    process.exitCode = 1
+    return
+  }
+
+  const flags = args.slice(2)
+  const store = cliInsightStore()
+  try {
+    if (sub === 'status') {
+      const result = store.status()
+      if (useJson) return jsonOrText(result, true)
+      return printInsightStatus(result)
+    }
+    if (sub === 'list') {
+      const result = store.list({
+        unreported: flagPresent(flags, '--unreported'),
+        minScore: parseNumberOption(flags, '--min-score'),
+        detector: optionValue(flags, '--detector'),
+        limit: parseNumberOption(flags, '--limit'),
+      })
+      if (useJson) return jsonOrText(result, true)
+      return printInsightList(result)
+    }
+    const ids = splitTagsOption(flags, '--ids')
+    if (ids.length === 0) {
+      console.error('mio insight mark-reported requires --ids a,b')
+      process.exitCode = 1
+      return
+    }
+    const result = store.markReported({ ids })
+    if (useJson) return jsonOrText(result, true)
+    console.log(`Marked ${result.marked} insight(s) as reported.`)
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
+// mio observer — terminal entry point for the observer research pipeline
+// (mio.observer.*). Not to be confused with `mio observe`, which is the
+// WorkBuddy transcript daemon.
+//
+// Only the read-only views are exposed. collect hits the network and ferment
+// drives the engine; both belong to the daemon, not an interactive shell (same
+// reasoning as skipping creativity generate from the CLI).
+//
+// Base directory defaults to <cwd>/.local/observer -- the MCP server's default
+// -- because the pipeline is project-local by design. --base-dir overrides it.
+// ═════════════════════════════════════════════════════════════
+function cliObserverStore() {
+  return createObserverStore({})
+}
+
+function observerUsage() {
+  console.log(`Usage:
+  mio observer status        Pipeline stage counts (observations/trends/topics/...)
+  mio observer world-model   Entities, events, trends and narratives
+  mio observer trends        Recent trend reports
+  mio observer research      Research reports
+  mio observer insights      Observer-generated insight articles
+  mio observer essays        Published essays
+  mio observer dag           Daily summaries for the last N days
+
+Options:
+  --base-dir DIR     Observer data directory (default: <cwd>/.local/observer)
+  --date YYYY-MM-DD  A single trend report (trends)
+  --type name        Essay type (default: published)
+  --days N           Days of history (dag, default 7)
+  --limit N          Max items
+  --json             Machine-readable output (same shape as mio.observer.*)`)
+}
+
+// Pipeline items are free-form JSON written by different stages, so pull a
+// human label from whichever well-known field happens to be present.
+function observerItemLabel(item) {
+  if (item === null || typeof item !== 'object') return String(item)
+  for (const key of ['title', 'name', 'topic', 'headline', 'summary', 'text', 'id', 'date']) {
+    const value = item[key]
+    if (typeof value === 'string' && value.trim()) return value.trim().replace(/\s+/g, ' ').slice(0, 120)
+  }
+  return JSON.stringify(item).slice(0, 120)
+}
+
+function printObserverList(kind, items) {
+  if (items.length === 0) {
+    console.log(`No ${kind} found. (Run the observer pipeline, or check --base-dir.)`)
+    return
+  }
+  for (const item of items) console.log(`- ${observerItemLabel(item)}`)
+  console.log(`\n${items.length} ${kind}`)
+}
+
+function printObserverStatus(status) {
+  console.log('Observer pipeline (file counts per stage)')
+  let total = 0
+  for (const [stage, count] of Object.entries(status)) {
+    total += count
+    console.log(`  ${stage.padEnd(14)} ${count}`)
+  }
+  console.log(`\n  ${'total'.padEnd(14)} ${total}`)
+  if (total === 0) {
+    console.log('\nNo pipeline data yet. Nothing has been collected into this directory.')
+  }
+}
+
+function printObserverWorldModel(model) {
+  const sections = ['entities', 'events', 'trends', 'narratives']
+  console.log('World model')
+  for (const key of sections) {
+    const value = model[key]
+    const count = Array.isArray(value) ? value.length : Object.keys(value || {}).length
+    console.log(`  ${key.padEnd(12)} ${count}`)
+  }
+  if (sections.every((key) => (Array.isArray(model[key]) ? model[key].length : 0) === 0)) {
+    console.log('\nWorld model is empty.')
+  }
+}
+
+function printObserverEssays(essays) {
+  if (essays.length === 0) {
+    console.log('No essays found.')
+    return
+  }
+  for (const essay of essays) {
+    console.log(`- ${essay.file} (${essay.type}, ${String(essay.created).slice(0, 10)})`)
+    const firstLine = String(essay.content || '').split('\n').find((l) => l.trim()) || ''
+    if (firstLine) console.log(`    ${firstLine.replace(/\s+/g, ' ').slice(0, 120)}`)
+  }
+  console.log(`\n${essays.length} essay(s)`)
+}
+
+function printObserverDag(result, days) {
+  if (result.summaryCount === 0) {
+    console.log(`No daily summaries found in the last ${days || 7} day(s).`)
+    return
+  }
+  for (const day of result.summaries) {
+    console.log(`- ${day.date}: ${day.summaries.length} summary(ies)`)
+  }
+  console.log(`\n${result.summaryCount} summary(ies) across ${result.summaries.length} day(s)`)
+}
+
+function observerCommand(args, useJson) {
+  const sub = args[1]
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    observerUsage()
+    if (!sub) process.exitCode = 1
+    return
+  }
+  if (!['status', 'world-model', 'trends', 'research', 'insights', 'essays', 'dag'].includes(sub)) {
+    console.error(`Unknown observer subcommand: ${sub}`)
+    observerUsage()
+    process.exitCode = 1
+    return
+  }
+
+  const flags = args.slice(2)
+  const store = cliObserverStore()
+  const base = { baseDir: optionValue(flags, '--base-dir') }
+  try {
+    if (sub === 'status') {
+      const result = store.status(base)
+      if (useJson) return jsonOrText(result, true)
+      return printObserverStatus(result)
+    }
+    if (sub === 'world-model') {
+      const result = store.worldModel(base)
+      if (useJson) return jsonOrText(result, true)
+      return printObserverWorldModel(result)
+    }
+    if (sub === 'trends') {
+      const result = store.trends({ ...base, date: optionValue(flags, '--date'), limit: parseNumberOption(flags, '--limit') })
+      if (useJson) return jsonOrText(result, true)
+      return printObserverList('trend report(s)', result)
+    }
+    if (sub === 'research') {
+      const result = store.research({ ...base, limit: parseNumberOption(flags, '--limit') })
+      if (useJson) return jsonOrText(result, true)
+      return printObserverList('research report(s)', result)
+    }
+    if (sub === 'insights') {
+      const result = store.insights({ ...base, limit: parseNumberOption(flags, '--limit') })
+      if (useJson) return jsonOrText(result, true)
+      return printObserverList('insight(s)', result)
+    }
+    if (sub === 'essays') {
+      const result = store.essays({ ...base, type: optionValue(flags, '--type'), limit: parseNumberOption(flags, '--limit') })
+      if (useJson) return jsonOrText(result, true)
+      return printObserverEssays(result)
+    }
+    const days = parseNumberOption(flags, '--days')
+    const result = store.dag({ ...base, days })
+    if (useJson) return jsonOrText(result, true)
+    return printObserverDag(result, days)
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+  }
+}
+
 function creativityUsage() {
   console.log(`Usage:
   mio creativity status              Show hypothesis counts and recent top ideas
@@ -1544,6 +1816,11 @@ Usage:
   mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse
   mio creativity status        Show creativity hypothesis counts and recent top ideas
   mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
+  mio insight status           Insight counts: total, reported, unreported, high-value
+  mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)
+  mio insight mark-reported    Mark insights as reported (--ids a,b)
+  mio observer <view>          Observer pipeline views (research pipeline, not the observe daemon):
+                               status | world-model | trends | research | insights | essays | dag
   mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
   mio policy check "<action>" Check historical risk for an action before running it
   mio prune --days 30         Trim old traces/queries/reuse records and observe.log (--dry-run to preview; --memory needs --yes)
@@ -1588,6 +1865,10 @@ async function main() {
       return policyCommand(args, useJson)
     case 'creativity':
       return creativityCommand(args, useJson)
+    case 'insight':
+      return insightCommand(args, useJson)
+    case 'observer':
+      return observerCommand(args, useJson)
     case 'phase0':
       return phase0Command(args, useJson)
     case 'prune':
