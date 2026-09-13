@@ -2,7 +2,11 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 
 const { getRecentCalls } = vi.hoisted(() => ({ getRecentCalls: vi.fn() }))
 
-vi.mock('@akemi-mio/intelligence/mcp/BehaviorPredictor', () => ({
+// 拆分前这里是 '@akemi-mio/intelligence/mcp/BehaviorPredictor'。mcp/ 目录已随包拆分
+// 迁出到 @akemi-mio/intelligence-mcp，而 vi.mock 是按 specifier 精确匹配的 ——
+// 写旧路径时 mock 完全不生效（且不报错），生产代码拿到的是真实 behaviorPredictor，
+// recentCalls 为空 → getProblematicTools() 返回 []，三个用例全部假失败。
+vi.mock('@akemi-mio/intelligence-mcp/BehaviorPredictor', () => ({
   behaviorPredictor: { getRecentCalls },
 }))
 
