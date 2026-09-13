@@ -65,6 +65,71 @@ function stateFile(home) {
   return path.join(home, 'observe-state.json')
 }
 
+// Canonical form for a workspace path used as a context key.
+//
+// Context keys are taken verbatim from the `cwd` field of host transcripts, and
+// hosts disagree on spelling: the same directory arrives as `D:\work\code\x`,
+// `d:\work\code\x`, or `D:/work/code/x`. Left alone, one project splits into
+// several buckets, each capped at CONTEXT_MAX, so its history is fragmented and
+// entries are dropped early. Windows paths are case-insensitive, so normalise
+// the drive letter to upper case and use backslashes consistently to match the
+// style the file-observation keys already use.
+function normalizeCwd(cwd) {
+  if (!cwd || typeof cwd !== 'string') return cwd
+  let out = cwd.replace(/\//g, '\\').replace(/\\+/g, '\\')
+  // Upper-case a single drive letter prefix ("c:\..." -> "C:\...").
+  if (/^[a-zA-Z]:\\/.test(out)) out = out[0].toUpperCase() + out.slice(1)
+  // Drop a trailing separator unless the path is just the drive root.
+  if (out.length > 3 && out.endsWith('\\')) out = out.slice(0, -1)
+  return out
+}
+
+// Parse the "YYYY/M/D HH:MM:SS | ..." stamp that context lines carry.
+// Returns null when the line has no recognisable leading timestamp, so
+// unparseable entries never get treated as the oldest by accident.
+function contextTimestamp(line) {
+  const m = /^\s*(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})/.exec(String(line || ''))
+  if (!m) return null
+  const ms = new Date(
+    Number(m[1]),
+    Number(m[2]) - 1,
+    Number(m[3]),
+    Number(m[4]),
+    Number(m[5]),
+    Number(m[6]),
+  ).getTime()
+  return Number.isFinite(ms) ? ms : null
+}
+
+// Drop repeated lines from stored context lists, preserving the most recent
+// occurrence order. Older builds could write the same line into every slot of
+// a workspace block (a generated digest headline broadcast to all projects),
+// so existing observe-state files still carry duplicates until they are
+// rewritten. Normalising on load heals that data without a migration step.
+//
+// Keys are also folded through normalizeCwd and merged, so buckets split by
+// spelling differences collapse back into one on the next load.
+function dedupeContexts(contexts) {
+  const out = {}
+  for (const [cwd, list] of Object.entries(contexts)) {
+    const key = normalizeCwd(cwd)
+    const existing = out[key] || []
+    if (!Array.isArray(list)) {
+      out[key] = existing
+      continue
+    }
+    const seen = new Set(existing)
+    const merged = existing.slice()
+    for (const line of list) {
+      if (seen.has(line)) continue
+      seen.add(line)
+      merged.push(line)
+    }
+    out[key] = merged
+  }
+  return out
+}
+
 function loadState(home) {
   try {
     const parsed = JSON.parse(fs.readFileSync(stateFile(home), 'utf8'))
@@ -74,7 +139,7 @@ function loadState(home) {
         files: parsed.files || {},
         buffers: parsed.buffers || {},
         openTurns: parsed.openTurns || {},
-        contexts: parsed.contexts || {},
+        contexts: dedupeContexts(parsed.contexts || {}),
         codexFiles: parsed.codexFiles || {},
         codexBuffers: parsed.codexBuffers || {},
         codexTurns: parsed.codexTurns || {},
@@ -290,11 +355,39 @@ const CONTEXT_MAX = 6
 // retrieval guaranteed (not dependent on the model deciding to read memory).
 function updateProjectContext(state, cwd, line, targetFile) {
   if (!cwd || !line) return
+  const key = normalizeCwd(cwd)
   const target = path.join(cwd, targetFile || 'AGENTS.md')
-  const list = state.contexts[cwd] || []
+  // Merge any buckets that differ only by spelling, so a project observed as
+  // both "D:\work\code\x" and "d:\work\code\x" converges into one list instead
+  // of two half-filled ones.
+  const list = []
+  const seen = new Set()
+  for (const [existingKey, items] of Object.entries(state.contexts || {})) {
+    if (normalizeCwd(existingKey) !== key) continue
+    for (const item of items || []) {
+      if (seen.has(item)) continue
+      seen.add(item)
+      list.push(item)
+    }
+    if (existingKey !== key) delete state.contexts[existingKey]
+  }
+  // Re-inserting an existing line moves it to the front instead of duplicating.
+  const existing = list.indexOf(line)
+  if (existing !== -1) list.splice(existing, 1)
   list.unshift(line)
-  if (list.length > CONTEXT_MAX) list.pop()
-  state.contexts[cwd] = list
+  // Once buckets merge, the list can exceed CONTEXT_MAX. Entries are stamped
+  // "YYYY/M/D HH:MM:SS | ...", so trim by that timestamp rather than by
+  // position -- merging appends whole buckets in object-key order, which says
+  // nothing about age, and popping blind could discard recent work.
+  if (list.length > CONTEXT_MAX) {
+    const stamped = list.filter((l) => contextTimestamp(l) !== null)
+    if (stamped.length > 1) {
+      list.sort((a, b) => contextTimestamp(b) - contextTimestamp(a))
+    }
+    list.length = CONTEXT_MAX
+  }
+  state.contexts = state.contexts || {}
+  state.contexts[key] = list
   try {
     let content = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : ''
     const block = CONTEXT_BEGIN + '\n## Mio 最近上下文（自动注入）\n' + list.map(function (l) { return '- ' + l }).join('\n') + '\n' + CONTEXT_END
@@ -1591,6 +1684,9 @@ module.exports = {
   workbuddyConfigDir,
   loadState,
   saveState,
+  dedupeContexts,
+  normalizeCwd,
+  contextTimestamp,
   updateProjectContext,
   runCycle,
   opencodeDbPath,

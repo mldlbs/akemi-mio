@@ -21,6 +21,7 @@ const observer = require('../observe/observer.js')
 const { getEvolutionStatus, formatEvolutionStatusText } = require('../server/runtime-modules.js')
 const { createEvolutionCutoverTools } = require('../server/evolution-cutover.js')
 const { createMemoryStore } = require('../server/memory-store.js')
+const { createExperienceStore } = require('../server/experience-store.js')
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
 
@@ -348,6 +349,13 @@ function digestCommand(args, useJson) {
     // Feed the actionable lines back into each active workspace context file
     // (AGENTS.md / CLAUDE.md MIO_CONTEXT block), so every agent passively
     // receives the digest's value on its next session.
+    //
+    // Targets are resolved per project, never broadcast. An earlier version
+    // wrote one global headline into Object.keys(state.contexts) -- every
+    // workspace ever observed -- so unrelated repos (ComfyUI, douyin_store)
+    // received the same line and their real history was pushed out of the
+    // six-slot block. Write only where the digest actually has data for that
+    // project, or where the caller explicitly asked with --cwd/--project.
     const stateFile = path.join(MIO_HOME, 'observe-state.json')
     let state = {}
     try {
@@ -355,27 +363,50 @@ function digestCommand(args, useJson) {
     } catch (_) {}
     state.contexts = state.contexts || {}
     const stamp = new Date().toLocaleString('zh-CN', { hour12: false })
-    const rate =
-      report.overview.tasks > 0
-        ? Math.round(((report.overview.byOutcome.success || 0) / report.overview.tasks) * 100)
-        : 0
-    const headline =
-      `digest(${days}d): 任务 ${report.overview.tasks} 条 成功率 ${rate}%, error ${report.overview.errorTraces}` +
-      (report.suggestions.length > 0 ? ' | ' + report.suggestions[0] : '')
-    const targetCwds = optionValue(flags, '--cwd')
-      ? [optionValue(flags, '--cwd')]
-      : Object.keys(state.contexts)
+
+    // Project name -> per-project digest line.
+    const projectLine = new Map()
+    for (const entry of report.projects || []) {
+      if (!entry || !entry.project) continue
+      const rate = entry.tasks > 0 ? Math.round(((entry.success || 0) / entry.tasks) * 100) : 0
+      projectLine.set(String(entry.project).toLowerCase(), `digest(${days}d): ${entry.project} ${entry.tasks} 任务 ${rate}% 成功`)
+    }
+
+    const explicitCwd = optionValue(flags, '--cwd')
+    const explicitProject = optionValue(flags, '--project')
+    let targetCwds = []
+    if (explicitCwd) {
+      targetCwds = [explicitCwd]
+    } else if (explicitProject) {
+      const wanted = String(explicitProject).toLowerCase()
+      targetCwds = Object.keys(state.contexts).filter(
+        (cwd) => path.basename(cwd).toLowerCase() === wanted,
+      )
+    } else {
+      // No explicit target: only write to workspaces this digest has data for.
+      // A workspace with no matching project gets nothing.
+      targetCwds = Object.keys(state.contexts).filter((cwd) =>
+        projectLine.has(path.basename(cwd).toLowerCase()),
+      )
+    }
+
     let written = 0
     for (const cwd of targetCwds) {
+      const line = projectLine.get(path.basename(cwd).toLowerCase())
+      if (!line) continue
       try {
-        observer.updateProjectContext(state, cwd, stamp + ' | ' + headline, 'CLAUDE.md')
-        observer.updateProjectContext(state, cwd, stamp + ' | ' + headline, 'AGENTS.md')
+        observer.updateProjectContext(state, cwd, stamp + ' | ' + line, 'CLAUDE.md')
+        observer.updateProjectContext(state, cwd, stamp + ' | ' + line, 'AGENTS.md')
         written += 1
       } catch (_) {}
     }
     fs.mkdirSync(MIO_HOME, { recursive: true })
     fs.writeFileSync(stateFile, JSON.stringify(state) + '\n', 'utf8')
-    report.writeBack = { workspaces: written, headline }
+    report.writeBack = {
+      workspaces: written,
+      skipped: Object.keys(state.contexts).length - written,
+      projects: [...projectLine.values()],
+    }
   }
 
   // Persist the report so it becomes part of the data asset itself.
@@ -388,7 +419,10 @@ function digestCommand(args, useJson) {
   console.log(report.markdown)
   console.log(`Report saved: ${reportFile}`)
   if (report.writeBack) {
-    console.log(`Write-back: ${report.writeBack.workspaces} workspace(s) <- "${report.writeBack.headline}"`)
+    console.log(
+      `Write-back: ${report.writeBack.workspaces} workspace(s), ${report.writeBack.skipped} skipped (no digest data)`,
+    )
+    for (const line of report.writeBack.projects) console.log(`  - ${line}`)
   }
 }
 
@@ -449,6 +483,387 @@ function rememberCommand(args, useJson) {
   }
   if (useJson) return jsonOrText(record, true)
   console.log(`Recorded ${record.id} (kind=${record.kind}, project=${record.project || 'global'}, scope=${record.scope})`)
+}
+
+// Every flag that consumes the next token. A positional directly after one of
+// these is that flag's value, not an id.
+const VALUE_FLAGS = new Set([
+  '--ids', '--reason', '--project', '--limit', '--scope',
+  '--by', '--notes', '--source-agent', '--target-agent', '--experience-id', '--status',
+])
+
+// Accept ids both as `--ids a,b,c` and as bare positionals
+// (`mio memory archive mem_a mem_b`).
+function collectIds(flags) {
+  const ids = []
+  for (let i = 0; i < flags.length; i += 1) {
+    const token = flags[i]
+    if (token.startsWith('--')) continue
+    const previous = flags[i - 1]
+    if (previous && VALUE_FLAGS.has(previous)) continue
+    // Ids never contain commas, so a comma-separated positional is unambiguous.
+    for (const id of token.split(',')) {
+      const trimmed = id.trim()
+      if (trimmed) ids.push(trimmed)
+    }
+  }
+  const raw = optionValue(flags, '--ids')
+  if (raw !== undefined) {
+    for (const id of raw.split(',')) {
+      const trimmed = id.trim()
+      if (trimmed) ids.push(trimmed)
+    }
+  }
+  return [...new Set(ids)]
+}
+
+function printMemoryAnalyze(result) {
+  const project = result.project || 'all'
+  console.log(
+    `Memory analyze: ${result.total} active, ${result.archived} archived (project=${project})`,
+  )
+  console.log(`layers: project=${result.layers.project} global=${result.layers.global}`)
+  const kinds = Object.entries(result.byKind)
+  if (kinds.length > 0) {
+    console.log(`by kind: ${kinds.map(([kind, count]) => `${kind}=${count}`).join(', ')}`)
+  }
+
+  if (result.duplicates.length > 0) {
+    console.log(`\nDuplicate groups: ${result.duplicates.length}`)
+    for (const group of result.duplicates) {
+      console.log(`- ${group.size} record(s): ${group.records.map((record) => record.id).join(', ')}`)
+      const preview = String(group.records[0].content || '')
+      if (preview) {
+        console.log(`  ${preview.length > 80 ? `${preview.slice(0, 80)}...` : preview}`)
+      }
+    }
+  }
+
+  if (result.lowQuality.length > 0) {
+    console.log(`\nLow quality: ${result.issues.lowQuality} record(s)`)
+    for (const record of result.lowQuality) {
+      console.log(`- ${record.id} [${record.kind || 'note'}] ${record.issues.join(', ')}`)
+    }
+  }
+
+  if (result.issues.duplicatesSkipped) {
+    console.log('\nDuplicate scan skipped: too many active records to compare pairwise.')
+  }
+
+  if (result.suggestions.length > 0) {
+    console.log('')
+    for (const suggestion of result.suggestions) console.log(`suggestion: ${suggestion}`)
+  }
+}
+
+function memoryUsage() {
+  console.log(`Usage:
+  mio memory analyze                        Report duplicates, low-quality records and kind histogram
+  mio memory archive --ids a,b              Archive records (soft delete; hidden from recall/analyze)
+  mio memory restore --ids a,b              Un-archive previously archived records
+  mio memory migrate --ids a,b --scope global   Move records between project and global layers
+
+Options:
+  --ids a,b,c        Memory record ids (also accepted as bare positionals)
+  --scope global|project   Target layer for migrate
+  --project name     Project filter (defaults to current directory name)
+  --reason text      Optional note stored on the record
+  --limit n          Max duplicate groups / low-quality rows to show (analyze, 1-20)
+  --yes              Apply archive (without it, archive only previews)
+  --json             Machine-readable output
+`)
+}
+
+function memoryCommand(args, useJson) {
+  const sub = args[1]
+  const flags = args.slice(2)
+
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    memoryUsage()
+    if (!sub) process.exitCode = 1
+    return
+  }
+  if (!['analyze', 'archive', 'restore', 'migrate'].includes(sub)) {
+    console.error(`Unknown memory subcommand: ${sub}`)
+    memoryUsage()
+    process.exitCode = 1
+    return
+  }
+
+  const store = cliMemoryStore()
+
+  if (sub === 'analyze') {
+    let result
+    try {
+      result = store.analyzeMemory({
+        project: optionValue(flags, '--project'),
+        limit: parseNumberOption(flags, '--limit'),
+      })
+    } catch (error) {
+      console.error(error.message || error)
+      process.exitCode = 1
+      return
+    }
+    if (useJson) return jsonOrText(result, true)
+    return printMemoryAnalyze(result)
+  }
+
+  const ids = collectIds(flags)
+  if (ids.length === 0) {
+    console.error(`mio memory ${sub} requires --ids <id,id,...> (or bare ids)`)
+    process.exitCode = 1
+    return
+  }
+
+  if (sub === 'archive' && !flagPresent(flags, '--yes')) {
+    // Archiving hides records from recall and analyze. Preview first so a
+    // mistyped id cannot silently drop records out of future retrieval.
+    const previewProject = optionValue(flags, '--project') || projectName() || 'current'
+    if (useJson) {
+      jsonOrText(
+        { preview: true, applied: false, project: previewProject, ids, hint: 'Re-run with --yes to apply.' },
+        true,
+      )
+    } else {
+      console.log(`Archive preview: ${ids.length} id(s) would be archived (project=${previewProject})`)
+      console.log(`  ${ids.join(', ')}`)
+      console.log('Re-run with --yes to apply. Undo with: mio memory restore --ids <ids>')
+    }
+    process.exitCode = 1
+    return
+  }
+
+  let result
+  try {
+    if (sub === 'archive' || sub === 'restore') {
+      result = store.archiveMemory({
+        ids,
+        project: optionValue(flags, '--project'),
+        restore: sub === 'restore',
+        reason: optionValue(flags, '--reason'),
+      })
+    } else {
+      result = store.migrateMemory({
+        ids,
+        scope: optionValue(flags, '--scope'),
+        project: optionValue(flags, '--project'),
+        reason: optionValue(flags, '--reason'),
+      })
+    }
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+
+  if (useJson) return jsonOrText(result, true)
+
+  if (sub === 'migrate') {
+    const target = result.scope === 'global' ? 'global' : `project=${result.project || 'current'}`
+    console.log(`Migrated ${result.updatedCount} record(s) to ${target}`)
+    if (result.updated.length > 0) console.log(`updated: ${result.updated.join(', ')}`)
+    if (result.unchanged.length > 0) console.log(`already ${result.scope}: ${result.unchanged.join(', ')}`)
+    if (result.notFound.length > 0) console.log(`not found: ${result.notFound.join(', ')}`)
+    // Every requested id missing is almost certainly a typo; signal it so
+    // scripts do not treat a no-op as success.
+    if (result.updatedCount === 0 && result.unchanged.length === 0) {
+      process.exitCode = 1
+      return
+    }
+    if (result.updated.length > 0) {
+      const back = result.scope === 'global' ? 'project' : 'global'
+      console.log(`Undo with: mio memory migrate --ids ${result.updated.join(',')} --scope ${back}`)
+    }
+    return
+  }
+
+  const verb = sub === 'restore' ? 'Restored' : 'Archived'
+  console.log(`${verb} ${result.archivedCount} record(s) (project=${result.project || 'current'})`)
+  if (result.archived.length > 0) console.log(`${sub}d: ${result.archived.join(', ')}`)
+  if (result.skipped.length > 0) console.log(`already ${sub}d: ${result.skipped.join(', ')}`)
+  if (result.notFound.length > 0) console.log(`not found: ${result.notFound.join(', ')}`)
+  if (result.archivedCount === 0) {
+    // Nothing changed: either the ids do not exist or they were already in the
+    // target state. Either way the caller's intent was not fulfilled, so say so
+    // instead of silently exiting 0.
+    console.error(`No records ${sub}d. Check the ids, or run: mio memory analyze`)
+    process.exitCode = 1
+    return
+  }
+  if (sub === 'archive' && result.archived.length > 0) {
+    console.log(`Undo with: mio memory restore --ids ${result.archived.join(',')}`)
+  }
+}
+
+// The observer auto-claims experience reuse, but an unconfirmed auto_claim
+// never counts as `verified` and so never feeds memory ranking or task
+// routing. In practice most claims sat unconfirmed forever because confirming
+// was only possible through the MCP server.
+function cliExperienceStore() {
+  return createExperienceStore({
+    dataDir: MIO_HOME,
+    projectName,
+  })
+}
+
+function experienceUsage() {
+  console.log(`Usage:
+  mio experience list                            List reuse records (--status/--target-agent/--project/--limit)
+  mio experience confirm --ids a,b               Confirm auto-claimed reuse (bulk supported)
+  mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse manually
+
+Options:
+  --ids a,b,c            Record ids (also accepted as bare positionals; confirm only)
+  --status pending|confirmed|verified|auto_claim|agent_report|all   Filter for list (default all)
+  --target-agent name    Only records reused by this agent
+  --experience-id id     The memory/experience that was reused
+  --source-agent name    Agent the experience came from
+  --reuse --behavior-changed --outcome-improved   Booleans describing the reuse
+  --outcome-improved     Confirm: accept the claim (--no-improved rejects it)
+  --by name              Who is confirming (default: cli)
+  --notes text           Optional note
+  --force                Re-confirm records that are already confirmed
+  --project name         Project filter (defaults to current directory name)
+  --json                 Machine-readable output
+`)
+}
+
+function printExperienceList(result) {
+  console.log(
+    `Experience reuse: ${result.count} shown of ${result.total} (project=${result.project || 'all'}, status=${result.status})`,
+  )
+  if (result.count === 0) {
+    console.log('No reuse records match.')
+    return
+  }
+  result.records.forEach((record, index) => {
+    const state = record.confirmed ? 'confirmed' : 'pending'
+    const badge = record.reuse && record.behaviorChanged && record.outcomeImproved ? 'verified' : state
+    const arrow = `${record.sourceAgent || '?'} -> ${record.targetAgent || '?'}`
+    const flags = [
+      record.reuse ? 'reused' : null,
+      record.behaviorChanged ? 'changed' : null,
+      record.outcomeImproved ? 'improved' : null,
+    ]
+      .filter(Boolean)
+      .join(',')
+    console.log(`${index + 1}. [${badge}] ${record.experienceId}  ${arrow}`)
+    console.log(
+      `   ${flags || 'no effect flags'} | ${(record.timestamp || '').slice(0, 19)} | ${record.id}`,
+    )
+    if (record.notes) console.log(`   note: ${record.notes}`)
+  })
+  // Only auto_claims are confirmable — experience.confirm rejects anything else.
+  const pending = result.records
+    .filter((record) => record.source === 'auto_claim' && !record.confirmed)
+    .map((record) => record.id)
+  if (pending.length > 0) {
+    console.log('')
+    console.log(
+      `${pending.length} unconfirmed auto-claim(s) shown. Unconfirmed auto-claims never count as verified, so they do not affect ranking or routing.`,
+    )
+    console.log(`Confirm with: mio experience confirm --ids ${pending.join(',')}`)
+  }
+}
+
+function experienceCommand(args, useJson) {
+  const sub = args[1]
+  const flags = args.slice(2)
+
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    experienceUsage()
+    if (!sub) process.exitCode = 1
+    return
+  }
+  if (!['list', 'confirm', 'reuse'].includes(sub)) {
+    console.error(`Unknown experience subcommand: ${sub}`)
+    experienceUsage()
+    process.exitCode = 1
+    return
+  }
+
+  const store = cliExperienceStore()
+
+  if (sub === 'list') {
+    let result
+    try {
+      result = store.listReuse({
+        status: optionValue(flags, '--status'),
+        targetAgent: optionValue(flags, '--target-agent'),
+        project: optionValue(flags, '--project'),
+        limit: parseNumberOption(flags, '--limit'),
+      })
+    } catch (error) {
+      console.error(error.message || error)
+      process.exitCode = 1
+      return
+    }
+    if (useJson) return jsonOrText(result, true)
+    return printExperienceList(result)
+  }
+
+  let result
+  try {
+    if (sub === 'confirm') {
+      const ids = collectIds(flags)
+      if (ids.length === 0) {
+        console.error('mio experience confirm requires --ids <id,id,...> (or bare ids)')
+        process.exitCode = 1
+        return
+      }
+      // Absent = keep whatever the auto-claim recorded; --no-improved rejects it.
+      const improved = flagPresent(flags, '--no-improved')
+        ? false
+        : flagPresent(flags, '--outcome-improved')
+          ? true
+          : undefined
+      result = store.confirmReuse({
+        ids,
+        outcomeImproved: improved,
+        confirmedBy: optionValue(flags, '--by') || 'cli',
+        notes: optionValue(flags, '--notes'),
+        force: flagPresent(flags, '--force'),
+      })
+    } else {
+      result = store.recordReuse({
+        sourceAgent: optionValue(flags, '--source-agent'),
+        targetAgent: optionValue(flags, '--target-agent'),
+        experienceId: optionValue(flags, '--experience-id'),
+        reuse: flagPresent(flags, '--reuse'),
+        behaviorChanged: flagPresent(flags, '--behavior-changed'),
+        outcomeImproved: flagPresent(flags, '--outcome-improved'),
+        project: optionValue(flags, '--project'),
+        notes: optionValue(flags, '--notes'),
+      })
+    }
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+
+  if (useJson) return jsonOrText(result, true)
+
+  if (sub === 'reuse') {
+    console.log(
+      `Recorded reuse ${result.evidence.id}: ${result.evidence.sourceAgent} -> ${result.evidence.targetAgent} (${result.evidence.experienceId})`,
+    )
+    return
+  }
+
+  console.log(`Confirmed ${result.confirmedCount} reuse record(s)`)
+  if (result.confirmedIds.length > 0) console.log(`confirmed: ${result.confirmedIds.join(', ')}`)
+  if (result.rejected.length > 0) {
+    console.log(`skipped (not auto_claim): ${result.rejected.join(', ')}`)
+  }
+  if (result.alreadyConfirmed.length > 0) {
+    console.log(`already confirmed: ${result.alreadyConfirmed.join(', ')} (use --force to redo)`)
+  }
+  if (result.notFound.length > 0) console.log(`not found: ${result.notFound.join(', ')}`)
+  if (result.confirmedCount === 0) {
+    console.error('Nothing confirmed. Check the ids, or run: mio experience list --status pending')
+    process.exitCode = 1
+  }
 }
 
 function readConfig() {
@@ -669,6 +1084,13 @@ Usage:
   mio recall "<query>"        Search Mio memory from the terminal (same ranking as mio.memory.query)
   mio traces                  Show recent observer traces (--type/--outcome/--agent/--since/--limit/--compact)
   mio remember "<content>"    Write a memory record from the terminal (same schema as mio.memory.record)
+  mio memory analyze          Report duplicates, low-quality records and kind histogram
+  mio memory archive --ids a,b    Archive records (soft delete; --yes required to apply)
+  mio memory restore --ids a,b    Un-archive previously archived records
+  mio memory migrate --ids a,b --scope global|project   Move records between layers
+  mio experience list        List experience reuse (--status pending|confirmed|verified)
+  mio experience confirm --ids a,b   Confirm auto-claimed reuse (bulk supported)
+  mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse
   mio prune --days 30         Trim old traces/queries/reuse records and observe.log (--dry-run to preview; --memory needs --yes)
   mio digest --days 7         Aggregate traces/memory/reuse into an actionable report (--write-back feeds agent context files; --json)
   mio --json status           Machine-readable status
@@ -703,6 +1125,10 @@ async function main() {
       return tracesCommand(args, useJson)
     case 'remember':
       return rememberCommand(args, useJson)
+    case 'memory':
+      return memoryCommand(args, useJson)
+    case 'experience':
+      return experienceCommand(args, useJson)
     case 'prune':
       return pruneCommand(args, useJson)
     case 'digest':

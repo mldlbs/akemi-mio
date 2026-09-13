@@ -10,6 +10,7 @@ const { getEvolutionStatus } = require('../runtime-modules.js')
 const { listHostCapabilities } = require('../host-capabilities.js')
 const { createEvolutionCutoverTools } = require('../evolution-cutover.js')
 const { createMemoryStore } = require('../memory-store.js')
+const { createExperienceStore, REUSE_STATUS_FILTERS } = require('../experience-store.js')
 const { createDigest } = require('../digest.js')
 
 const { CreativityEngine } = require('../creativity-engine.js')
@@ -226,16 +227,17 @@ function projectName() {
 // Memory store: shared implementation with the CLI (`mio recall`/`mio remember`).
 // The pure scoring/filter helpers and queryMemory/recordMemory live in
 // server/memory-store.js so both entry points rank and persist identically.
-const REUSE_STATUS_FILTERS = Object.freeze({
-  pending: (record) => record.source === 'auto_claim' && record.confirmed !== true,
-  confirmed: (record) => record.confirmed === true,
-  verified: (record) =>
-    (record.reuse === true || record.reuse === 'true') &&
-    (record.behaviorChanged === true || record.behaviorChanged === 'true') &&
-    (record.outcomeImproved === true || record.outcomeImproved === 'true'),
-  auto_claim: (record) => record.source === 'auto_claim',
-  agent_report: (record) => record.source !== 'auto_claim',
+const experienceStore = createExperienceStore({
+  dataDir,
+  projectName,
+  // Preserves the phase0 summary these tools have always returned.
+  phase0Summary: (project) => summarizePhase0(loadPhase0(dataDir, project)),
 })
+const {
+  listReuse: listExperienceReuse,
+  confirmReuse: confirmExperienceReuse,
+  recordReuse: recordExperienceReuse,
+} = experienceStore
 
 const memoryStore = createMemoryStore({
   dataDir,
@@ -265,6 +267,9 @@ const {
   queryMemory,
   recordMemory,
   queryTraces,
+  analyzeMemory,
+  archiveMemory,
+  migrateMemory,
   loadEvidenceWeights,
 } = memoryStore
 
@@ -519,241 +524,7 @@ function observerDigest(args = {}) {
   }
 }
 
-function contentTokens(value) {
-  const text = String(value || '').toLowerCase()
-  const latin = text.match(/[a-z0-9]+/g) || []
-  const chars = text.match(/[\u4e00-\u9fff]/g) || []
-  const bigrams = []
-  for (let i = 0; i < chars.length - 1; i++) {
-    bigrams.push(`${chars[i]}${chars[i + 1]}`)
-  }
-  return [...latin, ...bigrams]
-}
-
-function jaccardSimilarity(a, b) {
-  const setA = new Set(contentTokens(a))
-  const setB = new Set(contentTokens(b))
-  if (setA.size === 0 || setB.size === 0) return 0
-  let intersection = 0
-  for (const token of setA) {
-    if (setB.has(token)) intersection += 1
-  }
-  const union = setA.size + setB.size - intersection
-  return union === 0 ? 0 : intersection / union
-}
-
-function findDuplicateGroups(records, limit) {
-  const parent = new Map()
-  for (const record of records) parent.set(record.id, record.id)
-  const find = (id) => {
-    while (parent.get(id) !== id) {
-      parent.set(id, parent.get(parent.get(id)))
-      id = parent.get(id)
-    }
-    return id
-  }
-  const union = (a, b) => {
-    const ra = find(a)
-    const rb = find(b)
-    if (ra !== rb) parent.set(ra, rb)
-  }
-  for (let i = 0; i < records.length; i++) {
-    for (let j = i + 1; j < records.length; j++) {
-      if (
-        jaccardSimilarity(records[i].content, records[j].content) >= MEMORY_DUPLICATE_SIMILARITY
-      ) {
-        union(records[i].id, records[j].id)
-      }
-    }
-  }
-  const byRoot = new Map()
-  for (const record of records) {
-    const root = find(record.id)
-    if (!byRoot.has(root)) byRoot.set(root, [])
-    byRoot.get(root).push(record)
-  }
-  return Array.from(byRoot.values())
-    .filter((group) => group.length >= 2)
-    .sort((a, b) => b.length - a.length)
-    .slice(0, limit)
-}
-
-function analyzeMemory(args = {}) {
-  const project = args.project || projectName()
-  const limit = Math.min(Math.max(Number(args.limit) || 5, 1), 20)
-  const records = readJsonl(memoryPath).filter(
-    (record) => !project || record.project === project || !record.project,
-  )
-  const archived = records.filter((record) => record.archived === true).length
-  const activeRecords = records.filter((record) => record.archived !== true)
-  const total = activeRecords.length
-  const layerCounts = { project: 0, global: 0 }
-  for (const record of activeRecords) {
-    if (record.scope === 'global' || !record.project) layerCounts.global += 1
-    else layerCounts.project += 1
-  }
-
-  const byKind = {}
-  const lowQuality = []
-  for (const record of activeRecords) {
-    const kind = String(record.kind || '').trim() || 'unknown'
-    byKind[kind] = (byKind[kind] || 0) + 1
-    const content = String(record.content || '').trim()
-    const issues = []
-    if (!content) issues.push('missing content')
-    else if (content.length < MEMORY_SHORT_CONTENT_MIN) issues.push('content too short')
-    if (!record.kind || !String(record.kind).trim()) issues.push('missing kind')
-    if (issues.length > 0) {
-      lowQuality.push({
-        id: record.id,
-        timestamp: record.timestamp,
-        kind: record.kind || null,
-        content: content.slice(0, 200) || null,
-        issues,
-      })
-    }
-  }
-
-  let duplicateGroups = []
-  let duplicatesSkipped = false
-  if (activeRecords.length > MAX_PAIRWISE_MEMORY) {
-    duplicatesSkipped = true
-  } else {
-    duplicateGroups = findDuplicateGroups(activeRecords, limit).map((group) => ({
-      size: group.length,
-      records: group.map((record) => ({
-        id: record.id,
-        timestamp: record.timestamp,
-        kind: record.kind || null,
-        content: String(record.content || '').slice(0, 200),
-      })),
-    }))
-  }
-
-  const issues = {
-    lowQuality: lowQuality.length,
-    duplicateGroups: duplicateGroups.length,
-    duplicatesSkipped,
-  }
-
-  const suggestions = []
-  if (duplicateGroups.length > 0) {
-    suggestions.push(
-      `Found ${duplicateGroups.length} duplicate group(s); consider archiving or merging duplicates to keep recall precise.`,
-    )
-  }
-  if (lowQuality.length > 0) {
-    suggestions.push(
-      `${lowQuality.length} low-quality record(s) (missing kind/content or too short); consider fixing or removing them.`,
-    )
-  }
-  if (total === 0) {
-    suggestions.push('No memory records for this project yet.')
-  } else if (duplicateGroups.length === 0 && lowQuality.length === 0) {
-    suggestions.push('Memory looks healthy; no dedup or quality fixes needed.')
-  }
-
-  return {
-    project: project || null,
-    total,
-    archived,
-    layers: layerCounts,
-    byKind,
-    issues,
-    duplicates: duplicateGroups,
-    lowQuality: lowQuality.slice(0, limit),
-    suggestions,
-  }
-}
-
-function migrateMemory(args = {}) {
-  const idsInput = Array.isArray(args.ids) ? args.ids : []
-  const ids = idsInput.map((value) => String(value).trim()).filter(Boolean)
-  if (ids.length === 0) throw new Error('memory.migrate requires ids (array of memory record ids)')
-  const targetScope = normalizeScope(args.scope)
-  if (targetScope === 'all') throw new Error('memory.migrate scope must be project or global')
-  const project = args.project || projectName()
-  const reason = args.reason ? String(args.reason).trim().slice(0, 200) : null
-
-  const records = readJsonl(memoryPath)
-  const idSet = new Set(ids)
-  const updated = []
-  const unchanged = []
-  const notFound = [...ids]
-  for (const record of records) {
-    if (!idSet.has(record.id)) continue
-    const fromScope = record.scope || 'project'
-    const fromProject = record.project || null
-    if (fromScope === targetScope) {
-      unchanged.push(record.id)
-    } else {
-      record.scope = targetScope
-      record.project = targetScope === 'global' ? null : project
-      record.migratedAt = new Date().toISOString()
-      record.migratedFrom = fromScope === 'global' ? 'global' : fromProject || 'project'
-      if (reason) record.migrateReason = reason
-      updated.push(record.id)
-    }
-    const index = notFound.indexOf(record.id)
-    if (index >= 0) notFound.splice(index, 1)
-  }
-  writeJsonl(memoryPath, records)
-
-  return {
-    project: project || null,
-    scope: targetScope,
-    updated,
-    updatedCount: updated.length,
-    unchanged,
-    notFound,
-  }
-}
-function archiveMemory(args = {}) {
-  const idsInput = Array.isArray(args.ids) ? args.ids : []
-  const ids = idsInput.map((value) => String(value).trim()).filter(Boolean)
-  if (ids.length === 0) throw new Error('memory.archive requires ids (array of memory record ids)')
-  const project = args.project || projectName()
-  const restore = args.restore === true || args.restore === 'true'
-  const reason = args.reason ? String(args.reason).trim().slice(0, 200) : null
-
-  const records = readJsonl(memoryPath)
-  const idSet = new Set(ids)
-  const archived = []
-  const notFound = [...ids]
-  for (const record of records) {
-    if (!idSet.has(record.id)) continue
-    if (project && record.project && record.project !== project) continue
-    if (restore) {
-      if (record.archived === true) {
-        delete record.archived
-        delete record.archivedAt
-        delete record.archiveReason
-        archived.push(record.id)
-      }
-    } else if (record.archived !== true) {
-      record.archived = true
-      record.archivedAt = new Date().toISOString()
-      if (reason) record.archiveReason = reason
-      archived.push(record.id)
-    }
-    const index = notFound.indexOf(record.id)
-    if (index >= 0) notFound.splice(index, 1)
-  }
-  writeJsonl(memoryPath, records)
-
-  return {
-    project: project || null,
-    restored: restore,
-    archived,
-    archivedCount: archived.length,
-    notFound,
-  }
-}
-
 const FAILURE_OUTCOMES = new Set(['failure', 'error', 'aborted', 'retry'])
-const MEMORY_DUPLICATE_SIMILARITY = 0.75
-const MEMORY_SHORT_CONTENT_MIN = 20
-const MAX_PAIRWISE_MEMORY = 1500
 
 function isFailureOutcome(value) {
   return FAILURE_OUTCOMES.has(String(value || '').toLowerCase())
@@ -901,122 +672,6 @@ function policyCheck(args = {}) {
       relatedMemories,
     }),
     related_memories: relatedMemories,
-  }
-}
-
-function recordExperienceReuse(args = {}) {
-  const sourceAgent = String(args.sourceAgent || '').trim()
-  const targetAgent = String(args.targetAgent || '').trim()
-  const experienceId = String(args.experienceId || '').trim()
-  if (!sourceAgent) throw new Error('experience.reuse requires sourceAgent')
-  if (!targetAgent) throw new Error('experience.reuse requires targetAgent')
-  if (!experienceId) throw new Error('experience.reuse requires experienceId')
-
-  const project = args.project || projectName()
-  const evidence = {
-    id: createId('xfer'),
-    timestamp: new Date().toISOString(),
-    sourceAgent,
-    targetAgent,
-    experienceId,
-    reuse: args.reuse === true || args.reuse === 'true',
-    behaviorChanged: args.behaviorChanged === true || args.behaviorChanged === 'true',
-    outcomeImproved: args.outcomeImproved === true || args.outcomeImproved === 'true',
-    project,
-    source: args.source || 'agent_report',
-    notes: args.notes || null,
-  }
-  appendJsonl(experienceReusePath, evidence)
-
-  const report = loadPhase0(dataDir, project)
-  return {
-    recorded: true,
-    evidence,
-    phase0: summarizePhase0(report),
-  }
-}
-
-function confirmExperienceReuse(args = {}) {
-  const id = String(args.id || '').trim()
-  if (!id) throw new Error('experience.confirm requires id of an auto-claimed reuse record')
-  const records = readJsonl(experienceReusePath)
-  const index = records.findIndex((record) => record && record.id === id)
-  if (index < 0) {
-    throw new Error(`No experience reuse record found with id ${id}`)
-  }
-  const record = records[index]
-  if (record.source !== 'auto_claim') {
-    throw new Error('experience.confirm only applies to source=auto_claim reuse records')
-  }
-  const outcomeImproved =
-    args.outcomeImproved === undefined || args.outcomeImproved === null
-      ? record.outcomeImproved === true
-      : args.outcomeImproved === true || args.outcomeImproved === 'true'
-  const updated = {
-    ...record,
-    behaviorChanged: true,
-    outcomeImproved,
-    confirmed: true,
-    confirmedAt: new Date().toISOString(),
-    confirmedBy: String(args.confirmedBy || 'agent').trim() || 'agent',
-    notes: args.notes ? String(args.notes).trim() : record.notes || null,
-  }
-  records[index] = updated
-  writeJsonl(experienceReusePath, records)
-
-  const report = loadPhase0(dataDir, updated.project)
-  return {
-    confirmed: true,
-    evidence: updated,
-    phase0: summarizePhase0(report),
-  }
-}
-
-function listExperienceReuse(args = {}) {
-  const project = args.project || projectName()
-  const status = String(args.status || 'all').trim().toLowerCase()
-  const targetAgent = String(args.targetAgent || '').trim().toLowerCase()
-  const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 100)
-
-  let records = readJsonl(experienceReusePath)
-  if (project) records = records.filter((record) => record.project === project)
-  if (targetAgent) {
-    records = records.filter(
-      (record) => String(record.targetAgent || '').toLowerCase() === targetAgent,
-    )
-  }
-  const matcher = REUSE_STATUS_FILTERS[status]
-  if (matcher) records = records.filter(matcher)
-  records.sort((a, b) => {
-    const at = new Date(a.timestamp || 0).getTime()
-    const bt = new Date(b.timestamp || 0).getTime()
-    return bt - at
-  })
-
-  const visible = records.slice(0, limit).map((record) => ({
-    id: record.id,
-    source: record.source,
-    sourceAgent: record.sourceAgent,
-    targetAgent: record.targetAgent,
-    experienceId: record.experienceId,
-    reuse: record.reuse === true || record.reuse === 'true',
-    behaviorChanged: record.behaviorChanged === true || record.behaviorChanged === 'true',
-    outcomeImproved: record.outcomeImproved === true || record.outcomeImproved === 'true',
-    confirmed: record.confirmed === true,
-    confirmedBy: record.confirmedBy || null,
-    traceId: record.traceId || null,
-    timestamp: record.timestamp,
-    project: record.project,
-    notes:
-      typeof record.notes === 'string' && record.notes ? record.notes.slice(0, 300) : null,
-  }))
-
-  return {
-    project: project || null,
-    status,
-    count: visible.length,
-    total: records.length,
-    records: visible,
   }
 }
 

@@ -9,6 +9,7 @@ const {
   createVerifyPackedRuntimeOptions,
   createPackedRuntimeInstallPlan,
   packageArtifactEvidence,
+  readPackageJson,
   npmInvocation,
   npmCommand,
   parseVerifyPackedRuntimeArgs,
@@ -48,15 +49,18 @@ test('npm command resolves to npm.cmd on Windows', () => {
 test('npm invocation prefers npm_execpath to avoid Windows cmd shims', () => {
   assert.deepEqual(
     npmInvocation(['pack'], { npm_execpath: 'C:/node/npm-cli.js' }, 'win32', 'C:/node/node.exe'),
-    { command: 'C:/node/node.exe', args: ['C:/node/npm-cli.js', 'pack'] },
+    { command: 'C:/node/node.exe', args: ['C:/node/npm-cli.js', 'pack'], shell: false },
   )
+  // Without npm_execpath, fall back to the npm shim directly. Routing through
+  // cmd.exe fails with ENOENT in sandboxes that do not expose cmd.exe, and a
+  // bare .cmd cannot be spawned without a shell on Windows.
   assert.deepEqual(
     npmInvocation(['pack'], {}, 'win32', 'C:/node/node.exe'),
-    { command: 'cmd.exe', args: ['/d', '/s', '/c', 'npm', 'pack'] },
+    { command: 'npm.cmd', args: ['pack'], shell: true },
   )
   assert.deepEqual(
     npmInvocation(['pack'], {}, 'linux', '/usr/bin/node'),
-    { command: 'npm', args: ['pack'] },
+    { command: 'npm', args: ['pack'], shell: false },
   )
 })
 
@@ -288,4 +292,30 @@ test('installed smoke summary rejects shadow and dual-write mismatches', () => {
     ]),
     /Installed dual-write smoke did not match/,
   )
+})
+
+test('readPackageJson tolerates a UTF-8 BOM in package.json', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mio-bom-ws-'))
+  const dir = path.join(root, 'packages', 'runtime-contracts')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    '\uFEFF' + JSON.stringify({ name: '@akemi-mio/runtime-contracts', version: '9.9.9' }),
+    'utf8',
+  )
+
+  const { packageDir, manifest } = readPackageJson(root, '@akemi-mio/runtime-contracts')
+  assert.equal(packageDir, dir)
+  assert.equal(manifest.name, '@akemi-mio/runtime-contracts')
+  assert.equal(manifest.version, '9.9.9')
+})
+
+test('createPackedRuntimeInstallPlan reads the real workspace manifest with a BOM present', () => {
+  // Regression guard for the shipped BOM: the real mio-cli workspace manifest
+  // parses cleanly, so the install plan resolves every runtime package version.
+  const workspaceRoot = path.resolve(__dirname, '..', '..', '..')
+  const plan = createPackedRuntimeInstallPlan({ workspaceRoot })
+  const cli = plan.packages.find((pkg) => pkg.name === 'mio-agent-runtime')
+  assert.ok(cli, 'mio-agent-runtime must be part of the install plan')
+  assert.match(cli.version, /^\d+\.\d+\.\d+/)
 })

@@ -10,7 +10,8 @@ Mio Agent Runtime 的可发布 CLI 包。
 npm install -g mio-agent-runtime
 ```
 
-> 新机器 / 升级：请安装 `>=0.5.22`（5 host 被动观察 + trace 查询 + digest 价值管线）。
+> 新机器 / 升级：请安装 `>=0.5.23`（5 host 被动观察 + trace 查询 + digest 价值管线；
+> 0.5.23 修复了 digest 写回污染其它项目 workspace 的问题）。
 > 旧版本只有主动 MCP 规则注入，没有「无感存/取」。安装后执行一次
 > `mio init && mio install <host>`。
 
@@ -36,6 +37,10 @@ mio traces                  Show recent observer traces (--type/--outcome/--agen
 mio prune --days 30         Trim old traces/queries/reuse records and observe.log (--dry-run to preview; --memory needs --yes)
 mio digest --days 7         Aggregate traces/memory/reuse into an actionable report (--write-back feeds agent context files; --json)
 mio remember "<content>"    Write a memory record from the terminal (--kind/--tags/--scope/--project)
+mio memory analyze          Report duplicates, low-quality records and the kind histogram (--project/--limit)
+mio memory archive --ids a,b    Archive records, hiding them from recall/analyze (--yes required; reversible)
+mio memory restore --ids a,b    Un-archive previously archived records
+mio memory migrate --ids a,b --scope global|project   Move records between the project and global layers
 mio --json status           Machine-readable status
 mio --json agents           Machine-readable agents
 mio --json evolution status Machine-readable evolution module health
@@ -64,12 +69,12 @@ MCP server exposes 46 tools across 5 domains:
 
 ## Packages
 
-Published to npm under `@akemi-mio` scope:
+`mio-agent-runtime` depends on 14 packages that are published to npm under the
+`@akemi-mio` scope. All 14 carry version `0.1.0` and are released only when
+their source changes, so a normal CLI release does not republish them.
 
 | Package | Description |
 |---|---|
-| `@akemi-mio/core` | Electron lifecycle, config, logging, EventBus, patterns, schemas |
-| `@akemi-mio/cli` | CLI helpers |
 | `@akemi-mio/runtime-contracts` | Shared type definitions |
 | `@akemi-mio/runtime-foundation` | Logging, EventBus, memory schemas |
 | `@akemi-mio/experience-memory` | Experience recording and retrieval |
@@ -82,10 +87,16 @@ Published to npm under `@akemi-mio` scope:
 | `@akemi-mio/reasoning` | Reasoning planner — pure-function scoring for reasoning directives (injectable logger) |
 | `@akemi-mio/resource-control` | Resource budgets, background task runner, budget rebalancing (injectable runtime) |
 | `@akemi-mio/agent-persona` | Persona drift control, content classification, user behavior analysis (injectable logger) |
-| `@akemi-mio/creativity` | CreativityService — LLM-powered concept generation, conflict detection, merging, fermentation (TypeScript, depends on `@akemi-mio/core`) |
 | `@akemi-mio/observer` | ObserverService — multi-source data collection, trend analysis, deep research, world model, fermentation, DAG state machine, self-evolution engine (zero npm deps) |
 | `@akemi-mio/insight` | InsightService — LLM-based insight generation, conflict/drift/repetition/stalled-goal/friction detectors, presence service, insight scoring (zero npm deps) |
 | `mio-agent-runtime` | This package — CLI + MCP server |
+
+### Host-coupled packages (not published)
+
+`@akemi-mio/core` and `@akemi-mio/creativity` are consumed inside this
+monorepo through `workspace:*` links, so they are built from source and are
+**not** on npm. `packages/cli/` no longer exists. Do not add these to a
+downstream `package.json` — the install will fail.
 
 ## Host notes
 
@@ -137,6 +148,30 @@ schema，`source=workbuddy-observer`）。
 - 已处理的文件偏移记录在 `MIO_HOME/observe-state.json`，不会重复写入。
 - 只回填最近 24h 内更新的会话，避免把历史记录灌入记忆库。
 
+### Context 块的写入范围（`MIO_CONTEXT`）
+
+`<workspace>/AGENTS.md`（或 `CLAUDE.md`）里的 `MIO_CONTEXT` 块最多保留
+6 条（`CONTEXT_MAX`），按时间倒序。三条规则保证真实历史不被挤掉：
+
+- **同一条内容只占一个位置**。重复写入只把它移到最前。旧版本会把同一行
+  反复插入，占满全部 6 个位置，把真实任务摘要整体挤出（存量
+  `observe-state.json` 里的重复条目会在下次写入时自动清理）。
+- **同一项目只对应一个桶**。Context 键取自各 host 转录里的 `cwd` 字段，
+  而不同 Agent 的拼写不一致（`D:\work\code\x`、`d:\work\code\x`、
+  `D:/work/code/x`）。这些写法现在会被归一到统一形式（盘符大写 + 反斜杠），
+  等价桶在读取和写入时自动合并——否则同一个项目会被拆成多个桶，各自
+  只保留 6 条，互相看不到对方的历史。存量分裂键无需迁移脚本，
+  `loadState` 会在下次加载时合并。
+- **`mio digest --write-back` 只写回有数据的项目**。写回的是一行项目维度
+  摘要（`digest(7d): <项目> N 任务 M% 成功`），不是全局统计；`observe-state`
+  里没有对应 digest 数据的 workspace 会被直接跳过，不会被写入。旧版本把
+  同一条全局 headline 广播给所有历史项目，导致无关仓库（如 ComfyUI）被污染。
+
+桶合并后若超过 `CONTEXT_MAX`，按条目内嵌的时间戳（`YYYY/M/D HH:MM:SS`）
+截断，保留最新的，而不是按存储位置丢弃。
+
+需要强制指定目标时用 `--cwd <path>` 或 `--project <name>`；`--cwd` 优先。
+
 OpenCode 会话不依赖模型自觉：`mio observe` 通过 `opencode db` 增量读取
 `~/.local/share/opencode/opencode.db`（Windows 下该文件被 OpenCode 独占锁定，
 必须经 opencode 自带 CLI 读取），按 `part` 表的 rowid 做增量游标，只传输
@@ -185,10 +220,48 @@ query/record ranking (Latin token + CJK bigram scoring, project/global
 scope layers, reuse-evidence weighting). Both the MCP server
 (`mio.memory.query` / `mio.memory.record`) and the CLI
 (`mio recall` / `mio remember`) go through it, so rankings are identical
-across entry points. `server/digest.js` aggregates traces/memory/reuse
-into actionable reports (also exposed as `mio.digest.generate`), and
-`server/retention.js` powers `mio prune` (age/expiry trimming with
-backups; `memory.jsonl` is never touched without explicit `--memory --yes`).
+across entry points. The same module also implements the hygiene
+operations — `analyze` / `archive` / `migrate` — so `mio.memory.analyze`
+and `mio memory analyze` can never drift apart. `server/digest.js`
+aggregates traces/memory/reuse into actionable reports (also exposed as
+`mio.digest.generate`), and `server/retention.js` powers `mio prune`
+(age/expiry trimming with backups; `memory.jsonl` is never touched
+without explicit `--memory --yes`).
+
+## Memory hygiene
+
+`mio.memory.analyze` can diagnose duplicates and low-quality records, but
+until now the only way to act on that was through the MCP server. The
+`mio memory` subcommands close that gap:
+
+```bash
+mio memory analyze                       # what needs attention?
+mio memory archive --ids mem_a,mem_b     # preview (no --yes = no write)
+mio memory archive --ids mem_a,mem_b --yes   # apply
+mio memory restore --ids mem_a           # undo
+mio memory migrate --ids mem_a --scope global   # promote to the global layer
+```
+
+Notes:
+
+- **Archive is reversible**, not a delete. Archived records stay in
+  `memory.jsonl` with `archived: true` and drop out of `recall` and
+  `analyze`. `mio prune --memory` is still the only operation that
+  permanently removes records, and it still requires `--yes`.
+- **`archive` previews by default.** Without `--yes` it prints what would
+  change and exits `1`; this applies in `--json` mode too, so a script
+  cannot archive by accident. The ids are shown in the preview, which is
+  where a typo gets caught.
+- **Ids are accepted as `--ids a,b` or as bare positionals**
+  (`mio memory archive mem_a mem_b`). Ids never contain commas.
+- **Nothing changed exits non-zero.** If every id is unknown, already
+  archived, or belongs to another project, the command reports
+  `not found` / `already archived` and exits `1` rather than pretending
+  success.
+- **Duplicates use Jaccard similarity over Latin tokens and CJK bigrams**
+  with a `0.75` threshold, union-find grouped so `A~B, B~C` collapses
+  into one group. Above 1500 active records the scan is skipped and
+  `duplicatesSkipped` is reported instead of hanging on O(n²) work.
 
 ## Release verification
 

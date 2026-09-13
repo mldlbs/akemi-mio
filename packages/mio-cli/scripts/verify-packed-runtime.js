@@ -76,12 +76,13 @@ function npmCommand(platform = process.platform) {
 
 function npmInvocation(args, env = process.env, platform = process.platform, node = process.execPath) {
   if (env.npm_execpath) {
-    return { command: node, args: [env.npm_execpath, ...args] }
+    return { command: node, args: [env.npm_execpath, ...args], shell: false }
   }
-  if (platform === 'win32') {
-    return { command: 'cmd.exe', args: ['/d', '/s', '/c', 'npm', ...args] }
-  }
-  return { command: npmCommand(platform), args }
+  // Fall back to the npm shim on PATH instead of routing through cmd.exe.
+  // cmd.exe is unavailable in some sandboxes, and a bare .cmd/.bat shim cannot
+  // be spawned directly (Node requires shell:true for those on Windows), so
+  // signal the shell requirement to the runner instead of guessing there.
+  return { command: npmCommand(platform), args: [...args], shell: platform === 'win32' }
 }
 
 function packageDirName(name) {
@@ -95,9 +96,12 @@ function tarballFileName(name, version) {
 
 function readPackageJson(workspaceRoot, name) {
   const packageDir = path.join(workspaceRoot, 'packages', packageDirName(name))
+  // Windows editors may write package.json with a UTF-8 BOM; JSON.parse
+  // rejects the leading U+FEFF, so strip it before parsing.
+  const raw = fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8').replace(/^\uFEFF/, '')
   return {
     packageDir,
-    manifest: JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8')),
+    manifest: JSON.parse(raw),
   }
 }
 
@@ -211,6 +215,11 @@ function run(command, args, options = {}) {
     env: options.env || process.env,
     encoding: 'utf8',
     stdio: options.stdio || ['ignore', 'pipe', 'pipe'],
+    // Windows .cmd/.bat shims (npm.cmd) cannot be spawned directly by
+    // execFileSync since Node's CVE-2024-27980 hardening; they need a shell.
+    // This only kicks in for the npm shim path — node-based invocations pass
+    // an absolute node executable and still run shell-free.
+    shell: options.shell === true,
   })
   return output ? output.trim() : ''
 }
@@ -296,14 +305,19 @@ function verifyPackedRuntimeInstall(input = {}) {
     run(pack.command, pack.args, {
       cwd: pkg.packageDir,
       stdio: ['ignore', 'pipe', 'pipe'],
+      shell: pack.shell,
     })
     packageArtifactEvidence(pkg)
   }
 
   const init = npmInvocation(['init', '-y'])
-  run(init.command, init.args, { cwd: plan.installDir, stdio: ['ignore', 'pipe', 'pipe'] })
+  run(init.command, init.args, { cwd: plan.installDir, stdio: ['ignore', 'pipe', 'pipe'], shell: init.shell })
   const install = npmInvocation(plan.install.args)
-  run(install.command, install.args, { cwd: plan.install.cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+  run(install.command, install.args, {
+    cwd: plan.install.cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: install.shell,
+  })
   const smokeEnv = {
     ...process.env,
     MIO_HOME: path.join(plan.installDir, '.mio-home'),
@@ -360,6 +374,7 @@ module.exports = {
   createVerifyPackedRuntimeOptions,
   createPackedRuntimeInstallPlan,
   packageArtifactEvidence,
+  readPackageJson,
   npmInvocation,
   npmCommand,
   parseVerifyPackedRuntimeArgs,

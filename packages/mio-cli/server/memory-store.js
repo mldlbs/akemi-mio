@@ -34,6 +34,84 @@ function appendJsonl(file, value) {
   fs.appendFileSync(file, `${JSON.stringify(value)}\n`, 'utf8')
 }
 
+function writeJsonl(file, values) {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(
+    file,
+    values.length > 0 ? values.map((value) => JSON.stringify(value)).join('\n') + '\n' : '',
+    'utf8'
+  )
+}
+
+// --- Duplicate / quality analysis (mio.memory.analyze) ---------------------
+// Threshold is intentionally conservative: two records are "duplicates" only
+// when their token sets are nearly identical, because a false positive here
+// suggests archiving a record the user still needs.
+const MEMORY_DUPLICATE_SIMILARITY = 0.75
+const MEMORY_SHORT_CONTENT_MIN = 20
+// Pairwise Jaccard is O(n^2); beyond this many active records we skip the
+// duplicate scan and report `duplicatesSkipped` instead of hanging.
+const MAX_PAIRWISE_MEMORY = 1500
+
+function contentTokens(value) {
+  const text = String(value || '').toLowerCase()
+  const latin = text.match(/[a-z0-9]+/g) || []
+  const chars = text.match(/[\u4e00-\u9fff]/g) || []
+  const bigrams = []
+  for (let i = 0; i < chars.length - 1; i++) {
+    bigrams.push(`${chars[i]}${chars[i + 1]}`)
+  }
+  return [...latin, ...bigrams]
+}
+
+function jaccardSimilarity(a, b) {
+  const setA = new Set(contentTokens(a))
+  const setB = new Set(contentTokens(b))
+  if (setA.size === 0 || setB.size === 0) return 0
+  let intersection = 0
+  for (const token of setA) {
+    if (setB.has(token)) intersection += 1
+  }
+  const union = setA.size + setB.size - intersection
+  return union === 0 ? 0 : intersection / union
+}
+
+// Union-find over pairs above the similarity threshold, so "A~B, B~C" collapses
+// into one group of three rather than three overlapping pairs.
+function findDuplicateGroups(records, limit) {
+  const parent = new Map()
+  for (const record of records) parent.set(record.id, record.id)
+  const find = (id) => {
+    while (parent.get(id) !== id) {
+      parent.set(id, parent.get(parent.get(id)))
+      id = parent.get(id)
+    }
+    return id
+  }
+  const union = (a, b) => {
+    const ra = find(a)
+    const rb = find(b)
+    if (ra !== rb) parent.set(ra, rb)
+  }
+  for (let i = 0; i < records.length; i++) {
+    for (let j = i + 1; j < records.length; j++) {
+      if (jaccardSimilarity(records[i].content, records[j].content) >= MEMORY_DUPLICATE_SIMILARITY) {
+        union(records[i].id, records[j].id)
+      }
+    }
+  }
+  const byRoot = new Map()
+  for (const record of records) {
+    const root = find(record.id)
+    if (!byRoot.has(root)) byRoot.set(root, [])
+    byRoot.get(root).push(record)
+  }
+  return Array.from(byRoot.values())
+    .filter((group) => group.length >= 2)
+    .sort((a, b) => b.length - a.length)
+    .slice(0, limit)
+}
+
 function normalizeTags(tags) {
   if (Array.isArray(tags)) return tags.map((tag) => String(tag).trim()).filter(Boolean)
   if (typeof tags === 'string') {
@@ -349,6 +427,192 @@ function createMemoryStore(options = {}) {
     return record
   }
 
+  // Quality report over the active (non-archived) records for a project:
+  // kind histogram, low-quality records, and near-duplicate groups. This is the
+  // diagnostic half of memory hygiene — `archiveMemory` is the fix.
+  function analyzeMemory(args = {}) {
+    const project = args.project || projectName()
+    const limit = Math.min(Math.max(Number(args.limit) || 5, 1), 20)
+    const records = readJsonl(memoryPath).filter(
+      (record) => !project || record.project === project || !record.project
+    )
+    const archived = records.filter((record) => record.archived === true).length
+    const activeRecords = records.filter((record) => record.archived !== true)
+    const total = activeRecords.length
+    const layerCounts = { project: 0, global: 0 }
+    for (const record of activeRecords) {
+      if (record.scope === 'global' || !record.project) layerCounts.global += 1
+      else layerCounts.project += 1
+    }
+
+    const byKind = {}
+    const lowQuality = []
+    for (const record of activeRecords) {
+      const kind = String(record.kind || '').trim() || 'unknown'
+      byKind[kind] = (byKind[kind] || 0) + 1
+      const content = String(record.content || '').trim()
+      const issues = []
+      if (!content) issues.push('missing content')
+      else if (content.length < MEMORY_SHORT_CONTENT_MIN) issues.push('content too short')
+      if (!record.kind || !String(record.kind).trim()) issues.push('missing kind')
+      if (issues.length > 0) {
+        lowQuality.push({
+          id: record.id,
+          timestamp: record.timestamp,
+          kind: record.kind || null,
+          content: content.slice(0, 200) || null,
+          issues,
+        })
+      }
+    }
+
+    let duplicateGroups = []
+    let duplicatesSkipped = false
+    if (activeRecords.length > MAX_PAIRWISE_MEMORY) {
+      duplicatesSkipped = true
+    } else {
+      duplicateGroups = findDuplicateGroups(activeRecords, limit).map((group) => ({
+        size: group.length,
+        records: group.map((record) => ({
+          id: record.id,
+          timestamp: record.timestamp,
+          kind: record.kind || null,
+          content: String(record.content || '').slice(0, 200),
+        })),
+      }))
+    }
+
+    const issues = {
+      lowQuality: lowQuality.length,
+      duplicateGroups: duplicateGroups.length,
+      duplicatesSkipped,
+    }
+
+    const suggestions = []
+    if (duplicateGroups.length > 0) {
+      suggestions.push(
+        `Found ${duplicateGroups.length} duplicate group(s); consider archiving or merging duplicates to keep recall precise.`
+      )
+    }
+    if (lowQuality.length > 0) {
+      suggestions.push(
+        `${lowQuality.length} low-quality record(s) (missing kind/content or too short); consider fixing or removing them.`
+      )
+    }
+    if (total === 0) {
+      suggestions.push('No memory records for this project yet.')
+    } else if (duplicateGroups.length === 0 && lowQuality.length === 0) {
+      suggestions.push('Memory looks healthy; no dedup or quality fixes needed.')
+    }
+
+    return {
+      project: project || null,
+      total,
+      archived,
+      layers: layerCounts,
+      byKind,
+      issues,
+      duplicates: duplicateGroups,
+      lowQuality: lowQuality.slice(0, limit),
+      suggestions,
+    }
+  }
+
+  function migrateMemory(args = {}) {
+    const idsInput = Array.isArray(args.ids) ? args.ids : []
+    const ids = idsInput.map((value) => String(value).trim()).filter(Boolean)
+    if (ids.length === 0) throw new Error('memory.migrate requires ids (array of memory record ids)')
+    const targetScope = normalizeScope(args.scope)
+    if (targetScope === 'all') throw new Error('memory.migrate scope must be project or global')
+    const project = args.project || projectName()
+    const reason = args.reason ? String(args.reason).trim().slice(0, 200) : null
+
+    const records = readJsonl(memoryPath)
+    const idSet = new Set(ids)
+    const updated = []
+    const unchanged = []
+    const notFound = [...ids]
+    for (const record of records) {
+      if (!idSet.has(record.id)) continue
+      const fromScope = record.scope || 'project'
+      const fromProject = record.project || null
+      if (fromScope === targetScope) {
+        unchanged.push(record.id)
+      } else {
+        record.scope = targetScope
+        record.project = targetScope === 'global' ? null : project
+        record.migratedAt = new Date().toISOString()
+        record.migratedFrom = fromScope === 'global' ? 'global' : fromProject || 'project'
+        if (reason) record.migrateReason = reason
+        updated.push(record.id)
+      }
+      const index = notFound.indexOf(record.id)
+      if (index >= 0) notFound.splice(index, 1)
+    }
+    writeJsonl(memoryPath, records)
+
+    return {
+      project: project || null,
+      scope: targetScope,
+      updated,
+      updatedCount: updated.length,
+      unchanged,
+      notFound,
+    }
+  }
+
+  // Soft delete: archived records stay on disk but drop out of memory.query and
+  // memory.analyze. Reversible via `restore: true`.
+  function archiveMemory(args = {}) {
+    const idsInput = Array.isArray(args.ids) ? args.ids : []
+    const ids = idsInput.map((value) => String(value).trim()).filter(Boolean)
+    if (ids.length === 0) throw new Error('memory.archive requires ids (array of memory record ids)')
+    const project = args.project || projectName()
+    const restore = args.restore === true || args.restore === 'true'
+    const reason = args.reason ? String(args.reason).trim().slice(0, 200) : null
+
+    const records = readJsonl(memoryPath)
+    const idSet = new Set(ids)
+    const archived = []
+    // Ids that exist but are already in the requested state. Reported separately
+    // from `notFound` so callers can tell "already done" from "bad id".
+    const skipped = []
+    const notFound = [...ids]
+    for (const record of records) {
+      if (!idSet.has(record.id)) continue
+      if (project && record.project && record.project !== project) continue
+      if (restore) {
+        if (record.archived === true) {
+          delete record.archived
+          delete record.archivedAt
+          delete record.archiveReason
+          archived.push(record.id)
+        } else {
+          skipped.push(record.id)
+        }
+      } else if (record.archived !== true) {
+        record.archived = true
+        record.archivedAt = new Date().toISOString()
+        if (reason) record.archiveReason = reason
+        archived.push(record.id)
+      } else {
+        skipped.push(record.id)
+      }
+      const index = notFound.indexOf(record.id)
+      if (index >= 0) notFound.splice(index, 1)
+    }
+    writeJsonl(memoryPath, records)
+
+    return {
+      project: project || null,
+      restored: restore,
+      archived,
+      archivedCount: archived.length,
+      skipped,
+      notFound,
+    }
+  }
+
   return {
     memoryPath,
     experienceReusePath,
@@ -356,11 +620,18 @@ function createMemoryStore(options = {}) {
     queryMemory,
     recordMemory,
     queryTraces,
+    analyzeMemory,
+    archiveMemory,
+    migrateMemory,
     loadEvidenceWeights,
     // pure helpers, exported for tests and other consumers
     createId,
     readJsonl,
     appendJsonl,
+    writeJsonl,
+    contentTokens,
+    jaccardSimilarity,
+    findDuplicateGroups,
     normalizeTags,
     tokenize,
     normalizeScope,
@@ -373,4 +644,6 @@ function createMemoryStore(options = {}) {
   }
 }
 
-module.exports = { createMemoryStore }
+// Module-level exports let sibling stores (e.g. experience-store.js) reuse the
+// same JSONL primitives instead of duplicating them and drifting apart.
+module.exports = { createMemoryStore, createId, readJsonl, appendJsonl, writeJsonl }
