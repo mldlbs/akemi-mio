@@ -11,8 +11,13 @@ if (!gotTheLock) {
   app.quit()
 }
 
-// 远程调试端口 — 用于抓取渲染进程控制台日志
-app.commandLine.appendSwitch('remote-debugging-port', '9224')
+// 远程调试端口 — 用于抓取渲染进程控制台日志。
+// 以前是无条件开的，意味着每个装了正式版的用户机器上 9224 常开：
+// 任何人（本机任意进程、或被诱导访问的网页）连上 http://127.0.0.1:9224 就能完全控制应用。
+// 只在 dev 直跑时开；打包版要调试必须显式设 MIO_OPEN_DEVTOOLS=1。
+if (!app.isPackaged || process.env.MIO_OPEN_DEVTOOLS === '1') {
+  app.commandLine.appendSwitch('remote-debugging-port', '9224')
+}
 
 // 透明窗口：阻止 Chromium 在失焦时暂停合成渲染，防止 DWM 刷白
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')

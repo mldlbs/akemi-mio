@@ -175,11 +175,11 @@ export function createWindow(stateManager: StateManager): BrowserWindow {
 
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
-    mainWindow.webContents.openDevTools()
+    if (devToolsEnabled()) mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
     mainWindow.webContents.once('did-finish-load', () => {
-      mainWindow?.webContents.openDevTools()
+      if (devToolsEnabled()) mainWindow?.webContents.openDevTools()
     })
   }
 
@@ -237,6 +237,17 @@ export function closeAgentWindow(): void {
   if (agentWindow && !agentWindow.isDestroyed()) {
     agentWindow.close()
   }
+}
+
+/**
+ * 是否打开 DevTools 窗口。
+ *
+ * 曾经在 loadFile 分支（也就是**打包版**走的那条）里无条件 openDevTools()，
+ * 结果每个正式版用户一启动就会多弹一个 DevTools 窗口。现在只在 dev 直跑时开，
+ * 打包版要调试必须显式设 MIO_OPEN_DEVTOOLS=1。
+ */
+function devToolsEnabled(): boolean {
+  return !app.isPackaged || process.env.MIO_OPEN_DEVTOOLS === '1'
 }
 
 export function setupStartupLogging(): void {
