@@ -36,6 +36,7 @@ import { VoiceBookmarkService } from '@akemi-mio/intelligence-memory/VoiceBookma
 import { memoryEvolutionBridge } from '@akemi-mio/intelligence-memory/MemoryEvolutionBridge'
 import { memoryTtsBridge } from '@akemi-mio/audio/MemoryTtsBridge'
 import { resolveConstitutionPath } from './constitution-path'
+import { toUnpacked } from './asar-path'
 import { registerHandlers, createServiceRef } from '../ipc/handlers'
 import type { ServiceRef } from '../ipc/handlers'
 import { credentialsManager } from '@akemi-mio/core/credentials/CredentialsManager'
@@ -162,20 +163,6 @@ import { GuardrailProgressAnalyzer } from '@akemi-mio/core/core/evaluation/Guard
 import type { MetricSnapshot, TimeWindow } from '@akemi-mio/core/core/evaluation/types'
 import type { ToolChainOrchestrator, ToolChainDecomposer } from '@akemi-mio/intelligence/orchestrator'
 import type { OrchestrationBridge } from '@akemi-mio/intelligence/orchestrator/OrchestrationBridge'
-
-/**
- * 把 asar 内的路径映射到解包目录。
- *
- * 打包后 `require.resolve` 返回的是 `...\resources\app.asar\node_modules\...`，
- * 而 asar 里的文件**只有 Electron 进程的 patched fs 能读**。任何由我们 spawn 出去的
- * 独立进程（这里是 MCP 服务器，用系统 `node` 启动）拿这种路径一定 MODULE_NOT_FOUND。
- * electron-builder 已把相关包 asarUnpack 到 `app.asar.unpacked`，这里负责指过去。
- * 未打包（dev 直跑）时路径里没有 app.asar，原样返回。
- */
-function toUnpacked(p: string): string {
-  if (!p.includes('app.asar') || p.includes('app.asar.unpacked')) return p
-  return p.replace('app.asar', 'app.asar.unpacked')
-}
 
 /**
  * AppRuntime — 应用启动生命周期编排器。
