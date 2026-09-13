@@ -83,6 +83,13 @@ function infoFromConversation(ctx: ConversationContext): WallpaperInfo | null {
   return null
 }
 
+/** 进度夹到 0–100。数据源偶尔给出越界值（估算偏差导致的 120）或 NaN，
+ *  不夹的话宽度会撑出卡片、aria-valuenow 会超过 aria-valuemax。 */
+function progressPct(v: number): number {
+  if (!Number.isFinite(v)) return 0
+  return Math.min(100, Math.max(0, v))
+}
+
 /** 把记忆卡片转成信息卡。优先展示置顶的。 */
 function infoFromMemory(cards: MemoryCard[]): WallpaperInfo | null {
   if (cards.length === 0) return null
@@ -199,8 +206,14 @@ export function WallpaperForm() {
             <p className="wp-info-title">{info.title}</p>
             <p className="wp-info-body">{info.body}</p>
             {typeof info.progress === 'number' && (
-              <div className="wp-info-progress" role="progressbar" aria-valuenow={Math.round(info.progress)} aria-valuemin={0} aria-valuemax={100}>
-                <div className="wp-info-progress-fill" style={{ width: `${Math.min(100, Math.max(0, info.progress))}%` }} />
+              <div
+                className="wp-info-progress"
+                role="progressbar"
+                aria-valuenow={Math.round(progressPct(info.progress))}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div className="wp-info-progress-fill" style={{ width: `${progressPct(info.progress)}%` }} />
               </div>
             )}
           </div>
