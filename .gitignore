@@ -47,6 +47,7 @@ electron.vite.config.*.mjs
 .forms-capture/
 .main-capture/
 .launch-capture/
+.launch.log
 .claude-flow/
 .swarm/
 .playwright-mcp/

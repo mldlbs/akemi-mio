@@ -96,7 +96,17 @@ export class Kernel implements ISubsystem {
   /** 注册一个模块，调用其 init() */
   async registerModule(module: IModule): Promise<void> {
     if (this._frozen) {
-      log('WARN', 'kernel.registry_frozen_cannot_register', { name: module.name })
+      // 注册表在启动早期就冻结了，而 evolution 这类模块是 lazyInit 里才创建的，
+      // 必然晚于冻结 —— 它们的注册请求**永远不可能成功**。这种"记账失败"没有
+      // 功能影响（进化系统自己跑得好好的：evolution_service_started / 周期照常），
+      // 按 WARN 刷只是每次启动一条假故障，反而盖住真问题。
+      //
+      // 真正该警惕的是**内核模块**注册不上 —— 那才是启动顺序出了岔子。
+      const isKernelModule = KERNEL_NAMES.has(module.name)
+      log(isKernelModule ? 'WARN' : 'DEBUG', 'kernel.registry_frozen_cannot_register', {
+        name: module.name,
+        kernelModule: isKernelModule,
+      })
       return
     }
     if (this.modules.has(module.name)) {
