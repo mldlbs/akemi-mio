@@ -269,6 +269,7 @@ const {
   queryTraces,
   analyzeMemory,
   archiveMemory,
+  mergeMemory,
   migrateMemory,
   loadEvidenceWeights,
 } = memoryStore
@@ -992,6 +993,21 @@ const TOOLS = [
         project: { type: 'string', description: 'Project name filter. Defaults to current repository.' },
         restore: { type: 'boolean', description: 'When true, un-archive the given ids instead.' },
         reason: { type: 'string', description: 'Optional archive reason.' },
+      },
+      required: ['ids'],
+    },
+  },
+  {
+    name: 'mio.memory.merge',
+    description: 'Merge near-duplicate memory records into one survivor: the survivor gains a supersedes list and the others are archived. Refuses to merge records whose content differs unless keep and allowDivergent are both given, because concatenating divergent bodies corrupts them. Reversible via mio.memory.archive with restore.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: { type: 'array', items: { type: 'string' }, description: 'Memory record ids to merge (at least 2).' },
+        project: { type: 'string', description: 'Project name filter. Defaults to current repository.' },
+        keep: { type: 'string', description: 'Id of the record whose content survives. Defaults to the newest record in the set.' },
+        allowDivergent: { type: 'boolean', description: 'When true, allow merging records whose content differs. Requires keep so the surviving body is explicit.' },
+        reason: { type: 'string', description: 'Optional merge reason.' },
       },
       required: ['ids'],
     },
@@ -1762,6 +1778,8 @@ async function callTool(name, args = {}) {
       return recordMemory(args)
     case 'mio.memory.archive':
       return archiveMemory(args)
+    case 'mio.memory.merge':
+      return mergeMemory(args)
     case 'mio.memory.migrate':
       return migrateMemory(args)
     case 'mio.observer.ingest':

@@ -561,6 +561,162 @@ function createMemoryStore(options = {}) {
     }
   }
 
+  // Merge near-duplicate records into one survivor.
+  //
+  // Safety stance (measured, not assumed): of 22 duplicate groups in a real
+  // 860-record store, 19 held byte-identical content and 3 held *divergent*
+  // content. Concatenating divergent bodies is actively harmful -- a real
+  // example produced a record carrying both `Token 来源` and `凭证来源` for the
+  // same field plus a duplicated header. So by default this only merges groups
+  // whose members are byte-identical, and reports the rest as `divergent`
+  // for the caller to inspect. Nothing is ever silently concatenated.
+  //
+  // Merging is archive-based, so it is reversible with archiveMemory({restore}).
+  function mergeMemory(args = {}) {
+    const idsInput = Array.isArray(args.ids) ? args.ids : []
+    const ids = idsInput.map((value) => String(value).trim()).filter(Boolean)
+    if (ids.length < 2) throw new Error('memory.merge requires at least 2 ids')
+    const project = args.project || projectName()
+    const reason = args.reason ? String(args.reason).trim().slice(0, 200) : null
+    // keep: explicit survivor id. When absent, the newest record wins.
+    const keep = args.keep ? String(args.keep).trim() : null
+    // allowDivergent: opt-in escape hatch. Still refuses if no keep is named,
+    // because "which divergence wins" is then undefined.
+    const allowDivergent = args.allowDivergent === true || args.allowDivergent === 'true'
+
+    const records = readJsonl(memoryPath)
+    const idSet = new Set(ids)
+    // The project filter must be applied once, up front. Applying it only in the
+    // archive loop let a mismatched project still rewrite the survivor's
+    // `supersedes` list, recording an absorption of records that were never
+    // archived -- audit metadata pointing at nothing.
+    const allMembers = records.filter((record) => idSet.has(record.id))
+    const members = project
+      ? allMembers.filter((record) => !record.project || record.project === project)
+      : allMembers
+    const notFound = ids.filter((id) => !allMembers.some((record) => record.id === id))
+    const outOfScope = allMembers
+      .filter((record) => !members.some((member) => member.id === record.id))
+      .map((record) => record.id)
+
+    if (members.length < 2) {
+      return {
+        project: project || null,
+        merged: false,
+        reason:
+          outOfScope.length > 0
+            ? 'fewer than 2 ids are in this project; records belong to another project'
+            : 'fewer than 2 ids resolved to records',
+        survivor: null,
+        archived: [],
+        archivedCount: 0,
+        skipped: [],
+        divergent: [],
+        outOfScope,
+        notFound,
+      }
+    }
+
+    const contents = new Set(members.map((record) => String(record.content || '')))
+    const divergentFrom = contents.size > 1
+
+    if (divergentFrom && !allowDivergent) {
+      return {
+        project: project || null,
+        merged: false,
+        reason: 'content differs across records; refusing to concatenate',
+        survivor: null,
+        archived: [],
+        archivedCount: 0,
+        skipped: [],
+        divergent: members.map((record) => ({
+          id: record.id,
+          timestamp: record.timestamp || null,
+          contentLength: String(record.content || '').length,
+          content: String(record.content || '').slice(0, 200),
+        })),
+        outOfScope,
+        notFound,
+        hint: 'Re-run with --keep <id> --allow-divergent to choose the surviving body explicitly.',
+      }
+    }
+
+    if (divergentFrom && allowDivergent && !keep) {
+      throw new Error('memory.merge with divergent content requires keep (the id whose body survives)')
+    }
+
+    // Survivor selection: explicit keep, else newest by timestamp.
+    let survivor = null
+    if (keep) {
+      survivor = members.find((record) => record.id === keep)
+      if (!survivor) throw new Error(`memory.merge keep id not in the merge set: ${keep}`)
+    } else {
+      survivor = members.reduce((best, record) => {
+        const a = Date.parse(record.timestamp || 0) || 0
+        const b = Date.parse(best.timestamp || 0) || 0
+        return a > b ? record : best
+      })
+    }
+
+    const superseded = members
+      .filter((record) => record.id !== survivor.id)
+      .map((record) => record.id)
+    const mergedAt = new Date().toISOString()
+
+    // Union tags so a merge never loses retrieval keywords.
+    const tagSet = new Set(normalizeTags(survivor.tags))
+    for (const record of members) {
+      for (const tag of normalizeTags(record.tags)) tagSet.add(tag)
+    }
+    survivor.tags = Array.from(tagSet)
+
+    // Audit trail: which records this one absorbed, and when.
+    const priorSuperseded = Array.isArray(survivor.supersedes) ? survivor.supersedes : []
+    survivor.supersedes = Array.from(new Set([...priorSuperseded, ...superseded]))
+    survivor.mergedAt = mergedAt
+    survivor.mergedCount = survivor.supersedes.length
+    if (divergentFrom) survivor.mergeDivergent = true
+    if (reason) survivor.mergeReason = reason
+
+    const archived = []
+    const skipped = []
+    const memberIds = new Set(members.map((member) => member.id))
+    for (const record of records) {
+      if (record.id === survivor.id) continue
+      // members already passed the project filter, so no re-check is needed here.
+      if (!memberIds.has(record.id)) continue
+      if (record.archived === true) {
+        skipped.push(record.id)
+        continue
+      }
+      record.archived = true
+      record.archivedAt = mergedAt
+      record.archiveReason = `merged-into:${survivor.id}`
+      record.mergedInto = survivor.id
+      archived.push(record.id)
+    }
+    writeJsonl(memoryPath, records)
+
+    return {
+      project: project || null,
+      merged: true,
+      divergentContent: divergentFrom,
+      survivor: {
+        id: survivor.id,
+        timestamp: survivor.timestamp || null,
+        contentLength: String(survivor.content || '').length,
+        supersedes: survivor.supersedes,
+        tags: survivor.tags,
+      },
+      archived,
+      archivedCount: archived.length,
+      skipped,
+      divergent: [],
+      outOfScope,
+      notFound,
+    }
+  }
+
   // Soft delete: archived records stay on disk but drop out of memory.query and
   // memory.analyze. Reversible via `restore: true`.
   function archiveMemory(args = {}) {
@@ -622,6 +778,7 @@ function createMemoryStore(options = {}) {
     queryTraces,
     analyzeMemory,
     archiveMemory,
+    mergeMemory,
     migrateMemory,
     loadEvidenceWeights,
     // pure helpers, exported for tests and other consumers

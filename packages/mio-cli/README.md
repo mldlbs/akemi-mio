@@ -40,6 +40,7 @@ mio remember "<content>"    Write a memory record from the terminal (--kind/--ta
 mio memory analyze          Report duplicates, low-quality records and the kind histogram (--project/--limit)
 mio memory archive --ids a,b    Archive records, hiding them from recall/analyze (--yes required; reversible)
 mio memory restore --ids a,b    Un-archive previously archived records
+mio memory merge --ids a,b  Merge duplicate records into one survivor (--keep/--allow-divergent; --yes required)
 mio memory migrate --ids a,b --scope global|project   Move records between the project and global layers
 mio --json status           Machine-readable status
 mio --json agents           Machine-readable agents
@@ -48,10 +49,10 @@ mio --json evolution status Machine-readable evolution module health
 
 ## MCP Tools
 
-MCP server exposes 46 tools across 5 domains:
+MCP server exposes 47 tools across 5 domains:
 
-### Memory (9)
-`mio.memory.query` · `mio.memory.record` · `mio.memory.archive` · `mio.memory.migrate` · `mio.memory.analyze` · `mio.experience.list` · `mio.experience.confirm` · `mio.experience.reuse` · `mio.policy.check`
+### Memory (10)
+`mio.memory.query` · `mio.memory.record` · `mio.memory.archive` · `mio.memory.merge` · `mio.memory.migrate` · `mio.memory.analyze` · `mio.experience.list` · `mio.experience.confirm` · `mio.experience.reuse` · `mio.policy.check`
 
 ### Observer Pipeline (14)
 `mio.observer.world_model` · `mio.observer.trends` · `mio.observer.research` · `mio.observer.insights` · `mio.observer.status` · `mio.observer.collect` · `mio.observer.ferment` · `mio.observer.essays` · `mio.observer.dag` · `mio.observer.ingest` · `mio.observer.subscribe` · `mio.observer.digest`
@@ -221,8 +222,9 @@ scope layers, reuse-evidence weighting). Both the MCP server
 (`mio.memory.query` / `mio.memory.record`) and the CLI
 (`mio recall` / `mio remember`) go through it, so rankings are identical
 across entry points. The same module also implements the hygiene
-operations — `analyze` / `archive` / `migrate` — so `mio.memory.analyze`
-and `mio memory analyze` can never drift apart. `server/digest.js`
+operations — `analyze` / `archive` / `merge` / `migrate` — so
+`mio.memory.analyze` and `mio memory analyze` can never drift apart.
+`server/digest.js`
 aggregates traces/memory/reuse into actionable reports (also exposed as
 `mio.digest.generate`), and `server/retention.js` powers `mio prune`
 (age/expiry trimming with backups; `memory.jsonl` is never touched
@@ -239,6 +241,7 @@ mio memory analyze                       # what needs attention?
 mio memory archive --ids mem_a,mem_b     # preview (no --yes = no write)
 mio memory archive --ids mem_a,mem_b --yes   # apply
 mio memory restore --ids mem_a           # undo
+mio memory merge --ids mem_a,mem_b --yes # collapse duplicates into one survivor
 mio memory migrate --ids mem_a --scope global   # promote to the global layer
 ```
 
@@ -262,6 +265,54 @@ Notes:
   with a `0.75` threshold, union-find grouped so `A~B, B~C` collapses
   into one group. Above 1500 active records the scan is skipped and
   `duplicatesSkipped` is reported instead of hanging on O(n²) work.
+
+### Merging duplicates
+
+`analyze` reports duplicate groups but cannot resolve them — archiving
+each member by hand leaves the survivor without any record of what it
+absorbed. `mio memory merge` fixes that:
+
+```bash
+mio memory merge --ids mem_a,mem_b --yes                    # newest wins
+mio memory merge --ids mem_a,mem_b --keep mem_a --yes       # choose the survivor
+```
+
+**Merge only combines byte-identical content by default.** This is a
+deliberate safety stance, not an oversight: measured against a real
+860-record store, 19 of 22 duplicate groups were byte-identical and 3
+were not. Concatenating divergent bodies corrupts them — one real case
+produced a record carrying both `Token 来源` and `凭证来源` for the same
+field, plus a duplicated header. So when a group's members disagree,
+merge **refuses and prints the candidates** instead of guessing:
+
+```bash
+mio memory merge --ids mem_a,mem_b --yes
+# No merge applied: content differs across records; refusing to concatenate
+#   - mem_a (1167 chars, 2026-09-09T14:25:56.735Z)
+#   - mem_b (1174 chars, 2026-09-09T14:31:00.898Z)
+```
+
+To resolve such a group you must name the body that survives, which is
+what `--keep` is for; `--allow-divergent` acknowledges that the others
+are being dropped rather than combined:
+
+```bash
+mio memory merge --ids mem_a,mem_b --keep mem_b --allow-divergent --yes
+```
+
+What a merge writes:
+
+- The **survivor** keeps its own body verbatim and gains
+  `supersedes: [<archived ids>]`, `mergedAt`, `mergedCount`, and a
+  unioned tag list so no retrieval keyword is lost.
+- The **other members** are archived with
+  `archiveReason: "merged-into:<survivor>"` and a `mergedInto` pointer.
+- It is **reversible**: `mio memory restore --ids <archived ids>` brings
+  the group back. The audit fields stay on the record, so the merge
+  history survives an undo.
+- A re-run that has nothing left to merge exits `1` and reports
+  `nothing left to merge` — it does not print an undo command for
+  records it did not archive.
 
 ## Release verification
 

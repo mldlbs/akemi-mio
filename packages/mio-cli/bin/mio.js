@@ -488,7 +488,7 @@ function rememberCommand(args, useJson) {
 // Every flag that consumes the next token. A positional directly after one of
 // these is that flag's value, not an id.
 const VALUE_FLAGS = new Set([
-  '--ids', '--reason', '--project', '--limit', '--scope',
+  '--ids', '--reason', '--project', '--limit', '--scope', '--keep',
   '--by', '--notes', '--source-agent', '--target-agent', '--experience-id', '--status',
 ])
 
@@ -556,20 +556,69 @@ function printMemoryAnalyze(result) {
   }
 }
 
+// Merging divergent content is refused by default; when that happens the
+// caller needs to see *what* differs before deciding, so print the candidates.
+function printMemoryMerge(result) {
+  if (!result.merged) {
+    console.log(`No merge applied (project=${result.project || 'current'}): ${result.reason}`)
+    if (result.divergent.length > 0) {
+      console.log('\nDivergent content — inspect before choosing a survivor:')
+      for (const record of result.divergent) {
+        console.log(`- ${record.id} (${record.contentLength} chars, ${record.timestamp || 'no timestamp'})`)
+        console.log(`    ${record.content.split('\n')[0].slice(0, 110)}`)
+      }
+    }
+    if (result.notFound.length > 0) console.log(`\nnot found: ${result.notFound.join(', ')}`)
+    if (result.outOfScope && result.outOfScope.length > 0) {
+      console.log(`\nbelongs to another project: ${result.outOfScope.join(', ')}`)
+    }
+    if (result.hint) console.log(`\n${result.hint}`)
+    process.exitCode = 1
+    return
+  }
+
+  // A merge that archived nothing is a no-op: every requested id was already
+  // archived (i.e. these were merged before). Report it as failure the same way
+  // archive does, so scripts do not read success out of an idempotent re-run.
+  if (result.archivedCount === 0) {
+    console.log(`No merge applied (project=${result.project || 'current'}): nothing left to merge`)
+    if (result.skipped.length > 0) {
+      console.log(`already archived (previously merged): ${result.skipped.join(', ')}`)
+      console.log(`superseded by: ${result.survivor.id}`)
+    }
+    if (result.notFound.length > 0) console.log(`not found: ${result.notFound.join(', ')}`)
+    process.exitCode = 1
+    return
+  }
+
+  console.log(
+    `Merged ${result.archivedCount} record(s) into ${result.survivor.id} (project=${result.project || 'current'})`,
+  )
+  console.log(`survivor: ${result.survivor.contentLength} chars, ${result.survivor.timestamp || 'no timestamp'}`)
+  if (result.divergentContent) console.log('note: content differed across members; the survivor body was chosen explicitly')
+  console.log(`supersedes: ${result.survivor.supersedes.join(', ')}`)
+  if (result.skipped.length > 0) console.log(`already archived: ${result.skipped.join(', ')}`)
+  if (result.notFound.length > 0) console.log(`not found: ${result.notFound.join(', ')}`)
+  console.log(`Undo with: mio memory restore --ids ${result.archived.join(',')}`)
+}
+
 function memoryUsage() {
   console.log(`Usage:
   mio memory analyze                        Report duplicates, low-quality records and kind histogram
   mio memory archive --ids a,b              Archive records (soft delete; hidden from recall/analyze)
   mio memory restore --ids a,b              Un-archive previously archived records
+  mio memory merge --ids a,b                Merge duplicates: one survives, the rest are archived
   mio memory migrate --ids a,b --scope global   Move records between project and global layers
 
 Options:
   --ids a,b,c        Memory record ids (also accepted as bare positionals)
+  --keep id          Merge: which record's content survives (default: newest)
+  --allow-divergent  Merge: permit merging records whose content differs (requires --keep)
   --scope global|project   Target layer for migrate
   --project name     Project filter (defaults to current directory name)
   --reason text      Optional note stored on the record
   --limit n          Max duplicate groups / low-quality rows to show (analyze, 1-20)
-  --yes              Apply archive (without it, archive only previews)
+  --yes              Apply archive/merge (without it they only preview)
   --json             Machine-readable output
 `)
 }
@@ -583,7 +632,7 @@ function memoryCommand(args, useJson) {
     if (!sub) process.exitCode = 1
     return
   }
-  if (!['analyze', 'archive', 'restore', 'migrate'].includes(sub)) {
+  if (!['analyze', 'archive', 'restore', 'merge', 'migrate'].includes(sub)) {
     console.error(`Unknown memory subcommand: ${sub}`)
     memoryUsage()
     process.exitCode = 1
@@ -614,20 +663,40 @@ function memoryCommand(args, useJson) {
     process.exitCode = 1
     return
   }
+  if (sub === 'merge' && ids.length < 2) {
+    console.error('mio memory merge requires at least 2 ids (nothing to merge otherwise)')
+    process.exitCode = 1
+    return
+  }
 
-  if (sub === 'archive' && !flagPresent(flags, '--yes')) {
-    // Archiving hides records from recall and analyze. Preview first so a
-    // mistyped id cannot silently drop records out of future retrieval.
+  if ((sub === 'archive' || sub === 'merge') && !flagPresent(flags, '--yes')) {
+    // Archiving hides records from recall, and merging additionally rewrites the
+    // survivor's supersedes list. Preview first so a mistyped id cannot silently
+    // drop records out of future retrieval.
     const previewProject = optionValue(flags, '--project') || projectName() || 'current'
     if (useJson) {
       jsonOrText(
-        { preview: true, applied: false, project: previewProject, ids, hint: 'Re-run with --yes to apply.' },
+        {
+          preview: true,
+          applied: false,
+          project: previewProject,
+          ids,
+          keep: optionValue(flags, '--keep') || null,
+          hint: 'Re-run with --yes to apply.',
+        },
         true,
       )
     } else {
-      console.log(`Archive preview: ${ids.length} id(s) would be archived (project=${previewProject})`)
+      // Archive keeps its historical "Archive preview" wording; merge is newer
+      // and uses a lowercase verb to read naturally mid-sentence.
+      const label = sub === 'merge' ? 'merge preview' : 'Archive preview'
+      console.log(`${label}: ${ids.length} id(s) (project=${previewProject})`)
       console.log(`  ${ids.join(', ')}`)
-      console.log('Re-run with --yes to apply. Undo with: mio memory restore --ids <ids>')
+      if (sub === 'merge') {
+        const keep = optionValue(flags, '--keep')
+        console.log(`  survivor: ${keep || 'newest by timestamp (default)'}`)
+      }
+      console.log(`Re-run with --yes to apply. Undo with: mio memory restore --ids <ids>`)
     }
     process.exitCode = 1
     return
@@ -640,6 +709,14 @@ function memoryCommand(args, useJson) {
         ids,
         project: optionValue(flags, '--project'),
         restore: sub === 'restore',
+        reason: optionValue(flags, '--reason'),
+      })
+    } else if (sub === 'merge') {
+      result = store.mergeMemory({
+        ids,
+        project: optionValue(flags, '--project'),
+        keep: optionValue(flags, '--keep'),
+        allowDivergent: flagPresent(flags, '--allow-divergent'),
         reason: optionValue(flags, '--reason'),
       })
     } else {
@@ -657,6 +734,8 @@ function memoryCommand(args, useJson) {
   }
 
   if (useJson) return jsonOrText(result, true)
+
+  if (sub === 'merge') return printMemoryMerge(result)
 
   if (sub === 'migrate') {
     const target = result.scope === 'global' ? 'global' : `project=${result.project || 'current'}`
@@ -1087,6 +1166,7 @@ Usage:
   mio memory analyze          Report duplicates, low-quality records and kind histogram
   mio memory archive --ids a,b    Archive records (soft delete; --yes required to apply)
   mio memory restore --ids a,b    Un-archive previously archived records
+  mio memory merge --ids a,b  Merge duplicates into one survivor (--yes required to apply)
   mio memory migrate --ids a,b --scope global|project   Move records between layers
   mio experience list        List experience reuse (--status pending|confirmed|verified)
   mio experience confirm --ids a,b   Confirm auto-claimed reuse (bulk supported)

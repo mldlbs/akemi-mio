@@ -162,7 +162,7 @@ akemi-mio/
 | `@akemi-mio/agent-persona` | 人格漂移控制与行为分析 |
 | `@akemi-mio/runtime-contracts` | 共享类型定义 |
 | `@akemi-mio/runtime-foundation` | 日志、EventBus、记忆 schema |
-| `mio-agent-runtime` | CLI 加 MCP 服务端，共 46 个工具 |
+| `mio-agent-runtime` | CLI 加 MCP 服务端，共 47 个工具 |
 
 其余包依赖 Electron 宿主，通过 `tsconfig` 路径从源码引用，不对外发布。
 
