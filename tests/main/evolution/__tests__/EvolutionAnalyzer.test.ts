@@ -6,7 +6,15 @@ import { mkdirSync, rmSync } from 'fs'
 
 vi.mock('@akemi-mio/core/logger/Logger', () => ({ log: vi.fn() }))
 
-vi.mock('@akemi-mio/evolution/goals', () => ({
+// 必须用被测代码 import 的那个 specifier（@akemi-mio/evolution-goals）。
+// 这里原先 mock 的是旧路径 @akemi-mio/evolution/goals：vi.mock 按
+// specifier 匹配，两个写法会被当成**两个模块实例**，
+// 于是 mock 打在旧实例上、被测代码拿到的仍是真实 store，
+// 表现为断言拿到空字符串而不是 mock 数据。
+// 只替换 executionGoalStore，formatExecutionGoalContext 必须用真实实现 ——
+// 断言里的「放弃: 1 / 完成率: 60%」正是它格式化出来的。
+vi.mock('@akemi-mio/evolution-goals', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
   executionGoalStore: {
     getStats: vi.fn(() => ({ total: 0, active: 0, blocked: 0, completed: 0, abandoned: 0, completionRate: 0 })),
     getMethodologyStats: vi.fn(() => []),
@@ -142,7 +150,7 @@ describe('EvolutionAnalyzer', () => {
   })
 
   it('builds execution goal context including abandoned stats', async () => {
-    const { executionGoalStore } = await import('@akemi-mio/evolution/goals')
+    const { executionGoalStore } = await import('@akemi-mio/evolution-goals')
     executionGoalStore.getStats.mockReturnValue({
       total: 5,
       active: 0,
