@@ -41,6 +41,8 @@ __*
 .claude/projects/
 .claude/tool_call_log.json
 .claude/tool-call-log-*.test.json
+# electron-vite 每次构建落下的临时配置（electron.vite.config.<时间戳>.mjs）
+electron.vite.config.*.mjs
 .claude-flow/
 .swarm/
 .playwright-mcp/
