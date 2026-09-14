@@ -60,7 +60,11 @@ describe('nocturnal atelier v2 (warm paper) visual system', () => {
     expect(components).toContain('.btn-voice::before')
     expect(components).toContain('.rp-tool-btn::after')
     expect(components).toContain('.bookmark-item::before')
-    expect(components).toContain('atelier-control-glint')
+    // 注意：这里原本断言的是 atelier-control-glint 动画名。该动画已从
+    // .btn-voice::before / .btn-inspiration::before 上移除 —— 它无条件常驻，
+    // 实测让应用空闲时 GPU 进程吃满一个核（详见 components.css 里的说明）。
+    // 微光体系本身保留（静态高光 + --control-glint token），故断言改指 token。
+    expect(tokens).toContain('--control-glint')
   })
 
   it('gives rendered writing and code a deliberate paper typography treatment', () => {

@@ -6574,18 +6574,23 @@
   border-radius: inherit;
   background: radial-gradient(circle at 32% 18%, oklch(1 0 0 / 0.9), transparent 36%);
   opacity: 0.72;
-  animation: atelier-control-glint 5.5s var(--ease-glass) infinite alternate;
-}
+  /* 这里曾经挂过一条 atelier-control-glint 无限动画（5.5s alternate），已移除：
+     实测它让应用空闲时 GPU 进程常驻吃满一个核。
 
-@keyframes atelier-control-glint {
-  from {
-    transform: translateY(-1px) rotate(-8deg);
-    opacity: 0.42;
-  }
-  to {
-    transform: translateY(1px) rotate(8deg);
-    opacity: 0.82;
-  }
+       空闲基线（无任何交互，跳过启动期后连采多次取中位数）：
+         GPU 126%、整机总 CPU 138%，持续 65 秒不衰减。
+       2x2 分解：
+         基线              GPU 126%
+         只关全站毛玻璃     GPU  52%   ← 毛玻璃只是放大器
+         只关动画           GPU   0%   ← 动画才是主因
+       所以去掉动画即可归零；静态毛玻璃本身不耗电，不必一并移除。
+
+       它挂在没有任何状态语义的常驻伪元素上（不像 .active / :hover /
+       工作流 running 那些按需出现的动效），而 5.5s 的缓慢呼吸在一个
+       38px 的圆上几乎不可感知 —— 收益极小，代价却是常驻一个核。
+
+       高光本身保留为静态（opacity 0.72，落在原动画 0.42~0.82 区间内），
+       观感几乎无差别。 */
 }
 
 .btn-voice:hover,
@@ -6671,8 +6676,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .btn-voice::before,
-  .btn-inspiration::before,
   .btn-voice.active,
   .btn-inspiration.active,
   .status-dot.active,

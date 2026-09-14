@@ -28,7 +28,8 @@
     "coverage:renderer": "vitest run --config vitest.config.renderer.ts --coverage",
     "test:preload": "vitest run --config vitest.config.preload.ts",
     "audit": "npm audit --audit-level=high",
-    "check:renderer-entries": "node scripts/check-renderer-entries.cjs"
+    "check:renderer-entries": "node scripts/check-renderer-entries.cjs",
+    "check:idle-gpu": "node scripts/check-idle-gpu.cjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.199",
