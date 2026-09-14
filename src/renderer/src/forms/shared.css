@@ -5,8 +5,14 @@
    ============================================================ */
 
 /* 形态窗口一律透明底：窗口层面的透明由主进程 transparent:true 提供，
-   HTML 侧不得再铺底色，否则透明窗口会露出实心方块。 */
-html.form-root,
+   HTML 侧不得再铺底色，否则透明窗口会露出实心方块。
+
+   html 这条**不能**写成 html.form-root：form-root 只挂在 <body> 上，
+   <html> 从来没有这个类，那样写是一条永不匹配的死规则。后果很隐蔽：
+   html 高度保持 auto → body/#root/形态根容器的 height:100% 全部失去
+   确定高度而塌成 0 → 壁纸整块全透明只剩时钟、对话框只有顶部 220px。
+   本文件只被三个形态入口导入，不会波及主窗口，所以直接选中 html 是安全的。 */
+html,
 body.form-root {
   margin: 0;
   padding: 0;
@@ -25,6 +31,15 @@ body.form-root {
 body.form-root #root {
   width: 100%;
   height: 100%;
+}
+
+/* 主窗口的全局 reset 在 styles/base.css 里，形态窗口不导入它，
+   所以这里补齐 border-box：否则 width:100% 再叠 1px 描边会溢出 2px，
+   被上面的 overflow:hidden 裁掉 —— 表现为卡片右边框消失、圆角被切。 */
+body.form-root *,
+body.form-root *::before,
+body.form-root *::after {
+  box-sizing: border-box;
 }
 
 /* 窗口拖拽区：无边框窗口靠 -webkit-app-region 实现拖动。
