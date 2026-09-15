@@ -688,6 +688,14 @@ export function getFormWindow(kind: FormKind): BrowserWindow | null {
 /** 显示某形态窗口（按需创建）。壁纸形态显示时压到最底层并重新铺满。 */
 export function showForm(kind: FormKind, focus = true): BrowserWindow {
   const win = createFormWindow(kind)
+  // 先恢复帧率/节流再显示：hideForm 把它们降过，不还原的话重新打开的
+  // 形态会以 1fps 渲染（表现为动效卡成幻灯片）。
+  try {
+    win.webContents.setFrameRate(60)
+    win.webContents.setBackgroundThrottling(false)
+  } catch (err) {
+    log('WARN', 'form_show_throttle_reset_failed', { kind, error: String(err) })
+  }
   if (kind === 'wallpaper') {
     applyWallpaperBounds(win)
     win.showInactive() // 不抢焦点，否则用户正在输入的窗口会被打断
@@ -699,10 +707,37 @@ export function showForm(kind: FormKind, focus = true): BrowserWindow {
   return win
 }
 
-/** 隐藏某形态窗口。 */
+/**
+ * 隐藏某形态窗口。
+ *
+ * 关键：**隐藏时必须一并停掉渲染**，不能只 `hide()`。
+ *
+ * 对声明了 `transparent: true` 的窗口，`hide()` 只改变可见性标志，
+ * Chromium 不会自动把该 WebContents 降级为 "hidden" —— 页面继续以
+ * 全帧率出帧。实测（壁纸 2560x1440，含 142 个无限动画）：
+ *
+ *   壁纸可见      GPU 进程 138%
+ *   壁纸已隐藏    GPU 进程 138%   ← 窗口确实不可见（IsWindowVisible=false），
+ *                                   但一个核照样烧着，用户完全无感
+ *
+ * 壁纸是常驻功能，一旦被打开过就永久吃一个核，笔记本续航直接受影响。
+ * 所以这里显式停掉渲染；`showForm` 侧恢复。这是按需重启而非销毁，
+ * 重新显示时页面状态不会丢。
+ *
+ * 对非透明窗口（pet / chat）不加这个调用也无妨，但统一处理更简单、
+ * 且能防住将来某个形态改成透明时又踩同一个坑。
+ */
 export function hideForm(kind: FormKind): void {
   const win = getFormWindow(kind)
-  if (win) win.hide()
+  if (!win || win.isDestroyed()) return
+  win.hide()
+  // 必须在 hide() 之后：反过来的话，hide() 本身可能触发一次重绘
+  try {
+    win.webContents.setBackgroundThrottling(true)
+    win.webContents.setFrameRate(1)
+  } catch (err) {
+    log('WARN', 'form_hide_throttle_failed', { kind, error: String(err) })
+  }
 }
 
 /** 某形态是否可见。 */

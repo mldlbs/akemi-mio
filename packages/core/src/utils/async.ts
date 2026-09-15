@@ -8,10 +8,29 @@ export function createTimeoutSignal(timeoutMs: number): { controller: AbortContr
   return { controller, timer }
 }
 
-/** Race a promise against a timeout. Rejects with `errorMsg` if the timeout fires first. */
+/**
+ * Race a promise against a timeout. Rejects with `errorMsg` if the timeout fires first.
+ *
+ * `Promise.race` 不会取消落选的一方，所以两个方向都要收尾，否则：
+ *   1. fn 先返回时，那个 setTimeout 仍会到点 reject，而已经没人接它 ——
+ *      变成 unhandled rejection（测试里表现为 "Errors N errors"，
+ *      且可能掩盖真正的失败）。timer 还会一直挂到 timeoutMs 到期才释放，
+ *      拖着 event loop、推迟进程退出。
+ *   2. timeout 先触发时，fn 之后才 reject 同理。
+ * 所以这里 finally 里 clearTimeout，并给 fn 挂一个空 catch 吃掉落选后的 rejection。
+ */
 export async function withTimeout<T>(fn: () => Promise<T>, timeoutMs: number, errorMsg = 'timeout'): Promise<T> {
-  const timer = new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errorMsg)), timeoutMs))
-  return Promise.race([fn(), timer])
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
+  })
+  const work = fn()
+  work.catch(() => {})
+  try {
+    return await Promise.race([work, timeout])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** Retry an async function on rejection. Waits `delayMs` between attempts. */
