@@ -14,6 +14,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { render, act } from '@testing-library/react'
 import type { ConversationContext, MemoryCard } from '../../runtime'
 
@@ -135,6 +137,24 @@ describe('WallpaperForm 星图', () => {
   it('渲染固定数量的星点', async () => {
     const { container } = await renderWallpaper()
     expect(container.querySelectorAll('.wp-star')).toHaveLength(140)
+  })
+
+  it('星点不带 animationDelay（闪烁动画已移除，别再挂回去）', async () => {
+    const { container } = await renderWallpaper()
+    for (const star of container.querySelectorAll('.wp-star')) {
+      expect((star as HTMLElement).style.animationDelay).toBe('')
+      expect((star as HTMLElement).style.animationName).toBe('')
+    }
+  })
+
+  it('壁纸样式里不存在任何无限动画（回归：曾因它空闲吃满一个 GPU 核）', async () => {
+    const css = readFileSync(
+      join(process.cwd(), 'src/renderer/src/forms/wallpaper/styles.css'),
+      'utf8',
+    )
+    // 去掉注释再扫，避免把说明文字里的 "infinite" 当成真动画
+    const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(stripped).not.toContain('infinite')
   })
 
   it('两次挂载星点布局完全一致（刷新不会"闪一下"）', async () => {

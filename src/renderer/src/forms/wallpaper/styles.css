@@ -16,15 +16,22 @@
   -webkit-user-select: none;
 }
 
-/* ── 色晕：两团缓慢流动的大面积渐变 ──
-   色相由 --wp-hue 驱动，随情绪变化，但过渡极慢（18s），
-   这样颜色变化是"感觉到的"而不是"看到的"。 */
+/* ── 色晕：两团大面积渐变，位置固定 ──
+   色相由 --wp-hue 驱动，随情绪变化。
+
+   这里曾经挂过 wp-drift-a / wp-drift-b 两条无限漂移动画。
+   已移除：全屏透明窗口只要有任何动画在跑，合成器每帧都要重光栅化整个
+   全屏表面；实测壁纸可见时 GPU 常驻吃满一个核（136%）。停掉动画后归零
+   （见文件末尾的实测数据），而静态的模糊色晕、星点、噪点全部保留 ——
+   视觉上从"缓缓流动的极光"变成"一张静止的星空"，代价极小。
+
+   色相的「缓慢变化」不再靠动画：--wp-hue 由情绪广播驱动，
+   由 CSS transition 在 color 属性上做过渡（极慢、且非常驻，不产生每帧重绘）。 */
 .wp-aurora {
   position: absolute;
   border-radius: 50%;
   filter: blur(70px);
   opacity: 0.5;
-  will-change: transform;
 }
 
 .wp-aurora-a {
@@ -38,7 +45,6 @@
     oklch(0.5 0.12 var(--wp-hue) / 0.18) 45%,
     transparent 72%
   );
-  animation: wp-drift-a 26s ease-in-out infinite;
 }
 
 .wp-aurora-b {
@@ -52,7 +58,6 @@
     oklch(0.45 0.1 calc(var(--wp-hue) + 42) / 0.16) 48%,
     transparent 74%
   );
-  animation: wp-drift-b 32s ease-in-out infinite;
 }
 
 /* 细微噪点，消除大面积渐变的色带（banding）*/
@@ -76,8 +81,11 @@
   height: 100%;
 }
 
+/* 星点。亮度固定 —— 曾经的 wp-twinkle 无限闪烁（挂在 140 个 <circle> 上）
+   同样会触发全屏每帧重绘，已移除。星点密度与大小分布是静态的，
+   看上去仍是一片星空，只是不再「眨眼」。 */
 .wp-star {
-  animation: wp-twinkle 4.2s ease-in-out infinite;
+  opacity: 0.55;
 }
 
 /* ── 信息层 ── */
@@ -145,22 +153,11 @@
 
 /* ── 关键帧 ── */
 
-/* 极缓慢的位移与缩放：18~30s 级的周期，肉眼几乎察觉不到"在动" */
-@keyframes wp-drift-a {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(6%, 5%) scale(1.14); }
-}
+/* wp-drift-a / wp-drift-b / wp-twinkle 已全部移除，见上方注释与文末实测数据。 */
 
-@keyframes wp-drift-b {
-  0%, 100% { transform: translate(0, 0) scale(1.06); }
-  50% { transform: translate(-7%, -4%) scale(1); }
-}
-
-@keyframes wp-twinkle {
-  0%, 100% { opacity: 0.25; }
-  50% { opacity: 0.9; }
-}
-
+/* 信息卡的入场动画。这是**一次性**的（0.5s 播完即停在终态），
+   不构成常驻出帧源 —— 与上面被移除的三条 infinite 动画有本质区别。
+   只有在信息卡首次出现的那半秒里会引发重绘，之后静止。 */
 @keyframes wp-info-in {
   0% { opacity: 0; transform: translateY(10px); }
   100% { opacity: 1; transform: translateY(0); }
