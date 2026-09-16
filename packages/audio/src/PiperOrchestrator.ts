@@ -28,7 +28,7 @@ import { existsSync, unlinkSync } from 'fs'
 import { join, extname, dirname } from 'path'
 import { tmpdir } from 'os'
 import { log } from '@akemi-mio/core/logger/Logger'
-import { PIPER_SCRIPT, PIPER_MODEL, PIPER_PYTHON } from '@akemi-mio/core/config'
+import { resolvePiperScript, PIPER_MODEL, piperPython } from '@akemi-mio/core/config'
 import { cleanTTS } from './TtsService'
 import { AsyncQueue, ok, err, type Result } from '@akemi-mio/core/core/patterns'
 import { MetricsCollector } from '@akemi-mio/core/core/metrics/MetricsCollector'
@@ -630,9 +630,14 @@ export class PiperOrchestrator implements IEngineService {
         })
 
         const proc = execFile(
-          PIPER_PYTHON,
+          // 懒解析：优先 env，其次探测"真的装了 piper/numpy 的解释器"，
+          // 最后才退回裸 'python'。见 core/config 的 resolvePiperPython 注释。
+          piperPython(),
           [
-            PIPER_SCRIPT,
+            // 同样懒解析：会先把随包发布的脚本同步到 userData，避免用到旧版本。
+            // 旧版本用 PIPER_MODEL_PATH env 取模型、且硬编码回落到仓库路径，
+            // 与本处传参方式（--model CLI）不兼容。
+            resolvePiperScript(),
             '--model',
             modelPath,
             '--output_file',

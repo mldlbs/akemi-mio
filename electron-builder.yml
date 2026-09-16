@@ -61,6 +61,12 @@ extraResources:
   - from: "."
     filter:
       - "icon.png"
+  # Piper TTS 的解释器脚本必须以「文件」形式随包发布：主进程是用子进程
+  # `python <script>` 调它的，裸 python 读不了 asar 里的成员。
+  # 运行时由 core/config 的 resolvePiperScript() 同步到 <userData>/scripts/ 再执行，
+  # 避免 userData 里残留的旧版本脚本（接口不兼容）把新版本顶掉。
+  - from: "scripts/piper_speak.py"
+    to: "scripts/piper_speak.py"
 npmRebuild: false
 electronDist: node_modules/electron/dist
 publish:

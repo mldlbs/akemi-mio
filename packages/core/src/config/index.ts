@@ -1,5 +1,6 @@
-import { resolve, join } from 'path'
-import { existsSync, readFileSync } from 'fs'
+import { resolve, join, dirname } from 'path'
+import { existsSync, readFileSync, mkdirSync, copyFileSync } from 'fs'
+import { spawnSync } from 'child_process'
 
 let _electronApp: any = null
 let _electronLoaded = false
@@ -65,6 +66,73 @@ function isPackagedApp(): boolean {
   }
   return false
 }
+
+/**
+ * 找到一个**真的装了指定 Python 包**的解释器。
+ *
+ * 为什么需要它：`python` 这个裸命令在 PATH 上并不唯一。本机实测 PATH 顺序是
+ * WorkBuddy 托管 Python(3.13，空) 在前、系统 Python(3.12，带 numpy+piper+torch)
+ * 在后，于是裸 `python` 拿到了没有依赖的那个，造成：
+ *   - Piper TTS 每次合成都报 `ModuleNotFoundError: No module named 'numpy'`；
+ *   - ComfyUI `main.py` 导入即崩，进入 5 秒一次的重启循环。
+ * 两者都只是"解释器选错了"，不是缺包。
+ *
+ * 原来只有 `scripts/dev.js` 做这件事（探测 `python`/`py`），所以 **dev 跑得好好的、
+ * 打包版却必坏** —— 因为打包版不经过 dev.js，`PIPER_PYTHON` 直接落到裸 `python`。
+ * 这里把同一套探测下沉到配置层，让两条路径共用。
+ *
+ * 只在首次真正取值时探测（见下方 lazy getter），不在模块加载时执行 ——
+ * 本模块被 89 个文件 import，加载期做同步 spawn 会拖慢启动。
+ */
+function findPythonWithPackage(packageName: string): string {
+  // 'py' 放在 'python' 之后：Windows 的 py launcher 会选它自己认为的默认版本，
+  // 本机恰好是带依赖的 3.12，是很好的兜底。
+  for (const candidate of ['python', 'py']) {
+    try {
+      const probe = spawnSync(
+        candidate,
+        [
+          '-c',
+          `import importlib.util as u, sys; sys.exit(0 if u.find_spec(${JSON.stringify(packageName)}) else 1)`,
+        ],
+        { encoding: 'utf8', windowsHide: true, timeout: 5000 },
+      )
+      if (probe.status === 0) {
+        const pathProbe = spawnSync(candidate, ['-c', 'import sys; print(sys.executable)'], {
+          encoding: 'utf8',
+          windowsHide: true,
+          timeout: 5000,
+        })
+        const resolved = (pathProbe.stdout || '').trim()
+        return resolved || candidate
+      }
+    } catch {
+      /* 探测失败就试下一个候选 */
+    }
+  }
+  return ''
+}
+
+let _piperPython: string | undefined
+
+/**
+ * Piper / ComfyUI 使用的 Python 解释器。
+ *
+ * 优先级：显式 env（PIPER_PYTHON）> 探测出的带依赖解释器 > 裸 'python'。
+ * 探测结果做模块级缓存 —— 一次进程只探一次，别在每次合成时重复 spawn。
+ */
+export function resolvePiperPython(): string {
+  if (_piperPython !== undefined) return _piperPython
+  const explicit = process.env.PIPER_PYTHON
+  if (explicit) {
+    _piperPython = explicit
+    return _piperPython
+  }
+  // 先按 piper 探测；没有就退回 numpy（ComfyUI 的最小依赖，覆盖无 TTS 的机器）。
+  _piperPython = findPythonWithPackage('piper') || findPythonWithPackage('numpy') || 'python'
+  return _piperPython
+}
+
 
 // ===== Runtime / Workspace 边界定义 =====
 /** Layer 0 — Runtime Kernel 安装目录（只读） */
@@ -173,10 +241,83 @@ export const TELEGRAM_OUTBOX_COOLDOWN_MS = parseInt(process.env.TELEGRAM_OUTBOX_
 /** Path to the Piper TTS Python script. Override via PIPER_SCRIPT env. */
 const projectPiperScript = resolve(join(getProjectRoot(), 'scripts', 'piper_speak.py'))
 const workspacePiperScript = resolve(join(WORKSPACE_ROOT, 'scripts', 'piper_speak.py'))
+
+/**
+ * 确保 `<userData>/scripts/piper_speak.py` 是**当前版本**的脚本，返回其路径。
+ *
+ * 为什么需要它：打包版的 `PIPER_SCRIPT` 指向 userData 下的脚本副本，但历史上**没有任何
+ * 机制把这个文件同步过去**，于是 userData 里可能躺着任意旧版本。实测踩到的正是这个：
+ * 一份 6 月的旧脚本用 `PIPER_MODEL_PATH` 环境变量取模型路径、且硬编码回落到
+ * `D:\work\code\akemi-mio\models\...`，而主进程传的是 `--model <路径>` CLI 参数 ——
+ * 旧脚本根本不认，直接按硬编码路径找模型，报
+ * `FileNotFoundError: ...D:\work\code\akemi-mio\models\piper\zh_CN-huayan-medium.onnx.json`。
+ * （解释器已经修对了，但 TTS 仍然不可用，就是被这一层挡住的。）
+ *
+ * 做法：以 `process.resourcesPath/scripts/piper_speak.py`（electron-builder 的
+ * extraResources 产物）为准，内容不同就覆盖 userData 的副本。开发态下
+ * resourcesPath 不存在，退回仓库里的 `scripts/piper_speak.py`。
+ *
+ * 同步是**懒执行**的：只在真正要用脚本时调一次（结果做模块级缓存），
+ * 避免给 89 个 import 本模块的文件增加启动开销。
+ */
+let _piperScript: string | undefined
+
+export function resolvePiperScript(): string {
+  if (_piperScript !== undefined) return _piperScript
+  const explicit = process.env.PIPER_SCRIPT
+  if (explicit) {
+    _piperScript = explicit
+    return _piperScript
+  }
+
+  // 开发态：仓库里的脚本就是最新的，直接用，不折腾 userData。
+  if (!isPackagedApp()) {
+    _piperScript = existsSync(projectPiperScript) ? projectPiperScript : workspacePiperScript
+    return _piperScript
+  }
+
+  // 打包态：以随包发布的副本为准，同步到 userData 后再执行。
+  const bundled = join(process.resourcesPath || '', 'scripts', 'piper_speak.py')
+  if (!existsSync(bundled)) {
+    // 没随包带上（旧的打包配置）——只能退回 userData 现有副本。
+    _piperScript = workspacePiperScript
+    return _piperScript
+  }
+
+  try {
+    const current = existsSync(workspacePiperScript) ? readFileSync(workspacePiperScript, 'utf8') : ''
+    const incoming = readFileSync(bundled, 'utf8')
+    if (current !== incoming) {
+      mkdirSync(dirname(workspacePiperScript), { recursive: true })
+      copyFileSync(bundled, workspacePiperScript)
+    }
+    _piperScript = workspacePiperScript
+  } catch {
+    // 同步失败就退回落仓库路径（开发态能跑），不要因为 TTS 脚本让启动失败。
+    _piperScript = existsSync(projectPiperScript) ? projectPiperScript : workspacePiperScript
+  }
+  return _piperScript
+}
+
+/**
+ * @deprecated 用 `resolvePiperScript()`。
+ *
+ * 这个常量在**模块加载期**就求值，而 `getElectronApp()` 此刻往往还没拿到 electron 的
+ * `app`（`WORKSPACE_ROOT` 会退化到 `process.cwd()`），打包版因此可能落到仓库路径。
+ * 保留导出只为兼容既有 import；新代码请用函数。
+ */
 export const PIPER_SCRIPT =
   process.env.PIPER_SCRIPT || (!isPackagedApp() && existsSync(projectPiperScript) ? projectPiperScript : workspacePiperScript)
-/** Python executable used by Piper. Override via PIPER_PYTHON env. */
-export const PIPER_PYTHON = process.env.PIPER_PYTHON || 'python'
+/**
+ * Piper / ComfyUI 使用的 Python 解释器。Override via PIPER_PYTHON env.
+ *
+ * 这是**懒解析**：解释器探测要 spawn 子进程，若在模块加载期执行，89 个 import
+ * 本模块的文件都会白付一次代价。改成函数后，只在真正要起子进程时才探一次
+ * （resolvePiperPython 内部缓存结果）。调用点本来就在函数体里取值，无破坏。
+ */
+export function piperPython(): string {
+  return resolvePiperPython()
+}
 /** Path to the Piper TTS model. Override via PIPER_MODEL env. */
 export const PIPER_MODEL = process.env.PIPER_MODEL || resolve(join(WORKSPACE_ROOT, 'models', 'piper', 'zh_CN-huayan-medium.onnx'))
 /** Whether to prefer local Piper TTS over cloud TTS. Set USE_LOCAL_TTS=true to enable. */

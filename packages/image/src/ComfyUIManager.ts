@@ -11,6 +11,7 @@
 import { log } from '@akemi-mio/core'
 import { eventBus } from '@akemi-mio/core'
 import { WORKSPACE } from '@akemi-mio/core'
+import { piperPython } from '@akemi-mio/core/config'
 import { spawn, type ChildProcess } from 'child_process'
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync } from 'fs'
@@ -115,10 +116,11 @@ export class ComfyUIManager {
     try {
       log('INFO', 'comfyui_starting', { root: this.config.root, port: this.config.port })
 
-      // Python 解析顺序：COMFYUI_PYTHON > PIPER_PYTHON（dev.js 已解析出的带包 python）> 裸 'python'。
-      // 不能写死 'python'：PATH 上的 python 不一定有 torch/sqlalchemy（如 WorkBuddy 托管 Python），
-      // 而 dev.js 的 PIPER_PYTHON 已保证找到装好依赖的那个解释器。
-      const python = process.env.COMFYUI_PYTHON || process.env.PIPER_PYTHON || 'python'
+      // Python 解析顺序：COMFYUI_PYTHON > piperPython()（探测出的带包 python）> 裸 'python'。
+      // 不能写死 'python'：PATH 上的 python 不一定有 torch/sqlalchemy（如 WorkBuddy 托管 Python）。
+      // 走 piperPython() 而非 process.env.PIPER_PYTHON：打包版不经过 dev.js，env 里没有这个变量，
+      // 之前会退化成裸 'python' 导致 comfyui 启动即崩。piperPython() 在 core/config 里做探测+缓存。
+      const python = process.env.COMFYUI_PYTHON || piperPython() || 'python'
       log('DEBUG', 'comfyui_python_resolved', { python })
 
       this.process = spawn(python, ['main.py', '--port', String(this.config.port), '--listen', '0.0.0.0', '--highvram'], {
