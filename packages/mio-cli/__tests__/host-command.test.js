@@ -31,8 +31,12 @@ function capabilitiesJson(ws) {
 }
 
 test('host capabilities lists every host with its capabilities', () => {
-  const ws = workspace()
-  const result = capabilitiesJson(ws)
+  // Calls the module directly rather than spawning the CLI: this asserts the
+  // capability table itself, and spawning costs a full Node start plus a live
+  // probe of all five adapters (seconds each on Windows). The CLI layer is
+  // covered by the render/validation/agreement tests below.
+  const { listHostCapabilities } = require('../server/host-capabilities.js')
+  const result = listHostCapabilities()
 
   assert.equal(result.schemaVersion, 1)
   assert.ok(Array.isArray(result.hosts))

@@ -76,14 +76,22 @@ test('query log caps stored entries at the recent-query limit', () => {
   const home = workspace('cap')
   const log = createQueryLog({ dataDir: home })
 
+  // Persist once instead of calling record() 225 times: record() re-reads and
+  // rewrites the whole file on every call, which made this test O(n^2) and by
+  // far the slowest in the suite (~17s). The cap lives in persist/load, so a
+  // single batch write exercises exactly the same logic.
+  const many = []
   for (let i = 0; i < MAX_RECENT_QUERIES + 25; i += 1) {
-    log.record(entry({ query: `q${i}` }))
+    many.push(entry({ query: `q${i}` }))
   }
+  log.persist(many)
+
   const stored = readQueries(home)
   assert.equal(stored.length, MAX_RECENT_QUERIES)
   // Keeps the newest, so the first ones are gone.
   assert.equal(stored[0].query, 'q25')
   assert.equal(stored[stored.length - 1].query, `q${MAX_RECENT_QUERIES + 24}`)
+  assert.equal(log.load().length, MAX_RECENT_QUERIES, 'load applies the same cap')
 })
 
 test('memory store and task store share one query log (auto-claim still works)', () => {
