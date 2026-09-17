@@ -28,6 +28,7 @@ const { createAgentStore } = require('../server/agent-store.js')
 const { createInsightStore } = require('../server/insight-store.js')
 const { createObserverStore } = require('../server/observer-store.js')
 const { loadPhase0, renderPhase0Markdown } = require('../server/mio-intelligence-mcp/phase0.js')
+const { listHostCapabilities } = require('../server/host-capabilities.js')
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
 
@@ -1685,6 +1686,36 @@ Options:
   console.log(renderPhase0Markdown(report))
 }
 
+function hostCommand(args, useJson) {
+  const sub = args[1]
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    console.log(`Usage:
+  mio host capabilities       Show what each host supports and whether it is installed
+  mio host capabilities --json   Machine-readable (same shape as mio.host.capabilities)
+
+Notes:
+  "installed" is probed live from each adapter, so it reflects this machine right
+  now -- unlike \`mio install <host>\`, which only records intent in config.json.`)
+    if (!sub) process.exitCode = 1
+    return
+  }
+  if (sub !== 'capabilities') {
+    console.error(`Unknown host subcommand: ${sub}`)
+    process.exitCode = 1
+    return
+  }
+
+  const result = listHostCapabilities()
+  if (useJson) return jsonOrText(result, true)
+
+  console.log(`Host capabilities: ${result.hosts.length} host(s)`)
+  for (const host of result.hosts) {
+    const mark = host.installed ? 'installed' : 'not installed'
+    console.log(`  ${host.name.padEnd(10)} ${mark}`)
+    console.log(`             ${host.capabilities.join(', ')}`)
+  }
+}
+
 function installCommand(host, useJson) {
   if (!host) {
     console.error('Usage: mio install <codex|opencode|workbuddy|hermes|claude>')
@@ -1822,6 +1853,7 @@ Usage:
   mio observer <view>          Observer pipeline views (research pipeline, not the observe daemon):
                                status | world-model | trends | research | insights | essays | dag
   mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
+  mio host capabilities        Show what each host supports and whether it is installed
   mio policy check "<action>" Check historical risk for an action before running it
   mio prune --days 30         Trim old traces/queries/reuse records and observe.log (--dry-run to preview; --memory needs --yes)
   mio digest --days 7         Aggregate traces/memory/reuse into an actionable report (--write-back feeds agent context files; --json)
@@ -1871,6 +1903,8 @@ async function main() {
       return observerCommand(args, useJson)
     case 'phase0':
       return phase0Command(args, useJson)
+    case 'host':
+      return hostCommand(args, useJson)
     case 'prune':
       return pruneCommand(args, useJson)
     case 'digest':

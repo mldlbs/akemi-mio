@@ -53,6 +53,7 @@ mio insight mark-reported    Mark insights as reported (--ids a,b)
 mio observer <view>          Observer research pipeline views (research pipeline, not the observe daemon):
                              status|world-model|trends|research|insights|essays|dag (--base-dir DIR)
 mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
+mio host capabilities        Show what each host supports and whether it is installed (--json)
 mio --json status           Machine-readable status
 mio --json agents           Machine-readable agents
 mio --json evolution status Machine-readable evolution module health
@@ -377,6 +378,29 @@ codex (mcp)  idle
 ```
 
 两个子命令都委托给 `server/agent-store.js`——与 `mio.agent.list` / `mio.agent.report` / `mio.agent.register` MCP 工具相同的存储，因此终端与 MCP 服务端报告一致的遥测，不可能漂移。`list` 读取 `agents.jsonl`；`report` 叠加 trace/memory/reuse 的交叉引用。`register`（仅 MCP）写入一个新的被观察 agent；CLI 暴露的是只读一侧。
+
+### 与 `mio host capabilities` 的区别
+
+第三个与 host 相关的命令是 `mio host capabilities`，它回答的是**另两个问题**：
+每个宿主支持什么能力（静态表），以及**此刻是否真的装上了**（实时探测各 adapter）。
+
+```text
+Host capabilities: 5 host(s)
+  codex      not installed
+             mcp-tools, memory, observer-ingest, policy-check, experience-reuse, runtime-status
+  opencode   installed
+             mcp-tools, memory, observer-ingest, policy-check, experience-reuse, runtime-status
+```
+
+它与 `mio agents` **不是一回事**，两者不一致时本身就是有用的诊断信号：
+
+| 命令 | 数据来源 | 含义 |
+|---|---|---|
+| `mio agents` | `config.json` | 记录"曾经安装过"（含安装时间） |
+| `mio host capabilities` | 实时探测 adapter | 本机**现在**是否真的装上了 |
+
+例如配置文件还在、但宿主目录已被删掉时，`mio agents` 仍会列出它，而
+`host capabilities` 显示 `not installed`。
 
 ## 发布验证
 
