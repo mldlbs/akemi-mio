@@ -291,7 +291,7 @@ const taskStore = createTaskStore({
   memoryStore,
   agentId: runtimeAgentId,
 })
-const { routeTask } = taskStore
+const { routeTask, autoClaimExperienceReuse, recordTaskOutcome } = taskStore
 
 function ingestObservation(args = {}) {
   const traceId = String(args.trace_id || '').trim()
@@ -317,61 +317,6 @@ function ingestObservation(args = {}) {
   return { recorded: true, event }
 }
 
-function autoClaimExperienceReuse(event) {
-  if (String(event.event_type || '').toLowerCase() !== 'task_outcome') return []
-  const targetAgent = String(event.agent || '').trim()
-  if (!targetAgent) return []
-  const now = Date.now()
-  const claims = []
-  const remaining = []
-  const entries = loadRecentQueries()
-  for (const entry of entries) {
-    const expired = now - entry.timestamp > REUSE_MATCH_WINDOW_MS
-    const matches =
-      entry.agent === targetAgent && (!event.project || entry.project === event.project)
-    if (expired || matches) {
-      if (matches && !expired) {
-        claims.push(buildAutoClaim(entry, event, targetAgent))
-      }
-      continue
-    }
-    remaining.push(entry)
-  }
-  persistRecentQueries(remaining)
-  for (const evidence of claims) {
-    appendJsonl(experienceReusePath, evidence)
-  }
-  return claims
-}
-
-function buildAutoClaim(entry, event, targetAgent) {
-  const crossSourceIndex = entry.resultSources.findIndex(
-    (source) => source && String(source).toLowerCase() !== targetAgent.toLowerCase()
-  )
-  const sourceAgent =
-    crossSourceIndex >= 0
-      ? String(entry.resultSources[crossSourceIndex])
-      : targetAgent
-  const experienceId =
-    entry.resultIds[crossSourceIndex >= 0 ? crossSourceIndex : 0] ||
-    entry.resultIds[0] ||
-    'unknown'
-  const outcomeImproved = String(event.outcome || '').toLowerCase() === 'success'
-  return {
-    id: createId('xfer'),
-    timestamp: new Date().toISOString(),
-    sourceAgent,
-    targetAgent,
-    experienceId,
-    reuse: true,
-    behaviorChanged: false,
-    outcomeImproved,
-    project: entry.project,
-    source: 'auto_claim',
-    traceId: event.trace_id || null,
-    notes: `Auto-claimed: memory.query "${entry.query}" matched task_outcome ${event.outcome || 'unknown'} in trace ${event.trace_id || 'unknown'}.`,
-  }
-}
 
 const SUBSCRIPTION_DEFAULT_TTL_DAYS = 30
 const MAX_SUBSCRIPTIONS_PER_AGENT = 20
@@ -1593,53 +1538,5 @@ function evolutionReport(args = {}) {
 }
 
 
-function recordTaskOutcome(args = {}) {
-  const outcome = String(args.outcome || '').trim().toLowerCase()
-  if (!['success', 'failure', 'aborted'].includes(outcome)) {
-    throw new Error('task.record_outcome requires outcome to be success, failure, or aborted')
-  }
-  const agentId = String(args.agentId || runtimeAgentId() || 'unknown').trim()
-  const project = args.project || projectName()
-  const task = String(args.task || '').trim()
-  const summary = String(args.summary || '').trim()
-  const verification = String(args.verification || '').trim()
-  const traceId = String(args.traceId || '').trim() || createId('trace:' + agentId + ':' + project)
-
-  // 1. Record trace event
-  const event = {
-    id: createId('trace'),
-    timestamp: new Date().toISOString(),
-    trace_id: traceId,
-    event_type: 'task_outcome',
-    outcome,
-    payload: { task, summary, verification },
-    agent: agentId,
-    host: 'mcp',
-    project,
-  }
-  appendJsonl(tracePath, event)
-
-  // 2. Auto-claim experience reuse
-  const autoClaims = autoClaimExperienceReuse(event)
-
-  // 3. Update agent registry
-  const now = new Date().toISOString()
-  const agents = readJsonl(agentsPath)
-  const agent = agents.find((a) => a.agentId === agentId && a.project === project)
-  if (agent) {
-    agent.lastSeenAt = now
-    agent.taskCount = (agent.taskCount || 0) + 1
-    agent.successCount = (agent.successCount || 0) + (outcome === 'success' ? 1 : 0)
-    agent.failureCount = (agent.failureCount || 0) + (outcome === 'failure' ? 1 : 0)
-    writeJsonl(agentsPath, agents)
-  }
-
-  return {
-    recorded: true,
-    event: { id: event.id, trace_id: traceId, outcome, agent: agentId, project },
-    agentUpdated: !!agent,
-    autoClaims: autoClaims.length > 0 ? autoClaims : undefined,
-  }
-}
 
 module.exports = { TOOLS, callTool, handleMessage, readJsonl, appendJsonl, rl }

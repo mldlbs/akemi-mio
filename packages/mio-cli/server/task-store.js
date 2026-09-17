@@ -18,7 +18,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { readJsonl } = require('./memory-store.js')
+const { createId, readJsonl, appendJsonl, writeJsonl } = require('./memory-store.js')
 const { REUSE_STATUS_FILTERS } = require('./experience-store.js')
 
 const AGENT_HEALTH_FRESH_MS = 48 * 3600000
@@ -33,7 +33,8 @@ function createTaskStore(options) {
   const projectName = options.projectName || (() => null)
   const memoryStore = options.memoryStore
   // Who is asking. The MCP passes the runtime agent id; the CLI passes 'cli'.
-  const agentId = options.agentId || (() => 'mcp')
+  // Named resolveAgentId so recordTaskOutcome can still use `agentId` as a local.
+  const resolveAgentId = options.agentId || (() => 'mcp')
 
   const {
     normalizeScope,
@@ -46,6 +47,8 @@ function createTaskStore(options) {
   const memoryPath = path.join(dataDir, 'memory.jsonl')
   const experienceReusePath = path.join(dataDir, 'experience_reuse.jsonl')
   const queryPath = path.join(dataDir, 'queries.jsonl')
+  const tracePath = path.join(dataDir, 'traces.jsonl')
+  const agentsPath = path.join(dataDir, 'agents.jsonl')
 
   function readAgentHealth() {
     const file = path.join(dataDir, 'digest', 'latest.json')
@@ -79,6 +82,12 @@ function createTaskStore(options) {
     }
   }
 
+  // NOTE: these two are intentionally duplicated from mio-intelligence-mcp/index.js.
+  // Both operate on the same <dataDir>/queries.jsonl and must stay equivalent.
+  // They could not be de-duplicated by having the MCP pass its own in, because
+  // memoryStore.recordQuery needs them while taskStore in turn depends on
+  // memoryStore -- that is a cycle. If you change the format or the window here,
+  // change it there too (see REUSE_MATCH_WINDOW_MS above, also mirrored).
   function loadRecentQueries() {
     const now = Date.now()
     return readJsonl(queryPath)
@@ -197,7 +206,7 @@ function createTaskStore(options) {
       const now = Date.now()
       const entries = loadRecentQueries()
       entries.push({
-        agent: agentId() || 'mcp',
+        agent: resolveAgentId() || 'mcp',
         project,
         query: task,
         resultIds: [...routedIds, ...relatedMemories.map((record) => record.id)].filter(Boolean),
@@ -260,7 +269,115 @@ function createTaskStore(options) {
     }
   }
 
-  return { routeTask, readAgentHealth }
+  function buildAutoClaim(entry, event, targetAgent) {
+    const crossSourceIndex = entry.resultSources.findIndex(
+      (source) => source && String(source).toLowerCase() !== targetAgent.toLowerCase()
+    )
+    const sourceAgent =
+      crossSourceIndex >= 0 ? String(entry.resultSources[crossSourceIndex]) : targetAgent
+    const experienceId =
+      entry.resultIds[crossSourceIndex >= 0 ? crossSourceIndex : 0] ||
+      entry.resultIds[0] ||
+      'unknown'
+    const outcomeImproved = String(event.outcome || '').toLowerCase() === 'success'
+    return {
+      id: createId('xfer'),
+      timestamp: new Date().toISOString(),
+      sourceAgent,
+      targetAgent,
+      experienceId,
+      reuse: true,
+      behaviorChanged: false,
+      outcomeImproved,
+      project: entry.project,
+      source: 'auto_claim',
+      traceId: event.trace_id || null,
+      notes: `Auto-claimed: memory.query "${entry.query}" matched task_outcome ${event.outcome || 'unknown'} in trace ${event.trace_id || 'unknown'}.`,
+    }
+  }
+
+  // Phase 0 auto-claim: a task_outcome arriving within the match window of a
+  // prior query is attributed to that query's results, so reuse evidence does
+  // not depend on the agent self-reporting mio.experience.reuse. Shared with
+  // observer.ingest, which is why it lives in the store rather than the MCP
+  // handler.
+  function autoClaimExperienceReuse(event) {
+    if (String(event.event_type || '').toLowerCase() !== 'task_outcome') return []
+    const targetAgent = String(event.agent || '').trim()
+    if (!targetAgent) return []
+    const now = Date.now()
+    const claims = []
+    const remaining = []
+    const entries = loadRecentQueries()
+    for (const entry of entries) {
+      const expired = now - entry.timestamp > REUSE_MATCH_WINDOW_MS
+      const matches =
+        entry.agent === targetAgent && (!event.project || entry.project === event.project)
+      if (expired || matches) {
+        if (matches && !expired) {
+          claims.push(buildAutoClaim(entry, event, targetAgent))
+        }
+        continue
+      }
+      remaining.push(entry)
+    }
+    persistRecentQueries(remaining)
+    for (const evidence of claims) {
+      appendJsonl(experienceReusePath, evidence)
+    }
+    return claims
+  }
+
+  function recordTaskOutcome(args = {}) {
+    const outcome = String(args.outcome || '').trim().toLowerCase()
+    if (!['success', 'failure', 'aborted'].includes(outcome)) {
+      throw new Error('task.record_outcome requires outcome to be success, failure, or aborted')
+    }
+    const agentId = String(args.agentId || resolveAgentId() || 'unknown').trim()
+    const project = args.project || projectName()
+    const task = String(args.task || '').trim()
+    const summary = String(args.summary || '').trim()
+    const verification = String(args.verification || '').trim()
+    const traceId = String(args.traceId || '').trim() || createId('trace:' + agentId + ':' + project)
+
+    // 1. Record trace event
+    const event = {
+      id: createId('trace'),
+      timestamp: new Date().toISOString(),
+      trace_id: traceId,
+      event_type: 'task_outcome',
+      outcome,
+      payload: { task, summary, verification },
+      agent: agentId,
+      host: 'mcp',
+      project,
+    }
+    appendJsonl(tracePath, event)
+
+    // 2. Auto-claim experience reuse
+    const autoClaims = autoClaimExperienceReuse(event)
+
+    // 3. Update agent registry
+    const now = new Date().toISOString()
+    const agents = readJsonl(agentsPath)
+    const agent = agents.find((a) => a.agentId === agentId && a.project === project)
+    if (agent) {
+      agent.lastSeenAt = now
+      agent.taskCount = (agent.taskCount || 0) + 1
+      agent.successCount = (agent.successCount || 0) + (outcome === 'success' ? 1 : 0)
+      agent.failureCount = (agent.failureCount || 0) + (outcome === 'failure' ? 1 : 0)
+      writeJsonl(agentsPath, agents)
+    }
+
+    return {
+      recorded: true,
+      event: { id: event.id, trace_id: traceId, outcome, agent: agentId, project },
+      agentUpdated: !!agent,
+      autoClaims: autoClaims.length > 0 ? autoClaims : undefined,
+    }
+  }
+
+  return { routeTask, readAgentHealth, autoClaimExperienceReuse, recordTaskOutcome }
 }
 
 module.exports = { createTaskStore }

@@ -56,6 +56,7 @@ mio observer <view>          Observer research pipeline views (research pipeline
 mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
 mio host capabilities        Show what each host supports and whether it is installed (--json)
 mio task route "<task>"      Which verified experiences apply to this task (--project/--scope/--limit)
+mio task record-outcome --outcome success   Record a task outcome (--yes to apply; previews by default)
 mio --json status           Machine-readable status
 mio --json agents           Machine-readable agents
 mio --json evolution status Machine-readable evolution module health
@@ -466,6 +467,35 @@ Routes (apply the top match first):
 
 测试里两条都钉住了：CLI 跑完 `queries.jsonl` **不存在**；同一 store 传
 `persistQuery: true` 则**确实写入**——证明差异来自开关，而不是代码路径坏了。
+
+### 记录结果（`mio task record-outcome`）
+
+把任务结果写回证据库，与上面的路由形成**闭环**：
+路由 → 执行 → 记录结果 → 变成新的复用证据。
+
+```bash
+mio task record-outcome --outcome success --task "deploy service" --summary "all green"
+mio task record-outcome --outcome failure --task "deploy service" --yes    # 真正写入
+```
+
+它做三件事：写一条 `task_outcome` trace → 触发 auto-claim（把此前匹配的查询
+关联成复用证据）→ 更新该 agent 的 `taskCount` / `successCount` / `failureCount`。
+
+```text
+Record outcome preview: success (project=demo, agent=cli)
+  task: deploy it
+  agent not registered: trace only, agent registry untouched
+  register it with: mio agents register --agent-id cli --yes
+Re-run with --yes to apply.
+```
+
+同样是**写操作**，因此同样默认只预览：
+
+- 预览**不会创建 `traces.jsonl`**（有测试钉住）。
+- `--outcome` 非法时**在写入任何东西之前**就拒绝——不会出现"写了一半"。
+- 预览会告诉你 agent **是否已注册**：未注册时明确说"只写 trace、不更新注册表"
+  并给出注册命令，而不是默默少做一件事。
+- 已注册时预览显示 `will update agent (taskCount 4 -> 5, successCount 3 -> 4)`。
 
 ## 发布验证
 

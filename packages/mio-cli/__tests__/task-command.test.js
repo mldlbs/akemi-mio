@@ -219,3 +219,131 @@ test('the CLI and the shared store agree', () => {
 
   assert.throws(() => store.routeTask({}), /requires a non-empty task/)
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// record-outcome: the write side. Same contract as `mio agents register` /
+// `mio memory archive`: previews by default (exit 1, nothing written), applies
+// only with --yes, --json gated identically.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function tracesFile(ws) {
+  return path.join(ws.mioHome, 'traces.jsonl')
+}
+
+function readTraces(ws) {
+  if (!fs.existsSync(tracesFile(ws))) return []
+  return fs
+    .readFileSync(tracesFile(ws), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+}
+
+function readLastAgent(ws) {
+  const file = path.join(ws.mioHome, 'agents.jsonl')
+  const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
+  return JSON.parse(lines[lines.length - 1])
+}
+
+test('record-outcome rejects a missing or invalid outcome before writing', () => {
+  const ws = workspace('ro-bad')
+
+  const missing = run(ws.cwd, ws.env, ['task', 'record-outcome'])
+  assert.equal(missing.status, 1)
+  assert.match(missing.stderr, /requires --outcome/)
+
+  const invalid = run(ws.cwd, ws.env, ['task', 'record-outcome', '--outcome', 'maybe'])
+  assert.equal(invalid.status, 1)
+  assert.match(invalid.stderr, /requires --outcome/)
+
+  assert.equal(fs.existsSync(tracesFile(ws)), false, 'nothing written')
+})
+
+test('record-outcome previews without writing', () => {
+  const ws = workspace('ro-preview')
+
+  const result = run(ws.cwd, ws.env, [
+    'task', 'record-outcome', '--outcome', 'success', '--project', 'demo', '--task', 'deploy it',
+  ])
+  assert.equal(result.status, 1, 'preview exits non-zero')
+  assert.match(result.stdout, /Record outcome preview: success/)
+  assert.match(result.stdout, /task: deploy it/)
+  assert.match(result.stdout, /agent not registered/)
+  assert.match(result.stdout, /mio agents register --agent-id cli --yes/)
+  assert.equal(fs.existsSync(tracesFile(ws)), false, 'preview must not write traces.jsonl')
+})
+
+test('record-outcome preview shows the agent update when registered', () => {
+  const ws = workspace('ro-existing')
+  seed(path.join(ws.mioHome, 'agents.jsonl'), [
+    { id: 'agent_1', agentId: 'cli', hostType: 'mcp', project: 'demo', taskCount: 4, successCount: 3 },
+  ])
+
+  const result = run(ws.cwd, ws.env, ['task', 'record-outcome', '--outcome', 'success', '--project', 'demo'])
+  assert.equal(result.status, 1)
+  assert.match(result.stdout, /will update agent \(taskCount 4 -> 5, successCount 3 -> 4\)/)
+  assert.equal(readLastAgent(ws).taskCount, 4, 'untouched')
+})
+
+test('record-outcome --yes writes a task_outcome trace', () => {
+  const ws = workspace('ro-apply')
+
+  const result = run(ws.cwd, ws.env, [
+    'task', 'record-outcome', '--outcome', 'success', '--project', 'demo',
+    '--task', 'deploy it', '--summary', 'all green', '--yes',
+  ])
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /Recorded success for cli/)
+
+  const traces = readTraces(ws)
+  assert.equal(traces.length, 1)
+  assert.equal(traces[0].event_type, 'task_outcome')
+  assert.equal(traces[0].outcome, 'success')
+  assert.equal(traces[0].project, 'demo')
+  assert.equal(traces[0].agent, 'cli')
+  assert.equal(traces[0].payload.task, 'deploy it')
+  assert.equal(traces[0].payload.summary, 'all green')
+})
+
+test('record-outcome --yes updates the agent registry when registered', () => {
+  const ws = workspace('ro-agent')
+  seed(path.join(ws.mioHome, 'agents.jsonl'), [
+    { id: 'agent_1', agentId: 'cli', hostType: 'mcp', project: 'demo', taskCount: 1, successCount: 1, failureCount: 0 },
+  ])
+
+  run(ws.cwd, ws.env, ['task', 'record-outcome', '--outcome', 'success', '--project', 'demo', '--yes'])
+  let agent = readLastAgent(ws)
+  assert.equal(agent.taskCount, 2)
+  assert.equal(agent.successCount, 2)
+  assert.equal(agent.failureCount, 0)
+
+  run(ws.cwd, ws.env, ['task', 'record-outcome', '--outcome', 'failure', '--project', 'demo', '--yes'])
+  agent = readLastAgent(ws)
+  assert.equal(agent.taskCount, 3)
+  assert.equal(agent.successCount, 2)
+  assert.equal(agent.failureCount, 1)
+})
+
+test('record-outcome --json is gated the same way', () => {
+  const ws = workspace('ro-json')
+
+  const preview = run(ws.cwd, ws.env, [
+    'task', 'record-outcome', '--outcome', 'success', '--project', 'demo', '--json',
+  ])
+  assert.equal(preview.status, 1)
+  const previewJson = JSON.parse(preview.stdout)
+  assert.equal(previewJson.preview, true)
+  assert.equal(previewJson.applied, false)
+  assert.equal(previewJson.agentWillUpdate, false)
+  assert.match(previewJson.hint, /--yes/)
+  assert.equal(fs.existsSync(tracesFile(ws)), false)
+
+  const applied = run(ws.cwd, ws.env, [
+    'task', 'record-outcome', '--outcome', 'aborted', '--project', 'demo', '--json', '--yes',
+  ])
+  assert.equal(applied.status, 0, applied.stderr)
+  const appliedJson = JSON.parse(applied.stdout)
+  assert.equal(appliedJson.recorded, true)
+  assert.equal(appliedJson.event.outcome, 'aborted')
+  assert.equal(readTraces(ws).length, 1)
+})

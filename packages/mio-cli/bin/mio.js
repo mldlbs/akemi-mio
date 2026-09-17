@@ -1796,6 +1796,90 @@ Notes:
   }
 }
 
+function recordOutcomeCommand(args, useJson) {
+  const flags = args.slice(2)
+  const outcome = String(optionValue(flags, '--outcome') || '').toLowerCase()
+  if (!['success', 'failure', 'aborted'].includes(outcome)) {
+    console.error('mio task record-outcome requires --outcome success|failure|aborted')
+    process.exitCode = 1
+    return
+  }
+  const project = optionValue(flags, '--project') || projectName()
+  // Mirrors the store default so the preview reports the same agent that the
+  // applied run would use.
+  const agentId = optionValue(flags, '--agent-id') || 'cli'
+  const task = optionValue(flags, '--task') || ''
+  const summary = optionValue(flags, '--summary') || ''
+  const verification = optionValue(flags, '--verification') || ''
+  const traceId = optionValue(flags, '--trace-id') || ''
+
+  // Preview by default, like every other CLI write (mio memory archive,
+  // mio agents register): nothing is written without --yes, --json included.
+  if (!flagPresent(flags, '--yes')) {
+    const existing = cliAgentStore()
+      .listAgents({ project })
+      .agents.find((a) => a.agentId === agentId)
+    if (useJson) {
+      jsonOrText(
+        {
+          preview: true,
+          applied: false,
+          outcome,
+          agentId,
+          project,
+          task,
+          summary,
+          verification,
+          agentWillUpdate: !!existing,
+          currentTaskCount: existing ? existing.taskCount || 0 : null,
+          hint: 'Re-run with --yes to apply.',
+        },
+        true,
+      )
+    } else {
+      console.log(`Record outcome preview: ${outcome} (project=${project}, agent=${agentId})`)
+      if (task) console.log(`  task: ${task}`)
+      if (summary) console.log(`  summary: ${summary}`)
+      if (existing) {
+        const nextTasks = (existing.taskCount || 0) + 1
+        const nextSuccess = (existing.successCount || 0) + (outcome === 'success' ? 1 : 0)
+        console.log(
+          `  will update agent (taskCount ${existing.taskCount || 0} -> ${nextTasks}, successCount ${existing.successCount || 0} -> ${nextSuccess})`,
+        )
+      } else {
+        console.log(`  agent not registered: trace only, agent registry untouched`)
+        console.log(`  register it with: mio agents register --agent-id ${agentId} --yes`)
+      }
+      console.log('Re-run with --yes to apply.')
+    }
+    process.exitCode = 1
+    return
+  }
+
+  let result
+  try {
+    result = cliTaskStore().recordTaskOutcome({
+      outcome,
+      agentId,
+      project,
+      task,
+      summary,
+      verification,
+      traceId,
+    })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+
+  if (useJson) return jsonOrText(result, true)
+  console.log(`Recorded ${result.event.outcome} for ${result.event.agent} (project=${result.event.project})`)
+  console.log(`  trace: ${result.event.trace_id}`)
+  console.log(`  agent registry: ${result.agentUpdated ? 'updated' : 'not updated (agent not registered)'}`)
+  if (result.autoClaims) console.log(`  auto-claims: ${result.autoClaims.length}`)
+}
+
 function taskCommand(args, useJson) {
   const sub = args[1]
   if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
@@ -1812,6 +1896,10 @@ This is read-only: unlike the MCP call it does not write to the query log.`)
     if (!sub) process.exitCode = 1
     return
   }
+  if (sub === 'record-outcome' || sub === 'record_outcome') {
+    return recordOutcomeCommand(args, useJson)
+  }
+
   if (sub !== 'route') {
     console.error(`Unknown task subcommand: ${sub}`)
     process.exitCode = 1
@@ -2029,6 +2117,7 @@ Usage:
   mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
   mio host capabilities        Show what each host supports and whether it is installed
   mio task route "<task>"      Which verified experiences apply to this task (--project/--scope/--limit)
+  mio task record-outcome --outcome success   Record a task outcome (--yes to apply; previews by default)
   mio policy check "<action>" Check historical risk for an action before running it
   mio prune --days 30         Trim old traces/queries/reuse records and observe.log (--dry-run to preview; --memory needs --yes)
   mio digest --days 7         Aggregate traces/memory/reuse into an actionable report (--write-back feeds agent context files; --json)
