@@ -8,7 +8,7 @@ import {
   trimOrphanedToolCallsFrom,
 } from '@akemi-mio/intelligence/agent/context'
 import { validateToolCallChain } from '@akemi-mio/intelligence/agent/ContextIntegrityChecker'
-import { type ChatResult, type ChunkCallback } from './types'
+import { type ChatResult, type ChatErrorCode, type ChunkCallback } from './types'
 import { INTENT_CLASSIFY_PROMPT } from '@akemi-mio/intelligence/agent/intent/types'
 import { buildRouteClassificationPrompt } from '@akemi-mio/intelligence/agent/routing/prompts'
 import type { RouteInput } from '@akemi-mio/intelligence/agent/routing/types'
@@ -293,7 +293,7 @@ export class LlmService {
         }
 
         const statusErr = this._checkStatus(res, requestId, t0)
-        if (statusErr) return statusErr
+        if (statusErr) return { error: statusErr }
 
         const full = await this._readSSEStream(res, onChunk, requestId, t0, controller.signal)
 
@@ -380,20 +380,28 @@ export class LlmService {
     })
   }
 
-  private _checkStatus(res: Response, requestId?: string, t0?: number): ChatResult | null {
+  /**
+   * HTTP 状态码 → 错误码。返回 `null` 表示状态正常。
+   *
+   * 返回类型是 `ChatErrorCode | null`，而不是包一层的 `ChatResult | null`：调用方只需要一个码。
+   * 之前包成对象后，调用点写成 `statusErr.error ?? 'API_ERROR'` —— 那个 `??` 分支其实
+   * 不可达（本方法返回非 null 时必带 error），却让一个**从未产出过**的 `'API_ERROR'`
+   * 看起来是可能的取值，掩盖了真实值域。现在直接返回码，调用点写 `{ error: statusErr }`。
+   */
+  private _checkStatus(res: Response, requestId?: string, t0?: number): ChatErrorCode | null {
     if (res.status === 429) {
       log('WARN', 'rate_limited', { request_id: requestId, elapsed_ms: t0 ? Date.now() - t0 : 0 })
-      return { error: 'RATE_LIMITED' }
+      return 'RATE_LIMITED'
     }
     if (res.status === 401) {
       log('ERROR', 'invalid_api_key', { request_id: requestId })
-      return { error: 'INVALID_KEY' }
+      return 'INVALID_KEY'
     }
     if (!res.ok) {
       // 读取完整响应体以便定位 400 等错误的具体原因
       const elapsed = t0 ? Date.now() - t0 : 0
       this._readErrorBody(res, requestId, res.status, elapsed)
-      return { error: `API_ERROR:${res.status}` }
+      return `API_ERROR:${res.status}`
     }
     return null
   }
@@ -510,7 +518,7 @@ export class LlmService {
     externalSignal?: AbortSignal,
     allowedToolNames?: string[],
     options?: ChatWithToolsOptions,
-  ): Promise<{ reply?: string; toolCalls?: ToolCallInfo[]; error?: string }> {
+  ): Promise<{ reply?: string; toolCalls?: ToolCallInfo[]; error?: ChatErrorCode }> {
     if (!this.codeApiKey) return { error: 'NO_KEY' }
 
     log('INFO', 'tool_llm_request', { request_id: requestId, model: this.codeModel })
@@ -616,11 +624,11 @@ export class LlmService {
             continue
           }
           const statusErr = this._checkStatus(res, requestId, t0)
-          if (statusErr) return this._emitModelError(statusErr.error ?? 'API_ERROR', Date.now() - t0, requestId, t0, rawPromptTokens)
+          if (statusErr) return this._emitModelError(statusErr, Date.now() - t0, requestId, t0, rawPromptTokens)
         }
 
         const statusErr = this._checkStatus(res, requestId, t0)
-        if (statusErr) return this._emitModelError(statusErr.error ?? 'API_ERROR', Date.now() - t0, requestId, t0, rawPromptTokens)
+        if (statusErr) return this._emitModelError(statusErr, Date.now() - t0, requestId, t0, rawPromptTokens)
 
         const data = (await res.json()) as {
           choices?: Array<{
@@ -658,12 +666,12 @@ export class LlmService {
   }
 
   private _emitModelError(
-    error: string,
+    error: ChatErrorCode,
     elapsed: number,
     requestId: string | undefined,
     t0: number,
     rawPromptTokens: number,
-  ): { error: string } {
+  ): { error: ChatErrorCode } {
     const realElapsed = elapsed > 0 ? elapsed : Date.now() - t0
     this.evaluationEmitter?.emit(
       'model.completed',
@@ -692,7 +700,7 @@ export class LlmService {
     onChunk: ChunkCallback,
     allowedToolNames?: string[],
     toolChoiceMode: ToolChoiceMode = 'auto',
-  ): Promise<{ reply?: string; toolCalls?: ToolCallInfo[]; error?: string }> {
+  ): Promise<{ reply?: string; toolCalls?: ToolCallInfo[]; error?: ChatErrorCode }> {
     // 发流式请求前清理孤儿 tool_calls（兜底，与 chatWithTools 入口处互补）
     trimOrphanedToolCallsFrom(messages)
     // 流式请求中同时携带 tools 声明，让 LLM 仍可选工具调用
@@ -714,7 +722,7 @@ export class LlmService {
     })
 
     const statusErr = this._checkStatus(res, requestId, t0)
-    if (statusErr) return statusErr
+    if (statusErr) return { error: statusErr }
 
     const reader = res.body?.getReader()
     if (!reader) return { error: 'NETWORK' }
@@ -904,7 +912,7 @@ export class LlmService {
     requestId?: string,
     t0?: number,
     allowedToolNames?: string[],
-  ): { reply?: string; toolCalls?: ToolCallInfo[]; error?: string } {
+  ): { reply?: string; toolCalls?: ToolCallInfo[]; error?: ChatErrorCode } {
     const msg = data.choices?.[0]?.message
     if (!msg) return { error: 'EMPTY_RESPONSE' }
 
@@ -1217,7 +1225,7 @@ export class LlmService {
    * （仅当确实发起了 API 调用，即已发出 model.invoked）
    */
   private _emitModelCompleted(
-    result: { reply?: string; toolCalls?: ToolCallInfo[]; error?: string },
+    result: { reply?: string; toolCalls?: ToolCallInfo[]; error?: ChatErrorCode },
     requestId: string | undefined,
     t0: number,
     rawPromptTokens: number,

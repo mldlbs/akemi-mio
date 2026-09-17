@@ -8,8 +8,12 @@ import { TELEGRAM_SERVER_URL, TELEGRAM_ENABLED } from '@akemi-mio/core/config'
 import { resolveTelegramTarget } from '@akemi-mio/messaging/telegram/TelegramTargetRouter'
 import { ExternalMessageGateway } from '@akemi-mio/messaging'
 import { TelegramAdapter } from '@akemi-mio/messaging/telegram/TelegramAdapter'
-import type { NotificationEvent, OutboxInsert } from '@akemi-mio/messaging'
-import type { ChatResult } from '@akemi-mio/intelligence/llm/types'
+// `ChatResult` 取**端口侧**（`AgentServicePort`）的那份，而不是 `@akemi-mio/intelligence/llm/types`
+// 里实现侧的那份：`processExternalAgentMessage` 的返回值直接来自
+// `telegramGateway.handleExternalMessage()`，本来就该按端口契约标注。
+// （实现侧那份的 `error` 已收紧成 `ChatErrorCode` 联合类型，端口侧仍是 `string`；
+//   实现侧窄于端口侧所以赋值方向没问题，反过来标注才会编译不过。）
+import type { ChatResult, NotificationEvent, OutboxInsert } from '@akemi-mio/messaging'
 
 interface TelegramMessage {
   type: 'message' | 'command'
@@ -324,6 +328,11 @@ export class TelegramService {
           const safeReply = result.reply.replace(/<invoke name="[^"]+">[\s\S]*?<\/invoke>/g, '').trim() || '正在检查，请稍候……'
           this.enqueueReply(msg.chatId, safeReply, 'dialogue', botName)
         } else if (result.error === 'BUSY') {
+          // ⚠️ 当前**没有产出方**，这条分支（以及 retryQueue 的整条链路）不会触发：
+          // 本方法 → ExternalMessageGateway → AgentService.processExternalMessage
+          // → processTextInput，而 processTextInput 从不返回 BUSY（它连并发守卫都没有）。
+          // 保留判定是为了宿主补上「忙」信号后 telegram 侧不用改；补的时候记得把
+          // BUSY 加进 @akemi-mio/intelligence/llm/types 的 CHAT_ERROR_CODES。
           this.enqueueReply(
             msg.chatId,
             `👤 ${userText}\n\n⏳ 秋山澪正在处理其他请求，你的消息已加入队列，处理完成后会自动回复`,
@@ -404,6 +413,7 @@ export class TelegramService {
         log('INFO', 'telegram_reply_enqueued', { chatId, msgId: progressMsgId, replyLen: result.reply.length })
       } else if (result.error) {
         if (result.error === 'BUSY') {
+          // ⚠️ 同 330 行：宿主目前不产出 BUSY，此分支与 retryQueue 均为待激活状态。
           const busyText = `👤 你: ${userText}\n\n⏳ 秋山澪正在处理其他请求，你的消息已加入队列，处理完会自动回复`
           editor.cancel()
           this.enqueueEdit(chatId, progressMsgId, busyText, botName)

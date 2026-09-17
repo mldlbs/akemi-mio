@@ -13,7 +13,7 @@ import type { TtsService } from '@akemi-mio/audio/TtsService'
 import { ConversationContext, type Message, buildSystemPrompt, trimOrphanedToolCallsFrom } from './context'
 import { validateToolCallChain, rollbackToLastKnownGood } from './ContextIntegrityChecker'
 import type { MemoryService } from '@akemi-mio/intelligence-memory/MemoryService'
-import { type ChatResult } from '@akemi-mio/intelligence/llm/types'
+import { type ChatResult, type ChatErrorCode } from '@akemi-mio/intelligence/llm/types'
 import { eventBus, type EventPayload } from '@akemi-mio/core/core/EventBus'
 import type { CircuitBreaker } from '@akemi-mio/core/core/CircuitBreaker'
 import type { PlanManagerLike } from '@akemi-mio/evolution/types'
@@ -892,7 +892,8 @@ export class ChatExecutor {
         //  ② LLM 报错且重试已耗尽 —— 用真实错误码（TIMEOUT / NETWORK / RATE_LIMITED …）；
         //  ③ 模型确实返回了空内容 —— NO_REPLY。
         // toolLoop 只能给回一个空串，所以 ② 的原因要靠 ctx.terminalLlmError 带上来。
-        const noReplyCode = ctx.interruptFlag ? 'INTERRUPTED' : ctx.terminalLlmError || 'NO_REPLY'
+        // 显式标注类型：这个值会原样跨 IPC 给 renderer 展示，必须落在已知错误码集合内。
+        const noReplyCode: ChatErrorCode = ctx.interruptFlag ? 'INTERRUPTED' : ctx.terminalLlmError || 'NO_REPLY'
         this.obsLogger?.logOutput(noReplyCode, Date.now() - t0)
         this.obsLogger?.flush()
         log('WARN', 'chat_no_reply', {
@@ -1750,12 +1751,12 @@ export class ChatExecutor {
    * 「模型返回空内容」和「模型超时三次后放弃」。把错误码写进 `ctx` 才能让 `run()`
    * 如实上报（否则一律退化成 `NO_REPLY`，用户看到的是误导性的「模型没有返回内容」）。
    */
-  private terminateWithLlmError(ctx: RunContext, e: string): 'return' {
+  private terminateWithLlmError(ctx: RunContext, e: ChatErrorCode): 'return' {
     ctx.terminalLlmError = e
     return 'return'
   }
 
-  private handleLlmError(e: string | undefined, step: number, m: Message[], ctx: RunContext): 'return' | 'continue' | null {
+  private handleLlmError(e: ChatErrorCode | undefined, step: number, m: Message[], ctx: RunContext): 'return' | 'continue' | null {
     // 无错误 = 本轮 LLM 调用成功 → 让熔断器复位（含半开探测成功）
     if (!e) {
       this.circuitBreaker?.onSuccess('llm')
