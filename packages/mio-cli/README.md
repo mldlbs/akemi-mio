@@ -48,6 +48,8 @@ mio memory migrate --ids a,b --scope global|project   Move records between the p
 mio policy check "<action>" Check the historical risk of an action before running it (--project; reads global MIO_HOME)
 mio creativity status        Show creativity hypothesis counts and recent top ideas (reads global MIO_HOME)
 mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
+mio creativity generate      Generate hypotheses from 2+ --source "name|content" (calls an LLM)
+mio creativity ferment       Review and refine active hypotheses (calls an LLM)
 mio insight status           Insight counts: total, reported, unreported, high-value (needs @akemi-mio/insight)
 mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)
 mio insight mark-reported    Mark insights as reported (--ids a,b)
@@ -208,7 +210,7 @@ packages/mio-cli
 └── package.json
 ```
 
-`server/memory-store.js` 是记忆查询/记录排序（Latin token + CJK bigram 打分、project/global 作用域分层、复用证据加权）的唯一实现。MCP 服务端（`mio.memory.query` / `mio.memory.record`）与 CLI（`mio recall` / `mio remember`）都经过它，因此各入口的排序结果完全一致。同一个模块还实现了卫生操作——`analyze` / `archive` / `merge` / `migrate`——所以 `mio.memory.analyze` 与 `mio memory analyze` 不可能各自漂移。`server/experience-store.js` 与 `server/policy-store.js` 对 `mio.experience.*` 与 `mio.policy.check` 遵循同样的模式；策略存储复用了记忆存储的分词器，因此策略风险证据与相关记忆排序在构造上就与 `mio.memory.query` 一致。`server/creativity-engine.js` 是 `mio.creativity.*` 背后的共享实现——CLI 的 `mio creativity status`/`list` 与 MCP 工具调用的是同一个 `CreativityEngine`，因此假设计数在入口间不会漂移。`server/agent-store.js` 是 `mio.agent.list` / `register` / `report` 背后的共享实现；CLI 的 `mio agents list`/`report` 与 MCP 工具读取的是同一个存储，因此被观察 agent 的遥测数据在任何地方都相同。`server/digest.js` 把 traces/memory/reuse 聚合成可执行报告（同样以 `mio.digest.generate` 暴露），`server/retention.js` 驱动 `mio prune`（按年龄/过期裁剪并备份；没有显式的 `--memory --yes` 绝不触碰 `memory.jsonl`）。
+`server/memory-store.js` 是记忆查询/记录排序（Latin token + CJK bigram 打分、project/global 作用域分层、复用证据加权）的唯一实现。MCP 服务端（`mio.memory.query` / `mio.memory.record`）与 CLI（`mio recall` / `mio remember`）都经过它，因此各入口的排序结果完全一致。同一个模块还实现了卫生操作——`analyze` / `archive` / `merge` / `migrate`——所以 `mio.memory.analyze` 与 `mio memory analyze` 不可能各自漂移。`server/experience-store.js` 与 `server/policy-store.js` 对 `mio.experience.*` 与 `mio.policy.check` 遵循同样的模式；策略存储复用了记忆存储的分词器，因此策略风险证据与相关记忆排序在构造上就与 `mio.memory.query` 一致。`server/creativity-engine.js` 是 `mio.creativity.*` 背后的共享实现——CLI 的 `mio creativity status`/`list` 与 MCP 工具调用的是同一个 `CreativityEngine`，因此假设计数在入口间不会漂移。`server/agent-store.js` 是 `mio.agent.list` / `register` / `report` 背后的共享实现；CLI 的 `mio agents list`/`report` 与 MCP 工具读取的是同一个存储，因此被观察 agent 的遥测数据在任何地方都相同。`server/llm-client.js` 是 `chatJson` 的唯一实现，MCP 服务端（创意引擎 + insight）与 CLI（`mio creativity generate`/`ferment`）共用，因此两边调用的是同一个模型与同一份配置（`LLM_API_URL`/`LLM_KEY`/`LLM_CHAT_MODEL`）。`server/digest.js` 把 traces/memory/reuse 聚合成可执行报告（同样以 `mio.digest.generate` 暴露），`server/retention.js` 驱动 `mio prune`（按年龄/过期裁剪并备份；没有显式的 `--memory --yes` 绝不触碰 `memory.jsonl`）。
 
 ## 记忆卫生
 
@@ -326,8 +328,42 @@ Recent top ideas:
 说明：
 
 - **它委托给与 MCP 服务端相同的 `CreativityEngine`**，因此终端的 `mio creativity list` 看到的是与 `mio.creativity.list` 工具完全一致的假设。存储位于 `<MIO_HOME>/creativity/creativity-hypotheses.jsonl`；CLI 指向全局 `MIO_HOME`，与 `mio policy check` 一致。
-- **只暴露只读子命令。** `generate` 与 `ferment` 会调用 LLM，仍仅限 MCP（`mio.creativity.generate` / `mio.creativity.ferment`）；CLI 把 `generate`/`ferment` 当作未知子命令拒绝，而不是去调用一个未配置的模型。
 - **空存储是正常状态。** 引擎运行之前，`status` 报告全零计数，`list` 显示 "No hypotheses match." 两者都是有效输出，不是错误。
+
+### 生成与发酵（`generate` / `ferment`）
+
+这两个子命令会调用 LLM，`mio creativity` 同样支持它们——用的是**共享的 LLM 客户端**
+（`server/llm-client.js`），与 MCP 服务端完全同一实现：
+
+```bash
+mio creativity generate --source "auth|token rotation" --source "cache|write-through"
+mio creativity ferment --limit 3
+```
+
+- `--source "名称|内容"` **至少两个**：引擎是把概念两两配对来产生新假设的，
+  一个来源在构造上就不可能产出组合（此时**不会**调用 LLM，直接返回
+  `need at least 2 sources`）。
+- `ferment` 会复核 `active` 假设并更新分数；`verdict=promote` 且总分 > 200 时
+  升为 `validated`，`verdict=reject` 则标记为 `rejected`。
+
+#### LLM 配置
+
+三个环境变量，与 MCP 服务端读取的完全相同：
+
+| 变量 | 说明 |
+|---|---|
+| `LLM_API_URL` | OpenAI 兼容端点（默认 opencode zen） |
+| `LLM_KEY` | Bearer token；留空表示无需鉴权（本地 Ollama 常见） |
+| `LLM_CHAT_MODEL` | 模型 id，回退到 `LLM_MODEL` |
+
+本机跑 Ollama 时可以这样指过去：
+
+```bash
+LLM_API_URL=http://localhost:11434/v1/chat/completions mio creativity ferment
+```
+
+未设置 `LLM_API_URL` / `LLM_KEY` 时，命令会**先提示**它将要调用默认端点，
+再继续——不会静默地把请求发到你没配的地方。
 
 ## 洞察自省与观察管线
 

@@ -30,6 +30,7 @@ const { createObserverStore } = require('../server/observer-store.js')
 const { loadPhase0, renderPhase0Markdown } = require('../server/mio-intelligence-mcp/phase0.js')
 const { listHostCapabilities } = require('../server/host-capabilities.js')
 const { createTaskStore } = require('../server/task-store.js')
+const { chatJson, llmConfig, isLlmConfigured } = require('../server/llm-client.js')
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
 
@@ -262,11 +263,13 @@ function cliPolicyStore() {
 
 // The creativity engine is the single implementation behind mio.creativity.*;
 // the CLI points it at the global MIO_HOME so a terminal `mio creativity list`
-// sees the same hypotheses the MCP server would after it has run. generate/
-// ferment need an LLM, so the CLI only exposes the read-only status and list.
+// sees the same hypotheses the MCP server would. generate/ferment need an LLM,
+// so they use the shared client -- configured with LLM_API_URL / LLM_KEY /
+// LLM_CHAT_MODEL, the same environment the MCP server reads. A local Ollama
+// works: LLM_API_URL=http://localhost:11434/v1/chat/completions
 function cliCreativityEngine() {
   const creativityDir = path.join(MIO_HOME, 'creativity')
-  return new CreativityEngine(creativityDir, () => { throw new Error('LLM calls are not available from the CLI') })
+  return new CreativityEngine(creativityDir, chatJson)
 }
 
 // Observed-agent telemetry (agents.jsonl + traces/memory/reuse cross-reference)
@@ -1403,18 +1406,25 @@ function creativityUsage() {
   mio creativity status              Show hypothesis counts and recent top ideas
   mio creativity list                List hypotheses (--status active|validated|rejected|draft, --limit N)
 
+  mio creativity generate        Generate hypotheses by combining sources (needs 2+ --source, calls an LLM)
+  mio creativity ferment         Review/refine active hypotheses (calls an LLM)
+
 Options:
   --status name      Filter list by status
-  --limit N          Max results for list (default 20)
-  --json             Machine-readable output (same shape as mio.creativity.status / mio.creativity.list)
+  --limit N          Max results for list / ferment (default 20 / 5)
+  --source "name|content"   A concept source for generate; repeat 2+ times
+  --strategy explore|signal|stable   Generation strategy (auto-selected if omitted)
+  --json             Machine-readable output (same shape as the mio.creativity.* tools)
 
 Examples:
   mio creativity status
   mio creativity list --status rejected --limit 10
+  mio creativity generate --source "auth|token rotation" --source "cache|write-through"
 
-The CLI exposes the read-only side of the creativity engine. generate/ferment
-call an LLM and are only available over MCP (mio.creativity.generate /
-mio.creativity.ferment).`)
+generate/ferment call an LLM using the shared client. Configure it with
+LLM_API_URL / LLM_KEY / LLM_CHAT_MODEL (the same environment the MCP server
+reads). A local Ollama works:
+  LLM_API_URL=http://localhost:11434/v1/chat/completions`)
 }
 
 function printCreativityStatus(result) {
@@ -1447,6 +1457,99 @@ function printCreativityList(items) {
   })
 }
 
+// Parses repeated `--source "name|content"` into the shape CreativityEngine
+// expects. At least two are required: the engine pairs up sources, so one
+// source can never produce a combination.
+function parseSources(flags) {
+  const sources = []
+  for (let i = 0; i < flags.length; i += 1) {
+    if (flags[i] !== '--source') continue
+    const raw = flags[i + 1]
+    if (!raw) continue
+    const sep = raw.indexOf('|')
+    if (sep === -1) {
+      sources.push({ name: raw, content: raw })
+    } else {
+      sources.push({
+        name: raw.slice(0, sep).trim(),
+        content: raw.slice(sep + 1).trim(),
+      })
+    }
+  }
+  return sources
+}
+
+function warnIfLlmUnconfigured() {
+  if (isLlmConfigured()) return
+  const { apiUrl, model } = llmConfig()
+  console.log(`Note: no LLM_API_URL / LLM_KEY set, so this will call the default endpoint (${model} @ ${apiUrl}).`)
+  console.log('Set LLM_API_URL (e.g. http://localhost:11434/v1/chat/completions for a local Ollama) to point elsewhere.')
+}
+
+function creativityGenerateCommand(args, useJson) {
+  const flags = args.slice(2)
+  const sources = parseSources(flags)
+  if (sources.length < 2) {
+    console.error('mio creativity generate requires at least two --source "name|content" arguments')
+    console.error('Example: mio creativity generate --source "auth|token rotation" --source "cache|write-through cache"')
+    process.exitCode = 1
+    return
+  }
+  const strategy = optionValue(flags, '--strategy')
+
+  if (!useJson) warnIfLlmUnconfigured()
+
+  let result
+  try {
+    result = cliCreativityEngine().generate(sources, strategy)
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+  // generate is async in the engine.
+  return Promise.resolve(result).then((resolved) => {
+    if (useJson) return jsonOrText(resolved, true)
+    if (resolved.reason) {
+      console.log(`No hypotheses generated: ${resolved.reason}`)
+      return
+    }
+    console.log(`Generated ${resolved.ideas.length} hypothesis/hypotheses (strategy=${resolved.strategy})`)
+    resolved.ideas.forEach((idea, index) => {
+      console.log(`${index + 1}. [${idea.status}] ${idea.title}`)
+      console.log(`   novelty=${idea.novelty} feasibility=${idea.feasibility} impact=${idea.impact} | ${idea.id}`)
+      if (idea.rejectionReason) console.log(`   rejected: ${idea.rejectionReason}`)
+    })
+  })
+}
+
+function creativityFermentCommand(args, useJson) {
+  const flags = args.slice(2)
+  const limit = parseNumberOption(flags, '--limit')
+
+  if (!useJson) warnIfLlmUnconfigured()
+
+  let result
+  try {
+    result = cliCreativityEngine().ferment(limit)
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+  return Promise.resolve(result).then((resolved) => {
+    if (useJson) return jsonOrText(resolved, true)
+    if (resolved.fermented === 0) {
+      console.log(`Nothing fermented: ${resolved.reason || 'no eligible hypotheses'}`)
+      return
+    }
+    console.log(`Fermented ${resolved.fermented} hypothesis/hypotheses`)
+    for (const r of resolved.results || []) {
+      console.log(`- ${r.title || r.id}: ${r.verdict || 'updated'}${r.reason ? ` — ${r.reason}` : ''}`)
+    }
+  })
+}
+
 function creativityCommand(args, useJson) {
   const sub = args[1]
 
@@ -1455,6 +1558,9 @@ function creativityCommand(args, useJson) {
     if (!sub) process.exitCode = 1
     return
   }
+  if (sub === 'generate') return creativityGenerateCommand(args, useJson)
+  if (sub === 'ferment') return creativityFermentCommand(args, useJson)
+
   if (!['status', 'list'].includes(sub)) {
     console.error(`Unknown creativity subcommand: ${sub}`)
     creativityUsage()
@@ -2109,6 +2215,8 @@ Usage:
   mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse
   mio creativity status        Show creativity hypothesis counts and recent top ideas
   mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
+  mio creativity generate      Generate hypotheses from 2+ --source "name|content" (calls an LLM)
+  mio creativity ferment       Review and refine active hypotheses (calls an LLM)
   mio insight status           Insight counts: total, reported, unreported, high-value
   mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)
   mio insight mark-reported    Mark insights as reported (--ids a,b)

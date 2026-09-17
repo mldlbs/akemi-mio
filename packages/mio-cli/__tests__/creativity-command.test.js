@@ -169,10 +169,11 @@ test('creativity subcommand validates its arguments', () => {
   assert.equal(unknown.status, 1)
   assert.match(unknown.stderr, /Unknown creativity subcommand: bogus/)
 
-  // generate/ferment are MCP-only; the CLI must not expose them.
+  // generate/ferment are now exposed (they use the shared LLM client), so they
+  // fail on argument validation rather than being unknown subcommands.
   const gen = run(ws.cwd, ws.env, ['creativity', 'generate'])
   assert.equal(gen.status, 1)
-  assert.match(gen.stderr, /Unknown creativity subcommand: generate/)
+  assert.match(gen.stderr, /at least two --source/)
 
   const help = run(ws.cwd, ws.env, ['creativity', 'help'])
   assert.equal(help.status, 0)

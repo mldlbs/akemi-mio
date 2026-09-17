@@ -28,47 +28,11 @@ const SERVER_INFO = { name: 'mio-intelligence-mcp', version: '0.1.0' }
 const PROTOCOL_VERSION = '2024-11-05'
 
 // ═══════════════════════════════════════════════
-//  LLM chatJson — used by creativity engine
+//  LLM chatJson — shared with the CLI (see ../llm-client.js)
 // ═══════════════════════════════════════════════
 
-async function chatJson(userText, opts = {}) {
-  const apiUrl = process.env.LLM_API_URL || 'https://opencode.ai/zen/go/v1/chat/completions'
-  const apiKey = process.env.LLM_KEY || ''
-  const model = process.env.LLM_CHAT_MODEL || process.env.LLM_MODEL || 'deepseek-v4-flash'
-  const system = opts.system || 'You are a creative AI assistant. Output JSON.'
-  const temperature = opts.temperature ?? 0.3
+const { chatJson } = require('../llm-client.js')
 
-  try {
-    const resp = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        model,
-        temperature,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: userText },
-        ],
-        response_format: { type: 'json_object' },
-      }),
-      signal: AbortSignal.timeout(opts.timeoutMs || 30000),
-    })
-
-    if (!resp.ok) return { error: `HTTP ${resp.status}` }
-    const json = await resp.json()
-    const text = json.choices?.[0]?.message?.content || ''
-    try {
-      return { data: JSON.parse(text) }
-    } catch {
-      return { data: text }
-    }
-  } catch (err) {
-    return { error: String(err) }
-  }
-}
 
 const dataDir = path.resolve(
   process.env.MIO_DATA_DIR || path.join(process.cwd(), '.mio-intelligence')
