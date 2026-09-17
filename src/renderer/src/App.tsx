@@ -43,8 +43,15 @@ function AppInner() {
   useSessions()
   const { activeSessionId } = useSessionStore()
   const device = useDeviceStatus()
-  const { handleTextSubmit, handleVoiceResult, voiceIntentPrompt, confirmVoiceIntent, sendVoiceIntentAsChat, dismissVoiceIntent } =
-    useAIOutput(activeSessionId, device.active, device.setError)
+  const {
+    handleTextSubmit,
+    handleVoiceResult,
+    voiceIntentPrompt,
+    restoreDraft,
+    confirmVoiceIntent,
+    sendVoiceIntentAsChat,
+    dismissVoiceIntent,
+  } = useAIOutput(activeSessionId, device.active, device.setError)
   useTools()
   usePlans()
   useWorkflowDefinitions()
@@ -86,6 +93,7 @@ function AppInner() {
           )}
           <InputBar
             onSend={handleTextSubmit}
+            restoreDraft={restoreDraft}
             voiceIntentPrompt={voiceIntentPrompt}
             onConfirmVoiceIntent={confirmVoiceIntent}
             onSendVoiceIntentAsChat={sendVoiceIntentAsChat}

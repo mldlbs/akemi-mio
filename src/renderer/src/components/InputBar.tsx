@@ -1,9 +1,14 @@
-import { useCallback, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useAgentStore } from '../store/agentStore'
-import type { VoiceIntentPrompt } from '../hooks/useAIOutput'
+import type { RestoreDraft, VoiceIntentPrompt } from '../hooks/useAIOutput'
 
 interface InputBarProps {
   onSend: (text: string) => void
+  /**
+   * 提交被主进程拒绝（BUSY / 熔断 / 暂停，见 `REJECTED_BEFORE_RUN`）时把原文还回输入框。
+   * 靠 `token` 变化触发一次回填，所以同一段文本被连拒两次也会重新回填。
+   */
+  restoreDraft?: RestoreDraft | null
   /** Renders before the textarea */
   voiceSlot?: ReactNode
   voiceIntentPrompt?: VoiceIntentPrompt | null
@@ -14,6 +19,7 @@ interface InputBarProps {
 
 export function InputBar({
   onSend,
+  restoreDraft,
   voiceSlot,
   voiceIntentPrompt,
   onConfirmVoiceIntent,
@@ -30,6 +36,21 @@ export function InputBar({
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 120) + 'px'
   }, [textareaRef])
+
+  // 高度跟随 value 重算：回填走的是 effect 里的 setValue，不经过 onChange，
+  // 否则一段多行草稿会被压在一行里（textarea 的 rows={1}）。
+  useEffect(() => {
+    autoResize()
+  }, [value, autoResize])
+
+  const restoreText = restoreDraft?.text
+  const restoreToken = restoreDraft?.token
+
+  useEffect(() => {
+    if (restoreToken === undefined || restoreText === undefined) return
+    setValue(restoreText)
+    textareaRef?.focus()
+  }, [restoreToken, restoreText, textareaRef])
 
   const isBusy = agentState === 'thinking' || agentState === 'tool_executing' || agentState === 'replying'
 
@@ -96,10 +117,7 @@ export function InputBar({
           ref={setTextareaRef}
           className="inputbar-field"
           value={value}
-          onChange={(e) => {
-            setValue(e.target.value)
-            autoResize()
-          }}
+          onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="输入消息…"
           rows={1}

@@ -161,4 +161,53 @@ describe('InputBar', () => {
     expect(onSendVoiceIntentAsChat).toHaveBeenCalledTimes(1)
     expect(onDismissVoiceIntent).toHaveBeenCalledTimes(1)
   })
+
+  // ── 提交被主进程拒绝（BUSY / 熔断 / 暂停）时不丢用户输入 ──
+  // handleSend 调完 onSend 就 setValue('')，所以「拒绝」必须由上层把原文送回 restoreDraft。
+  describe('restoreDraft 回填', () => {
+    function getTextarea(): HTMLTextAreaElement {
+      return screen.getByPlaceholderText('输入消息…') as HTMLTextAreaElement
+    }
+
+    it('草稿被拒后回填进输入框', () => {
+      const { rerender } = render(<InputBar onSend={vi.fn()} />)
+      const textarea = getTextarea()
+      fireEvent.change(textarea, { target: { value: '被拒的草稿' } })
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+      // 发送后输入框已被清空 —— 这就是「丢掉用户输入」的那一步
+      expect(textarea.value).toBe('')
+
+      rerender(<InputBar onSend={vi.fn()} restoreDraft={{ text: '被拒的草稿', token: 1 }} />)
+      expect(textarea.value).toBe('被拒的草稿')
+    })
+
+    it('回填后可以直接再发一次', () => {
+      const onSend = vi.fn()
+      const { rerender } = render(<InputBar onSend={onSend} />)
+      rerender(<InputBar onSend={onSend} restoreDraft={{ text: '重发我', token: 1 }} />)
+
+      const textarea = getTextarea()
+      expect(textarea.value).toBe('重发我')
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+      expect(onSend).toHaveBeenCalledWith('重发我')
+    })
+
+    it('同一段文本再次被拒（token 递增）会重新回填', () => {
+      const { rerender } = render(<InputBar onSend={vi.fn()} restoreDraft={{ text: '同一段', token: 1 }} />)
+      const textarea = getTextarea()
+      expect(textarea.value).toBe('同一段')
+
+      // 用户又按了一次 Enter（或自己清空），框空了；此时同样的文本再来一次拒绝
+      fireEvent.change(textarea, { target: { value: '' } })
+      expect(textarea.value).toBe('')
+
+      rerender(<InputBar onSend={vi.fn()} restoreDraft={{ text: '同一段', token: 2 }} />)
+      expect(textarea.value).toBe('同一段')
+    })
+
+    it('没有 restoreDraft 时输入框保持空（对照面）', () => {
+      render(<InputBar onSend={vi.fn()} restoreDraft={null} />)
+      expect(getTextarea().value).toBe('')
+    })
+  })
 })

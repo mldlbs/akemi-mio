@@ -323,4 +323,105 @@ describe('useAIOutput', () => {
     })
     expect(window.electronAPI.chat).not.toHaveBeenCalled()
   })
+
+  // ── 提交被拒时不丢用户输入 ──
+  // InputBar.handleSend 调用 onSend 之后立刻 setValue('')，输入框是组件内部 state，
+  // 上层拿不到原文。所以「被拒的提交」必须由这里把原文还回去。
+  describe('被拒绝的提交回填草稿', () => {
+    it('BUSY：还回原文，并给出「正在处理上一条消息」的提示', async () => {
+      window.electronAPI.chat = vi.fn().mockResolvedValue({ error: 'BUSY' })
+      const onError = vi.fn()
+      const { result } = renderHook(() => useAIOutput('sess-1', false, onError))
+      await act(async () => {
+        await result.current.handleTextSubmit('先发一条')
+      })
+      expect(result.current.restoreDraft?.text).toBe('先发一条')
+      const shown = onError.mock.calls.map((c) => c[0]).find((v) => typeof v === 'string' && v.length > 0)
+      expect(shown).toContain('正在处理上一条消息')
+    })
+
+    // CIRCUIT_OPEN 在 AgentService.processTextInput 的第一行返回、PAUSED 在 ai:chat handler 里
+    // 直接返回，两者都早于 insertMessage —— 与 BUSY 同属「消息未落库」，同样可以安全回填。
+    it.each(['CIRCUIT_OPEN', 'PAUSED'])('%s 也回填（同样在落库之前返回）', async (code) => {
+      window.electronAPI.chat = vi.fn().mockResolvedValue({ error: code })
+      const { result } = renderHook(() => useAIOutput('sess-1', false, vi.fn()))
+      await act(async () => {
+        await result.current.handleTextSubmit('草稿')
+      })
+      expect(result.current.restoreDraft?.text).toBe('草稿')
+    })
+
+    // TIMEOUT 等码产自 ChatExecutor.run() 内部，那时 insertMessage(userMsg) 已经执行 ——
+    // 消息已在历史里，回填会让用户重发一遍，所以必须排除。
+    it.each(['TIMEOUT', 'NETWORK', 'NO_KEY', 'EMPTY_RESPONSE', 'API_ERROR:503'])(
+      '%s 不回填（消息已落库）',
+      async (code) => {
+        window.electronAPI.chat = vi.fn().mockResolvedValue({ error: code })
+        const { result } = renderHook(() => useAIOutput('sess-1', false, vi.fn()))
+        await act(async () => {
+          await result.current.handleTextSubmit('hi')
+        })
+        expect(result.current.restoreDraft).toBeNull()
+      },
+    )
+
+    it('正常回复不回填', async () => {
+      window.electronAPI.chat = vi.fn().mockResolvedValue({ reply: 'ok' })
+      const { result } = renderHook(() => useAIOutput('sess-1', false, vi.fn()))
+      await act(async () => {
+        await result.current.handleTextSubmit('hi')
+      })
+      expect(result.current.restoreDraft).toBeNull()
+    })
+
+    it('同一段文本被连拒两次 → token 递增（否则 InputBar 的 effect 不会重跑）', async () => {
+      window.electronAPI.chat = vi.fn().mockResolvedValue({ error: 'BUSY' })
+      const { result } = renderHook(() => useAIOutput('sess-1', false, vi.fn()))
+      await act(async () => {
+        await result.current.handleTextSubmit('同一段')
+      })
+      const first = result.current.restoreDraft
+      await act(async () => {
+        await result.current.handleTextSubmit('同一段')
+      })
+      const second = result.current.restoreDraft
+      expect(second?.text).toBe('同一段')
+      expect(second!.token).toBeGreaterThan(first!.token)
+    })
+
+    it('下一次提交会清掉上一次的草稿', async () => {
+      window.electronAPI.chat = vi.fn().mockResolvedValueOnce({ error: 'BUSY' }).mockResolvedValueOnce({ reply: 'ok' })
+      const { result } = renderHook(() => useAIOutput('sess-1', false, vi.fn()))
+      await act(async () => {
+        await result.current.handleTextSubmit('第一条')
+      })
+      expect(result.current.restoreDraft?.text).toBe('第一条')
+      await act(async () => {
+        await result.current.handleTextSubmit('第二条')
+      })
+      expect(result.current.restoreDraft).toBeNull()
+    })
+
+    it('语音提交被拒时不回填（语音原文不该塞回文本框）', async () => {
+      window.electronAPI.chat = vi.fn().mockResolvedValue({ error: 'BUSY' })
+      const { result } = renderHook(() => useAIOutput('sess-1', true, vi.fn()))
+      await act(async () => {
+        await result.current.handleVoiceResult('说出来的话')
+      })
+      expect(result.current.restoreDraft).toBeNull()
+    })
+
+    it('换会话时丢掉待回填的草稿', async () => {
+      window.electronAPI.chat = vi.fn().mockResolvedValue({ error: 'BUSY' })
+      const { result, rerender } = renderHook(({ s }: { s: string }) => useAIOutput(s, false, vi.fn()), {
+        initialProps: { s: 'sess-1' },
+      })
+      await act(async () => {
+        await result.current.handleTextSubmit('草稿')
+      })
+      expect(result.current.restoreDraft?.text).toBe('草稿')
+      rerender({ s: 'sess-2' })
+      expect(result.current.restoreDraft).toBeNull()
+    })
+  })
 })

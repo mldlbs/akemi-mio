@@ -20,9 +20,42 @@ export interface VoiceIntentPrompt {
   intent: VoiceIntentMatch
 }
 
+/**
+ * 需要「把原文还回输入框」的错误码 —— 判据是**用户消息根本没落库**，不是「失败了」。
+ *
+ * `InputBar.handleSend` 在调用 `onSend` 之后立刻 `setValue('')`，输入框是组件内部 state，
+ * 上层拿不到原文。所以一旦提交被拒，用户刚打的字就没了 —— 而 `BUSY` 恰恰是最容易撞上的：
+ * 上一轮还在跑时按 Enter（`InputBar` 忙碌时只把发送键换成停止键，**不禁用 textarea**，
+ * `handleKeyDown` 的 Enter 照样走 `handleSend`）。
+ *
+ * 三个码都在「任何副作用之前」返回：
+ * - `BUSY` —— `ChatExecutor.run()` 顶部的重入守卫（packages/intelligence/src/agent/ChatExecutor.ts）
+ * - `CIRCUIT_OPEN` —— `AgentService.processTextInput` 的第一件事就是熔断检查，同样早于 `run()`
+ * - `PAUSED` —— `packages/main/src/ipc/handlers/agent.ts` 的 `ai:chat` handler 在调用
+ *   `processTextInput` 之前直接返回
+ *
+ * 其余码（TIMEOUT / NETWORK / NO_KEY / EMPTY_RESPONSE / API_ERROR:5xx …）都在 `run()` **内部**
+ * 产出，那时 `insertMessage(userMsg)` 已经执行过 —— 消息已经在历史里了，
+ * 再回填只会让用户重发一遍，所以**不能**放进这个表。
+ */
+export const REJECTED_BEFORE_RUN: ReadonlySet<string> = new Set(['BUSY', 'CIRCUIT_OPEN', 'PAUSED'])
+
+/**
+ * 待回填进输入框的草稿。
+ *
+ * `token` 单调递增：同一条文本被连拒两次时，纯字符串 prop 前后相同，
+ * `InputBar` 的 effect 不会重跑（用户会发现第二次没有回填）。
+ */
+export interface RestoreDraft {
+  text: string
+  token: number
+}
+
 export function useAIOutput(activeSessionId: string, voiceActive: boolean, onError?: (err: string | undefined) => void) {
   const store = useAgentStore()
   const [voiceIntentPrompt, setVoiceIntentPrompt] = useState<VoiceIntentPrompt | null>(null)
+  const [restoreDraft, setRestoreDraft] = useState<RestoreDraft | null>(null)
+  const restoreTokenRef = useRef(0)
 
   const fadeTimer = useTimerControl()
   const revealTimer = useTimerControl()
@@ -30,6 +63,8 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
   useEffect(() => {
     store.resetAgent()
     setVoiceIntentPrompt(null)
+    // 换会话时丢掉待回填的草稿：否则新会话的 InputBar 一挂载就会把旧会话的草稿塞进去
+    setRestoreDraft(null)
     revealTimer.clear()
     fadeTimer.clear()
   }, [activeSessionId])
@@ -115,6 +150,7 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
       if (!text) return false
       store.setTranscribed(source === 'voice' ? text : '')
       setVoiceIntentPrompt(null)
+      setRestoreDraft(null)
       onError?.(undefined)
       store.setPendingText('')
       store.setDisplayText('')
@@ -134,7 +170,7 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
   )
 
   const sendChat = useCallback(
-    async (text: string) => {
+    async (text: string, restoreOnReject = false) => {
       store.setAgentState('thinking')
       try {
         const result = await window.electronAPI.chat(text, undefined, activeSessionId || undefined, !voiceActive)
@@ -142,6 +178,13 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
         // 不接返回值就等于把这些错误静默吞掉 —— 用户只会看到「思考中」然后消失。
         const message = chatErrorText(result?.error)
         if (message) onError?.(message)
+
+        // 本轮根本没被受理（消息未落库）→ 输入框里的原文已经被 handleSend 清掉了，还回去。
+        // 注意只对文本提交做：语音的原文不该塞回文本框（那不是用户「打的字」）。
+        if (restoreOnReject && result?.error && REJECTED_BEFORE_RUN.has(result.error)) {
+          restoreTokenRef.current += 1
+          setRestoreDraft({ text, token: restoreTokenRef.current })
+        }
       } catch (err) {
         onError?.(String(err))
       }
@@ -196,7 +239,7 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
   const handleTextSubmit = useCallback(
     async (text: string) => {
       if (!clearSubmissionState(text, 'text')) return
-      await sendChat(text)
+      await sendChat(text, true)
     },
     [clearSubmissionState, sendChat],
   )
@@ -243,6 +286,7 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
     toolStatus: store.toolStatus,
     agentState: store.agentState,
     voiceIntentPrompt,
+    restoreDraft,
     handleTextSubmit,
     handleVoiceResult,
     confirmVoiceIntent,
