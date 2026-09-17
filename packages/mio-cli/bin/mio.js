@@ -29,6 +29,7 @@ const { createInsightStore } = require('../server/insight-store.js')
 const { createObserverStore } = require('../server/observer-store.js')
 const { loadPhase0, renderPhase0Markdown } = require('../server/mio-intelligence-mcp/phase0.js')
 const { listHostCapabilities } = require('../server/host-capabilities.js')
+const { createTaskStore } = require('../server/task-store.js')
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
 
@@ -272,6 +273,18 @@ function cliCreativityEngine() {
 // shares one store with the MCP server, so CLI and MCP report identical agents.
 function cliAgentStore() {
   return createAgentStore({ dataDir: MIO_HOME, projectName })
+}
+
+// Task routing shares one store with mio.task.route. persistQuery stays false:
+// the MCP call feeds the query log for auto-claim, but a terminal inspection
+// must not write to queries.jsonl every time it runs.
+function cliTaskStore() {
+  return createTaskStore({
+    dataDir: MIO_HOME,
+    projectName,
+    memoryStore: cliMemoryStore(),
+    agentId: () => 'cli',
+  })
 }
 
 function splitTagsOption(args, name) {
@@ -1716,6 +1729,99 @@ Notes:
   }
 }
 
+function taskCommand(args, useJson) {
+  const sub = args[1]
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    console.log(`Usage:
+  mio task route "<task>"     Which verified experiences apply to this task
+  mio task route "<task>" --json    Machine-readable (same shape as mio.task.route)
+
+Options:
+  --project name     Project filter (defaults to the current directory name)
+  --scope all|project|global   Memory scope to consider
+  --limit N          Max routes (1-10, default 5)
+
+This is read-only: unlike the MCP call it does not write to the query log.`)
+    if (!sub) process.exitCode = 1
+    return
+  }
+  if (sub !== 'route') {
+    console.error(`Unknown task subcommand: ${sub}`)
+    process.exitCode = 1
+    return
+  }
+
+  const flags = args.slice(2)
+  // The task is free text and may be quoted as one argument or passed as
+  // several words. Only flags this command understands are treated as options.
+  const TASK_KNOWN_FLAGS = new Set(['--project', '--scope', '--limit', '--json'])
+  const taskParts = []
+  for (let i = 0; i < flags.length; i += 1) {
+    const token = flags[i]
+    if (TASK_KNOWN_FLAGS.has(token)) continue
+    if (i > 0 && TASK_KNOWN_FLAGS.has(flags[i - 1])) continue
+    taskParts.push(token)
+  }
+  const task = taskParts.join(' ').trim()
+  if (!task) {
+    console.error('mio task route requires a task, e.g. mio task route "publish the npm package"')
+    process.exitCode = 1
+    return
+  }
+
+  let result
+  try {
+    result = cliTaskStore().routeTask({
+      task,
+      project: optionValue(flags, '--project'),
+      scope: optionValue(flags, '--scope'),
+      limit: parseNumberOption(flags, '--limit'),
+      persistQuery: false,
+    })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+
+  if (useJson) return jsonOrText(result, true)
+  printTaskRoute(result)
+}
+
+function printTaskRoute(result) {
+  console.log(`Task route: "${result.task}" (project=${result.project || 'all'}, scope=${result.scope})`)
+  console.log(`verified routes: ${result.count}`)
+
+  if (result.count > 0) {
+    console.log('')
+    console.log('Routes (apply the top match first):')
+    result.routes.forEach((route, index) => {
+      const via = route.sourceAgents.length > 0 ? route.sourceAgents.join(', ') : '?'
+      const to = route.targetAgents.length > 0 ? route.targetAgents.join(', ') : '?'
+      console.log(
+        `${index + 1}. [score ${route.score}] ${route.experienceId} — reused ${route.reuseCount}x${route.confirmed ? ' (confirmed)' : ''}`,
+      )
+      console.log(`   ${String(route.memory.content).replace(/\s+/g, ' ').slice(0, 110)}`)
+      console.log(`   ${via} -> ${to}`)
+    })
+  }
+
+  if (result.relatedMemories.length > 0) {
+    console.log('')
+    console.log('Related memories:')
+    for (const record of result.relatedMemories) {
+      console.log(`- ${record.id}  ${String(record.content).replace(/\s+/g, ' ').slice(0, 100)}`)
+    }
+  }
+
+  if (result.summary && result.summary.routingSignal) {
+    console.log(`\nAgent health: ${result.summary.routingSignal}`)
+  }
+  if (result.summary && result.summary.suggestion) {
+    console.log(`\n${result.summary.suggestion}`)
+  }
+}
+
 function installCommand(host, useJson) {
   if (!host) {
     console.error('Usage: mio install <codex|opencode|workbuddy|hermes|claude>')
@@ -1854,6 +1960,7 @@ Usage:
                                status | world-model | trends | research | insights | essays | dag
   mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
   mio host capabilities        Show what each host supports and whether it is installed
+  mio task route "<task>"      Which verified experiences apply to this task (--project/--scope/--limit)
   mio policy check "<action>" Check historical risk for an action before running it
   mio prune --days 30         Trim old traces/queries/reuse records and observe.log (--dry-run to preview; --memory needs --yes)
   mio digest --days 7         Aggregate traces/memory/reuse into an actionable report (--write-back feeds agent context files; --json)
@@ -1905,6 +2012,8 @@ async function main() {
       return phase0Command(args, useJson)
     case 'host':
       return hostCommand(args, useJson)
+    case 'task':
+      return taskCommand(args, useJson)
     case 'prune':
       return pruneCommand(args, useJson)
     case 'digest':

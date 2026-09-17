@@ -54,6 +54,7 @@ mio observer <view>          Observer research pipeline views (research pipeline
                              status|world-model|trends|research|insights|essays|dag (--base-dir DIR)
 mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
 mio host capabilities        Show what each host supports and whether it is installed (--json)
+mio task route "<task>"      Which verified experiences apply to this task (--project/--scope/--limit)
 mio --json status           Machine-readable status
 mio --json agents           Machine-readable agents
 mio --json evolution status Machine-readable evolution module health
@@ -401,6 +402,45 @@ Host capabilities: 5 host(s)
 
 例如配置文件还在、但宿主目录已被删掉时，`mio agents` 仍会列出它，而
 `host capabilities` 显示 `not installed`。
+
+## 任务路由（`mio task route`）
+
+回答的是"这类任务历史上谁做成过、按哪条已验证经验走"：把**已验证的复用经验**
+（`confirmed` + `reuse` + `behaviorChanged` + `outcomeImproved` 四项全真）与任务描述
+做相关性匹配，再叠加 digest 快照里的 agent 健康信号。
+
+```bash
+mio task route "publish npm package"
+mio task route "mio.experience.confirm 复用证据" --project akemi-mio --limit 3
+mio task route "deploy service" --json
+```
+
+```text
+Task route: "mio.experience.confirm 复用证据" (project=akemi-mio, scope=project)
+verified routes: 5
+
+Routes (apply the top match first):
+1. [score 23.5] mem_1786932717070_22577ed0f57a — reused 2x (confirmed)
+   新增 mio.experience.confirm（worktree ...）：把 source=auto_claim 的复用证据升级为已确认...
+   codex -> opencode
+```
+
+### 与 MCP 唯一的行为差异：不写查询日志
+
+`mio.task.route` 会把这次查询写进 `queries.jsonl`——这是 Phase 0 **自动认领**
+（auto-claim）机制的输入：之后的 `task_outcome` 才能把"路由命中→任务成功"
+关联成复用证据。这个写入是**承重的**，不能去掉。
+
+但终端里的 `mio task route` 是一次**查看**，每跑一次就往查询日志塞一条是不对的。
+所以 store 提供了 `persistQuery` 开关：
+
+| 调用方 | `persistQuery` | 是否写 `queries.jsonl` |
+|---|---|---|
+| MCP `mio.task.route` | 默认 `true` | ✅ 写（保持原行为） |
+| CLI `mio task route` | `false` | ❌ 不写 |
+
+测试里两条都钉住了：CLI 跑完 `queries.jsonl` **不存在**；同一 store 传
+`persistQuery: true` 则**确实写入**——证明差异来自开关，而不是代码路径坏了。
 
 ## 发布验证
 
