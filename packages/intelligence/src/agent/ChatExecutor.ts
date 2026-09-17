@@ -887,13 +887,24 @@ export class ChatExecutor {
         reply = cleaned || '嗯，我在呢。'
       }
       if (!reply) {
-        this.obsLogger?.logOutput('NO_REPLY', Date.now() - t0)
+        // 空回复有三种成因，必须区分开，否则给用户的原因会误导：
+        //  ① 用户主动打断（interruptFlag）—— 不是错误，renderer 侧会抑制展示；
+        //  ② LLM 报错且重试已耗尽 —— 用真实错误码（TIMEOUT / NETWORK / RATE_LIMITED …）；
+        //  ③ 模型确实返回了空内容 —— NO_REPLY。
+        // toolLoop 只能给回一个空串，所以 ② 的原因要靠 ctx.terminalLlmError 带上来。
+        const noReplyCode = ctx.interruptFlag ? 'INTERRUPTED' : ctx.terminalLlmError || 'NO_REPLY'
+        this.obsLogger?.logOutput(noReplyCode, Date.now() - t0)
         this.obsLogger?.flush()
-        log('WARN', 'chat_no_reply', { request_id: rid, source, duration_ms: Date.now() - t0 })
+        log('WARN', 'chat_no_reply', {
+          request_id: rid,
+          source,
+          duration_ms: Date.now() - t0,
+          code: noReplyCode,
+        })
         // M6.1: 无回复即终止本轮 → 未终结的执行目标标记 abandoned
-        this.abandonActiveGoal('NO_REPLY')
-        this.emitChatTaskCompleted(rid, effectiveSessionId, 'abandoned', Date.now() - t0, 'NO_REPLY')
-        return { error: 'NO_REPLY' }
+        this.abandonActiveGoal(noReplyCode)
+        this.emitChatTaskCompleted(rid, effectiveSessionId, 'abandoned', Date.now() - t0, noReplyCode)
+        return { error: noReplyCode }
       }
       this.workingMemory.addAssistant(reply)
       this.obsLogger?.logOutput(reply, Date.now() - t0)
@@ -1732,6 +1743,18 @@ export class ChatExecutor {
     return '操作次数过多，请重新尝试'
   }
 
+  /**
+   * 终止本轮并记下真实错误码。
+   *
+   * `toolLoop` 的返回值类型是 `string`，放弃重试时只能给上层一个空串 —— 上层无法区分
+   * 「模型返回空内容」和「模型超时三次后放弃」。把错误码写进 `ctx` 才能让 `run()`
+   * 如实上报（否则一律退化成 `NO_REPLY`，用户看到的是误导性的「模型没有返回内容」）。
+   */
+  private terminateWithLlmError(ctx: RunContext, e: string): 'return' {
+    ctx.terminalLlmError = e
+    return 'return'
+  }
+
   private handleLlmError(e: string | undefined, step: number, m: Message[], ctx: RunContext): 'return' | 'continue' | null {
     // 无错误 = 本轮 LLM 调用成功 → 让熔断器复位（含半开探测成功）
     if (!e) {
@@ -1742,7 +1765,7 @@ export class ChatExecutor {
       // 超时属于「基础设施暂时不可用」，计入熔断
       this.circuitBreaker?.onFailure('llm')
       ctx.consecutiveTimeouts++
-      if (ctx.consecutiveTimeouts >= 3) return 'return'
+      if (ctx.consecutiveTimeouts >= 3) return this.terminateWithLlmError(ctx, e)
       this.workingMemory.scratchpad.add('error_hint', '超时，请缩短输出量从断点继续。')
       return 'continue'
     }
@@ -1755,7 +1778,8 @@ export class ChatExecutor {
     }
     if (c.category === 'RETRYABLE') {
       this.consecutiveRetryableErrors++
-      return this.consecutiveRetryableErrors >= 3 ? 'return' : 'continue'
+      if (this.consecutiveRetryableErrors >= 3) return this.terminateWithLlmError(ctx, e)
+      return 'continue'
     }
     if (c.category === 'CONTEXT_OVERFLOW') {
       this.workingMemory.context.saveToShortTermMemory(5)
@@ -1793,13 +1817,13 @@ export class ChatExecutor {
     }
     if (c.category === 'CONFIGURATION_ERROR') {
       log('WARN', 'chat_configuration_error', { step, error: e.slice(0, 200) })
-      return 'return'
+      return this.terminateWithLlmError(ctx, e)
     }
     if (c.category === 'TOOL_SCHEMA_ERROR') {
       this.workingMemory.scratchpad.add('error_hint', '工具参数格式有误，请检查后重试。')
       return 'continue'
     }
-    return 'return'
+    return this.terminateWithLlmError(ctx, e)
   }
 
   /**

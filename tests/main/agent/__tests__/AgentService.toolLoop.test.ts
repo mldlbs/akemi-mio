@@ -193,13 +193,16 @@ describe('AgentService toolLoop 状态机', () => {
       expect(result.reply).toBe('刚才超时了，现在继续')
     })
 
-    it('连续 3 次超时 → 返回错误提示', async () => {
+    it('连续 3 次超时 → 如实上报 TIMEOUT，而不是笼统的 NO_REPLY', async () => {
       const chatSpy = vi.spyOn(llmService, 'chatWithTools')
       chatSpy.mockResolvedValue({ error: 'TIMEOUT' })
 
       const result = await agent.processTextInput('测试超时')
-      // ChatExecutor 连续超时 3 次后返回 NO_REPLY error
-      expect(result.error || result.reply).toBeTruthy()
+
+      // ChatExecutor 连续超时 3 次后放弃重试。toolLoop 只能给上层一个空串，
+      // 真实原因靠 ctx.terminalLlmError 带上来 —— 若丢掉，就会退化成 NO_REPLY，
+      // 用户看到的是误导性的「模型没有返回内容」，而实际原因是超时。
+      expect(result.error).toBe('TIMEOUT')
     })
 
     it('超时恢复后正常 → consecutiveTimeouts 应重置', async () => {

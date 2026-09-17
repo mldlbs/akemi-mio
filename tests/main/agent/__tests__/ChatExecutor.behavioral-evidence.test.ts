@@ -197,4 +197,22 @@ describe('ChatExecutor behavioral evidence', () => {
       error: 'NO_REPLY',
     })
   })
+
+  it('用户主动打断时上报 INTERRUPTED，而不是假装成 NO_REPLY', async () => {
+    const executor = createExecutor()
+    const requestId = 'trace-interrupted'
+    const sessionId = 'session-interrupted'
+
+    vi.spyOn(executor as any, 'toolLoop').mockImplementation(async (_m: any, ctx: any) => {
+      ctx.interruptFlag = true
+      return ''
+    })
+
+    const result = await executor.run('Say something', requestId, 'electron', undefined, sessionId, true)
+
+    // 打断是用户的意图，不是故障：renderer 侧 chatErrorText 对 INTERRUPTED 返回 null，
+    // 所以不会弹错误。若这里报成 NO_REPLY，用户取消后反而会看到
+    // 「模型没有返回内容，请重试」——把用户的主动行为说成模型故障。
+    expect(result).toEqual({ error: 'INTERRUPTED' })
+  })
 })

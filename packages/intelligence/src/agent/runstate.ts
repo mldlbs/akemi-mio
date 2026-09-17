@@ -74,6 +74,14 @@ export class RunContext {
   suppressForceContinue = false
   /** Guardrail 请求终止：放行最后一轮 LLM 回复后退出 */
   guardrailStop = false
+  /**
+   * 终止本轮的 LLM 错误码（`TIMEOUT` / `NETWORK` / `RATE_LIMITED` / `CONFIGURATION_ERROR` …）。
+   *
+   * 由 `handleLlmError` 在返回 `'return'`（不再重试）时写入。`toolLoop` 只会给上层一个
+   * 空字符串，若不记下来，`run()` 就无法区分「模型返回了空内容」和「模型超时三次后放弃」，
+   * 只能一律报 `NO_REPLY` —— 用户会看到「模型没有返回内容」，而真实原因是超时/限流。
+   */
+  terminalLlmError = ''
   softReplyInjected = false
   /** 前几轮已经口头汇报过的内容摘要 */
   spokenReplies: string[] = []

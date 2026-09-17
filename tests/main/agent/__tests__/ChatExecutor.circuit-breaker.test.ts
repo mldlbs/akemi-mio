@@ -113,13 +113,19 @@ function createExecutor() {
   return { executor, llmService }
 }
 
-/** handleLlmError 只用到 ctx.consecutiveTimeouts，其余字段无关 */
+/** handleLlmError 只用到 ctx.consecutiveTimeouts / ctx.terminalLlmError，其余字段无关 */
 function makeCtx() {
-  return { consecutiveTimeouts: 0 } as any
+  return { consecutiveTimeouts: 0, terminalLlmError: '' } as any
+}
+
+function callHandleLlmErrorWithCtx(executor: ChatExecutor, error: string | undefined) {
+  const ctx = makeCtx()
+  const verdict = (executor as any).handleLlmError(error, 0, [], ctx)
+  return { verdict, ctx }
 }
 
 function callHandleLlmError(executor: ChatExecutor, error: string | undefined) {
-  return (executor as any).handleLlmError(error, 0, [], makeCtx())
+  return callHandleLlmErrorWithCtx(executor, error).verdict
 }
 
 describe('ChatExecutor 熔断器接入', () => {
@@ -209,5 +215,54 @@ describe('ChatExecutor 熔断器接入', () => {
     const { executor } = createExecutor()
     expect(() => callHandleLlmError(executor, 'NETWORK')).not.toThrow()
     expect(() => callHandleLlmError(executor, undefined)).not.toThrow()
+  })
+})
+
+describe('ChatExecutor 失败原因上报（ctx.terminalLlmError）', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.clearAllMocks()
+    userBehaviorAnalyzer.reset()
+    taskOrchestrationModeManager.reset()
+  })
+
+  it('放弃重试时把真实错误码写进 ctx —— 否则上层只能一律报 NO_REPLY', () => {
+    const { executor } = createExecutor()
+
+    const { verdict, ctx } = callHandleLlmErrorWithCtx(executor, 'NETWORK')
+
+    expect(verdict).toBe('return')
+    expect(ctx.terminalLlmError).toBe('NETWORK')
+  })
+
+  it('连续超时到第 3 次才放弃，并记录 TIMEOUT', () => {
+    const { executor } = createExecutor()
+    const ctx = makeCtx()
+    const call = () => (executor as any).handleLlmError('TIMEOUT', 0, [], ctx)
+
+    expect(call()).toBe('continue') // 第 1 次：注入提示后继续
+    expect(call()).toBe('continue') // 第 2 次
+    expect(ctx.terminalLlmError).toBe('') // 还在重试，不该记成终止原因
+
+    expect(call()).toBe('return') // 第 3 次：放弃
+    expect(ctx.terminalLlmError).toBe('TIMEOUT')
+  })
+
+  it('可自愈的错误不写 terminalLlmError（本轮还能救回来）', () => {
+    const { executor } = createExecutor()
+
+    const { verdict, ctx } = callHandleLlmErrorWithCtx(executor, 'context_length_exceeded')
+
+    expect(verdict).toBe('continue')
+    expect(ctx.terminalLlmError).toBe('')
+  })
+
+  it('成功（无错误）不写 terminalLlmError', () => {
+    const { executor } = createExecutor()
+
+    const { verdict, ctx } = callHandleLlmErrorWithCtx(executor, undefined)
+
+    expect(verdict).toBeNull()
+    expect(ctx.terminalLlmError).toBe('')
   })
 })
