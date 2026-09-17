@@ -328,11 +328,11 @@ export class TelegramService {
           const safeReply = result.reply.replace(/<invoke name="[^"]+">[\s\S]*?<\/invoke>/g, '').trim() || '正在检查，请稍候……'
           this.enqueueReply(msg.chatId, safeReply, 'dialogue', botName)
         } else if (result.error === 'BUSY') {
-          // ⚠️ 当前**没有产出方**，这条分支（以及 retryQueue 的整条链路）不会触发：
-          // 本方法 → ExternalMessageGateway → AgentService.processExternalMessage
-          // → processTextInput，而 processTextInput 从不返回 BUSY（它连并发守卫都没有）。
-          // 保留判定是为了宿主补上「忙」信号后 telegram 侧不用改；补的时候记得把
-          // BUSY 加进 @akemi-mio/intelligence/llm/types 的 CHAT_ERROR_CODES。
+          // ⚠️ 这条分支（以及 retryQueue 的整条链路）目前不会触发，但**不是**因为没人产出 BUSY
+          // —— ChatExecutor 的重入守卫已经会返回它（09-18）—— 而是因为 telegram 侧**没有并发**：
+          // `pollUpdates` 对每条消息 `await this.handleMessage(msg)`，retryQueue 也在同一轮里
+          // 顺序排空，所以同一时刻只会有一个 processExternalAgentMessage 在跑。
+          // 保留这段处理是**防御性**的：一旦将来 poll 改成并发派发，它立刻就有意义。
           this.enqueueReply(
             msg.chatId,
             `👤 ${userText}\n\n⏳ 秋山澪正在处理其他请求，你的消息已加入队列，处理完成后会自动回复`,
@@ -413,7 +413,7 @@ export class TelegramService {
         log('INFO', 'telegram_reply_enqueued', { chatId, msgId: progressMsgId, replyLen: result.reply.length })
       } else if (result.error) {
         if (result.error === 'BUSY') {
-          // ⚠️ 同 330 行：宿主目前不产出 BUSY，此分支与 retryQueue 均为待激活状态。
+          // ⚠️ 同 330 行：telegram 侧无并发（poll 顺序 await），此分支与 retryQueue 不会触发。
           const busyText = `👤 你: ${userText}\n\n⏳ 秋山澪正在处理其他请求，你的消息已加入队列，处理完会自动回复`
           editor.cancel()
           this.enqueueEdit(chatId, progressMsgId, busyText, botName)

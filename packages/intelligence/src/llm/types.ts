@@ -20,6 +20,7 @@ export const CHAT_ERROR_CODES = [
   // —— 服务可用性 ——
   'CIRCUIT_OPEN', // 熔断器打开，请求被快速失败
   'PAUSED', // 用户暂停了对话（产出点：packages/main/src/ipc/handlers/agent.ts）
+  'BUSY', // 上一轮还在跑，本轮被 ChatExecutor 的重入守卫拒绝
   // —— 传输 / 模型侧 ——
   'TIMEOUT',
   'NETWORK',

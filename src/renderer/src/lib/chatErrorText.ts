@@ -23,6 +23,7 @@
 export const CHAT_ERROR_TEXT: Record<string, string> = {
   CIRCUIT_OPEN: '模型服务暂时不可用，已暂停请求，约 30 秒后自动恢复',
   PAUSED: '对话已暂停，恢复后再试',
+  BUSY: '正在处理上一条消息，请稍候再试',
   NO_REPLY: '模型没有返回内容，请重试',
   EMPTY_RESPONSE: '模型没有返回内容，请重试',
   INTERNAL: '内部错误，请重试',

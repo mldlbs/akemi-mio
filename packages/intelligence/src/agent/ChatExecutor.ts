@@ -608,6 +608,30 @@ export class ChatExecutor {
     sessionId?: string,
     noTts?: boolean,
   ): Promise<ChatResult> {
+    // ── 重入守卫：同一时刻只允许一次 run ──
+    // 本方法会覆盖一批实例级状态：`runContext`（interrupt / stop / isBusy 都读它）、
+    // `noTts`，以及换 session 时的 `currentSessionId` / `workingMemory`。
+    // 两次 run 并行时后来者会把先来那次的这些字段全部改写 ——
+    // 先来那次随即失去可中断性（`stop()` 打到别人的 ctx），
+    // 而先结束的一方在 finally 里把 `runContext` 置 null，把仍在跑的那次「变得不忙」
+    // （`isBusy()` 恒 false → SleepCycle 可能在对话进行中插进来）。
+    //
+    // 判据用 `runContext !== null` 而不是 `isBusy()`：`isBusy()` 看的是 `ctx.state`
+    // （RUNNING / WAIT_TOOL），而 runContext 在 toolLoop 前后各有一段窗口状态还没推进
+    // 或已经结束，那些窗口同样会被覆盖。
+    //
+    // **拒绝而不打断是刻意的**：打断会把前一轮的产出丢掉，而 `INTERRUPTED` 在 renderer
+    // 侧是被静默抑制的（见 chatErrorText 的 SILENT_CODES），用户会看到回答凭空消失。
+    // 上游各自的策略不同：telegram 侧有「收到 BUSY → 回排队文案 + 重排队」的处理。
+    if (this.runContext) {
+      log('WARN', 'chat_run_rejected_busy', {
+        request_id: requestId,
+        source,
+        active_run: this.runContext.runId,
+      })
+      return { error: 'BUSY' }
+    }
+
     this.noTts = noTts ?? false
     // 纠正模式学习器懒启动（安全幂等）
     correctionPatternLearner.start()

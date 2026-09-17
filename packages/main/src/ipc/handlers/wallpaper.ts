@@ -10,6 +10,22 @@ const DEFAULT_WALLPAPER_INTERACTIVE_CONFIG = {
   shortcut: 'CommandOrControl+Space',
 }
 
+/**
+ * 任务面板里给用户看的失败原因。
+ *
+ * 只翻译「用户点了按钮会立刻失败」的几个码，其余回落到「带码的通用文案」——
+ * 面板是给人看的诊断面，保留原始码便于排查。
+ *
+ * **刻意不在主进程再维护一份完整文案表**：给人看的那份唯一实现是 renderer 的
+ * `src/renderer/src/lib/chatErrorText.ts`，而 renderer 不 import 主进程包（架构边界），
+ * 所以主进程这边也拿不到它。两份表并存是这套架构的既有代价，这里只保留最小交集。
+ */
+const TASK_PANEL_AGENT_ERROR: Record<string, string> = {
+  BUSY: '助手正在处理上一条消息，请稍候再试',
+  CIRCUIT_OPEN: '模型服务暂时不可用，请稍后重试',
+  PAUSED: '对话已暂停，请先恢复',
+}
+
 function hasWallpaperInteractiveApi(
   svc: unknown,
 ): svc is { getConfig: () => { enabled: boolean; shortcut: string }; setConfig: (config: { enabled?: boolean }) => void } {
@@ -150,7 +166,17 @@ export function registerWallpaperHandlers({
       if (action.tool === 'desktop_ask_agent') {
         const prompt = args.prompt || args.content || ''
         if (!prompt.trim()) return { success: false, error: 'prompt is required' }
-        await agentService.processTextInput(prompt, `task_panel_${Date.now()}`, 'task-panel' as any)
+        // 必须看返回值：主进程用「正常 resolve + error 字段」表达失败，不接就等于把
+        // 「忙 / 熔断 / 暂停」全当成「已发送」上报成功 —— 用户点了按钮、界面回「✅ 已发送」、
+        // 实际什么都没发生。`ask_agent`（快捷提问）是真实存在的快捷操作
+        // （见 platform/src/wallpaper/TaskPanelService.ts），所以这条路径可达。
+        const result = await agentService.processTextInput(prompt, `task_panel_${Date.now()}`, 'task-panel' as any)
+        if (result?.error) {
+          const reason = TASK_PANEL_AGENT_ERROR[result.error] ?? `助手暂时无法处理（${result.error}）`
+          log('WARN', 'task_panel_ask_agent_failed', { actionId, code: result.error })
+          svc.recordAction({ tool: action.tool, status: 'error', summary: reason })
+          return { success: false, error: reason }
+        }
         svc.recordAction({ tool: action.tool, status: 'success', summary: `${action.label} 已发送` })
         return { success: true, result: `${action.label} 已发送` }
       }
@@ -245,7 +271,18 @@ export function registerWallpaperHandlers({
     try {
       agentService
         .processTextInput('打开 ' + conversationId, 'wp_nav_' + Date.now(), 'electron', undefined, undefined, true)
-        .catch(() => {})
+        // 保持 fire-and-forget（一次导航要跑完一整轮对话，不该阻塞这个 IPC），
+        // 但**不能再把失败吞掉**：主进程用「正常 resolve + error 字段」表达失败，
+        // 而 `.catch()` 只接 rejection —— 「忙 / 熔断 / 暂停」以前是完全静默的。
+        // 这个 handler 的 `success` 语义是「导航请求已受理」，不是「导航已完成」。
+        .then((result) => {
+          if (result?.error) {
+            log('WARN', 'conversation_navigate_rejected', { conversationId, code: result.error })
+          }
+        })
+        .catch((err) => {
+          log('WARN', 'conversation_navigate_rejected', { conversationId, error: String(err) })
+        })
       log('INFO', 'conversation_navigated', { conversationId })
       return { success: true }
     } catch (err: any) {

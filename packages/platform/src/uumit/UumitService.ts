@@ -229,6 +229,14 @@ export class UumitService {
                 uumitOrderId: params?.orderId,
               } as any,
             )
+            // 必须同时接 then：主进程用「正常 resolve + error 字段」表达失败，
+            // 只挂 `.catch()` 接不到 BUSY / CIRCUIT_OPEN 这类「成功 resolve 的失败」，
+            // 等于把外部平台发来的消息静默丢掉。
+            .then((result) => {
+              if (result?.error) {
+                log('ERROR', 'uumit_chat_failed', { code: result.error, taskId: params?.taskId })
+              }
+            })
             .catch((err) => {
               log('ERROR', 'uumit_chat_error', { error: String(err) })
             })
