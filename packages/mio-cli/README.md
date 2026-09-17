@@ -25,6 +25,7 @@ mio status                  Show runtime and adapter status
 mio agents                  List installed host adapters
 mio agents list             List observed agents (from agents.jsonl, --project X)
 mio agents report           Report per-agent task/memory/reuse telemetry (--agent X, --project Y)
+mio agents register --agent-id X   Register an observed agent (--yes to apply; previews by default)
 mio evolution status        Show composed evolution module health
 mio evolution shadow record      Record a shadow comparison sample
 mio evolution dual-write record  Record a dual-write comparison sample
@@ -378,7 +379,31 @@ codex (mcp)  idle
    last seen: 2026-09-06 00:57:03 | sessions=2
 ```
 
-两个子命令都委托给 `server/agent-store.js`——与 `mio.agent.list` / `mio.agent.report` / `mio.agent.register` MCP 工具相同的存储，因此终端与 MCP 服务端报告一致的遥测，不可能漂移。`list` 读取 `agents.jsonl`；`report` 叠加 trace/memory/reuse 的交叉引用。`register`（仅 MCP）写入一个新的被观察 agent；CLI 暴露的是只读一侧。
+两个子命令都委托给 `server/agent-store.js`——与 `mio.agent.list` / `mio.agent.report` / `mio.agent.register` MCP 工具相同的存储，因此终端与 MCP 服务端报告一致的遥测，不可能漂移。`list` 读取 `agents.jsonl`；`report` 叠加 trace/memory/reuse 的交叉引用。
+
+### 注册（`mio agents register`）
+
+`register` 是这一组里唯一的**写操作**，因此沿用与 `mio memory archive` 相同的约定：
+**默认只预览，加 `--yes` 才落盘**，`--json` 模式同样受限。
+
+```bash
+mio agents register --agent-id my-agent --project demo --capabilities code,test
+mio agents register --agent-id my-agent --project demo --yes    # 真正写入
+```
+
+```text
+Register preview: my-agent (project=demo, host=mcp)
+  will create a new agent record
+  capabilities: code, test
+Re-run with --yes to apply.
+```
+
+- **预览时不会创建 `agents.jsonl`**——这点有测试钉住（预览跑完文件不存在）。
+- 已存在时预览会显示 `will update existing agent (sessionCount 4 -> 5)`，
+  而不是含糊地说"将注册"。
+- `--yes` 首次创建（`sessionCount: 1`），再次执行则更新
+  `lastSeenAt` + `sessionCount`，**不会产生重复行**。
+- 更新时若省略 `--capabilities`，原有能力**保留**（只有显式传入非空列表才覆盖）。
 
 ### 与 `mio host capabilities` 的区别
 

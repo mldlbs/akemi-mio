@@ -1622,8 +1622,75 @@ function agentsCommand(args, useJson) {
     return printAgentReport(result)
   }
 
+  if (sub === 'register') {
+    const flags = args.slice(2)
+    const agentId = optionValue(flags, '--agent-id')
+    if (!agentId) {
+      console.error('mio agents register requires --agent-id <id>')
+      process.exitCode = 1
+      return
+    }
+    const project = optionValue(flags, '--project') || projectName()
+    const hostType = optionValue(flags, '--host-type') || 'mcp'
+    const capabilities = splitTagsOption(flags, '--capabilities')
+
+    // Preview by default, like `mio memory archive`: nothing is written
+    // without --yes, in --json mode either.
+    if (!flagPresent(flags, '--yes')) {
+      const existing = cliAgentStore()
+        .listAgents({ project })
+        .agents.find((a) => a.agentId === agentId)
+      if (useJson) {
+        jsonOrText(
+          {
+            preview: true,
+            applied: false,
+            agentId,
+            project,
+            hostType,
+            capabilities,
+            willCreate: !existing,
+            existingSessionCount: existing ? existing.sessionCount || 0 : null,
+            hint: 'Re-run with --yes to apply.',
+          },
+          true,
+        )
+      } else {
+        console.log(`Register preview: ${agentId} (project=${project}, host=${hostType})`)
+        if (existing) {
+          const next = (existing.sessionCount || 0) + 1
+          console.log(`  will update existing agent (sessionCount ${existing.sessionCount || 0} -> ${next})`)
+        } else {
+          console.log('  will create a new agent record')
+        }
+        if (capabilities.length > 0) console.log(`  capabilities: ${capabilities.join(', ')}`)
+        console.log('Re-run with --yes to apply.')
+      }
+      process.exitCode = 1
+      return
+    }
+
+    let result
+    try {
+      result = cliAgentStore().registerAgent({ agentId, project, hostType, capabilities })
+    } catch (error) {
+      console.error(error.message || error)
+      process.exitCode = 1
+      return
+    }
+    if (useJson) return jsonOrText(result, true)
+    console.log(`Registered ${result.agentId} (project=${project})`)
+    console.log(
+      `  ${result.registered ? 'created' : `updated (session ${result.sessionCount})`} | host=${result.hostType}`,
+    )
+    if (result.capabilities && result.capabilities.length > 0) {
+      console.log(`  capabilities: ${result.capabilities.join(', ')}`)
+    }
+    return
+  }
+
   console.error(`Unknown agents subcommand: ${sub}`)
-  console.error('Usage: mio agents [list|report] [--agent X] [--project Y]')
+  console.error('Usage: mio agents [list|register|report] [--agent X] [--project Y]')
   process.exitCode = 1
 }
 
@@ -1931,6 +1998,7 @@ Usage:
   mio agents                  List installed host adapters
   mio agents list             List observed agents (from agents.jsonl, --project X)
   mio agents report           Report per-agent task/memory/reuse telemetry (--agent X, --project Y)
+  mio agents register --agent-id X   Register an observed agent (--yes to apply; previews by default)
   mio evolution status        Show composed evolution module health
   mio evolution shadow record      Record a shadow comparison sample
   mio evolution dual-write record  Record a dual-write comparison sample

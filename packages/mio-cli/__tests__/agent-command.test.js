@@ -211,3 +211,106 @@ test('the CLI and the shared store agree on the same agents', () => {
   const viaCliList = listJson(ws)
   assert.equal(directList.count, viaCliList.count)
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// register: the write side. Follows the same contract as `mio memory archive`:
+// previews by default (exit 1, nothing written), applies only with --yes, and
+// --json is equally gated.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function agentsFile(ws) {
+  return path.join(ws.mioHome, 'agents.jsonl')
+}
+
+function readAgents(ws) {
+  const file = agentsFile(ws)
+  if (!fs.existsSync(file)) return []
+  return fs
+    .readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+}
+
+test('agents register previews without writing', () => {
+  const ws = workspace('reg-preview')
+
+  const result = run(ws.cwd, ws.env, [
+    'agents', 'register', '--agent-id', 'cli-x', '--project', 'demo', '--capabilities', 'code,test',
+  ])
+  assert.equal(result.status, 1, 'preview exits non-zero')
+  assert.match(result.stdout, /Register preview: cli-x/)
+  assert.match(result.stdout, /will create a new agent record/)
+  assert.match(result.stdout, /capabilities: code, test/)
+  assert.match(result.stdout, /Re-run with --yes to apply/)
+  assert.equal(fs.existsSync(agentsFile(ws)), false, 'preview must not write agents.jsonl')
+})
+
+test('agents register preview shows an update when the agent exists', () => {
+  const ws = workspace('reg-existing')
+  seed(path.join(ws.mioHome, 'agents.jsonl'), [
+    { id: 'agent_1', agentId: 'cli-x', hostType: 'mcp', sessionCount: 4, project: 'demo' },
+  ])
+
+  const result = run(ws.cwd, ws.env, ['agents', 'register', '--agent-id', 'cli-x', '--project', 'demo'])
+  assert.equal(result.status, 1)
+  assert.match(result.stdout, /will update existing agent \(sessionCount 4 -> 5\)/)
+  // Still untouched.
+  assert.equal(readAgents(ws)[0].sessionCount, 4)
+})
+
+test('agents register --yes creates and then updates', () => {
+  const ws = workspace('reg-apply')
+
+  const first = run(ws.cwd, ws.env, [
+    'agents', 'register', '--agent-id', 'cli-x', '--project', 'demo', '--capabilities', 'code', '--yes',
+  ])
+  assert.equal(first.status, 0, first.stderr)
+  assert.match(first.stdout, /Registered cli-x \(project=demo\)/)
+  assert.match(first.stdout, /created/)
+  let agents = readAgents(ws)
+  assert.equal(agents.length, 1)
+  assert.equal(agents[0].agentId, 'cli-x')
+  assert.equal(agents[0].sessionCount, 1)
+  assert.deepEqual(agents[0].capabilities, ['code'])
+  assert.equal(agents[0].project, 'demo')
+
+  // Second call updates lastSeenAt + sessionCount and keeps the capabilities.
+  const second = run(ws.cwd, ws.env, ['agents', 'register', '--agent-id', 'cli-x', '--project', 'demo', '--yes'])
+  assert.equal(second.status, 0, second.stderr)
+  assert.match(second.stdout, /updated \(session 2\)/)
+  agents = readAgents(ws)
+  assert.equal(agents.length, 1, 'no duplicate row')
+  assert.equal(agents[0].sessionCount, 2)
+  assert.deepEqual(agents[0].capabilities, ['code'], 'capabilities survive an update that omits them')
+})
+
+test('agents register --json is gated the same way', () => {
+  const ws = workspace('reg-json')
+
+  const preview = run(ws.cwd, ws.env, ['agents', 'register', '--agent-id', 'cli-x', '--project', 'demo', '--json'])
+  assert.equal(preview.status, 1, 'json preview still exits non-zero')
+  const previewJson = JSON.parse(preview.stdout)
+  assert.equal(previewJson.preview, true)
+  assert.equal(previewJson.applied, false)
+  assert.equal(previewJson.willCreate, true)
+  assert.match(previewJson.hint, /--yes/)
+  assert.equal(fs.existsSync(agentsFile(ws)), false, 'json preview must not write either')
+
+  const applied = run(ws.cwd, ws.env, [
+    'agents', 'register', '--agent-id', 'cli-x', '--project', 'demo', '--json', '--yes',
+  ])
+  assert.equal(applied.status, 0, applied.stderr)
+  const appliedJson = JSON.parse(applied.stdout)
+  assert.equal(appliedJson.registered, true)
+  assert.equal(appliedJson.agentId, 'cli-x')
+  assert.equal(readAgents(ws).length, 1)
+})
+
+test('agents register rejects a missing agent id', () => {
+  const ws = workspace('reg-missing')
+  const result = run(ws.cwd, ws.env, ['agents', 'register'])
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /requires --agent-id/)
+  assert.equal(fs.existsSync(agentsFile(ws)), false)
+})
