@@ -43,6 +43,7 @@ mio remember "<content>"    Write a memory record from the terminal (--kind/--ta
 mio memory analyze          Report duplicates, low-quality records and the kind histogram (--project/--limit)
 mio memory archive --ids a,b    Archive records, hiding them from recall/analyze (--yes required; reversible)
 mio memory restore --ids a,b    Un-archive previously archived records
+mio memory forget --ids a,b     PERMANENTLY delete records (--yes required; writes an audit entry; not undoable)
 mio memory merge --ids a,b  Merge duplicate records into one survivor (--keep/--allow-divergent; --yes required)
 mio memory migrate --ids a,b --scope global|project   Move records between the project and global layers
 mio policy check "<action>" Check the historical risk of an action before running it (--project; reads global MIO_HOME)
@@ -232,6 +233,39 @@ mio memory migrate --ids mem_a --scope global   # 提升到 global 层
 - **id 既可写作 `--ids a,b`，也可作裸位置参数**（`mio memory archive mem_a mem_b`）。id 中绝不含逗号。
 - **无变更时以非零退出**。若每个 id 都未知、已归档或属于其它项目，命令会报告 `not found` / `already archived` 并以退出码 `1` 结束，而非假装成功。
 - **重复项使用 Latin token 与 CJK bigram 的 Jaccard 相似度**，阈值 `0.75`，用并查集聚类，使 `A~B, B~C` 坍缩为一组。活跃记录超过 1500 条时跳过扫描，改为报告 `duplicatesSkipped`，避免在 O(n²) 工作上卡死。
+
+### 彻底遗忘（`mio memory forget`）
+
+上面所有操作都是**可逆**的：archive 只是打上 `archived: true`，merge 基于 archive，
+migrate 只改作用域。`forget` 是**唯一不可逆**的操作——它把记录真正删除。
+
+```bash
+mio memory forget --ids mem_secret --project demo            # 预览
+mio memory forget --ids mem_secret --project demo --yes      # 真正删除
+```
+
+```text
+Forget preview: 1 id(s) (project=demo)
+  mem_secret  secret token abc123
+
+WARNING: this permanently deletes the record(s) and cannot be undone.
+An audit entry (excerpt only) is written to memory-forget-audit.jsonl.
+Reversible alternative: mio memory archive --ids mem_secret --yes
+Re-run with --yes to delete permanently.
+```
+
+几条硬性保证（均有测试覆盖）：
+
+- **预览显示"将要消失的是什么"**，而不只是 id——这是唯一删了就没了的操作。
+- **审计先行**：先把条目写进 `<MIO_HOME>/memory-forget-audit.jsonl` 再删除，
+  所以任何一次删除事后都能回答"删掉了什么"。
+- **审计只存摘要，不存全文**（`excerpt` 取前 120 字符 + `contentLength` + `kind`），
+  不会在你要求删除之后又悄悄把全文留下来。
+- **跨项目绝不误删**：id 属于其它项目时按 `not found` 处理，原记录保留。
+- **全部未命中以退出码 `1` 结束**，避免一次 typo 被当成成功。
+- 预览与 `--json` 里都会给出**可逆替代方案**（`mio memory archive`）。
+
+> 除非记录必须真的消失（例如误存了凭据），否则请优先用 `archive`。
 
 ### 合并重复项
 

@@ -225,6 +225,7 @@ const {
   queryTraces,
   analyzeMemory,
   archiveMemory,
+  forgetMemory,
   mergeMemory,
   migrateMemory,
   loadEvidenceWeights,
@@ -499,6 +500,19 @@ const TOOLS = [
         project: { type: 'string', description: 'Project name filter. Defaults to current repository.' },
         restore: { type: 'boolean', description: 'When true, un-archive the given ids instead.' },
         reason: { type: 'string', description: 'Optional archive reason.' },
+      },
+      required: ['ids'],
+    },
+  },
+  {
+    name: 'mio.memory.forget',
+    description: 'Permanently delete memory records by id. This is the only irreversible memory operation: archive is reversible, and forget removes the record outright. An audit entry (id, project, timestamp, reason, kind, length, excerpt) is written to memory-forget-audit.jsonl before the delete, so a removal is always reconstructable. Prefer archive unless the record must actually be gone.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: { type: 'array', items: { type: 'string' }, description: 'Memory record ids to permanently delete.' },
+        project: { type: 'string', description: 'Project name filter. Defaults to current repository.' },
+        reason: { type: 'string', description: 'Why the record is being forgotten. Recorded in the audit entry.' },
       },
       required: ['ids'],
     },
@@ -1144,6 +1158,8 @@ async function callTool(name, args = {}) {
       return recordMemory(args)
     case 'mio.memory.archive':
       return archiveMemory(args)
+    case 'mio.memory.forget':
+      return forgetMemory(args)
     case 'mio.memory.merge':
       return mergeMemory(args)
     case 'mio.memory.migrate':

@@ -243,6 +243,7 @@ function createMemoryStore(options = {}) {
   const memoryPath = path.join(dataDir, 'memory.jsonl')
   const experienceReusePath = path.join(dataDir, 'experience_reuse.jsonl')
   const tracePath = path.join(dataDir, 'traces.jsonl')
+  const forgetAuditPath = path.join(dataDir, 'memory-forget-audit.jsonl')
 
   function loadEvidenceWeights() {
     const weights = new Map()
@@ -769,15 +770,78 @@ function createMemoryStore(options = {}) {
     }
   }
 
+  // forget is the only hard delete in the memory surface: archive is reversible
+  // (archived: true), merge is archive-based, and prune --memory is age-based.
+  // Because the record is gone afterwards, an audit entry is written FIRST and
+  // the delete only proceeds once that succeeded -- otherwise a "forgotten"
+  // record would leave no trace of what it said.
+  //
+  // The audit keeps an excerpt rather than the full body: enough to answer
+  // "what was removed" later, without quietly retaining everything the user
+  // asked to delete.
+  function forgetMemory(args = {}) {
+    const idsInput = Array.isArray(args.ids) ? args.ids : []
+    const ids = idsInput.map((value) => String(value).trim()).filter(Boolean)
+    if (ids.length === 0) throw new Error('memory.forget requires ids (array of memory record ids)')
+    const project = args.project || projectName()
+    const reason = args.reason ? String(args.reason).trim().slice(0, 200) : null
+    const by = args.by ? String(args.by).trim().slice(0, 80) : null
+
+    const records = readJsonl(memoryPath)
+    const idSet = new Set(ids)
+    const forgotten = []
+    const notFound = [...ids]
+    const kept = []
+    for (const record of records) {
+      if (!idSet.has(record.id)) {
+        kept.push(record)
+        continue
+      }
+      // Out-of-project ids stay on file and are reported as notFound, matching
+      // how archiveMemory scopes by project.
+      if (project && record.project && record.project !== project) {
+        kept.push(record)
+        continue
+      }
+      const index = notFound.indexOf(record.id)
+      if (index >= 0) notFound.splice(index, 1)
+      const content = String(record.content || '')
+      appendJsonl(forgetAuditPath, {
+        id: createId('forget'),
+        forgottenId: record.id,
+        project: record.project || null,
+        timestamp: new Date().toISOString(),
+        reason,
+        by,
+        kind: record.kind || null,
+        contentLength: content.length,
+        excerpt: content.replace(/\s+/g, ' ').slice(0, 120),
+      })
+      forgotten.push(record.id)
+    }
+
+    if (forgotten.length > 0) writeJsonl(memoryPath, kept)
+
+    return {
+      project: project || null,
+      forgotten,
+      forgottenCount: forgotten.length,
+      notFound,
+      auditPath: forgetAuditPath,
+    }
+  }
+
   return {
     memoryPath,
     experienceReusePath,
     tracePath,
+    forgetAuditPath,
     queryMemory,
     recordMemory,
     queryTraces,
     analyzeMemory,
     archiveMemory,
+    forgetMemory,
     mergeMemory,
     migrateMemory,
     loadEvidenceWeights,

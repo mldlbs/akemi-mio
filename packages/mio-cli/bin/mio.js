@@ -658,6 +658,7 @@ function memoryUsage() {
   mio memory analyze                        Report duplicates, low-quality records and kind histogram
   mio memory archive --ids a,b              Archive records (soft delete; hidden from recall/analyze)
   mio memory restore --ids a,b              Un-archive previously archived records
+  mio memory forget --ids a,b               PERMANENTLY delete records (--yes required; writes an audit entry)
   mio memory merge --ids a,b                Merge duplicates: one survives, the rest are archived
   mio memory migrate --ids a,b --scope global   Move records between project and global layers
 
@@ -683,7 +684,7 @@ function memoryCommand(args, useJson) {
     if (!sub) process.exitCode = 1
     return
   }
-  if (!['analyze', 'archive', 'restore', 'merge', 'migrate'].includes(sub)) {
+  if (!['analyze', 'archive', 'restore', 'forget', 'merge', 'migrate'].includes(sub)) {
     console.error(`Unknown memory subcommand: ${sub}`)
     memoryUsage()
     process.exitCode = 1
@@ -720,10 +721,10 @@ function memoryCommand(args, useJson) {
     return
   }
 
-  if ((sub === 'archive' || sub === 'merge') && !flagPresent(flags, '--yes')) {
-    // Archiving hides records from recall, and merging additionally rewrites the
-    // survivor's supersedes list. Preview first so a mistyped id cannot silently
-    // drop records out of future retrieval.
+  if ((sub === 'archive' || sub === 'merge' || sub === 'forget') && !flagPresent(flags, '--yes')) {
+    // Archiving hides records from recall, merging additionally rewrites the
+    // survivor's supersedes list, and forgetting deletes outright. Preview first
+    // so a mistyped id cannot silently destroy data.
     const previewProject = optionValue(flags, '--project') || projectName() || 'current'
     if (useJson) {
       jsonOrText(
@@ -733,10 +734,32 @@ function memoryCommand(args, useJson) {
           project: previewProject,
           ids,
           keep: optionValue(flags, '--keep') || null,
-          hint: 'Re-run with --yes to apply.',
+          reversible: sub !== 'forget',
+          hint:
+            sub === 'forget'
+              ? 'PERMANENT: re-run with --yes to delete. Consider mio memory archive instead.'
+              : 'Re-run with --yes to apply.',
         },
         true,
       )
+    } else if (sub === 'forget') {
+      // Show *what* is about to disappear, not just the ids: this is the one
+      // memory operation that cannot be undone.
+      const all = readJsonl(cliMemoryStore().memoryPath)
+      const idSet = new Set(ids)
+      const matched = all.filter((r) => idSet.has(r.id))
+      console.log(`Forget preview: ${ids.length} id(s) (project=${previewProject})`)
+      for (const record of matched) {
+        console.log(`  ${record.id}  ${String(record.content || '').replace(/\s+/g, ' ').slice(0, 80)}`)
+      }
+      for (const id of ids) {
+        if (!matched.some((r) => r.id === id)) console.log(`  ${id}  (not found)`)
+      }
+      console.log('')
+      console.log('WARNING: this permanently deletes the record(s) and cannot be undone.')
+      console.log('An audit entry (excerpt only) is written to memory-forget-audit.jsonl.')
+      console.log(`Reversible alternative: mio memory archive --ids ${ids.join(',')} --yes`)
+      console.log('Re-run with --yes to delete permanently.')
     } else {
       // Archive keeps its historical "Archive preview" wording; merge is newer
       // and uses a lowercase verb to read naturally mid-sentence.
@@ -770,6 +793,13 @@ function memoryCommand(args, useJson) {
         allowDivergent: flagPresent(flags, '--allow-divergent'),
         reason: optionValue(flags, '--reason'),
       })
+    } else if (sub === 'forget') {
+      result = store.forgetMemory({
+        ids,
+        project: optionValue(flags, '--project'),
+        reason: optionValue(flags, '--reason'),
+        by: 'cli',
+      })
     } else {
       result = store.migrateMemory({
         ids,
@@ -787,6 +817,21 @@ function memoryCommand(args, useJson) {
   if (useJson) return jsonOrText(result, true)
 
   if (sub === 'merge') return printMemoryMerge(result)
+
+  if (sub === 'forget') {
+    console.log(`Forgot ${result.forgottenCount} record(s) permanently (project=${result.project || 'current'})`)
+    if (result.forgotten.length > 0) console.log(`deleted: ${result.forgotten.join(', ')}`)
+    if (result.notFound.length > 0) console.log(`not found: ${result.notFound.join(', ')}`)
+    console.log(`audit: ${result.auditPath}`)
+    // Everything missing is a typo; do not let a no-op read as success.
+    if (result.forgottenCount === 0) {
+      process.exitCode = 1
+      return
+    }
+    // No undo is possible -- say so, and point at what should have been used.
+    console.log('This cannot be undone. (Next time consider `mio memory archive`, which is reversible.)')
+    return
+  }
 
   if (sub === 'migrate') {
     const target = result.scope === 'global' ? 'global' : `project=${result.project || 'current'}`
@@ -2207,6 +2252,7 @@ Usage:
   mio remember "<content>"    Write a memory record from the terminal (same schema as mio.memory.record)
   mio memory analyze          Report duplicates, low-quality records and kind histogram
   mio memory archive --ids a,b    Archive records (soft delete; --yes required to apply)
+  mio memory forget --ids a,b     PERMANENTLY delete records (--yes required; not undoable)
   mio memory restore --ids a,b    Un-archive previously archived records
   mio memory merge --ids a,b  Merge duplicates into one survivor (--yes required to apply)
   mio memory migrate --ids a,b --scope global|project   Move records between layers
