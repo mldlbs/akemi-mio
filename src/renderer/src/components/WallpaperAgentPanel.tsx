@@ -9,6 +9,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useWallpaperInteractionStore } from '../store/wallpaperInteractionStore'
 import type { WallpaperChatMessage } from '../store/wallpaperInteractionStore'
+import { chatErrorText } from '../lib/chatErrorText'
 
 // =============================================================================
 // 常量
@@ -133,7 +134,7 @@ export function WallpaperAgentPanel() {
       } else if (result?.error) {
         addMessage({
           role: 'system',
-          content: `错误: ${result.error}`,
+          content: chatErrorText(result.error) ?? `错误: ${result.error}`,
           timestamp: Date.now(),
         })
       }
@@ -187,7 +188,7 @@ export function WallpaperAgentPanel() {
         } else if (result?.error) {
           addMessage({
             role: 'system',
-            content: `错误: ${result.error}`,
+            content: chatErrorText(result.error) ?? `错误: ${result.error}`,
             timestamp: Date.now(),
           })
         }

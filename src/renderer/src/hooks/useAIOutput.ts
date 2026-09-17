@@ -3,6 +3,7 @@ import { playTTS, playTTSBuffer, onTTSStart, onTTSError } from '../components/au
 import { useIPCEvent } from './useIPCEvent'
 import { useTimerControl } from './useTimer'
 import { useAgentStore } from '../store/agentStore'
+import { chatErrorText } from '../lib/chatErrorText'
 
 export type { AgentState } from '../store/agentStore'
 
@@ -136,7 +137,11 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
     async (text: string) => {
       store.setAgentState('thinking')
       try {
-        await window.electronAPI.chat(text, undefined, activeSessionId || undefined, !voiceActive)
+        const result = await window.electronAPI.chat(text, undefined, activeSessionId || undefined, !voiceActive)
+        // 主进程用「正常 resolve + error 字段」表达失败（熔断 / 内部错误 / 暂停…），
+        // 不接返回值就等于把这些错误静默吞掉 —— 用户只会看到「思考中」然后消失。
+        const message = chatErrorText(result?.error)
+        if (message) onError?.(message)
       } catch (err) {
         onError?.(String(err))
       }

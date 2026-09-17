@@ -261,6 +261,30 @@ describe('useAIOutput', () => {
     expect(onError).toHaveBeenCalledWith('Error: network error')
   })
 
+  it('上报「正常 resolve + error 字段」的失败，而不是静默丢弃', async () => {
+    // 主进程用 resolve({error}) 表达熔断/内部错误/暂停，这类失败不进 catch。
+    // 旧实现不接收返回值，用户只会看到「思考中」然后消失。
+    window.electronAPI.chat = vi.fn().mockResolvedValue({ error: 'CIRCUIT_OPEN' })
+    const onError = vi.fn()
+    const { result } = renderHook(() => useAIOutput('sess-1', false, onError))
+    await act(async () => {
+      await result.current.handleTextSubmit('hi')
+    })
+    const shown = onError.mock.calls.map((c) => c[0]).find((v) => typeof v === 'string' && v.length > 0)
+    expect(shown).toContain('自动恢复')
+    expect(shown).not.toContain('CIRCUIT_OPEN')
+  })
+
+  it('正常回复时不产生任何错误文案', async () => {
+    window.electronAPI.chat = vi.fn().mockResolvedValue({ reply: 'ok' })
+    const onError = vi.fn()
+    const { result } = renderHook(() => useAIOutput('sess-1', false, onError))
+    await act(async () => {
+      await result.current.handleTextSubmit('hi')
+    })
+    expect(onError.mock.calls.every((c) => c[0] === undefined)).toBe(true)
+  })
+
   it('clears onError on successful handleTextSubmit start', async () => {
     const onError = vi.fn()
     const { result } = renderHook(() => useAIOutput('sess-1', false, onError))
