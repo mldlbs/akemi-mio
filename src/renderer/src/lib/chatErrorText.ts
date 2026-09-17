@@ -18,6 +18,7 @@ const CHAT_ERROR_TEXT: Record<string, string> = {
   TIMEOUT: '模型响应超时，请重试',
   NETWORK: '网络异常，请检查连接后重试',
   RATE_LIMITED: '请求过于频繁，请稍后再试',
+  RATE_LIMITED_EXHAUSTED: '请求过于频繁，多次重试仍未成功，请稍后再试',
   NO_KEY: '未配置模型密钥，请在设置中填写',
   INVALID_KEY: '模型密钥无效，请在设置中检查',
   INVALID_REQUEST: '请求格式有误，请重试',
@@ -37,8 +38,18 @@ const SILENT_CODES = new Set(['INTERRUPTED', 'ABORTED'])
 /** `API_ERROR:503` → 说清是「服务端返回错误」而不是把状态码当内部码甩出去 */
 const API_ERROR_RE = /^API_ERROR:(\d{3})$/
 
-/** 未知码兜底时允许展示的最大长度，避免把超长技术串糊到界面上 */
-const MAX_RAW_LENGTH = 120
+/**
+ * 「看起来像错误码」：短、无空白。
+ *
+ * **为什么需要这个判据**：`ChatResult.error` 的类型只是 `string`，没有枚举约束。
+ * `LlmService` 在网络异常分支里直接把原始异常报文当错误码返回
+ * （`_emitModelError(String(err), …)`，`LlmService.ts:647`），所以这个字段**可能是一段
+ * 含空格、甚至含堆栈的技术文本**。那种内容不该糊到用户界面上 —— 落到下面统一兜底。
+ */
+const CODE_LIKE_RE = /^[A-Za-z0-9_:.-]{1,60}$/
+
+/** 不像错误码（原始异常报文等）时的兜底文案 */
+const GENERIC_FAILURE = '模型服务暂时不可用，请重试'
 
 /**
  * 把错误码翻译成可展示的文案。
@@ -54,7 +65,9 @@ export function chatErrorText(error: string | undefined | null): string | null {
   const apiError = API_ERROR_RE.exec(error)
   if (apiError) return `模型服务返回错误（${apiError[1]}），请稍后重试`
 
-  // 兜底：保留原始信息便于排查，但截断，避免把整段技术报文糊到界面上
-  const brief = error.length > MAX_RAW_LENGTH ? `${error.slice(0, MAX_RAW_LENGTH - 1)}…` : error
-  return `请求失败（${brief}）`
+  // 不像错误码（多半是原始异常报文 / 超长技术串）→ 不展示原文，统一兜底
+  if (!CODE_LIKE_RE.test(error)) return GENERIC_FAILURE
+
+  // 像错误码但没收录：保留原始码，便于排查，也不至于像上面那样泄露内部细节
+  return `请求失败（${error}）`
 }

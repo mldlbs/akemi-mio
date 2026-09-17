@@ -644,7 +644,11 @@ export class LlmService {
           return this._emitModelError('TIMEOUT', elapsed, requestId, t0, rawPromptTokens)
         }
         log('ERROR', 'tool_llm_network_error', { request_id: requestId, elapsed_ms: elapsed, error: String(err) })
-        return this._emitModelError(String(err), elapsed, requestId, t0, rawPromptTokens)
+        // 不用 String(err) 当错误码：它是任意技术报文（可能含空格/堆栈），
+        // ① 会经 ChatResult.error 跨 IPC 糊到用户界面上；
+        // ② ErrorClassifier 认不出它 → 这类传输层失败不会计入熔断，
+        //    与上面显式返回 'NETWORK' 的路径不一致。原始报文已由上一行日志保留。
+        return this._emitModelError('NETWORK', elapsed, requestId, t0, rawPromptTokens)
       } finally {
         clearTimeout(timer)
       }

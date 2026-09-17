@@ -24,6 +24,7 @@ describe('chatErrorText', () => {
       'TIMEOUT',
       'NETWORK',
       'RATE_LIMITED',
+      'RATE_LIMITED_EXHAUSTED',
       'NO_KEY',
       'INVALID_KEY',
       'INVALID_REQUEST',
@@ -64,10 +65,18 @@ describe('chatErrorText', () => {
     expect(chatErrorText('WEIRD_CODE')).toContain('WEIRD_CODE')
   })
 
-  it('未知码过长时截断，避免把整段技术报文糊到界面上', () => {
-    const huge = 'X'.repeat(500)
-    const text = chatErrorText(huge)!
-    expect(text.length).toBeLessThan(200)
-    expect(text).toContain('…')
+  it('原始异常报文不糊到界面上（error 字段的类型只是 string，可能夹带堆栈）', () => {
+    // LlmService.ts:647 在网络异常分支把 String(err) 直接当错误码返回，
+    // 所以这个字段可能是「TypeError: fetch failed」这种含空格的技术文本。
+    const text = chatErrorText('TypeError: fetch failed')!
+    expect(text).not.toContain('TypeError')
+    expect(text).not.toContain('fetch')
+    expect(text).toContain('暂时不可用')
+  })
+
+  it('超长的疑似报文也不展示原文', () => {
+    const text = chatErrorText('X'.repeat(500))!
+    expect(text).not.toContain('XXXX')
+    expect(text).toContain('暂时不可用')
   })
 })
