@@ -17,7 +17,7 @@
     "!server/mio-intelligence-mcp/__tests__"
   ],
   "scripts": {
-    "check": "node --check bin/mio.js && node --check adapters/host-utils.js && node --check adapters/codex.js && node --check adapters/opencode.js && node --check adapters/workbuddy.js && node --check adapters/hermes.js && node --check adapters/claude-code.js && node --check server/runtime-modules.js && node --check server/memory-store.js && node --check server/retention.js && node --check server/digest.js && node --check server/host-capabilities.js && node --check server/evolution-cutover.js && node --check server/mio-intelligence-mcp/index.js && node --check server/mio-intelligence-mcp/phase0.js && node --check observe/observer.js && node --check scripts/verify-packed-runtime.js",
+    "check": "node scripts/check-syntax.cjs",
     "test": "node --test \"__tests__/*.test.js\" \"server/mio-intelligence-mcp/__tests__/*.test.js\"",
     "prepack": "npm run check",
     "verify:pack-install": "node scripts/verify-packed-runtime.js"
