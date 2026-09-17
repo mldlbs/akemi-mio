@@ -31,6 +31,7 @@ const { loadPhase0, renderPhase0Markdown } = require('../server/mio-intelligence
 const { listHostCapabilities } = require('../server/host-capabilities.js')
 const { createTaskStore } = require('../server/task-store.js')
 const { chatJson, llmConfig, isLlmConfigured } = require('../server/llm-client.js')
+const { createQueryLog } = require('../server/query-log.js')
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
 
@@ -282,10 +283,16 @@ function cliAgentStore() {
 // the MCP call feeds the query log for auto-claim, but a terminal inspection
 // must not write to queries.jsonl every time it runs.
 function cliTaskStore() {
+  // Shares one query-log instance with nothing else here, but created from the
+  // same module the MCP server uses, so queries.jsonl has a single reader/writer
+  // implementation. cliMemoryStore deliberately does NOT get one: a terminal
+  // recall is never followed by a task_outcome, so recording those queries
+  // would only add noise.
   return createTaskStore({
     dataDir: MIO_HOME,
     projectName,
     memoryStore: cliMemoryStore(),
+    queryLog: createQueryLog({ dataDir: MIO_HOME }),
     agentId: () => 'cli',
   })
 }

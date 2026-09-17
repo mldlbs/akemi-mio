@@ -20,13 +20,9 @@ const fs = require('fs')
 const path = require('path')
 const { createId, readJsonl, appendJsonl, writeJsonl } = require('./memory-store.js')
 const { REUSE_STATUS_FILTERS } = require('./experience-store.js')
+const { createQueryLog } = require('./query-log.js')
 
 const AGENT_HEALTH_FRESH_MS = 48 * 3600000
-const MAX_RECENT_QUERIES = 200
-const REUSE_MATCH_WINDOW_MS = (() => {
-  const minutes = Number(process.env.MIO_REUSE_MATCH_WINDOW_MIN)
-  return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : 60 * 60 * 1000
-})()
 
 function createTaskStore(options) {
   const dataDir = options.dataDir
@@ -46,7 +42,6 @@ function createTaskStore(options) {
 
   const memoryPath = path.join(dataDir, 'memory.jsonl')
   const experienceReusePath = path.join(dataDir, 'experience_reuse.jsonl')
-  const queryPath = path.join(dataDir, 'queries.jsonl')
   const tracePath = path.join(dataDir, 'traces.jsonl')
   const agentsPath = path.join(dataDir, 'agents.jsonl')
 
@@ -82,36 +77,13 @@ function createTaskStore(options) {
     }
   }
 
-  // NOTE: these two are intentionally duplicated from mio-intelligence-mcp/index.js.
-  // Both operate on the same <dataDir>/queries.jsonl and must stay equivalent.
-  // They could not be de-duplicated by having the MCP pass its own in, because
-  // memoryStore.recordQuery needs them while taskStore in turn depends on
-  // memoryStore -- that is a cycle. If you change the format or the window here,
-  // change it there too (see REUSE_MATCH_WINDOW_MS above, also mirrored).
-  function loadRecentQueries() {
-    const now = Date.now()
-    return readJsonl(queryPath)
-      .filter(
-        (entry) =>
-          entry &&
-          typeof entry.agent === 'string' &&
-          entry.agent &&
-          typeof entry.expiresAt === 'number' &&
-          entry.expiresAt > now
-      )
-      .slice(-MAX_RECENT_QUERIES)
-  }
-
-  function persistRecentQueries(entries) {
-    const limited = entries.slice(-MAX_RECENT_QUERIES)
-    fs.mkdirSync(dataDir, { recursive: true })
-    fs.writeFileSync(
-      queryPath,
-      limited.length > 0 ? limited.map((entry) => JSON.stringify(entry)).join('\n') + '\n' : '',
-      'utf8'
-    )
-    return limited
-  }
+  // queries.jsonl is owned by the shared query log (see ../query-log.js). The
+  // MCP server and the CLI hand in the same instance the memory store uses, so
+  // there is exactly one reader/writer for this file.
+  const queryLog = options.queryLog || createQueryLog({ dataDir })
+  const loadRecentQueries = () => queryLog.load()
+  const persistRecentQueries = (entries) => queryLog.persist(entries)
+  const REUSE_MATCH_WINDOW_MS = queryLog.windowMs
 
   function routeTask(args = {}) {
     const task = String(args.task || '').trim()

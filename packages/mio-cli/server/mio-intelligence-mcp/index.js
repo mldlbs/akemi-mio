@@ -14,6 +14,7 @@ const { createExperienceStore, REUSE_STATUS_FILTERS } = require('../experience-s
 const { createPolicyStore } = require('../policy-store.js')
 const { createAgentStore } = require('../agent-store.js')
 const { createTaskStore } = require('../task-store.js')
+const { createQueryLog } = require('../query-log.js')
 const { createDigest } = require('../digest.js')
 
 const { CreativityEngine } = require('../creativity-engine.js')
@@ -74,40 +75,6 @@ function runtimeAgentId() {
 // Phase 0 auto-claim: match memory.query results with a later task_outcome
 // from the same agent+project, so reuse evidence does not depend on the
 // agent self-reporting mio.experience.reuse.
-const REUSE_MATCH_WINDOW_MS = (() => {
-  const minutes = Number(process.env.MIO_REUSE_MATCH_WINDOW_MIN)
-  return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : 60 * 60 * 1000
-})()
-const MAX_RECENT_QUERIES = 200
-let recentQueries = []
-
-function loadRecentQueries() {
-  const now = Date.now()
-  const entries = readJsonl(queryPath)
-    .filter(
-      (entry) =>
-        entry &&
-        typeof entry.agent === 'string' &&
-        entry.agent &&
-        typeof entry.expiresAt === 'number' &&
-        entry.expiresAt > now
-    )
-    .slice(-MAX_RECENT_QUERIES)
-  recentQueries = entries
-  return entries
-}
-
-function persistRecentQueries(entries) {
-  const limited = entries.slice(-MAX_RECENT_QUERIES)
-  fs.mkdirSync(dataDir, { recursive: true })
-  fs.writeFileSync(
-    queryPath,
-    limited.length > 0 ? limited.map((entry) => JSON.stringify(entry)).join('\n') + '\n' : '',
-    'utf8'
-  )
-  recentQueries = limited
-  return limited
-}
 
 function createId(prefix) {
   return `${prefix}_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`
@@ -195,17 +162,17 @@ const {
   recordReuse: recordExperienceReuse,
 } = experienceStore
 
+// One query-log instance shared by the memory store (which records queries) and
+// the task store (which consumes them for auto-claim). This is what removes the
+// previous duplicate load/persist implementations of queries.jsonl.
+const queryLog = createQueryLog({ dataDir })
+
 const memoryStore = createMemoryStore({
   dataDir,
   projectName,
   agentId: runtimeAgentId,
-  reuseMatchWindowMs: REUSE_MATCH_WINDOW_MS,
+  queryLog,
   verifiedFilter: REUSE_STATUS_FILTERS.verified,
-  recordQuery(entry) {
-    const entries = loadRecentQueries()
-    entries.push(entry)
-    persistRecentQueries(entries)
-  },
 })
 
 const digestEngine = createDigest({ home: dataDir })
@@ -254,6 +221,7 @@ const taskStore = createTaskStore({
   dataDir,
   projectName,
   memoryStore,
+  queryLog,
   agentId: runtimeAgentId,
 })
 const { routeTask, autoClaimExperienceReuse, recordTaskOutcome } = taskStore

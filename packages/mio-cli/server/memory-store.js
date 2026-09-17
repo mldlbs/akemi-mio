@@ -237,7 +237,15 @@ function createMemoryStore(options = {}) {
   // Hook that persists a recent-query entry (phase 0 auto-claim input).
   // Optional: the CLI passes null because no task_outcome can follow a
   // terminal command, so recording a query there would only add noise.
-  const recordQuery = options.recordQuery || null
+  //
+  // Prefer passing `queryLog` (a createQueryLog instance) so memory and task
+  // stores share one implementation of queries.jsonl; `recordQuery` remains
+  // supported as a plain callback for callers that do not have a queryLog.
+  const queryLog = options.queryLog || null
+  const recordQuery =
+    options.recordQuery || (queryLog ? (entry) => queryLog.record(entry) : null)
+  const reuseMatchWindowMs =
+    options.reuseMatchWindowMs || (queryLog ? queryLog.windowMs : 60 * 60 * 1000)
   const verifiedFilter = options.verifiedFilter || defaultVerifiedFilter
 
   const memoryPath = path.join(dataDir, 'memory.jsonl')
@@ -313,7 +321,7 @@ function createMemoryStore(options = {}) {
         resultIds: results.map((record) => record.id).filter(Boolean),
         resultSources: results.map((record) => record.source || null),
         timestamp,
-        expiresAt: timestamp + (options.reuseMatchWindowMs || 60 * 60 * 1000),
+        expiresAt: timestamp + reuseMatchWindowMs,
       })
     }
     return {
