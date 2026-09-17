@@ -214,6 +214,11 @@ export class AgentService implements IEngineService {
       this.reflectLoop,
     )
 
+    // 熔断器：与上面 processTextInput 里的 allow('llm') 检查共用同一实例，
+    // 这样 ChatExecutor 记录的 onFailure/onSuccess 才能真正驱动熔断。
+    // （此前 ChatExecutor 从未上报成功/失败，熔断器恒为 closed，形同虚设。）
+    this.chatExecutor.setCircuitBreaker(this.circuitBreaker)
+
     // 注册流程记忆到工具依赖
     setProceduralMemory(this.proceduralMemory)
     // 注册 TTS 服务到工具依赖（供 PiperTTS 工具调用）

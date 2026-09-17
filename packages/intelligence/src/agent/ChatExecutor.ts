@@ -15,6 +15,7 @@ import { validateToolCallChain, rollbackToLastKnownGood } from './ContextIntegri
 import type { MemoryService } from '@akemi-mio/intelligence-memory/MemoryService'
 import { type ChatResult } from '@akemi-mio/intelligence/llm/types'
 import { eventBus, type EventPayload } from '@akemi-mio/core/core/EventBus'
+import type { CircuitBreaker } from '@akemi-mio/core/core/CircuitBreaker'
 import type { PlanManagerLike } from '@akemi-mio/evolution/types'
 import { SubAgentPoolAdapter } from './SubAgentPoolAdapter'
 import { ReflectLoop } from './ReflectLoop'
@@ -108,6 +109,25 @@ import { SessionMemory, sessionMemory as defaultSessionMemory } from '@akemi-mio
 import { MemoryContextProvider, type InjectionContext } from '@akemi-mio/intelligence-memory/MemoryContextProvider'
 import { PlanMemoryRecall, planMemoryRecall as defaultPlanMemoryRecall } from '@akemi-mio/intelligence-memory/PlanMemoryRecall'
 
+/**
+ * 判断一个 LLM 错误是否属于「服务不可用」信号 —— 用于驱动熔断计数。
+ *
+ * 刻意**不复用** ErrorClassifier 的 RETRYABLE 分类：那个分类决定的是
+ * 「要不要在本层重试」，而 LlmService.chatWithTools 内部已经对
+ * NETWORK / RATE_LIMITED / 429 / 5xx 做过指数退避重试（最多 3 次），
+ * 在本层再重试会造成 3×3 的重试放大。所以 NETWORK 这类裸错误码在分类器里
+ * 保持 FATAL（立即终止、不重试），但它们确实是「服务打不通」的信号，
+ * 必须计入熔断 —— 否则熔断器永远不会开。
+ *
+ * 熔断（快速失败）与重试（继续尝试）是两个独立决策，不要耦合在一起。
+ */
+function isLlmUnavailable(error: string, category: string): boolean {
+  // LlmService 的裸错误码（即其内部 RETRYABLE 集合的成员，说明内部已重试过）
+  if (error === 'NETWORK' || error === 'RATE_LIMITED') return true
+  // 分类器判定可重试的：429 / 5xx / timeout / 网络错误文本
+  return category === 'RETRYABLE'
+}
+
 export class ChatExecutor {
   private llmService: LlmService
   private ttsService: TtsService
@@ -128,6 +148,12 @@ export class ChatExecutor {
   private goalGuardrail: GoalGuardrail
   private sessionPlanIds: Set<string> = new Set()
   private errorClassifier: { classify: (error: string) => any }
+  /**
+   * 熔断器 —— 由 AgentService 注入（与其 allow('llm') 检查共用同一实例）。
+   * 只在 LLM 返回「基础设施暂时不可用」类错误（RETRYABLE）时计数，
+   * 业务/状态类错误不计，否则用户发个超长 prompt 就会把 LLM 熔断。
+   */
+  private circuitBreaker: CircuitBreaker | null = null
   private consecutiveRetryableErrors = 0
   private consecutiveInvalidRequest = 0
   private lastCheckpointStep = -1
@@ -274,6 +300,11 @@ export class ChatExecutor {
 
   setMainWindow(win: BrowserWindow | null): void {
     this.mainWindow = win
+  }
+
+  /** 注入熔断器（与 AgentService.allow('llm') 共用同一实例） */
+  setCircuitBreaker(cb: CircuitBreaker | null): void {
+    this.circuitBreaker = cb
   }
 
   setIntentRouter(router: { route(input: RouteInput, requestId?: string): Promise<IntentRouteDecision> } | null): void {
@@ -1702,8 +1733,14 @@ export class ChatExecutor {
   }
 
   private handleLlmError(e: string | undefined, step: number, m: Message[], ctx: RunContext): 'return' | 'continue' | null {
-    if (!e) return null
+    // 无错误 = 本轮 LLM 调用成功 → 让熔断器复位（含半开探测成功）
+    if (!e) {
+      this.circuitBreaker?.onSuccess('llm')
+      return null
+    }
     if (e === 'TIMEOUT') {
+      // 超时属于「基础设施暂时不可用」，计入熔断
+      this.circuitBreaker?.onFailure('llm')
       ctx.consecutiveTimeouts++
       if (ctx.consecutiveTimeouts >= 3) return 'return'
       this.workingMemory.scratchpad.add('error_hint', '超时，请缩短输出量从断点继续。')
@@ -1711,6 +1748,11 @@ export class ChatExecutor {
     }
     const c = this.errorClassifier.classify(e)
     eventBus.emit('recovery.error.classified' as any, { category: c.category })
+    // 熔断计数与「是否重试」是独立决策（见 isLlmUnavailable 注释）：
+    // 业务/状态类错误既不计失败也不当成功，让真正的成功（上面的 !e 分支）去复位。
+    if (isLlmUnavailable(e, c.category)) {
+      this.circuitBreaker?.onFailure('llm')
+    }
     if (c.category === 'RETRYABLE') {
       this.consecutiveRetryableErrors++
       return this.consecutiveRetryableErrors >= 3 ? 'return' : 'continue'
@@ -1851,7 +1893,7 @@ export class ChatExecutor {
           pendingStepDescriptions: pd,
         },
         resourceBudget: this.resourceBudget,
-        circuitBreaker: null as any,
+        circuitBreaker: this.circuitBreaker ?? undefined,
       })
       .catch(() => {})
     this.lastCheckpointStep = step
