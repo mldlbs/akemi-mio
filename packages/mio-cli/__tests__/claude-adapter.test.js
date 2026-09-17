@@ -170,7 +170,7 @@ test('sidechain lines are ignored and aborted turns have no summary', () => {
   assert.equal(result.finalized.outcome, 'aborted')
 })
 
-test('runCycle ingests claude transcripts into traces and memory', () => {
+test('runClaudeCycle ingests claude transcripts into traces and memory', () => {
   const configDir = tempHome('obs')
   const mioHome = tempHome('home')
   const projectDir = path.join(configDir, 'projects', 'D--work-code-demo')
@@ -189,7 +189,11 @@ test('runCycle ingests claude transcripts into traces and memory', () => {
   try {
     const state = observer.loadState(mioHome)
     const sinks = observer.createSinks(mioHome)
-    const res = observer.runCycle(mioHome, state, sinks)
+    // runClaudeCycle, not runCycle: runCycle also sweeps the real
+    // Workbuddy/Codex/OpenCode/Hermes transcript dirs, so its outcome count
+    // depends on live machine data (and takes ~30s). Only the claude path is
+    // under test here, and it is isolated by CLAUDE_CONFIG_DIR above.
+    const res = observer.runClaudeCycle(mioHome, state, sinks)
     assert.ok(res.outcomes >= 1, 'expected at least one outcome, got ' + JSON.stringify(res))
 
     const traces = fs
@@ -214,7 +218,7 @@ test('runCycle ingests claude transcripts into traces and memory', () => {
     assert.ok(memoryEntry.content.startsWith('[claude-code] 任务完成:'))
 
     // Second cycle must be a no-op (offsets tracked).
-    const res2 = observer.runCycle(mioHome, state, sinks)
+    const res2 = observer.runClaudeCycle(mioHome, state, sinks)
     assert.equal(res2.outcomes, 0)
   } finally {
     delete process.env.CLAUDE_CONFIG_DIR
