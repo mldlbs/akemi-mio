@@ -520,6 +520,63 @@ describe('TelegramService', () => {
     expect(tg['retryQueue'].length).toBeGreaterThanOrEqual(1)
   })
 
+  // 以前这里是 `❌ 错误: ${result.error}` —— 把内部码直接甩给用户。
+  // 与 renderer 侧 `chatErrorText` 同源（`@akemi-mio/intelligence/llm/errorText`）。
+  function shownEdits(): string {
+    return vi
+      .mocked(insertOutbox)
+      .mock.calls.map((c) => c[0] as any)
+      .filter((m) => m.msgType === 'edit')
+      .map((m) => String(m.message))
+      .join('\n')
+  }
+
+  it('把内部错误码翻成可读文案，而不是把码甩给用户', async () => {
+    vi.mocked(insertOutbox).mockClear()
+    mockAgent.processExternalMessage.mockResolvedValue({ error: 'CIRCUIT_OPEN', reply: undefined })
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(okJson({ queueLength: 0 }))
+      .mockResolvedValueOnce(okJson({ messageId: 42 }))
+
+    await tg.initialize()
+    await tg['handleMessage']({
+      type: 'message',
+      messageId: 1,
+      chatId: 100,
+      text: 'request',
+      from: 'user',
+      timestamp: Date.now(),
+    })
+
+    const shown = shownEdits()
+    expect(shown).not.toContain('CIRCUIT_OPEN')
+    expect(shown).toContain('自动恢复')
+  })
+
+  // `chatErrorText` 对 INTERRUPTED/ABORTED 返回 null（renderer 侧「用户自己按的取消不该弹错误」）。
+  // telegram 不能照搬这个 null：消息已经发出去了，不给收尾就会永远停在「处理中…」。
+  it('用户自己打断时也要给个收尾，不能静默留在「处理中…」', async () => {
+    vi.mocked(insertOutbox).mockClear()
+    mockAgent.processExternalMessage.mockResolvedValue({ error: 'INTERRUPTED', reply: undefined })
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(okJson({ queueLength: 0 }))
+      .mockResolvedValueOnce(okJson({ messageId: 42 }))
+
+    await tg.initialize()
+    await tg['handleMessage']({
+      type: 'message',
+      messageId: 1,
+      chatId: 100,
+      text: 'request',
+      from: 'user',
+      timestamp: Date.now(),
+    })
+
+    const shown = shownEdits()
+    expect(shown).not.toContain('INTERRUPTED')
+    expect(shown).toContain('取消')
+  })
+
   it('handles agent exceptions without crashing', async () => {
     mockAgent.processExternalMessage.mockRejectedValue(new Error('internal'))
     vi.mocked(fetch)

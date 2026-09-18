@@ -3,6 +3,7 @@ import { log } from '@akemi-mio/core/logger/Logger'
 import { credentialsManager } from '@akemi-mio/core/credentials/CredentialsManager'
 import { blogKanbanBridge } from '@akemi-mio/platform/wallpaper/BlogKanbanBridge'
 import { behaviorActionCounter } from '@akemi-mio/evolution/behavior/BehaviorActionCounter'
+import { chatErrorText } from '@akemi-mio/intelligence/llm/errorText'
 import type { HandlerContext } from './context'
 
 const DEFAULT_WALLPAPER_INTERACTIVE_CONFIG = {
@@ -11,19 +12,18 @@ const DEFAULT_WALLPAPER_INTERACTIVE_CONFIG = {
 }
 
 /**
- * 任务面板里给用户看的失败原因。
+ * 任务面板里给用户看的失败原因 —— 统一走 `@akemi-mio/intelligence/llm/errorText`。
  *
- * 只翻译「用户点了按钮会立刻失败」的几个码，其余回落到「带码的通用文案」——
- * 面板是给人看的诊断面，保留原始码便于排查。
+ * 这里原先有一份**只含 3 个码**的局部表（BUSY / CIRCUIT_OPEN / PAUSED），措辞还与别处不同
+ * （「助手正在处理上一条消息」vs 统一表的「正在处理上一条消息」）。现在主进程侧有了规范实现，
+ * 局部表就只剩下「同一件事两套说法」的风险，所以删掉。
  *
- * **刻意不在主进程再维护一份完整文案表**：给人看的那份唯一实现是 renderer 的
- * `src/renderer/src/lib/chatErrorText.ts`，而 renderer 不 import 主进程包（架构边界），
- * 所以主进程这边也拿不到它。两份表并存是这套架构的既有代价，这里只保留最小交集。
+ * 落点说明：`chatErrorText` 对「用户自己打断」（`INTERRUPTED` / `ABORTED`）返回 null
+ * —— renderer 侧不打扰用户是对的，但面板得说清发生了什么，否则会显示成
+ * 「助手暂时无法处理（INTERRUPTED）」这种内部码。
  */
-const TASK_PANEL_AGENT_ERROR: Record<string, string> = {
-  BUSY: '助手正在处理上一条消息，请稍候再试',
-  CIRCUIT_OPEN: '模型服务暂时不可用，请稍后重试',
-  PAUSED: '对话已暂停，请先恢复',
+function taskPanelErrorText(code: string): string {
+  return chatErrorText(code) ?? '本轮已被取消，请重试'
 }
 
 function hasWallpaperInteractiveApi(
@@ -172,7 +172,7 @@ export function registerWallpaperHandlers({
         // （见 platform/src/wallpaper/TaskPanelService.ts），所以这条路径可达。
         const result = await agentService.processTextInput(prompt, `task_panel_${Date.now()}`, 'task-panel' as any)
         if (result?.error) {
-          const reason = TASK_PANEL_AGENT_ERROR[result.error] ?? `助手暂时无法处理（${result.error}）`
+          const reason = taskPanelErrorText(result.error)
           log('WARN', 'task_panel_ask_agent_failed', { actionId, code: result.error })
           svc.recordAction({ tool: action.tool, status: 'error', summary: reason })
           return { success: false, error: reason }

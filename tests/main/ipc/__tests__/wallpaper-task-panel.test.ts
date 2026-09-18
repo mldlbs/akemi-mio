@@ -105,6 +105,18 @@ describe('taskPanel:invokeQuickAction → desktop_ask_agent', () => {
     expect(res.error).toContain('SOME_BRAND_NEW_CODE')
   })
 
+  // `chatErrorText` 对 INTERRUPTED/ABORTED 返回 null（renderer 侧「用户自己按的取消不该弹错误」）。
+  // 面板不能照搬这个 null —— 否则会显示成「助手暂时无法处理（INTERRUPTED）」这种内部码。
+  it('静默码（用户自己打断）不把内部码当文案', async () => {
+    const { handler } = setup({ error: 'INTERRUPTED' })
+
+    const res = await handler({}, 'ask_agent', { prompt: '帮我看看这个' })
+
+    expect(res.success).toBe(false)
+    expect(res.error).not.toContain('INTERRUPTED')
+    expect(res.error).toContain('取消')
+  })
+
   it('成功时仍然报「已发送」（对照面：别把成功路径一起改坏）', async () => {
     const { handler, recordAction } = setup({ reply: '好的' })
 

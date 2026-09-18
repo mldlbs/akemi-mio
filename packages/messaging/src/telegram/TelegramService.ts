@@ -1,4 +1,5 @@
 import { AgentService } from '@akemi-mio/intelligence/agent/AgentService'
+import { chatErrorText } from '@akemi-mio/intelligence/llm/errorText'
 import { log } from '@akemi-mio/core/logger/Logger'
 import { credentialsManager } from '@akemi-mio/core/credentials/CredentialsManager'
 import { eventBus } from '@akemi-mio/core/core/EventBus'
@@ -341,7 +342,12 @@ export class TelegramService {
           )
           insertOutbox({ chatId: String(chatId), msgType: 'reply', category: 'dialogue', message: userText })
         } else if (result.error) {
-          this.enqueueReply(msg.chatId, `❌ 错误: ${result.error}`, 'dialogue', botName)
+          // 别把内部码甩给用户（曾经是 `❌ 错误: CIRCUIT_OPEN`）—— 走统一文案表。
+          // `chatErrorText` 对「用户自己打断」返回 null（renderer 侧不打扰用户），
+          // 但 telegram 这条消息已经发出去了，必须给个收尾，否则进度停在「处理中…」。
+          const reason = chatErrorText(result.error) ?? '本轮已被取消'
+          log('WARN', 'telegram_chat_error', { chatId: String(chatId), code: result.error })
+          this.enqueueReply(msg.chatId, `❌ ${reason}`, 'dialogue', botName)
         } else {
           this.enqueueReply(msg.chatId, '❌ 处理失败，未获得有效回复', 'dialogue', botName)
         }
@@ -423,7 +429,10 @@ export class TelegramService {
           }
           log('INFO', 'telegram_busy_requeue', { text: msg.text?.slice(0, 50), queueSize: this.retryQueue.length })
         } else {
-          const errorText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n❌ ${result.error}`
+          // 同上：给用户可读文案，内部码只进日志。
+          const reason = chatErrorText(result.error) ?? '本轮已被取消'
+          log('WARN', 'telegram_chat_error', { chatId: String(chatId), code: result.error })
+          const errorText = `👤 你: ${userText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n❌ ${reason}`
           editor.cancel()
           this.enqueueEdit(chatId, progressMsgId, errorText, botName)
         }

@@ -1,27 +1,26 @@
 /**
- * 聊天错误码 → 用户可读文案。
+ * 错误码 → 用户可读文案（**主进程侧的规范实现**）。
  *
- * 背景：主进程 `ChatResult.error` 是给程序看的错误码（`CIRCUIT_OPEN` / `INTERNAL` /
- * `NO_REPLY` / `TIMEOUT` …）。此前 renderer 侧要么直接把原始码显示出来
- * （`WallpaperAgentPanel` 显示成「错误: CIRCUIT_OPEN」），要么干脆丢弃
- * （`useAIOutput.sendChat` 不接收返回值）—— 用户看到的是一串内部码或什么都没有。
+ * 值域的唯一事实来源是同目录 `types.ts` 的 `CHAT_ERROR_CODES`（`ChatResult.error` 的类型）。
  *
- * 这里集中翻译一次，避免每个消费点各写一套、也避免再出现「丢弃返回值」。
+ * ## 为什么有两份实现
  *
- * ⚠️ **码表要与主进程对齐**：值域的唯一事实来源是
- * `packages/intelligence/src/llm/types.ts` 的 `CHAT_ERROR_CODES`（`ChatResult.error` 的类型）。
- * renderer **刻意不 import 主进程包**（`src/renderer` 里零 `@akemi-mio/*`，这是架构边界），
- * 所以对齐不靠类型、靠契约测试 `tests/main/__tests__/chat-error-code.contract.test.ts`：
- * 主进程新增一个错误码却没在这里补文案，那条测试会直接红。
+ * 与 `src/renderer/src/lib/chatErrorText.ts` 是**同一份逻辑的两份拷贝**，原因是架构边界：
+ * renderer 刻意零 `@akemi-mio/*` 依赖，import 不到这里；而 renderer 那边也不该被
+ * 主进程包拖进来。两份实现由
+ * `tests/main/__tests__/chat-error-code.contract.test.ts` 做**行为等价**断言
+ * （逐码比对两边 `chatErrorText()` 的返回值，再比垃圾输入）——
+ * **改这里必须同步改那边，否则测试红。** 别只改一份。
  *
- * ⚠️ **本文件是两份实现之一**。另一份在主进程侧：`packages/intelligence/src/llm/errorText.ts`
- * （telegram 与壁纸任务面板用它）。契约测试除了核对码表覆盖，还会**逐码比对两份
- * `chatErrorText()` 的返回值是否一致** —— 改这里就要同步改那边，否则测试红。
+ * ## 主进程内的消费方
+ *
+ * - `messaging/src/telegram/TelegramService.ts` —— 以前直接把 `result.error` 拼给用户
+ *   （`❌ 错误: CIRCUIT_OPEN`），现在走这里。
+ * - `main/src/ipc/handlers/wallpaper.ts` —— 任务面板的「快捷提问」失败原因。
  */
 
 /**
  * 错误码 → 文案。
- *
  * 导出是为了让契约测试能直接核对覆盖情况（而不是只能靠调用 `chatErrorText` 反推）。
  */
 export const CHAT_ERROR_TEXT: Record<string, string> = {
@@ -47,7 +46,9 @@ export const CHAT_ERROR_TEXT: Record<string, string> = {
  * `INTERRUPTED` 由 ChatExecutor 在用户主动打断（发新消息 / 取消）时产出，不是故障；
  * `ABORTED` 来自 LlmService，而 `RunContext.interrupt()` 是唯一会 abort 该 signal 的地方
  * （它同时会把 `interruptFlag` 置位），因此语义相同。
- * 用户自己按下的取消，不该弹一条错误。
+ *
+ * ⚠️ **主进程消费方要自己决定怎么处理 null**：renderer 侧「用户自己按的取消不该弹错误」，
+ * 但 telegram 那边消息已经发出去了，必须给个收尾（否则进度条永远停在「处理中…」）。
  */
 export const SILENT_CODES = new Set(['INTERRUPTED', 'ABORTED'])
 
@@ -56,7 +57,6 @@ export const SILENT_CODES = new Set(['INTERRUPTED', 'ABORTED'])
  *
  * 契约测试的判据是：
  * `CHAT_ERROR_CODES` 减去（`CHAT_ERROR_TEXT` 的键 + `SILENT_CODES` + 本表的键）之后必须为空。
- * 也就是说，主进程那边每加一个码，这里要么补文案、要么来本表给个理由 —— 二选一，不能漏。
  */
 export const UNMAPPED_BY_DESIGN: Record<string, string> = {
   UNKNOWN_INTENT:
@@ -71,12 +71,10 @@ const API_ERROR_RE = /^API_ERROR:(\d{3})$/
 /**
  * 「看起来像错误码」：短、无空白。
  *
- * 主进程侧已经把 `ChatResult.error` 收紧成 `ChatErrorCode` 联合类型
- * （`packages/intelligence/src/llm/types.ts`），所以**新产出**的码一定短且无空白。
- * 这层守卫仍然要留着 —— 它是 IPC 边界的最后一道防线：类型在跨进程之后不再有任何约束，
- * renderer 拿到的就是运行时字符串。历史版本也确实产出过原始异常报文
+ * `ChatResult.error` 已收紧成 `ChatErrorCode` 联合类型，所以**新产出**的码一定短且无空白。
+ * 这层守卫仍然要留着 —— 它是边界上的最后一道防线：历史版本确实产出过原始异常报文
  * （`_emitModelError(String(err), …)`，已在 `b12b82f5` 修掉），
- * 那种内容（含空格、含堆栈、超长）不该糊到用户界面上 —— 落到下面统一兜底。
+ * 那种内容（含空格、含堆栈、超长）不该糊到用户界面上。
  */
 const CODE_LIKE_RE = /^[A-Za-z0-9_:.-]{1,60}$/
 
