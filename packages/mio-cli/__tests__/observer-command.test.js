@@ -263,3 +263,106 @@ test('the CLI and the shared observer store agree', () => {
   const viaCliStatus = jsonOf(ws, ['observer', 'status', '--json', '--base-dir', base])
   assert.deepEqual(viaCliStatus, store.status({}))
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ingest: records an arbitrary trace event (tool_call / error / retry / ...).
+// It appends rather than modifies, so like `mio remember` it writes immediately
+// instead of previewing -- but bad arguments must still be rejected before any
+// write happens.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function readTraces(ws) {
+  const file = path.join(ws.mioHome, 'traces.jsonl')
+  if (!fs.existsSync(file)) return []
+  return fs
+    .readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+}
+
+test('observer ingest records a trace event', () => {
+  const ws = workspace()
+
+  const result = run(ws, [
+    'observer', 'ingest',
+    '--trace-id', 't1',
+    '--event-type', 'tool_call',
+    '--payload', '{"tool":"Bash"}',
+    '--project', 'demo',
+  ])
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /Ingested tool_call \(trace=t1\)/)
+
+  const traces = readTraces(ws)
+  assert.equal(traces.length, 1)
+  assert.equal(traces[0].trace_id, 't1')
+  assert.equal(traces[0].event_type, 'tool_call')
+  assert.deepEqual(traces[0].payload, { tool: 'Bash' })
+  assert.equal(traces[0].project, 'demo')
+  assert.equal(traces[0].agent, 'cli', 'the CLI identifies itself as cli')
+})
+
+test('observer ingest requires trace id and event type, writing nothing', () => {
+  const ws = workspace()
+
+  const missing = run(ws, ['observer', 'ingest'])
+  assert.equal(missing.status, 1)
+  assert.match(missing.stderr, /requires --trace-id/)
+
+  const partial = run(ws, ['observer', 'ingest', '--trace-id', 't1'])
+  assert.equal(partial.status, 1)
+  assert.match(partial.stderr, /requires --trace-id/)
+
+  assert.equal(fs.existsSync(path.join(ws.mioHome, 'traces.jsonl')), false, 'nothing written')
+})
+
+test('observer ingest rejects a malformed payload before writing', () => {
+  const ws = workspace()
+
+  const bad = run(ws, [
+    'observer', 'ingest', '--trace-id', 't2', '--event-type', 'error', '--payload', '{not json',
+  ])
+  assert.equal(bad.status, 1)
+  assert.match(bad.stderr, /valid JSON/)
+
+  // Valid JSON but not an object -- also rejected, rather than silently stored.
+  const array = run(ws, [
+    'observer', 'ingest', '--trace-id', 't3', '--event-type', 'error', '--payload', '[1,2]',
+  ])
+  assert.equal(array.status, 1)
+  assert.match(array.stderr, /JSON object/)
+
+  assert.equal(readTraces(ws).length, 0, 'no write for either bad payload')
+})
+
+test('observer ingest --json returns the recorded event', () => {
+  const ws = workspace()
+  const result = run(ws, [
+    'observer', 'ingest', '--trace-id', 't1', '--event-type', 'retry',
+    '--outcome', 'success', '--project', 'demo', '--json',
+  ])
+  assert.equal(result.status, 0, result.stderr)
+  const json = JSON.parse(result.stdout)
+  assert.equal(json.recorded, true)
+  assert.equal(json.event.trace_id, 't1')
+  assert.equal(json.event.event_type, 'retry')
+  assert.equal(json.event.outcome, 'success')
+  assert.equal(readTraces(ws).length, 1)
+})
+
+test('the store rejects an ingest with no trace id or event type', () => {
+  const { createTaskStore } = require('../server/task-store.js')
+  const { createMemoryStore } = require('../server/memory-store.js')
+  const ws = workspace()
+  const store = createTaskStore({
+    dataDir: ws.mioHome,
+    projectName: () => 'demo',
+    memoryStore: createMemoryStore({ dataDir: ws.mioHome, projectName: () => 'demo' }),
+    agentId: () => 'cli',
+  })
+
+  assert.throws(() => store.ingestObservation({}), /requires trace_id/)
+  assert.throws(() => store.ingestObservation({ trace_id: 't1' }), /requires event_type/)
+  assert.equal(readTraces(ws).length, 0)
+})

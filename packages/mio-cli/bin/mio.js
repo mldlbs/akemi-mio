@@ -1315,6 +1315,9 @@ function observerUsage() {
   mio observer insights      Observer-generated insight articles
   mio observer essays        Published essays
   mio observer dag           Daily summaries for the last N days
+  mio observer ingest        Record a trace event (tool_call/error/retry/task_outcome)
+                             --trace-id <id> --event-type <type> [--payload '<json>'] [--outcome]
+                             [--agent] [--host] [--project] (writes immediately, like mio remember)
 
 Options:
   --base-dir DIR     Observer data directory (default: <cwd>/.local/observer)
@@ -1395,6 +1398,66 @@ function printObserverDag(result, days) {
   console.log(`\n${result.summaryCount} summary(ies) across ${result.summaries.length} day(s)`)
 }
 
+// Records an arbitrary trace event (tool_call / error / retry / task_outcome).
+// Unlike `mio task record-outcome`, which is specific to task outcomes, this is
+// the general-purpose half -- and the one AGENTS.md asks agents to call.
+//
+// It appends rather than modifies, so like `mio remember` it writes straight
+// away instead of previewing: there is nothing to destroy. Missing arguments are
+// still rejected before anything is written.
+function observerIngestCommand(args, useJson) {
+  const flags = args.slice(2)
+  const traceId = optionValue(flags, '--trace-id')
+  const eventType = optionValue(flags, '--event-type')
+  if (!traceId || !eventType) {
+    console.error('mio observer ingest requires --trace-id <id> and --event-type <type>')
+    console.error('Example: mio observer ingest --trace-id t1 --event-type tool_call --payload \'{"tool":"Bash"}\'')
+    process.exitCode = 1
+    return
+  }
+
+  let payload = {}
+  const rawPayload = optionValue(flags, '--payload')
+  if (rawPayload) {
+    try {
+      payload = JSON.parse(rawPayload)
+    } catch (error) {
+      console.error(`--payload must be valid JSON: ${error.message}`)
+      process.exitCode = 1
+      return
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      console.error('--payload must be a JSON object')
+      process.exitCode = 1
+      return
+    }
+  }
+
+  let result
+  try {
+    result = cliTaskStore().ingestObservation({
+      trace_id: traceId,
+      event_type: eventType,
+      outcome: optionValue(flags, '--outcome'),
+      payload,
+      agent: optionValue(flags, '--agent'),
+      host: optionValue(flags, '--host'),
+      project: optionValue(flags, '--project'),
+    })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+
+  if (useJson) return jsonOrText(result, true)
+  console.log(`Ingested ${result.event.event_type} (trace=${result.event.trace_id})`)
+  console.log(`  agent=${result.event.agent} project=${result.event.project} host=${result.event.host}`)
+  if (result.autoClaims && result.autoClaims.length > 0) {
+    console.log(`  auto-claims: ${result.autoClaims.length}`)
+  }
+}
+
 function observerCommand(args, useJson) {
   const sub = args[1]
   if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
@@ -1402,6 +1465,8 @@ function observerCommand(args, useJson) {
     if (!sub) process.exitCode = 1
     return
   }
+  if (sub === 'ingest') return observerIngestCommand(args, useJson)
+
   if (!['status', 'world-model', 'trends', 'research', 'insights', 'essays', 'dag'].includes(sub)) {
     console.error(`Unknown observer subcommand: ${sub}`)
     observerUsage()
@@ -2275,6 +2340,7 @@ Usage:
   mio insight mark-reported    Mark insights as reported (--ids a,b)
   mio observer <view>          Observer pipeline views (research pipeline, not the observe daemon):
                                status | world-model | trends | research | insights | essays | dag
+  mio observer ingest --trace-id T --event-type E   Record a trace event (--payload/--outcome)
   mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
   mio host capabilities        Show what each host supports and whether it is installed
   mio task route "<task>"      Which verified experiences apply to this task (--project/--scope/--limit)

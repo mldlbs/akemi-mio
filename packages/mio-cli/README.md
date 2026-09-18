@@ -56,6 +56,7 @@ mio insight list             List insights (--unreported, --min-score N, --detec
 mio insight mark-reported    Mark insights as reported (--ids a,b)
 mio observer <view>          Observer research pipeline views (research pipeline, not the observe daemon):
                              status|world-model|trends|research|insights|essays|dag (--base-dir DIR)
+mio observer ingest --trace-id T --event-type E   Record a trace event (--payload JSON/--outcome)
 mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
 mio host capabilities        Show what each host supports and whether it is installed (--json)
 mio task route "<task>"      Which verified experiences apply to this task (--project/--scope/--limit)
@@ -67,10 +68,10 @@ mio --json evolution status Machine-readable evolution module health
 
 ## MCP 工具
 
-MCP 服务端在 5 大域共暴露 47 个工具：
+MCP 服务端在 5 大域共暴露 48 个工具：
 
-### 记忆（10）
-`mio.memory.query` · `mio.memory.record` · `mio.memory.archive` · `mio.memory.merge` · `mio.memory.migrate` · `mio.memory.analyze` · `mio.experience.list` · `mio.experience.confirm` · `mio.experience.reuse` · `mio.policy.check`
+### 记忆（11）
+`mio.memory.query` · `mio.memory.record` · `mio.memory.archive` · `mio.memory.merge` · `mio.memory.migrate` · `mio.memory.analyze` · `mio.memory.forget` · `mio.experience.list` · `mio.experience.confirm` · `mio.experience.reuse` · `mio.policy.check`
 
 ### 观察管线（14）
 `mio.observer.world_model` · `mio.observer.trends` · `mio.observer.research` · `mio.observer.insights` · `mio.observer.status` · `mio.observer.collect` · `mio.observer.ferment` · `mio.observer.essays` · `mio.observer.dag` · `mio.observer.ingest` · `mio.observer.subscribe` · `mio.observer.digest`
@@ -423,7 +424,15 @@ mio observer trends --base-dir /path/to/.local/observer
 说明：
 
 - **两者都委托给与 MCP 服务端完全相同的共享实现** —— `server/insight-store.js` 与 `server/observer-store.js`。这是 `memory-store.js` / `experience-store.js` / `policy-store.js` / `creativity-engine.js` / `agent-store.js` 一路沿用的同一个模式：一份实现、两个入口，因此不可能各自漂移。
-- **只暴露不需要 LLM、不发起网络请求的子命令。** `insight generate`、`observer collect`、`observer ferment` 仍是 MCP 专有（`mio.insight.generate` / `mio.observer.collect` / `mio.observer.ferment`），CLI 把三者当作未知子命令拒绝——与 `creativity generate` 的处理方式一致。
+- **只暴露不需要 LLM、不发起网络请求的子命令。** `insight generate`、`observer collect`、`observer ferment` 仍是 MCP 专有（`mio.insight.generate` / `mio.observer.collect` / `mio.observer.ferment`），CLI 把三者当作未知子命令拒绝。前两者需要 LLM 或外部采集源，`collect` 依赖的 `@akemi-mio/observer` 包未安装时更无从谈起。
+- **`mio observer ingest` 记录任意 trace 事件**（`tool_call` / `error` / `retry` / `task_outcome`）：
+
+  ```bash
+  mio observer ingest --trace-id t1 --event-type tool_call --payload '{"tool":"Bash"}' --project demo
+  ```
+
+  它是**追加**而非修改，所以像 `mio remember` 一样直接写入、**不做预览**；但缺 `--trace-id` / `--event-type`，或 `--payload` 不是合法 JSON 对象时，会在写入任何东西之前拒绝。
+  只想记录任务结果时用 `mio task record-outcome` 更合适——它更专用，还会一并更新该 agent 的 `taskCount` / `successCount` / `failureCount`。
 - **数据位置不同，这是有意的。** 洞察存储在 `<MIO_HOME>/insights/insights.json`，与 `mio recall` / `mio policy check` 同处全局 `MIO_HOME`；观察研究管线则是按项目的，默认 `<cwd>/.local/observer`（与 MCP 服务端的默认值一致），可用 `--base-dir` 覆盖。
 - **`@akemi-mio/insight` 是可选依赖。** 未安装时 `mio insight status` 会失败并提示 `@akemi-mio/insight not installed`，而不是报告一个「看起来没有洞察」的全零结果——全零会掩盖「引擎根本没装」这件事。
 - **观察管线的空目录是正常状态。** 管线没跑过时，`observer status` 各阶段计数为 0 并提示 "No pipeline data yet."，其余视图显示 "No ... found."，都是有效输出而非错误。

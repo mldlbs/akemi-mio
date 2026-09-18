@@ -349,7 +349,37 @@ function createTaskStore(options) {
     }
   }
 
-  return { routeTask, readAgentHealth, autoClaimExperienceReuse, recordTaskOutcome }
+  function ingestObservation(args = {}) {
+    const traceId = String(args.trace_id || '').trim()
+    const eventType = String(args.event_type || '').trim()
+    if (!traceId) throw new Error('observer.ingest requires trace_id')
+    if (!eventType) throw new Error('observer.ingest requires event_type')
+    const event = {
+      id: createId('trace'),
+      timestamp: new Date().toISOString(),
+      trace_id: traceId,
+      event_type: eventType,
+      outcome: args.outcome || null,
+      payload: args.payload || {},
+      agent: args.agent || resolveAgentId(),
+      host: args.host || 'mcp',
+      project: args.project || projectName(),
+    }
+    appendJsonl(tracePath, event)
+    const autoClaims = autoClaimExperienceReuse(event)
+    if (autoClaims.length > 0) {
+      return { recorded: true, event, autoClaims }
+    }
+    return { recorded: true, event }
+  }
+
+  return {
+    routeTask,
+    readAgentHealth,
+    autoClaimExperienceReuse,
+    recordTaskOutcome,
+    ingestObservation,
+  }
 }
 
 module.exports = { createTaskStore }
