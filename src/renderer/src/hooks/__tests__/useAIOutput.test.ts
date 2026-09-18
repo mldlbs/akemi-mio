@@ -424,4 +424,75 @@ describe('useAIOutput', () => {
       expect(result.current.restoreDraft).toBeNull()
     })
   })
+
+  // ── 语音指令编排的后续对话同样不看返回值就会静默 ──
+  // 工具链已经跑完（有副作用），这条 chat 只负责「总结」；它被拒时用户会看到工具输出、
+  // 却既没有总结也没有任何提示。
+  describe('语音指令编排的后续对话上报失败', () => {
+    async function runConfirmedIntent(chatResult: unknown, onError: (err: string | undefined) => void) {
+      window.electronAPI.matchVoiceIntent = vi.fn().mockResolvedValue({
+        matched: true,
+        intent: {
+          name: 'read_file',
+          description: '读取文件内容',
+          confirmMessage: '将读取文件 README.md',
+          toolSequence: [{ tool: 'read_file', args: { path: 'README.md' } }],
+          slots: { filename: 'README.md' },
+        },
+      })
+      window.electronAPI.executeVoiceChain = vi.fn().mockResolvedValue({
+        success: true,
+        steps: [{ tool: 'read_file', success: true, output: 'README contents', durationMs: 25 }],
+        summary: 'done',
+      })
+      window.electronAPI.chat = vi.fn().mockResolvedValue(chatResult)
+
+      const { result } = renderHook(() => useAIOutput('sess-1', true, onError))
+      await act(async () => {
+        await result.current.handleVoiceResult('打开 README.md')
+      })
+      await act(async () => {
+        await result.current.confirmVoiceIntent()
+      })
+    }
+
+    it('被熔断拒绝时给出可读文案', async () => {
+      const onError = vi.fn()
+      await runConfirmedIntent({ error: 'CIRCUIT_OPEN' }, onError)
+      const shown = onError.mock.calls.map((c) => c[0]).find((v) => typeof v === 'string' && v.length > 0)
+      expect(shown).toContain('自动恢复')
+    })
+
+    it('抛异常时也上报', async () => {
+      const onError = vi.fn()
+      window.electronAPI.matchVoiceIntent = vi.fn().mockResolvedValue({
+        matched: true,
+        intent: {
+          name: 'read_file',
+          description: '读取文件内容',
+          confirmMessage: '将读取文件 README.md',
+          toolSequence: [{ tool: 'read_file', args: { path: 'README.md' } }],
+          slots: { filename: 'README.md' },
+        },
+      })
+      window.electronAPI.executeVoiceChain = vi.fn().mockResolvedValue({ success: true, steps: [], summary: 'done' })
+      window.electronAPI.chat = vi.fn().mockRejectedValue(new Error('socket hang up'))
+
+      const { result } = renderHook(() => useAIOutput('sess-1', true, onError))
+      await act(async () => {
+        await result.current.handleVoiceResult('打开 README.md')
+      })
+      await act(async () => {
+        await result.current.confirmVoiceIntent()
+      })
+
+      expect(onError).toHaveBeenCalledWith('Error: socket hang up')
+    })
+
+    it('成功时不产生错误文案（对照面）', async () => {
+      const onError = vi.fn()
+      await runConfirmedIntent({ reply: '已经读完了' }, onError)
+      expect(onError.mock.calls.every((c) => c[0] === undefined)).toBe(true)
+    })
+  })
 })

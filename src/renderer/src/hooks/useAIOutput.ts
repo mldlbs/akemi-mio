@@ -221,19 +221,26 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
       store.appendPendingText(`🔧 工具执行完成:\n${resultText}`)
 
       try {
-        await window.electronAPI.chat(
+        const result = await window.electronAPI.chat(
           `[语音工具编排] ${prompt.intent.description}\n结果:\n${resultText}`,
           undefined,
           activeSessionId || undefined,
           true,
         )
-      } catch {
-        /* results are already visible in the UI */
+        // 这条后续对话是用来「总结刚跑完的工具链」的（回复本身走 onAIChunk 事件流）。
+        // 它同样可能被拒（BUSY / 熔断 / 暂停），而这类失败是**正常 resolve + error 字段**，
+        // 不进 catch —— 不接返回值就等于：用户点了「执行指令」、工具真的跑了，
+        // 却既没有总结、也没有任何提示。
+        const message = chatErrorText(result?.error)
+        if (message) onError?.(message)
+      } catch (err) {
+        // 抛异常同理：工具结果虽然在界面上，但「为什么没有总结」需要说出来。
+        onError?.(String(err))
       }
 
       scheduleReset(15000)
     },
-    [activeSessionId, buildVoiceExecutionText, scheduleReset, store],
+    [activeSessionId, buildVoiceExecutionText, onError, scheduleReset, store],
   )
 
   const handleTextSubmit = useCallback(
