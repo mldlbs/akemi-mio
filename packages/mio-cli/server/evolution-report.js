@@ -39,6 +39,17 @@ const PERIOD_MS = {
   '30d': 2592000000,
 }
 
+// `high` maps to 0, so the rank must be looked up with hasOwnProperty -- an
+// `|| default` fallback would turn high (0, falsy) into the lowest priority and
+// sort the most urgent suggestion last.
+const SUGGESTION_RANK = { high: 0, medium: 1, low: 2 }
+
+function suggestionRank(priority) {
+  return Object.prototype.hasOwnProperty.call(SUGGESTION_RANK, priority)
+    ? SUGGESTION_RANK[priority]
+    : SUGGESTION_RANK.low
+}
+
 function createEvolutionReport({ dataDir, projectName }) {
   const files = {
     memory: path.join(dataDir, REPORT_FILES.memory),
@@ -216,10 +227,7 @@ function createEvolutionReport({ dataDir, projectName }) {
       })
     }
 
-    suggestions.sort((a, b) => {
-      const p = { high: 0, medium: 1, low: 2 }
-      return (p[a.priority] || 2) - (p[b.priority] || 2)
-    })
+    suggestions.sort((a, b) => suggestionRank(a.priority) - suggestionRank(b.priority))
 
     return {
       project,
