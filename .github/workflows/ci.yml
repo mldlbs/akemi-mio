@@ -26,6 +26,9 @@ jobs:
       - name: Format check
         run: npx prettier --check "src/**/*.{ts,tsx,json,css}"
 
+      - name: mio-agent-runtime syntax gate
+        run: npm run check --workspace mio-agent-runtime
+
       - name: Build
         run: npx electron-vite build
 
@@ -67,3 +70,23 @@ jobs:
       - run: npm ci
       - name: Preload tests
         run: npx vitest run --config vitest.config.preload.ts
+
+  mio-cli-tests:
+    runs-on: windows-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # The mio-agent-runtime CLI is plain CommonJS and uses node:test, so it is
+      # not covered by any of the vitest configs above -- without this job none
+      # of its tests run in CI at all.
+      - name: mio-agent-runtime tests
+        run: npm test --workspace mio-agent-runtime
+
+      - name: README commands match the CLI
+        run: npm run check:cli-docs

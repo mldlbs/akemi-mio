@@ -223,13 +223,25 @@ test('packed runtime install plan runs installed cutover CLI smoke commands', ()
   )
 })
 
-test('mio-agent-runtime package ships release verification script referenced by check', () => {
+test('mio-agent-runtime package ships release verification script covered by check', () => {
   const manifest = JSON.parse(
     fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'),
   )
 
   assert.ok(manifest.files.includes('scripts/'))
-  assert.match(manifest.scripts.check, /scripts\/verify-packed-runtime\.js/)
+
+  const script = path.resolve(__dirname, '..', 'scripts', 'verify-packed-runtime.js')
+  assert.ok(fs.existsSync(script), 'release verification script ships')
+
+  // `check` used to be a hand-written `node --check <file>` list that named this
+  // script explicitly. It is now scripts/check-syntax.cjs, which discovers files
+  // instead -- so assert the discovery actually reaches scripts/, otherwise the
+  // release verification script would silently stop being syntax-checked.
+  const gate = fs.readFileSync(
+    path.resolve(__dirname, '..', 'scripts', 'check-syntax.cjs'),
+    'utf8',
+  )
+  assert.match(gate, /['"]scripts['"]/, 'check-syntax walks the scripts/ directory')
 })
 
 test('installed smoke summary rejects unloaded or unhealthy runtime modules', () => {
