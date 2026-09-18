@@ -411,6 +411,27 @@ describe('useAIOutput', () => {
       expect(result.current.restoreDraft).toBeNull()
     })
 
+    // chat() 抛异常时同样要回填：`processTextInput` 把 try 内部的一切异常都转成了
+    // `{ error: 'INTERNAL' }`（不外抛），能抛到 renderer 的只有 try 之前那几句和 IPC 本身，
+    // 全都在 insertMessage 之前 —— 消息一定没落库。
+    it('chat 抛异常时也回填', async () => {
+      window.electronAPI.chat = vi.fn().mockRejectedValue(new Error('ipc closed'))
+      const { result } = renderHook(() => useAIOutput('sess-1', false, vi.fn()))
+      await act(async () => {
+        await result.current.handleTextSubmit('别丢了我')
+      })
+      expect(result.current.restoreDraft?.text).toBe('别丢了我')
+    })
+
+    it('语音提交抛异常时同样不回填（对照面）', async () => {
+      window.electronAPI.chat = vi.fn().mockRejectedValue(new Error('ipc closed'))
+      const { result } = renderHook(() => useAIOutput('sess-1', true, vi.fn()))
+      await act(async () => {
+        await result.current.handleVoiceResult('说出来的话')
+      })
+      expect(result.current.restoreDraft).toBeNull()
+    })
+
     it('换会话时丢掉待回填的草稿', async () => {
       window.electronAPI.chat = vi.fn().mockResolvedValue({ error: 'BUSY' })
       const { result, rerender } = renderHook(({ s }: { s: string }) => useAIOutput(s, false, vi.fn()), {

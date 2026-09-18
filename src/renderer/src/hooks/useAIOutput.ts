@@ -169,6 +169,11 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
     [fadeTimer, store],
   )
 
+  const restoreRejectedDraft = useCallback((text: string) => {
+    restoreTokenRef.current += 1
+    setRestoreDraft({ text, token: restoreTokenRef.current })
+  }, [])
+
   const sendChat = useCallback(
     async (text: string, restoreOnReject = false) => {
       store.setAgentState('thinking')
@@ -182,15 +187,19 @@ export function useAIOutput(activeSessionId: string, voiceActive: boolean, onErr
         // 本轮根本没被受理（消息未落库）→ 输入框里的原文已经被 handleSend 清掉了，还回去。
         // 注意只对文本提交做：语音的原文不该塞回文本框（那不是用户「打的字」）。
         if (restoreOnReject && result?.error && REJECTED_BEFORE_RUN.has(result.error)) {
-          restoreTokenRef.current += 1
-          setRestoreDraft({ text, token: restoreTokenRef.current })
+          restoreRejectedDraft(text)
         }
       } catch (err) {
         onError?.(String(err))
+        // 抛异常同样意味着本轮没被受理：`processTextInput` 把 try 内部的一切异常都转成了
+        // `{ error: 'INTERNAL' }`（**不外抛**），能一路抛到 renderer 的只有 try 之前那几句
+        // （熔断检查 / 会话恢复 / 预算 / 记忆记录）和 IPC 通道本身 —— 全都在 `insertMessage` 之前。
+        // 漏掉这条路径的话，同样会「字没了、只剩一句提示」。
+        if (restoreOnReject) restoreRejectedDraft(text)
       }
       scheduleReset(10000)
     },
-    [activeSessionId, onError, scheduleReset, store, voiceActive],
+    [activeSessionId, onError, restoreRejectedDraft, scheduleReset, store, voiceActive],
   )
 
   const buildVoiceExecutionText = useCallback(
