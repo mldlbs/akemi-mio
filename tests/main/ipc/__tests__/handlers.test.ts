@@ -489,6 +489,16 @@ describe('IPC handlers', () => {
       const result = await handler(mockEvent)
       expect(result).toEqual({ success: true })
     })
+
+    it('不调用 agentService.pause()：关窗口不该永久禁用 agent', async () => {
+      const handler = registeredHandlers.get('window:close')!
+      await handler({ sender: {} })
+      // pause() 会设持久标志 `_paused`，而唯一的清除路径 `agent:resume` 没有任何消费方
+      // （preload 都没暴露）→ 点一次关闭按钮，之后每次 ai:chat 都返回 PAUSED 且无从恢复。
+      expect(agentService.pause).not.toHaveBeenCalled()
+      // 但「停止当前输出」必须保留
+      expect(agentService.stopConversation).toHaveBeenCalled()
+    })
   })
 
   describe('evaluation:getDecision (M5.3)', () => {

@@ -31,7 +31,11 @@ export function registerWindowHandlers({ agentService, eventBus }: HandlerContex
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return { success: false }
     try {
-      agentService.pause()
+      // 不要在这里调 agentService.pause()：pause() 会设持久标志 `_paused = true`，
+      // 而唯一的清除路径是 `agent:resume` —— 它没有任何消费方（preload 都没暴露），
+      // 于是「点一次关闭按钮」会让 agent 永久停在 PAUSED，之后每次 ai:chat 都被拒，
+      // 且用户无从恢复。关窗口要的是「停止当前输出」，stopConversation() 已经做了，
+      // 而且做得更彻底：它还清 runContext、把未终结的执行目标标成 abandoned。
       await agentService.stopConversation().catch(() => {})
       eventBus.emit('agent.session.flush' as any, {})
       agentService.saveRecoverySnapshot?.('window_close' as any)
