@@ -1554,7 +1554,7 @@ export function createElectronAPI(ipc: IpcRenderer) {
     voiceBookmarkDelete: (id: string): Promise<{ success: boolean; error?: string }> => ipc.invoke('voice-bookmark:delete', id),
 
     voiceBookmarkGetAudioPath: (id: string): Promise<{ success: boolean; audioPath?: string; error?: string }> =>
-      ipc.invoke('voice-bookmark:audioPath', id),
+      ipc.invoke('voice-bookmark:getAudioPath', id),
 
     voiceBookmarkToggleFavorite: (id: string): Promise<{ success: boolean; isFavorite?: boolean; error?: string }> =>
       ipc.invoke('voice-bookmark:toggleFavorite', id),
@@ -1615,7 +1615,7 @@ export function createElectronAPI(ipc: IpcRenderer) {
     > => ipc.invoke('blog:listAudio', type, limit),
 
     blogGetAudioPath: (entryId: string): Promise<{ success: boolean; audioPath?: string; error?: string }> =>
-      ipc.invoke('blog:getAudioPath', entryId),
+      ipc.invoke('blog:getAudio', entryId),
 
     blogDeleteAudio: (entryId: string): Promise<{ success: boolean; error?: string }> => ipc.invoke('blog:deleteAudio', entryId),
 

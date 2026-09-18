@@ -87,6 +87,33 @@ export function registerVoiceBookmarkHandlers({ voiceBookmarkRef }: HandlerConte
     }
   })
 
+  // ── 书签列表 / 搜索 ──
+  // 这两个通道曾长期缺失：preload 一直在 invoke('voice-bookmark:list' / 'voice-bookmark:search')，
+  // 而主进程只注册了 :favorites。invoke 没有对应 handler 会直接 reject，渲染侧的 catch{} 又把
+  // 错误吞掉 —— 结果是书签面板永远显示空列表，连「刷新」按钮都无效，且不报任何错。
+  // 服务层本来就有 listBookmarks() / searchBookmarks()，补上 handler 即可。
+  ipcMain.handle('voice-bookmark:list', async (_event, limit?: number, offset?: number) => {
+    try {
+      const svc = voiceBookmarkRef.current
+      if (!svc) return { success: false, bookmarks: [], error: 'VoiceBookmarkService not initialized' }
+      return { success: true, bookmarks: svc.listBookmarks(limit ?? 50, offset ?? 0) }
+    } catch (err: any) {
+      log('ERROR', 'voice_bookmark_list_failed', { error: String(err) })
+      return { success: false, bookmarks: [], error: String(err) }
+    }
+  })
+
+  ipcMain.handle('voice-bookmark:search', async (_event, query: string) => {
+    try {
+      const svc = voiceBookmarkRef.current
+      if (!svc) return { success: false, bookmarks: [], error: 'VoiceBookmarkService not initialized' }
+      return { success: true, bookmarks: svc.searchBookmarks(query ?? '') }
+    } catch (err: any) {
+      log('ERROR', 'voice_bookmark_search_failed', { error: String(err) })
+      return { success: false, bookmarks: [], error: String(err) }
+    }
+  })
+
   // Blog voice
   ipcMain.handle('blog:saveAudio', async (_event, audio: ArrayBuffer, type: string, options?: any) => {
     try {

@@ -157,6 +157,7 @@ describe('IPC handlers', () => {
   let llmService: any
   let taskPanelService: any
   let wallpaperInteractiveService: any
+  let voiceBookmarkService: any
 
   beforeEach(() => {
     registeredHandlers.clear()
@@ -245,6 +246,12 @@ describe('IPC handlers', () => {
       setConfig: vi.fn(),
     }
 
+    voiceBookmarkService = {
+      listBookmarks: vi.fn().mockReturnValue([{ id: 'b1', summary: '第一条' }]),
+      searchBookmarks: vi.fn().mockReturnValue([{ id: 'b2', summary: '命中' }]),
+      getAudioPath: vi.fn().mockReturnValue('/tmp/a.wav'),
+    }
+
     registerHandlers(
       agentService,
       stateManager,
@@ -257,7 +264,7 @@ describe('IPC handlers', () => {
       { current: decisionQueryService },
       undefined,
       undefined,
-      undefined,
+      { current: voiceBookmarkService },
       { current: taskPanelService },
       { current: wallpaperInteractiveService },
     )
@@ -292,6 +299,43 @@ describe('IPC handlers', () => {
       for (const ch of expected) {
         expect(registeredHandlers.has(ch)).toBe(true)
       }
+    })
+  })
+
+  describe('voice-bookmark:list / voice-bookmark:search', () => {
+    // 回归：这两个通道曾长期缺失，而 preload 一直在调用它们。
+    // invoke 无 handler 会 reject，渲染侧 catch{} 吞掉 → 书签面板永远空列表。
+    it('list 走 service.listBookmarks 并回传 bookmarks', async () => {
+      const handler = registeredHandlers.get('voice-bookmark:list')!
+      expect(handler).toBeDefined()
+      const result = await handler({}, 100, 0)
+      expect(voiceBookmarkService.listBookmarks).toHaveBeenCalledWith(100, 0)
+      expect(result).toEqual({ success: true, bookmarks: [{ id: 'b1', summary: '第一条' }] })
+    })
+
+    it('list 缺省 limit/offset 时回落到 50 / 0', async () => {
+      const handler = registeredHandlers.get('voice-bookmark:list')!
+      await handler({})
+      expect(voiceBookmarkService.listBookmarks).toHaveBeenCalledWith(50, 0)
+    })
+
+    it('search 走 service.searchBookmarks', async () => {
+      const handler = registeredHandlers.get('voice-bookmark:search')!
+      expect(handler).toBeDefined()
+      const result = await handler({}, '会议')
+      expect(voiceBookmarkService.searchBookmarks).toHaveBeenCalledWith('会议')
+      expect(result).toEqual({ success: true, bookmarks: [{ id: 'b2', summary: '命中' }] })
+    })
+
+    it('service 抛错时返回结构化失败，而不是把异常抛给渲染进程', async () => {
+      voiceBookmarkService.listBookmarks = () => {
+        throw new Error('boom')
+      }
+      const handler = registeredHandlers.get('voice-bookmark:list')!
+      const result = await handler({})
+      expect(result.success).toBe(false)
+      expect(result.bookmarks).toEqual([])
+      expect(result.error).toContain('boom')
     })
   })
 
