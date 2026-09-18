@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import { log } from '@akemi-mio/core/logger/Logger'
 import type { HandlerContext } from './context'
 
-export function registerDesktopHandlers({ restoreRef }: HandlerContext): void {
+export function registerDesktopHandlers(_ctx: HandlerContext): void {
   const desktopToolMap: Record<string, (args: any) => Promise<any>> = {}
 
   import('@akemi-mio/capabilities/tool/definitions/DesktopTools')
@@ -25,21 +25,6 @@ export function registerDesktopHandlers({ restoreRef }: HandlerContext): void {
     } catch (err: any) {
       log('ERROR', 'desktop_invoke_tool_failed', { toolName, error: String(err) })
       return { success: false, error: err.message || String(err) }
-    }
-  })
-
-  ipcMain.handle('runtime:restore', async (_event, checkpointId: string) => {
-    if (!restoreRef?.current) {
-      log('WARN', 'runtime_restore_not_ready')
-      return { success: false, error: 'RuntimeRestoreService not initialized', status: null }
-    }
-    try {
-      const result = await restoreRef.current.restore(checkpointId)
-      log('INFO', 'runtime_restore_completed', { checkpointId, status: result.status })
-      return { success: result.status !== 'failed', status: result.status, errors: result.errors }
-    } catch (err: any) {
-      log('ERROR', 'runtime_restore_failed', { checkpointId, error: String(err) })
-      return { success: false, error: String(err), status: 'failed' }
     }
   })
 }

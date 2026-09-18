@@ -16,10 +16,9 @@ export function registerAgentHandlers({ agentService, stateManager }: HandlerCon
     }
   })
 
-  ipcMain.handle('agent:pause', async () => {
-    agentService.pause()
-    return { success: true }
-  })
+  // agent:resume / agent:status 保留 —— scripts/cdp-trigger-round3.mjs 用它们
+  // 从异常状态里把 agent 拉回来。agent:pause 已删除：窗口关闭刻意不再 pause
+  // （见 window.ts），全仓没有任何地方调它，留着只会误导人去调。
   ipcMain.handle('agent:resume', async () => {
     agentService.resume()
     return { success: true }

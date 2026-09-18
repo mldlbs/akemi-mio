@@ -292,7 +292,6 @@ describe('IPC handlers', () => {
         'state:get',
         'evolution:trigger',
         'evolution:status',
-        'credentials:list',
         'credentials:get',
         'credentials:set',
         'config:getWakeWords',
@@ -439,12 +438,6 @@ describe('IPC handlers', () => {
   })
 
   describe('credentials', () => {
-    it('credentials:list', async () => {
-      const handler = registeredHandlers.get('credentials:list')!
-      const result = await handler()
-      expect(result).toBeDefined()
-    })
-
     it('credentials:get', async () => {
       const handler = registeredHandlers.get('credentials:get')!
       const result = await handler({}, 'test-key')
@@ -554,47 +547,6 @@ describe('IPC handlers', () => {
       expect(agentService.pause).not.toHaveBeenCalled()
       // 但「停止当前输出」必须保留
       expect(agentService.stopConversation).toHaveBeenCalled()
-    })
-  })
-
-  describe('evaluation:getDecision (M5.3)', () => {
-    it('channel registered', () => {
-      expect(registeredHandlers.has('evaluation:getDecision')).toBe(true)
-    })
-
-    it('delegates to DecisionQueryService.getDecision', async () => {
-      const handler = registeredHandlers.get('evaluation:getDecision')!
-      const result = await handler({}, 'd1')
-      expect(decisionQueryService.getDecision).toHaveBeenCalledWith('d1')
-      expect(result.state).toBe('RECORDED')
-      expect(result.record.decisionId).toBe('d1')
-    })
-
-    it('no service returns UNAVAILABLE', async () => {
-      registeredHandlers.clear()
-      registeredOns.clear()
-      // decisionQueryRef 存在但 current 为 null → service 不可用
-      registerHandlers(agentService, stateManager, ttsService, { current: evolutionService }, undefined, undefined, undefined, undefined, {
-        current: null,
-      })
-      const handler = registeredHandlers.get('evaluation:getDecision')
-      expect(handler).toBeDefined()
-      const result = await handler!({}, 'd1')
-      expect(result.state).toBe('UNAVAILABLE')
-    })
-  })
-
-  describe('evaluation:listByTrace (M5.3)', () => {
-    it('channel registered', () => {
-      expect(registeredHandlers.has('evaluation:listByTrace')).toBe(true)
-    })
-
-    it('delegates to DecisionQueryService.listByTrace', async () => {
-      decisionQueryService.listByTrace.mockResolvedValue([{ decisionId: 'd1', traceId: 't1' }])
-      const handler = registeredHandlers.get('evaluation:listByTrace')!
-      const result = await handler({}, 't1')
-      expect(decisionQueryService.listByTrace).toHaveBeenCalledWith('t1')
-      expect(result.length).toBe(1)
     })
   })
 

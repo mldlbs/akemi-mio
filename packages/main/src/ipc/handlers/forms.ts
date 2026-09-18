@@ -2,7 +2,6 @@ import { BrowserWindow, ipcMain } from 'electron'
 import { log } from '@akemi-mio/core/logger/Logger'
 import {
   broadcastToForms,
-  createFormWindow,
   hideForm,
   isFormVisible,
   showForm,
@@ -52,18 +51,6 @@ export function registerFormHandlers(): void {
     return isFormVisible(kind)
   })
 
-  /** 查询当前窗口承载的形态 —— 渲染进程启动时用它确认自己是谁。 */
-  ipcMain.handle('forms:whoami', async (event): Promise<FormKind | null> => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return null
-    // 从窗口加载的 URL 反推形态，比维护一份 窗口→形态 映射表更不易漂移
-    const url = win.webContents.getURL()
-    if (url.includes('pet.html')) return 'pet'
-    if (url.includes('chat.html')) return 'chat'
-    if (url.includes('wallpaper.html')) return 'wallpaper'
-    return null
-  })
-
   /** 跨形态广播：由主进程中继，而非渲染进程之间直连（后者会被 contextIsolation 挡住）。 */
   ipcMain.handle('forms:broadcast', async (_event, message: unknown): Promise<void> => {
     const msg = message as { from?: unknown; type?: unknown; payload?: unknown } | null
@@ -87,17 +74,5 @@ export function registerFormHandlers(): void {
     // 拖拽由渲染侧的 -webkit-app-region: drag 负责，这里只做兜底日志。
     // 保留该通道是为了将来支持"按住某元素拖动窗口"的精细控制。
     log('DEBUG', 'form_drag_requested', {})
-  })
-
-  /** 按需创建某形态窗口（不显示）。供启动时预热，减少首次切换延迟。 */
-  ipcMain.handle('forms:preload', async (_event, kind: unknown): Promise<boolean> => {
-    if (!isFormKind(kind)) return false
-    try {
-      createFormWindow(kind)
-      return true
-    } catch (err) {
-      log('WARN', 'form_preload_failed', { kind, error: String(err) })
-      return false
-    }
   })
 }

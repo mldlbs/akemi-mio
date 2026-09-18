@@ -15,20 +15,7 @@ function emptyMetricsSummary() {
   }
 }
 
-export function registerEvaluationHandlers({ decisionQueryRef, metricsQueryRef, organizerRef }: HandlerContext): void {
-  if (decisionQueryRef) {
-    ipcMain.handle('evaluation:getDecision', async (_event, decisionId: string) => {
-      const svc = decisionQueryRef.current
-      if (!svc) return { state: 'UNAVAILABLE' }
-      return svc.getDecision(decisionId)
-    })
-    ipcMain.handle('evaluation:listByTrace', async (_event, traceId: string) => {
-      const svc = decisionQueryRef.current
-      if (!svc) return []
-      return svc.listByTrace(traceId)
-    })
-  }
-
+export function registerEvaluationHandlers({ metricsQueryRef, organizerRef }: HandlerContext): void {
   if (metricsQueryRef) {
     ipcMain.handle('guardrail:metrics:summary', async () => {
       const svc = metricsQueryRef.current

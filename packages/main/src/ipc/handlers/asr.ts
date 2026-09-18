@@ -1,6 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { log } from '@akemi-mio/core/logger/Logger'
-import { extractContextFromSummaries, getEntityExtractorStats } from '@akemi-mio/audio/AsrContextBuilder'
+import { extractContextFromSummaries } from '@akemi-mio/audio/AsrContextBuilder'
 import { asrHotwordManager } from '@akemi-mio/audio/AsrHotwordManager'
 import { memoryAsrHybridPipeline } from '@akemi-mio/audio/MemoryAsrHybridPipeline'
 import { VoiceToolOrchestrator } from '@akemi-mio/capabilities/tool/VoiceToolOrchestrator'
@@ -11,7 +11,6 @@ import { voiceOdeSession, McpOdeSolverInvoker } from '@akemi-mio/audio/VoiceOdeS
 import { eventBus } from '@akemi-mio/core/core/EventBus'
 import { userSpeechProfileTracker } from '@akemi-mio/audio/UserSpeechProfileTracker'
 import type { HandlerContext } from './context'
-import { asrBehaviorPredictor } from '@akemi-mio/audio/AsrBehaviorPredictor'
 
 export function registerAsrHandlers({ agentService, ttsService }: HandlerContext): void {
   ipcMain.handle('asr:transcribe', async (_event, audioBuffer: ArrayBuffer) => {
@@ -221,119 +220,6 @@ export function registerAsrHandlers({ agentService, ttsService }: HandlerContext
     } else {
       asr.refreshContext()
     }
-    return { success: true }
-  })
-
-  // ══════════════════════════════════════════
-  //  记忆实体提取器
-  // ══════════════════════════════════════════
-
-  ipcMain.handle('asr:entities:stats', async () => {
-    try {
-      return { stats: getEntityExtractorStats() }
-    } catch (err) {
-      return { stats: null, error: String(err) }
-    }
-  })
-
-  ipcMain.handle('asr:entities:feed', async () => {
-    const asr = agentService.getAsrService()
-    const memoryService = agentService.getMemoryService()
-    if (!asr || !memoryService) return { success: false, error: 'ASR or Memory not ready' }
-    const entries = memoryService.getEntries()
-    const interactions = memoryService.interactionTracker?.getAll()
-    asr.feedMemoryEntries(entries, interactions)
-    return { success: true, entriesCount: entries.length, interactionCount: interactions?.length ?? 0 }
-  })
-
-  ipcMain.handle('asr:hotword:recall', async (_event, text: string) => {
-    // 手动触发热词 Memory 回放（供 UI 使用）
-    const asr = agentService.getAsrService()
-    const memoryService = agentService.getMemoryService()
-    if (!asr || !memoryService || !text?.trim()) {
-      return { hits: [], recalled: [] }
-    }
-    const hits = asr.detectHotwordHits(text)
-    const hitWords = hits.map((h) => h.hotword)
-    let recalled: string[] = []
-    if (hitWords.length > 0) {
-      recalled = memoryService.vector.querySync(hitWords.join(' '), 5).slice(0, 5)
-      log('INFO', 'asr_hotword_manual_recall', {
-        hits: hitWords,
-        recalled: recalled.length,
-      })
-    }
-    return { hits, recalled }
-  })
-
-  // ASR hybrid pipeline
-  ipcMain.handle('asr:hybrid:toggle', async (_event, enabled: boolean) => {
-    memoryAsrHybridPipeline.setEnabled(enabled)
-    log('INFO', 'asr_hybrid_toggle', { enabled })
-    return { enabled: memoryAsrHybridPipeline.isReady() }
-  })
-
-  ipcMain.handle('asr:hybrid:state', async () => {
-    const config = memoryAsrHybridPipeline.getConfig()
-    return { enabled: config.enabled, ready: memoryAsrHybridPipeline.isReady(), config }
-  })
-
-  ipcMain.handle('asr:hybrid:updateConfig', async (_event, partial: Record<string, unknown>) => {
-    memoryAsrHybridPipeline.updateConfig(partial as any)
-    log('INFO', 'asr_hybrid_config_updated', { partial })
-    return { success: true, config: memoryAsrHybridPipeline.getConfig() }
-  })
-
-  // ASR behavior prediction
-  ipcMain.handle('asr:behavior:prediction', async () => {
-    try {
-      const prediction = asrBehaviorPredictor.getPrediction()
-      if (!prediction.isValid) {
-        return {
-          isValid: false,
-          note: '样本不足，正在收集用户语音特征...',
-          sampleCount: prediction.hesitation.sampleCount,
-        }
-      }
-      return {
-        isValid: true,
-        hesitation: {
-          overallFillerRatio: prediction.hesitation.overallFillerRatio,
-          isHighHesitation: prediction.hesitation.isHighHesitation,
-          topFillers: prediction.hesitation.topFillers,
-          recommendedConfidenceAdjust: prediction.hesitation.recommendedConfidenceAdjust,
-          sampleCount: prediction.hesitation.sampleCount,
-        },
-        boostedTerms: prediction.boostedTerms,
-        promptBoosts: prediction.promptBoosts,
-        globalConfidenceAdjust: prediction.globalConfidenceAdjust,
-        failurePatterns: prediction.failurePatterns.slice(0, 10),
-        description: asrBehaviorPredictor.getHesitationDescription(),
-        timestamp: prediction.timestamp,
-      }
-    } catch (err) {
-      log('ERROR', 'asr_behavior_prediction_failed', { error: String(err) })
-      return { isValid: false, error: String(err) }
-    }
-  })
-
-  ipcMain.handle('asr:behavior:stats', async () => {
-    const stats = asrBehaviorPredictor.getStats()
-    const optimization = asrBehaviorPredictor.getAsrOptimization()
-    return {
-      totalRecords: stats.totalRecords,
-      hasValidPrediction: stats.hasValidPrediction,
-      hesitationMode: optimization.hesitationMode,
-      hotwordBoosts: optimization.hotwordBoosts.length,
-      promptBoost: optimization.promptBoost.slice(0, 100),
-      confidenceAdjust: optimization.confidenceAdjust,
-      description: asrBehaviorPredictor.getHesitationDescription(),
-    }
-  })
-
-  ipcMain.handle('asr:behavior:reset', async () => {
-    asrBehaviorPredictor.reset()
-    log('INFO', 'asr_behavior_predictor_reset_by_ipc')
     return { success: true }
   })
 

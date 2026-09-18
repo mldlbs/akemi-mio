@@ -5,7 +5,6 @@ import { WAKE_WORDS } from '@akemi-mio/core/config'
 import type { HandlerContext } from './context'
 
 export function registerCredentialsHandlers({ agentService, ttsService }: HandlerContext): void {
-  ipcMain.handle('credentials:list', async () => credentialsManager.list())
   ipcMain.handle('credentials:getAll', async () => credentialsManager.getAll())
   ipcMain.handle('credentials:get', async (_event, name: string) => credentialsManager.get(name))
 

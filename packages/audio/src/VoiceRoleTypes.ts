@@ -297,12 +297,3 @@ export interface VoiceSchemeChangedEvent {
   /** 变更时间戳 */
   timestamp: number
 }
-
-/** 角色方案相关 IPC 通道名 */
-export const VOICE_ROLE_IPC_CHANNELS = {
-  GET_SCHEMES: 'voice:role:schemes',
-  SET_SCHEME: 'voice:role:setScheme',
-  GET_ACTIVE_SCHEME: 'voice:role:activeScheme',
-  GET_ROLES: 'voice:role:roles',
-  GET_ROLE_FOR_TASK: 'voice:role:forTask',
-} as const

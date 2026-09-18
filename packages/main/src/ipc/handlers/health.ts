@@ -73,15 +73,4 @@ export function registerHealthHandlers({ agentService, stateManager, metricsColl
       timestamp: Date.now(),
     }
   })
-
-  ipcMain.handle('health:metrics', async () => {
-    const mem = process.memoryUsage()
-    return {
-      heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
-      heapTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
-      rssMB: Math.round(mem.rss / 1024 / 1024),
-      uptime: Math.round(process.uptime()),
-      timestamp: Date.now(),
-    }
-  })
 }

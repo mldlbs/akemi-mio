@@ -25,7 +25,6 @@ import { registerWindowHandlers } from './handlers/window'
 import { registerAgentHandlers } from './handlers/agent'
 import { registerAsrHandlers } from './handlers/asr'
 import { registerTtsHandlers } from './handlers/tts'
-import { registerLearningHandlers } from './handlers/learning'
 import { registerEvolutionHandlers } from './handlers/evolution'
 import { registerCredentialsHandlers } from './handlers/credentials'
 import { registerHealthHandlers } from './handlers/health'
@@ -39,7 +38,6 @@ import { registerQuickTaskHandlers } from './handlers/quicktask'
 import { registerVoiceBookmarkHandlers } from './handlers/voice-bookmark'
 import { registerToolHandlers } from './handlers/tool'
 import { registerEvaluationHandlers } from './handlers/evaluation'
-import { registerMemoryHandlers } from './handlers/memory'
 import { registerVoiceNoteHandlers } from './handlers/voicenote'
 import { registerWorkspaceHandlers } from './handlers/workspace'
 import { registerFormHandlers } from './handlers/forms'
@@ -121,7 +119,6 @@ export function registerHandlers(
   registerAgentHandlers(ctx)
   registerAsrHandlers(ctx)
   registerTtsHandlers(ctx)
-  registerLearningHandlers(ctx)
   registerEvolutionHandlers(ctx)
   registerCredentialsHandlers(ctx)
   registerHealthHandlers(ctx)
@@ -136,6 +133,5 @@ export function registerHandlers(
   registerVoiceBookmarkHandlers(ctx)
   registerToolHandlers(ctx)
   registerEvaluationHandlers(ctx)
-  registerMemoryHandlers(ctx)
   registerVoiceNoteHandlers(ctx)
 }

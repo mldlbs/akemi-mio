@@ -61,6 +61,27 @@ function mainRegisteredChannels(): Map<string, string> {
  */
 const KNOWN_UNWIRED_CHANNELS: string[] = []
 
+/**
+ * 非渲染进程可达的通道白名单 —— 每条都必须写明**消费方是谁**。
+ *
+ * 上面那个断言查的是「preload 调的没人注册」（症状：按钮没反应）；
+ * 这个常量服务的是反方向：「主进程注册了，但渲染进程根本调不到」。
+ * 后者不会报错、不会崩，只会让死面越积越多，审计时的噪声盖过真问题。
+ *
+ * 2026-09-18 的清理把 62 个零调用通道的 handler 全部删掉（服务层实现保留）：
+ * tts 调参面 20、asr 调参面 9、memory 管理 12、learning/oral 4、voice:role 5、
+ * evolution 统计/管线 4、forms 2、evaluation 2、其余零散 4。删完只剩下面这三条。
+ *
+ * 同样「过期即报错」：某条对应的通道一旦消失（或改成 preload 暴露了），测试就会失败，
+ * 逼人把这个条目删掉 —— 手写白名单腐烂起来比没有还糟。
+ */
+const NON_PRELOAD_CHANNELS: Record<string, string> = {
+  'agent:resume': 'scripts/cdp-trigger-round3.mjs —— 调试脚本用它把 agent 从异常状态拉回来',
+  'agent:status': 'scripts/cdp-trigger-round3.mjs —— 同上，先查状态再决定是否恢复',
+  'health:check':
+    '只读诊断端点。消费方天然在仓库之外（DevTools 手调 / 外部巡检 / 打包后冒烟），仓内零引用属于仪器偏差，不代表没人用',
+}
+
 describe('preload ↔ 主进程 IPC channel 契约', () => {
   it('preload 解析出的 channel 数量合理（防止正则失效导致测试空转）', () => {
     const invoked = preloadInvokedChannels(read('src/preload/index.ts'))
@@ -85,5 +106,20 @@ describe('preload ↔ 主进程 IPC channel 契约', () => {
         ? `以下 channel 被 preload 调用但主进程未注册（新出现的必须补 handler，\n已接线的请从 KNOWN_UNWIRED_CHANNELS 里删掉）：\n  ${missing.join('\n  ')}`
         : undefined,
     ).toEqual([...KNOWN_UNWIRED_CHANNELS].sort())
+  })
+
+  it('主进程注册的 channel 要么被 preload 暴露，要么在非渲染通道白名单里', () => {
+    const invoked = preloadInvokedChannels(read('src/preload/index.ts'))
+    const registered = mainRegisteredChannels()
+
+    const orphans = [...registered.keys()].filter((ch) => !invoked.has(ch)).sort()
+
+    expect(
+      orphans,
+      orphans.length
+        ? `以下 channel 主进程注册了、但 preload 从未暴露 —— 渲染进程根本调不到。\n` +
+          `要么补 preload 暴露，要么删掉 handler，要么写进 NON_PRELOAD_CHANNELS 并说明消费方：\n  ${orphans.join('\n  ')}`
+        : undefined,
+    ).toEqual(Object.keys(NON_PRELOAD_CHANNELS).sort())
   })
 })
