@@ -788,28 +788,22 @@ export class AppRuntime {
     // the remaining startup stages finish.
     const evolutionRef = createServiceRef<SelfEvolutionService>()
     const dashboardRef = createServiceRef<EvolutionDashboardService>()
-    const pipelineRef = createServiceRef<PipelineOrchestrator>()
-    const decisionQueryRef = createServiceRef<import('@akemi-mio/core/core/evaluation/DecisionQueryService').DecisionQueryService>()
     const taskPanelRef = createServiceRef<TaskPanelService>()
     const wallpaperInteractiveRef = createServiceRef<WallpaperInteractiveService>()
-    const restoreRef = createServiceRef<import('@akemi-mio/intelligence/runtime/RuntimeRestoreService').RuntimeRestoreService>()
 
     registerHandlers(
       agentService,
       stateManager,
       ttsService,
       evolutionRef,
-      pipelineRef,
       this.metricsCollector,
       dashboardRef,
       this.memoryContextRef,
-      decisionQueryRef,
       this.metricsQueryRef,
       this.organizerRef,
       this.voiceBookmarkRef,
       taskPanelRef,
       wallpaperInteractiveRef,
-      restoreRef,
       this.conversationContextRef,
       this.voiceNoteRef,
     )
@@ -1025,13 +1019,6 @@ export class AppRuntime {
       }
     }, METRICS_REFRESH_MS)
     this.subs.add(() => clearInterval(metricsTimer))
-
-    // DecisionQueryService — 只读查询层（M5.3）
-    const { DecisionQueryService } = await import('@akemi-mio/core/core/evaluation/DecisionQueryService')
-    decisionQueryRef.current = new DecisionQueryService(guardrailDecisionStore)
-    // Reuse the refs registered before window creation.
-
-    restoreRef.current = this.runtimeRestoreService ?? null
 
     // === Stage 3: 核心服务（内存、插件、技能） ===
     const memoryService = new MemoryService()
@@ -1709,7 +1696,6 @@ export class AppRuntime {
       cognitiveService,
       evolutionRef,
       dashboardRef,
-      pipelineRef,
       taskPanelRef,
       wallpaperInteractiveRef,
     )
@@ -2108,7 +2094,6 @@ export class AppRuntime {
     cognitiveService: CognitiveService,
     evolutionRef?: { current: SelfEvolutionService | null },
     dashboardRef?: { current: EvolutionDashboardService | null },
-    pipelineRef?: { current: PipelineOrchestrator | null },
     taskPanelRef?: { current: TaskPanelService | null },
     wallpaperInteractiveRef?: { current: WallpaperInteractiveService | null },
   ): void {
@@ -2233,7 +2218,6 @@ export class AppRuntime {
         log('INFO', 'cicd_orchestrator_initialized', { toolsLoaded: cicdOrchestrator.isReady() })
 
         this.pipeline = pipeline
-        if (pipelineRef) pipelineRef.current = pipeline
         evolution.scheduleEvolution(2)
         if (evolutionRef) evolutionRef.current = evolution
         // 创建 UserBehavior 上层增强层（由环境变量 USER_BEHAVIOR_FEATURES 控制）

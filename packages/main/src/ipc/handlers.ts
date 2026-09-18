@@ -12,12 +12,10 @@ import {
   FileOrganizerProgressService,
 } from '@akemi-mio/platform/wallpaper/WallpaperService'
 import { MetricsCollector } from '@akemi-mio/intelligence/observability/MetricsCollector'
-import type { DecisionQueryService } from '@akemi-mio/core/core/evaluation/DecisionQueryService'
 import type { GuardrailMetricsQueryService } from '@akemi-mio/core/core/evaluation/GuardrailMetricsQueryService'
 import type { VoiceBookmarkService } from '@akemi-mio/intelligence-memory/VoiceBookmarkService'
 import type { TaskPanelService } from '@akemi-mio/platform/wallpaper/TaskPanelService'
 import type { WallpaperInteractiveService } from '@akemi-mio/platform/wallpaper/WallpaperInteractiveService'
-import type { RuntimeRestoreService } from '@akemi-mio/intelligence/runtime/RuntimeRestoreService'
 import type { VoiceNoteService } from '@akemi-mio/voicenote/VoiceNoteService'
 import { existsSync } from 'fs'
 import type { HandlerContext } from './handlers/context'
@@ -77,17 +75,14 @@ export function registerHandlers(
   stateManager: StateManager,
   ttsService: TtsService,
   evolutionRef?: { current: SelfEvolutionService | null },
-  pipelineRef?: { current: import('@akemi-mio/evolution/automation').PipelineOrchestrator | null },
   metricsCollector?: MetricsCollector,
   dashboardRef?: { current: EvolutionDashboardService | null },
   memoryContextRef?: { current: MemoryContextService | null },
-  decisionQueryRef?: { current: DecisionQueryService | null },
   metricsQueryRef?: { current: GuardrailMetricsQueryService | null },
   organizerRef?: { current: FileOrganizerProgressService | null },
   voiceBookmarkRef?: { current: VoiceBookmarkService | null },
   taskPanelRef?: { current: TaskPanelService | null },
   wallpaperInteractiveRef?: { current: WallpaperInteractiveService | null },
-  restoreRef?: { current: RuntimeRestoreService | null },
   conversationContextRef?: { current: ConversationContextService | null },
   voiceNoteRef?: { current: VoiceNoteService | null },
 ): void {
@@ -96,17 +91,14 @@ export function registerHandlers(
     stateManager,
     ttsService,
     evolutionRef,
-    pipelineRef,
     metricsCollector,
     dashboardRef,
     memoryContextRef,
-    decisionQueryRef,
     metricsQueryRef,
     organizerRef,
     voiceBookmarkRef,
     taskPanelRef,
     wallpaperInteractiveRef,
-    restoreRef,
     conversationContextRef,
     voiceNoteRef,
   }

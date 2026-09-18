@@ -89,7 +89,6 @@ const configMock = vi.hoisted(() => ({
   BEHAVIOR_PREDICTOR_PRELOAD_TIMEOUT_MS: 10000,
   BEHAVIOR_PREDICTOR_PRELOAD_CONFIDENCE: 0.35,
   BEHAVIOR_PREDICTOR_MAX_CONCURRENT_PRELOADS: 3,
-  ASR_HOTWORD_WINDOW_SIZE: 5000,
   ASR_HOTWORD_FREQ_THRESHOLD: 2,
   BLOG_MEMORY_ENABLED: true,
   BLOG_MEMORY_MAX_ENTRIES: 200,
@@ -154,7 +153,6 @@ describe('IPC handlers', () => {
   let stateManager: any
   let ttsService: any
   let evolutionService: any
-  let decisionQueryService: any
   let llmService: any
   let taskPanelService: any
   let wallpaperInteractiveService: any
@@ -235,11 +233,6 @@ describe('IPC handlers', () => {
       getConsecutiveFailures: vi.fn().mockReturnValue(0),
     }
 
-    decisionQueryService = {
-      getDecision: vi.fn().mockResolvedValue({ state: 'RECORDED', record: { decisionId: 'd1', traceId: 't1' } }),
-      listByTrace: vi.fn().mockResolvedValue([]),
-    }
-
     taskPanelService = {
       getState: vi.fn().mockReturnValue({ visible: true, quickActions: [], recentActions: [], timestamp: Date.now() }),
       toggleVisibility: vi.fn().mockReturnValue(false),
@@ -266,8 +259,6 @@ describe('IPC handlers', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
-      { current: decisionQueryService },
       undefined,
       undefined,
       { current: voiceBookmarkService },
@@ -590,8 +581,6 @@ describe('IPC handlers', () => {
         undefined,
         undefined,
         undefined,
-        undefined,
-        { current: decisionQueryService },
         undefined,
         undefined,
         undefined,
