@@ -350,8 +350,25 @@ export class ChatExecutor {
   setSessionPlanIds(ids: Set<string>): void {
     this.sessionPlanIds = ids
   }
+  /**
+   * 是否有正在进行的对话轮次。
+   *
+   * 这是后台系统的「对话中不要插进来」锁 —— `SleepCycle.run()`（每 2 小时，见
+   * `AppRuntime:2455`）、`SelfEvolutionService.schedulerTick()`、`TaskPanelService.getState()`
+   * 都读它。也用于 `agent:status` / `evolution:status` 的 busy 上报。
+   *
+   * 判据是 `runContext !== null`，**不是** `runContext.running`
+   * （= `state === RUNNING || WAIT_TOOL`）：`toolLoop` 会先转 `COMPLETED`（`:1713`），
+   * 之后还有一次 `await this.hybridPipeline.validateReplyQuality(...)`（`:1739`，
+   * 一次仲裁 LLM 调用）才真正返回。那段窗口里本轮仍占用 `runContext`、仍不可再入，
+   * 但 `running` 已经是 false —— 用状态判定会让后台系统在对话收尾期间插进来，
+   * 也会让壁纸任务面板显示「待机」。
+   *
+   * 与 `run()` 顶部的重入守卫用的是**同一个判据**，两处必须一致：
+   * 「忙」不该在不同调用点有第二种含义。
+   */
   isBusy(): boolean {
-    return this.runContext?.running ?? false
+    return this.runContext !== null
   }
 
   /** M6.1 current execution goal id (exposed to AgentService recovery snapshot) */

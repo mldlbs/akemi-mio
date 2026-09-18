@@ -64,6 +64,7 @@ vi.mock('@akemi-mio/core/db/messages', () => ({
 }))
 
 import { ChatExecutor } from '@akemi-mio/intelligence/agent/ChatExecutor'
+import { RunState } from '@akemi-mio/intelligence/agent/runstate'
 import { insertMessage } from '@akemi-mio/core/db/messages'
 import { EvaluationEmitter } from '@akemi-mio/core/core/evaluation/EvaluationEmitter'
 import { InMemoryEvaluationRepository } from '../../core/evaluation/__test_support__'
@@ -211,5 +212,57 @@ describe('ChatExecutor 重入守卫（BUSY）', () => {
     await expect(executor.run('二', 'trace-2', 'electron', undefined, 'session-1', true)).resolves.toEqual({
       reply: '回复',
     })
+  })
+})
+
+/**
+ * `isBusy()` 必须与重入守卫用同一个判据。
+ *
+ * 它是后台系统的「对话中不要插进来」锁：`SleepCycle.run()`（每 2 小时）、
+ * `SelfEvolutionService.schedulerTick()`、`TaskPanelService.getState()` 都读它。
+ *
+ * 旧实现读 `runContext.running`（= `state === RUNNING || WAIT_TOOL`），
+ * 但真实 `toolLoop` 在转 `COMPLETED`（`ChatExecutor:1713`）之后还有一次
+ * `await this.hybridPipeline.validateReplyQuality(...)`（`:1739`，一次仲裁 LLM 调用）
+ * 才真正返回。那段窗口里本轮仍占用 `runContext`、重入守卫仍会拒绝，但 `running` 已是 false ——
+ * 后台系统会在对话收尾期间插进来，任务面板也会显示「待机」。
+ *
+ * 下面的 mock 复刻的正是这个收尾形态：先 `RUNNING`（真实代码在 `toolLoop` 首行 `:1245` 转），
+ * 再 `COMPLETED`，然后还有一次 await，最后才 return。
+ */
+describe('ChatExecutor.isBusy() 覆盖整个 run（含收尾窗口）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('状态已转 COMPLETED 但仍在收尾时，isBusy() 仍为 true', async () => {
+    const executor = createExecutor()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    vi.spyOn(executor as any, 'toolLoop').mockImplementation(async (_m: any, ctx: any) => {
+      ctx.transition(RunState.RUNNING)
+      ctx.transition(RunState.COMPLETED)
+      await gate
+      return '回复'
+    })
+
+    const run = executor.run('一', 'trace-1', 'electron', undefined, 'session-1', true)
+    await until(() => (executor as any).runContext?.state === RunState.COMPLETED)
+
+    // 旧的判据（runContext.running）在这一刻是 false —— 这正是它漏掉的窗口
+    expect((executor as any).runContext.running).toBe(false)
+
+    // 后台系统据此跳过、重入守卫据此拒绝：同一个问题必须只有一个答案
+    expect(executor.isBusy()).toBe(true)
+    expect(await executor.run('二', 'trace-2', 'electron', undefined, 'session-1', true)).toEqual({ error: 'BUSY' })
+
+    release()
+    await expect(run).resolves.toEqual({ reply: '回复' })
+
+    // 真正结束后锁要释放，否则后台系统永远不再运行
+    expect(executor.isBusy()).toBe(false)
   })
 })
