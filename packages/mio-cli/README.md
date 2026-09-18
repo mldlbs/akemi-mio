@@ -27,6 +27,7 @@ mio agents list             List observed agents (from agents.jsonl, --project X
 mio agents report           Report per-agent task/memory/reuse telemetry (--agent X, --project Y)
 mio agents register --agent-id X   Register an observed agent (--yes to apply; previews by default)
 mio evolution status        Show composed evolution module health
+mio evolution report        Cross-agent evolution report: ecosystem, agents, memory health, suggestions (--period 24h|7d|30d|all)
 mio evolution shadow record      Record a shadow comparison sample
 mio evolution dual-write record  Record a dual-write comparison sample
 mio evolution cutover readiness   Assess shadow/dual-write cutover readiness

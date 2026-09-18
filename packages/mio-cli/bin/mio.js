@@ -35,6 +35,7 @@ const { createQueryLog } = require('../server/query-log.js')
 const { createSubscriptionStore, subscribeKey } = require('../server/subscription-store.js')
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
+const { createEvolutionReport, formatEvolutionReportText } = require('../server/evolution-report.js')
 
 function appendJsonl(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -108,6 +109,39 @@ function parseNumberOption(args, name) {
   return value
 }
 
+// mio evolution report shares one implementation with mio.evolution.report
+// (see ../server/evolution-report.js), so CLI and MCP cannot report different numbers.
+function cliEvolutionReport() {
+  return createEvolutionReport({ dataDir: MIO_HOME, projectName })
+}
+
+const EVOLUTION_REPORT_PERIODS = new Set(['24h', '7d', '30d', 'all'])
+
+function evolutionReportCommand(args, useJson) {
+  const flags = args.slice(2)
+  const period = optionValue(flags, '--period')
+  if (period !== undefined && !EVOLUTION_REPORT_PERIODS.has(period)) {
+    console.error(`--period must be one of: ${[...EVOLUTION_REPORT_PERIODS].join(', ')}`)
+    process.exitCode = 1
+    return
+  }
+
+  let result
+  try {
+    result = cliEvolutionReport().report({
+      project: optionValue(flags, '--project'),
+      period,
+    })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+
+  if (useJson) return jsonOrText(result, true)
+  console.log(formatEvolutionReportText(result))
+}
+
 function evolutionStatus(useJson) {
   const payload = getEvolutionStatus()
   if (useJson) {
@@ -160,6 +194,7 @@ function printDualWriteRecord(record, useJson) {
 
 async function evolutionCommand(args, useJson) {
   if (args[1] === 'status') return evolutionStatus(useJson)
+  if (args[1] === 'report') return evolutionReportCommand(args, useJson)
   try {
     if (args[1] === 'shadow' && args[2] === 'record') {
       return printShadowRecord(
@@ -230,7 +265,7 @@ async function evolutionCommand(args, useJson) {
     process.exitCode = 1
     return
   }
-  console.error('Usage: mio evolution status|shadow record|dual-write record|cutover readiness|cutover apply|authority plan|migration plan')
+  console.error('Usage: mio evolution status|report|shadow record|dual-write record|cutover readiness|cutover apply|authority plan|migration plan')
   process.exitCode = 1
 }
 
@@ -2415,6 +2450,7 @@ Usage:
   mio agents report           Report per-agent task/memory/reuse telemetry (--agent X, --project Y)
   mio agents register --agent-id X   Register an observed agent (--yes to apply; previews by default)
   mio evolution status        Show composed evolution module health
+  mio evolution report        Cross-agent evolution report: ecosystem, agents, memory health, suggestions (--period 24h|7d|30d|all)
   mio evolution shadow record      Record a shadow comparison sample
   mio evolution dual-write record  Record a dual-write comparison sample
   mio evolution cutover readiness   Assess shadow/dual-write cutover readiness
