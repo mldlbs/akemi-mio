@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const electronAppMock = vi.hoisted(() => ({
   isPackaged: false,
@@ -144,6 +144,7 @@ vi.mock('@akemi-mio/core/core/EventBus', () => ({
 }))
 
 import { registerHandlers } from '@akemi-mio/main/ipc/handlers'
+import { voiceConfirmationSession } from '@akemi-mio/capabilities/tool/VoiceConfirmationSession'
 import type { AgentService } from '@akemi-mio/intelligence/agent/AgentService'
 import type { StateManager } from '@akemi-mio/core/core/StateManager'
 import type { TtsService } from '@akemi-mio/audio/TtsService'
@@ -163,9 +164,13 @@ describe('IPC handlers', () => {
     registeredHandlers.clear()
     registeredOns.clear()
     electronAppMock.isPackaged = false
+    // 确认会话是全局单例（和 voiceOdeSession 一样），状态会跨用例残留；
+    // reset() 同时清掉 30s 超时定时器，否则测试进程会挂着一堆 pending timer。
+    voiceConfirmationSession.reset()
 
     llmService = {
       refreshFromCredentials: vi.fn(),
+      chatJson: vi.fn().mockResolvedValue({ data: null }),
     }
 
     agentService = {
@@ -183,6 +188,7 @@ describe('IPC handlers', () => {
       }),
       getMcpManager: vi.fn().mockReturnValue({
         listServers: vi.fn().mockReturnValue([{ name: 'server1', initialized: true }]),
+        callTool: vi.fn().mockResolvedValue('工具输出'),
       }),
       isBusy: vi.fn().mockReturnValue(false),
       isPaused: vi.fn().mockReturnValue(false),
@@ -268,6 +274,12 @@ describe('IPC handlers', () => {
       { current: taskPanelService },
       { current: wallpaperInteractiveService },
     )
+  })
+
+  // 最后一个用例可能留下一个 awaiting_confirm 会话（30s 超时定时器），
+  // 不在这里清掉会让 fork 一直挂到定时器触发。
+  afterEach(() => {
+    voiceConfirmationSession.reset()
   })
 
   describe('handler 注册', () => {
@@ -637,6 +649,248 @@ describe('IPC handlers', () => {
 
       const handler = registeredHandlers.get('wallpaper:interactive:getConfig')!
       await expect(handler()).resolves.toEqual({ enabled: false, shortcut: 'CommandOrControl+Space' })
+    })
+  })
+
+  // ══════════════════════════════════════════════════════════════════
+  //  语音编排：LLM 意图解析 / 多轮语音确认 / 一站式编排
+  //
+  //  这 7 个通道的 preload API（llmParseIntent / voiceConfirm* / orchestrator*）
+  //  与 capabilities 层实现都早已写好，唯独主进程从未注册 handler。
+  //  invoke 无 handler 会 reject，调用方 catch{} 吞掉 → 「按钮没反应、控制台无错」。
+  //  下面同时钉住「接上了」与「接对了」。
+  // ══════════════════════════════════════════════════════════════════
+
+  describe('voice:llmParseIntent', () => {
+    it('把 LLM 返回的 JSON 解析成结构化意图', async () => {
+      llmService.chatJson.mockResolvedValue({
+        data: {
+          matched: true,
+          intent: 'analyze_code',
+          description: '分析代码',
+          slots: { path: 'a.ts' },
+          tools: [{ tool: 'read_file', args: { path: '{{slot.path}}' } }],
+          confirmMessage: '将分析 a.ts',
+          requireConfirmation: false,
+          confidence: 0.9,
+        },
+      })
+
+      const handler = registeredHandlers.get('voice:llmParseIntent')!
+      expect(handler).toBeDefined()
+      const result = await handler({}, '帮我看看 a.ts')
+
+      expect(result.success).toBe(true)
+      expect(result.parsed.intent).toBe('analyze_code')
+      expect(result.parsed.tools).toHaveLength(1)
+      expect(result.parsed.requireConfirmation).toBe(false)
+      // system prompt 必须真的传下去 —— 漏传会让 LLM 回自由文本而不是 JSON
+      const [, opts] = llmService.chatJson.mock.calls[0]
+      expect(opts.system).toContain('意图解析')
+    })
+
+    it('LLM 判定为闲聊时返回 success:false，而不是编造一个意图', async () => {
+      llmService.chatJson.mockResolvedValue({ data: { matched: false } })
+      const handler = registeredHandlers.get('voice:llmParseIntent')!
+      const result = await handler({}, '随便聊聊')
+
+      expect(result.success).toBe(false)
+      expect(result.parsed).toBeNull()
+      expect(result.fallbackText).toBe('随便聊聊')
+    })
+  })
+
+  describe('voice:confirm:* 多轮语音确认会话', () => {
+    const startParams = {
+      intentName: 'read_file',
+      confirmMessage: '将读取文件: a.ts',
+      slots: { filename: 'a.ts' },
+      tools: [{ tool: 'read_file', args: { path: '{{slot.filename}}' } }],
+    }
+    const start = () => registeredHandlers.get('voice:confirm:start')!
+    const feed = () => registeredHandlers.get('voice:confirm:feed')!
+    const state = () => registeredHandlers.get('voice:confirm:state')!
+
+    it('start 后 state 反映 awaiting_confirm，说“确认”后 result=confirmed', async () => {
+      const started = await start()({}, startParams)
+      expect(started.success).toBe(true)
+      expect(started.state).toBe('awaiting_confirm')
+      expect(started.sessionId).toMatch(/^vconf_/)
+
+      const s1 = await state()()
+      expect(s1.active).toBe(true)
+      expect(s1.intentName).toBe('read_file')
+      expect(s1.confirmMessage).toBe('将读取文件: a.ts')
+      expect(s1.slots).toEqual({ filename: 'a.ts' })
+
+      const fed = await feed()({}, '确认')
+      expect(fed.result).toBe('confirmed')
+      expect((await state()()).active).toBe(false)
+    })
+
+    it('说“取消”后 result=rejected', async () => {
+      await start()({}, startParams)
+      const fed = await feed()({}, '取消')
+      expect(fed.result).toBe('rejected')
+      expect((await state()()).state).toBe('rejected')
+    })
+
+    it('没听清时不返回 result —— 否则调用方会把「还没确认」当成「已确认」直接执行', async () => {
+      await start()({}, startParams)
+      const fed = await feed()({}, '嗯嗯嗯')
+
+      expect(fed.success).toBe(true)
+      expect(fed.state).toBe('awaiting_confirm')
+      expect(fed.result).toBeUndefined()
+    })
+
+    it('没有活动会话时 feed 返回结构化失败，而不是静默成功', async () => {
+      const fed = await feed()({}, '确认')
+      expect(fed.success).toBe(false)
+      expect(fed.error).toContain('no active confirm session')
+    })
+
+    it('reset 把会话打回 idle', async () => {
+      await start()({}, startParams)
+      await registeredHandlers.get('voice:confirm:reset')!()
+      expect((await state()()).state).toBe('idle')
+      expect((await state()()).active).toBe(false)
+    })
+  })
+
+  describe('voice:orchestrate:full', () => {
+    const full = () => registeredHandlers.get('voice:orchestrate:full')!
+    const callTool = () => agentService.getMcpManager().callTool
+
+    it('关键词命中时开会话等待确认，不直接执行', async () => {
+      const result = await full()({}, '打开 a.ts')
+
+      expect(result.matched).toBe(true)
+      expect(result.awaitingConfirm).toBe(true)
+      expect(result.intent.name).toBe('read_file')
+      expect(result.intent.toolSequence[0].tool).toBe('read_file')
+      expect(result.state).toBe('awaiting_confirm')
+      expect(callTool()).not.toHaveBeenCalled()
+    })
+
+    it('未命中且未开 LLM fallback 时返回 matched:false，且不打扰 LLM', async () => {
+      const result = await full()({}, '随便聊聊')
+      expect(result).toEqual({ matched: false, text: '随便聊聊' })
+      expect(llmService.chatJson).not.toHaveBeenCalled()
+    })
+
+    it('尊重意图定义里的 requireConfirmation:false —— 只读意图不该被拦下来确认', async () => {
+      const result = await full()({}, '进度如何')
+
+      expect(result.matched).toBe(true)
+      expect(result.intent.name).toBe('query_plan_status')
+      expect(result.awaitingConfirm).toBe(false)
+      expect(callTool()).toHaveBeenCalledWith('list_plans', {})
+    })
+
+    it('requireConfirm:false 时跳过确认直接执行，并接上 TTS 播报', async () => {
+      const result = await full()({}, '打开 a.ts', { requireConfirm: false })
+
+      expect(result.matched).toBe(true)
+      expect(result.awaitingConfirm).toBe(false)
+      expect(callTool()).toHaveBeenCalledWith('read_file', { path: 'a.ts' })
+      expect(result.result.success).toBe(true)
+      // VoiceToolOrchestrator 的 _autoTtsFeedback 默认开着，但不接 speaker 就永远不会播报
+      expect(ttsService.speak).toHaveBeenCalled()
+    })
+
+    it('LLM fallback 命中时执行 LLM 给出的工具序列', async () => {
+      llmService.chatJson.mockResolvedValue({
+        data: {
+          matched: true,
+          intent: 'llm_read_config',
+          description: '读取配置',
+          slots: { file: 'config.json' },
+          tools: [{ tool: 'read_file', args: { path: '{{slot.file}}' } }],
+          confirmMessage: '将读取 config.json',
+          requireConfirmation: false,
+        },
+      })
+
+      const result = await full()({}, '随便聊聊', { useLlmFallback: true })
+
+      expect(result.matched).toBe(true)
+      expect(result.awaitingConfirm).toBe(false)
+      expect(result.intent.name).toBe('llm_read_config')
+      // LLM 意图名不在静态意图表里 —— 走 execute() 只会得到「未知意图」，
+      // 必须走 executeSequence() 才能执行显式工具序列
+      expect(callTool()).toHaveBeenCalledWith('read_file', { path: 'config.json' })
+    })
+
+    it('LLM fallback 命中高风险操作时先开会话等确认', async () => {
+      llmService.chatJson.mockResolvedValue({
+        data: {
+          matched: true,
+          intent: 'llm_write',
+          description: '写文件',
+          slots: {},
+          tools: [{ tool: 'write_file', args: { path: 'x.ts' } }],
+          confirmMessage: '将写入 x.ts',
+          requireConfirmation: true,
+        },
+      })
+
+      const result = await full()({}, '随便聊聊', { useLlmFallback: true })
+
+      expect(result.awaitingConfirm).toBe(true)
+      expect(result.state).toBe('awaiting_confirm')
+      expect(callTool()).not.toHaveBeenCalled()
+    })
+
+    it('LLM fallback 也没命中时返回 matched:false', async () => {
+      llmService.chatJson.mockResolvedValue({ data: { matched: false } })
+      const result = await full()({}, '随便聊聊', { useLlmFallback: true })
+      expect(result.matched).toBe(false)
+    })
+  })
+
+  describe('voice:orchestrate:confirmAndExecute', () => {
+    const start = () => registeredHandlers.get('voice:confirm:start')!
+    const state = () => registeredHandlers.get('voice:confirm:state')!
+    const exec = () => registeredHandlers.get('voice:orchestrate:confirmAndExecute')!
+    const callTool = () => agentService.getMcpManager().callTool
+
+    it('执行确认后的意图，并把会话标记为已确认', async () => {
+      await start()({}, {
+        intentName: 'read_file',
+        confirmMessage: '将读取文件: a.ts',
+        slots: { filename: 'a.ts' },
+        tools: [{ tool: 'read_file', args: { path: '{{slot.filename}}' } }],
+      })
+
+      const result = await exec()({}, 'read_file', { filename: 'a.ts' })
+
+      expect(result.success).toBe(true)
+      expect(result.result.steps[0].tool).toBe('read_file')
+      expect(callTool()).toHaveBeenCalledWith('read_file', { path: 'a.ts' })
+      // 会话必须被同步结束 —— 否则它 30s 后超时，播报一句莫名其妙的
+      // 「确认超时，操作已取消」，而操作其实已经执行完了
+      expect((await state()()).state).toBe('confirmed')
+    })
+
+    it('不替「另一个意图」的会话盖章确认', async () => {
+      await start()({}, {
+        intentName: 'write_file',
+        confirmMessage: '将写入 x.ts',
+        slots: {},
+        tools: [{ tool: 'write_file', args: { path: 'x.ts' } }],
+      })
+
+      await exec()({}, 'read_file', { filename: 'a.ts' })
+
+      expect((await state()()).state).toBe('awaiting_confirm')
+      expect((await state()()).intentName).toBe('write_file')
+    })
+
+    it('未知意图返回结构化失败，而不是把异常抛给渲染进程', async () => {
+      const result = await exec()({}, 'definitely_not_an_intent', {})
+      expect(result.success).toBe(false)
+      expect(result.result.summary).toContain('未知意图')
     })
   })
 })

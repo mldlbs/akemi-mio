@@ -32,6 +32,8 @@ export interface VoiceOrchestrateResult {
     confirmMessage: string
     toolSequence: Array<{ tool: string; args: Record<string, string> }>
     slots: Record<string, string>
+    /** 是否需要用户确认（来自意图定义，缺省视为需要） */
+    requireConfirmation: boolean
   }
   /** 如果匹配失败，返回原始文本供后续 LLM 处理 */
   fallbackText?: string
@@ -58,6 +60,17 @@ export interface VoiceExecuteResult {
   }>
   /** 汇总输出（最后一步的结果） */
   summary: string
+}
+
+export interface VoiceExecuteSequenceRequest {
+  /** 显式的工具序列（用于 LLM 解析出的意图 —— 它不在静态意图表里，findIntent 查不到） */
+  tools: Array<{ tool: string; args: Record<string, string> }>
+  /** 槽位填充值 */
+  slots: Record<string, string>
+  /** 意图名（仅用于日志与 TTS 播报，不影响执行） */
+  intent?: string
+  /** 请求 ID */
+  requestId?: string
 }
 
 // ── 工具调用器接口 ──
@@ -149,6 +162,10 @@ export class VoiceToolOrchestrator {
         confirmMessage,
         toolSequence,
         slots,
+        // 意图定义里的 requireConfirmation 之前被丢掉了 —— 调用方只能一律按
+        // 「需要确认」处理，于是显式声明 requireConfirmation: false 的意图
+        // （如 solve_ode）也会被拦下来确认一次。这里把它透传出去。
+        requireConfirmation: bestMatch.requireConfirmation !== false,
       },
     }
   }
@@ -185,11 +202,47 @@ export class VoiceToolOrchestrator {
       slots: req.slots,
     })
 
+    return this.executeSequence({
+      tools: intentDef.tools,
+      slots: req.slots,
+      intent: req.intent,
+      requestId: rid,
+    })
+  }
+
+  /**
+   * 第二步（显式序列版）：执行给定的工具序列。
+   *
+   * 与 execute() 的区别：不做 findIntent() 查表，直接执行调用方给出的 tools。
+   * 这是 LLM fallback 路径的唯一执行入口 —— LLM 解析出的意图名不在静态意图表里，
+   * 用 execute() 只会得到「未知意图」。两者共用同一段链式执行逻辑，不重复实现。
+   */
+  async executeSequence(req: VoiceExecuteSequenceRequest): Promise<VoiceExecuteResult> {
+    const rid = req.requestId || createRequestId()
+    if (!this.toolCaller) {
+      return {
+        success: false,
+        steps: [],
+        summary: '工具调用器未初始化',
+      }
+    }
+
+    const stepDefs = req.tools || []
+    const intentName = req.intent || 'llm_parsed'
+
+    if (stepDefs.length === 0) {
+      return {
+        success: false,
+        steps: [],
+        summary: '没有可执行的工具步骤',
+      }
+    }
+
     const steps: VoiceExecuteResult['steps'] = []
     let prevOutput = '' // 链式传递：上一步输出
 
-    for (let i = 0; i < intentDef.tools.length; i++) {
-      const stepDef = intentDef.tools[i]
+    for (let i = 0; i < stepDefs.length; i++) {
+      const stepDef = stepDefs[i]
       const t0 = Date.now()
 
       // 解析参数：支持 {{slot.xxx}} 和 {{prev.xxx}}
@@ -201,7 +254,7 @@ export class VoiceToolOrchestrator {
       log('INFO', 'voice_orchestrate_step', {
         request_id: rid,
         step: i + 1,
-        total: intentDef.tools.length,
+        total: stepDefs.length,
         tool: stepDef.tool,
         args: JSON.stringify(resolvedArgs).slice(0, 200),
       })
@@ -254,14 +307,14 @@ export class VoiceToolOrchestrator {
 
     log('INFO', 'voice_orchestrate_execute_done', {
       request_id: rid,
-      intent: req.intent,
+      intent: intentName,
       stepCount: steps.length,
       success: true,
     })
 
     // ── 自动语音播报执行结果 ──
     if (this._autoTtsFeedback && this.ttsSpeaker) {
-      const ttsText = this.buildTtsFeedback(steps, req.intent)
+      const ttsText = this.buildTtsFeedback(steps, intentName)
       if (ttsText) {
         this.ttsSpeaker(ttsText).catch((err: unknown) =>
           log('WARN', 'voice_orchestrate_tts_feedback_error', {

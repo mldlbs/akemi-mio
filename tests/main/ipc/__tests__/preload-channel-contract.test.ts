@@ -49,26 +49,17 @@ function mainRegisteredChannels(): Map<string, string> {
 /**
  * 已知的、尚未接线的一批 —— **不是**「没问题」，是「已记录在案」。
  *
- * 语音确认 / 一站式编排这组能力在 `packages/capabilities/src/tool/` 里是**实现好了的**
- * （VoiceConfirmationSession / VoiceIntentLlmParser / VoiceToolOrchestrator），
- * preload 也照着一一暴露了方法，但主进程从来没注册过这些 channel ——
- * 和上面那四个被修掉的属于同一个疏忽，区别只是暂时还没有渲染进程调用点，所以没暴露出来。
+ * 现在它是**空的**：语音确认 / 一站式编排那 7 个通道（voice:llmParseIntent、
+ * voice:confirm:start|feed|state|reset、voice:orchestrate:full|confirmAndExecute）
+ * 已于 `packages/main/src/ipc/handlers/asr.ts` 接线完毕。
  *
- * 接线需要的是「会话生命周期 + 工具调用方注入」，是一个功能，不是补一行 handle。
- * 在有人决定做它之前，把清单钉死在这里：
+ * 这个常量保留空数组是有意的 —— 它是「过期即报错」机制的载体：
  *   - 冒出**新的**未注册 channel → 测试失败（这正是它的价值）
- *   - 有人把这 7 个里某个接上了 → 测试也会失败，逼他把对应条目删掉
- * 后一条是刻意的：手写清单最大的毛病就是腐烂，让它「过期即报错」比让它悄悄失真强。
+ *   - 有人临时接线了某个通道却把条目留在这里 → 测试也会失败，逼他删掉
+ * 手写清单最大的毛病就是腐烂，让它「过期即报错」比让它悄悄失真强。
+ * 接下一批潜伏通道时，把名字加进这个数组，接完立刻删掉。
  */
-const KNOWN_UNWIRED_CHANNELS = [
-  'voice:confirm:feed',
-  'voice:confirm:reset',
-  'voice:confirm:start',
-  'voice:confirm:state',
-  'voice:llmParseIntent',
-  'voice:orchestrate:confirmAndExecute',
-  'voice:orchestrate:full',
-]
+const KNOWN_UNWIRED_CHANNELS: string[] = []
 
 describe('preload ↔ 主进程 IPC channel 契约', () => {
   it('preload 解析出的 channel 数量合理（防止正则失效导致测试空转）', () => {
