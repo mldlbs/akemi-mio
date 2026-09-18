@@ -57,6 +57,8 @@ mio insight mark-reported    Mark insights as reported (--ids a,b)
 mio observer <view>          Observer research pipeline views (research pipeline, not the observe daemon):
                              status|world-model|trends|research|insights|essays|dag (--base-dir DIR)
 mio observer ingest --trace-id T --event-type E   Record a trace event (--payload JSON/--outcome)
+mio observer subscribe --event-types a,b          Subscribe to events (--yes to apply; previews by default)
+mio observer digest                               New events since the last digest (advances the cursor)
 mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
 mio host capabilities        Show what each host supports and whether it is installed (--json)
 mio task route "<task>"      Which verified experiences apply to this task (--project/--scope/--limit)
@@ -424,7 +426,7 @@ mio observer trends --base-dir /path/to/.local/observer
 说明：
 
 - **两者都委托给与 MCP 服务端完全相同的共享实现** —— `server/insight-store.js` 与 `server/observer-store.js`。这是 `memory-store.js` / `experience-store.js` / `policy-store.js` / `creativity-engine.js` / `agent-store.js` 一路沿用的同一个模式：一份实现、两个入口，因此不可能各自漂移。
-- **只暴露不需要 LLM、不发起网络请求的子命令。** `insight generate`、`observer collect`、`observer ferment` 仍是 MCP 专有（`mio.insight.generate` / `mio.observer.collect` / `mio.observer.ferment`），CLI 把三者当作未知子命令拒绝。前两者需要 LLM 或外部采集源，`collect` 依赖的 `@akemi-mio/observer` 包未安装时更无从谈起。
+- **只暴露不需要 LLM、不发起网络请求的子命令。** `insight generate`、`observer collect`、`observer ferment` 仍是 MCP 专有（`mio.insight.generate` / `mio.observer.collect` / `mio.observer.ferment`），CLI 把三者当作未知子命令拒绝。前两者需要 LLM，`collect`/`ferment` 依赖的 `@akemi-mio/observer` 包未安装时更无从谈起。
 - **`mio observer ingest` 记录任意 trace 事件**（`tool_call` / `error` / `retry` / `task_outcome`）：
 
   ```bash
@@ -433,6 +435,33 @@ mio observer trends --base-dir /path/to/.local/observer
 
   它是**追加**而非修改，所以像 `mio remember` 一样直接写入、**不做预览**；但缺 `--trace-id` / `--event-type`，或 `--payload` 不是合法 JSON 对象时，会在写入任何东西之前拒绝。
   只想记录任务结果时用 `mio task record-outcome` 更合适——它更专用，还会一并更新该 agent 的 `taskCount` / `successCount` / `failureCount`。
+
+### 订阅与摘要（`subscribe` / `digest`）
+
+```bash
+mio observer subscribe --event-types tool_call,error --project demo        # 预览
+mio observer subscribe --event-types tool_call,error --project demo --yes  # 订阅
+mio observer ingest --trace-id t1 --event-type tool_call --project demo
+mio observer digest --project demo
+```
+
+```text
+Observer digest: 1 event(s) (project=demo, agent=cli)
+  subscriptions: 1 active, 1 matched
+- tool_call trace=t1
+Note: this advances the cursor; the next digest returns only newer events.
+```
+
+- `subscribe` 是写操作，**默认只预览**（exit 1、不落盘），`--yes` 才写。相同的
+  agent+project+事件类型+主题视为**同一条订阅**，重复执行是**续期**而非新增一行。
+- **`digest` 是基于游标的**：只返回上次投递之后的**新事件**，并推进游标。
+  所以「第二次跑返回 0 条」是**正确行为**，不是坏了——输出里也明确写了这一点，
+  免得让人误以为订阅失效了。
+- 因此 digest **无法预览**（不跑就不知道有什么），但它会写游标这件事在输出与
+  `mio observer help` 里都写明了。
+- 订阅、traces、游标都在 `<MIO_HOME>` 下（与研究管线的 `.local/observer` 不同），
+  所以这组能力放在 `server/subscription-store.js`，与 `observer-store.js` 分开。
+
 - **数据位置不同，这是有意的。** 洞察存储在 `<MIO_HOME>/insights/insights.json`，与 `mio recall` / `mio policy check` 同处全局 `MIO_HOME`；观察研究管线则是按项目的，默认 `<cwd>/.local/observer`（与 MCP 服务端的默认值一致），可用 `--base-dir` 覆盖。
 - **`@akemi-mio/insight` 是可选依赖。** 未安装时 `mio insight status` 会失败并提示 `@akemi-mio/insight not installed`，而不是报告一个「看起来没有洞察」的全零结果——全零会掩盖「引擎根本没装」这件事。
 - **观察管线的空目录是正常状态。** 管线没跑过时，`observer status` 各阶段计数为 0 并提示 "No pipeline data yet."，其余视图显示 "No ... found."，都是有效输出而非错误。

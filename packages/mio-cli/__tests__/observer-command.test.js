@@ -366,3 +366,104 @@ test('the store rejects an ingest with no trace id or event type', () => {
   assert.throws(() => store.ingestObservation({ trace_id: 't1' }), /requires event_type/)
   assert.equal(readTraces(ws).length, 0)
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// subscribe / digest. The digest is cursor-based: it returns only events newer
+// than the last one delivered, so the second call returning 0 is correct, not a
+// bug -- and the CLI says so in its output.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function readSubscriptions(ws) {
+  const file = path.join(ws.mioHome, 'subscriptions.jsonl')
+  if (!fs.existsSync(file)) return []
+  return fs
+    .readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+}
+
+test('observer subscribe previews without writing', () => {
+  const ws = workspace()
+
+  const result = run(ws, [
+    'observer', 'subscribe', '--event-types', 'tool_call,error', '--project', 'demo',
+  ])
+  assert.equal(result.status, 1, 'preview exits non-zero')
+  assert.match(result.stdout, /Subscribe preview/)
+  assert.match(result.stdout, /event types: tool_call, error/)
+  assert.match(result.stdout, /will create a new subscription/)
+  assert.equal(fs.existsSync(path.join(ws.mioHome, 'subscriptions.jsonl')), false)
+})
+
+test('observer subscribe --yes creates then renews in place', () => {
+  const ws = workspace()
+
+  const first = run(ws, [
+    'observer', 'subscribe', '--event-types', 'tool_call', '--project', 'demo', '--yes',
+  ])
+  assert.equal(first.status, 0, first.stderr)
+  let subs = readSubscriptions(ws)
+  assert.equal(subs.length, 1)
+  assert.equal(subs[0].agent, 'cli')
+  assert.deepEqual(subs[0].eventTypes, ['tool_call'])
+
+  // Same key -> renewal, not a second row.
+  const again = run(ws, [
+    'observer', 'subscribe', '--event-types', 'tool_call', '--project', 'demo', '--yes',
+  ])
+  assert.equal(again.status, 0, again.stderr)
+  subs = readSubscriptions(ws)
+  assert.equal(subs.length, 1, 'renewed in place, no duplicate')
+})
+
+test('observer digest returns matching events then stops repeating them', () => {
+  const ws = workspace()
+  run(ws, ['observer', 'subscribe', '--event-types', 'tool_call,error', '--project', 'demo', '--yes'])
+  run(ws, ['observer', 'ingest', '--trace-id', 't1', '--event-type', 'tool_call', '--project', 'demo'])
+
+  const first = run(ws, ['observer', 'digest', '--project', 'demo'])
+  assert.equal(first.status, 0, first.stderr)
+  assert.match(first.stdout, /Observer digest: 1 event\(s\)/)
+  assert.match(first.stdout, /subscriptions: 1 active, 1 matched/)
+  assert.match(first.stdout, /- tool_call trace=t1/)
+  assert.match(first.stdout, /advances the cursor/, 'tells the user the run is not repeatable')
+
+  // Cursor advanced: the same event is not delivered twice.
+  const second = run(ws, ['observer', 'digest', '--project', 'demo'])
+  assert.equal(second.status, 0, second.stderr)
+  assert.match(second.stdout, /Observer digest: 0 event\(s\)/)
+  assert.match(second.stdout, /Nothing new since the last digest/)
+
+  // A genuinely new event comes through.
+  run(ws, ['observer', 'ingest', '--trace-id', 't2', '--event-type', 'error', '--project', 'demo'])
+  const third = run(ws, ['observer', 'digest', '--project', 'demo'])
+  assert.match(third.stdout, /Observer digest: 1 event\(s\)/)
+  assert.match(third.stdout, /- error trace=t2/)
+})
+
+test('observer digest without --event-types does not filter subscriptions out', () => {
+  // Regression: the CLI passes [] when --event-types is omitted, and an empty
+  // array is truthy -- it used to be treated as "match only subscriptions with
+  // no event types", silently excluding everything.
+  const ws = workspace()
+  run(ws, ['observer', 'subscribe', '--event-types', 'tool_call', '--project', 'demo', '--yes'])
+  run(ws, ['observer', 'ingest', '--trace-id', 't1', '--event-type', 'tool_call', '--project', 'demo'])
+
+  const result = run(ws, ['observer', 'digest', '--project', 'demo'])
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /subscriptions: 1 active/, 'the subscription must still be considered')
+  assert.match(result.stdout, /Observer digest: 1 event\(s\)/)
+})
+
+test('observer digest --json exposes counts and events', () => {
+  const ws = workspace()
+  run(ws, ['observer', 'subscribe', '--event-types', 'tool_call', '--project', 'demo', '--yes'])
+  run(ws, ['observer', 'ingest', '--trace-id', 't1', '--event-type', 'tool_call', '--project', 'demo'])
+
+  const json = jsonOf(ws, ['observer', 'digest', '--project', 'demo', '--json'])
+  assert.equal(json.count, 1)
+  assert.equal(json.subscriptionCount, 1)
+  assert.equal(json.events[0].event_type, 'tool_call')
+  assert.equal(json.events[0].trace_id, 't1')
+})

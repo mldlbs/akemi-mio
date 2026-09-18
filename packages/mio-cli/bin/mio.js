@@ -32,6 +32,7 @@ const { listHostCapabilities } = require('../server/host-capabilities.js')
 const { createTaskStore } = require('../server/task-store.js')
 const { chatJson, llmConfig, isLlmConfigured } = require('../server/llm-client.js')
 const { createQueryLog } = require('../server/query-log.js')
+const { createSubscriptionStore, subscribeKey } = require('../server/subscription-store.js')
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
 
@@ -1318,6 +1319,10 @@ function observerUsage() {
   mio observer ingest        Record a trace event (tool_call/error/retry/task_outcome)
                              --trace-id <id> --event-type <type> [--payload '<json>'] [--outcome]
                              [--agent] [--host] [--project] (writes immediately, like mio remember)
+  mio observer subscribe     Subscribe to events: --event-types a,b [--topic T] [--ttl-days N]
+                             (--yes required to apply; previews by default)
+  mio observer digest        New events since the last digest (--limit/--project/--event-types)
+                             NOTE: advances the cursor, so a second run returns only newer events
 
 Options:
   --base-dir DIR     Observer data directory (default: <cwd>/.local/observer)
@@ -1398,6 +1403,14 @@ function printObserverDag(result, days) {
   console.log(`\n${result.summaryCount} summary(ies) across ${result.summaries.length} day(s)`)
 }
 
+function cliSubscriptionStore() {
+  return createSubscriptionStore({
+    dataDir: MIO_HOME,
+    projectName,
+    agentId: () => 'cli',
+  })
+}
+
 // Records an arbitrary trace event (tool_call / error / retry / task_outcome).
 // Unlike `mio task record-outcome`, which is specific to task outcomes, this is
 // the general-purpose half -- and the one AGENTS.md asks agents to call.
@@ -1458,6 +1471,95 @@ function observerIngestCommand(args, useJson) {
   }
 }
 
+// Subscribe creates or renews a subscription, so it previews like every other
+// mutating command (`mio agents register`, `mio memory archive`): exit 1 and
+// nothing written without --yes.
+function observerSubscribeCommand(args, useJson) {
+  const flags = args.slice(2)
+  const project = optionValue(flags, '--project') || projectName()
+  const eventTypes = splitTagsOption(flags, '--event-types')
+  const topic = optionValue(flags, '--topic') || ''
+  const ttlDays = optionValue(flags, '--ttl-days')
+
+  if (!flagPresent(flags, '--yes')) {
+    const store = cliSubscriptionStore()
+    const existing = readJsonl(store.subscriptionPath).find((subscription) => {
+      return (
+        subscription &&
+        subscription.agent === 'cli' &&
+        subscribeKey(subscription.agent, subscription.project, subscription.eventTypes || [], subscription.topic || '') ===
+          subscribeKey('cli', project, eventTypes, topic)
+      )
+    })
+    if (useJson) {
+      jsonOrText(
+        {
+          preview: true,
+          applied: false,
+          project,
+          eventTypes,
+          topic: topic || null,
+          ttlDays: ttlDays ? Number(ttlDays) : null,
+          willCreate: !existing,
+          hint: 'Re-run with --yes to apply.',
+        },
+        true,
+      )
+    } else {
+      console.log(`Subscribe preview: project=${project}`)
+      console.log(`  event types: ${eventTypes.length > 0 ? eventTypes.join(', ') : '(all)'}`)
+      if (topic) console.log(`  topic: ${topic}`)
+      console.log(`  ${existing ? 'will renew the existing subscription' : 'will create a new subscription'}`)
+      console.log('Re-run with --yes to apply.')
+    }
+    process.exitCode = 1
+    return
+  }
+
+  let result
+  try {
+    result = cliSubscriptionStore().subscribe({ project, eventTypes, topic, ttlDays })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+  if (useJson) return jsonOrText(result, true)
+  console.log(`Subscribed (project=${result.project})`)
+  console.log(`  id=${result.subscription.id} expires=${result.subscription.expiresAt}`)
+  console.log(`  event types: ${(result.subscription.eventTypes || []).join(', ') || '(all)'}`)
+}
+
+// The digest is cursor-based: it returns only events newer than the last one it
+// delivered, and ADVANCES that cursor. Running it twice therefore gives different
+// results -- so it cannot be previewed, and the output says so rather than
+// leaving that surprise for the user to discover.
+function observerDigestCommand(args, useJson) {
+  const flags = args.slice(2)
+  let result
+  try {
+    result = cliSubscriptionStore().digest({
+      project: optionValue(flags, '--project'),
+      limit: optionValue(flags, '--limit'),
+      eventTypes: splitTagsOption(flags, '--event-types'),
+    })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+  if (useJson) return jsonOrText(result, true)
+  console.log(`Observer digest: ${result.count} event(s) (project=${result.project}, agent=${result.agent})`)
+  console.log(`  subscriptions: ${result.subscriptionCount} active, ${result.matchedSubscriptions.length} matched`)
+  for (const event of result.events) {
+    console.log(`- ${event.event_type}${event.outcome ? ` (${event.outcome})` : ''} trace=${event.trace_id || '-'}`)
+  }
+  if (result.count === 0) {
+    console.log('Nothing new since the last digest.')
+  }
+  console.log('Note: this advances the cursor; the next digest returns only newer events.')
+}
+
 function observerCommand(args, useJson) {
   const sub = args[1]
   if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
@@ -1466,6 +1568,8 @@ function observerCommand(args, useJson) {
     return
   }
   if (sub === 'ingest') return observerIngestCommand(args, useJson)
+  if (sub === 'subscribe') return observerSubscribeCommand(args, useJson)
+  if (sub === 'digest') return observerDigestCommand(args, useJson)
 
   if (!['status', 'world-model', 'trends', 'research', 'insights', 'essays', 'dag'].includes(sub)) {
     console.error(`Unknown observer subcommand: ${sub}`)
@@ -2341,6 +2445,8 @@ Usage:
   mio observer <view>          Observer pipeline views (research pipeline, not the observe daemon):
                                status | world-model | trends | research | insights | essays | dag
   mio observer ingest --trace-id T --event-type E   Record a trace event (--payload/--outcome)
+  mio observer subscribe --event-types a,b          Subscribe to events (--yes to apply)
+  mio observer digest                               New events since the last digest (advances cursor)
   mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
   mio host capabilities        Show what each host supports and whether it is installed
   mio task route "<task>"      Which verified experiences apply to this task (--project/--scope/--limit)

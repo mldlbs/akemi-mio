@@ -15,6 +15,7 @@ const { createPolicyStore } = require('../policy-store.js')
 const { createAgentStore } = require('../agent-store.js')
 const { createTaskStore } = require('../task-store.js')
 const { createQueryLog } = require('../query-log.js')
+const { createSubscriptionStore } = require('../subscription-store.js')
 const { createDigest } = require('../digest.js')
 
 const { CreativityEngine } = require('../creativity-engine.js')
@@ -226,178 +227,12 @@ const taskStore = createTaskStore({
 })
 const { routeTask, autoClaimExperienceReuse, recordTaskOutcome, ingestObservation } = taskStore
 
-const SUBSCRIPTION_DEFAULT_TTL_DAYS = 30
-const MAX_SUBSCRIPTIONS_PER_AGENT = 20
-const MAX_DIGEST_EVENTS = 100
-
-function readDigestState() {
-  if (!fs.existsSync(digestStatePath)) return {}
-  try {
-    const parsed = JSON.parse(fs.readFileSync(digestStatePath, 'utf8'))
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
-  } catch (_) {
-    return {}
-  }
-}
-
-function writeDigestState(state) {
-  fs.mkdirSync(dataDir, { recursive: true })
-  fs.writeFileSync(digestStatePath, JSON.stringify(state), 'utf8')
-}
-
-function subscribeKey(agent, project, eventTypes, topic) {
-  return `${agent}|${project}|${eventTypes.join(',')}|${topic || ''}`
-}
-
-function loadActiveSubscriptions(agent) {
-  const now = Date.now()
-  return readJsonl(subscriptionPath)
-    .filter((subscription) => subscription && subscription.agent === agent)
-    .filter((subscription) => {
-      if (subscription.expiresAt) {
-        const expires = new Date(subscription.expiresAt).getTime()
-        if (Number.isFinite(expires) && expires <= now) return false
-      }
-      return true
-    })
-}
-
-function subscribeObserver(args = {}) {
-  const agent = runtimeAgentId() || 'mcp'
-  const project = args.project || projectName()
-  const eventTypes = Array.isArray(args.eventTypes)
-    ? args.eventTypes.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
-    : []
-  const topic = args.topic ? String(args.topic).trim().slice(0, 120) : ''
-  const ttlDays = Number(args.ttlDays) || SUBSCRIPTION_DEFAULT_TTL_DAYS
-  const ttlMs = Math.max(1, ttlDays) * 24 * 60 * 60 * 1000
-
-  const subscriptions = readJsonl(subscriptionPath)
-  const key = subscribeKey(agent, project, eventTypes, topic)
-  let existing = subscriptions.find((subscription) => {
-    return (
-      subscription &&
-      subscribeKey(
-        subscription.agent,
-        subscription.project,
-        subscription.eventTypes || [],
-        subscription.topic || '',
-      ) === key
-    )
-  })
-  const now = new Date()
-  const expiresAt = new Date(now.getTime() + ttlMs).toISOString()
-  if (existing) {
-    existing.updatedAt = now.toISOString()
-    existing.expiresAt = expiresAt
-  } else {
-    existing = {
-      id: createId('sub'),
-      agent,
-      project,
-      eventTypes,
-      topic: topic || null,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-      expiresAt,
-    }
-    subscriptions.push(existing)
-  }
-  const agentSubscriptions = subscriptions.filter((subscription) => subscription.agent === agent)
-  if (agentSubscriptions.length > MAX_SUBSCRIPTIONS_PER_AGENT) {
-    throw new Error(`Too many subscriptions for agent ${agent} (max ${MAX_SUBSCRIPTIONS_PER_AGENT})`)
-  }
-  writeJsonl(subscriptionPath, subscriptions)
-  return { subscribed: true, subscription: existing, project }
-}
-
-function observerDigest(args = {}) {
-  const agent = runtimeAgentId() || 'mcp'
-  const project = args.project || projectName()
-  const limit = Math.min(Math.max(Number(args.limit) || 20, 1), MAX_DIGEST_EVENTS)
-  const filterEventTypes = Array.isArray(args.eventTypes)
-    ? args.eventTypes.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
-    : null
-
-  let subscriptions = loadActiveSubscriptions(agent)
-  if (args.project) {
-    subscriptions = subscriptions.filter((subscription) => subscription.project === project)
-  }
-  if (filterEventTypes) {
-    subscriptions = subscriptions.filter((subscription) => {
-      if ((subscription.eventTypes || []).length === 0) return true
-      return filterEventTypes.some((eventType) =>
-        (subscription.eventTypes || []).includes(eventType),
-      )
-    })
-  }
-
-  const state = readDigestState()
-  const traces = readJsonl(tracePath)
-  const digestTime = new Date().toISOString()
-  const events = []
-  const seenIds = new Set()
-  const matchedSubscriptionIds = new Set()
-
-  for (const subscription of subscriptions) {
-    const cursor = state[subscription.id] || null
-    const cursorTime = cursor ? Date.parse(cursor) : null
-    const subscriptionEventTypes = subscription.eventTypes || []
-    let lastEventTime = null
-    for (const event of traces) {
-      if (subscription.project && event.project && event.project !== subscription.project) {
-        continue
-      }
-      if (
-        subscriptionEventTypes.length > 0 &&
-        !subscriptionEventTypes.includes(String(event.event_type || '').toLowerCase())
-      ) {
-        continue
-      }
-      if (subscription.topic) {
-        const haystack = `${event.event_type || ''} ${JSON.stringify(event.payload || {})}`
-          .toLowerCase()
-        if (!haystack.includes(subscription.topic.toLowerCase())) continue
-      }
-      const eventTime = event.timestamp ? Date.parse(event.timestamp) : null
-      if (cursorTime !== null && eventTime !== null && eventTime <= cursorTime) continue
-      if (eventTime !== null && (lastEventTime === null || eventTime > lastEventTime)) {
-        lastEventTime = eventTime
-      }
-      if (seenIds.has(event.id)) continue
-      seenIds.add(event.id)
-      events.push({
-        id: event.id,
-        trace_id: event.trace_id || null,
-        event_type: event.event_type,
-        outcome: event.outcome || null,
-        timestamp: event.timestamp,
-        agent: event.agent || null,
-        payload: event.payload || null,
-      })
-      matchedSubscriptionIds.add(subscription.id)
-      if (events.length >= limit) break
-    }
-    if (lastEventTime !== null) {
-      state[subscription.id] = new Date(lastEventTime).toISOString()
-    } else if (cursor === null) {
-      state[subscription.id] = digestTime
-    }
-    if (events.length >= limit) break
-  }
-
-  writeDigestState(state)
-  return {
-    project,
-    agent,
-    subscriptionCount: subscriptions.length,
-    matchedSubscriptions: Array.from(matchedSubscriptionIds),
-    count: events.length,
-    events,
-  }
-}
-
-
+const subscriptionStore = createSubscriptionStore({
+  dataDir,
+  projectName,
+  agentId: runtimeAgentId,
+})
+const { subscribe: subscribeObserver, digest: observerDigest } = subscriptionStore
 
 function phase0Report(args = {}) {
   const project = args.project || projectName()
