@@ -28,10 +28,15 @@ const README = path.join(REPO, 'packages', 'mio-cli', 'README.md')
 const NON_EXITING = new Set(['mcp', 'observe'])
 
 // Commands that exist but must not be *executed* by a doc linter: collect hits
-// external sources over the network and ferment calls an LLM. Probing them here
-// would turn `npm run check:cli-docs` into a network client. Their existence is
-// pinned by mio-cli's own tests instead (observer-command.test.js).
-const SIDE_EFFECTING = new Set(['observer:collect', 'observer:ferment'])
+// external sources over the network, ferment calls an LLM, and `config llm`
+// writes to config.json. Probing them here would turn `npm run check:cli-docs`
+// into a network client or a config mutator. Their existence is pinned by
+// mio-cli's own tests instead (observer-command.test.js, config-command.test.js).
+//
+// (In practice the linter only replays `mio <command> <sub>` and drops the
+// flags, so `config llm` would just print usage — but its whole purpose is
+// writing state, so it does not belong in a probe list at all.)
+const SIDE_EFFECTING = new Set(['observer:collect', 'observer:ferment', 'config:llm'])
 const TIMEOUT_MS = 20000
 
 function readmeCommandBlock() {

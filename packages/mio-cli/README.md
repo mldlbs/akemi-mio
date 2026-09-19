@@ -19,6 +19,10 @@ npm install -g mio-agent-runtime
 
 ```text
 mio init                    Initialize MIO_HOME
+mio config show             Show effective settings and where each value comes from
+mio config llm --url U --model M [--key K]   Store LLM endpoint/key/model in config.json
+mio config llm --clear      Remove the stored LLM config (env vars still apply)
+mio config path             Print the config.json path
 mio mcp                     Start Mio MCP server (stdio)
 mio install <host>          Install Mio into a host (codex|opencode|workbuddy|hermes|claude)
 mio status                  Show runtime and adapter status
@@ -217,7 +221,7 @@ packages/mio-cli
 └── package.json
 ```
 
-`server/memory-store.js` 是记忆查询/记录排序（Latin token + CJK bigram 打分、project/global 作用域分层、复用证据加权）的唯一实现。MCP 服务端（`mio.memory.query` / `mio.memory.record`）与 CLI（`mio recall` / `mio remember`）都经过它，因此各入口的排序结果完全一致。同一个模块还实现了卫生操作——`analyze` / `archive` / `merge` / `migrate`——所以 `mio.memory.analyze` 与 `mio memory analyze` 不可能各自漂移。`server/experience-store.js` 与 `server/policy-store.js` 对 `mio.experience.*` 与 `mio.policy.check` 遵循同样的模式；策略存储复用了记忆存储的分词器，因此策略风险证据与相关记忆排序在构造上就与 `mio.memory.query` 一致。`server/creativity-engine.js` 是 `mio.creativity.*` 背后的共享实现——CLI 的 `mio creativity status`/`list` 与 MCP 工具调用的是同一个 `CreativityEngine`，因此假设计数在入口间不会漂移。`server/agent-store.js` 是 `mio.agent.list` / `register` / `report` 背后的共享实现；CLI 的 `mio agents list`/`report` 与 MCP 工具读取的是同一个存储，因此被观察 agent 的遥测数据在任何地方都相同。`server/llm-client.js` 是 `chatJson` 的唯一实现，MCP 服务端（创意引擎 + insight）与 CLI（`mio creativity generate`/`ferment`）共用，因此两边调用的是同一个模型与同一份配置（`LLM_API_URL`/`LLM_KEY`/`LLM_CHAT_MODEL`）。`server/query-log.js` 是 `queries.jsonl` 的唯一读写实现——记忆存储在 `queryMemory` 时记录查询，任务存储在 auto-claim 时消费它把 `task_outcome` 归因到先前的查询；两者**不能互相引用**（会成环），所以日志自成一模块、由调用方把同一个实例交给两个 store。`server/digest.js` 把 traces/memory/reuse 聚合成可执行报告（同样以 `mio.digest.generate` 暴露），`server/retention.js` 驱动 `mio prune`（按年龄/过期裁剪并备份；没有显式的 `--memory --yes` 绝不触碰 `memory.jsonl`）。
+`server/memory-store.js` 是记忆查询/记录排序（Latin token + CJK bigram 打分、project/global 作用域分层、复用证据加权）的唯一实现。MCP 服务端（`mio.memory.query` / `mio.memory.record`）与 CLI（`mio recall` / `mio remember`）都经过它，因此各入口的排序结果完全一致。同一个模块还实现了卫生操作——`analyze` / `archive` / `merge` / `migrate`——所以 `mio.memory.analyze` 与 `mio memory analyze` 不可能各自漂移。`server/experience-store.js` 与 `server/policy-store.js` 对 `mio.experience.*` 与 `mio.policy.check` 遵循同样的模式；策略存储复用了记忆存储的分词器，因此策略风险证据与相关记忆排序在构造上就与 `mio.memory.query` 一致。`server/creativity-engine.js` 是 `mio.creativity.*` 背后的共享实现——CLI 的 `mio creativity status`/`list` 与 MCP 工具调用的是同一个 `CreativityEngine`，因此假设计数在入口间不会漂移。`server/agent-store.js` 是 `mio.agent.list` / `register` / `report` 背后的共享实现；CLI 的 `mio agents list`/`report` 与 MCP 工具读取的是同一个存储，因此被观察 agent 的遥测数据在任何地方都相同。`server/llm-client.js` 是 `chatJson` 的唯一实现，MCP 服务端（创意引擎 + insight）与 CLI（`mio creativity generate`/`ferment`）共用，因此两边调用的是同一个模型与同一份配置（环境变量 > `MIO_HOME/config.json` 的 `llm` 块 > 内置默认，见「LLM 配置」）。`server/query-log.js` 是 `queries.jsonl` 的唯一读写实现——记忆存储在 `queryMemory` 时记录查询，任务存储在 auto-claim 时消费它把 `task_outcome` 归因到先前的查询；两者**不能互相引用**（会成环），所以日志自成一模块、由调用方把同一个实例交给两个 store。`server/digest.js` 把 traces/memory/reuse 聚合成可执行报告（同样以 `mio.digest.generate` 暴露），`server/retention.js` 驱动 `mio prune`（按年龄/过期裁剪并备份；没有显式的 `--memory --yes` 绝不触碰 `memory.jsonl`）。
 
 ## 记忆卫生
 
@@ -388,7 +392,33 @@ mio creativity ferment --limit 3
 
 #### LLM 配置
 
-三个环境变量，与 MCP 服务端读取的完全相同：
+只有 4 条命令会调用大模型：`mio creativity generate` / `ferment`、
+`mio insight generate`、`mio observer ferment`。它们共用
+`server/llm-client.js` 这一份实现，配置也共用同一套解析顺序：
+
+```
+环境变量  >  MIO_HOME/config.json 的 llm 块  >  内置默认值
+```
+
+**写入配置文件**（换机器/换终端不必重设）：
+
+```bash
+mio config llm --url http://localhost:11434/v1/chat/completions \
+               --model qwen2.5:14b
+# 需要鉴权时再加 --key <token>；清空用 --clear
+```
+
+**查看当前生效值及其来源**：
+
+```bash
+mio config show
+```
+
+`show` 会逐字段标注该值来自环境变量、`config.json` 还是内置默认，
+并在环境变量遮挡了文件配置时明确警告——只报值不报来源，正是
+「改了 `config.json` 却毫无变化」的常见成因。
+
+**也可以用环境变量**（优先级更高，便于单次覆盖）：
 
 | 变量 | 说明 |
 |---|---|
@@ -396,14 +426,12 @@ mio creativity ferment --limit 3
 | `LLM_KEY` | Bearer token；留空表示无需鉴权（本地 Ollama 常见） |
 | `LLM_CHAT_MODEL` | 模型 id，回退到 `LLM_MODEL` |
 
-本机跑 Ollama 时可以这样指过去：
-
 ```bash
 LLM_API_URL=http://localhost:11434/v1/chat/completions mio creativity ferment
 ```
 
-未设置 `LLM_API_URL` / `LLM_KEY` 时，命令会**先提示**它将要调用默认端点，
-再继续——不会静默地把请求发到你没配的地方。
+未配置任何 LLM 时，命令会**先提示**它将要调用默认端点，再继续——
+不会静默地把请求发到你没配的地方。
 
 ## 洞察自省与观察管线
 
