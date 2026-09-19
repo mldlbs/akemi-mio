@@ -126,7 +126,9 @@ C\357\200\272*
 # Transient migration / scratch artifacts (not project source)
 .migration-state/
 .tmp/
-.git-broken-20260912/
-.git-broken-20260919/
+# 损坏现场快照：诊断完就移到 D:\work\data\git-forensics\，别留在仓库里
+.git-broken-*/
 
 .workbuddy/
+.workbuddy-ai/
+site/
