@@ -180,7 +180,11 @@ function createObserverStore(options = {}) {
   // `collected: 0` no matter how much the collectors actually returned.
   async function collect(args = {}) {
     if (!ObserverService) throw new Error('@akemi-mio/observer not installed')
-    const service = new ObserverService({ baseDir: baseDirOf(args), collectorConfig: {} })
+    // ObserverService takes the base dir as a bare string -- passing an options
+    // object made path.resolve() throw before any collector ran, so collect()
+    // was dead on arrival for every caller. (collectorConfig was never read by
+    // the package; it was invented here.)
+    const service = new ObserverService(baseDirOf(args))
     const sources = args.sources || ['bilibili', 'hackernews', 'github', 'douyin', 'rss']
     const allObs = []
     for (const src of sources) {
@@ -206,7 +210,7 @@ function createObserverStore(options = {}) {
 
   async function ferment(args = {}) {
     if (!ObserverService) throw new Error('@akemi-mio/observer not installed')
-    const service = new ObserverService({ baseDir: baseDirOf(args), collectorConfig: {} })
+    const service = new ObserverService(baseDirOf(args))
     const session = args.session || 'afternoon'
     try {
       const fermentation = service.getFermentation()

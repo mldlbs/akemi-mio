@@ -190,6 +190,11 @@ class CreativityEngine {
   }
 
   async generate(sourceLabels, strategy) {
+    // A missing sources array used to reach .map() and surface as
+    // "Cannot read properties of undefined", which tells the caller nothing.
+    if (!Array.isArray(sourceLabels)) {
+      throw new Error('creativity.generate requires sources: an array of { name, content } entries')
+    }
     const sources = sourceLabels.map(s => ({
       name: s.name || 'unnamed',
       content: s.content || '',

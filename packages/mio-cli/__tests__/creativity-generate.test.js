@@ -97,6 +97,23 @@ test('generate needs at least two sources and never calls the LLM otherwise', as
   assert.equal(fs.existsSync(hypothesesFile(ws)), false)
 })
 
+test('generate rejects a missing sources array with a usable message', async () => {
+  // The MCP entry calls generate(args.sources, args.strategy), so an omitted
+  // argument used to reach .map() and surface as "Cannot read properties of
+  // undefined", which names neither the tool nor the missing field.
+  const ws = workspace('gen-noarray')
+  const engine = engineWith(ws, async () => ({ data: { title: 'x' } }))
+
+  await assert.rejects(
+    () => engine.generate(undefined),
+    /requires sources/,
+  )
+  await assert.rejects(
+    () => engine.generate('not-an-array'),
+    /requires sources/,
+  )
+})
+
 test('generate skips a pair when the LLM call fails', async () => {
   const ws = workspace('gen-fail')
   const engine = engineWith(ws, async () => ({ error: 'HTTP 500' }))

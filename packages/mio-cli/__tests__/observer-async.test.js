@@ -74,6 +74,51 @@ function fakeObserver(overrides = {}) {
   }
 }
 
+// Records what the store actually hands to the ObserverService constructor.
+// The service is `constructor(baseDir)` -- a bare string. The store used to pass
+// an options object, so path.resolve() threw inside the service before any
+// collector ran, and collect()/ferment() were dead on arrival for every caller
+// (CLI and MCP alike) even though the rest of the store was correct.
+function loadStoreRecordingCtorArg() {
+  const seen = []
+  const { createObserverStore } = loadStoreWith(() => {
+    const fake = fakeObserver()
+    fake.ObserverService = class {
+      constructor(arg) {
+        seen.push(arg)
+      }
+      async collectBySource() {
+        return {}
+      }
+      getFermentation() {
+        return { async ferment() { return {} } }
+      }
+    }
+    return fake
+  })
+  return { seen, createObserverStore }
+}
+
+test('collect passes the base dir as a bare string, not an options object', async () => {
+  const { seen, createObserverStore } = loadStoreRecordingCtorArg()
+  const store = createObserverStore({ baseDir: path.join(os.tmpdir(), 'mio-ctor-arg') })
+
+  await store.collect({ sources: ['rss'] })
+
+  assert.equal(seen.length, 1)
+  assert.equal(typeof seen[0], 'string', 'ObserverService takes a bare base dir string')
+})
+
+test('ferment passes the base dir as a bare string too', async () => {
+  const { seen, createObserverStore } = loadStoreRecordingCtorArg()
+  const store = createObserverStore({ baseDir: path.join(os.tmpdir(), 'mio-ctor-arg-2') })
+
+  await store.ferment({ session: 'morning' })
+
+  assert.equal(seen.length, 1)
+  assert.equal(typeof seen[0], 'string')
+})
+
 test('collect awaits the async collector instead of dropping its result', async () => {
   const { createObserverStore } = loadStoreWith(() => fakeObserver())
   const store = createObserverStore({ baseDir: path.join(os.tmpdir(), 'mio-collect-1') })
