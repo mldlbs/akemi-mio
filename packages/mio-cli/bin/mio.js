@@ -30,7 +30,15 @@ const { createObserverStore } = require('../server/observer-store.js')
 const { loadPhase0, renderPhase0Markdown } = require('../server/mio-intelligence-mcp/phase0.js')
 const { listHostCapabilities } = require('../server/host-capabilities.js')
 const { createTaskStore } = require('../server/task-store.js')
-const { chatJson, llmConfig, isLlmConfigured } = require('../server/llm-client.js')
+const {
+  chatJson,
+  llmConfig,
+  isLlmConfigured,
+  llmConfigSources,
+  resetLlmConfigCache,
+  DEFAULT_API_URL,
+  DEFAULT_MODEL,
+} = require('../server/llm-client.js')
 const { createQueryLog } = require('../server/query-log.js')
 const { createSubscriptionStore, subscribeKey } = require('../server/subscription-store.js')
 const { createRetention } = require('../server/retention.js')
@@ -1835,8 +1843,9 @@ function parseSources(flags) {
 function warnIfLlmUnconfigured() {
   if (isLlmConfigured()) return
   const { apiUrl, model } = llmConfig()
-  console.log(`Note: no LLM_API_URL / LLM_KEY set, so this will call the default endpoint (${model} @ ${apiUrl}).`)
-  console.log('Set LLM_API_URL (e.g. http://localhost:11434/v1/chat/completions for a local Ollama) to point elsewhere.')
+  console.log(`Note: no LLM configured, so this will call the default endpoint (${model} @ ${apiUrl}).`)
+  console.log('Configure one with:  mio config llm --url http://localhost:11434/v1/chat/completions --model qwen2.5:14b')
+  console.log('(or set LLM_API_URL / LLM_KEY / LLM_CHAT_MODEL in the environment)')
 }
 
 function creativityGenerateCommand(args, useJson) {
@@ -1958,6 +1967,191 @@ function readConfig() {
 function writeConfig(config) {
   ensureHome()
   fs.writeFileSync(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
+}
+
+// Mask a secret for display: keep a short prefix/suffix so users can tell which
+// key is stored without leaking it. Anything short enough that masking would
+// still reveal most of it is hidden entirely.
+function maskSecret(value) {
+  if (!value) return ''
+  if (value.length <= 8) return '*'.repeat(value.length)
+  return `${value.slice(0, 4)}${'*'.repeat(Math.min(value.length - 8, 20))}${value.slice(-4)}`
+}
+
+// Where a key lives, so an edit to config.json is not silently shadowed by an
+// environment variable. Reporting a value without its origin is the whole
+// reason users conclude "config didn't work".
+const LLM_SOURCE_LABELS = {
+  env: 'environment variable',
+  config: CONFIG_FILE,
+  default: 'built-in default',
+  unset: 'not set',
+}
+
+function configShowCommand(useJson) {
+  const config = readConfig()
+  const stored = config.llm && typeof config.llm === 'object' ? config.llm : {}
+  const effective = llmConfig()
+  const sources = llmConfigSources()
+
+  if (useJson) {
+    return jsonOrText(
+      {
+        home: MIO_HOME,
+        configFile: CONFIG_FILE,
+        exists: fs.existsSync(CONFIG_FILE),
+        llm: {
+          // The effective values (what a call would actually use) ...
+          effective: {
+            apiUrl: effective.apiUrl,
+            apiKey: maskSecret(effective.apiKey),
+            hasApiKey: Boolean(effective.apiKey),
+            model: effective.model,
+          },
+          // ... and where each one came from.
+          sources,
+          // What is stored on disk, independent of any env override.
+          stored: {
+            apiUrl: stored.apiUrl || '',
+            apiKey: maskSecret(stored.apiKey),
+            hasApiKey: Boolean(stored.apiKey),
+            model: stored.model || '',
+          },
+          configured: isLlmConfigured(),
+        },
+      },
+      true
+    )
+  }
+
+  console.log(`MIO_HOME:    ${MIO_HOME}`)
+  console.log(`config file: ${CONFIG_FILE}${fs.existsSync(CONFIG_FILE) ? '' : '  (not created yet)'}`)
+  console.log('')
+  console.log('LLM (effective):')
+  console.log(`  apiUrl: ${effective.apiUrl}   [${LLM_SOURCE_LABELS[sources.apiUrl]}]`)
+  console.log(
+    `  apiKey: ${effective.apiKey ? `${maskSecret(effective.apiKey)}   [${LLM_SOURCE_LABELS[sources.apiKey]}]` : '(none / unauthenticated)'}`
+  )
+  console.log(`  model:  ${effective.model}   [${LLM_SOURCE_LABELS[sources.model]}]`)
+  console.log('')
+
+  const storedKeys = ['apiUrl', 'apiKey', 'model'].filter((k) => stored[k])
+  if (storedKeys.length > 0) {
+    console.log(`Stored in config.json: ${storedKeys.join(', ')}`)
+    if (sources.apiUrl === 'env' || sources.apiKey === 'env' || sources.model === 'env') {
+      console.log('⚠️  An environment variable currently overrides part of this — the shell wins over the file.')
+    }
+  } else {
+    console.log('Nothing stored in config.json yet. Set it with:')
+    console.log('  mio config llm --url <endpoint> --model <id> [--key <token>]')
+  }
+
+  if (!isLlmConfigured()) {
+    console.log('')
+    console.log('No LLM configured — `mio creativity generate` / `ferment` and `mio insight generate`')
+    console.log('would call the shared default endpoint instead of yours.')
+  }
+}
+
+function configLlmCommand(flags, useJson) {
+  const url = optionValue(flags, '--url')
+  const key = optionValue(flags, '--key')
+  const model = optionValue(flags, '--model')
+  const clearAll = flagPresent(flags, '--clear')
+
+  // Validate before writing: a typo here would otherwise fail much later, at the
+  // first real call, with a far less useful error.
+  if (url !== undefined) {
+    let parsed
+    try {
+      parsed = new URL(url)
+    } catch (_) {
+      throw new Error(`--url must be a valid URL (got: ${url})`)
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`--url must be http(s) (got: ${parsed.protocol})`)
+    }
+  }
+
+  const config = readConfig()
+  const before = config.llm && typeof config.llm === 'object' ? { ...config.llm } : {}
+
+  if (clearAll) {
+    delete config.llm
+    writeConfig(config)
+    resetLlmConfigCache()
+    if (useJson) return jsonOrText({ cleared: true, llm: null }, true)
+    console.log('Cleared the stored LLM config. Environment variables (if any) still apply.')
+    return
+  }
+
+  if (url === undefined && key === undefined && model === undefined) {
+    console.error('Nothing to set. Pass at least one of --url / --key / --model, or --clear.')
+    console.error('Example: mio config llm --url http://localhost:11434/v1/chat/completions --model qwen2.5:14b')
+    process.exitCode = 1
+    return
+  }
+
+  const llm = { ...before }
+  if (url !== undefined) llm.apiUrl = url
+  if (key !== undefined) llm.apiKey = key
+  if (model !== undefined) llm.model = model
+  config.llm = llm
+  writeConfig(config)
+  resetLlmConfigCache()
+
+  const changed = ['apiUrl', 'apiKey', 'model'].filter((k) => llm[k] !== before[k])
+
+  if (useJson) {
+    return jsonOrText(
+      {
+        updated: changed,
+        llm: {
+          apiUrl: llm.apiUrl || '',
+          apiKey: maskSecret(llm.apiKey),
+          hasApiKey: Boolean(llm.apiKey),
+          model: llm.model || '',
+        },
+        configFile: CONFIG_FILE,
+      },
+      true
+    )
+  }
+
+  console.log(`Updated ${CONFIG_FILE}: ${changed.join(', ')}`)
+  if (llm.apiKey) console.log(`  apiKey: ${maskSecret(llm.apiKey)}`)
+  if (llm.apiUrl) console.log(`  apiUrl: ${llm.apiUrl}`)
+  if (llm.model) console.log(`  model:  ${llm.model}`)
+
+  // Warn when the value just written will NOT be the one used at call time.
+  const sources = llmConfigSources()
+  const shadowed = changed.filter((k) => sources[k] === 'env')
+  if (shadowed.length > 0) {
+    console.log('')
+    console.log(`⚠️  ${shadowed.join(', ')} is currently overridden by an environment variable —`)
+    console.log('   the shell value wins at call time. Unset it to use what you just stored.')
+  } else {
+    console.log('')
+    console.log('Environment variables (if set) still take precedence at call time.')
+  }
+}
+
+function configCommand(args, useJson) {
+  const sub = args[1] || 'show'
+  const flags = args.slice(2)
+
+  if (sub === 'show' || sub === 'list') return configShowCommand(useJson)
+  if (sub === 'llm') return configLlmCommand(flags, useJson)
+
+  if (sub === 'path') {
+    if (useJson) return jsonOrText({ home: MIO_HOME, configFile: CONFIG_FILE }, true)
+    console.log(CONFIG_FILE)
+    return
+  }
+
+  console.error(`Unknown config subcommand: ${sub}`)
+  console.error('Usage: mio config show | mio config llm [--url U] [--key K] [--model M] | mio config llm --clear | mio config path')
+  process.exitCode = 1
 }
 
 function jsonOrText(payload, useJson) {
@@ -2539,6 +2733,10 @@ function help() {
 
 Usage:
   mio init                    Initialize MIO_HOME
+  mio config show             Show effective settings and where each value comes from
+  mio config llm --url U --model M [--key K]   Store LLM endpoint/key/model in config.json
+  mio config llm --clear      Remove the stored LLM config (env vars still apply)
+  mio config path             Print the config.json path
   mio mcp                     Start Mio MCP server (stdio)
   mio install <host>          Install Mio into a host (codex|opencode|workbuddy|hermes|claude)
   mio status                  Show runtime and adapter status
@@ -2605,6 +2803,8 @@ async function main() {
   switch (command) {
     case 'init':
       return initCommand()
+    case 'config':
+      return configCommand(args, useJson)
     case 'mcp':
       return mcpCommand()
     case 'install':
