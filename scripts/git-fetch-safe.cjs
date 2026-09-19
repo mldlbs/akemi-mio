@@ -169,6 +169,39 @@ function main() {
   }
 
   const expected = Object.keys(refs)
+
+  // FETCH_HEAD is not always the freshest source: it records what the last
+  // *fetch* saw. After a successful `git push`, the remote has moved on but
+  // FETCH_HEAD still describes the pre-push state, so reconciling from it alone
+  // would write a stale SHA over a fresh ref. Query the remote directly and let
+  // it win — it is the ground truth for a remote-tracking ref.
+  const lsRemote = runGit(['ls-remote', '--heads', opts.remote], { stdio: 'pipe' })
+  if (lsRemote.status === 0 && lsRemote.stdout) {
+    const remoteShas = {}
+    for (const line of lsRemote.stdout.split('\n')) {
+      const m = /^([0-9a-f]{40})\s+refs\/heads\/(.+?)\s*$/.exec(line)
+      if (m) remoteShas[m[2]] = m[1]
+    }
+    let adopted = 0
+    for (const name of expected) {
+      if (remoteShas[name] && remoteShas[name] !== refs[name]) {
+        log(`  ${opts.remote}/${name}: FETCH_HEAD had ${refs[name].slice(0, 10)}, remote has ${remoteShas[name].slice(0, 10)} — using remote`)
+        refs[name] = remoteShas[name]
+        adopted += 1
+      }
+    }
+    if (adopted > 0) log(`ls-remote corrected ${adopted} stale SHA(s) from FETCH_HEAD.`)
+    // Also cover branches the fetch did not map but the remote does have.
+    for (const name of Object.keys(remoteShas)) {
+      if (!(name in refs) && opts.all) {
+        refs[name] = remoteShas[name]
+        expected.push(name)
+      }
+    }
+  } else {
+    log('warning: could not query the remote (ls-remote failed); relying on FETCH_HEAD alone.')
+  }
+
   const missing = expected.filter((name) => {
     const p = path.join(refDir, ...name.split('/'))
     if (!fs.existsSync(p)) return true
@@ -178,6 +211,23 @@ function main() {
       return true
     }
   })
+
+  // A ref may exist only in packed-refs (that is the whole point of this script),
+  // where no loose file is present. Compare against what git actually resolves,
+  // otherwise a correctly packed ref looks "missing" forever.
+  const packedStale = []
+  for (const name of expected) {
+    const resolved = runGit(['rev-parse', '--verify', `refs/remotes/${opts.remote}/${name}`], { stdio: 'pipe' })
+    if (resolved.status !== 0) continue
+    const current = (resolved.stdout || '').trim()
+    if (current && current !== refs[name]) {
+      packedStale.push(name)
+      if (!missing.includes(name)) missing.push(name)
+    }
+  }
+  if (packedStale.length > 0) {
+    log(`\n${packedStale.length} ref(s) are packed with out-of-date SHAs: ${packedStale.join(', ')}`)
+  }
 
   if (missing.length > 0) {
     log(`\n${missing.length} of ${expected.length} ref(s) missing or stale — rebuilding from FETCH_HEAD.`)
@@ -203,15 +253,28 @@ function main() {
   }
 
   // Verify by reading back through git itself, not just the filesystem: a file
-  // existing is not proof that git accepts it as a ref.
+  // existing is not proof that git accepts it as a ref, and a packed ref can carry
+  // a stale SHA while still resolving fine. Check both existence and value.
   const broken = []
+  const wrong = []
   for (const name of expected) {
     const res = runGit(['rev-parse', '--verify', `refs/remotes/${opts.remote}/${name}`], { stdio: 'pipe' })
-    if (res.status !== 0) broken.push(name)
+    if (res.status !== 0) {
+      broken.push(name)
+      continue
+    }
+    const actual = (res.stdout || '').trim()
+    if (actual && actual !== refs[name]) wrong.push(`${name} (have ${actual.slice(0, 10)}, want ${refs[name].slice(0, 10)})`)
   }
 
   if (broken.length > 0) {
     console.error(`\nRepair incomplete — git still cannot resolve: ${broken.join(', ')}`)
+    process.exit(1)
+  }
+
+  if (wrong.length > 0) {
+    console.error(`\nRepair incomplete — refs resolve but hold the wrong SHA:`)
+    for (const w of wrong) console.error(`  ${w}`)
     process.exit(1)
   }
 
