@@ -182,11 +182,11 @@ test('the CLI validates insight subcommands before touching the store', () => {
   assert.equal(unknown.status, 1)
   assert.match(unknown.stderr, /Unknown insight subcommand: bogus/)
 
-  // generate needs an LLM, so it is deliberately not exposed -- same call as
-  // creativity generate/ferment.
+  // generate is exposed now (it was the only mio.insight.* tool without a
+  // terminal entry point), but it must refuse to touch the LLM without context.
   const generate = run(ws, ['insight', 'generate'])
   assert.equal(generate.status, 1)
-  assert.match(generate.stderr, /Unknown insight subcommand: generate/)
+  assert.match(generate.stderr, /needs context/)
 
   const noIds = run(ws, ['insight', 'mark-reported'])
   assert.equal(noIds.status, 1)
@@ -196,6 +196,188 @@ test('the CLI validates insight subcommands before touching the store', () => {
   assert.equal(help.status, 0)
   assert.match(help.stdout, /mio insight status/)
 })
+
+// ── mio insight generate ────────────────────────────────────────────────
+// generate calls an LLM, so the engine is stubbed the same way
+// creativity-generate.test.js does it: a fake @akemi-mio/insight injected
+// through a Module._load hook. The CLI-level cases run with a `-r` preload, so
+// the whole path (argv -> store -> generator -> stdout) is exercised for real
+// without a network call.
+
+function makeFakeWithGenerator(seed, generateImpl) {
+  const fake = makeFake(seed)
+  fake.module = {
+    ...fake.module,
+    InsightGenerator: class {
+      async generate(ctx) {
+        return generateImpl(ctx)
+      }
+    },
+  }
+  return fake
+}
+
+function generatedTwo() {
+  return [insight('g1', 0.8, { content: 'generated one' }), insight('g2', 0.5, { content: 'generated two' })]
+}
+
+// The preload resolves @akemi-mio/insight to a fake whose generator records the
+// context it was handed in $FAKE_CTX -- that file is the proof the LLM was (or
+// was not) called.
+function runWithFake(ws, args) {
+  const preload = path.join(ws.cwd, 'fake-insight-preload.js')
+  const ctxFile = path.join(ws.cwd, 'ctx.json')
+  fs.writeFileSync(
+    preload,
+    `'use strict'
+const Module = require('node:module')
+const fs = require('node:fs')
+const original = Module._load
+class FakeInsightStore {
+  constructor(file) { this.items = [] }
+  getAll() { return this.items }
+  getUnreported() { return this.items }
+  getHighValueUnreported() { return [] }
+  markReported() {}
+  addMany(list) { this.items.push(...list) }
+}
+class FakeInsightGenerator {
+  async generate(ctx) {
+    fs.writeFileSync(process.env.FAKE_CTX, JSON.stringify(ctx))
+    return [
+      { id: 'g1', score: 0.8, content: 'generated one', detector: 'drift' },
+      { id: 'g2', score: 0.5, content: 'generated two', detector: 'drift' },
+    ]
+  }
+}
+Module._load = function (request, ...rest) {
+  if (request === '@akemi-mio/insight') {
+    return { InsightStore: FakeInsightStore, InsightGenerator: FakeInsightGenerator }
+  }
+  return original.call(this, request, ...rest)
+}
+`
+  )
+  const result = spawnSync(process.execPath, ['-r', preload, CLI, ...args], {
+    cwd: ws.cwd,
+    encoding: 'utf8',
+    env: { ...ws.env, FAKE_CTX: ctxFile },
+  })
+  return { ctxFile, result }
+}
+
+test('insight generate maps --memory "kind|content" onto generator context entries', async () => {
+  let seen = null
+  const fake = makeFakeWithGenerator([], (ctx) => {
+    seen = ctx
+    return []
+  })
+  const { createInsightStore } = loadStoreWithFake(fake.module)
+  const store = createInsightStore({ dataDir: '/tmp/whatever' })
+
+  const result = await store.generate({
+    memories: [{ kind: 'decision', content: 'moved parsing into a shared store' }],
+    summaries: ['shipped 0.7.0'],
+  })
+
+  assert.equal(result.generated, 0)
+  assert.equal(seen.memoryEntries.length, 1)
+  assert.equal(seen.memoryEntries[0].type, 'decision')
+  assert.equal(seen.memoryEntries[0].content, 'moved parsing into a shared store')
+  assert.deepEqual(seen.summaries, ['shipped 0.7.0'])
+})
+
+test('insight generate falls back to the default kind when --memory has none', async () => {
+  let seen = null
+  const fake = makeFakeWithGenerator([], (ctx) => {
+    seen = ctx
+    return []
+  })
+  const { createInsightStore } = loadStoreWithFake(fake.module)
+  const store = createInsightStore({ dataDir: '/tmp/whatever' })
+
+  await store.generate({ memories: [{ content: 'bare content' }] })
+  assert.equal(seen.memoryEntries[0].type, 'note')
+  assert.equal(seen.memoryEntries[0].content, 'bare content')
+})
+
+test('insight generate persists what the generator returns', async () => {
+  const fake = makeFakeWithGenerator([insight('existing', 0.9)], () => generatedTwo())
+  const { createInsightStore } = loadStoreWithFake(fake.module)
+  const store = createInsightStore({ dataDir: '/tmp/whatever' })
+
+  const result = await store.generate({ memories: [{ content: 'x' }] })
+  assert.equal(result.generated, 2)
+  // Persisted, or `mio insight list` would never show what was just generated.
+  assert.equal(fake.instances[0].items.length, 3)
+})
+
+test('insight generate --json emits the same shape as the MCP tool', () => {
+  const ws = workspace()
+  const { result } = runWithFake(ws, ['insight', 'generate', '--memory', 'decision|moved parsing', '--json'])
+
+  assert.equal(result.status, 0, result.stderr)
+  const payload = JSON.parse(result.stdout)
+  assert.equal(payload.generated, 2)
+  assert.equal(payload.insights.length, 2)
+})
+
+test('insight generate splits kind from content before the store sees it', () => {
+  const ws = workspace()
+  const { ctxFile, result } = runWithFake(ws, ['insight', 'generate', '--memory', 'decision|moved parsing'])
+
+  assert.equal(result.status, 0, result.stderr)
+  const ctx = JSON.parse(fs.readFileSync(ctxFile, 'utf8'))
+  assert.equal(ctx.memoryEntries.length, 1)
+  assert.equal(ctx.memoryEntries[0].type, 'decision')
+  assert.equal(ctx.memoryEntries[0].content, 'moved parsing')
+})
+
+test('insight generate refuses to call the LLM without context', () => {
+  const ws = workspace()
+  const { ctxFile, result } = runWithFake(ws, ['insight', 'generate'])
+
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /needs context/)
+  assert.equal(fs.existsSync(ctxFile), false, 'the generator must not run when context is missing')
+})
+
+test('a trailing --json is a flag, not the value of --memory', () => {
+  const ws = workspace()
+  const { result } = runWithFake(ws, ['insight', 'generate', '--memory', 'decision|x', '--json'])
+
+  assert.equal(result.status, 0, result.stderr)
+  // If --json were eaten as a second --memory value the output would be the
+  // human-readable form instead, and this parse would throw.
+  const payload = JSON.parse(result.stdout)
+  assert.equal(payload.generated, 2)
+})
+
+test('an empty --memory does not swallow the flag that follows it', () => {
+  const ws = workspace()
+  // Note: --json cannot be used to probe this -- main() strips it from argv
+  // before the command ever sees it. --summary does reach the command.
+  const { ctxFile, result } = runWithFake(ws, ['insight', 'generate', '--memory', '--summary', 'context text'])
+
+  assert.equal(result.status, 0, result.stderr)
+  const ctx = JSON.parse(fs.readFileSync(ctxFile, 'utf8'))
+  // If "--summary" were taken as the value of --memory, it would arrive as a
+  // memory entry and the summary list would be emptied instead.
+  assert.deepEqual(ctx.memoryEntries, [])
+  assert.deepEqual(ctx.summaries, ['context text'])
+})
+
+test(
+  'insight generate reports a missing engine instead of a misleading zero',
+  { skip: realInsightAvailable ? 'the real package is installed; running it would call an LLM' : false },
+  () => {
+    const ws = workspace()
+    const result = run(ws, ['insight', 'generate', '--summary', 'x'])
+
+    assert.equal(result.status, 1, 'an unavailable engine must fail, not report generated: 0')
+    assert.match(result.stderr, /@akemi-mio\/insight not installed/)
+  }
+)
 
 test('insight status reports counts when installed, or says it is not', () => {
   const ws = workspace()

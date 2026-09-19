@@ -58,6 +58,7 @@ mio creativity generate      Generate hypotheses from 2+ --source "name|content"
 mio creativity ferment       Review and refine active hypotheses (calls an LLM)
 mio insight status           Insight counts: total, reported, unreported, high-value (needs @akemi-mio/insight)
 mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)
+mio insight generate         Generate insights from context (--memory "kind|content"/--summary "text"; calls an LLM)
 mio insight mark-reported    Mark insights as reported (--ids a,b)
 mio observer <view>          Observer research pipeline views (research pipeline, not the observe daemon):
                              status|world-model|trends|research|insights|essays|dag (--base-dir DIR)
@@ -442,6 +443,7 @@ LLM_API_URL=http://localhost:11434/v1/chat/completions mio creativity ferment
 mio insight status
 mio insight list --unreported --min-score 0.7
 mio insight mark-reported --ids ins_1,ins_2
+mio insight generate --memory "decision|把记忆解析抽到共享 store" --summary "刚发了 0.7.0"
 
 # 观察研究管线（纯文件读取，不依赖可选包）
 mio observer status

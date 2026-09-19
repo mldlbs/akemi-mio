@@ -99,6 +99,19 @@ function flagPresent(args, name) {
   return args.includes(name)
 }
 
+// Same option repeated: `mio insight generate --memory a --memory b`. A value
+// that is itself another flag is skipped, so a trailing `--json` is not eaten
+// as the value of an option that was left empty.
+function optionValues(args, name) {
+  const values = []
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] !== name) continue
+    const raw = args[i + 1]
+    if (raw && !raw.startsWith('--')) values.push(raw)
+  }
+  return values
+}
+
 function parseJsonOption(args, name) {
   const raw = optionValue(args, name)
   if (raw === undefined) throw new Error(`${name} is required`)
@@ -1235,8 +1248,12 @@ function policyCommand(args, useJson) {
 // commands delegate to the same shared store as the MCP tools, so the two
 // cannot disagree.
 //
-// `generate` is deliberately not exposed. It needs an LLM and the CLI has no
-// LLM wiring; the same call was made for creativity generate/ferment.
+// `generate` was deliberately not exposed when this command shipped: it needs
+// an LLM and the CLI had no LLM wiring. `mio config llm` (and creativity
+// generate before it) changed that, so it is exposed now — otherwise
+// mio.insight.generate was the only tool of the 48 with no terminal entry
+// point. Like creativity generate it calls an LLM and appends records, so it
+// warns when no LLM is configured and accepts --json like every other command.
 // ═════════════════════════════════════════════════════════════
 function cliInsightStore() {
   return createInsightStore({ dataDir: MIO_HOME })
@@ -1246,6 +1263,7 @@ function insightUsage() {
   console.log(`Usage:
   mio insight status                    Insight counts: total, reported, unreported, high-value
   mio insight list                      List insights
+  mio insight generate                  Generate insights from context (calls an LLM)
   mio insight mark-reported --ids a,b   Mark insights as reported (acknowledged)
 
 Options:
@@ -1253,6 +1271,8 @@ Options:
   --min-score N      Minimum score (list)
   --detector name    Filter by detector (list)
   --limit N          Max insights (list)
+  --memory "kind|content"   Context entry for generate (repeatable)
+  --summary "text"          Pre-summarised context for generate (repeatable)
   --ids a,b          Comma-separated insight ids (mark-reported)
   --json             Machine-readable output (same shape as mio.insight.*)
 
@@ -1294,12 +1314,16 @@ function insightCommand(args, useJson) {
     if (!sub) process.exitCode = 1
     return
   }
-  if (!['status', 'list', 'mark-reported'].includes(sub)) {
+  const known = ['status', 'list', 'generate', 'mark-reported']
+  if (!known.includes(sub)) {
     console.error(`Unknown insight subcommand: ${sub}`)
     insightUsage()
     process.exitCode = 1
     return
   }
+  // Handled before the store is touched: generate needs no readable store when
+  // it fails on missing context, and it is async while the rest are not.
+  if (sub === 'generate') return insightGenerateCommand(args, useJson)
 
   const flags = args.slice(2)
   const store = cliInsightStore()
@@ -1332,6 +1356,51 @@ function insightCommand(args, useJson) {
     console.error(error.message || error)
     process.exitCode = 1
   }
+}
+
+// --memory "kind|content": the "|" is optional — without it the whole string is
+// the content and insight-store falls back to its default kind.
+function parseInsightMemory(raw) {
+  const sep = raw.indexOf('|')
+  if (sep === -1) return { content: raw }
+  const kind = raw.slice(0, sep).trim()
+  return kind ? { kind, content: raw.slice(sep + 1).trim() } : { content: raw.slice(sep + 1).trim() }
+}
+
+function insightGenerateCommand(args, useJson) {
+  const flags = args.slice(2)
+  const memories = optionValues(flags, '--memory').map(parseInsightMemory)
+  const summaries = optionValues(flags, '--summary')
+
+  if (memories.length === 0 && summaries.length === 0) {
+    console.error('mio insight generate needs context: --memory "kind|content" and/or --summary "text"')
+    console.error('Example: mio insight generate --memory "decision|memory parsing moved into a shared store"')
+    process.exitCode = 1
+    return
+  }
+
+  if (!useJson) warnIfLlmUnconfigured()
+
+  let result
+  try {
+    result = cliInsightStore().generate({ memories, summaries })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+  // generate is async in the store.
+  return Promise.resolve(result).then((resolved) => {
+    if (useJson) return jsonOrText(resolved, true)
+    if (!resolved || resolved.generated === 0) {
+      console.log(
+        `No insights generated: ${(resolved && resolved.reason) || 'nothing notable in the given context'}`
+      )
+      return
+    }
+    console.log(`Generated ${resolved.generated} insight(s)`)
+    printInsightList(resolved.insights || [])
+  })
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -2772,6 +2841,7 @@ Usage:
   mio creativity ferment       Review and refine active hypotheses (calls an LLM)
   mio insight status           Insight counts: total, reported, unreported, high-value
   mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)
+  mio insight generate         Generate insights from context (--memory "kind|content"/--summary "text"; calls an LLM)
   mio insight mark-reported    Mark insights as reported (--ids a,b)
   mio observer <view>          Observer pipeline views (research pipeline, not the observe daemon):
                                status | world-model | trends | research | insights | essays | dag

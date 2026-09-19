@@ -36,7 +36,13 @@ const NON_EXITING = new Set(['mcp', 'observe'])
 // (In practice the linter only replays `mio <command> <sub>` and drops the
 // flags, so `config llm` would just print usage — but its whole purpose is
 // writing state, so it does not belong in a probe list at all.)
-const SIDE_EFFECTING = new Set(['observer:collect', 'observer:ferment', 'config:llm'])
+const SIDE_EFFECTING = new Set([
+  'observer:collect',
+  'observer:ferment',
+  'config:llm',
+  // generate writes insight records and calls an LLM, so it is never probed here
+  'insight:generate',
+])
 const TIMEOUT_MS = 20000
 
 function readmeCommandBlock() {
