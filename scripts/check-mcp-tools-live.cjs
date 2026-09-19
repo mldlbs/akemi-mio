@@ -24,23 +24,19 @@ const path = require('node:path')
 const MCP_DIR = path.resolve(__dirname, '..', 'packages', 'mio-cli', 'server', 'mio-intelligence-mcp')
 const ENTRY = path.resolve(__dirname, '..', 'packages', 'mio-cli', 'bin', 'mio.js')
 
-// A tool that rejects empty arguments should say why in its own words
-// ("memory.record requires a non-empty content"). These are the shapes that mean
-// the code crashed instead of validating -- they name neither the tool nor the
-// missing field, which is what makes them so expensive to diagnose later.
-const CRASH_MARKERS = [
-  'is not a function',
-  'Cannot read propert',
-  'Cannot read properties',
-  'is not defined',
-  'ERR_INVALID_ARG_TYPE',
-  'must be of type',
-  'Cannot find module',
-  'MODULE_NOT_FOUND',
-  'TypeError',
-  'ReferenceError',
-  'SyntaxError',
-]
+const { crashMarker } = require('./lib/crash-messages.cjs')
+
+// Arguments for tools whose empty-args path does real network I/O. observer.collect
+// fetches from bilibili/hackernews/rss, so it takes ~30s and then only by luck --
+// an unknown source name returns immediately and still constructs the
+// ObserverService, which is where its one real bug lived.
+//
+// Deliberately short. Every entry here is a tool this gate does NOT exercise with
+// empty arguments, so the list is checked against the live tool list below and a
+// stale entry fails the gate rather than quietly shrinking coverage.
+const SAFE_ARGS = {
+  'mio.observer.collect': { sources: ['__gate_unknown_source__'] },
+}
 
 function definedTools() {
   const names = new Set()
@@ -105,11 +101,12 @@ function probe(timeoutMs) {
       const i = next
       p.stdin.write(JSON.stringify({
         jsonrpc: '2.0', id: 100 + i, method: 'tools/call',
-        params: { name: names[i], arguments: {} },
+        params: { name: names[i], arguments: SAFE_ARGS[names[i]] || {} },
       }) + '\n')
-      // A network-backed tool (observer.collect fetches real sources) can take
-      // ~30s. Give up on this one and move on rather than stalling the gate.
-      perCallTimer = setTimeout(() => { next += 1; sendNext() }, 40000)
+      // Nothing here should take long once network-backed tools have safe
+      // arguments, so a tool that never answers is a finding, not a weather
+      // report -- it only degrades to a warning if it is tolerated silently.
+      perCallTimer = setTimeout(() => { next += 1; sendNext() }, 30000)
     }
 
     p.on('error', reject)
@@ -190,7 +187,7 @@ function diff(a, b) {
     const a = answers.get(100 + i)
     if (!a) { unanswered.push(n); return }
     if (a.ok) return
-    const marker = CRASH_MARKERS.find((m) => String(a.error).includes(m))
+    const marker = crashMarker(a.error)
     if (marker) crashed.push(n + '  [' + marker + ']  ' + String(a.error).split('\n')[0].slice(0, 120))
   })
 
@@ -204,6 +201,18 @@ function diff(a, b) {
 
   if (!survived) {
     problems.push('the server stopped answering after the smoke calls -- some tool killed it')
+  }
+
+  // A tool that never answers is not verified. Tolerating it as a warning would
+  // quietly make this gate blind to that tool, which is how observer.collect
+  // stayed broken: the old doc gate skipped it "because it has side effects".
+  if (unanswered.length) {
+    problems.push('no answer within the timeout, so these tools are NOT verified: ' + unanswered.join(', '))
+  }
+
+  const staleSafeArgs = Object.keys(SAFE_ARGS).filter((n) => !live.has(n))
+  if (staleSafeArgs.length) {
+    problems.push('SAFE_ARGS names tools that no longer exist (coverage is quietly shrinking): ' + staleSafeArgs.join(', '))
   }
 
   console.log(

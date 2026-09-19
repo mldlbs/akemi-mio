@@ -10,39 +10,60 @@
 // as unknown.
 //
 // Two rules learned the hard way:
-//   - `mio mcp` (stdio server) and `mio observe` (foreground watcher) never exit,
-//     so they are skipped rather than waited on. Every spawn has a timeout anyway.
 //   - MIO_HOME is pointed at a temp dir so commands that write (init, install)
 //     cannot touch the real home directory.
+//   - Nothing here is skipped without being probed another way. `mio mcp` and
+//     `mio observe` do not exit on their own, but `mcp` answers a stdio
+//     handshake and exits on stdin EOF, and `observe --status` exits normally,
+//     so both are still exercised (see probeSpecial below).
 
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
+const { crashMarker } = require('./lib/crash-messages.cjs')
 
 const REPO = path.resolve(__dirname, '..')
 const CLI = path.join(REPO, 'packages', 'mio-cli', 'bin', 'mio.js')
 const README = path.join(REPO, 'packages', 'mio-cli', 'README.md')
 
-// Commands that start a server / run forever, so they cannot be probed.
-const NON_EXITING = new Set(['mcp', 'observe'])
+// Commands that never exit when spawned plainly, so they get a bespoke probe.
+const NEVER_EXITS = new Set(['mcp', 'observe'])
 
-// Commands that exist but must not be *executed* by a doc linter: collect hits
-// external sources over the network, ferment calls an LLM, and `config llm`
-// writes to config.json. Probing them here would turn `npm run check:cli-docs`
-// into a network client or a config mutator. Their existence is pinned by
-// mio-cli's own tests instead (observer-command.test.js, config-command.test.js).
+// Extra arguments that let a side-effecting command be probed for real instead
+// of being skipped.
 //
-// (In practice the linter only replays `mio <command> <sub>` and drops the
-// flags, so `config llm` would just print usage — but its whole purpose is
-// writing state, so it does not belong in a probe list at all.)
-const SIDE_EFFECTING = new Set([
-  'observer:collect',
-  'observer:ferment',
-  'config:llm',
-  // generate writes insight records and calls an LLM, so it is never probed here
-  'insight:generate',
-])
+// Skipping these is exactly how `mio observer collect` stayed broken for every
+// caller: it died on a bad ObserverService constructor argument, and the only
+// gate that would have executed it skipped it as "side effecting". A skipped
+// gate is not a gate -- the README advertised a command that crashed on contact.
+//
+// With these arguments each one reaches its own code path and returns in about
+// two seconds, without becoming a network client or a config mutator:
+//   - an unknown source name makes collect return before fetching anything
+//   - ferment only probes a localhost LLM and fails fast
+//   - insight generate refuses with "needs context" before any LLM call
+//   - config llm with no flags writes nothing and reports "Nothing to set"
+//
+// If a new side-effecting command shows up in the README, give it safe
+// arguments here rather than adding it to a skip list.
+const SAFE_ARGS = {
+  'observer:collect': ['--sources', '__doc_gate_unknown_source__'],
+  'observer:ferment': [],
+  'config:llm': [],
+  'insight:generate': [],
+}
+
+// A minimal MCP handshake. `mio mcp` reads stdin until EOF and then exits, so
+// spawnSync can drive it without a wait-and-kill dance.
+const MCP_HANDSHAKE = [
+  JSON.stringify({
+    jsonrpc: '2.0', id: 1, method: 'initialize',
+    params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'doc-gate', version: '1' } },
+  }),
+  JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+  JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+].join('\n') + '\n'
 const TIMEOUT_MS = 20000
 
 function readmeCommandBlock() {
@@ -81,6 +102,40 @@ function isUnknown(output) {
   )
 }
 
+// Probes a command that never exits on its own. Returns null when it behaved,
+// or a message describing what went wrong.
+function probeSpecial(command) {
+  if (command === 'observe') {
+    const r = spawnSync(process.execPath, [CLI, 'observe', '--status'], {
+      encoding: 'utf8', env, timeout: TIMEOUT_MS,
+    })
+    if (r.error) return String(r.error.message || r.error)
+    const out = `${r.stdout || ''}${r.stderr || ''}`
+    if (isUnknown(out)) return 'mio observe --status reports an unknown command'
+    return null
+  }
+
+  if (command === 'mcp') {
+    const r = spawnSync(process.execPath, [CLI, 'mcp'], {
+      encoding: 'utf8', env, timeout: TIMEOUT_MS, input: MCP_HANDSHAKE,
+    })
+    if (r.error) return String(r.error.message || r.error)
+    const line = (r.stdout || '')
+      .split('\n')
+      .find((l) => l.trim().startsWith('{') && l.includes('"id":2'))
+    if (!line) return 'mio mcp never answered tools/list'
+    try {
+      const tools = JSON.parse(line).result.tools
+      if (!Array.isArray(tools) || tools.length === 0) return 'mio mcp offered no tools'
+    } catch (err) {
+      return 'mio mcp returned an unparseable tools/list: ' + err.message
+    }
+    return null
+  }
+
+  return null
+}
+
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mio-doccheck-'))
 const env = { ...process.env, MIO_HOME: home }
 
@@ -90,15 +145,17 @@ const skipped = []
 let checked = 0
 
 for (const { raw, command, sub } of commands) {
-  if (NON_EXITING.has(command)) {
-    skipped.push(`(never exits): ${raw}`)
+  if (NEVER_EXITS.has(command)) {
+    const problem = probeSpecial(command)
+    if (problem) {
+      drift.push({ raw, message: problem })
+      continue
+    }
+    checked += 1
     continue
   }
-  if (sub && SIDE_EFFECTING.has(`${command}:${sub}`)) {
-    skipped.push(`(side effecting): ${raw}`)
-    continue
-  }
-  const args = sub ? [command, sub] : [command]
+  const safe = SAFE_ARGS[`${command}:${sub || ''}`]
+  const args = [command, ...(sub ? [sub] : []), ...(safe || [])]
   let result
   try {
     result = spawnSync(process.execPath, [CLI, ...args], {
@@ -127,6 +184,20 @@ for (const { raw, command, sub } of commands) {
         .map((line) => line.trim())
         .find((line) => line.includes('Unknown')) || output.trim().split('\n')[0]
     drift.push({ raw, message: detail })
+    continue
+  }
+
+  // A command that exists can still be broken. This is what let
+  // `mio observer collect` ship dead: the gate only asked "does the CLI know
+  // this command?", never "does it work?", so a TypeError looked fine.
+  const marker = crashMarker(output)
+  if (marker) {
+    drift.push({
+      raw,
+      message: `crashes instead of reporting a usage problem [${marker}]: ${
+        output.trim().split('\n')[0].slice(0, 120)
+      }`,
+    })
   }
 }
 
