@@ -95,3 +95,9 @@ jobs:
       # mio.insight.generate drifted out of both for weeks before anyone noticed.
       - name: MCP tools are reachable from the CLI
         run: npm run check:coverage
+
+      # Reachable on paper is not the same as offered at runtime: a failing
+      # isXxxAvailable() hides a tool from tools/list while its dispatch case
+      # survives, which is invisible to every other gate.
+      - name: MCP tools are actually offered at runtime
+        run: npm run check:mcp-live

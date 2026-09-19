@@ -32,6 +32,7 @@
     "check:idle-gpu": "node scripts/check-idle-gpu.cjs",
     "check:cli-docs": "node scripts/check-cli-docs.cjs",
     "check:coverage": "node scripts/check-mcp-cli-coverage.cjs",
+    "check:mcp-live": "node scripts/check-mcp-tools-live.cjs",
     "git:fetch": "node scripts/git-fetch-safe.cjs"
   },
   "dependencies": {
