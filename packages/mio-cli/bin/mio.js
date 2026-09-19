@@ -2797,6 +2797,14 @@ function observeCommand(args) {
   observer.startForeground(MIO_HOME)
 }
 
+function versionCommand(useJson) {
+  // Read from the package manifest so the installed copy reports its own version
+  // instead of a hardcoded string that drifts on every release.
+  const pkg = require('../package.json')
+  if (useJson) console.log(JSON.stringify({ name: pkg.name, version: pkg.version }))
+  else console.log(pkg.version)
+}
+
 function help() {
   console.log(`Mio Agent Runtime CLI
 
@@ -2860,6 +2868,7 @@ Usage:
   mio --json status           Machine-readable status
   mio --json agents           Machine-readable agents
   mio --json evolution status Machine-readable evolution module health
+  mio --version                Print the version and exit (-V)
 `)
 }
 
@@ -2915,6 +2924,9 @@ async function main() {
       return digestCommand(args, useJson)
     case 'evolution':
       return evolutionCommand(args, useJson)
+    case '--version':
+    case '-V':
+      return versionCommand(useJson)
     case 'help':
     case '--help':
       return help()

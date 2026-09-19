@@ -74,6 +74,7 @@ mio task record-outcome --outcome success   Record a task outcome (--yes to appl
 mio --json status           Machine-readable status
 mio --json agents           Machine-readable agents
 mio --json evolution status Machine-readable evolution module health
+mio --version                Print the version and exit (-V)
 ```
 
 ## MCP 工具
