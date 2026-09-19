@@ -7,10 +7,10 @@
 // `Object.entries(promise)` yielded nothing and collect() cheerfully reported
 // `collected: 0` while the real observations were thrown away.
 //
-// The optional package is not linked in this repo, so these tests inject a fake
-// one with Module._load before requiring the store -- the same trick used for
-// the insight/observer availability probes. Every assertion here runs against
-// the injected module; nothing touches the network.
+// The optional package is not linked into node_modules in this repo, so these
+// tests inject a fake one with Module._load before requiring the store -- the
+// same trick used for the insight/observer availability probes. Every assertion
+// here runs against the injected module; nothing touches the network.
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -25,11 +25,21 @@ const MCP_PATH = path.resolve(__dirname, '..', 'server', 'mio-intelligence-mcp',
 // Loads a *fresh* copy of the store with `resolver` interposed on
 // '@akemi-mio/observer'. The module-level require happens once per load, so the
 // cache has to be dropped to see a different fake.
+// The store resolves the package first and, if that throws, falls back to the
+// workspace source at packages/observer (see server/observer-store.js). A
+// resolver that throws is meant to simulate "not installed", so the fallback has
+// to fail as well -- in this checkout packages/observer exists, and without
+// blocking it the simulation silently stops simulating anything.
+const OBSERVER_FALLBACK = path.resolve(__dirname, '..', '..', 'observer')
+
 function loadStoreWith(resolver) {
   delete require.cache[STORE_PATH]
   const originalLoad = Module._load
   Module._load = function (request, parent, isMain) {
     if (request === '@akemi-mio/observer') return resolver()
+    if (path.resolve(request) === OBSERVER_FALLBACK) {
+      throw new Error("Cannot find module '@akemi-mio/observer'")
+    }
     return originalLoad.apply(this, [request, parent, isMain])
   }
   try {

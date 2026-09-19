@@ -17,10 +17,22 @@ const path = require('path')
 // Observer research pipeline (optional -- installed via @akemi-mio/observer).
 // Loaded lazily at module level so the CLI can report availability without the
 // MCP server having to pass its own handles down.
+// Two-step resolution, same as server/runtime-modules.js and insight-store.js:
+// the published package first, then the workspace source. A checkout has no
+// node_modules/@akemi-mio, so without the fallback the whole mio.observer.*
+// family stays gated off while its source is sitting in packages/observer.
+function loadObserver() {
+  try {
+    return require('@akemi-mio/observer')
+  } catch (_) {
+    return require(path.resolve(__dirname, '..', '..', 'observer'))
+  }
+}
+
 let ObserverStore = null
 let ObserverService = null
 try {
-  const obs = require('@akemi-mio/observer')
+  const obs = loadObserver()
   ObserverStore = obs.ObserverStore
   ObserverService = obs.ObserverService
 } catch {}

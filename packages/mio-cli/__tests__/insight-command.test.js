@@ -19,13 +19,16 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..')
 const CLI = path.join(repoRoot, 'packages', 'mio-cli', 'bin', 'mio.js')
 
 // Captured before any fake is injected, so it reflects the real environment.
-let realInsightAvailable = false
-try {
-  require('@akemi-mio/insight')
-  realInsightAvailable = true
-} catch {}
+// Ask the store rather than the package name: the store falls back to the
+// workspace source (packages/insight), so a bare require() of the package here
+// would report "not installed" on a machine where the tools actually work.
+const { isInsightAvailable } = require('../server/insight-store.js')
+const realInsightAvailable = isInsightAvailable()
 
 const INSIGHT_STORE_PATH = require.resolve('../server/insight-store.js')
+
+// The workspace-source fallback the store uses when the package is missing.
+const INSIGHT_FALLBACK = path.resolve(__dirname, '..', '..', 'insight')
 
 // Loads insight-store.js with @akemi-mio/insight resolved to `fake`. The store
 // caches the constructor at module load, so the cache entry is dropped first.
@@ -33,6 +36,11 @@ function loadStoreWithFake(fake) {
   const original = Module._load
   Module._load = function (request, ...rest) {
     if (request === '@akemi-mio/insight') return fake
+    // `fake === null` means "the package is not installed" -- the fallback would
+    // otherwise load packages/insight and the simulation would simulate nothing.
+    if (fake === null && path.resolve(request) === INSIGHT_FALLBACK) {
+      throw new Error('@akemi-mio/insight not installed')
+    }
     return original.call(this, request, ...rest)
   }
   delete require.cache[INSIGHT_STORE_PATH]
@@ -367,17 +375,41 @@ test('an empty --memory does not swallow the flag that follows it', () => {
   assert.deepEqual(ctx.summaries, ['context text'])
 })
 
-test(
-  'insight generate reports a missing engine instead of a misleading zero',
-  { skip: realInsightAvailable ? 'the real package is installed; running it would call an LLM' : false },
-  () => {
-    const ws = workspace()
-    const result = run(ws, ['insight', 'generate', '--summary', 'x'])
-
-    assert.equal(result.status, 1, 'an unavailable engine must fail, not report generated: 0')
-    assert.match(result.stderr, /@akemi-mio\/insight not installed/)
+// Blocks both resolution routes (package name + workspace fallback) so the run
+// behaves like a machine that never installed @akemi-mio/insight. Depending on
+// whether the real package happens to be present would make this assertion
+// untestable in this checkout, where the fallback now provides it.
+function runWithoutInsight(ws, args) {
+  const preload = path.join(ws.cwd, 'missing-insight-preload.js')
+  const fallback = JSON.stringify(INSIGHT_FALLBACK)
+  fs.writeFileSync(
+    preload,
+    `'use strict'
+const Module = require('node:module')
+const path = require('node:path')
+const originalLoad = Module._load
+Module._load = function (request, parent, isMain) {
+  if (request === '@akemi-mio/insight' || path.resolve(request) === ${fallback}) {
+    throw new Error('Cannot find module \\'@akemi-mio/insight\\'')
   }
-)
+  return originalLoad.apply(this, [request, parent, isMain])
+}
+`
+  )
+  return spawnSync(process.execPath, ['-r', preload, CLI, ...args], {
+    cwd: ws.cwd,
+    encoding: 'utf8',
+    env: ws.env,
+  })
+}
+
+test('insight generate reports a missing engine instead of a misleading zero', () => {
+  const ws = workspace()
+  const result = runWithoutInsight(ws, ['insight', 'generate', '--summary', 'x'])
+
+  assert.equal(result.status, 1, 'an unavailable engine must fail, not report generated: 0')
+  assert.match(result.stderr, /@akemi-mio\/insight not installed/)
+})
 
 test('insight status reports counts when installed, or says it is not', () => {
   const ws = workspace()

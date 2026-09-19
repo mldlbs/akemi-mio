@@ -545,18 +545,50 @@ function runFake(ws, args, logFile) {
   return { result, logged }
 }
 
+// Simulates a machine where @akemi-mio/observer was never installed. Both
+// resolution routes have to fail: the package name, and the workspace-source
+// fallback the store now uses (packages/observer exists in this checkout, so
+// blocking only the package name would no longer simulate anything).
+function missingObserverPreload() {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mio-preload-')), 'missing-observer.js')
+  const fallback = JSON.stringify(path.resolve(__dirname, '..', '..', 'observer'))
+  fs.writeFileSync(
+    file,
+    `'use strict'
+const Module = require('node:module')
+const path = require('node:path')
+const originalLoad = Module._load
+Module._load = function (request, parent, isMain) {
+  if (request === '@akemi-mio/observer' || path.resolve(request) === ${fallback}) {
+    throw new Error("Cannot find module '@akemi-mio/observer'")
+  }
+  return originalLoad.apply(this, [request, parent, isMain])
+}
+`
+  )
+  return file
+}
+
+function runWithoutObserver(ws, args) {
+  return spawnSync(process.execPath, ['-r', missingObserverPreload(), CLI, ...args], {
+    cwd: ws.cwd,
+    encoding: 'utf8',
+    env: ws.env,
+  })
+}
+
 test('observer collect fails gracefully when the optional package is missing', () => {
   const ws = workspace()
 
-  const text = run(ws, ['observer', 'collect'])
+  const text = runWithoutObserver(ws, ['observer', 'collect'])
   assert.equal(text.status, 1)
   assert.match(text.stderr, /@akemi-mio\/observer not installed/)
 
-  const json = run(ws, ['observer', 'collect', '--json'])
+  const json = runWithoutObserver(ws, ['observer', 'collect', '--json'])
   assert.equal(json.status, 1)
   assert.match(json.stderr, /not installed/)
 
-  const ferment = run(ws, ['observer', 'ferment'])
+  const ferment = runWithoutObserver(ws, ['observer', 'ferment'])
   assert.equal(ferment.status, 1)
   assert.match(ferment.stderr, /@akemi-mio\/observer not installed/)
 })

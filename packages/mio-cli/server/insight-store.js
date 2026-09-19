@@ -11,10 +11,24 @@
 
 const path = require('path')
 
+// Same two-step resolution as server/runtime-modules.js: the published package
+// first, then the workspace source. In a checkout the @akemi-mio/* packages are
+// NOT linked into node_modules (there is no node_modules/@akemi-mio at all), so
+// without the fallback every mio.insight.* tool stayed gated off even though the
+// source sits right there in packages/insight. In a published install only the
+// package exists, so the fallback never runs.
+function loadInsight() {
+  try {
+    return require('@akemi-mio/insight')
+  } catch (_) {
+    return require(path.resolve(__dirname, '..', '..', 'insight'))
+  }
+}
+
 let InsightStore = null
 let InsightGenerator = null
 try {
-  const insight = require('@akemi-mio/insight')
+  const insight = loadInsight()
   InsightStore = insight.InsightStore
   InsightGenerator = insight.InsightGenerator
 } catch {}
