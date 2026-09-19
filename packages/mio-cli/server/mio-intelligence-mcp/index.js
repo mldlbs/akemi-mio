@@ -913,6 +913,9 @@ function observerStatus(args = {}) {
   return observerStore.status(args)
 }
 
+// Both return promises (the upstream collector and fermentation engine are
+// async). callTool is async, so the promise is awaited before the result is
+// serialized -- but nothing here may treat them as synchronous values.
 function observerCollect(args = {}) {
   return observerStore.collect(args)
 }

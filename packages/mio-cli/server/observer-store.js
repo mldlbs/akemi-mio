@@ -161,19 +161,28 @@ function createObserverStore(options = {}) {
     return { summaries, summaryCount: summaries.reduce((a, s) => a + s.summaries.length, 0) }
   }
 
-  function collect(args = {}) {
+  // ObserverService.collectBySource and FermentationEngine.ferment are both
+  // async. They must be awaited here: a Promise is `typeof 'object'` with no
+  // own enumerable keys, so the previous synchronous version of collect()
+  // happily "iterated" one and pushed nothing -- every call reported
+  // `collected: 0` no matter how much the collectors actually returned.
+  async function collect(args = {}) {
     if (!ObserverService) throw new Error('@akemi-mio/observer not installed')
     const service = new ObserverService({ baseDir: baseDirOf(args), collectorConfig: {} })
     const sources = args.sources || ['bilibili', 'hackernews', 'github', 'douyin', 'rss']
     const allObs = []
     for (const src of sources) {
       try {
-        const collectFn = service.collectBySource ? service.collectBySource : service.collect
-        if (collectFn) {
-          const result = collectFn.call(service, [src], args.keywords || [], args.limit || 20)
-          if (Array.isArray(result)) allObs.push(...result)
-          else if (result && typeof result === 'object') {
-            for (const [, items] of Object.entries(result)) allObs.push(...items)
+        const collectFn = service.collectBySource || service.collect
+        if (!collectFn) {
+          throw new Error('ObserverService exposes neither collectBySource nor collect')
+        }
+        const result = await collectFn.call(service, [src], args.keywords || [], args.limit || 20)
+        if (Array.isArray(result)) allObs.push(...result)
+        else if (result && typeof result === 'object') {
+          // Record<sourceName, Observation[]>: keep every list, in key order.
+          for (const items of Object.values(result)) {
+            if (Array.isArray(items)) allObs.push(...items)
           }
         }
       } catch (e) {
@@ -183,13 +192,13 @@ function createObserverStore(options = {}) {
     return { collected: allObs.length, observations: allObs }
   }
 
-  function ferment(args = {}) {
+  async function ferment(args = {}) {
     if (!ObserverService) throw new Error('@akemi-mio/observer not installed')
     const service = new ObserverService({ baseDir: baseDirOf(args), collectorConfig: {} })
     const session = args.session || 'afternoon'
     try {
       const fermentation = service.getFermentation()
-      if (fermentation && fermentation.ferment) return fermentation.ferment(session)
+      if (fermentation && fermentation.ferment) return await fermentation.ferment(session)
       return { status: 'fermentation engine available but no ferment method' }
     } catch (e) {
       return { error: e.message }

@@ -26,6 +26,12 @@ const README = path.join(REPO, 'packages', 'mio-cli', 'README.md')
 
 // Commands that start a server / run forever, so they cannot be probed.
 const NON_EXITING = new Set(['mcp', 'observe'])
+
+// Commands that exist but must not be *executed* by a doc linter: collect hits
+// external sources over the network and ferment calls an LLM. Probing them here
+// would turn `npm run check:cli-docs` into a network client. Their existence is
+// pinned by mio-cli's own tests instead (observer-command.test.js).
+const SIDE_EFFECTING = new Set(['observer:collect', 'observer:ferment'])
 const TIMEOUT_MS = 20000
 
 function readmeCommandBlock() {
@@ -74,7 +80,11 @@ let checked = 0
 
 for (const { raw, command, sub } of commands) {
   if (NON_EXITING.has(command)) {
-    skipped.push(raw)
+    skipped.push(`(never exits): ${raw}`)
+    continue
+  }
+  if (sub && SIDE_EFFECTING.has(`${command}:${sub}`)) {
+    skipped.push(`(side effecting): ${raw}`)
     continue
   }
   const args = sub ? [command, sub] : [command]
@@ -113,7 +123,7 @@ fs.rmSync(home, { recursive: true, force: true })
 
 console.log(`README commands: ${commands.length} | probed: ${checked} | skipped: ${skipped.length}`)
 if (skipped.length > 0) {
-  for (const raw of skipped) console.log(`  skip (never exits): ${raw}`)
+  for (const raw of skipped) console.log(`  skip ${raw}`)
 }
 
 if (drift.length > 0) {

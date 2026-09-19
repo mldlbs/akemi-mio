@@ -227,15 +227,13 @@ test('observer validates its subcommands', () => {
   assert.equal(unknown.status, 1)
   assert.match(unknown.stderr, /Unknown observer subcommand: bogus/)
 
-  // collect/ferment are deliberately not exposed: collect hits the network and
-  // ferment drives the engine, both of which belong to the daemon.
-  const collect = run(ws, ['observer', 'collect'])
-  assert.equal(collect.status, 1)
-  assert.match(collect.stderr, /Unknown observer subcommand: collect/)
-
   const help = run(ws, ['observer', 'help'])
   assert.equal(help.status, 0)
   assert.match(help.stdout, /mio observer status/)
+  // collect/ferment are skipped by scripts/check-cli-docs.cjs (they hit the
+  // network / an LLM), so this is what still catches a rename.
+  assert.match(help.stdout, /mio observer collect/)
+  assert.match(help.stdout, /mio observer ferment/)
 })
 
 test('bad --limit is rejected rather than silently ignored', () => {
@@ -466,4 +464,180 @@ test('observer digest --json exposes counts and events', () => {
   assert.equal(json.subscriptionCount, 1)
   assert.equal(json.events[0].event_type, 'tool_call')
   assert.equal(json.events[0].trace_id, 't1')
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// collect / ferment: the two driver commands. They need the optional
+// @akemi-mio/observer package, so the happy path is exercised against a fake
+// injected with a -r preload (the package is not linked in this repo), while the
+// "package missing" path is the real thing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Writes a preload that swaps '@akemi-mio/observer' for a fake whose
+// collectBySource/ferment log their arguments to $FAKE_OBSERVER_LOG so the test
+// can see exactly what the CLI passed down.
+function fakeObserverPreload(logFile) {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mio-preload-')), 'fake-observer.js')
+  fs.writeFileSync(
+    file,
+    `'use strict'
+const Module = require('node:module')
+const fs = require('node:fs')
+const originalLoad = Module._load
+Module._load = function (request, parent, isMain) {
+  if (request === '@akemi-mio/observer') {
+    return {
+      ObserverStore: function ObserverStore() {},
+      ObserverService: class {
+        async collectBySource(sources, keywords, limit) {
+          // Appended, not overwritten: the store calls this once per source.
+          fs.appendFileSync(
+            process.env.FAKE_OBSERVER_LOG,
+            JSON.stringify({ call: 'collect', sources, keywords, limit }) + '\\n',
+          )
+          const out = {}
+          for (const name of sources) {
+            out[name] = [{ id: name + '-1', source: name, content: 'item from ' + name }]
+          }
+          if (sources.includes('broken')) throw new Error('network down')
+          return out
+        }
+        getFermentation() {
+          return {
+            async ferment(session) {
+              fs.appendFileSync(
+                process.env.FAKE_OBSERVER_LOG,
+                JSON.stringify({ call: 'ferment', session }) + '\\n',
+              )
+              return {
+                generatedAt: '2026-09-18T00:00:00.000Z',
+                clusters: [{ theme: 'agent runtimes', associations: ['mcp', 'cli'], strength: 0.82 }],
+              }
+            },
+          }
+        }
+      },
+    }
+  }
+  return originalLoad.apply(this, [request, parent, isMain])
+}
+`,
+    'utf8',
+  )
+  return { file, logFile }
+}
+
+function runFake(ws, args, logFile) {
+  const { file } = fakeObserverPreload(logFile)
+  if (fs.existsSync(logFile)) fs.rmSync(logFile)
+  const result = spawnSync(process.execPath, ['-r', file, CLI, ...args], {
+    cwd: ws.cwd,
+    encoding: 'utf8',
+    env: { ...ws.env, FAKE_OBSERVER_LOG: logFile },
+  })
+  const logged = fs.existsSync(logFile)
+    ? fs
+        .readFileSync(logFile, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+    : []
+  return { result, logged }
+}
+
+test('observer collect fails gracefully when the optional package is missing', () => {
+  const ws = workspace()
+
+  const text = run(ws, ['observer', 'collect'])
+  assert.equal(text.status, 1)
+  assert.match(text.stderr, /@akemi-mio\/observer not installed/)
+
+  const json = run(ws, ['observer', 'collect', '--json'])
+  assert.equal(json.status, 1)
+  assert.match(json.stderr, /not installed/)
+
+  const ferment = run(ws, ['observer', 'ferment'])
+  assert.equal(ferment.status, 1)
+  assert.match(ferment.stderr, /@akemi-mio\/observer not installed/)
+})
+
+test('observer collect reports what each source returned', () => {
+  const ws = workspace()
+  const logFile = path.join(ws.mioHome, 'collect-args.json')
+
+  const { result, logged } = runFake(ws, ['observer', 'collect', '--sources', 'rss,github'], logFile)
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /Collected 2 observation\(s\)/)
+  assert.match(result.stdout, /rss: 1/)
+  assert.match(result.stdout, /github: 1/)
+  assert.deepEqual(logged, [
+    { call: 'collect', sources: ['rss'], keywords: [], limit: 20 },
+    { call: 'collect', sources: ['github'], keywords: [], limit: 20 },
+  ])
+})
+
+test('observer collect defaults to every source instead of none', () => {
+  // Regression guard: splitTagsOption returns [] for an absent flag and [] is
+  // truthy, so passing it straight through meant "collect from zero sources".
+  const ws = workspace()
+  const logFile = path.join(ws.mioHome, 'collect-args.json')
+
+  const { logged } = runFake(ws, ['observer', 'collect'], logFile)
+  assert.equal(logged.length, 5, 'the store default is five sources, one call each')
+  assert.deepEqual(
+    logged.map((entry) => entry.sources[0]),
+    ['bilibili', 'hackernews', 'github', 'douyin', 'rss'],
+  )
+  assert.ok(
+    logged.every((entry) => entry.sources.length === 1),
+    'never an empty source list',
+  )
+})
+
+test('observer collect forwards --keywords and --limit, and keeps a failing source', () => {
+  const ws = workspace()
+  const logFile = path.join(ws.mioHome, 'collect-args.json')
+
+  const { result, logged } = runFake(
+    ws,
+    ['observer', 'collect', '--sources', 'rss,broken', '--keywords', 'mcp,cli', '--limit', '3'],
+    logFile,
+  )
+  assert.deepEqual(logged, [
+    { call: 'collect', sources: ['rss'], keywords: ['mcp', 'cli'], limit: 3 },
+    { call: 'collect', sources: ['broken'], keywords: ['mcp', 'cli'], limit: 3 },
+  ])
+  assert.equal(result.status, 0, 'one broken source must not fail the whole run')
+  assert.match(result.stdout, /rss: 1/)
+  assert.match(result.stdout, /broken: 0 \(errors: network down\)/)
+})
+
+test('observer collect --json matches mio.observer.collect', () => {
+  const ws = workspace()
+  const logFile = path.join(ws.mioHome, 'collect-args.json')
+
+  const { result } = runFake(ws, ['observer', 'collect', '--sources', 'rss', '--json'], logFile)
+  assert.equal(result.status, 0, result.stderr)
+  const json = JSON.parse(result.stdout)
+  assert.equal(json.collected, 1)
+  assert.equal(json.observations[0].id, 'rss-1')
+})
+
+test('observer ferment prints its clusters and forwards --session', () => {
+  const ws = workspace()
+  const logFile = path.join(ws.mioHome, 'ferment-args.json')
+
+  const { result, logged } = runFake(ws, ['observer', 'ferment', '--session', 'morning'], logFile)
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(logged, [{ call: 'ferment', session: 'morning' }])
+  assert.match(result.stdout, /Fermentation \(session=morning\): 1 cluster\(s\)/)
+  assert.match(result.stdout, /\[0\.82\] agent runtimes — mcp, cli/)
+})
+
+test('observer ferment defaults to the afternoon session', () => {
+  const ws = workspace()
+  const logFile = path.join(ws.mioHome, 'ferment-args.json')
+
+  const { logged } = runFake(ws, ['observer', 'ferment'], logFile)
+  assert.deepEqual(logged, [{ call: 'ferment', session: 'afternoon' }])
 })

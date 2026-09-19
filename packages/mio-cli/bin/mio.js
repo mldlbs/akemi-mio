@@ -1331,9 +1331,11 @@ function insightCommand(args, useJson) {
 // (mio.observer.*). Not to be confused with `mio observe`, which is the
 // WorkBuddy transcript daemon.
 //
-// Only the read-only views are exposed. collect hits the network and ferment
-// drives the engine; both belong to the daemon, not an interactive shell (same
-// reasoning as skipping creativity generate from the CLI).
+// The read-only views plus the two driver commands (collect, ferment) are
+// exposed. An earlier version of this comment claimed collect/ferment "belong
+// to the daemon" -- they do not: observe/observer.js only tails WorkBuddy
+// transcripts and never calls either. Until they got a terminal entry point the
+// only way to run a collection was from inside an MCP session.
 //
 // Base directory defaults to <cwd>/.local/observer -- the MCP server's default
 // -- because the pipeline is project-local by design. --base-dir overrides it.
@@ -1358,6 +1360,10 @@ function observerUsage() {
                              (--yes required to apply; previews by default)
   mio observer digest        New events since the last digest (--limit/--project/--event-types)
                              NOTE: advances the cursor, so a second run returns only newer events
+  mio observer collect       Fetch from the configured sources (--sources a,b [--keywords k1,k2])
+                             [--limit N]  (needs @akemi-mio/observer; hits the network)
+  mio observer ferment       Run the fermentation engine over recent observations
+                             (--session morning|afternoon|night; needs @akemi-mio/observer)
 
 Options:
   --base-dir DIR     Observer data directory (default: <cwd>/.local/observer)
@@ -1365,6 +1371,9 @@ Options:
   --type name        Essay type (default: published)
   --days N           Days of history (dag, default 7)
   --limit N          Max items
+  --sources a,b      Sources to collect from (default: all configured)
+  --keywords a,b     Keyword filter, OR matched (collect)
+  --session label    Fermentation session (default: afternoon)
   --json             Machine-readable output (same shape as mio.observer.*)`)
 }
 
@@ -1595,6 +1604,90 @@ function observerDigestCommand(args, useJson) {
   console.log('Note: this advances the cursor; the next digest returns only newer events.')
 }
 
+// collect drives the upstream collectors, so it needs @akemi-mio/observer and
+// hits the network. Unlike the mutating commands it is not previewed: it only
+// appends observations, and a preview would have to fetch everything twice.
+function printObserverCollect(result) {
+  console.log(`Collected ${result.collected} observation(s)`)
+  if (result.collected === 0) {
+    console.log('Nothing came back. Check the source names and network access.')
+    return
+  }
+  const perSource = new Map()
+  for (const item of result.observations) {
+    const key = item.source || '(unknown source)'
+    const bucket = perSource.get(key) || { ok: 0, errors: [] }
+    if (item.error) bucket.errors.push(item.error)
+    else bucket.ok += 1
+    perSource.set(key, bucket)
+  }
+  for (const [source, bucket] of perSource) {
+    const suffix = bucket.errors.length > 0 ? ` (errors: ${bucket.errors.join('; ')})` : ''
+    console.log(`  ${source}: ${bucket.ok}${suffix}`)
+  }
+}
+
+async function observerCollectCommand(args, useJson) {
+  const flags = args.slice(2)
+  const base = { baseDir: optionValue(flags, '--base-dir') }
+  // splitTagsOption returns [] for an absent flag, and [] is truthy -- passing
+  // it through would mean "collect from zero sources" instead of "all sources".
+  const sources = splitTagsOption(flags, '--sources')
+  const keywords = splitTagsOption(flags, '--keywords')
+  let result
+  try {
+    result = await cliObserverStore().collect({
+      ...base,
+      sources: sources.length > 0 ? sources : undefined,
+      keywords: keywords.length > 0 ? keywords : undefined,
+      limit: parseNumberOption(flags, '--limit'),
+    })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+  if (useJson) return jsonOrText(result, true)
+  printObserverCollect(result)
+}
+
+// ferment is likewise a driver command: it may write an essay when a cluster
+// clears the writing threshold, which is why it is not part of the read-only
+// views even though it mostly reads.
+function printObserverFerment(result, session) {
+  if (result.error) {
+    console.log(`Fermentation failed: ${result.error}`)
+    process.exitCode = 1
+    return
+  }
+  const clusters = Array.isArray(result.clusters) ? result.clusters : []
+  console.log(`Fermentation (session=${session}): ${clusters.length} cluster(s)`)
+  for (const cluster of clusters) {
+    const strength = typeof cluster.strength === 'number' ? cluster.strength.toFixed(2) : 'n/a'
+    const words = Array.isArray(cluster.associations) ? cluster.associations.join(', ') : ''
+    console.log(`- [${strength}] ${cluster.theme || '(untitled)'}${words ? ` — ${words}` : ''}`)
+  }
+  if (clusters.length === 0) {
+    console.log('No recurring themes found in the recent observations.')
+  }
+}
+
+async function observerFermentCommand(args, useJson) {
+  const flags = args.slice(2)
+  const session = optionValue(flags, '--session') || 'afternoon'
+  const base = { baseDir: optionValue(flags, '--base-dir') }
+  let result
+  try {
+    result = await cliObserverStore().ferment({ ...base, session })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+  if (useJson) return jsonOrText(result, true)
+  printObserverFerment(result, session)
+}
+
 function observerCommand(args, useJson) {
   const sub = args[1]
   if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
@@ -1605,6 +1698,10 @@ function observerCommand(args, useJson) {
   if (sub === 'ingest') return observerIngestCommand(args, useJson)
   if (sub === 'subscribe') return observerSubscribeCommand(args, useJson)
   if (sub === 'digest') return observerDigestCommand(args, useJson)
+  // Driver commands return promises (the upstream engine is async), so they are
+  // returned rather than called -- main() is async and awaits them.
+  if (sub === 'collect') return observerCollectCommand(args, useJson)
+  if (sub === 'ferment') return observerFermentCommand(args, useJson)
 
   if (!['status', 'world-model', 'trends', 'research', 'insights', 'essays', 'dag'].includes(sub)) {
     console.error(`Unknown observer subcommand: ${sub}`)
@@ -2483,6 +2580,8 @@ Usage:
   mio observer ingest --trace-id T --event-type E   Record a trace event (--payload/--outcome)
   mio observer subscribe --event-types a,b          Subscribe to events (--yes to apply)
   mio observer digest                               New events since the last digest (advances cursor)
+  mio observer collect         Fetch from the configured sources (--sources/--keywords/--limit)
+  mio observer ferment         Run the fermentation engine (--session morning|afternoon|night)
   mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
   mio host capabilities        Show what each host supports and whether it is installed
   mio task route "<task>"      Which verified experiences apply to this task (--project/--scope/--limit)

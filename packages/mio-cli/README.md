@@ -57,6 +57,8 @@ mio insight list             List insights (--unreported, --min-score N, --detec
 mio insight mark-reported    Mark insights as reported (--ids a,b)
 mio observer <view>          Observer research pipeline views (research pipeline, not the observe daemon):
                              status|world-model|trends|research|insights|essays|dag (--base-dir DIR)
+mio observer collect         Fetch from the configured sources (--sources a,b/--keywords k1,k2/--limit N)
+mio observer ferment         Run the fermentation engine (--session morning|afternoon|night)
 mio observer ingest --trace-id T --event-type E   Record a trace event (--payload JSON/--outcome)
 mio observer subscribe --event-types a,b          Subscribe to events (--yes to apply; previews by default)
 mio observer digest                               New events since the last digest (advances the cursor)
@@ -427,7 +429,16 @@ mio observer trends --base-dir /path/to/.local/observer
 说明：
 
 - **两者都委托给与 MCP 服务端完全相同的共享实现** —— `server/insight-store.js` 与 `server/observer-store.js`。这是 `memory-store.js` / `experience-store.js` / `policy-store.js` / `creativity-engine.js` / `agent-store.js` 一路沿用的同一个模式：一份实现、两个入口，因此不可能各自漂移。
-- **只暴露不需要 LLM、不发起网络请求的子命令。** `insight generate`、`observer collect`、`observer ferment` 仍是 MCP 专有（`mio.insight.generate` / `mio.observer.collect` / `mio.observer.ferment`），CLI 把三者当作未知子命令拒绝。前两者需要 LLM，`collect`/`ferment` 依赖的 `@akemi-mio/observer` 包未安装时更无从谈起。
+- **只有 `insight generate` 仍是 MCP 专有**（`mio.insight.generate`）：它要调 LLM，CLI 把它当作未知子命令拒绝。`observer collect` / `observer ferment` 此前也被一起挡在 CLI 之外，理由是「它们属于 daemon」——这个理由不成立：`observe/observer.js` 那条 daemon 只 tail WorkBuddy 的 transcript，从不调用这两者。现在它们有了终端入口，默认走全部已配置源：
+
+  ```bash
+  mio observer collect                                  # 全部已配置源
+  mio observer collect --sources rss,github --limit 20  # 指定源
+  mio observer collect --sources rss --keywords mcp,cli # 关键词 OR 过滤
+  mio observer ferment --session morning                # morning|afternoon|night
+  ```
+
+  两者都依赖可选包 `@akemi-mio/observer`（未安装时提示 `not installed`，不是空结果）。`collect` 会**联网**抓取，`ferment` 需要 LLM；它们**不做预览**，因为预览意味着把数据抓两遍。单个源失败不会中断整次运行——该源会以 `errors: ...` 出现在输出里，其余源照常统计。
 - **`mio observer ingest` 记录任意 trace 事件**（`tool_call` / `error` / `retry` / `task_outcome`）：
 
   ```bash
