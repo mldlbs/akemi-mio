@@ -31,6 +31,7 @@
     "check:renderer-entries": "node scripts/check-renderer-entries.cjs",
     "check:idle-gpu": "node scripts/check-idle-gpu.cjs",
     "check:cli-docs": "node scripts/check-cli-docs.cjs",
+    "check:coverage": "node scripts/check-mcp-cli-coverage.cjs",
     "git:fetch": "node scripts/git-fetch-safe.cjs"
   },
   "dependencies": {

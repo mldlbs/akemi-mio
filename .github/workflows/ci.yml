@@ -90,3 +90,8 @@ jobs:
 
       - name: README commands match the CLI
         run: npm run check:cli-docs
+
+      # Every MCP tool must stay reachable from the terminal and documented;
+      # mio.insight.generate drifted out of both for weeks before anyone noticed.
+      - name: MCP tools are reachable from the CLI
+        run: npm run check:coverage
