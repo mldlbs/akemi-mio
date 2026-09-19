@@ -115,6 +115,12 @@ export function createElectronAPI(ipc: IpcRenderer) {
       options?: {
         useLlmFallback?: boolean
         autoTts?: boolean
+        /**
+         * 三态：
+         * - `true`  → 强制要求确认（即使意图定义里写着 requireConfirmation:false）
+         * - `false` → 跳过确认，直接执行
+         * - 不传    → 尊重意图定义（只读意图不确认，写操作确认）
+         */
         requireConfirm?: boolean
         confirmTimeoutMs?: number
       },

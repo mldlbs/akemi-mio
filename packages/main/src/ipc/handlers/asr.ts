@@ -382,6 +382,15 @@ export function registerAsrHandlers({ agentService, ttsService }: HandlerContext
       options?: {
         useLlmFallback?: boolean
         autoTts?: boolean
+        /**
+         * 三态：
+         * - `true`  → 强制要求确认（覆盖意图定义里的 requireConfirmation:false）
+         * - `false` → 跳过确认，直接执行
+         * - 不传    → 尊重意图定义（只读意图不确认，写操作确认）
+         *
+         * 注意此前写成 `opts.requireConfirm !== false`，使 true 与不传等价，
+         * 调用方传 true 也拦不住 requireConfirmation:false 的只读意图。
+         */
         requireConfirm?: boolean
         confirmTimeoutMs?: number
       },
@@ -408,7 +417,15 @@ export function registerAsrHandlers({ agentService, ttsService }: HandlerContext
             slots: intent.slots,
           }
 
-          const needConfirm = opts.requireConfirm !== false && intent.requireConfirmation !== false
+          // 三态：显式 true 强制确认；显式 false 跳过；不传才看意图定义。
+          // 别写成 `opts.requireConfirm !== false` —— 那会让 true 与不传等价，
+          // 调用方无法用 true 拦下 requireConfirmation:false 的只读意图。
+          const needConfirm =
+            opts.requireConfirm === true
+              ? true
+              : opts.requireConfirm === false
+                ? false
+                : intent.requireConfirmation !== false
           if (needConfirm) {
             if (typeof opts.confirmTimeoutMs === 'number' && opts.confirmTimeoutMs > 0) {
               voiceConfirmationSession.updateConfig({ timeoutMs: opts.confirmTimeoutMs })

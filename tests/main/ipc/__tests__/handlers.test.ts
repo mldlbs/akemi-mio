@@ -740,6 +740,31 @@ describe('IPC handlers', () => {
       expect(ttsService.speak).toHaveBeenCalled()
     })
 
+    // ── requireConfirm 是三态，不是布尔 ──
+    // 之前写成 `opts.requireConfirm !== false`，让 true 与「不传」等价，
+    // 调用方传 true 也拦不住 requireConfirmation:false 的只读意图。
+    // 上面那条只测了 false 这一半，所以漏洞一直藏着。
+    it('requireConfirm:true 能强制拦下意图定义为 false 的只读意图', async () => {
+      const result = await full()({}, '进度如何', { requireConfirm: true })
+
+      expect(result.matched).toBe(true)
+      expect(result.intent.name).toBe('query_plan_status')
+      // query_plan_status 在意图表里是 requireConfirmation:false，
+      // 但调用方显式要求确认 → 必须停下
+      expect(result.awaitingConfirm).toBe(true)
+      expect(result.state).toBe('awaiting_confirm')
+      expect(callTool()).not.toHaveBeenCalled()
+    })
+
+    it('不传 requireConfirm 时尊重意图定义（只读不确认、写操作确认）', async () => {
+      const readOnly = await full()({}, '进度如何')
+      expect(readOnly.awaitingConfirm).toBe(false)
+      expect(callTool()).toHaveBeenCalledWith('list_plans', {})
+
+      const write = await full()({}, '打开 a.ts')
+      expect(write.awaitingConfirm).toBe(true)
+    })
+
     it('LLM fallback 命中时执行 LLM 给出的工具序列', async () => {
       llmService.chatJson.mockResolvedValue({
         data: {
