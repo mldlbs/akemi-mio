@@ -132,3 +132,8 @@ C\357\200\272*
 .workbuddy/
 .workbuddy-ai/
 site/
+
+# Observer pipeline data. `mio observer collect` writes observations to
+# <cwd>/.local/observer by design (project-local, unlike MIO_HOME), so running
+# it inside a git repo would otherwise leave untracked data files behind.
+.local/
