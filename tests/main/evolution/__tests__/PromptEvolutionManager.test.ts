@@ -94,8 +94,12 @@ describe('PromptEvolutionManager', () => {
   })
 
   it('llmEvolvePrompt 失败时回退到硬编码模式', async () => {
+    // NOTE: the runner interface is `runSelfTask` (see PromptEvolutionManager.ts:128).
+    // Mocking `runAgentTask` makes `agentRunner.runSelfTask` undefined, so the call
+    // throws a TypeError *synchronously* and both llmEvolvePrompt cases silently take
+    // the same catch branch -- i.e. neither case tests what it claims to test.
     const failingAgent = {
-      runAgentTask: async () => {
+      runSelfTask: async () => {
         throw new Error('timeout')
       },
     }
@@ -105,12 +109,27 @@ describe('PromptEvolutionManager', () => {
   })
 
   it('llmEvolvePrompt 使用 LLM 输出时解析反模式指令', async () => {
+    // Assert the LLM path actually ran: the version reason must carry the "LLM优化:"
+    // marker that only the success branch produces. Without this the test cannot
+    // distinguish "parsed the LLM output" from "fell through to the hard-coded
+    // fallback" -- both end at version 2.
+    //
+    // NOTE ON FIXTURE LENGTH: the implementation filters parsed lines with
+    // `l.length > 10`, so a short line like '第一条指令' (5 chars) is silently dropped
+    // and the success branch is never taken. Fixture lines must be longer than 10
+    // characters or this test measures the fallback, not the LLM path.
     const mockAgent = {
-      runAgentTask: async () => ({ success: true, summary: '- 第一条指令\n- 第二条指令\n' }),
+      runSelfTask: async () => ({
+        success: true,
+        summary:
+          '- 避免在连续两次分析中检查相同的配置文件以免重复\n- 第三次必须选择项目根目录下未被分析的子目录\n',
+      }),
     }
     const pv = await manager.llmEvolvePrompt('analysis_prompt', '退化', '失败摘要', mockAgent as any)
     expect(pv).not.toBeNull()
     expect(pv!.version).toBe(2)
+    expect(pv!.evolutionReason).toContain('LLM优化')
+    expect(manager.getOverlay('analysis_prompt')).toContain('避免在连续两次分析中检查相同的配置文件以免重复')
   })
 
   it('persistence 跨实例恢复状态', () => {
