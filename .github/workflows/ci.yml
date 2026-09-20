@@ -20,8 +20,15 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      # --max-warnings is required: every rule in eslint.config.mjs is set to
+      # "warn", so without a threshold the exit code is always 0 and this step
+      # cannot fail no matter how many problems it prints. 130 is the current
+      # measured count; injecting a single new violation must fail the build.
+      # NOTE: this number must only ever be lowered deliberately. Fixing a
+      # warning lowers the count and silently loosens the threshold, so when you
+      # clean any up, drop this number to match in the same commit.
       - name: Lint
-        run: npx eslint src/ --ext .ts,.tsx
+        run: npx eslint src/ --ext .ts,.tsx --max-warnings 130
 
       - name: Format check
         run: npx prettier --check "src/**/*.{ts,tsx,json,css}"
