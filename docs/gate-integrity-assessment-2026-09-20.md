@@ -3,30 +3,35 @@
 > 方法：`rnd-quality-assessment` skill 的四种失效模式 + `falsification-testing` 的变异检验。
 > 原则：**没做过变异的门禁标 ⚠️ unverified，绝不标 ✅。** 所有读数可被复核（命令附在表内）。
 
-**本轮结论摘要**：
+**本轮结论摘要**（*为事后更新，见各节内「已更新」标记*）：
 
 - 发现并**已修复** 1 个库级缺陷（`withTimeout` 定时器泄漏 → 全量测试 `exit 1`），
   主进程测试 **2988 passed + 2 errors → 2994 passed + 0 errors**。
 - 发现并**已修复** 2 个「测不到所声称逻辑」的用例（含 1 个 mock 方法名错配）。
-- 发现 **1 个实际失效的门禁**：`lint`（130 条常响警告 + 退出码恒 0）——**未修，待决策**。
-- 发现 **2 道真实红**：`format:check`（20 文件）、`audit`（2 critical + 16 high）。
+- 发现 **1 个实际失效的门禁**：`lint`（130 条常响警告 + 退出码恒 0）—— ✅ **已修**（`28358e4`）。
+- 发现 **2 道真实红**：`format:check`（20 文件）—— ✅ **已修**（`c4c3d2b`）；
+  `audit` —— ⚠️ **性质已变**：被陈旧的 `package-lock.json` 挡住，`npm audit` 已无法复现原读数。
 - **2 道门禁无法运行**（缺打包产物，前置条件）。
+- ★ **新发现（本轮）**：`package-lock.json` 早于 monorepo 化 → **`npm ci` 无法工作**，
+  CI 第一步即失败。**未修，需决策**（见 §5.2）。
+- ★ **我自己有 1 处结论被本轮推翻**：`format:check` 的「不建议动」是错的（见 §5.1 修正）。
 
 ---
 
 ## 一、总览
 
-工作区共 **18 道** 门禁（`package.json` 的 `check:*` / `typecheck*` / `lint` / `format:check` / `test*` / `audit`）。
+工作区共 **19 道** 门禁（`package.json` 的 `check:*` / `typecheck*` / `lint` / `format:check` / `test*` / `audit`）。
 
 | 结论 | 数量 |
 |---|---|
 | ✅ 承重（有防护 + 变异验证红） | 4 |
-| ✅ 承重（有防护，未变异） | 3 |
-| ✅ **本轮修复后恢复承重**（主进程测试） | 1 |
-| ❌ **实际失效**（退出码恒 0，CI 拦不住） | 1 |
+| ✅ 承重（有防护，未变异） | 6 |
+| ✅ **本轮修复后恢复承重**（主进程测试 / `lint` / `format:check`） | 1 |
+| ❌ ~~**实际失效**（退出码恒 0，CI 拦不住）~~ → ✅ **本轮已修**（`lint`） | ~~1~~ 0 |
 | ⚠️ **无法运行**（缺打包产物，前置条件） | 2 |
-| ❌ **真实红**（本次读数失败） | 2 |
-| ⬜ 未评估（需 GPU / 实机 / 长时） | 5 |
+| ⚠️ **无法运行**（lock 陈旧，`npm ci` 不可用） | 1 |
+| ❌ **真实红**（本次读数失败） | 0 |
+| ⬜ 未评估（需 GPU / 实机 / 长时） | 3 |
 
 ---
 
@@ -41,15 +46,15 @@
 | 5 | `typecheck:budget` | `node scripts/typecheck-budget.mjs --budget 0` | 2 个 tsconfig | 0 | ✅ pass | ✅ 有防护 | 0 errors / budget 0，硬预算 |
 | 6 | `test`（主进程） | `npm test` | **2997** | **3** | ✅ **exit 0**（修复后） | ✅ **本轮修复** | 修复前 `2988 passed + 2 errors + exit 1`；见 §4.5 |
 | 7 | `test`（mio-cli） | `cd packages/mio-cli && npm test` | 386/386 | 0 | ✅ pass | ✅ **已变异验证** | 本轮新增 4 条 |
-| 8 | **`lint`** | `npx eslint src/ --ext .ts,.tsx` | — | — | ⚠️ **0 errors / 130 warnings, exit 0** | ❌ **实际失效** | **见 §四（本轮最重要发现）** |
+| 8 | **`lint`** | `npx eslint src/ --ext .ts,.tsx --max-warnings 130` | 130 warn | 0 | ✅ **exit 0**（阈值已加） | ✅ **已修复**（`28358e4`） | 修复前退出码恒 0 —— **见 §四** |
 | 9 | `async-timeout`（新） | `vitest run tests/main/core/utils/__tests__/async-timeout.test.ts` | 6 | 0 | ✅ pass | ✅ **已双向变异** | 修复前 `withTimeout` 零测试 |
-| 10 | `format:check` | `npx prettier --check "src/**/*.{ts,tsx,json,css}"` | 20 文件 | 0 | ❌ **fail (exit 1)** | ✅ 承重（真红） | CI 会拦（ci.yml:27）—— **见 §五** |
-| 11 | `audit` | `npm audit --audit-level=high` | 32 漏洞 | 0 | ❌ **fail (exit 1)** | ✅ 承重（真红） | **2 critical + 16 high** —— 见 §五 |
+| 10 | `format:check` | `npx prettier --check "src/**/*.{ts,tsx,json,css}"` | 20 文件 | 0 | ✅ **exit 0**（已修） | ✅ 承重（真红） | CI 会拦（ci.yml:27）—— **见 §五·修正** |
+| 11 | `audit` | `npm audit --audit-level=high` | — | — | ⚠️ **无法运行 (400)** | ⚠️ unverified | lock 陈旧致 `npm ci` 亦不可用 —— **见 §五** |
 | 12 | `check:renderer-entries` | `node scripts/check-renderer-entries.cjs` | — | — | ❌ **无法运行 (exit 1)** | ⚠️ unverified | 缺 `dist-electron/` |
 | 13 | `check:idle-gpu` | `npm run check:idle-gpu` | — | — | ❌ **无法运行 (exit 2)** | ⚠️ unverified | 缺打包 exe |
 | 14 | `typecheck` / `typecheck:node` / `typecheck:web` | `tsc -p … --noEmit` | 2 工程 | 0 | ✅ pass | ✅ 有防护 | 被 #5 覆盖读数 |
-| 15 | `test:renderer` | `vitest --config vitest.config.renderer.ts` | — | — | ⬜ 未跑 | ⚠️ unverified | 本轮未执行 |
-| 16 | `test:preload` | `vitest --config vitest.config.preload.ts` | — | — | ⬜ 未跑 | ⚠️ unverified | 本轮未执行 |
+| 15 | `test:renderer` | `vitest --config vitest.config.renderer.ts` | 449 | 0 | ✅ pass | ✅ 有防护 | 本轮补跑（验证格式化无害） |
+| 16 | `test:preload` | `vitest --config vitest.config.preload.ts` | 94 | 0 | ✅ pass | ✅ 有防护 | 本轮补跑 |
 | 17 | `test:unit:fast` | `vitest --config vitest.config.unit-fast.ts` | — | — | ⬜ 未跑 | ⚠️ unverified | 本轮未执行 |
 | 18 | `test:stress` | 见 `package.json` | — | — | ⬜ 未跑 | ⚠️ unverified | 需长时；建议单独排期 |
 | 19 | build（CI 内联） | `npx electron-vite build` | — | — | ⬜ 未跑 | ⚠️ unverified | 本机 `emptyOutDir` 撞 safe-delete（已知） |
@@ -107,19 +112,20 @@ exit=0        ← CI 不会失败
 
 （注入已 `cp` 还原，`diff` 确认逐字节一致，md5 `b6683a40…`。）
 
-### 修法（**未实施，需你决策**）
+### 修法（✅ **方案 A 已实施**，commit `28358e4`）
 
 三选一，代价差别很大：
 
 | 方案 | 做法 | 代价 | 风险 |
 |---|---|---|---|
-| **A. 加阈值护栏** | CI 改 `eslint … --max-warnings 130` | 极小 | 低。**只能防新增**，存量 130 条保留。数字需随清理下调 |
+| **A. 加阈值护栏** ✅ **已采用** | CI 改 `eslint … --max-warnings 130` | 极小 | 低。**只能防新增**，存量 130 条保留。数字需随清理下调 |
 | **B. 分级** | `no-unused-vars` 改 `error`；其余留 `warn` | 小 | 中。需先清掉那 70 条，否则 CI 立刻红 |
 | **C. 清理存量** | 清零 70 条 `no-unused-vars` 后转 `error` | **大** | **高**。散在 45 个文件，含多形态渲染层 |
 
 **A 的注意点**：`--max-warnings 130` 是「计数阈值」而非「规则阈值」，不清存量也能立刻获得阻止力——
 但它有一个已知陷阱：任何人**修好**一条未使用变量，计数降到 129，阈值就**失效了**（变宽松）。
 所以 A 必须配合「数字只降不升」的约定，或改用 `--max-warnings 0` + 存量 `eslint-disable` 收口。
+**这条陷阱已写进 `ci.yml` 的注释**，避免下一个人修好警告后把护栏悄悄弄松。
 
 ### 方案 A 已实测验证（不是推测）
 
@@ -243,7 +249,10 @@ Received: "退化"
 
 ## 五、两道真实红（会被 CI 拦住）
 
-### 5.1 `format:check` — 20 个文件未格式化
+### 5.1 `format:check` — 20 个文件未格式化 ✅ **已修复**
+
+> **本节已更新（2026-09-20 16:00）。** 初版结论是「不建议动」，**那个结论是错的**。
+> 修正见下方「修正」小节。
 
 ```
 [warn] Code style issues found in 20 files. Run Prettier with --write to fix.
@@ -275,16 +284,46 @@ src/renderer/src/hooks/useAIOutput.ts
 src/renderer/src/styles/components.css
 ```
 
-⚠️ **不建议无脑 `prettier --write`**：其中 `forms/pet`、`forms/chat`、`forms/wallpaper`、`styles/components.css`
-正是本仓有「样式层叠冲突」历史（`components.css` vs `layout.css` 同名类）和形态窗口问题的区域。
+#### 修正：先量清楚再决定「不能动」
 
-### 5.2 `audit` — 32 个漏洞（2 critical / 16 high / 14 moderate）
+初版我说「⚠️ 不建议无脑 `prettier --write`」，理由是其中含有多形态渲染层与样式层叠历史。
+**风险提示没错，但由它推出的「不动」是错的**——我把「有风险的区域」直接当成了
+「改动有风险」，跳过了中间那步：**先看预览改动到底是什么**。补做后结论反转：
+
+| 检验 | 结果 |
+|---|---|
+| 全部 20 个文件，**忽略行尾后**是否还有差异 | 19 个有，1 个（`useAIOutput.ts`）**纯粹是行尾符假红** |
+| 差异是否只是空白/换行/尾逗号 | 是。逐个 diff 确认只有：折行合并、参数表尾逗号、1 处尾部空行 |
+| 改动后 `typecheck` | exit 0 |
+| 改动后 `typecheck:budget` | 0 errors / budget 0 |
+| 改动后 `test`（主进程全量） | **2994 passed**, 3 skipped, **exit 0** |
+| 改动后 `test:renderer` | **449 passed**, exit 0 |
+| 改动后 `test:preload` | **94 passed**, exit 0 |
+| 改动后 `format:check` | **exit 0**（原 exit 1） |
+| 改动后 `lint` | 130 warnings，**计数未变**（阈值仍有效） |
+
+改动范围经 `git diff --name-only` 核对**恰好是被点名的那些文件**，无溢出。
+`preload/index.ts` 顺带修掉一处真实缺陷：两行语句曾被挤在同一行。
+
+**教训**：`git` 里的版本**本来就是 prettier-clean 的**（`git show HEAD:<file> | prettier --check`
+全部通过）。也就是说这 20 个「红」里，有 1 个是**测量假象**（工作区 CRLF），
+其余 19 个是格式漂移。**「这个区域有历史风险」应当转化为「先做可比对的预览」，
+而不是「所以不要碰」。** 这条已写回 `evidence-based-verification` skill。
+
+### 5.2 `audit` — 被陈旧的 `package-lock.json` 挡住 ⚠️ **未修复，性质已变**
+
+> **本节已更新。** 初版报的是「32 漏洞」，重跑后**这个数字已无法复现**：
+> `npm audit` 现在直接报 `400 Bad Request`。
 
 ```
-32 vulnerabilities (14 moderate, 16 high, 2 critical)
+npm error audit endpoint returned an error
+{ statusCode: 400,
+  message: 'Invalid package tree, run npm install to rebuild your package-lock.json' }
 ```
 
-已识别的一条明确来源：
+查出**两个独立问题**，其中第二个比 CVE 严重：
+
+**(1) `sharp` 的 CVE 真实存在，且修法明确**
 
 ```
 sharp inherited vulnerabilities in libvips:
@@ -292,7 +331,43 @@ CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591
 GHSA-f88m-g3jw-g9cj
 ```
 
-这是**实质安全问题**（非噪音），且 `weekly-audit.yml` 的存在说明团队预期它会周期性地失败。
+去读原始公告确认（非二手转述）：**affected `< 0.35.0`，patched `0.35.0`**，severity High。
+本仓是 `0.34.5`。
+
+但要注意它的**实际暴露面很小**：CVSS 攻击向量是 `AV:L`（本地）、`PR:L`（需低权限），
+且它是 **devDependency**（不进产物）；全仓唯一用法在
+`packages/capabilities/src/tool/definitions/CardGeneratorTool.ts:226`，
+`sharp(Buffer.from(svg)).png().toBuffer()` —— 输入是**我们自己构造的 SVG**
+（`buildCardSVG`），不是不可信输入，公告说的 GIF/TIFF/VIPS 攻击面**根本不可达**。
+升级到 `0.35.x` 的要求也满足（Node ≥20.9，本地 22 / CI 20）。
+**这是一个真 CVE + 真明确的修法 + 极小的实际风险。**
+
+**(2) ★ 更严重：`package-lock.json` 早于 monorepo 化，`npm ci` 无法工作**
+
+```
+lock 里 root 的 workspaces:  undefined        ← package.json 是 ["packages/*"]
+lock 里 packages/ 条目数:     0               ← 实际有 60 个包
+lock 里 @akemi-mio/ 条目:     0               ← 60+ 个包用 "workspace:*" 引用
+lock 文件时间 / 最后提交:      2026-08-22 / 244af61
+```
+
+后果：**任何 `npm install` 都会失败**：
+
+```
+npm error code EUNSUPPORTEDPROTOCOL
+npm error Unsupported URL Type "workspace:": workspace:*
+```
+
+而 CI 的第一步就是 `npm ci`（`ci.yml:18`）。**即 CI 从 monorepo 化那天起就跑不起来**，
+`audit` 的失败只是最先暴露出来的症状。
+
+⚠️ **这是既有状态，与本次改动无关**：`git show HEAD:package-lock.json` 解析后
+`workspaces` 同样是 `undefined`、`packages/` 条目同样是 0。
+
+**我没有擅自重建 lock**：这是 1053 条目的重写，风险与影响面都很大
+（会重新解析 60 个包的依赖树，且本机与 CI 的 lock 必须一致）。
+重建 lock 应当是**单独一件事、单独一次提交**，需要你先确认。
+在那之前，`audit` 的结论**按「无法运行」记，而不是按「32 漏洞」记**。
 
 ---
 
@@ -317,9 +392,19 @@ GHSA-f88m-g3jw-g9cj
 ## 七、口径提醒（给读这份报告的人）
 
 1. **`⚠️ unverified` 不是通过**。它表示「没验证」，不是「没问题」。
-2. **本报告的所有数字都附了命令**，可复核。基准提交：`6dfec76`（本轮含 2 个修复提交）。
-3. **未做的事**：`test:renderer` / `test:preload` / `test:unit:fast` / `test:stress` / build 未跑；
-   它们的承重性未验证。
-4. **一个反复出现的教训**：本报告撰写过程中，我自己有 **3 次**因工具使用不当产生错判——
-   `cmd | head` 吃掉真实退出码（把 exit=2 误读成 0）、`grep "[warn]"` 把方括号当字符类、
-   断言写错导致假红。**每条结论都值得复核**，包括我的。
+2. **本报告的所有数字都附了命令**，可复核。基准提交：`c4c3d2b`（本轮共 5 个修复提交）。
+3. **未做的事**：`test:unit:fast` / `test:stress` / build 未跑；它们的承重性未验证。
+   （`test:renderer` / `test:preload` 已于本轮补跑，因格式化改动需要它们背书。）
+4. **一个反复出现的教训**：本报告撰写过程中，我自己有 **5 次**因工具使用不当或推理跳跃产生错判——
+   - `cmd | head` / `cmd | tail` 吃掉真实退出码（把 `exit=2` 误读成 0，并据此得出过错误的
+     「静默假绿」结论，已撤回）；
+   - `grep "[warn]"` 把方括号当字符类 → 20 个文件报成 0 命中（**写下这条时我上一句刚引用它，
+     却又踩了一次**）；
+   - 写 frontmatter 校验脚本正则写错 → 全报 `name_match=False`（自造假红）；
+   - 用 prettier 的 **Node API** 比对时传 `filepath`，**它不读 `.prettierrc`** → 得到
+     「引号全被改写」的假差异，一度以为格式化会改动语义。CLI 才是对的（会读配置）；
+   - 由「这些文件在样式层叠敏感区」直接推出「所以不要格式化」，**跳过了「先看改动预览」**。
+     §5.1 因此整节结论反转。
+
+   **每条结论都值得复核，包括我的。** 尤其：**任何一次「某道门禁坏了」的结论，
+   先确认自己用的测量工具是对的。** 这 5 次里有 4 次是仪器错，不是被测对象错。
