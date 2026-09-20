@@ -134,3 +134,72 @@ test('status reports 0 pending when no reuse file exists yet', () => {
   const payload = jsonOf(ws, ['status', '--json'])
   assert.equal(payload.pendingAutoClaims, 0)
 })
+
+// ── the cross-agent breakdown ───────────────────────────────────────────────
+//
+// The raw pending count is not the actionable number. ADR-017's confirmation
+// rule is "仅跨 Agent 且真实改变行为才 confirm；同 Agent / 弱关联 / 自报一律
+// 不确认，避免数据污染", so a same-agent auto-claim can never be confirmed.
+// Reporting only the total invites "confirm them all", which is the exact
+// pollution the ADR forbids -- and it would fake behavior-change rate, the
+// metric the confirmation would be cited as improving. The breakdown makes the
+// eligible subset visible so a reviewer is not steered into bulk-confirming.
+
+test('status separates cross-agent claims from same-agent ones', () => {
+  const ws = workspace('cross')
+  // ⚠️ The two counts MUST differ (3 vs 2 here). If they happened to be equal a
+  // predicate swap (cross <-> same) would still satisfy the assertion, and the
+  // mutation check showed exactly that: an inverted filter passed this test
+  // when the fixture held an even 2/2 split. Uneven counts make the test able
+  // to fail.
+  seedReuse(ws, [
+    { ...autoClaim('x1', 'project-alpha'), sourceAgent: 'opencode', targetAgent: 'codex' },
+    { ...autoClaim('x2', 'project-alpha'), sourceAgent: 'codex-observer', targetAgent: 'codex' },
+    { ...autoClaim('x3', 'project-alpha'), sourceAgent: 'mcp', targetAgent: 'codex' },
+    // Same-agent: never eligible, must not inflate the cross-agent figure.
+    autoClaim('s1', 'project-alpha'),
+    autoClaim('s2', 'project-alpha'),
+  ])
+
+  const payload = jsonOf(ws, ['status', '--json'])
+  assert.equal(payload.pendingAutoClaims, 5, 'total still counts every pending claim')
+  assert.equal(payload.pendingCrossAgent, 3, 'only sourceAgent != targetAgent counts as cross-agent')
+})
+
+test('the cross-agent count ignores case differences in agent names', () => {
+  const ws = workspace('cross-case')
+  seedReuse(ws, [
+    { ...autoClaim('c1', 'project-alpha'), sourceAgent: 'OpenCode', targetAgent: 'CODEX' },
+    { ...autoClaim('c2', 'project-alpha'), sourceAgent: 'codex', targetAgent: 'CODEX' },
+  ])
+
+  const payload = jsonOf(ws, ['status', '--json'])
+  assert.equal(payload.pendingCrossAgent, 1, 'agent names compare case-insensitively')
+})
+
+test('the status line warns against confirming non-cross-agent claims', () => {
+  const ws = workspace('warn')
+  // 2 cross / 1 same: total and cross-agent must differ here too, or the line's
+  // "(1 cross-agent)" assertion would pass under an inverted predicate.
+  seedReuse(ws, [
+    { ...autoClaim('x1', 'project-alpha'), sourceAgent: 'opencode', targetAgent: 'codex' },
+    { ...autoClaim('x2', 'project-alpha'), sourceAgent: 'mcp', targetAgent: 'codex' },
+    autoClaim('s1', 'project-alpha'),
+  ])
+
+  const result = run(ws, ['status'])
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /Pending auto-claims: 3 \(2 cross-agent\)/)
+  // The guidance must not read as "confirm them all".
+  assert.match(result.stdout, /same-agent/)
+  assert.match(result.stdout, /ADR-017/)
+})
+
+test('cross-agent is 0 when every pending claim is same-agent', () => {
+  const ws = workspace('allsame')
+  seedReuse(ws, [autoClaim('s1', 'project-alpha'), autoClaim('s2', 'project-beta')])
+
+  const payload = jsonOf(ws, ['status', '--json'])
+  assert.equal(payload.pendingAutoClaims, 2)
+  assert.equal(payload.pendingCrossAgent, 0, 'a same-agent backlog has no confirmable records at all')
+})

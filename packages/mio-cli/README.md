@@ -567,14 +567,28 @@ ADR-017 用四项指标决定控制平面是继续扩展还是回滚。实现见
 既不进记忆排序也不进任务路由，是「哑重」；`mio.experience.confirm` 会把
 `behaviorChanged` 置为 true，从而把它们转入有效证据。真实数据核查发现：确认这一步
 在生产里从未被执行过（全部 reuse 记录的 `confirmed` 字段缺省），于是行为改变率恒为
-0%、数据卫生恒为「93% 未确认」。工具本身工作正常——缺口在于没人按提示执行。
-因此 `mio status` 现在会直接报出全局待确认数：
+0%、数据卫生恒为「93% 未确认」。因此 `mio status` 现在会直接报出全局待确认数以及
+其中**跨 Agent** 的条数：
 
 ```
 mio status
 mio experience list --status pending          # 看具体是哪些
-mio experience confirm --ids a,b,c             # 批量确认
+mio experience confirm --ids a,b,c             # 确认（见下方口径）
 ```
+
+⚠️ **但「待确认 20 条」不等于「该确认 20 条」，不要批量全确认。** ADR-017 的确认口径
+（`docs/adr-017-mio-agent-control-plane.md`，原文出现两次）是：
+
+> 仅**跨 Agent 且真实改变行为**才 `experience.confirm`；**同 Agent / 弱关联 / 自报
+> 一律不确认**，避免数据污染。
+
+同 Agent 的 auto-claim（如 `codex` -> `codex`）在定义上就不可能满足这条，所以原始
+pending 数**高估了可确认的积压**。`mio status` 因此同时报出跨 Agent 的条数，例如
+`Pending auto-claims: 20 (12 cross-agent)`——那 8 条同 Agent 的**不应被确认**。
+
+跨 Agent 也只是**必要条件**：确认前仍须人工核对该 target agent 的真实输出是否
+**明确引用**了 source 记忆并据此改变方案。把不合条件的记录一并 confirm，正是这条
+ADR 要防的数据污染，而且会让行为改变率这个指标本身失真。
 
 ### 注册（`mio agents register`）
 

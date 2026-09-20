@@ -2273,6 +2273,37 @@ function statusCommand(useJson) {
       return 0
     }
   })()
+  // Of those, how many are even *eligible* under the ADR-017 confirmation rule?
+  //
+  // The rule (docs/adr-017-mio-agent-control-plane.md, stated twice) is:
+  // "仅跨 Agent 且真实改变行为才 experience.confirm；同 Agent / 弱关联 / 自报
+  //  一律不确认，避免数据污染."  A same-agent auto-claim can never satisfy it,
+  // so the raw pending count overstates the actionable backlog. Reporting only
+  // the total invites "just confirm them all", which is precisely the data
+  // pollution the ADR exists to prevent -- and it fakes behavior-change rate,
+  // the very metric it would be used to report.
+  //
+  // Note this is a necessary, not sufficient, filter: passing it still requires
+  // a human to check that the target agent's real output cites the source
+  // memory. So it is framed as "candidates to review", not "to confirm".
+  const pendingCrossAgent = (() => {
+    try {
+      // limit is clamped to 100 inside listReuse; the status filter is applied
+      // before the slice, so 100 is plenty for this diagnostic. If the backlog
+      // ever exceeds that the count saturates rather than lying.
+      const records = createExperienceStore({
+        dataDir: MIO_HOME,
+        projectName: () => null,
+      }).listReuse({ status: 'pending', limit: 100 }).records
+      return records.filter(
+        (record) =>
+          String(record.sourceAgent || '').toLowerCase() !==
+          String(record.targetAgent || '').toLowerCase()
+      ).length
+    } catch {
+      return 0
+    }
+  })()
   const payload = {
     version: config.version,
     home: MIO_HOME,
@@ -2280,6 +2311,7 @@ function statusCommand(useJson) {
     serverScriptExists: fs.existsSync(SERVER_SCRIPT),
     agents: config.agents || {},
     pendingAutoClaims,
+    pendingCrossAgent,
     codexInstalled: installed.codex,
     opencodeInstalled: installed.opencode,
     workbuddyInstalled: installed.workbuddy,
@@ -2314,7 +2346,10 @@ function statusCommand(useJson) {
   console.log(`Observer: ${observer.isRunning(MIO_HOME) ? 'running (pid ' + observer.readPid(MIO_HOME) + ')' : 'not running'}`)
   if (pendingAutoClaims > 0) {
     console.log(
-      `Pending auto-claims: ${pendingAutoClaims} -- confirm them with \`mio experience list --status pending\` then \`mio experience confirm --ids <id,...>\``
+      `Pending auto-claims: ${pendingAutoClaims} (${pendingCrossAgent} cross-agent) -- only cross-agent claims whose target output actually cites the source memory may be confirmed; same-agent / weak / self-reported must NOT be (ADR-017).`
+    )
+    console.log(
+      `  review: \`mio experience list --status pending\` then \`mio experience confirm --ids <id,...>\``
     )
   }
 }
