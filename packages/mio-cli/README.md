@@ -549,6 +549,13 @@ ADR-017 用四项指标决定控制平面是继续扩展还是回滚。实现见
 **无样本时输出 `no data`，而不是 `0%`**：`0%` 的意思是「测过了、很差」，
 `no data` 才是「没测」。`--json` 下对应 `null`，客户端必须区分这两种情况。
 
+**报告会带出 Phase 0 基线作对照。** ADR 要求这些数字「对照 Phase 0 基线
+2026-08-17」来读，但基线此前只作为散文存在于 ADR 里，报告给的是没有参照点的裸值。
+现在 `baseline` 字段（`--json`）与输出里的 `baseline …` 行会并列给出基线值。
+基线以 `observed / required` 形式陈述（与 `phase0.js` 的 `current/required` 渲染一致）。
+这一条对 `verified` 尤其重要：它已从基线的 6 跌到 0，裸看只是一句「0」，
+对照读才是「比起步时少了 6、跌破门槛」。
+
 ⚠️ **前两项指标读的是一个设计上就会变空的缓冲区**。`queries.jsonl` 不是评估日志，
 而是 auto-claim 的关联缓冲（见 `server/query-log.js`）：最多 200 条，超过
 `expiresAt`（默认 1 小时）就被清理，`retention.js` 也把它列在 `EXPIRY_BASED_FILES`。

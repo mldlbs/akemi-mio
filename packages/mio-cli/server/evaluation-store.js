@@ -68,6 +68,36 @@ const { REUSE_MATCH_WINDOW_MS } = require('./query-log.js')
 // to the auto-claim window cannot leave this description stale.
 const QUERY_BUFFER_MINUTES = Math.round(REUSE_MATCH_WINDOW_MS / 60000)
 
+// The ADR frames the whole evaluation period as a comparison against the Phase 0
+// baseline, and states it in its own line:
+//
+//   "对照 Phase 0 基线 2026-08-17：hosts 3/2、tasks 176/20、verified 6/5、
+//    improved 30/1"
+//
+// Each pair is `observed / threshold`, which the Phase 0 implementation
+// confirms: phase0.js declares thresholds {minHosts:2, minTaskOutcomes:20,
+// minVerifiedReuse:5, minImprovementEvidence:1} and renders them as
+// `current/required` (phase0.js:313). So `verified 6/5` means verified=6
+// against a required 5 -- passing, with one to spare.
+//
+// Without this the metrics report bare numbers with no reference point, and a
+// regression like verified 6 -> 0 reads as an unremarkable "0" instead of a
+// gate that used to pass and no longer does. Measured 2026-09-20: verified is
+// in fact 0.
+//
+// The keys match phase0's `criteria[].key` values so the two reports can be
+// read side by side.
+const PHASE0_BASELINE = Object.freeze({
+  date: '2026-08-17',
+  source: 'docs/adr-017-mio-agent-control-plane.md',
+  values: Object.freeze({
+    hosts: Object.freeze({ observed: 3, required: 2 }),
+    tasks: Object.freeze({ observed: 176, required: 20 }),
+    verified_reuse: Object.freeze({ observed: 6, required: 5 }),
+    measurable_improvement: Object.freeze({ observed: 30, required: 1 }),
+  }),
+})
+
 function ratio(numerator, denominator) {
   return denominator > 0 ? Math.round((numerator / denominator) * 100) : null
 }
@@ -160,6 +190,14 @@ function createEvaluationStore(options = {}) {
         recallQuality: { file: 'queries.jsonl', durable: false, windowMinutes: QUERY_BUFFER_MINUTES },
         dataHygiene: { file: 'experience_reuse.jsonl', durable: true },
       },
+      // The Phase 0 reference point the ADR asks these numbers to be read
+      // against. Reported verbatim, with no interpretation folded in -- a
+      // caller compares `behaviorChange.verified` to
+      // `baseline.values.verified_reuse.observed` itself. Deliberately NOT
+      // merged into the metrics above: the baseline was measured on different
+      // record shapes, so silently differencing them would be another confident
+      // number with a shaky basis.
+      baseline: PHASE0_BASELINE,
       sample: {
         queries: queries.length,
         routeHits: routeHits.length,

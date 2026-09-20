@@ -340,3 +340,67 @@ test('mio --json agents evaluation emits null rates when there is no sample', ()
   assert.equal(parsed.dataHygiene.pendingRatio, null)
   assert.equal(parsed.sample.reuses, 0)
 })
+
+// ── Phase 0 baseline ────────────────────────────────────────────────────────
+
+// The ADR asks for these numbers to be read against the Phase 0 baseline
+// (2026-08-17), but until now the baseline lived only as prose in the ADR, so
+// the report gave bare values with no reference point. That matters most for
+// `verified`, which has since fallen from 6 to 0 -- a bare "0" reads as
+// unremarkable where "0, below the 6 we started from" does not.
+
+test('the report carries the Phase 0 baseline verbatim', () => {
+  const ws = workspace('baseline', 'proj-a')
+  const result = store(ws).evaluate({ project: ws.project })
+
+  assert.equal(result.baseline.date, '2026-08-17')
+  assert.deepEqual(result.baseline.values.verified_reuse, { observed: 6, required: 5 })
+  assert.deepEqual(result.baseline.values.hosts, { observed: 3, required: 2 })
+  assert.deepEqual(result.baseline.values.tasks, { observed: 176, required: 20 })
+  assert.deepEqual(result.baseline.values.measurable_improvement, { observed: 30, required: 1 })
+})
+
+test('the CLI marks verified as BELOW BASELINE when confirmations are missing', () => {
+  const ws = workspace('baseline-below', 'proj-a')
+  // Reuse records exist and are improved, but none are confirmed -- the real
+  // production state, which is what drops verified to 0.
+  seed(path.join(ws.mioHome, 'experience_reuse.jsonl'), [
+    reuse({ experienceId: 'e1', behaviorChanged: false, outcomeImproved: true, project: ws.project }),
+    reuse({ experienceId: 'e2', behaviorChanged: false, outcomeImproved: true, project: ws.project }),
+  ])
+
+  const r = run(ws.cwd, ws.env, ['agents', 'evaluation', '--project', ws.project])
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /verified \(changed \+ improved\): 0/)
+  assert.match(r.stdout, /baseline 2026-08-17: 6 \(required 5\) -- now 0, BELOW BASELINE/)
+})
+
+test('the CLI reports at or above baseline once confirmations land', () => {
+  const ws = workspace('baseline-met', 'proj-a')
+  // Six confirmed + improved records is exactly the baseline value.
+  seed(
+    path.join(ws.mioHome, 'experience_reuse.jsonl'),
+    Array.from({ length: 6 }, (_, i) =>
+      reuse({
+        experienceId: 'e' + i,
+        confirmed: true,
+        behaviorChanged: true,
+        outcomeImproved: true,
+        project: ws.project,
+      })
+    )
+  )
+
+  const r = run(ws.cwd, ws.env, ['agents', 'evaluation', '--project', ws.project])
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /now 6, at or above/)
+})
+
+test('the baseline is present in the JSON payload too', () => {
+  const ws = workspace('baseline-json', 'proj-a')
+  const r = run(ws.cwd, ws.env, ['--json', 'agents', 'evaluation', '--project', ws.project])
+  assert.equal(r.status, 0, r.stderr)
+  const parsed = JSON.parse(r.stdout)
+  assert.equal(parsed.baseline.date, '2026-08-17')
+  assert.equal(parsed.baseline.values.verified_reuse.observed, 6)
+})

@@ -2526,6 +2526,18 @@ function printEvaluation(result) {
   console.log('   2. behaviour change rate (confirmed behaviorChanged / reuses)')
   printRate('changed', result.behaviorChange, 'confirmed', 'total', 'reuses')
   console.log(`      verified (changed + improved): ${result.behaviorChange.verified}`)
+  // The ADR reads these numbers against the Phase 0 baseline, so show the
+  // reference point next to the value. `verified` is the one that has actually
+  // regressed (6 -> 0) through nothing but missing confirmations, and a bare
+  // "0" hides that a gate which used to pass no longer does.
+  const base = result.baseline && result.baseline.values && result.baseline.values.verified_reuse
+  if (base) {
+    const now = result.behaviorChange.verified
+    const verdict = now >= base.observed ? 'at or above' : now >= base.required ? 'above threshold, below baseline' : 'BELOW BASELINE'
+    console.log(
+      `      baseline ${result.baseline.date}: ${base.observed} (required ${base.required}) -- now ${now}, ${verdict}`,
+    )
+  }
   console.log('   3. recall quality (queries with results that led to a reuse)')
   printRate('yield', result.recallQuality, 'queriesLinkedToReuse', 'queriesWithResults', 'queries', 'yield')
   if (result.recallQuality.emptyQueryRate !== null) {
