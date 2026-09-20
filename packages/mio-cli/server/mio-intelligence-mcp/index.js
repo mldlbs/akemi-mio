@@ -13,6 +13,7 @@ const { createMemoryStore } = require('../memory-store.js')
 const { createExperienceStore, REUSE_STATUS_FILTERS } = require('../experience-store.js')
 const { createPolicyStore } = require('../policy-store.js')
 const { createAgentStore } = require('../agent-store.js')
+const { createEvaluationStore } = require('../evaluation-store.js')
 const { createTaskStore } = require('../task-store.js')
 const { createQueryLog } = require('../query-log.js')
 const { createSubscriptionStore } = require('../subscription-store.js')
@@ -215,6 +216,10 @@ const { policyCheck } = policyStore
 // (mio agents list / report) and this MCP tool report identical telemetry.
 const agentStore = createAgentStore({ dataDir, projectName })
 const { listAgents, reportAgent, registerAgent } = agentStore
+
+// ADR-017 evaluation metrics, same store the CLI uses (`mio agents evaluation`).
+const evaluationStore = createEvaluationStore({ dataDir, projectName })
+const evaluateAgents = (args) => evaluationStore.evaluate(args)
 
 // task.route delegates to the shared store so the CLI (`mio task route`) and
 // this MCP tool route identically. The MCP keeps feeding the query log
@@ -538,6 +543,18 @@ const TOOLS = [
       properties: {
         agentId: { type: 'string', description: 'Agent to report on. Omit for all agents.' },
         project: { type: 'string', description: 'Project name filter. Defaults to current repository.' },
+      },
+    },
+  },
+  {
+    name: 'mio.agent.evaluation',
+    description:
+      'ADR-017 evaluation-period metrics: route adoption rate, behaviour change rate, recall quality, and data hygiene (pending auto-claim ratio). Each metric reports its own denominator, so a null rate means "no samples" rather than "zero".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Project name filter. Defaults to current repository.' },
+        since: { type: 'string', description: 'ISO timestamp; only count records at or after it.' },
       },
     },
   },
@@ -976,6 +993,8 @@ async function callTool(name, args = {}) {
       return listAgents(args)
     case 'mio.agent.report':
       return reportAgent(args)
+    case 'mio.agent.evaluation':
+      return evaluateAgents(args)
     case 'mio.evolution.report':
       return evolutionReport(args)
     case 'mio.evolution.status':

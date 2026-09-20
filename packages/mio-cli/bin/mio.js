@@ -25,6 +25,7 @@ const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine } = require('../server/creativity-engine.js')
 const { createAgentStore } = require('../server/agent-store.js')
+const { createEvaluationStore } = require('../server/evaluation-store.js')
 const { createInsightStore } = require('../server/insight-store.js')
 const { createObserverStore } = require('../server/observer-store.js')
 const { loadPhase0, renderPhase0Markdown } = require('../server/mio-intelligence-mcp/phase0.js')
@@ -334,6 +335,11 @@ function cliCreativityEngine() {
 // shares one store with the MCP server, so CLI and MCP report identical agents.
 function cliAgentStore() {
   return createAgentStore({ dataDir: MIO_HOME, projectName })
+}
+
+// ADR-017 evaluation metrics share one store with mio.agent.evaluation.
+function cliEvaluationStore() {
+  return createEvaluationStore({ dataDir: MIO_HOME, projectName })
 }
 
 // Task routing shares one store with mio.task.route. persistQuery stays false:
@@ -2344,6 +2350,25 @@ function agentsCommand(args, useJson) {
     return printAgentReport(result)
   }
 
+  // ADR-017 evaluation metrics. Read-only, so no --yes gate: it inspects the
+  // period's numbers and writes nothing.
+  if (sub === 'evaluation') {
+    const flags = args.slice(2)
+    let result
+    try {
+      result = cliEvaluationStore().evaluate({
+        project: optionValue(flags, '--project'),
+        since: optionValue(flags, '--since'),
+      })
+    } catch (error) {
+      console.error(error.message || error)
+      process.exitCode = 1
+      return
+    }
+    if (useJson) return jsonOrText(result, true)
+    return printEvaluation(result)
+  }
+
   if (sub === 'register') {
     const flags = args.slice(2)
     const agentId = optionValue(flags, '--agent-id')
@@ -2412,7 +2437,7 @@ function agentsCommand(args, useJson) {
   }
 
   console.error(`Unknown agents subcommand: ${sub}`)
-  console.error('Usage: mio agents [list|register|report] [--agent X] [--project Y]')
+  console.error('Usage: mio agents [list|register|report|evaluation] [--agent X] [--project Y]')
   process.exitCode = 1
 }
 
@@ -2446,6 +2471,49 @@ function printAgentReport(result) {
     )
     console.log(`   memories: ${r.memories}  experience reuses: ${r.experienceReuses.total} (verified ${r.experienceReuses.verified})`)
     console.log(`   last seen: ${when} | sessions=${r.sessionCount}`)
+  }
+}
+
+// A metric with a null rate has no samples behind it. Printing "0%" there is
+// the lie this repo keeps re-learning: it reads as "measured, and it is bad"
+// when the truth is "not measured". So say so.
+//
+// `rateKey` is passed explicitly rather than assumed to be `rate`: the recall
+// and hygiene blocks name theirs `yield` and `pendingRatio`, and defaulting to
+// `rate` printed a confident `undefined%` on empty data.
+function printRate(label, metric, numeratorKey, denominatorKey, unit, rateKey = 'rate') {
+  const rate = metric[rateKey]
+  if (rate === null || rate === undefined) {
+    console.log(`   ${label}: no data (${denominatorKey} = 0)`)
+    return
+  }
+  console.log(`   ${label}: ${rate}% (${metric[numeratorKey]}/${metric[denominatorKey]} ${unit})`)
+}
+
+function printEvaluation(result) {
+  const s = result.sample
+  console.log(
+    `ADR-017 evaluation${result.project ? ` (project=${result.project})` : ''}${result.since ? ` since ${result.since}` : ''}`,
+  )
+  console.log(
+    `   sample: queries=${s.queries} routeHits=${s.routeHits} reuses=${s.reuses} traces=${s.traces} agents=${s.agents}`,
+  )
+  console.log('   1. route adoption rate (hit and acted on / hits)')
+  printRate('adoption', result.routeAdoption, 'adopted', 'routeHits', 'experience hits')
+  console.log('   2. behaviour change rate (confirmed behaviorChanged / reuses)')
+  printRate('changed', result.behaviorChange, 'confirmed', 'total', 'reuses')
+  console.log(`      verified (changed + improved): ${result.behaviorChange.verified}`)
+  console.log('   3. recall quality (queries with results that led to a reuse)')
+  printRate('yield', result.recallQuality, 'queriesLinkedToReuse', 'queriesWithResults', 'queries', 'yield')
+  if (result.recallQuality.emptyQueryRate !== null) {
+    console.log(`      empty queries: ${result.recallQuality.emptyQueries} (${result.recallQuality.emptyQueryRate}%)`)
+  }
+  console.log('   4. data hygiene (pending auto-claims / reuses)')
+  printRate('pending', result.dataHygiene, 'pendingAutoClaims', 'total', 'reuses', 'pendingRatio')
+  if (result.taskOutcomes.total > 0) {
+    console.log(
+      `   task outcomes: ${result.taskOutcomes.total} total, ${result.taskOutcomes.success} success, ${result.taskOutcomes.failure} failure (${result.taskOutcomes.successRate}% success)`,
+    )
   }
 }
 
@@ -2821,6 +2889,7 @@ Usage:
   mio agents list             List observed agents (from agents.jsonl, --project X)
   mio agents report           Report per-agent task/memory/reuse telemetry (--agent X, --project Y)
   mio agents register --agent-id X   Register an observed agent (--yes to apply; previews by default)
+  mio agents evaluation       ADR-017 evaluation metrics: route adoption, behaviour change, recall quality, data hygiene (--project X, --since ISO)
   mio evolution status        Show composed evolution module health
   mio evolution report        Cross-agent evolution report: ecosystem, agents, memory health, suggestions (--period 24h|7d|30d|all)
   mio evolution shadow record      Record a shadow comparison sample

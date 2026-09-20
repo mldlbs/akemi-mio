@@ -30,6 +30,7 @@ mio agents                  List installed host adapters
 mio agents list             List observed agents (from agents.jsonl, --project X)
 mio agents report           Report per-agent task/memory/reuse telemetry (--agent X, --project Y)
 mio agents register --agent-id X   Register an observed agent (--yes to apply; previews by default)
+mio agents evaluation       ADR-017 evaluation metrics: route adoption, behaviour change, recall quality, data hygiene (--project X, --since ISO)
 mio evolution status        Show composed evolution module health
 mio evolution report        Cross-agent evolution report: ecosystem, agents, memory health, suggestions (--period 24h|7d|30d|all)
 mio evolution shadow record      Record a shadow comparison sample
@@ -79,7 +80,7 @@ mio --version                Print the version and exit (-V)
 
 ## MCP 工具
 
-MCP 服务端在 5 大域共暴露 48 个工具：
+MCP 服务端在 5 大域共暴露 49 个工具：
 
 ### 记忆（11）
 `mio.memory.query` · `mio.memory.record` · `mio.memory.archive` · `mio.memory.merge` · `mio.memory.migrate` · `mio.memory.analyze` · `mio.memory.forget` · `mio.experience.list` · `mio.experience.confirm` · `mio.experience.reuse` · `mio.policy.check`
@@ -95,8 +96,8 @@ MCP 服务端在 5 大域共暴露 48 个工具：
 ### 创意引擎（4）
 `mio.creativity.generate` · `mio.creativity.ferment` · `mio.creativity.list` · `mio.creativity.status`
 
-### 任务、Agent 与演化（15）
-`mio.task.route` · `mio.task.record_outcome` · `mio.agent.register` · `mio.agent.list` · `mio.agent.report` · `mio.host.capabilities` · `mio.evolution.status` · `mio.evolution.report` · `mio.evolution.shadow.record` · `mio.evolution.dual_write.record` · `mio.evolution.cutover.readiness` · `mio.evolution.cutover.apply` · `mio.evolution.migration.plan` · `mio.evolution.authority.plan` · `mio.phase0.report`
+### 任务、Agent 与演化（16）
+`mio.task.route` · `mio.task.record_outcome` · `mio.agent.register` · `mio.agent.list` · `mio.agent.report` · `mio.agent.evaluation` · `mio.host.capabilities` · `mio.evolution.status` · `mio.evolution.report` · `mio.evolution.shadow.record` · `mio.evolution.dual_write.record` · `mio.evolution.cutover.readiness` · `mio.evolution.cutover.apply` · `mio.evolution.migration.plan` · `mio.evolution.authority.plan` · `mio.phase0.report`
 
 ## 包
 
