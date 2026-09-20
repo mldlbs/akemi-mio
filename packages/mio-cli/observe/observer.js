@@ -39,8 +39,19 @@ function cleanText(text) {
 function projectFromDirName(dirName) {
   // WorkBuddy project dirs encode the workspace path with dashes, e.g.
   // "d-work-code-douyin_store" -> "douyin_store"
+  //
+  // Hosts that munge a timestamped workspace path produce a trailing numeric
+  // segment, e.g. "c-Users-me-WorkBuddy-2026-08-27-17-37-10" -> "10". Using
+  // the seconds field as a project name funnels unrelated sessions into
+  // colliding 2-digit buckets that recall never resolves to, so fall back to
+  // the whole directory name in that case.
+  //
+  // ⚠️ The test must be /^\d+$/ (one backslash). An earlier revision wrote
+  // /^\\d+$/ -- that matches a literal backslash followed by "d", so it never
+  // fires and every numeric segment becomes the project (fixed 2026-09-20).
+  // Keep the escaping as-is; do not "tidy" it into a double backslash.
   const parts = String(dirName || '').split('-').filter(Boolean)
-  if (parts.length > 1 && /^\\d+$/.test(parts[parts.length - 1])) {
+  if (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) {
     return dirName || 'unknown'
   }
   return parts.length > 1 ? parts[parts.length - 1] : dirName || 'unknown'
@@ -1703,4 +1714,7 @@ module.exports = {
   stopBackground,
   isRunning,
   readPid,
+  // exported for tests: the numeric-segment guard here was silently dead for
+  // several releases because nothing exercised it (see __tests__/observer-project.test.js)
+  projectFromDirName,
 }
