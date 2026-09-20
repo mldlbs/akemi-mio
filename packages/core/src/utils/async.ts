@@ -18,13 +18,28 @@ export function createTimeoutSignal(timeoutMs: number): { controller: AbortContr
  *      拖着 event loop、推迟进程退出。
  *   2. timeout 先触发时，fn 之后才 reject 同理。
  * 所以这里 finally 里 clearTimeout，并给 fn 挂一个空 catch 吃掉落选后的 rejection。
+ *
+ * ⚠️ `fn()` 必须在 try 内调用：`fn` 同步抛出时（例如 runner 根本没有那个方法，
+ * 调用即 TypeError），若 `fn()` 写在 try 之前，异常会绕过 finally ——
+ * timer 不会被清掉，那个已经建好的 `timeout` promise 也没人接，
+ * 到期后变成 Unhandled Rejection。单文件跑得快时定时器还没到点进程就退了，
+ * 只有在长时/并发运行里才暴露，因此这个缺陷藏得很深。
  */
 export async function withTimeout<T>(fn: () => Promise<T>, timeoutMs: number, errorMsg = 'timeout'): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
+  // `timeout` 一旦建成，就必须保证有处理者：同步抛出时由下面的 catch 分支接手。
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
   })
-  const work = fn()
+  let work: Promise<T>
+  try {
+    work = fn()
+  } catch (err) {
+    // fn 同步抛出：定时器已建但 work 不存在，必须自己收掉两样东西再抛出。
+    clearTimeout(timer)
+    timeout.catch(() => {})
+    throw err
+  }
   work.catch(() => {})
   try {
     return await Promise.race([work, timeout])
