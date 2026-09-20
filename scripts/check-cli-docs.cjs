@@ -66,6 +66,16 @@ const MCP_HANDSHAKE = [
 ].join('\n') + '\n'
 const TIMEOUT_MS = 20000
 
+// A command that hits the timeout is retried once with a much longer budget.
+//
+// `mio status` shells out to git and probes five host configs, so it lands
+// around 4-7s on an idle machine -- inside the budget, but with little headroom.
+// On a loaded machine it blew past 20s and the gate reported it as "does not
+// exist", which is both wrong and the most misleading thing this gate can say:
+// the command is fine, the budget was too tight. Retrying separates "slow" from
+// "broken", and a genuine hang still fails on the second attempt.
+const RETRY_TIMEOUT_MS = 120000
+
 function readmeCommandBlock() {
   const text = fs.readFileSync(README, 'utf8')
   const match = text.match(/```text\r?\n([\s\S]*?)```/)
@@ -156,21 +166,36 @@ for (const { raw, command, sub } of commands) {
   }
   const safe = SAFE_ARGS[`${command}:${sub || ''}`]
   const args = [command, ...(sub ? [sub] : []), ...(safe || [])]
-  let result
-  try {
-    result = spawnSync(process.execPath, [CLI, ...args], {
+  const run = (timeout) =>
+    spawnSync(process.execPath, [CLI, ...args], {
       encoding: 'utf8',
       env,
-      timeout: TIMEOUT_MS,
+      timeout,
     })
+  let result
+  try {
+    result = run(TIMEOUT_MS)
+    // spawnSync does not throw on timeout; it sets `error` with code ETIMEDOUT.
+    // Retry slowly before concluding anything: a command that is merely slow on
+    // a loaded machine must not be reported as missing.
+    if (result.error && result.error.code === 'ETIMEDOUT') {
+      result = run(RETRY_TIMEOUT_MS)
+    }
   } catch (err) {
     // spawnSync throws on timeout only when the child was killed; treat as drift
     // so a hanging command is reported rather than silently passing.
-    drift.push({ raw, message: `timed out after ${TIMEOUT_MS}ms` })
+    drift.push({ raw, message: `timed out after ${RETRY_TIMEOUT_MS}ms` })
     continue
   }
   if (result.error) {
-    drift.push({ raw, message: String(result.error.message || result.error) })
+    const code = result.error.code
+    drift.push({
+      raw,
+      message:
+        code === 'ETIMEDOUT'
+          ? `timed out after ${RETRY_TIMEOUT_MS}ms (twice) -- the command may hang`
+          : String(result.error.message || result.error),
+    })
     continue
   }
   checked += 1
