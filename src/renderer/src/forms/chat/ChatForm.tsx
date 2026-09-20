@@ -81,12 +81,7 @@ export function ChatForm() {
           <button className="chat-icon-btn" onClick={clear} title="清空会话" aria-label="清空会话" disabled={messages.length === 0}>
             ⌫
           </button>
-          <button
-            className="chat-icon-btn"
-            onClick={() => void toggleForm('pet')}
-            title="切换到宠物形态"
-            aria-label="切换到宠物形态"
-          >
+          <button className="chat-icon-btn" onClick={() => void toggleForm('pet')} title="切换到宠物形态" aria-label="切换到宠物形态">
             ❀
           </button>
           <button

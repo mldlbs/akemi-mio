@@ -74,16 +74,30 @@
   animation: pet-deco-float 2.6s ease-in-out infinite;
 }
 
-.pet-deco-thinking circle:nth-child(1) { animation: pet-deco-float 2.6s ease-in-out infinite; }
-.pet-deco-thinking circle:nth-child(2) { animation: pet-deco-float 2.6s ease-in-out 0.18s infinite; }
-.pet-deco-thinking circle:nth-child(3) { animation: pet-deco-float 2.6s ease-in-out 0.36s infinite; }
+.pet-deco-thinking circle:nth-child(1) {
+  animation: pet-deco-float 2.6s ease-in-out infinite;
+}
+.pet-deco-thinking circle:nth-child(2) {
+  animation: pet-deco-float 2.6s ease-in-out 0.18s infinite;
+}
+.pet-deco-thinking circle:nth-child(3) {
+  animation: pet-deco-float 2.6s ease-in-out 0.36s infinite;
+}
 
-.pet-deco-sleepy text:nth-child(1) { animation: pet-deco-float 3.2s ease-in-out infinite; }
-.pet-deco-sleepy text:nth-child(2) { animation: pet-deco-float 3.2s ease-in-out 0.3s infinite; }
-.pet-deco-sleepy text:nth-child(3) { animation: pet-deco-float 3.2s ease-in-out 0.6s infinite; }
+.pet-deco-sleepy text:nth-child(1) {
+  animation: pet-deco-float 3.2s ease-in-out infinite;
+}
+.pet-deco-sleepy text:nth-child(2) {
+  animation: pet-deco-float 3.2s ease-in-out 0.3s infinite;
+}
+.pet-deco-sleepy text:nth-child(3) {
+  animation: pet-deco-float 3.2s ease-in-out 0.6s infinite;
+}
 
 /* ── 一次性动作 ── */
-.pet-gesture-blink { animation: pet-breathe 3.4s ease-in-out infinite; }
+.pet-gesture-blink {
+  animation: pet-breathe 3.4s ease-in-out infinite;
+}
 
 .pet-gesture-wave .pet-arm-right {
   animation: pet-wave 0.4s ease-in-out 2;
@@ -165,7 +179,9 @@
   color: oklch(0.85 0.012 85);
   background: transparent;
   cursor: pointer;
-  transition: background 0.16s ease, color 0.16s ease;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
 }
 
 .pet-tool-btn:hover {
@@ -182,56 +198,116 @@
 
 /* 呼吸：以垂直方向轻微缩放模拟胸腔起伏 */
 @keyframes pet-breathe {
-  0%, 100% { transform: scaleY(1) scaleX(1); }
-  50% { transform: scaleY(1.025) scaleX(0.99); }
+  0%,
+  100% {
+    transform: scaleY(1) scaleX(1);
+  }
+  50% {
+    transform: scaleY(1.025) scaleX(0.99);
+  }
 }
 
 /* 漂浮：整体上下位移，幅度很小，只为脱离"贴纸感" */
 @keyframes pet-float {
-  0%, 100% { translate: 0 0; }
-  50% { translate: 0 -4px; }
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -4px;
+  }
 }
 
 @keyframes pet-glow-pulse {
-  0%, 100% { opacity: 0.75; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 @keyframes pet-arm-sway-l {
-  0%, 100% { transform: rotate(0deg); }
-  50% { transform: rotate(4deg); }
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(4deg);
+  }
 }
 
 @keyframes pet-arm-sway-r {
-  0%, 100% { transform: rotate(0deg); }
-  50% { transform: rotate(-4deg); }
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(-4deg);
+  }
 }
 
 @keyframes pet-deco-float {
-  0%, 100% { transform: translateY(0); opacity: 0.75; }
-  50% { transform: translateY(-4px); opacity: 1; }
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.75;
+  }
+  50% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
 }
 
 @keyframes pet-wave {
-  0%, 100% { transform: rotate(0deg); }
-  50% { transform: rotate(-38deg); }
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(-38deg);
+  }
 }
 
 @keyframes pet-bounce {
-  0% { transform: translateY(0) scaleY(1); }
-  30% { transform: translateY(-16px) scaleY(1.06); }
-  60% { transform: translateY(0) scaleY(0.94); }
-  80% { transform: translateY(-4px) scaleY(1.02); }
-  100% { transform: translateY(0) scaleY(1); }
+  0% {
+    transform: translateY(0) scaleY(1);
+  }
+  30% {
+    transform: translateY(-16px) scaleY(1.06);
+  }
+  60% {
+    transform: translateY(0) scaleY(0.94);
+  }
+  80% {
+    transform: translateY(-4px) scaleY(1.02);
+  }
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
 }
 
 @keyframes pet-tilt {
-  0%, 100% { transform: rotate(0deg); }
-  35% { transform: rotate(9deg); }
-  70% { transform: rotate(-4deg); }
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  35% {
+    transform: rotate(9deg);
+  }
+  70% {
+    transform: rotate(-4deg);
+  }
 }
 
 @keyframes pet-bubble-in {
-  0% { opacity: 0; transform: translateX(-50%) translateY(6px) scale(0.94); }
-  100% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px) scale(0.94);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
 }

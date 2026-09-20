@@ -65,10 +65,7 @@ export function useChatForm(): ChatFormState {
 
       const replyId = nextId()
       streamingIdRef.current = replyId
-      setMessages((prev) => [
-        ...prev,
-        { id: replyId, role: 'assistant', text: '', at: Date.now(), streaming: true },
-      ])
+      setMessages((prev) => [...prev, { id: replyId, role: 'assistant', text: '', at: Date.now(), streaming: true }])
 
       const bridge = readBridge()
       try {
@@ -77,9 +74,7 @@ export function useChatForm(): ChatFormState {
           const reply =
             typeof result === 'string'
               ? result
-              : ((result as { text?: string; content?: string } | null)?.text ??
-                (result as { content?: string } | null)?.content ??
-                '')
+              : ((result as { text?: string; content?: string } | null)?.text ?? (result as { content?: string } | null)?.content ?? '')
           if (reply) appendAssistantText(replyId, reply)
         } else {
           // 降级：桥不可用时给一个本地回声，让 UI 流程完整可演示

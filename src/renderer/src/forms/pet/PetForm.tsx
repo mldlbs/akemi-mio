@@ -13,14 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PetAvatar } from './PetAvatar'
 import type { PetGesture, PetMood } from '../types'
-import {
-  broadcast,
-  hasFormBridge,
-  onAgentActivity,
-  onBroadcast,
-  setFormVisible,
-  setIgnoreMouseEvents,
-} from '../runtime'
+import { broadcast, hasFormBridge, onAgentActivity, onBroadcast, setFormVisible, setIgnoreMouseEvents } from '../runtime'
 import { toolLabel } from '../types'
 import './styles.css'
 
@@ -315,11 +308,7 @@ export function PetForm() {
       title="单击互动 · 双击打开对话框 · 拖拽移动"
     >
       {/* 悬停工具条：常驻会挡住小人，所以只在靠近时浮现 */}
-      <div
-        className="pet-toolbar form-no-drag"
-        data-passthrough-hit=""
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="pet-toolbar form-no-drag" data-passthrough-hit="" onClick={(e) => e.stopPropagation()}>
         <button
           className={`pet-tool-btn ${passthrough ? 'is-active' : ''}`}
           onClick={togglePassthrough}

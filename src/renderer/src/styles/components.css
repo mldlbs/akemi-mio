@@ -10166,7 +10166,9 @@
   height: 7px;
   border-radius: 50%;
   background: oklch(0.45 0.02 45);
-  transition: background 0.18s ease, box-shadow 0.18s ease;
+  transition:
+    background 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .form-switcher-dot.is-on {
@@ -10175,8 +10177,14 @@
 }
 
 @keyframes form-menu-in {
-  0% { opacity: 0; transform: translateY(-5px) scale(0.98); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
+  0% {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* 快捷键提示：用 kbd 元素而非 span，语义正确且便于样式统一 */

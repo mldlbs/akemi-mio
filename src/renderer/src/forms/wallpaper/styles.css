@@ -65,10 +65,7 @@
   position: absolute;
   inset: 0;
   opacity: 0.035;
-  background-image: repeating-conic-gradient(
-    oklch(1 0 0 / 0.5) 0% 25%,
-    transparent 0% 50%
-  );
+  background-image: repeating-conic-gradient(oklch(1 0 0 / 0.5) 0% 25%, transparent 0% 50%);
   background-size: 3px 3px;
   mix-blend-mode: overlay;
 }
@@ -159,8 +156,14 @@
    不构成常驻出帧源 —— 与上面被移除的三条 infinite 动画有本质区别。
    只有在信息卡首次出现的那半秒里会引发重绘，之后静止。 */
 @keyframes wp-info-in {
-  0% { opacity: 0; transform: translateY(10px); }
-  100% { opacity: 1; transform: translateY(0); }
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 信息卡的进度条 —— 仅在有进行中任务时出现 */
@@ -176,10 +179,6 @@
 .wp-info-progress-fill {
   height: 100%;
   border-radius: 2px;
-  background: linear-gradient(
-    90deg,
-    oklch(0.72 0.14 calc(var(--wp-hue) + 20)),
-    oklch(0.84 0.125 80)
-  );
+  background: linear-gradient(90deg, oklch(0.72 0.14 calc(var(--wp-hue) + 20)), oklch(0.84 0.125 80));
   transition: width 0.6s cubic-bezier(0.34, 1.2, 0.64, 1);
 }

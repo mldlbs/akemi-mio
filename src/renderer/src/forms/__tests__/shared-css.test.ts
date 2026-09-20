@@ -23,7 +23,10 @@ function rulesWithFullHeight(css: string): { selector: string; selectors: string
   const out: { selector: string; selectors: string[] }[] = []
   for (const m of stripComments(css).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     if (!/height\s*:\s*100%/.test(m[2])) continue
-    const selectors = m[1].split(',').map((s) => s.trim()).filter(Boolean)
+    const selectors = m[1]
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
     out.push({ selector: m[1].trim(), selectors })
   }
   return out

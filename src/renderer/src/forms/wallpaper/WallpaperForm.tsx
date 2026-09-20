@@ -182,22 +182,9 @@ export function WallpaperForm() {
       <div className="wp-grain" aria-hidden="true" />
 
       {/* ── 星图层 ── */}
-      <svg
-        className="wp-stars"
-        viewBox="0 0 100 100"
-        preserveAspectRatio="none"
-        aria-hidden="true"
-      >
+      <svg className="wp-stars" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         {stars.map((s, i) => (
-          <circle
-            key={i}
-            cx={s.x}
-            cy={s.y}
-            r={s.r * 0.06}
-            fill="oklch(0.95 0.01 85)"
-            opacity={s.o}
-            className="wp-star"
-          />
+          <circle key={i} cx={s.x} cy={s.y} r={s.r * 0.06} fill="oklch(0.95 0.01 85)" opacity={s.o} className="wp-star" />
         ))}
       </svg>
 

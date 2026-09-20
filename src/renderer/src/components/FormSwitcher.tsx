@@ -37,9 +37,7 @@ export function FormSwitcher() {
   // 展开时刷新各形态的真实可见状态 —— 用户可能已通过宠物上的 ✕ 关掉了它，
   // 这里必须以后端实际状态为准，不能靠本地记忆。
   const refresh = useCallback(async () => {
-    const entries = await Promise.all(
-      FORM_KINDS.map(async (kind) => [kind, await isFormVisible(kind)] as const),
-    )
+    const entries = await Promise.all(FORM_KINDS.map(async (kind) => [kind, await isFormVisible(kind)] as const))
     setVisible(Object.fromEntries(entries) as Record<FormKind, boolean>)
   }, [])
 
@@ -60,13 +58,10 @@ export function FormSwitcher() {
     }
   }, [open, refresh])
 
-  const handleToggle = useCallback(
-    async (kind: FormKind) => {
-      const nowVisible = await toggleForm(kind)
-      setVisible((prev) => ({ ...prev, [kind]: nowVisible }))
-    },
-    [],
-  )
+  const handleToggle = useCallback(async (kind: FormKind) => {
+    const nowVisible = await toggleForm(kind)
+    setVisible((prev) => ({ ...prev, [kind]: nowVisible }))
+  }, [])
 
   const anyVisible = FORM_KINDS.some((k) => visible[k])
 

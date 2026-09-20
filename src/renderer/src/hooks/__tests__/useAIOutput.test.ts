@@ -353,17 +353,14 @@ describe('useAIOutput', () => {
 
     // TIMEOUT 等码产自 ChatExecutor.run() 内部，那时 insertMessage(userMsg) 已经执行 ——
     // 消息已在历史里，回填会让用户重发一遍，所以必须排除。
-    it.each(['TIMEOUT', 'NETWORK', 'NO_KEY', 'EMPTY_RESPONSE', 'API_ERROR:503'])(
-      '%s 不回填（消息已落库）',
-      async (code) => {
-        window.electronAPI.chat = vi.fn().mockResolvedValue({ error: code })
-        const { result } = renderHook(() => useAIOutput('sess-1', false, vi.fn()))
-        await act(async () => {
-          await result.current.handleTextSubmit('hi')
-        })
-        expect(result.current.restoreDraft).toBeNull()
-      },
-    )
+    it.each(['TIMEOUT', 'NETWORK', 'NO_KEY', 'EMPTY_RESPONSE', 'API_ERROR:503'])('%s 不回填（消息已落库）', async (code) => {
+      window.electronAPI.chat = vi.fn().mockResolvedValue({ error: code })
+      const { result } = renderHook(() => useAIOutput('sess-1', false, vi.fn()))
+      await act(async () => {
+        await result.current.handleTextSubmit('hi')
+      })
+      expect(result.current.restoreDraft).toBeNull()
+    })
 
     it('正常回复不回填', async () => {
       window.electronAPI.chat = vi.fn().mockResolvedValue({ reply: 'ok' })

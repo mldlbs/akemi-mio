@@ -82,10 +82,7 @@ function stageHue(container: HTMLElement): string {
   return stage.style.getPropertyValue('--wp-hue').trim()
 }
 
-function makeCtx(
-  activeTasks: ConversationContext['activeTasks'],
-  summary = '',
-): ConversationContext {
+function makeCtx(activeTasks: ConversationContext['activeTasks'], summary = ''): ConversationContext {
   return {
     summary,
     summaryConfidence: 0.8,
@@ -93,11 +90,7 @@ function makeCtx(
     completedTasks: 0,
     totalTasks: activeTasks.length,
     // 整体进度取活跃任务的均值；无任务时为 0，与后端的语义一致
-    progressPercent: activeTasks.length
-      ? Math.round(
-          activeTasks.reduce((s, t) => s + t.progressPercent, 0) / activeTasks.length,
-        )
-      : 0,
+    progressPercent: activeTasks.length ? Math.round(activeTasks.reduce((s, t) => s + t.progressPercent, 0) / activeTasks.length) : 0,
     hasData: activeTasks.length > 0 || summary.trim().length > 0,
   }
 }
@@ -148,10 +141,7 @@ describe('WallpaperForm 星图', () => {
   })
 
   it('壁纸样式里不存在任何无限动画（回归：曾因它空闲吃满一个 GPU 核）', async () => {
-    const css = readFileSync(
-      join(process.cwd(), 'src/renderer/src/forms/wallpaper/styles.css'),
-      'utf8',
-    )
+    const css = readFileSync(join(process.cwd(), 'src/renderer/src/forms/wallpaper/styles.css'), 'utf8')
     // 去掉注释再扫，避免把说明文字里的 "infinite" 当成真动画
     const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '')
     expect(stripped).not.toContain('infinite')
@@ -159,15 +149,11 @@ describe('WallpaperForm 星图', () => {
 
   it('两次挂载星点布局完全一致（刷新不会"闪一下"）', async () => {
     const a = await renderWallpaper()
-    const posA = [...a.container.querySelectorAll('.wp-star')].map(
-      (c) => `${c.getAttribute('cx')},${c.getAttribute('cy')}`,
-    )
+    const posA = [...a.container.querySelectorAll('.wp-star')].map((c) => `${c.getAttribute('cx')},${c.getAttribute('cy')}`)
     a.unmount()
 
     const b = await renderWallpaper()
-    const posB = [...b.container.querySelectorAll('.wp-star')].map(
-      (c) => `${c.getAttribute('cx')},${c.getAttribute('cy')}`,
-    )
+    const posB = [...b.container.querySelectorAll('.wp-star')].map((c) => `${c.getAttribute('cx')},${c.getAttribute('cy')}`)
 
     expect(posB).toEqual(posA)
     // 顺带确认不是退化成"全部堆在原点"
@@ -234,11 +220,7 @@ describe('WallpaperForm 信息卡：对话语境', () => {
     const { container } = await renderWallpaper()
     act(() => {
       emitConversation(
-        makeCtx([
-          task('t1', '重构 Lifecycle', 'running', 10),
-          task('t2', '补测试', 'running', 20),
-          task('t3', '写文档', 'running', 30),
-        ]),
+        makeCtx([task('t1', '重构 Lifecycle', 'running', 10), task('t2', '补测试', 'running', 20), task('t3', '写文档', 'running', 30)]),
       )
     })
     expect(container.querySelector('.wp-info-body')?.textContent).toBe('重构 Lifecycle · 另有 2 项')
@@ -247,9 +229,7 @@ describe('WallpaperForm 信息卡：对话语境', () => {
   it('已完成任务不算进行中', async () => {
     const { container } = await renderWallpaper()
     act(() => {
-      emitConversation(
-        makeCtx([task('t1', '重构 Lifecycle', 'completed', 100)], '全部做完了'),
-      )
+      emitConversation(makeCtx([task('t1', '重构 Lifecycle', 'completed', 100)], '全部做完了'))
     })
     // 没有进行中任务 → 落到摘要分支
     expect(container.querySelector('.wp-info-title')?.textContent).toBe('最近')

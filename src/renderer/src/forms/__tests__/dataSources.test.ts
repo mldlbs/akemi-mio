@@ -15,9 +15,7 @@ describe('parseConversationContext', () => {
       hasData: true,
       summary: '在重构表单架构',
       summaryConfidence: 0.8,
-      activeTasks: [
-        { taskId: 't1', title: '重构渲染层', status: 'running', progressPercent: 40, completedSteps: 2, totalSteps: 5 },
-      ],
+      activeTasks: [{ taskId: 't1', title: '重构渲染层', status: 'running', progressPercent: 40, completedSteps: 2, totalSteps: 5 }],
       completedTasks: 3,
       totalTasks: 4,
       progressPercent: 75,
@@ -67,12 +65,7 @@ describe('parseConversationContext', () => {
   it('丢弃没有标题的任务（避免渲染空行）', () => {
     const r = parseConversationContext({
       hasData: true,
-      activeTasks: [
-        { taskId: 'a', title: '', status: 'running' },
-        { taskId: 'b', title: '有标题', status: 'running' },
-        null,
-        'garbage',
-      ],
+      activeTasks: [{ taskId: 'a', title: '', status: 'running' }, { taskId: 'b', title: '有标题', status: 'running' }, null, 'garbage'],
     })
     expect(r!.activeTasks).toHaveLength(1)
     expect(r!.activeTasks[0].title).toBe('有标题')
@@ -98,9 +91,7 @@ describe('parseMemoryCards', () => {
   it('正常卡片解析成功', () => {
     const cards = parseMemoryCards({
       hasData: true,
-      cards: [
-        { id: 'm1', content: '用户偏好简洁回复', type: 'preference', confidence: 0.9, isPinned: true, topics: ['偏好'] },
-      ],
+      cards: [{ id: 'm1', content: '用户偏好简洁回复', type: 'preference', confidence: 0.9, isPinned: true, topics: ['偏好'] }],
     })
     expect(cards).toHaveLength(1)
     expect(cards[0].content).toBe('用户偏好简洁回复')

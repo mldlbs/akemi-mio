@@ -3,7 +3,8 @@ import type { IpcRenderer } from 'electron'
 
 export function createElectronAPI(ipc: IpcRenderer) {
   return {
-    closeWindow: (): Promise<{ success: boolean }> => ipc.invoke('window:close'),    minimizeWindow: (): Promise<{ success: boolean }> => ipc.invoke('window:minimize'),
+    closeWindow: (): Promise<{ success: boolean }> => ipc.invoke('window:close'),
+    minimizeWindow: (): Promise<{ success: boolean }> => ipc.invoke('window:minimize'),
     maximizeWindow: (): Promise<{ success: boolean; isMaximized: boolean }> => ipc.invoke('window:maximize'),
     isMaximized: (): Promise<{ isMaximized: boolean }> => ipc.invoke('window:isMaximized'),
     toggleFullscreen: (): Promise<{ success: boolean; isFullScreen: boolean }> => ipc.invoke('window:fullscreen'),
@@ -85,10 +86,11 @@ export function createElectronAPI(ipc: IpcRenderer) {
       slots: Record<string, string>
       tools: Array<{ tool: string; args: Record<string, string> }>
       timeoutMs?: number
-    }): Promise<{ success: boolean; sessionId?: string; state?: string; error?: string }> =>
-      ipc.invoke('voice:confirm:start', params),
+    }): Promise<{ success: boolean; sessionId?: string; state?: string; error?: string }> => ipc.invoke('voice:confirm:start', params),
 
-    voiceConfirmFeed: (text: string): Promise<{
+    voiceConfirmFeed: (
+      text: string,
+    ): Promise<{
       success: boolean
       state?: string
       result?: string
@@ -106,8 +108,7 @@ export function createElectronAPI(ipc: IpcRenderer) {
       elapsedMs: number
     }> => ipc.invoke('voice:confirm:state'),
 
-    voiceConfirmReset: (): Promise<{ success: boolean }> =>
-      ipc.invoke('voice:confirm:reset'),
+    voiceConfirmReset: (): Promise<{ success: boolean }> => ipc.invoke('voice:confirm:reset'),
 
     // ── 一站式语音编排 ──
     orchestratorFull: (
@@ -1786,8 +1787,7 @@ contextBridge.exposeInMainWorld('akemiForms', {
 
   toggleForm: (kind: FormKind): Promise<boolean> => ipcRenderer.invoke('forms:toggle', kind),
 
-  setFormVisible: (kind: FormKind, visible: boolean): Promise<void> =>
-    ipcRenderer.invoke('forms:setVisible', kind, visible),
+  setFormVisible: (kind: FormKind, visible: boolean): Promise<void> => ipcRenderer.invoke('forms:setVisible', kind, visible),
 
   isFormVisible: (kind: FormKind): Promise<boolean> => ipcRenderer.invoke('forms:isVisible', kind),
 
@@ -1804,8 +1804,7 @@ contextBridge.exposeInMainWorld('akemiForms', {
     }
   },
 
-  setIgnoreMouseEvents: (ignore: boolean): Promise<void> =>
-    ipcRenderer.invoke('forms:setIgnoreMouseEvents', ignore),
+  setIgnoreMouseEvents: (ignore: boolean): Promise<void> => ipcRenderer.invoke('forms:setIgnoreMouseEvents', ignore),
 
   startWindowDrag: (): Promise<void> => ipcRenderer.invoke('forms:startDrag'),
 
@@ -1819,9 +1818,7 @@ contextBridge.exposeInMainWorld('akemiForms', {
    * 这里为白名单内的每个频道注册监听，统一交给一个 handler，
    * 并带上 channel 名让调用方区分来源。
    */
-  onAgentMirror: (
-    handler: (payload: { channel: string; args: unknown[] }) => void,
-  ): (() => void) => {
+  onAgentMirror: (handler: (payload: { channel: string; args: unknown[] }) => void): (() => void) => {
     const channels = ['ai:chunk', 'tool:status', 'agent:state']
     const listeners: { channel: string; fn: (...a: unknown[]) => void }[] = []
 

@@ -237,4 +237,3 @@ export const TOOL_LABELS: Record<string, string> = {
 export function toolLabel(tool: string): string {
   return TOOL_LABELS[tool] ?? tool
 }
-

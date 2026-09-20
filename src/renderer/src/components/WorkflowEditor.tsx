@@ -1255,9 +1255,7 @@ export function WorkflowEditor({ initial, onBack, onSaved, focusStepId }: Props)
                 status: r.status,
                 steps: r.steps,
                 startedAt: 'startedAt' in r ? r.startedAt : r.createdAt,
-                pendingGate: (
-                  r as { pendingGate?: { stepId: string; message: string; preview: string; options: string[] } }
-                ).pendingGate,
+                pendingGate: (r as { pendingGate?: { stepId: string; message: string; preview: string; options: string[] } }).pendingGate,
               }))}
             pipelineLogs={pipelineLogs}
             onCancel={async (runId) => {

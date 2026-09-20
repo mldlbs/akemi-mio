@@ -75,7 +75,9 @@
   color: oklch(0.78 0.015 82);
   background: transparent;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .chat-icon-btn:hover:not(:disabled) {
@@ -221,7 +223,9 @@
   background: oklch(0.24 0.014 53 / 0.95);
   border: 1px solid oklch(0.4 0.019 45 / 0.7);
   outline: none;
-  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -248,7 +252,9 @@
   color: oklch(0.99 0.005 85);
   background: oklch(0.67 0.155 28);
   cursor: pointer;
-  transition: background 0.16s ease, transform 0.12s ease;
+  transition:
+    background 0.16s ease,
+    transform 0.12s ease;
 }
 
 .chat-send:hover:not(:disabled) {
@@ -267,16 +273,34 @@
 
 /* ── 关键帧 ── */
 @keyframes chat-row-in {
-  0% { opacity: 0; transform: translateY(5px); }
-  100% { opacity: 1; transform: translateY(0); }
+  0% {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes chat-caret-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
 @keyframes chat-dot-pulse {
-  0%, 100% { opacity: 0.7; box-shadow: 0 0 6px oklch(0.67 0.155 28 / 0.6); }
-  50% { opacity: 1; box-shadow: 0 0 12px oklch(0.67 0.155 28 / 1); }
+  0%,
+  100% {
+    opacity: 0.7;
+    box-shadow: 0 0 6px oklch(0.67 0.155 28 / 0.6);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 12px oklch(0.67 0.155 28 / 1);
+  }
 }

@@ -135,10 +135,7 @@ export function PetAvatar({ mood, gesture, onGestureEnd }: PetAvatarProps) {
 
       {/* ── 躯干 ── */}
       <g className="pet-torso">
-        <path
-          d="M52 150 Q52 122 80 122 Q108 122 108 150 L110 176 Q110 188 96 188 L64 188 Q50 188 50 176 Z"
-          fill="url(#pet-body)"
-        />
+        <path d="M52 150 Q52 122 80 122 Q108 122 108 150 L110 176 Q110 188 96 188 L64 188 Q50 188 50 176 Z" fill="url(#pet-body)" />
         {/* 围巾：朱红点缀，也是形态的识别色 */}
         <path d="M54 128 Q80 140 106 128 L104 138 Q80 150 56 138 Z" fill={theme.accent} />
         <path d="M100 133 L112 158 L102 161 L94 137 Z" fill={theme.accent} opacity="0.85" />
@@ -170,20 +167,8 @@ export function PetAvatar({ mood, gesture, onGestureEnd }: PetAvatarProps) {
 
         {/* 眉：角度随情绪变化 */}
         <g stroke={theme.bodyDark} strokeWidth="2.4" strokeLinecap="round" opacity={mood === 'happy' ? 0.35 : 0.8}>
-          <line
-            x1="62"
-            y1="80"
-            x2="72"
-            y2={80 + browAngle * 0.12}
-            transform={`rotate(${-browAngle} 67 80)`}
-          />
-          <line
-            x1="88"
-            y1={80 + browAngle * 0.12}
-            x2="98"
-            y2="80"
-            transform={`rotate(${browAngle} 93 80)`}
-          />
+          <line x1="62" y1="80" x2="72" y2={80 + browAngle * 0.12} transform={`rotate(${-browAngle} 67 80)`} />
+          <line x1="88" y1={80 + browAngle * 0.12} x2="98" y2="80" transform={`rotate(${browAngle} 93 80)`} />
         </g>
 
         {/* 眼 */}
@@ -239,9 +224,15 @@ export function PetAvatar({ mood, gesture, onGestureEnd }: PetAvatarProps) {
       {/* sleepy：Z Z Z */}
       {mood === 'sleepy' && (
         <g className="pet-mood-deco pet-deco-sleepy" fill="oklch(0.72 0.015 82)" fontFamily="'Sora', sans-serif" fontWeight="600">
-          <text x="118" y="58" fontSize="12">z</text>
-          <text x="128" y="46" fontSize="16">Z</text>
-          <text x="140" y="30" fontSize="20">Z</text>
+          <text x="118" y="58" fontSize="12">
+            z
+          </text>
+          <text x="128" y="46" fontSize="16">
+            Z
+          </text>
+          <text x="140" y="30" fontSize="20">
+            Z
+          </text>
         </g>
       )}
       {/* alert：感叹号 */}

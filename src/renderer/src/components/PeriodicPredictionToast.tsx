@@ -33,41 +33,51 @@ interface PredictionEvent {
 // =============================================================================
 
 const TOPIC_ICONS: Record<string, string> = {
-  '天气': '🌤️',
-  '时间': '🕐',
-  '新闻': '📰',
-  '编程': '💻',
-  '写作': '✍️',
-  '学习': '📚',
-  '翻译': '🔤',
-  '图片': '🎨',
-  '音乐': '🎵',
-  '视频': '🎬',
-  '搜索': '🔍',
-  '设置': '⚙️',
-  '帮助': '❓',
-  '推荐': '👍',
-  '日程': '📅',
-  '交通': '🚗',
+  天气: '🌤️',
+  时间: '🕐',
+  新闻: '📰',
+  编程: '💻',
+  写作: '✍️',
+  学习: '📚',
+  翻译: '🔤',
+  图片: '🎨',
+  音乐: '🎵',
+  视频: '🎬',
+  搜索: '🔍',
+  设置: '⚙️',
+  帮助: '❓',
+  推荐: '👍',
+  日程: '📅',
+  交通: '🚗',
   // ASR 关键词驱动的动作预测（英文 action category）
-  'browse': '🌐',
-  'music': '🎵',
-  'weather': '🌤️',
-  'news': '📰',
-  'code': '💻',
-  'schedule': '📅',
-  'write': '✍️',
-  'translate': '🔤',
-  'image': '🎨',
-  'study': '📚',
-  'video': '🎬',
-  'help': '❓',
+  browse: '🌐',
+  music: '🎵',
+  weather: '🌤️',
+  news: '📰',
+  code: '💻',
+  schedule: '📅',
+  write: '✍️',
+  translate: '🔤',
+  image: '🎨',
+  study: '📚',
+  video: '🎬',
+  help: '❓',
 }
 
 /** ASR 动作类别列表（用于判断事件类型） */
 const ASR_ACTION_CATEGORIES = new Set([
-  'browse', 'music', 'weather', 'news', 'code',
-  'schedule', 'write', 'translate', 'image', 'study', 'video', 'help',
+  'browse',
+  'music',
+  'weather',
+  'news',
+  'code',
+  'schedule',
+  'write',
+  'translate',
+  'image',
+  'study',
+  'video',
+  'help',
 ])
 
 /** 根据话题获取图标 */
@@ -142,9 +152,7 @@ export function PeriodicPredictionToast() {
             {/* 紧凑视图：图标 + 简短描述 */}
             <div className="prediction-toast-compact">
               <span className="prediction-toast-icon">{getTopicIcon(event.topic)}</span>
-              <span className={`prediction-toast-text ${isAction ? 'prediction-toast-action-text' : ''}`}>
-                {event.description}
-              </span>
+              <span className={`prediction-toast-text ${isAction ? 'prediction-toast-action-text' : ''}`}>{event.description}</span>
               <span className="prediction-toast-confidence">{confidencePct}%</span>
               <button
                 className="prediction-toast-dismiss"
