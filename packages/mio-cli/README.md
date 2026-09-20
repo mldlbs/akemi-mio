@@ -25,7 +25,7 @@ mio config llm --clear      Remove the stored LLM config (env vars still apply)
 mio config path             Print the config.json path
 mio mcp                     Start Mio MCP server (stdio)
 mio install <host>          Install Mio into a host (codex|opencode|workbuddy|hermes|claude)
-mio status                  Show runtime and adapter status
+mio status                  Show runtime and adapter status (also reports pending auto-claims)
 mio agents                  List installed host adapters
 mio agents list             List observed agents (from agents.jsonl, --project X)
 mio agents report           Report per-agent task/memory/reuse telemetry (--agent X, --project Y)
@@ -555,6 +555,19 @@ ADR-017 用四项指标决定控制平面是继续扩展还是回滚。实现见
 所以这两项在实际使用中**几乎总是 `no data`**——不是因为路由没人用，而是因为它的证据
 被有意设计成不长期保留。报告里会打印一句说明，避免读者把「缓冲区为空」误读成
 「功能没被使用」。
+
+⚠️ **行为改变率停在 0% 通常是确认纪律问题，不是功能问题**。未确认的 auto-claim
+既不进记忆排序也不进任务路由，是「哑重」；`mio.experience.confirm` 会把
+`behaviorChanged` 置为 true，从而把它们转入有效证据。真实数据核查发现：确认这一步
+在生产里从未被执行过（全部 reuse 记录的 `confirmed` 字段缺省），于是行为改变率恒为
+0%、数据卫生恒为「93% 未确认」。工具本身工作正常——缺口在于没人按提示执行。
+因此 `mio status` 现在会直接报出全局待确认数：
+
+```
+mio status
+mio experience list --status pending          # 看具体是哪些
+mio experience confirm --ids a,b,c             # 批量确认
+```
 
 ### 注册（`mio agents register`）
 

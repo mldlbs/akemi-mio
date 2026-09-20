@@ -2256,12 +2256,30 @@ function statusCommand(useJson) {
     hermes: adapters.hermes.isInstalled(),
     claude: adapters.claude.isInstalled(),
   }
+  // ADR-017 treats unconfirmed auto-claims as "invisible dead weight": they
+  // never feed memory ranking or task routing, and behavior-change rate stays
+  // at 0% until they are confirmed. The count was only visible via
+  // `mio digest` (at >= 10) or `mio experience list --status pending`, both of
+  // which nobody runs routinely, so surface it on the command people do run.
+  // Scope is global (projectName -> null) because the backlog accumulates
+  // across projects, not just the current one.
+  const pendingAutoClaims = (() => {
+    try {
+      return createExperienceStore({
+        dataDir: MIO_HOME,
+        projectName: () => null,
+      }).listReuse({ status: 'pending', limit: 1 }).total
+    } catch {
+      return 0
+    }
+  })()
   const payload = {
     version: config.version,
     home: MIO_HOME,
     serverScript: SERVER_SCRIPT,
     serverScriptExists: fs.existsSync(SERVER_SCRIPT),
     agents: config.agents || {},
+    pendingAutoClaims,
     codexInstalled: installed.codex,
     opencodeInstalled: installed.opencode,
     workbuddyInstalled: installed.workbuddy,
@@ -2294,6 +2312,11 @@ function statusCommand(useJson) {
   console.log(`Claude Code MCP: ${installed.claude ? 'installed' : 'not installed'}`)
   console.log(`Claude Code observer: ${fs.existsSync(observer.claudeProjectsDir()) ? 'ready' : 'no transcripts'}`)
   console.log(`Observer: ${observer.isRunning(MIO_HOME) ? 'running (pid ' + observer.readPid(MIO_HOME) + ')' : 'not running'}`)
+  if (pendingAutoClaims > 0) {
+    console.log(
+      `Pending auto-claims: ${pendingAutoClaims} -- confirm them with \`mio experience list --status pending\` then \`mio experience confirm --ids <id,...>\``
+    )
+  }
 }
 
 function agentsCommand(args, useJson) {
