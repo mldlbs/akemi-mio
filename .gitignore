@@ -31,6 +31,10 @@ logs.*
 *.ps1
 _check*
 _typecheck*
+# site 部署探针留下的临时输出（HTTP 状态码 / ssh 报错转录），可随时重生成
+_final.txt
+_live_check.txt
+_redeploy.txt
 check-*.bat
 check-*.cmd
 check-*.js
