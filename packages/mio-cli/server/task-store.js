@@ -24,6 +24,26 @@ const { createQueryLog } = require('./query-log.js')
 
 const AGENT_HEALTH_FRESH_MS = 48 * 3600000
 
+// Token overlap helpers for the routing-gate diagnostic below. Kept local and
+// deliberately stricter than memory-store's scoreRecord: that scorer also
+// counts prefix matches, which are right for fuzzy recall but would make this
+// diagnostic fire on unrelated records. These require exact token equality.
+function tokenizeForOverlap(text) {
+  const normalized = String(text || '').toLowerCase()
+  const latin = normalized.match(/[a-z0-9]+/g) || []
+  const cjk = (normalized.match(/[\u4e00-\u9fff]/g) || []).map((char) => `cjk:${char}`)
+  return [...latin, ...cjk]
+}
+
+function cjkBigramsForOverlap(text) {
+  const chars = String(text || '').toLowerCase().match(/[\u4e00-\u9fff]/g) || []
+  const bigrams = new Set()
+  for (let i = 0; i + 1 < chars.length; i += 1) {
+    bigrams.add(`${chars[i]}${chars[i + 1]}`)
+  }
+  return bigrams
+}
+
 function createTaskStore(options) {
   const dataDir = options.dataDir
   const projectName = options.projectName || (() => null)
@@ -97,8 +117,23 @@ function createTaskStore(options) {
     const evidence = loadEvidenceWeights()
 
     // Match verified reuse experiences whose source memory is relevant to the task.
+    //
+    // ⚠️ The `verified` predicate (experience-store.js) is
+    // `reuse && behaviorChanged && outcomeImproved` -- note it does NOT include
+    // `confirmed`. It has a failure mode that looks exactly like "no match": an
+    // auto-claim is written with behaviorChanged=false (task-store.js
+    // buildAutoClaim), and nothing flips it to true except
+    // `mio.experience.confirm` (experience-store.js:146). So if nothing was ever
+    // confirmed, verified is empty and routing returns nothing for every task,
+    // forever. Measured on the real dataset 2026-09-20: 21 reuse records,
+    // behaviorChanged=false in all of them, verified == 0, and `task.route`
+    // could not return a single hit on a task that plainly had matching
+    // experience. Confirming three records made the same route return 1. So
+    // `count` is not a routing-quality signal until confirmations exist --
+    // `gatedBy` below reports that distinction.
+    const reuseRecords = readJsonl(experienceReusePath)
     const routeByMemory = new Map()
-    for (const record of readJsonl(experienceReusePath)) {
+    for (const record of reuseRecords) {
       if (!REUSE_STATUS_FILTERS.verified(record)) continue
       const memory = memoryById.get(record.experienceId)
       if (!memory || !matchesProjectScope(memory, project, scope)) continue
@@ -144,6 +179,45 @@ function createTaskStore(options) {
           scope: entry.memory.scope || 'project',
         },
       }))
+
+    // Why routing came back empty, when it did. `no-match` means the strict
+    // filter was satisfied by nothing relevant; `unconfirmed` means relevant
+    // experience exists but was never confirmed, so the filter excluded it. The
+    // two look identical in `count` but need opposite responses -- the first is
+    // a recall problem, the second is a one-command fix.
+    //
+    // "Relevant" here deliberately does NOT reuse scoreRecord: that scorer's
+    // prefix rule is symmetric (`token.startsWith(item) || item.startsWith(token)`),
+    // so a query token merely starting with any short haystack token counts --
+    // "nonsense" matches a record containing "no read path". Fine for fuzzy
+    // recall, useless as a diagnostic: measured on the real dataset, a nonsense
+    // task scored 10 unrelated records as "relevant". Require a real shared
+    // token (or CJK bigram) instead, so the count only moves for genuine overlap.
+    let gatedBy = null
+    if (routes.length === 0) {
+      const queryTokens = new Set(tokenizeForOverlap(task))
+      const bigrams = cjkBigramsForOverlap(task)
+      const overlaps = (memory) => {
+        const content = `${memory.content || ''} ${(memory.tags || []).join(' ')} ${memory.kind || ''}`
+        if (tokenizeForOverlap(content).some((token) => queryTokens.has(token))) return true
+        if (bigrams.size === 0) return false
+        const haystack = cjkBigramsForOverlap(content)
+        for (const bigram of bigrams) if (haystack.has(bigram)) return true
+        return false
+      }
+      const relevantUnconfirmed = reuseRecords.filter((record) => {
+        if (!REUSE_STATUS_FILTERS.pending(record)) return false
+        const memory = memoryById.get(record.experienceId)
+        if (!memory || !matchesProjectScope(memory, project, scope)) return false
+        return overlaps(memory)
+      }).length
+      const totalVerified = reuseRecords.filter(REUSE_STATUS_FILTERS.verified).length
+      gatedBy = {
+        reason: relevantUnconfirmed > 0 ? 'unconfirmed' : 'no-match',
+        verifiedTotal: totalVerified,
+        relevantUnconfirmed,
+      }
+    }
 
     // Broader context: top related memories not already routed.
     const routedIds = new Set(routes.map((route) => route.experienceId))
@@ -196,6 +270,13 @@ function createTaskStore(options) {
     if (routes.length > 0) {
       suggestion =
         `Route ${routes.length} verified experience(s) to this task; apply the top match first and record the outcome with mio.observer.ingest / mio.experience.reuse.`
+    } else if (gatedBy && gatedBy.reason === 'unconfirmed') {
+      // Distinct from "no match": the experience is there and relevant, it just
+      // was never confirmed. `verified` requires behaviorChanged, which only
+      // `experience.confirm` sets on an auto-claim, so an unconfirmed backlog
+      // silently empties the routing set. Point at the fix, not at recall.
+      suggestion =
+        `${gatedBy.relevantUnconfirmed} relevant experience(s) match this task but are unconfirmed, so routing skipped them (only verified experience routes, and confirming is what marks behaviorChanged). Run "mio status" to see the backlog, then "mio experience confirm --ids <id,...>".`
     } else if (relatedMemories.length > 0) {
       suggestion =
         'No verified experience matches yet. Consult the related memories, then record the outcome so this task can seed future routes.'
@@ -232,6 +313,7 @@ function createTaskStore(options) {
       routes,
       relatedMemories,
       agentHealth,
+      gatedBy,
       summary: {
         verifiedRoutes: routes.length,
         relatedMemories: relatedMemories.length,

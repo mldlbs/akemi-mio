@@ -2745,15 +2745,30 @@ This is read-only: unlike the MCP call it does not write to the query log.`)
   const flags = args.slice(2)
   // The task is free text and may be quoted as one argument or passed as
   // several words. Only flags this command understands are treated as options.
-  const TASK_KNOWN_FLAGS = new Set(['--project', '--scope', '--limit', '--json'])
+  //
+  // `--task` takes a value (the task itself), unlike --project/--scope/--limit
+  // whose values are settings. So it is handled first, by name: its value IS
+  // the task and must not be discarded along with the flag. Leaving `--task`
+  // out of the known set entirely (the previous behaviour) let the literal
+  // token `task` into the query text, where it matched almost every memory
+  // record and silently widened recall. Observed on the real dataset
+  // 2026-09-20: same task scored 3 relevant records positionally but 10 via
+  // `--task`.
+  const TASK_SETTING_FLAGS = new Set(['--project', '--scope', '--limit', '--json'])
+  const explicitTask = optionValue(flags, '--task')
   const taskParts = []
   for (let i = 0; i < flags.length; i += 1) {
     const token = flags[i]
-    if (TASK_KNOWN_FLAGS.has(token)) continue
-    if (i > 0 && TASK_KNOWN_FLAGS.has(flags[i - 1])) continue
+    if (token === '--task') {
+      i += 1 // skip the flag's value; it is handled via explicitTask
+      continue
+    }
+    if (TASK_SETTING_FLAGS.has(token)) continue
+    if (i > 0 && TASK_SETTING_FLAGS.has(flags[i - 1])) continue
     taskParts.push(token)
   }
-  const task = taskParts.join(' ').trim()
+  // `--task` wins when given; positional words are the fallback.
+  const task = String(explicitTask || taskParts.join(' ')).trim()
   if (!task) {
     console.error('mio task route requires a task, e.g. mio task route "publish the npm package"')
     process.exitCode = 1
@@ -2782,6 +2797,16 @@ This is read-only: unlike the MCP call it does not write to the query log.`)
 function printTaskRoute(result) {
   console.log(`Task route: "${result.task}" (project=${result.project || 'all'}, scope=${result.scope})`)
   console.log(`verified routes: ${result.count}`)
+  // A zero here has two very different causes, and the default reading
+  // ("nothing matched") is the wrong one when the real problem is that the
+  // experience was never confirmed. Only verified experience routes, so an
+  // all-unconfirmed dataset yields 0 for every task no matter how well it
+  // matches. Say which case this is.
+  if (result.gatedBy && result.gatedBy.reason === 'unconfirmed') {
+    console.log(
+      `   routing gated: ${result.gatedBy.relevantUnconfirmed} relevant experience(s) are unconfirmed (verified total: ${result.gatedBy.verifiedTotal})`,
+    )
+  }
 
   if (result.count > 0) {
     console.log('')

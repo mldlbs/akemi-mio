@@ -347,3 +347,112 @@ test('record-outcome --json is gated the same way', () => {
   assert.equal(appliedJson.event.outcome, 'aborted')
   assert.equal(readTraces(ws).length, 1)
 })
+
+// ── `--task` must be parsed as a flag whose VALUE is the task ───────────────
+
+// Regression guard. `--task` was missing from the set of recognised options, so
+// its name was treated as part of the task text: the query then contained the
+// literal token `task`, which matches nearly every memory record and silently
+// widened recall (measured on the real dataset: the same task scored 3 records
+// positionally but 10 via `--task`). The documented form is positional, so
+// nobody using `--task` would have known the query was being corrupted.
+
+test('task route --task parses the value, not the flag name', () => {
+  const ws = workspace('task-flag')
+  seedRouteData(ws)
+
+  const viaFlag = routeJson(ws, 'deploy the service to production', ['--task']) // wrong order on purpose below
+  // The helper above passes positionally; assert the explicit form separately.
+  const explicit = run(ws.cwd, ws.env, [
+    'task', 'route', '--task', 'deploy the service to production',
+    '--json', '--project', ws.project,
+  ])
+  assert.equal(explicit.status, 0, explicit.stderr)
+  const parsed = JSON.parse(explicit.stdout)
+  assert.equal(parsed.task, 'deploy the service to production', 'flag name must not leak into the task')
+  assert.doesNotMatch(parsed.task, /--task/)
+  assert.equal(parsed.count, viaFlag.count, 'explicit and positional forms must route identically')
+})
+
+test('task route --task matches the positional form exactly', () => {
+  const ws = workspace('task-flag-eq')
+  seedRouteData(ws)
+
+  const positional = routeJson(ws, 'deploy the service to production')
+  const viaFlag = run(ws.cwd, ws.env, [
+    'task', 'route', '--task', 'deploy the service to production',
+    '--json', '--project', ws.project,
+  ])
+  assert.equal(viaFlag.status, 0, viaFlag.stderr)
+  const flagged = JSON.parse(viaFlag.stdout)
+  assert.equal(flagged.task, positional.task)
+  assert.equal(flagged.count, positional.count)
+})
+
+// ── routing gate diagnostic ────────────────────────────────────────────────
+
+// Routing only considers *verified* reuse, so an all-unconfirmed dataset yields
+// 0 routes for every task however well it matches. That is indistinguishable
+// from "nothing matched" unless the report says which it is -- and the two need
+// opposite responses (investigate recall vs run `experience confirm`).
+
+test('gatedBy explains that relevant experience exists but is unconfirmed', () => {
+  const ws = workspace('gate-unconfirmed')
+  seed(path.join(ws.mioHome, 'memory.jsonl'), [
+    { id: 'mem_deploy', kind: 'decision', content: 'deploy the service to production', project: ws.project, tags: [] },
+  ])
+  // Relevant to the task, improved, but never confirmed -> not verified.
+  seed(path.join(ws.mioHome, 'experience_reuse.jsonl'), [
+    verifiedReuse('x1', 'mem_deploy', 'codex', 'claude', ws.project, { source: 'auto_claim', confirmed: false, behaviorChanged: false }),
+  ])
+
+  const parsed = routeJson(ws, 'deploy the service to production')
+  assert.equal(parsed.count, 0)
+  assert.equal(parsed.gatedBy.reason, 'unconfirmed')
+  assert.equal(parsed.gatedBy.relevantUnconfirmed, 1)
+  assert.equal(parsed.gatedBy.verifiedTotal, 0)
+  // The suggestion must point at the fix, not at a recall investigation.
+  assert.match(parsed.summary.suggestion, /unconfirmed/)
+  assert.match(parsed.summary.suggestion, /experience confirm/)
+})
+
+test('gatedBy reports no-match when nothing overlaps', () => {
+  const ws = workspace('gate-nomatch')
+  seed(path.join(ws.mioHome, 'memory.jsonl'), [
+    { id: 'mem_deploy', kind: 'decision', content: 'deploy the service to production', project: ws.project, tags: [] },
+  ])
+  seed(path.join(ws.mioHome, 'experience_reuse.jsonl'), [
+    verifiedReuse('x1', 'mem_deploy', 'codex', 'claude', ws.project, { source: 'auto_claim', confirmed: false, behaviorChanged: false }),
+  ])
+
+  const parsed = routeJson(ws, 'zzz quantum banana nonsense')
+  assert.equal(parsed.count, 0)
+  assert.equal(parsed.gatedBy.reason, 'no-match')
+  assert.equal(parsed.gatedBy.relevantUnconfirmed, 0)
+})
+
+test('gatedBy is absent once routing succeeds', () => {
+  const ws = workspace('gate-none')
+  seedRouteData(ws)
+  const parsed = routeJson(ws, 'deploy the service to production')
+  assert.ok(parsed.count > 0, 'fixture must produce a route')
+  assert.equal(parsed.gatedBy, null, 'no gate to report when routes exist')
+})
+
+test('the CLI prints the gate reason only when it applies', () => {
+  const ws = workspace('gate-text')
+  seed(path.join(ws.mioHome, 'memory.jsonl'), [
+    { id: 'mem_deploy', kind: 'decision', content: 'deploy the service to production', project: ws.project, tags: [] },
+  ])
+  seed(path.join(ws.mioHome, 'experience_reuse.jsonl'), [
+    verifiedReuse('x1', 'mem_deploy', 'codex', 'claude', ws.project, { source: 'auto_claim', confirmed: false, behaviorChanged: false }),
+  ])
+
+  const gated = run(ws.cwd, ws.env, ['task', 'route', 'deploy the service to production', '--project', ws.project])
+  assert.equal(gated.status, 0, gated.stderr)
+  assert.match(gated.stdout, /routing gated: 1 relevant experience\(s\) are unconfirmed/)
+
+  const clean = run(ws.cwd, ws.env, ['task', 'route', 'zzz quantum banana nonsense', '--project', ws.project])
+  assert.equal(clean.status, 0, clean.stderr)
+  assert.doesNotMatch(clean.stdout, /routing gated/)
+})
