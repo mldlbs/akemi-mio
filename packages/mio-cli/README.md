@@ -534,6 +534,28 @@ codex (mcp)  idle
 
 两个子命令都委托给 `server/agent-store.js`——与 `mio.agent.list` / `mio.agent.report` / `mio.agent.register` MCP 工具相同的存储，因此终端与 MCP 服务端报告一致的遥测，不可能漂移。`list` 读取 `agents.jsonl`；`report` 叠加 trace/memory/reuse 的交叉引用。
 
+### 评估期指标（`mio agents evaluation`）
+
+ADR-017 用四项指标决定控制平面是继续扩展还是回滚。实现见
+`server/evaluation-store.js`，MCP 侧为 `mio.agent.evaluation`。
+
+| 指标 | 口径 | 数据来源 |
+|---|---|---|
+| 路由采纳率 | 命中且被采纳 / 命中 | `queries.jsonl` ⚠️ |
+| 行为改变率 | confirmed 且 behaviorChanged / 全部 reuse | `experience_reuse.jsonl` |
+| 召回质量 | 结果导向 reuse 的查询 / 有结果的查询 | `queries.jsonl` ⚠️ |
+| 数据卫生 | 未确认 auto-claim / 全部 reuse | `experience_reuse.jsonl` |
+
+**无样本时输出 `no data`，而不是 `0%`**：`0%` 的意思是「测过了、很差」，
+`no data` 才是「没测」。`--json` 下对应 `null`，客户端必须区分这两种情况。
+
+⚠️ **前两项指标读的是一个设计上就会变空的缓冲区**。`queries.jsonl` 不是评估日志，
+而是 auto-claim 的关联缓冲（见 `server/query-log.js`）：最多 200 条，超过
+`expiresAt`（默认 1 小时）就被清理，`retention.js` 也把它列在 `EXPIRY_BASED_FILES`。
+所以这两项在实际使用中**几乎总是 `no data`**——不是因为路由没人用，而是因为它的证据
+被有意设计成不长期保留。报告里会打印一句说明，避免读者把「缓冲区为空」误读成
+「功能没被使用」。
+
 ### 注册（`mio agents register`）
 
 `register` 是这一组里唯一的**写操作**，因此沿用与 `mio memory archive` 相同的约定：

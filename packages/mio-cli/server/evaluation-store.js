@@ -38,6 +38,22 @@
 //      feed ranking or routing, so a rising ratio means the confirmation
 //      discipline is slipping.
 //
+// ⚠️ TWO OF THESE METRICS READ A BUFFER THAT IS EMPTY BY DESIGN.
+//
+// Metrics 1 and 3 are derived from `queries.jsonl`, which is not an evaluation
+// log: it is the auto-claim correlation buffer (see ../query-log.js), holding
+// at most 200 entries and pruning anything past a 1-hour `expiresAt` window
+// (retention.js lists it under EXPIRY_BASED_FILES). Measured against the real
+// dataset on 2026-09-20: queries.jsonl was 0 bytes while traces.jsonl held 764
+// task_outcomes and experience_reuse.jsonl held 21 records. So in practice
+// these two metrics report "no data" almost always -- not because routing is
+// unused, but because its evidence deliberately does not survive.
+//
+// That is a real limitation of the metric definitions, not of the data, and it
+// is reported rather than hidden: `sources` below names each metric's backing
+// file and whether that file is durable, so a reader can tell "route adoption
+// is 0%" from "route adoption cannot be measured from what we keep".
+//
 // Everything is read-only. Each metric reports its own denominator so a caller
 // can tell "0%" from "no data at all" -- reporting a confident 0% on zero
 // samples is the failure mode this repo keeps rediscovering.
@@ -45,6 +61,12 @@
 const path = require('path')
 const { readJsonl } = require('./memory-store.js')
 const { REUSE_STATUS_FILTERS } = require('./experience-store.js')
+const { REUSE_MATCH_WINDOW_MS } = require('./query-log.js')
+
+// Reported so the client can say "this number is windowed to the last N
+// minutes". Read from the query log itself rather than hardcoded, so a change
+// to the auto-claim window cannot leave this description stale.
+const QUERY_BUFFER_MINUTES = Math.round(REUSE_MATCH_WINDOW_MS / 60000)
 
 function ratio(numerator, denominator) {
   return denominator > 0 ? Math.round((numerator / denominator) * 100) : null
@@ -128,6 +150,16 @@ function createEvaluationStore(options = {}) {
     return {
       project,
       since: args.since || null,
+      // Which file each metric is derived from, and whether that file survives.
+      // Metrics 1 and 3 depend on a 1-hour buffer, so their denominators decay
+      // to zero on their own; without this a reader cannot tell an unused
+      // feature from an unmeasurable one.
+      sources: {
+        routeAdoption: { file: 'queries.jsonl', durable: false, windowMinutes: QUERY_BUFFER_MINUTES },
+        behaviorChange: { file: 'experience_reuse.jsonl', durable: true },
+        recallQuality: { file: 'queries.jsonl', durable: false, windowMinutes: QUERY_BUFFER_MINUTES },
+        dataHygiene: { file: 'experience_reuse.jsonl', durable: true },
+      },
       sample: {
         queries: queries.length,
         routeHits: routeHits.length,

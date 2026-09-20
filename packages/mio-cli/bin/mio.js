@@ -2515,6 +2515,17 @@ function printEvaluation(result) {
       `   task outcomes: ${result.taskOutcomes.total} total, ${result.taskOutcomes.success} success, ${result.taskOutcomes.failure} failure (${result.taskOutcomes.successRate}% success)`,
     )
   }
+
+  // Metrics 1 and 3 come from a buffer that prunes itself after an hour, so a
+  // "no data" there means "cannot be measured from what we keep", not "routing
+  // is unused". Say that plainly instead of letting the reader guess.
+  const windowed = Object.values(result.sources || {}).filter((src) => src.durable === false)
+  if (windowed.length > 0) {
+    const minutes = windowed[0].windowMinutes
+    console.log(
+      `   note: route adoption and recall quality read queries.jsonl, which keeps only the last ${minutes} minutes -- "no data" above means the buffer is empty, not that routing is unused.`,
+    )
+  }
 }
 
 function phase0Command(args, useJson) {

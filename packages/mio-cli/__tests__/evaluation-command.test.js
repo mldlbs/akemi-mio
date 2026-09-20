@@ -255,6 +255,43 @@ test('--since drops records older than the window', () => {
   assert.equal(result.since, '2026-09-01T00:00:00.000Z')
 })
 
+// ── data provenance ────────────────────────────────────────────────────────
+
+// Two of the four metrics are derived from queries.jsonl, which is the
+// auto-claim correlation buffer: 200 entries max, pruned past a 1-hour window
+// (query-log.js + retention.js EXPIRY_BASED_FILES). Their denominators decay to
+// zero on their own, so the report has to distinguish "unused feature" from
+// "unmeasurable with what we keep". This pins that provenance so a later
+// refactor cannot quietly drop it.
+test('the report names each metric\'s backing file and whether it is durable', () => {
+  const ws = workspace('sources', 'proj-a')
+  const result = store(ws).evaluate({ project: ws.project })
+  assert.equal(result.sources.routeAdoption.file, 'queries.jsonl')
+  assert.equal(result.sources.routeAdoption.durable, false)
+  assert.equal(result.sources.recallQuality.file, 'queries.jsonl')
+  assert.equal(result.sources.recallQuality.durable, false)
+  assert.equal(result.sources.behaviorChange.file, 'experience_reuse.jsonl')
+  assert.equal(result.sources.behaviorChange.durable, true)
+  assert.equal(result.sources.dataHygiene.durable, true)
+})
+
+// The window length is read from the query log rather than hardcoded, so it
+// cannot go stale if the auto-claim window changes.
+test('the reported buffer window matches the query log window', () => {
+  const ws = workspace('window', 'proj-a')
+  const result = store(ws).evaluate({ project: ws.project })
+  const { REUSE_MATCH_WINDOW_MS } = require('../server/query-log.js')
+  assert.equal(result.sources.routeAdoption.windowMinutes, Math.round(REUSE_MATCH_WINDOW_MS / 60000))
+})
+
+test('the CLI explains why a windowed metric can have no data', () => {
+  const ws = workspace('cli-note', 'proj-a')
+  const r = run(ws.cwd, ws.env, ['agents', 'evaluation'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /keep the last \d+ minutes|keeps only the last \d+ minutes/)
+  assert.match(r.stdout, /not that routing is unused/)
+})
+
 // ── the CLI surface ────────────────────────────────────────────────────────
 
 test('mio agents evaluation prints all four metrics', () => {
