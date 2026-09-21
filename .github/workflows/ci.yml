@@ -17,8 +17,14 @@ jobs:
           cache: npm
       - run: npm ci
 
-      - name: Type check
-        run: npm run typecheck
+      # typecheck:budget rather than typecheck: it runs BOTH tsconfigs and reports a
+      # combined count with an explicit ceiling. `npm run typecheck` is
+      # `tsc -p node && tsc -p web`, so when node has errors the web side is never
+      # even run -- that is exactly how the renderer silently carried hundreds of
+      # errors before 2026-09-11 (it is transpiled by esbuild, which erases types
+      # without checking them). Same cost when clean; strictly more visible when not.
+      - name: Type check (budget = 0)
+        run: npm run typecheck:budget
 
       # --max-warnings is required: every rule in eslint.config.mjs is set to
       # "warn", so without a threshold the exit code is always 0 and this step

@@ -17,6 +17,10 @@
   故改为补一道**静态等价门禁** `check:form-registry`（秒级、无产物依赖，已进 quality job）—— 见 §七·补记。
   ⚠️ **同日更正**：原写「6 道不在任何流水线上」是**错的**，实际 **5 道** ——
   `test:stress` 就在 `weekly-stress.yml:18`（09-20 只比对了 `ci.yml`，漏看另两个 workflow）。
+  📋 **FM-5 六道的当前状态（09-21 收尾）**：✅ `typecheck:budget` 已顶替 CI 的 typecheck 步骤；
+  ✅ `test:stress` 已修好并去掉 `continue-on-error`；🗑 `test:unit:fast` 已删（名不副实 + 冗余 + 无消费者）；
+  ⬜ 仍无人调用：`audit`（等安装链）、`check:idle-gpu`（需打包 exe）、
+  `check:renderer-entries`（需打包 exe；已由静态门禁 `check:form-registry` 覆盖其最关键的那类不一致）。
 - ★ ★ **新发现 FM-6（09-21）：门禁在流水线上，但 `continue-on-error: true` 摘掉了它的失败能力** ——
   `weekly-stress.yml`（`Run stress tests` 步骤）与 `weekly-audit.yml:21/27/55/64`。
   **而且查下去发现 `npm run test:stress` 当时连一个文件都没匹配到**（4 个 glob 全失配，
@@ -603,7 +607,7 @@ npm audit --audit-level=high   → exit 1
 | `check:cli-docs` / `check:coverage` / `check:mcp-live` | — | ✅ 是（`:99`/`:104`/`:110`） |
 | `check --workspace mio-agent-runtime` | — | ✅ 是（`:37`/`:96`） |
 | `check:form-registry`（**09-21 新增**） | `node scripts/check-form-registry.cjs` | ✅ 是（quality job，`Build` 之前）—— 见本节「补记」 |
-| **`typecheck:budget`** | `node scripts/typecheck-budget.mjs --budget 0` | ❌ **否** |
+| **`typecheck:budget`** | `node scripts/typecheck-budget.mjs --budget 0` | ✅ **是（09-21 顶替原 typecheck 步骤）** |
 | **`test:unit:fast`** | ~~`vitest run --config vitest.config.unit-fast.ts`~~ | 🗑 **09-21 已删除** |
 | **`test:stress`** | 12 个 `*.stress/benchmark/endurance/baseline` 文件 | ⚠️ **CI 否，但 weekly-stress.yml:18 会跑**（见下方更正） |
 | **`audit`** | `npm audit --audit-level=high` | ❌ **否**（`weekly-audit.yml` 里 `npm audit` 出现 **0 次**） |
@@ -717,7 +721,14 @@ vitest run tests/main/**/__tests__/*.stress.test.ts tests/main/**/__tests__/*.be
    （`weekly-stress.yml`，每周日 22:00 + `workflow_dispatch`），真正的病是**脚本 glob 全失配
    （0 文件）+ `continue-on-error`（失败不红）+ 无通报**。已改：脚本改用可用写法
    （实测 12 passed / 57 tests / 40s）、去掉 `continue-on-error`。见 FM-6。
-4. `typecheck:budget` 与 `typecheck` 二选一，避免同一次 CI 跑两遍 tsc。
+4. ~~`typecheck:budget` 与 `typecheck` 二选一~~ → **已办（09-21）**：CI 的 `Type check` 步骤
+   由 `npm run typecheck` 改为 `npm run typecheck:budget`（**顶替，不是叠加**，所以没有跑两遍 tsc）。
+   选 budget 而非 typecheck 的理由是实测出来的差异：`npm run typecheck` 是
+   `tsc -p node && tsc -p web`，**node 一失败 web 就根本不跑** —— 这正是 2026-09-11 之前
+   renderer 长期带着数百个错误静默出厂的机制（renderer 由 esbuild 转译，擦类型不检查）。
+   budget 脚本**两个配置都跑**并把合并计数与预算显式打出来，干净时开销相同。
+   承重性本轮复验：往 `src/renderer/src/` 注入一个类型错误的临时文件 →
+   `tsconfig.web.json: 1 errors`，**exit 1**；探针删除后回绿。
 5. ~~`test:unit:fast` 要么改名，要么删~~ → **已删（09-21）**：连同 `vitest.config.unit-fast.ts` 一起删除。
    依据是三条实测：耗时 **8m23s**（名不副实）；选中的是 CI 已跑的 `vitest run --coverage`
    的**子集**（主配置减去 12 个压测文件，而压测只占 ~40s）；`grep unit-fast` 只命中
