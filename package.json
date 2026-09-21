@@ -29,6 +29,7 @@
     "test:preload": "vitest run --config vitest.config.preload.ts",
     "audit": "npm audit --audit-level=high",
     "check:renderer-entries": "node scripts/check-renderer-entries.cjs",
+    "check:form-registry": "node scripts/check-form-registry.cjs",
     "check:idle-gpu": "node scripts/check-idle-gpu.cjs",
     "check:cli-docs": "node scripts/check-cli-docs.cjs",
     "check:coverage": "node scripts/check-mcp-cli-coverage.cjs",

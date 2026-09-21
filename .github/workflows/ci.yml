@@ -36,6 +36,15 @@ jobs:
       - name: mio-agent-runtime syntax gate
         run: npm run check --workspace mio-agent-runtime
 
+      # 形态（pet / chat / wallpaper）的窗口参数在三个文件里各留一份副本：
+      # src/renderer/src/forms/types.ts、packages/core/src/core/Lifecycle.ts、
+      # electron.vite.config.ts 的 renderer input。三份副本各自内部自洽，
+      # 所以构建、typecheck、lint 都不会因为漏改一处而报错 —— 症状是运行期窗口空白。
+      # scripts/check-renderer-entries.cjs 能在运行期抓到，但它要启动打包好的 exe，
+      # 进不了这个 job（此处还没有产物）。这道静态门禁是它的等价物，秒级无依赖。
+      - name: Form registry consistency (types.ts / Lifecycle.ts / vite input)
+        run: npm run check:form-registry
+
       - name: Build
         run: npx electron-vite build
 
