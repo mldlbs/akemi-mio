@@ -10,11 +10,21 @@
 - 发现并**已修复** 2 个「测不到所声称逻辑」的用例（含 1 个 mock 方法名错配）。
 - 发现 **1 个实际失效的门禁**：`lint`（130 条常响警告 + 退出码恒 0）—— ✅ **已修**（`28358e4`）。
 - 发现 **2 道真实红**：`format:check`（20 文件）—— ✅ **已修**（`c4c3d2b`）；
-  `audit` —— ⚠️ **性质已变**：被陈旧的 `package-lock.json` 挡住，`npm audit` 已无法复现原读数。
+  `audit` —— ⚠️ **无法运行**（根因见下条，非 CVE 问题）。
 - **2 道门禁无法运行**（缺打包产物，前置条件）。
-- ★ **新发现（本轮）**：`package-lock.json` 早于 monorepo 化 → **`npm ci` 无法工作**，
-  CI 第一步即失败。**未修，需决策**（见 §5.2）。
-- ★ **我自己有 1 处结论被本轮推翻**：`format:check` 的「不建议动」是错的（见 §5.1 修正）。
+- ★ **新发现 FM-5：6 道门禁存在、可执行，却不在 CI 流水线上**（`typecheck:budget`、`test:unit:fast`、`test:stress`、`audit`、`check:renderer-entries`、`check:idle-gpu`）—— 见 §七。**其中 `check:renderer-entries` 最该补**（它守的是「三形态注册表不一致→空白屏」，其它门禁全看不见）。
+- ★★ **`npm ci` 起不来的真正根因（本轮定位，已用最小复现证明）**：
+  **仓库用了 npm 从不支持的 `workspace:` 协议**（46 包 / 79 处），
+  npm 的工作区解析是**按 name 匹配**而非协议。
+  ⚠️ 上一轮曾归因于「`package-lock.json` 陈旧」——**那是错的**，已被最小复现推翻（见 §5.2）。
+  📋 **修复方案已验证但未应用**（用户 2026-09-21 决定暂缓）：`workspace:*`→`*` + 根 `.npmrc` 的
+  `legacy-peer-deps=true` + 重建 lock 1170 条目；`npm ci --dry-run` exit 0 —— **见 §5.2**。
+- 🔥 **应用修复后会暴露**：`audit` 将能跑，报 **31 漏洞（18 high/critical，含 2 critical）**——
+  当前仓库未应用修复，`audit` 仍因 lock 损坏 400 跑不了，故这 31 漏洞目前看不见。建议单列任务升级
+  vite/exceljs/sharp 等，**未擅自 `audit fix --force`**。
+- ★ **我自己有 2 处结论被推翻**：
+  ① `format:check` 的「不建议动」是错的（见 §5.1 修正）；
+  ② `npm ci` 的「lock 陈旧」归因是错的（见 §5.2 二次修正）。
 
 ---
 
@@ -25,13 +35,21 @@
 | 结论 | 数量 |
 |---|---|
 | ✅ 承重（有防护 + 变异验证红） | 4 |
-| ✅ 承重（有防护，未变异） | 6 |
-| ✅ **本轮修复后恢复承重**（主进程测试 / `lint` / `format:check`） | 1 |
-| ❌ ~~**实际失效**（退出码恒 0，CI 拦不住）~~ → ✅ **本轮已修**（`lint`） | ~~1~~ 0 |
+| ✅ 承重（有防护，未变异） | 9 |
+| ✅ **本轮修复后恢复承重**（`lint` / `format:check` / 主进程测试） | 3 |
 | ⚠️ **无法运行**（缺打包产物，前置条件） | 2 |
-| ⚠️ **无法运行**（lock 陈旧，`npm ci` 不可用） | 1 |
-| ❌ **真实红**（本次读数失败） | 0 |
-| ⬜ 未评估（需 GPU / 实机 / 长时） | 3 |
+| ⚠️ **无法运行**（源码 `workspace:` 协议 → `npm ci` 不可用） | 1 |
+| ⬜ 未评估（`test:stress` 长时） | 1 |
+
+> **交叉计数说明（避免重复）**：除上面 19 道门禁外，本轮还发现 **FM-5「门禁存在但不在 CI 流水线上」**
+> 共 6 道：`typecheck:budget`、`test:unit:fast`、`test:stress`、`audit`、
+> `check:renderer-entries`、`check:idle-gpu`。其中 `check:renderer-entries` / `check:idle-gpu`
+> 已计入上面「无法运行」两行（`check:renderer-entries` / `check:idle-gpu` 缺打包产物；
+> `audit` 与安装链同因 lock 损坏 400 跑不了）；
+> 真正「此前既没算进结论、又不在 CI」的是 **3 道**：`typecheck:budget`、`test:unit:fast`（已补跑）、`test:stress`。
+> 另：**安装链 `npm ci` 本身不是 19 道门禁之一**，而是所有门禁的前置——它因 `workspace:` 协议当前仍「无法运行」，
+> 修复方案已验证（见 §5.2），但用户 2026-09-21 决定暂缓应用。
+> 详见 §七。
 
 ---
 
@@ -49,13 +67,13 @@
 | 8 | **`lint`** | `npx eslint src/ --ext .ts,.tsx --max-warnings 130` | 130 warn | 0 | ✅ **exit 0**（阈值已加） | ✅ **已修复**（`28358e4`） | 修复前退出码恒 0 —— **见 §四** |
 | 9 | `async-timeout`（新） | `vitest run tests/main/core/utils/__tests__/async-timeout.test.ts` | 6 | 0 | ✅ pass | ✅ **已双向变异** | 修复前 `withTimeout` 零测试 |
 | 10 | `format:check` | `npx prettier --check "src/**/*.{ts,tsx,json,css}"` | 20 文件 | 0 | ✅ **exit 0**（已修） | ✅ 承重（真红） | CI 会拦（ci.yml:27）—— **见 §五·修正** |
-| 11 | `audit` | `npm audit --audit-level=high` | — | — | ⚠️ **无法运行 (400)** | ⚠️ unverified | lock 陈旧致 `npm ci` 亦不可用 —— **见 §五** |
+| 11 | `audit` | `npm audit --audit-level=high` | — | — | ⚠️ **无法运行 (400)** | ⚠️ unverified | lock 损坏致 `npm ci` 亦不可用（修复应用前）；CI 未覆盖（FM-5）—— **见 §五** |
 | 12 | `check:renderer-entries` | `node scripts/check-renderer-entries.cjs` | — | — | ❌ **无法运行 (exit 1)** | ⚠️ unverified | 缺 `dist-electron/` |
 | 13 | `check:idle-gpu` | `npm run check:idle-gpu` | — | — | ❌ **无法运行 (exit 2)** | ⚠️ unverified | 缺打包 exe |
 | 14 | `typecheck` / `typecheck:node` / `typecheck:web` | `tsc -p … --noEmit` | 2 工程 | 0 | ✅ pass | ✅ 有防护 | 被 #5 覆盖读数 |
 | 15 | `test:renderer` | `vitest --config vitest.config.renderer.ts` | 449 | 0 | ✅ pass | ✅ 有防护 | 本轮补跑（验证格式化无害） |
 | 16 | `test:preload` | `vitest --config vitest.config.preload.ts` | 94 | 0 | ✅ pass | ✅ 有防护 | 本轮补跑 |
-| 17 | `test:unit:fast` | `vitest --config vitest.config.unit-fast.ts` | — | — | ⬜ 未跑 | ⚠️ unverified | 本轮未执行 |
+| 17 | `test:unit:fast` | `vitest --config vitest.config.unit-fast.ts` | **2940** | 3 | ✅ **exit 0**（本轮补跑） | ✅ 有防护 | **实测 2937 passed / 3 skipped / 0 errors**；⚠️ 名不副实：耗时 **8m23s**，几乎等同主进程全量，CI 也从未调用它（见 §七 FM-5） |
 | 18 | `test:stress` | 见 `package.json` | — | — | ⬜ 未跑 | ⚠️ unverified | 需长时；建议单独排期 |
 | 19 | build（CI 内联） | `npx electron-vite build` | — | — | ⬜ 未跑 | ⚠️ unverified | 本机 `emptyOutDir` 撞 safe-delete（已知） |
 
@@ -310,10 +328,11 @@ src/renderer/src/styles/components.css
 其余 19 个是格式漂移。**「这个区域有历史风险」应当转化为「先做可比对的预览」，
 而不是「所以不要碰」。** 这条已写回 `evidence-based-verification` skill。
 
-### 5.2 `audit` — 被陈旧的 `package-lock.json` 挡住 ⚠️ **未修复，性质已变**
+### 5.2 `audit` — 无法运行（根因是源码用了 npm 不认的 `workspace:` 协议）⚠️ **未修复，待拍板**
 
-> **本节已更新。** 初版报的是「32 漏洞」，重跑后**这个数字已无法复现**：
-> `npm audit` 现在直接报 `400 Bad Request`。
+> **本节已二次修正。** 初版报的是「32 漏洞」（被打桩的 lock 挡住）；第一次修正归因于
+> 「`package-lock.json` 陈旧」——**那仍然是错的**；第二次修正才定位到真根因（源码里的
+> `workspace:` 协议）。保留初版数字只为说明它为何不可复现。
 
 ```
 npm error audit endpoint returned an error
@@ -342,32 +361,196 @@ GHSA-f88m-g3jw-g9cj
 升级到 `0.35.x` 的要求也满足（Node ≥20.9，本地 22 / CI 20）。
 **这是一个真 CVE + 真明确的修法 + 极小的实际风险。**
 
-**(2) ★ 更严重：`package-lock.json` 早于 monorepo 化，`npm ci` 无法工作**
+**(2) ★★ 真正的根因：仓库在 npm 里**用了 `workspace:` 协议**，而 npm 从不支持该协议**
+
+> **本节已二次修正。** 初版归因于「`package-lock.json` 陈旧」，**那是错的** ——
+> 陈旧 lock 只是背景，不是原因。下面是用最小复现定位到的真实根因。
+
+**一句话**：`workspace:*` 是 **pnpm / Yarn 的协议**，npm 从来没有实现过。
+npm 的工作区解析走的是**按 `name` 匹配**（见 npm 自带文档
+`docs/content/using-npm/workspaces.md` 原文：
+*"it's possible to consume any defined workspace **by its declared `package.json` `name`**"*）。
+
+本仓 **46 个包、79 处** 用了 `"@akemi-mio/xxx": "workspace:*"`，因此 npm 任何安装命令必然失败。
+
+**最小复现（3 个文件，与 akemi-mio 无关）**：
 
 ```
-lock 里 root 的 workspaces:  undefined        ← package.json 是 ["packages/*"]
-lock 里 packages/ 条目数:     0               ← 实际有 60 个包
-lock 里 @akemi-mio/ 条目:     0               ← 60+ 个包用 "workspace:*" 引用
-lock 文件时间 / 最后提交:      2026-08-22 / 244af61
+root/package.json          { "name":"t","version":"1.0.0","private":true,"workspaces":["packages/*"] }
+root/packages/a/package.json  { "name":"@akemi-mio/a","version":"0.1.0",
+                                "dependencies":{ "@akemi-mio/b":"workspace:*" } }
+root/packages/b/package.json  { "name":"@akemi-mio/b","version":"0.1.0" }
 ```
 
-后果：**任何 `npm install` 都会失败**：
-
-```
+```bash
+$ npm install --package-lock-only
 npm error code EUNSUPPORTEDPROTOCOL
 npm error Unsupported URL Type "workspace:": workspace:*
 ```
 
-而 CI 的第一步就是 `npm ci`（`ci.yml:18`）。**即 CI 从 monorepo 化那天起就跑不起来**，
-`audit` 的失败只是最先暴露出来的症状。
+把 `"workspace:*"` 换成 `"*"` 后**同一个目录立刻安装成功**，且 lock 正确生成成员链接：
 
-⚠️ **这是既有状态，与本次改动无关**：`git show HEAD:package-lock.json` 解析后
-`workspaces` 同样是 `undefined`、`packages/` 条目同样是 0。
+```
+node_modules/@akemi-mio/a => packages/a   LINK
+node_modules/@akemi-mio/b => packages/b   LINK
+```
 
-**我没有擅自重建 lock**：这是 1053 条目的重写，风险与影响面都很大
-（会重新解析 60 个包的依赖树，且本机与 CI 的 lock 必须一致）。
-重建 lock 应当是**单独一件事、单独一次提交**，需要你先确认。
-在那之前，`audit` 的结论**按「无法运行」记，而不是按「32 漏洞」记**。
+**为什么不是「npm 版本太旧」**（这是网上所有答案的说法，但都不成立）：
+
+| 证伪步骤 | 结果 |
+|---|---|
+| 本机 npm | **10.9.7**（≥7，早该支持 workspaces） |
+| 全量校验本机 npm 与官方 `npm-10.9.7.tgz` | **1036 个 js 文件逐字节一致**，17 个差异**仅为行尾空白**，28 个缺失全是 `test/`（Node 分发包裁掉）→ **npm 安装未被污染** |
+| 用 **npm 11.6.2** 自带的 `arborist@9.1.6` 跑同一最小复现 | **同样失败**，报同一个 `EUNSUPPORTEDPROTOCOL` |
+| 在本机 npm 全树 grep `workspace:` 协议处理代码 | **不存在**（命中仅 3 处，均为 lock 字段名 / CLI flag 名，与协议解析无关） |
+
+**为什么失败在这个位置**（`--loglevel=silly` + 打桩 `npa.resolve` 定位）：
+
+根节点是**正确**的（`root.workspaces` 两个成员齐全，root 的边是 `type=workspace, spec=file:...`）；
+但**工作区成员节点拿不到 `workspaces` 映射**（`Node.workspaces` 只在 root 上被
+`_setWorkspaces` 赋值，构造器里恒为 `null`）。于是成员 `packages/a` 的
+`dependencies` 走 `#loadDepType`，那个 `current.type !== 'workspace'` 的跳过条件不生效，
+`workspace:*` **原样** 变成一个 `type=prod, spec="workspace:*", valid=false` 的边：
+
+```
+#buildDepStep (build-ideal-tree.js:869)
+  → #problemEdges (1157)
+    → Edge.valid (edge.js:214) → Edge.error (239)
+      → Edge.satisfiedBy (115) → depValid (dep-valid.js:149 → 23)
+        → npa.resolve('@akemi-mio/b', 'workspace:*', '...\\packages\\a')
+          → 抛 EUNSUPPORTEDPROTOCOL
+```
+
+**修法**：把 46 个包 / 79 处 `workspace:*` 改写成 npm 认识的写法。
+`"*"` 已验证可用（走 name 匹配 → 生成 `LINK`）；等价的 `"^0.1.0"` 也可，因为这些包
+**确实都已发布到 npm 0.1.0**（`@akemi-mio/runtime-contracts`、`runtime-foundation`、
+`experience-memory`、`evolution-*`、`observer`、`insight` 逐一查证过 `dist-tags.latest`）。
+
+**附带发现**：`packages/audit/package.json` 声明了
+`"@akemi-mio/eventBus": "workspace:*"` —— 该成员**不存在**（无目录、npm 上 `Not found`），
+且 `audit/src/EventAuditor.ts` 实际是从 `@akemi-mio/core/core/EventBus` 导入的。
+**这是一条纯悬挂依赖**（全仓唯一引用点），属于必须一并清掉的死声明。
+
+⚠️ **与本次改动无关**（既有状态）：`git show HEAD:package.json` 与工作区一致，
+`workspace:` 引用是随 monorepo 化一起进来的。
+
+**仍未完成**：把 `workspace:*` 换成 `*` 后，`EUNSUPPORTEDPROTOCOL` **消失**，
+但暴露出**第二个、独立的错误**：`Cannot read properties of null (reading 'edgesOut')`。
+
+#### 第二个缺陷：`#loadPeerSet` 解引用 null parent
+
+定位到确切崩溃点（`--loglevel` 栈）：
+
+```
+TypeError: Cannot read properties of null (reading 'edgesOut')
+  at #loadPeerSet (build-ideal-tree.js:1289:38)
+  at async #loadPeerSet (1297:11)   ← 递归 3 层
+  at async #loadPeerSet (1308:23)
+  at async #buildDepStep (904:11)
+  at async Arborist.reify (reify.js:133:5)
+  at async Install.exec (install.js:150:5)
+```
+
+`1289` 行是 `const parentEdge = node.parent.edgesOut.get(edge.name)` ——
+`node.parent` 为 `null`。触发者是 **vitest 的 optional peer 集合**：
+日志显示最后卡在 `idealTree:node_modules/vitest`，
+且同一轮里既 fetch 了正确的 `@vitest/browser-playwright@4.1.11`，
+又 fetch 了**跨大版本的 `@vitest/browser-playwright@5.0.1`**。
+
+`vitest@4.1.11` 的 `peerDependencies` 有 **12 条**，其中 11 条 optional
+（`@vitest/browser-playwright: "4.1.11"`、`@vitest/browser-preview`、
+`@vitest/browser-webdriverio`、`@vitest/coverage-istanbul` …）。
+这些**我们一个都没声明**（全仓 grep 无命中）—— 纯粹是 npm 追着 optional peer 走，
+在构建那组 peer 时撞上无父节点。
+
+**两个缺陷都被证伪过的对照表**：
+
+| 施加的修改 | 结果 |
+|---|---|
+| 只把 `workspace:*` → `*` | ❌ `EUNSUPPORTEDPROTOCOL` 消失，但 `edgesOut` 崩溃 |
+| `workspace:*` → `*` **+ `--legacy-peer-deps`** | ✅ **exit 0**，生成正确的 workspace 感知 lock |
+
+验证结果（`--legacy-peer-deps` 路径）：
+
+```
+npm install --package-lock-only --legacy-peer-deps   → exit 0, "up to date in 3m"
+生成 lock: 1170 条目 / workspaces=["packages/*"] / packages/* 73 条
+           node_modules/@akemi-mio/* 67 条 / link:true 68 条
+npm ci --dry-run --legacy-peer-deps                   → exit 0, "added 1101 packages"
+```
+
+**对照（旧 lock）**：1053 条目 / `workspaces: undefined` / `packages/*` 0 条 / `link` 0 条。
+
+#### 第二个缺陷的确切触发链（已完整证明）
+
+崩溃点前最后的 fetch 序列（日志行号连续，全是 cache hit，无网络干扰）：
+
+```
+5226  fetch manifest @vitejs/devtools-vitest@^0.7.5
+5230  fetch manifest vitest@*                    ← 通配符
+5234  fetch manifest @vitest/browser-playwright@5.0.1   ← 跨大版本 5.x
+5236  fetch manifest vitest@4.1.11               ← 我们声明的 4.x
+5240  fetch manifest @vitest/coverage-v8@4.1.11
+5242  fetch manifest jsdom@*
+5246  TypeError: Cannot read properties of null (reading 'edgesOut')
+```
+
+链条：`@vitejs/devtools@0.7.5` 声明 **`peerDependencies: { "vite": "*" }`**（通配符）
+→ 通配符 peer 把 `vitest` 拉到 **5.0.1**（latest）
+→ 5.0.1 带出 `@vitest/browser-playwright@5.0.1`
+→ 递归 `#loadPeerSet`（栈里 3 层嵌套）下探到一个 `parent === null` 的节点
+→ `build-ideal-tree.js:1289` 的 `node.parent.edgesOut.get(...)` 抛 TypeError。
+
+#### 修法对照（全部实测，同一份源码只改一处）
+
+| 施加的修改 | 结果 |
+|---|---|
+| **只把 `workspace:*` → `*`** | ❌ `EUNSUPPORTEDPROTOCOL` 消失，但 `edgesOut` 崩溃 |
+| 上一个 + `overrides` 钉 `@vitest/{browser-playwright,browser-preview,browser-webdriverio,coverage-istanbul}@4.1.11` | ❌ 仍 `edgesOut` 崩溃（日志里依旧 fetch `browser-playwright@5.0.1`） |
+| 上一个 + 根部把 `canvas@^3.2.3` 加成 `optionalDependencies` | ❌ 仍 `edgesOut` 崩溃 |
+| 上一个 + **`--legacy-peer-deps`** | ✅ **exit 0** |
+
+**结论**：`--legacy-peer-deps` 是**目前唯一被实测证实可用**的路径 ——
+因为它**整体跳过 peer 解析**，那个通配符 peer 与递归下探根本不会发生。
+三个「精确」修法都失败，说明问题不在某一个 peer 的版本，
+而在**递归 peer-set 构建本身遇到无父节点时的空指针**（arborist 的健壮性缺口）。
+
+### ⚠️ 修复方案已验证，暂缓应用（用户 2026-09-21 决定先不改）
+
+修复方案已就绪（已实测验证，但**用户决定暂缓应用，未改动仓库**）。实际改动清单
+（与「改动清单」一致，第 3 点建议用 `.npmrc` 而非改 5 处 CI）：
+
+1. `workspace:*` → `*`：**46 个包 / 79 处**（JSON 感知替换，全 46 个文件解析合法，0 残留）。
+2. 删 `packages/audit` 的 `@akemi-mio/eventBus` 悬挂依赖（该成员不存在）。
+3. 仓库根 **`.npmrc`** 加 `legacy-peer-deps=true`（一处覆盖全部 5 处 `npm ci`，比改 CI 更干净）。
+4. 重建 `package-lock.json`（1053 → **1170** 条目）。
+
+**验证（同隔离副本一致）**：
+
+```
+npm install --package-lock-only --legacy-peer-deps   → exit 0, "audited 1170 packages"
+npm ci --dry-run --legacy-peer-deps                  → exit 0
+生成 lock: 1170 条目 / workspaces=["packages/*"] / @akemi-mio/* 67 / link:true 68
+```
+
+→ **应用后 CI 全部 5 处 `npm ci` 即可通**（`.npmrc` 自动生效）。当前仓库未应用，安装链仍「无法运行」。
+
+### 🔥 应用修复后会暴露的问题：`audit` 将能跑，报 **31 漏洞（18 high / critical）**
+
+安装链修好后 `npm audit` 因 lock 正常即可运行；当前仓库未应用修复，`audit` 仍因 lock 损坏 400 跑不了，
+若在已修复的副本上以 CI 口径（`npm audit --audit-level=high`）实测：
+
+```
+npm audit --audit-level=high   → exit 1
+31 vulnerabilities (13 moderate, 16 high, 2 critical)
+```
+
+含 2 个 **critical**（如 `vite <=6.4.2` 的 GHSA-v6wh-96g9-6wx3 / GHSA-fx2h-pf6j-xcff；
+`exceljs` 经 `uuid` 传递）。**这是安装链修好后才看得见的新问题，与安装链修复本身无关。**
+
+⚠️ **未处理**：`npm audit fix --force` 会大改版本、有破坏风险，未擅自执行。
+建议作为**独立任务**排期（升级 vite 到 6.4.3+、exceljs、sharp 等），不在本次安装链修复内。
+`audit` 门禁本身**仍不在 CI**（FM-5），所以目前不阻塞合并——但 2 个 critical 不应长期搁置。
 
 ---
 
@@ -389,7 +572,77 @@ npm error Unsupported URL Type "workspace:": workspace:*
 
 ---
 
-## 七、口径提醒（给读这份报告的人）
+## 七、★ CI 覆盖面缺口：有门禁，但 CI 从不执行
+
+> 本节是 2026-09-20 20:30 补测时发现的**第五类失效模式**，前四类（FM-1…FM-4）都没覆盖它。
+> 参照 `rnd-quality-assessment` 的框架，可命名 **FM-5「门禁存在但不在流水线上」**。
+
+判据不是「脚本名是否出现在 `ci.yml` 里」（`npx` 直调会漏判），而是**逐条比对脚本的命令体**。
+实测结果（`.github/workflows/ci.yml` 全部 5 个 job、17 个 `run:` 步骤）：
+
+| 门禁 | 命令体 | CI 是否执行 |
+|---|---|---|
+| `typecheck` | `tsc -p node && tsc -p web` | ✅ 是（`ci.yml:21`） |
+| `lint` | `eslint src/ … --max-warnings 130` | ✅ 是（`:31`） |
+| `format:check` | `prettier --check "src/**/*.{ts,tsx,json,css}"` | ✅ 是（`:34`，npx 直调） |
+| `build` | `electron-vite build` | ✅ 是（`:40`，npx 直调） |
+| `test` / `coverage` | `vitest run --coverage` | ✅ 是（`:53`，主进程） |
+| `test:renderer` | `vitest run --config vitest.config.renderer.ts` | ✅ 是（`:66`） |
+| `test:preload` | `vitest run --config vitest.config.preload.ts` | ✅ 是（`:79`） |
+| `check:cli-docs` / `check:coverage` / `check:mcp-live` | — | ✅ 是（`:99`/`:104`/`:110`） |
+| `check --workspace mio-agent-runtime` | — | ✅ 是（`:37`/`:96`） |
+| **`typecheck:budget`** | `node scripts/typecheck-budget.mjs --budget 0` | ❌ **否** |
+| **`test:unit:fast`** | `vitest run --config vitest.config.unit-fast.ts` | ❌ **否** |
+| **`test:stress`** | 12 个 `*.stress/benchmark/endurance/baseline` 文件 | ❌ **否** |
+| **`audit`** | `npm audit --audit-level=high` | ❌ **否** |
+| **`check:renderer-entries`** | `node scripts/check-renderer-entries.cjs` | ❌ **否** |
+| **`check:idle-gpu`** | `node scripts/check-idle-gpu.cjs` | ❌ **否** |
+
+**6 道门禁存在、可执行、却不在任何流水线上。**
+
+### 逐条评估（不是所有缺口都同等严重）
+
+| 门禁 | 严重度 | 判据 |
+|---|---|---|
+| `check:renderer-entries` | **高** | 它守的是「三处形态注册表不一致 → 运行期空白屏」（见记忆 §三）。**这类 bug 只在运行时暴露，其它门禁全看不见** —— 而它恰恰不在 CI 里。这是最该补的一条。 |
+| `check:idle-gpu` | **中** | 守能耗回归（历史 `80c530e` 136%→0.0%）。需要打包 exe，CI 里补的成本高（要跑 electron-builder）。 |
+| `audit` | **中** | 依赖 `npm ci` 可用；当前**根本跑不了**（§5.2）。安装链修好后应补上。 |
+| `test:stress` | **中低** | 12 个文件，纯长时压测。适合单独 job + schedule，不适合每次 PR。 |
+| `typecheck:budget` | **低（部分重叠）** | CI 的 `npm run typecheck` 本身就会 fail on error，**但不是等价物**：budget 脚本能捕获「tsc 退出码非 0 但错误数在预算内」之外的情形，且它把 node+web **合并计数**并显式声明预算。CI 里 `&&` 串联的 `typecheck` 已经覆盖了主要风险，缺口是**没有可见的预算陈述**。 |
+| `test:unit:fast` | **低（冗余）** | 实测它并不「fast」——**8m23s**，几乎等同于主进程全量。CI 的 `main-tests` job 已经跑了 `vitest run --coverage`（覆盖更广）。所以**这条不补也没关系**，反倒是这个名字有误导性。 |
+
+### 建议（按性价比排序，均未实施）
+
+1. **`check:renderer-entries` 进 CI quality job** —— 它不需要打包产物也能报「注册表不一致」吗？
+   需先确认（本机因缺 `dist-electron/` 在 exit 1 处更早退出，未验证到形态检查段）。
+2. `audit` 加进 quality job（**依赖安装链先修好**）。
+3. `test:stress` 单独 job + `schedule:`（夜间），不阻塞 PR。
+4. `typecheck:budget` 与 `typecheck` 二选一，避免同一次 CI 跑两遍 tsc。
+5. `test:unit:fast` 要么改名（如 `test:main:unit`），要么删——**当前名字与实测耗时严重不符**。
+
+### 已做的验证与未能做的验证（口径要说清）
+
+**已实证的部分**：
+
+| 检验 | 命令 | 结果 |
+|---|---|---|
+| `typecheck:budget` 未被任何 workflow 引用 | `grep -rn "typecheck-budget\|typecheck:budget" .github/` | **0 命中** |
+| 该门禁确实会红（不是「永远绿」） | 注入 `__MIO_MUTATION__` 后运行 | **exit 1**（真红，非假绿） |
+| 变异还原 | `diff` + `md5sum` | 逐字节一致（`4d930378…`） |
+
+**未能实证的部分（诚实标注）**：我**没有**真的把这条变异推给 GitHub Actions 跑一次 CI，
+因此「CI 会保持绿」是从 `run:` 列表**推断**的，不是观测到的。
+—— 但推断的依据很强：该脚本的命令体**不出现在任何 workflow 的任何 `run:` 里**，
+CI 没有任何途径执行它。若要闭合这个循环，需推一个含变异的提交看 CI 结果。
+
+⚠️ 顺带记一次**我自己又踩了 `cmd | tail` 陷阱**：上表第一次跑变异时我写了
+`node … | tail -5; echo $?`，得到 `exit=0`，差点据此写下「变异没有生效」。
+改用 `node … > f 2>&1; echo $?` 后才是真实的 `exit=1`。
+这正是本报告 §八 第 1 条列出的那个陷阱 —— **同一个坑，同一份文档里，我又踩了一次。**
+
+---
+
+## 八、口径提醒（给读这份报告的人）
 
 1. **`⚠️ unverified` 不是通过**。它表示「没验证」，不是「没问题」。
 2. **本报告的所有数字都附了命令**，可复核。基准提交：`c4c3d2b`（本轮共 5 个修复提交）。
@@ -408,3 +661,9 @@ npm error Unsupported URL Type "workspace:": workspace:*
 
    **每条结论都值得复核，包括我的。** 尤其：**任何一次「某道门禁坏了」的结论，
    先确认自己用的测量工具是对的。** 这 5 次里有 4 次是仪器错，不是被测对象错。
+
+   **区分两类错**（口径不要混）：
+   - **测量误差 5 次**（上面列的那些）——仪器读错，被测对象其实没问题。
+   - **结论被推翻 2 次**——仪器是对的，但我**从正确读数推出了错误结论**，
+     且这两次都已写进正文修正（§5.1 `format:check` 的「不建议动」、§5.2 的「lock 陈旧」）。
+     共同特征是：**跳过了一次低成本的验证**（看改动预览 / 做最小复现）。
