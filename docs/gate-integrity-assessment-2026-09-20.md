@@ -13,6 +13,17 @@
   `audit` —— ⚠️ **无法运行**（根因见下条，非 CVE 问题）。
 - **2 道门禁无法运行**（缺打包产物，前置条件）。
 - ★ **新发现 FM-5：6 道门禁存在、可执行，却不在 CI 流水线上**（`typecheck:budget`、`test:unit:fast`、`test:stress`、`audit`、`check:renderer-entries`、`check:idle-gpu`）—— 见 §七。**其中 `check:renderer-entries` 最该补**（它守的是「三形态注册表不一致→空白屏」，其它门禁全看不见）。
+  ✅ **2026-09-21 已闭环**：确认它**必须**有打包 exe（`findExe()` 在形态检查之前就抛），
+  故改为补一道**静态等价门禁** `check:form-registry`（秒级、无产物依赖，已进 quality job）—— 见 §七·补记。
+  ⚠️ **同日更正**：原写「6 道不在任何流水线上」是**错的**，实际 **5 道** ——
+  `test:stress` 就在 `weekly-stress.yml:18`（09-20 只比对了 `ci.yml`，漏看另两个 workflow）。
+- ★ ★ **新发现 FM-6（09-21）：门禁在流水线上，但 `continue-on-error: true` 摘掉了它的失败能力** ——
+  `weekly-stress.yml`（`Run stress tests` 步骤）与 `weekly-audit.yml:21/27/55/64`。
+  **而且查下去发现 `npm run test:stress` 当时连一个文件都没匹配到**（4 个 glob 全失配，
+  `No test files found` exit 1，3 秒；那 12 个文件真实存在且全绿）。
+  三重叠加 → 「每周跑压测」这句话是真的，但保障是 **0**，且没人见过它红。
+  ✅ **已修**：`test:stress` 改用可用写法（实测 12 passed / 57 tests / 40s）+ 去掉 `continue-on-error`。
+  `weekly-audit.yml` 的 4 处**未动**（趋势性指标，直接放开会变成常响噪音，需先定阈值）。见 §七。
 - ★★ **`npm ci` 起不来的真正根因（本轮定位，已用最小复现证明）**：
   **仓库用了 npm 从不支持的 `workspace:` 协议**（46 包 / 79 处），
   npm 的工作区解析是**按 name 匹配**而非协议。
@@ -591,14 +602,95 @@ npm audit --audit-level=high   → exit 1
 | `test:preload` | `vitest run --config vitest.config.preload.ts` | ✅ 是（`:79`） |
 | `check:cli-docs` / `check:coverage` / `check:mcp-live` | — | ✅ 是（`:99`/`:104`/`:110`） |
 | `check --workspace mio-agent-runtime` | — | ✅ 是（`:37`/`:96`） |
+| `check:form-registry`（**09-21 新增**） | `node scripts/check-form-registry.cjs` | ✅ 是（quality job，`Build` 之前）—— 见本节「补记」 |
 | **`typecheck:budget`** | `node scripts/typecheck-budget.mjs --budget 0` | ❌ **否** |
 | **`test:unit:fast`** | `vitest run --config vitest.config.unit-fast.ts` | ❌ **否** |
-| **`test:stress`** | 12 个 `*.stress/benchmark/endurance/baseline` 文件 | ❌ **否** |
-| **`audit`** | `npm audit --audit-level=high` | ❌ **否** |
+| **`test:stress`** | 12 个 `*.stress/benchmark/endurance/baseline` 文件 | ⚠️ **CI 否，但 weekly-stress.yml:18 会跑**（见下方更正） |
+| **`audit`** | `npm audit --audit-level=high` | ❌ **否**（`weekly-audit.yml` 里 `npm audit` 出现 **0 次**） |
 | **`check:renderer-entries`** | `node scripts/check-renderer-entries.cjs` | ❌ **否** |
 | **`check:idle-gpu`** | `node scripts/check-idle-gpu.cjs` | ❌ **否** |
 
-**6 道门禁存在、可执行、却不在任何流水线上。**
+> ⚠️ **本表原结论有一处错误，2026-09-21 更正**：原写「**6 道**门禁…不在**任何**流水线上」，
+> 但当时只逐条比对了 `ci.yml` 的 17 个 `run:` 步骤，**没有看 `.github/workflows/` 下的另外两个文件**。
+> 检索全部三个 workflow 后（`grep -rn "<命令体>" .github/`）：
+> `test:stress` **确实在** `weekly-stress.yml:18`（每周日 22:00 + `workflow_dispatch`）。
+> → 「不在任何流水线上」的准确数字是 **5 道**，不是 6 道。
+> 教训与本报告 §5.2 那次同源：**结论的范围超出了取证的样本范围**。
+> 顺带确证：`weekly-audit.yml` 虽叫 "Audit"，**`npm audit` 出现 0 次**（它跑的是 ts-prune / 长函数 / 配置漂移），
+> 所以 `audit` 这道门禁确实无人调用 —— 结论对，但理由与原文所述不同。
+
+### ★ 顺带发现 FM-6：门禁在流水线上，但被 `continue-on-error` 摘掉了失败能力
+
+比「不在流水线上」更隐蔽：门禁**真的在跑**，可它**永远不能让这次运行失败**。
+
+| Workflow | 步骤 | 现象 |
+|---|---|---|
+| `weekly-stress.yml` | `Run stress tests` → `npm run test:stress` | 曾带 `continue-on-error: true` + `timeout-minutes: 15` |
+| `weekly-audit.yml` | 测试 / 死代码 / 长函数 / 配置漂移 | 4 个实质步骤**全部** `continue-on-error: true`（在行 21/27/55/64） |
+
+后果：
+
+- **`weekly-stress`**：若压测回归，job **结论仍是 success**，且该 workflow **没有任何失败通知**
+  （无 issue 创建、无 slack/邮件）。→ **压测回归是完全静默的盲区。**
+  「每周有跑压测」这句话是真的，但它提供的保障是 0。
+- **`weekly-audit`**：4 个检查都失败也不能让 job 变红；它唯一的通报渠道是自动建 issue。
+  这算**有通报但不会失败**，比 stress 强，但同样淹掉了「红灯」语义 —— 除非有人真的去看 issue。
+
+判据：`continue-on-error: true` 出现在**实质检查步骤**上就是可疑的。
+它的正当用途是「可选/探索性步骤」，不是「我们做一下检查但不想知道结果」。
+
+### ★★ 更进一步的发现：`test:stress` 当时连一个文件都没匹配到
+
+顺着上面查下去时发现，这道门禁当时的状态比「失败不了」还糟 —— **它什么都没跑**：
+
+```
+$ npm run test:stress
+No test files found, exiting with code 1      # 3 秒退出，12 个文件一个没匹配
+```
+
+原因是脚本里的 4 个 glob **全部失配**：
+
+```
+vitest run tests/main/**/__tests__/*.stress.test.ts tests/main/**/__tests__/*.benchmark.test.ts …
+```
+
+实测（vitest 4.1.11）：CLI 位置参数在这里是按**子串**匹配的，`**` / `*` **不作为通配** ——
+
+| 过滤写法 | 命中 |
+|---|---|
+| `tests/main/**/__tests__/*.stress.test.ts` | **0** |
+| `tests/main/**/*.stress.test.ts` | **0** |
+| `**/*.stress.test.ts` | **0** |
+| `tests/main/*/__tests__/*.stress.test.ts` | **0** |
+| `.stress.test`（子串） | **10** ✅ |
+
+而那 12 个文件是**真实存在且全绿的**（`find` 数到 12；子串过滤实跑 **12 passed / 57 tests / 38s**）。
+
+三重叠加，正是「看起来被覆盖、实际保障为 0」的完整链条：
+
+1. glob 失配 → 一个文件都没选到，命令 3 秒 exit 1；
+2. `continue-on-error: true` → 这次 exit 1 **不会**让 job 变红；
+3. 该 workflow **无任何失败通报** → 没有人在任何地方看到过它。
+
+> 这正是本报告反复强调的那条：**「0 条用例」/「No test files found」= 门禁已死，不能当绿。**
+> 它这次藏在 `continue-on-error` 后面，藏得更深。
+
+**修复（2026-09-21 已实施）**：
+
+1. `package.json` 的 `test:stress` 改用可用写法 ——
+   `vitest run .stress.test .benchmark.test endurance.test baseline.test`（不加引号，
+   bash/cmd 都无需展开；`.` 不是通配符所以两种 shell 下都安全）。
+   修复后实测：**12 passed / 57 tests / exit 0**，耗时 **~40s**（不是长时任务，
+   原 `timeout-minutes: 15` 完全可以兜住）。
+2. `weekly-stress.yml` 去掉 `continue-on-error: true`，压测回归现在**真的会红**。
+   之所以敢直接去掉：已实测全绿且只要 40s，不是「一放就常响的警告」。
+3. `weekly-audit.yml` 的 4 个 `continue-on-error` **本轮未动** ——
+   它的通报渠道是自动建 issue，且「死代码/长函数」是**趋势性指标**，
+   直接让它红会立刻变成常响噪音（本报告门禁三条之③）。要改应先定「何谓失败阈值」，
+   属于单独的设计决策，不宜顺手改。**列为待办。**
+
+**5 道门禁不在任何流水线上（不含 test:stress）；另有 1 道在流水线上但被摘掉了失败能力 ——
+且该门禁在修复前连文件都没匹配到。**
 
 ### 逐条评估（不是所有缺口都同等严重）
 
@@ -607,7 +699,7 @@ npm audit --audit-level=high   → exit 1
 | `check:renderer-entries` | **高** | 它守的是「三处形态注册表不一致 → 运行期空白屏」（见记忆 §三）。**这类 bug 只在运行时暴露，其它门禁全看不见** —— 而它恰恰不在 CI 里。这是最该补的一条。 |
 | `check:idle-gpu` | **中** | 守能耗回归（历史 `80c530e` 136%→0.0%）。需要打包 exe，CI 里补的成本高（要跑 electron-builder）。 |
 | `audit` | **中** | 依赖 `npm ci` 可用；当前**根本跑不了**（§5.2）。安装链修好后应补上。 |
-| `test:stress` | **中低** | 12 个文件，纯长时压测。适合单独 job + schedule，不适合每次 PR。 |
+| `test:stress` | **中（09-21 上调）** | 12 个文件，纯长时压测，**不适合每次 PR** —— 这一点没变。但**它已经**在 `weekly-stress.yml:18` 排了每周日 22:00，所以缺口**不是「没排期」**（原判据写错了），而是 **`continue-on-error: true` 让它失败不了**，见 FM-6。原判据误导性在于：让人以为要补一个 schedule，实际上该改的是让它能红。 |
 | `typecheck:budget` | **低（部分重叠）** | CI 的 `npm run typecheck` 本身就会 fail on error，**但不是等价物**：budget 脚本能捕获「tsc 退出码非 0 但错误数在预算内」之外的情形，且它把 node+web **合并计数**并显式声明预算。CI 里 `&&` 串联的 `typecheck` 已经覆盖了主要风险，缺口是**没有可见的预算陈述**。 |
 | `test:unit:fast` | **低（冗余）** | 实测它并不「fast」——**8m23s**，几乎等同于主进程全量。CI 的 `main-tests` job 已经跑了 `vitest run --coverage`（覆盖更广）。所以**这条不补也没关系**，反倒是这个名字有误导性。 |
 
@@ -615,8 +707,16 @@ npm audit --audit-level=high   → exit 1
 
 1. **`check:renderer-entries` 进 CI quality job** —— 它不需要打包产物也能报「注册表不一致」吗？
    需先确认（本机因缺 `dist-electron/` 在 exit 1 处更早退出，未验证到形态检查段）。
+   → **2026-09-21 已确认并改用另一种做法**：读源码即可判定它**必须**有 exe ——
+   `findExe()` 是模块顶层调用（`check-renderer-entries.cjs:52`），`dist-electron/` 不存在时
+   直接抛 `打包目录不存在`，**根本走不到形态检查段**。所以「把它塞进 quality job」不可行。
+   改为补一道**静态等价门禁**：`scripts/check-form-registry.cjs`（`npm run check:form-registry`），
+   直接比对三处源文件，已加入 quality job。详见本节「补记」。
 2. `audit` 加进 quality job（**依赖安装链先修好**）。
-3. `test:stress` 单独 job + `schedule:`（夜间），不阻塞 PR。
+3. ~~`test:stress` 单独 job + `schedule:`（夜间）~~ → **更正并已修（09-21）**：schedule 早已存在
+   （`weekly-stress.yml`，每周日 22:00 + `workflow_dispatch`），真正的病是**脚本 glob 全失配
+   （0 文件）+ `continue-on-error`（失败不红）+ 无通报**。已改：脚本改用可用写法
+   （实测 12 passed / 57 tests / 40s）、去掉 `continue-on-error`。见 FM-6。
 4. `typecheck:budget` 与 `typecheck` 二选一，避免同一次 CI 跑两遍 tsc。
 5. `test:unit:fast` 要么改名（如 `test:main:unit`），要么删——**当前名字与实测耗时严重不符**。
 
@@ -639,6 +739,50 @@ CI 没有任何途径执行它。若要闭合这个循环，需推一个含变�
 `node … | tail -5; echo $?`，得到 `exit=0`，差点据此写下「变异没有生效」。
 改用 `node … > f 2>&1; echo $?` 后才是真实的 `exit=1`。
 这正是本报告 §八 第 1 条列出的那个陷阱 —— **同一个坑，同一份文档里，我又踩了一次。**
+
+### 补记（2026-09-21）：FM-5 头号项已闭环 —— 但不是按原建议的方式
+
+**先回答本节遗留的问题**：「`check:renderer-entries` 不需要打包产物也能报注册表不一致吗？」
+**不能。** `check-renderer-entries.cjs:52` 在**模块顶层**就调 `findExe()`，`dist-electron/` 不存在时
+直接抛 `打包目录不存在` 并 exit 1，**永远走不到形态检查段**。所以把它搬进 quality job 的前提是
+先跑 electron-builder —— 成本高、且 quality job 目前刻意不产出打包产物。
+
+**改用的做法**：补一道**静态等价门禁**，直接读三处源文件比对：
+
+| 项 | 内容 |
+|---|---|
+| 脚本 | `scripts/check-form-registry.cjs`（`npm run check:form-registry`） |
+| CI 位置 | `.github/workflows/ci.yml` quality job，`Build` 之前 |
+| 检查对象 | `src/renderer/src/forms/types.ts` 的 `FORM_KINDS`/`FORM_REGISTRY`、<br>`packages/core/src/core/Lifecycle.ts` 的 `FORM_SPECS`、<br>`electron.vite.config.ts` 的 renderer `rollupOptions.input` |
+| 比对内容 | 形态集合（含 `FormKind` 联合类型）、`htmlFile`、`size`/`minSize`、6 个窗口标志、<br>`alwaysOnTopLevel`、`acceptsMouseEvents ↔ ignoreMouseEvents` 互为取反、html 文件真实存在 |
+| 耗时 | 秒级，无依赖、无产物 |
+
+**为什么这是真缺口而不是重复**：`forms/__tests__/types.test.ts` 只校验 `FORM_REGISTRY` **自身**
+（键齐、`htmlFile === kind + '.html'`、透明形态无边框……），三份副本**各自内部都是自洽的**。
+所以「types.ts 加了形态但 vite 没加 input」「Lifecycle 的 size 与 registry 不一致」这类漂移，
+构建、typecheck、lint、以及那个既有测试**全都看不见**，只在运行期表现为窗口空白。
+
+**本门禁自身的验证（都做了，命令可复核）**：
+
+| 检验 | 手段 | 结果 |
+|---|---|---|
+| 三处源各改坏一次必须变红 | 6 组变异（改名 htmlFile / 改尺寸 / 删 vite 入口 / 反义字段搞错 / 改置顶层级 / 删整个形态） | **6/6 均 exit 1**，且报出预期的差异文案 |
+| 变异还原 | 内存原文回写 + `md5` 复核 | **零漂移**，门禁回绿 |
+| 判据本身被直接测 | `tests/main/renderer/__tests__/form-registry-gate.test.ts`（15 条） | **15 passed** |
+| 那些断言是否承重 | 把 `compare()` 改成恒返回空 → 变红 **12** 条；整段删掉防空转守卫 → 变红 **2** 条；`collect()` 返回空集 → 变红 **2** 条 | **全部承重** |
+| 防空转 | 解析失配（读到空集）时**主动报错**而非在空集上判「集合相等」 | 见上条 |
+
+⚠️ 过程中踩的两个坑，记下来：
+1. **夹具锚点必须用正则**：`electron.vite.config.ts` 等工作区文件是 **CRLF**，
+   字面量锚点里写 `\n` 会静默失配（命中 0 次），于是「变异没生效」被误读成「门禁没抓到」。
+   夹具里已加**锚点命中次数必须为 1** 的断言，专门拦这类假变异。
+2. **vitest 输出带 ANSI 颜色码**：`Tests\u001b[22m \u001b[1m\u001b[32m15 passed` ——
+   直接正则抓计数会得 0，必须先剥 `\u001b[..m`。差点据此判「测试全没跑」。
+
+**仍未闭环的 FM-5 项**：`check:idle-gpu`（需 exe，中）、`audit`（等安装链，中）、
+`test:stress`（建议独立 schedule job，中低）、`typecheck:budget`（与 `typecheck` 二选一，低）、
+`test:unit:fast`（改名或删，低）。**`check:renderer-entries` 本身仍不在 CI** ——
+它是运行期真跑，价值独立于本静态门禁，但需要打包产物才有意义。
 
 ---
 

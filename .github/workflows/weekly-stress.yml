@@ -14,7 +14,12 @@ jobs:
           node-version: 20
           cache: 'npm'
       - run: npm ci
+
+      # No continue-on-error: a stress regression has to make this run red.
+      # It used to be set, which turned "we run stress tests weekly" into zero
+      # actual coverage -- the step could fail and the job still went green,
+      # and nothing notified anyone. The suite takes ~40s, so a real failure
+      # is cheap to surface. See docs/gate-integrity-assessment-2026-09-20.md §七 FM-6.
       - name: Run stress tests
         run: npm run test:stress
         timeout-minutes: 15
-        continue-on-error: true

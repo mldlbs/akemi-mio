@@ -13,7 +13,7 @@
     "download:model": "node scripts/download-model.cjs",
     "test": "vitest run",
     "test:unit": "vitest run",
-    "test:stress": "vitest run tests/main/**/__tests__/*.stress.test.ts tests/main/**/__tests__/*.benchmark.test.ts tests/main/**/__tests__/*endurance* tests/main/**/__tests__/*baseline*",
+    "test:stress": "vitest run .stress.test .benchmark.test endurance.test baseline.test",
     "test:unit:fast": "vitest run --config vitest.config.unit-fast.ts",
     "typecheck:budget": "node scripts/typecheck-budget.mjs --budget 0",
     "lint": "eslint src/ --ext .ts,.tsx",
