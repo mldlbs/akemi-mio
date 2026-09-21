@@ -84,8 +84,8 @@
 | 14 | `typecheck` / `typecheck:node` / `typecheck:web` | `tsc -p … --noEmit` | 2 工程 | 0 | ✅ pass | ✅ 有防护 | 被 #5 覆盖读数 |
 | 15 | `test:renderer` | `vitest --config vitest.config.renderer.ts` | 449 | 0 | ✅ pass | ✅ 有防护 | 本轮补跑（验证格式化无害） |
 | 16 | `test:preload` | `vitest --config vitest.config.preload.ts` | 94 | 0 | ✅ pass | ✅ 有防护 | 本轮补跑 |
-| 17 | `test:unit:fast` | `vitest --config vitest.config.unit-fast.ts` | **2940** | 3 | ✅ **exit 0**（本轮补跑） | ✅ 有防护 | **实测 2937 passed / 3 skipped / 0 errors**；⚠️ 名不副实：耗时 **8m23s**，几乎等同主进程全量，CI 也从未调用它（见 §七 FM-5） |
-| 18 | `test:stress` | 见 `package.json` | — | — | ⬜ 未跑 | ⚠️ unverified | 需长时；建议单独排期 |
+| 17 | ~~`test:unit:fast`~~ | ~~`vitest --config vitest.config.unit-fast.ts`~~ | **2940** | 3 | ✅ exit 0 | ✅ 有防护 | 🗑 **2026-09-21 已删除**（含 `vitest.config.unit-fast.ts`）：名不副实（耗时 **8m23s**，几乎等同全量），且是 CI 已跑的 `vitest run --coverage` 的**子集**，CI 与脚本**均无消费者**（`grep` 只命中 package.json 与本报告）。见 §七 |
+| 18 | `test:stress` | 见 `package.json` | **57** | 0 | ✅ **exit 0** | ✅ 有防护 | **2026-09-21 已修**：原 4 个 glob 全失配 = **0 文件 exit 1**；改用可用写法后实测 **12 passed / 57 tests / ~40s**。同时去掉 `weekly-stress.yml` 的 `continue-on-error`。见 §七 FM-6 |
 | 19 | build（CI 内联） | `npx electron-vite build` | — | — | ⬜ 未跑 | ⚠️ unverified | 本机 `emptyOutDir` 撞 safe-delete（已知） |
 
 ---
@@ -604,7 +604,7 @@ npm audit --audit-level=high   → exit 1
 | `check --workspace mio-agent-runtime` | — | ✅ 是（`:37`/`:96`） |
 | `check:form-registry`（**09-21 新增**） | `node scripts/check-form-registry.cjs` | ✅ 是（quality job，`Build` 之前）—— 见本节「补记」 |
 | **`typecheck:budget`** | `node scripts/typecheck-budget.mjs --budget 0` | ❌ **否** |
-| **`test:unit:fast`** | `vitest run --config vitest.config.unit-fast.ts` | ❌ **否** |
+| **`test:unit:fast`** | ~~`vitest run --config vitest.config.unit-fast.ts`~~ | 🗑 **09-21 已删除** |
 | **`test:stress`** | 12 个 `*.stress/benchmark/endurance/baseline` 文件 | ⚠️ **CI 否，但 weekly-stress.yml:18 会跑**（见下方更正） |
 | **`audit`** | `npm audit --audit-level=high` | ❌ **否**（`weekly-audit.yml` 里 `npm audit` 出现 **0 次**） |
 | **`check:renderer-entries`** | `node scripts/check-renderer-entries.cjs` | ❌ **否** |
@@ -718,7 +718,10 @@ vitest run tests/main/**/__tests__/*.stress.test.ts tests/main/**/__tests__/*.be
    （0 文件）+ `continue-on-error`（失败不红）+ 无通报**。已改：脚本改用可用写法
    （实测 12 passed / 57 tests / 40s）、去掉 `continue-on-error`。见 FM-6。
 4. `typecheck:budget` 与 `typecheck` 二选一，避免同一次 CI 跑两遍 tsc。
-5. `test:unit:fast` 要么改名（如 `test:main:unit`），要么删——**当前名字与实测耗时严重不符**。
+5. ~~`test:unit:fast` 要么改名，要么删~~ → **已删（09-21）**：连同 `vitest.config.unit-fast.ts` 一起删除。
+   依据是三条实测：耗时 **8m23s**（名不副实）；选中的是 CI 已跑的 `vitest run --coverage`
+   的**子集**（主配置减去 12 个压测文件，而压测只占 ~40s）；`grep unit-fast` 只命中
+   package.json 与本报告，**CI 与脚本均无消费者**。留着只能误导人以为有快速反馈通道。
 
 ### 已做的验证与未能做的验证（口径要说清）
 
