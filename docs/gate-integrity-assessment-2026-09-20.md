@@ -1478,3 +1478,199 @@ exit=0
 GPU 阈值本来就注明「在 CI 上未标定」，现在连首次标定的机会都还没有。
 **下一个 CI run 才是它们真正的首跑。**
 
+### 10.10 ★ `mio-cli-tests` 第一次绿（run #38），以及它为什么连红四次
+
+`mio-cli-tests` 是整个 CI 里唯一跑 `packages/mio-cli`（`node --test`，非 vitest）的 job，
+从 monorepo 化起就没绿过。它的失败点**一次一次往前移**，每一道被修好后才露出下一道：
+
+| run | commit | 失败点 |
+|---|---|---|
+| #35 | `48c711d` | `mio-agent-runtime tests`（无注解，只有 `exit code 1`）|
+| #36 | `fa38927` | 前移到 `check:mcp-live` ← **真根因在这里** |
+| #37 | `97da3c1` | 前移到 `mio-agent-runtime tests` 里的 1 个用例（flaky，见 §10.12）|
+| #38 | `4769bf0` | **无 —— `mio-cli-tests` succeeded，8m59s，史上第一次绿** |
+
+#### `check:mcp-live` 的真根因：`main` 指向被 gitignore 的 `dist`
+
+```
+dispatchable but NOT offered by tools/list (13): mio.insight.generate, mio.insight.list,
+  mio.insight.mark_reported, mio.insight.status, mio.observer.collect, mio.observer.dag,
+  mio.observer.essays, mio.observer.ferment, mio.observer.insights, mio.observer.research,
+  mio.observer.status, mio.observer.trends, mio.observer.world_model
+  an isXxxAvailable() gate is swallowing them -- check that the optional package resolves
+```
+
+7 个 workspace 包的 `main` 指向 `./dist/index.js`，而 `dist` 被 `.gitignore:2` 排除
+—— 全新检出里不存在。`insight-store.js` 的两步解析**两条都指向同一个缺失文件**
+（回退的 `require('../../insight')` 命中同一个 `main`），于是 `isInsightAvailable()`
+返回 false，`TOOLS` 里的条件展开 `...(isXxxAvailable() ? [...] : [])` 让这 13 个工具
+**从 `tools/list` 整体消失**，而分派 `case` 还在源码里 —— 源码和测试都看不出问题。
+
+本机双向复现（因果闭合）：
+
+| `packages/{insight,observer}/dist` | `check:mcp-live` |
+|---|---|
+| 移走（确认 `mv` 成功） | **exit 1**，13 个工具消失 |
+| 放回 | **exit 0** |
+
+修法 `npm run build --workspaces --if-present`（本机 26.4s）。`--if-present` 恰好只命中
+那 7 个包 —— 「有 build 脚本的包」与「`main` 指向 dist 的包」经逐一核对是同一批，
+以后加包自动跟随。**这不是降质量线**：published 安装里这些包带 `dist`
+（`files: ["dist"]` + `prepublishOnly: build`），构建后 CI 才与真实环境一致。
+
+#### 三个被证伪的假设（记下来，免得再走一遍）
+
+在拿到真根因之前，对 #35 的失败提了三个假设，**全部被本机实验证伪**：
+
+| 假设 | 实验 | 结果 |
+|---|---|---|
+| `packages/insight\|observer/dist` 缺失 | 移走两个 dist 跑全量 | 386/386 全过（测试用假包注入，对包不可用是健壮的）|
+| 时区（CI 是 UTC） | `TZ=UTC` 跑全量 | 全过 |
+| `node_modules/@akemi-mio/*` 软链差异 | `git archive HEAD` 干净树 + 67 个 junction 跑全量 | 386/386 全过 |
+
+#### 顺带修的：让这个 job 的失败可读（`97da3c1`）
+
+该 job 的 4 个步骤都不是 vitest（`node --test` + 3 个 plain node 脚本），而
+**vitest 会自己发 `::error::`（注解无需管理员权限即可读），它们不会**。
+所以此前整个 job 的注解只有一句 `Process completed with exit code 1.`，
+真正的报错只在 job 日志里，而**公开仓的 job 日志仍要管理员权限**（实测 403）。
+新增 `scripts/run-with-annotations.mjs` 包住这 4 步（透明传退出码，只在失败时补注解）。
+
+### 10.11 ★ 包装脚本自己的缺陷：注解取错了位置（`a3d6a1b`）
+
+上一节的包装脚本**第一版就是错的**，而且错法很典型：它从「全局最后 30 行」里找诊断。
+但 `node --test` 的诊断块（duration / location / error / expected / actual / stack）
+紧跟在 `not ok` 行**之后**、位于输出中段。run #37 有 386 个用例、失败在第 357 个，
+于是注解里是：
+
+```
+not ok 357 - digest respects topic filter
+----- last lines of output -----
+# Subtest: task.route returns related memories when no verified match exists
+ok 385 - task.route returns related memories when no verified match exists
+```
+
+—— 知道哪个用例挂了，不知道**为什么**挂。而这个用例的断言是 `assert.equal(digest.count, 1)`，
+`count` 是 0 还是 2 决定完全不同的排查方向（§10.12 就是被这一点拖慢的）。
+
+改成按 `not ok` 行提取缩进的 TAP 诊断块；tail 只在「压根没产出 TAP」时保留
+（崩溃、npm 报错、几个 plain node 检查脚本），因为块存在时它严格更有信息量。
+
+**验证（60 个用例、第 30 个失败的夹具）：**
+
+| 路径 | 结果 |
+|---|---|
+| 旧策略 | `node --test … \| tail -30 \| grep -c 'case 30'` → **0**（确实漏）|
+| 新策略 | 注解拿到 `error` / `expected: 0` / `actual: 1` / `operator` / `stack` 全套 |
+| 无 TAP 的崩溃脚本 | 仍走 tail，注解里是完整栈 |
+| 成功路径 | 0 条注解、exit 0 |
+
+**在真实 CI 上复核过**：run #40（`a3d6a1b`）的 `mio-cli-tests` 注解里出现了
+`duration_ms: 7.7483` / `type: 'test'` / `location: '…observer-subscribe.test.js:51:1'`。
+
+### 10.12 ★★ 一个 flaky 门禁的根因：digest 游标的毫秒竞态（`ae4cbd3`）
+
+#### 症状：同一份测试代码，一次绿一次红
+
+| run | commit | `mio-agent-runtime tests` 里的失败 |
+|---|---|---|
+| #36 | `fa38927` | 无 |
+| #37 | `97da3c1` | `not ok 357 - digest respects topic filter`（1 个）|
+| #38 | `4769bf0` | 无 |
+| #39 | `37cde4b` | `not ok 355 - digest delivers new events once…` + `not ok 357 - digest respects topic filter`（**2 个**）|
+| #40 | `a3d6a1b` | `not ok 355 - digest delivers new events once…`（1 个）|
+
+#36 与 #37 的**测试代码完全相同**（#37 只改了 `ci.yml` 并新增包装脚本）→ 先怀疑 flaky。
+本机跑该文件 30 次：**30/30 全过**。
+
+挂的用例有一个共同结构：`subscribe → digest（建立游标）→ 紧接着 ingest → digest 期望 count 1`。
+同文件里那个只断言 `count 0` 的用例**从未挂过**。
+
+#### 排除法：唯一的非确定性是两次 `new Date()`
+
+该测试里所有 I/O 都是同步的（`appendFileSync` / `writeFileSync`）、
+`node:test` 单文件内顶层用例顺序执行、`crypto.randomBytes` 只影响 id、
+每个测试文件有自己的 `mkdtemp` 目录 —— 所以**唯一的非确定性就是墙钟**。
+
+两个时间戳来自同一个时钟：
+
+```
+subscription-store.js:145   const digestTime = new Date().toISOString()   ← 游标
+task-store.js:441            timestamp: new Date().toISOString()          ← 事件
+subscription-store.js:171    if (cursorTime !== null && eventTime !== null && eventTime <= cursorTime) continue
+```
+
+digest 与 ingest 之间只隔一次小文件写入（digest 写 `digest_state.json`）。
+
+#### 确定性复现（把「靠运气」变成「必然」）
+
+冻结 `Date`（每个无参 `new Date()` 都返回同一瞬间）后跑真实调用序列：
+
+| 自变量 | `traces.jsonl` 行数 | 事件 timestamp | 游标 | `digest.count` |
+|---|---|---|---|---|
+| 真实时钟 | 2 | `.739` / `.742` | `.739` | **1** ✅ |
+| 冻结时钟 | 2 | 都是 `.000` | `.000` | **0** ❌ |
+
+两臂都落盘 2 行 → **排除「ingest 没写进去」**。
+冻结臂里第一次 digest 的 `subscriptionCount = 1` → **排除「订阅被 expiresAt 过期过滤」**
+（否则订阅根本不在循环里，游标也不会被写）。
+
+#### 量化：窗口本身就是那次文件写入
+
+| 量 | 本机实测 |
+|---|---|
+| `new Date().toISOString()` | 0.0018ms（可忽略）|
+| `writeFileSync` 小文件 | min 0.55ms / 中位 1.98ms / **max 110ms**（Defender 实时扫描）|
+| digest→ingest 间隔 | min **2ms** / 中位 17ms |
+
+本机地板 2ms，而「同毫秒」要求窗口 = 0ms → 本机几乎不会发生（30/30 吻合）。
+CI runner 的盘更快、工作区被排除实时扫描 → **地板可能 <1ms，「同毫秒」于是成为常态**。
+这解释了本机 0/50 与 CI 约 50% 的巨大差异。
+
+⚠️ **方法坑**：第一版窗口探针在 digest 与 ingest 之间读了 `digest_state.json`，
+把窗口污染成 9–39ms（量的其实是自己的 I/O）。改用只挂钩 `Date`、关键路径零 I/O 的记录探针后
+才拿到上面这组数。
+
+#### 这不只是测试问题 —— 是永久丢事件
+
+游标只前进，所以被吞掉的事件**再也不会被投递**。这是真 bug，不是 flaky 的副作用。
+
+#### 修法：游标改成 `{ time, id }`，语义改为排他下界
+
+事件排在游标**之后**才投递，同毫秒用 `event.id` 破平。`id` 三态，差别是实质性的：
+
+| `id` | 含义 | 同毫秒行为 |
+|---|---|---|
+| `''` | 墙钟游标（那一刻什么都没投递过）| 空串排在所有真实 id 之前 → **照投**（修掉竞态）|
+| `null` | 旧格式游标（tie-break 之前是裸 ISO 字符串）| `null` 排在所有真实 id 之后，**精确复现**原来的时间闭区间比较 → **升级不重新投递** |
+| `'<id>'` | 事件游标：该事件已投递 | 按 id 字典序 |
+
+另外投递时游标要停在同毫秒内**最大**的 id 上，否则较低的那些下次会被重复投递。
+
+#### 回归测试与承重性验证
+
+`__tests__/observer-digest-cursor.test.js` 冻结时钟，把竞态变成确定性的。
+三个用例都做了**定向变异**（因为用例 2、3 在修复前后都是绿的，承重性必须证明）：
+
+| 变异 | 结果 |
+|---|---|
+| 未修实现 | 用例 1 红（复现器），2/3 绿 |
+| `isNewEvent` 恒返回 true | 用例 2、3 红 |
+| legacy 分支改坏 | **仅**用例 3 红 |
+
+验证：新文件 3/3；mio-cli 全量 **389/389**（原 386 + 3）；原 flaky 文件 20/20；
+`check:cli-docs` / `check:coverage` / `check:mcp-live` 全 exit 0。
+
+### 10.13 两个顺带发现（均未修，记录以免重复踩）
+
+* **`format:check` 只覆盖 `src/**`**：`scripts/format-check.mjs:17` 的
+  `GLOB = 'src/**/*.{ts,tsx,json,css}'`。于是 `packages/mio-cli/**` **完全不在格式门禁内**
+  —— `subscription-store.js` 相对根 `.prettierrc`（`printWidth: 140`）有 **23 行既有漂移**。
+  本轮只保证**自己新增的行**干净（用 `git show HEAD:<f> | npx prettier --stdin-filepath <f>`
+  做基线对比，确认未新增漂移）；全量重排属另一件事，未做。
+  ⚠️ 判「我有没有引入漂移」**必须用 `--stdin-filepath`**：直接 `npx prettier /tmp/x.js`
+  读不到仓库 `.prettierrc`，会走默认 80 列/双引号，得出**假差异**（实测 213 行 vs 真实 23 行）。
+* **`index.js:50` 的 `digestStatePath` 是死变量**（定义后从未使用）。
+  真正的游标读写全在 `subscription-store.js`（`readDigestState` / `writeDigestState`），
+  所以本次游标格式变更的影响面就是那一个文件。
+
