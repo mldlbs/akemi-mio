@@ -1875,3 +1875,65 @@ weekly-stress.yml    OK   name="Weekly Stress Test"
 依赖 `audit`/`automated` 两个 label —— 这已经不是「让门禁承重」而是
 「要不要这道门禁、要成什么样」，需要拍板。
 
+#### 修法（`07ce2af`，按拍板取最小改动）
+
+**A. `weekly-audit.yml`**：只把 `Create report` 的块内容**缩进 10 格**。
+YAML 会按块基准统一剥掉这 10 格，交给 PowerShell 时 `@"` 与 `"@` 仍在**第 0 列**
+—— 这正是 here-string 需要的。两处验证：
+
+```
+js-yaml：ci.yml OK / weekly-audit.yml OK / weekly-stress.yml OK      （此前 weekly-audit FAIL 69:1）
+再取解析后的脚本：lines[0] === '@"'  → true
+                lines.some(l => l.startsWith('"@')) → true
+```
+
+⚠️ 只改缩进、**不动语义**：4 处 `continue-on-error`、`npm install -D ts-prune`（改 `package.json`）、
+`Create Issue` 依赖 `audit`/`automated` 两个 label —— 这些是「要不要这道门禁」的问题，留待单独评估。
+
+**B. `weekly-stress.yml`**：`node-version: 20 → 22`（与 `ci.yml` 对齐），
+并把 `npm run test:stress` 换成
+`node scripts/run-with-annotations.mjs npm run test:stress`（可诊断性，做法同 §10.11）。
+本机验证：`WRAPPED_EXIT=0`、`Test Files 12 passed`；另用不存在的 script 冒烟，
+确认包装脚本对失败命令会产出 `::error::` 尾注解、且**退出码透明**。
+
+#### 修完观察到的效果（⚠️ 观察，非证明）
+
+* 修好后那次 push（`07ce2af`）**没有**产生新的 `weekly-audit` run —— 最新一条仍是修前的
+  `e19b01e`（`Failure`，且页面上**没有** `Run tests`/`Dead code scan`/`Create Issue` 这些步骤名
+  → 又一个「0 job」的旁证）。
+* 也就是说：**文件语法非法时 GitHub 每次 push 建一个 0 job 失败 run；文件一旦合法、
+  且 `on:` 里只有 `schedule`/`workflow_dispatch`，这个每 push 的噪音就停了。**
+  这解释了「为什么一个只有 `schedule` 的 workflow 会 `event=push`」这个反常现象。
+  ⚠️ 仍属推断（可能只是索引延迟），但两个方向都与它一致。
+* `weekly-stress` 是否还会红**仍未证实**：两次红都早于 `npm ci` 修复，job 日志 403
+  → 需等 09-27 调度，或在页面上手动 `workflow_dispatch`。
+
+### 10.16 ★★★ 里程碑：CI 六个 job **首次全绿**，且连续三笔
+
+| run | commit | 结果 |
+|---|---|---|
+| #43 | `2415bd4`（TelegramService 修复） | **Success —— 六个 job 全部通过，史上第一次** |
+| #44 | `d053632`（§10.14 文档） | Success |
+| #45 | `e19b01e`（§10.15 文档） | Success |
+| — | `07ce2af`（weekly 修复） | 抓取时仍在跑 |
+
+> ⚠️ 计数说明：run 号是**按 workflow 各自计数**的，所以 `CI` 与 `weekly-audit` 会各有一套
+> 40+ 的号（此前一度把它误读成「同一个 run 号出现在两个 workflow 上」）。
+
+至此，**push 面上的六道 job 都有「承重」证据**（不是「配了」，而是「跑到了且能红」）：
+
+| job | 承重证据 |
+|---|---|
+| `quality` | 曾是 `format:check` 恒红 / `typecheck:budget` 报错（§10.7） |
+| `main-tests` | §10.14：4 条用例曾在 CI 上稳定红，修复后转绿 |
+| `renderer-tests` / `preload-tests` | 覆盖率棘轮已标定（§10.8） |
+| `mio-cli-tests` | §10.12 游标竞态曾在 CI 上红 → 修复后 #38、#41 两次绿 |
+| `packaging` | §10.9：曾在 CI 上 3 秒失败 → 修复后实跑 |
+
+⚠️ **但「全绿」不等于「门禁没问题了」**。仍未闭合的：
+* `weekly-stress` 两次红未复跑（本节）。
+* `weekly-audit` 语义问题未动（4 处 `continue-on-error`）。
+* 覆盖率目标值 30/37/80 仍是**未还的债**（§10.8）。
+* `check:idle-gpu` 的 GPU 阈值仍未在 CI 上标定。
+* `audit` 门禁仍未进 CI（要先还 32 个漏洞的债）。
+
