@@ -2135,11 +2135,12 @@ $ curl -sL https://github.com/mldlbs/akemi-mio/labels
   `wallpaper`/`pet`/`chat` 三个形态窗口完全没被守。
   「把量到了什么变成 notice」**09-22 已做并验证**（§10.19：受控夹具 + 变异检验通过）；
   **扩大覆盖**仍未做（已探明路径，见 §10.19 末尾）。
-* ⚠️ **`main-tests` 有一处抖动**（§10.20）：`connection.path.test.ts` 的 5s 超时
-  从未在 Windows runner 上标定过（本机 1.1–1.4s）。**master 上实测 5 笔 2 红（≈40%）**
-  —— 与代码质量无关的红，已让默认分支的红不再携带信息。
-  成本已查清（迁移 88ms vs 冷 import 957ms），并发现**严格优于「放宽超时」的 A′ 方案**；
-  **未动**，等拍板。
+* ✅ ~~**`main-tests` 有一处抖动**（§10.20）：`connection.path.test.ts` 的 5s 超时
+  从未在 Windows runner 上标定过（本机 1.1–1.4s）。**master 上实测 5 笔 2 红（≈40%）**~~
+  —— **09-22 已处置**：成本查清（迁移 88ms vs 冷 import 957ms），
+  采用 **A′（`beforeAll` 预热 + `resetModules`）**：测试体从 1374ms 降到 **96ms**
+  （对 5000ms 是 52 倍余量），**超时阈值未动**，变异检验通过。
+  ⚠️ 待 CI 复跑若干轮后确认假红率确实归零。
 * 覆盖率目标值 30/37/80 仍是**未还的债**（§10.8）。
 * `check:idle-gpu` 的 GPU 阈值仍未在 CI 上标定（§10.17 已把数字变成注解，
   CI #48 已拿到基线数字：GPU 0.0% / CPU 2.5%）。
@@ -2595,7 +2596,7 @@ main-tests   ✗  Process completed with exit code 1.
 
 | 方案 | 做法 | 代价 / 风险 |
 |---|---|---|
-| **A′. `beforeAll` 预热（实测后新增，推荐）** | 在测试体之外付掉进程级冷启动；该测试超时**保持 5s** | 严格优于 A：消除假红且**不降低灵敏度**；⚠️hook 需显式给超时；⚠️必须用变异检验证明 `doMock` 仍生效（否则变成假通过） |
+| ✅ **A′. `beforeAll` 预热（09-22 拍板并实施）** | 在测试体之外付掉进程级冷启动；该测试超时**保持 5s** | 严格优于 A：消除假红且**不降低灵敏度**；⚠️hook 需显式给超时；⚠️**必须** `resetModules()`，否则 `doMock` 静默失效 → 假通过（已实测，见下） |
 | **A. 只给这一个测试放宽超时** | `it('…', { timeout: 30_000 }, …)`（或在 `vitest.config.ts` 设 `testTimeout`） | 最小；实测支持它：超时预算被**模块加载**吃掉，而该测试断言的是**路径**不是**速度**；⚠️仍会**掩盖** DB 初始化真的变慢的回归（虽然它本来也不是性能门禁） |
 | ~~**B. 降低测试成本**~~ | ~~查这 48 次 migration 是否必需~~ | ❌ **已被实测否决**：迁移只占 88ms（7%），砍掉也救不了；成本在冷 import（957ms），而那个 import 是该断言的**机制本身** |
 | **C. 只记录不改** | 保留现状 + 本节记录，遇到红就重跑 | ⚠️ 实测 40% 的红率下，「重跑」等于承认这道门禁**在默认分支上不携带信息** |
@@ -2653,6 +2654,54 @@ beforeAll(async () => {
 import 是否**真的重新求值**（而不是复用被缓存的模块）。若没重新求值，
 `doMock` 就失效了 → 测试会变成**假通过** —— 那正是本报告最反对的那类失败。
 验证方式仍是**变异检验**：把断言改坏，确认它**仍然会红**。
+
+#### ✅ 处置（09-22 拍板 A′）：实施与验证
+
+按拍板选了 A′。实施时**那个前提确实是个真陷阱**，不是假想 —— 探针实测：
+
+```
+[probe] (a) 预热+resetModules  → 落到了 mock 给的路径? true
+[probe] (b) 预热无 resetModules → 落到了 mock 给的路径? false
+```
+
+**为什么 (b) 会静默变成假通过**（这段是本节最该记住的部分）：
+
+1. 预热 import 把 `@akemi-mio/core/db/connection` 放进了模块注册表，
+   它内部的 `@akemi-mio/core/config` 引用指向**真实配置**；
+2. 测试里 `vi.doMock('@akemi-mio/core/config', …)` 之后那次 `await import(connection)`
+   **拿回的是缓存实例** → mock 被绕过；
+3. 而 `getDatabaseDirectory()` 是
+   `process.env.USER_DATA_DIR ? … : WORKSPACE.databases` ——
+   `USER_DATA_DIR` **优先级更高**，测试在调用 `initDatabase()` 前已经把它设成了
+   `dynamicRoot` ⇒ 前两条断言**照样通过**；
+4. 第三条断言（`fixedRoot` 下不该有库）在没有 mock 时**也是真的**（没人往那儿写）。
+
+⇒ **四条路径全部通过，测试绿，但 `vi.doMock` 已经死了。** 没有任何信号。
+
+所以 `beforeAll` 里的 `vi.resetModules()` **是修法的一部分**，不是保险起见：
+
+```ts
+beforeAll(async () => {
+  await import('@akemi-mio/core/db/connection')  // 付掉进程级冷启动
+  vi.resetModules()                              // ← 必须：否则上面的 mock 静默失效
+}, 60_000)                                       // hook 超时须显式给（默认也是 5000ms）
+```
+
+**验证结果**：
+
+| 检查 | 结果 |
+|---|---|
+| 改后该测试 | ✅ 通过，**测试体 96ms**（改前 1374ms / 插桩下 1097ms）→ 对 5000ms 是 **52 倍**余量 |
+| `tests/main/db` 全目录 | ✅ 9 文件 20 用例全过 |
+| **变异检验**（`getDatabaseDirectory()` 改成忽略 `USER_DATA_DIR`） | ✅ 如期变红（`expected false to be true` = 断言 1） |
+| mock 是否仍生效 | ✅ 探针 (a)：预热+reset 后落到 **mock 给的路径** |
+| `prettier --check` | ✅ 通过（HEAD 与工作区都过，不是 CRLF 假红） |
+| 恢复 | ✅ 用 `cp`（**没用 git**），md5 与备份一致、`grep -c MUTATION` = 0 |
+
+> ⭐ 这一段的元教训：**「把成本挪出超时窗口」和「不让 mock 静默失效」是两个必须
+> 同时满足的约束**。只做前者会让测试变绿，而绿的原因是**它不再检查任何东西** ——
+> 这正好是 FM-2b（断言变成恒真）的另一种制造方式，且比原来那个抖动**更危险**：
+> 抖动至少会红，假通过永远绿。
 
 
 ### 10.21 ✅ 还掉 `weekly-audit` 的 label 债，并补上**缺失的 `permissions`**（09-22 拍板）
