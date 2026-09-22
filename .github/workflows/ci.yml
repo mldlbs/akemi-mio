@@ -136,3 +136,55 @@ jobs:
       # survives, which is invisible to every other gate.
       - name: MCP tools are actually offered at runtime
         run: npm run check:mcp-live
+
+  # The two gates in this job need a real packaged exe, which no other job
+  # produces -- until 2026-09-21 they simply never ran anywhere. They are the
+  # only gates that can see packaged-only failures (asarUnpack paths, a window
+  # that paints in dev but is blank in the exe) and the only ones that measure
+  # what the app actually costs at idle.
+  packaging:
+    runs-on: windows-latest
+    needs: quality
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm i -g npm@11
+      - run: npm ci
+
+      - name: Build renderer + main bundles
+        run: npm run build
+
+      # --dir instead of the configured nsis target: both scripts below look for
+      # dist-electron/win-unpacked/AkemiMio.exe, which is exactly what --dir
+      # produces. It also skips the NSIS step and the winCodeSign download,
+      # which is minutes we do not need to spend to answer the question.
+      - name: Package (unpacked directory)
+        run: npx electron-builder --win --dir
+
+      # Boots the real exe and opens every renderer entry (pet / chat /
+      # wallpaper / agent), then checks it actually painted by measuring the
+      # layout height chain. A blank window passes build, typecheck, lint and
+      # every vitest config -- only this sees it.
+      - name: Every renderer entry actually paints (packaged exe)
+        run: npm run check:renderer-entries
+
+      # THRESHOLDS ARE UNCALIBRATED ON CI. --gpu-budget / --delta-budget default
+      # to 20 / 15, derived on a dev machine with a real GPU; GitHub runners are
+      # software-rasterised, so the absolute number is not comparable yet. The
+      # A/B delta (animations on vs. animations off, same machine, same run) is
+      # the load-bearing assertion and does travel across machines. If the
+      # absolute budget goes red on the first runs, recalibrate it from the
+      # measured numbers -- do NOT silence the step.
+      - name: Idle GPU budget (packaged exe)
+        run: npm run check:idle-gpu -- --warmup=30 --samples=2 --interval=6
+
+      - name: Upload unpacked build
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-unpacked
+          path: dist-electron/win-unpacked
