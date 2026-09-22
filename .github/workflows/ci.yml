@@ -123,6 +123,29 @@ jobs:
       - run: npm i -g npm@11
       - run: npm ci
 
+      # 7 个 workspace 包的 `main` 指向 `./dist/index.js`，而 `dist` 被 gitignore
+      # （`.gitignore:2`）—— 全新检出里它们不存在。
+      #
+      # electron-vite 把 `@akemi-mio/*` alias 到 `packages/*/src` 直接打进 bundle，
+      # 所以**应用**不需要 dist；但 mio-cli 是 plain CommonJS，走的是
+      # `require('@akemi-mio/insight')` → package.json 的 main → dist，没有 bundler
+      # 兜底。缺 dist 时 insight-store.js / observer-store.js 的两步解析**两条都指向
+      # 同一个缺失文件**（回退 `require('../../insight')` 命中同一个 main），于是
+      # isInsightAvailable() 返回 false，13 个 mio.insight.* / mio.observer.* 工具从
+      # tools/list 整体消失。
+      #
+      # 09-22 实测：这一步缺席时 `check:mcp-live` 在 CI 上红（`mio-cli-tests` 的失败
+      # 点从「mio-agent-runtime tests」前移到了它），而该门禁自己会把原因打出来：
+      #   dispatchable but NOT offered by tools/list (13): mio.insight.generate, ...
+      #   an isXxxAvailable() gate is swallowing them -- check that the optional package resolves
+      # 本机复现：移走 packages/insight/dist 与 packages/observer/dist → exit 1；
+      # 放回 → exit 0。所以这是「全新检出没构建」，不是门禁定错了期望值。
+      #
+      # `--if-present` 恰好只命中这 7 个包（有 build 脚本的包与 main 指向 dist 的包
+      # 是同一批 7 个），以后加包自动跟随。本机实测 26.4s。
+      - name: Build the workspace packages mio-cli requires through main (dist is gitignored)
+        run: npm run build --workspaces --if-present
+
       # The mio-agent-runtime CLI is plain CommonJS and uses node:test, so it is
       # not covered by any of the vitest configs above -- without this job none
       # of its tests run in CI at all.
