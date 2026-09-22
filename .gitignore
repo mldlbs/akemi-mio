@@ -120,7 +120,21 @@ out/
 .ssh/
 tsc-permission-test.json
 *.ts.tmp.*
-extensions/
+# `extensions/` 下只有 fanqie-mcp 一个扩展，而它是**产品的一部分**：
+# `tests/main/tool/__tests__/FanqieProviderContract.test.ts:64` 会 spawn 它跑 MCP 协议、
+# `ContentDraftingProviderContract.test.ts:49` 读它的源码做断言，
+# `packages/main/src/bootstrap/AppRuntime.ts:578` 也用 `process.cwd()/extensions/...` 注册它。
+# 它被忽略时这三个使用方在 CI 全新检出里全部失败（`Cannot find module` / `ENOENT`），
+# 而本机因为文件就在那儿一直绿 —— 与 `__test_support__.ts`、`m56-*` 是同一类 bug。
+#
+# ⚠️ 不能写成 `extensions/` + `!extensions/fanqie-mcp/fanqie-mcp.mjs`：
+# git 不允许 re-include 一个**父目录已被排除**的文件，必须把目录规则改成
+# `extensions/*` 再逐层 negate。`extensions/fanqie-mcp/*` 保留「里面的其它文件仍
+# 不入库」这个原意。
+extensions/*
+!extensions/fanqie-mcp/
+extensions/fanqie-mcp/*
+!extensions/fanqie-mcp/fanqie-mcp.mjs
 test-user-data/
 # 测试夹具：IdentityModule / MetaCycle 会把 constitution 临时写在仓库根目录，
 # 跑完才删；清理失败时会残留，别让它被 `git add -A` 收进去
