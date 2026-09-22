@@ -1814,7 +1814,39 @@ run #41（`ae4cbd3`）的 `main-tests` 注解正是这 4 条、行号 `91/520/55
   而不是文件第 1 行写的 `Weekly Codebase Audit`。
 * 两者都与「GitHub 读不出这个文件」一致：读不到 `name:` → 退回显示路径；
   建不出 job → 0 job。
-  （⚠️ 「为什么 `event` 是 `push`」我**没有**进一步验证机制；对本节结论无影响。）
+
+**run 页面把这件事写得更直白**（`curl` 抓 `.../actions/runs/<id>`，页面摘要区逐字）：
+
+```
+Triggered via push        September 22, 2026 10:28   mldlbs pushed e19b01e fix/gate-packaging
+Status        Failure
+Total duration    –                        ← 破折号，一个 job 都没有
+Artifacts         –
+This workflow graph cannot be shown        ← 图都画不出来
+A graph will be generated the next time this workflow is run.
+Annotations   1 error
+  Invalid workflow file: .github/workflows/weekly-audit.yml#L69
+  You have an error in your yaml syntax on line 69
+```
+
+即 **GitHub 自己就写着 `Invalid workflow file`** —— 根因不需要我再推断。
+页面里 `/actions/runs/<id>/job/<n>` 形式的链接数 = **0**（另有旁证：`Total duration` 为 `–`）。
+
+#### 事实 1b：**从第 1 次运行起就是坏的**，且 50 次运行全是 push 事件
+
+把该 workflow 的**全部 50 次运行**（run #1–#50，两页各 25 条）拉出来看：
+
+* **50/50 全部 `failed`**。
+* **50/50 的标题都是提交信息**（`Triggered via push`），**没有一次是 `Scheduled`**
+  —— 也就是说这个「每周」workflow **一次都没被调度执行过**。
+* run #1 = **2026-09-12 12:47**，`144d5fb` 推到 **`master`**，
+  报错是 `...weekly-audit.yml#L68` / `on line 68`（后来变成 L69，文件有过微调）。
+  → **这个文件自打被引入那天起就是非法的**，不存在「以前好过、后来坏的」。
+
+> ⚠️ **方法论（补 10.15 开头那条）**：判「某 workflow 死了多久」不能只数失败的 run 数，
+> 要看**这些 run 的 event 是不是它声明的触发方式**。
+> 一个只有 `schedule` 的 workflow 出现一堆 `event=push` 的失败 run，
+> 说明 GitHub **根本没解析出它的 `on:`** —— 这本身就是「文件非法」的独立证据。
 
 #### 事实 2：根因是 YAML 语法错误 —— `Create report` 步骤的 here-string 顶到了第 0 列
 
@@ -1848,29 +1880,72 @@ weekly-stress.yml    OK   name="Weekly Stress Test"
 > 和「跑起来了、某一步红了」不是一回事。以后先看 job 数。
 > 这一条也解释了 10.3 里那个反常现象：`name` 显示成路径。
 
-#### 事实 3：`weekly-stress.yml` 解析正常，但**两次调度全红**
+#### 事实 3：`weekly-stress.yml` 的两次红**根本没跑到测试** —— 死在 `npm ci`
 
-* `on: schedule` + `workflow_dispatch`，**没有** `continue-on-error`
-  （文件里有注释明确写「a stress regression has to make this run red」）——
-  也就是说这道门禁的**意图**是对的。
-* 运行历史：**`total_count: 2`，两次都 `failure`**
-  （2026-09-13、2026-09-20，均 `schedule`）。
-* ⚠️ 先排除了「夹具没选中文件」这个 FM-6 变体：
-  `test:stress` = `vitest run .stress.test .benchmark.test endurance.test baseline.test`，
-  而这 4 个过滤词在主树里**都有真文件**
-  （`tests/main/agent/__tests__/AgentState.stress.test.ts` 等 8 个 `*.stress.test.ts`、
+⚠️ **先更正本节初稿的一条**：初稿写「没有 `continue-on-error`，这道门禁的**意图**是对的」。
+那是**分支上（已修）**的文件。**实际跑出那两次红的文件在 `master` 上，它带着
+`continue-on-error: true`**（该文件第 18 行）—— 即 FM-6 **在默认分支上仍然活着**。
+
+两次 run 的页面（`curl` 抓 HTML 即可，不需要日志权限）：
+
+```
+Triggered via schedule     September 20, 2026 23:46    mldlbs    ec5bbd3    master
+Status        Failure
+Total duration    31s                       ← 本机光 vitest 段就要 37.75s
+Annotations   1 error    stress   Process completed with exit code 1.
+              1 warning  stress   Node.js 20 is deprecated…
+```
+
+⚠️ 本机实测 vitest 段要 **37.75s**，而整个 job 只跑了 **31s** → **它没跑到测试**。
+
+**步骤级结论**：job 页面里的 `<check-step>` 元素自带 `data-conclusion`，
+**不需要日志权限就能读** —— 本轮找到的一个好用的取证缝（日志 403 时的替代）：
+
+```
+step  1   success   Set up job
+step  4   failure   Run npm ci           23:46:56 → 23:46:58（2 秒）
+step  5   skipped   Run stress tests
+```
+
+即 **`npm ci` 2 秒失败、`Run stress tests` 被 skipped**。
+此前只看到 `Process completed with exit code 1` 而**无任何 vitest 注解**，
+原因就在这里 —— 失败在测试**上游**（当时这个判断是对的）。
+
+**根因：`npm ci` 本身在这份检出上是坏的。** `master` 上：
+
+* `packages/*/package.json` 里 **46 个文件**仍是 `"@akemi-mio/core": "workspace:*"`；
+* `ci.yml` 里**没有** `npm i -g npm@11`。
+
+npm 从不支持 `workspace:` 协议（那是 pnpm/yarn 的写法），遇到就**立刻**报错。
+最小夹具实测（本机 npm 11.17.0）：
+
+```
+$ npm install --package-lock-only     # package.json 里只有一个 workspace:* 依赖
+EXIT=1   耗时 2471ms
+npm error code EUNSUPPORTEDPROTOCOL
+npm error Unsupported URL Type "workspace:": workspace:*
+```
+
+**2.471 秒 vs CI 的 2 秒** —— 机制与时长都对上。
+而 `fe3a130` 正是修这个（`workspace:*` → `*` + 升 npm 11），**但它不在 `master` 上**。
+
+* ⚠️ 顺带排除了「夹具没选中文件」这个 FM-6 变体：`test:stress` 的 4 个过滤词
+  在主树里都有真文件（`AgentState.stress.test.ts` 等 8 个 `*.stress.test.ts`、
   `db-benchmark.test.ts`、`startup-benchmark.test.ts`、`endurance.test.ts`、
-  `resource-baseline.test.ts`）→ **不是「0 文件」**。
-* 所以它红是**别的原因**，待查（下一步：本机跑 `npm run test:stress` 看真实输出）。
-  ⚠️ 另注：两个 weekly workflow 都是 `node-version: 20`，而 `ci.yml` 已统一到 22。
+  `resource-baseline.test.ts`）→ **不是「0 文件」**；何况它压根没被执行。
 
 #### 结论
 
-**「我们每周跑代码审计和压力测试」目前是假的**：一个从未启动（49 次失败 run，0 job），
-一个两次全红。CI 的 push 面已经接近全绿，**weekly 面则完全没有保障** ——
+**「我们每周跑代码审计和压力测试」目前是假的**：一个**从未启动**
+（50 次失败 run、全部 `event=push`、0 job），一个两次红但**红在 `npm ci` 而非测试**
+（`Run stress tests` 被 skipped）。CI 的 push 面已经接近全绿，**weekly 面则完全没有保障** ——
 而且它一直在产出红色 run，正是「常响的警告 = 永久盲区」的教科书形态。
 
-⚠️ 本节只做诊断，**未改**：修 YAML 会让它真的开始跑，而它一旦跑起来就会
+⚠️ 更糟的是：**两个 weekly workflow 的排期都落在 `master` 上，而 `master` 上
+`npm ci` 是坏的**（46 个 `workspace:*` + 无 npm 11）→ 就算文件语法/Node 版本都修好，
+调度跑起来仍然会死在 `npm ci`。**这个结论只在修复落到默认分支后才成立**（见下方）。
+
+⚠️ 本节只做诊断，**未改语义**：修 YAML 会让它真的开始跑，而它一旦跑起来就会
 `npm install -D ts-prune`（改 `package.json`）、并在 `Create Issue` 步骤
 依赖 `audit`/`automated` 两个 label —— 这已经不是「让门禁承重」而是
 「要不要这道门禁、要成什么样」，需要拍板。
@@ -1896,17 +1971,58 @@ js-yaml：ci.yml OK / weekly-audit.yml OK / weekly-stress.yml OK      （此前 
 本机验证：`WRAPPED_EXIT=0`、`Test Files 12 passed`；另用不存在的 script 冒烟，
 确认包装脚本对失败命令会产出 `::error::` 尾注解、且**退出码透明**。
 
-#### 修完观察到的效果（⚠️ 观察，非证明）
+#### 修完的效果：噪音停了（**已证实**），但修复本身**还是惰性的**（⚠️ 新发现）
 
-* 修好后那次 push（`07ce2af`）**没有**产生新的 `weekly-audit` run —— 最新一条仍是修前的
-  `e19b01e`（`Failure`，且页面上**没有** `Run tests`/`Dead code scan`/`Create Issue` 这些步骤名
-  → 又一个「0 job」的旁证）。
-* 也就是说：**文件语法非法时 GitHub 每次 push 建一个 0 job 失败 run；文件一旦合法、
-  且 `on:` 里只有 `schedule`/`workflow_dispatch`，这个每 push 的噪音就停了。**
-  这解释了「为什么一个只有 `schedule` 的 workflow 会 `event=push`」这个反常现象。
-  ⚠️ 仍属推断（可能只是索引延迟），但两个方向都与它一致。
-* `weekly-stress` 是否还会红**仍未证实**：两次红都早于 `npm ci` 修复，job 日志 403
-  → 需等 09-27 调度，或在页面上手动 `workflow_dispatch`。
+**证实部分**：修好后的 4 次 push（`07ce2af` / `c7eb715` / `2533092` / `ba122b5`）
+**一次 `weekly-audit` run 都没产生** —— 该 workflow 的最新一条仍是修前的 `e19b01e`（run #50）。
+把「事实 1b」的 50 条与这 4 次 push 对起来，机制就闭合了：
+
+> **文件语法非法 → GitHub 解析不出 `on:` → 于是「每个 push 都报一次解析失败」，
+> 建出一个 0 job 的失败 run。文件一旦合法，声明的触发器（`schedule`/`workflow_dispatch`）
+> 才生效 —— 而它俩都不含 push，所以噪音归零。**
+
+这同时解释了 10.15 开头那个反常现象（一个只有 `schedule` 的 workflow 却 `event=push`）。
+此前记为「推断」，现在是**证明**：`on:` 里确实没有 `push`（第 3-6 行只有
+`schedule: cron '0 20 * * 0'` 与 `workflow_dispatch:`），却存在 50 个 push 事件 run。
+
+---
+
+⚠️ **但修复现在等于没修 —— 它只在 `fix/gate-packaging` 上。**
+
+| 项 | 值 |
+|---|---|
+| 默认分支 | **`master`**（`ls-remote --symref origin HEAD` → `refs/heads/master`） |
+| 远端 `master` | `ec5bbd36`（`docs: fix two wrong conclusions…`），**其 `weekly-audit.yml` 仍是坏的那份** |
+| 远端 `fix/gate-packaging` | `ba122b5`（含修复），是 `master` 的**直系后代**（0 提交分叉，35 笔领先） |
+| 两分支关系 | `master` 是 `fix/gate-packaging` 的**祖先** → **可快进，不需要 merge commit** |
+
+后果（三条都要紧）：
+
+1. **`schedule` 只在默认分支触发** → 下次调度（`0 20 * * 0` = 2026-09-27 20:00 UTC
+   = **2026-09-28 04:00 GMT+8**）读的是 **`master` 上那份坏文件** → 依旧 0 job 失败。
+   **这次「每周审计」的首次真实执行不会发生。**
+2. 对 `master` 的任何 push 仍会继续产生 0 job 噪音 run
+   （`master` 最后一次 push 就是 weekly-audit run #33，之后 master 没再动过）。
+3. ⚠️⚠️ **比 1 更根本：`master` 上 `npm ci` 就是坏的。**
+   `master`（`ec5bbd3`，**2026-09-20 16:04**）上 46 个 `package.json` 仍是 `workspace:*`、
+   `ci.yml` 里没有 `npm i -g npm@11`，而 `fe3a130`（那个修复）**不在 `master` 上**。
+   ⇒ **即使把 YAML 语法和 Node 版本都修好并落到 `master`，调度跑起来仍会死在 `npm ci`。**
+   ⇒ 更广的：**`master` 上的 `CI` 也是死的** —— 它 5 处 `npm ci` 都会 2 秒失败。
+   也就是说，`master` 作为默认分支，其 CI 自 monorepo 化以来一直是红的，
+   **而这两天所有「修好了」的证据全部长在 `fix/gate-packaging` 上。**
+
+> ⚠️ **通用教训（本轮最贵的一条）**：「修好了」必须问**修在哪个分支**。
+> 只验证「我推的那个分支不再产生 run / 变绿了」会得到一个
+> **正确的局部结论 + 错误的全局结论**。判据要落到
+> **该 workflow 真正会执行的那条路径**上（这里 = 默认分支上的 `schedule`）。
+> 这一条与 §10.16「门禁在 CI 生效须确认那次运行真跑到它」是同一族的错。
+
+* `weekly-stress` 那两次红**已经查清**（事实 3）：是 `npm ci` 2 秒失败、测试被 skipped，
+  **不是压测回归**。所以「升 Node 22 + 接注解包装」修的不是那个红 —— 那个红要等
+  `fe3a130` 落到默认分支才会消失。
+  ⚠️ 它的调度同样在 `master` 上，`07ce2af` 的两处改动**也要等落到默认分支才在真实调度里生效**。
+* ⚠️ **`master` 上那份 `weekly-stress.yml` 还带着 `continue-on-error: true`** ——
+  即便 `npm ci` 修好、测试跑起来，压测回归在默认分支上**仍然红不了**（FM-6 未除）。
 
 ### 10.16 ★★★ 里程碑：CI 六个 job **首次全绿**，且连续三笔
 
@@ -1915,7 +2031,12 @@ js-yaml：ci.yml OK / weekly-audit.yml OK / weekly-stress.yml OK      （此前 
 | #43 | `2415bd4`（TelegramService 修复） | **Success —— 六个 job 全部通过，史上第一次** |
 | #44 | `d053632`（§10.14 文档） | Success |
 | #45 | `e19b01e`（§10.15 文档） | Success |
-| — | `07ce2af`（weekly 修复） | 抓取时仍在跑 |
+| #46 | `07ce2af`（weekly 修复） | **Success** —— 证明这两处 workflow 改动没有破坏 `quality`/`packaging` |
+| #47 | `c7eb715`（§10.15 修法 + 本节） | Success |
+| #48 | `2533092`（`check-idle-gpu` 改造） | 抓取时仍在跑 —— **本轮唯一会真正跑到新 `check:idle-gpu` 的那笔** |
+| #49 | `ba122b5`（§10.17 文档） | 抓取时仍在跑 |
+
+即 **#43–#47 连续五笔全绿**。
 
 > ⚠️ 计数说明：run 号是**按 workflow 各自计数**的，所以 `CI` 与 `weekly-audit` 会各有一套
 > 40+ 的号（此前一度把它误读成「同一个 run 号出现在两个 workflow 上」）。
@@ -1931,10 +2052,12 @@ js-yaml：ci.yml OK / weekly-audit.yml OK / weekly-stress.yml OK      （此前 
 | `packaging` | §10.9：曾在 CI 上 3 秒失败 → 修复后实跑 |
 
 ⚠️ **但「全绿」不等于「门禁没问题了」**。仍未闭合的：
+* ⚠️⚠️ **`fix/gate-packaging` 整个分支（35 笔）还没落到默认分支 `master`** ——
+  两个 weekly 门禁的修复**因此都还是惰性的**（§10.15 末尾）。
 * `weekly-stress` 两次红未复跑（本节）。
 * `weekly-audit` 语义问题未动（4 处 `continue-on-error`）。
 * 覆盖率目标值 30/37/80 仍是**未还的债**（§10.8）。
-* `check:idle-gpu` 的 GPU 阈值仍未在 CI 上标定。
+* `check:idle-gpu` 的 GPU 阈值仍未在 CI 上标定（§10.17 已把数字变成注解，等 CI 跑完即可读）。
 * `audit` 门禁仍未进 CI（要先还 32 个漏洞的债）。
 
 ### 10.17 `check:idle-gpu`：**判据自己没法被标定**（`2533092`）
