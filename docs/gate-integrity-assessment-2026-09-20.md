@@ -1098,16 +1098,69 @@ for await (const message of query({ prompt, options: {...} })) {   // query 来�
 `noImplicitAny` 报 TS7006。而 `content` 若是 `any[]` 则**不会**报（数组元素给了上下文类型 `any`）——
 这正是「只有 `any` 才报、`any[]` 不报」这个反直觉现象的解释。
 
-为什么 0.3.199 会塌成 `any`：它的 `sdk.d.ts` 用
-`import type { BetaMessage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'`
-（`@anthropic-ai/sdk` 是 **peerDependency**，本仓未直接声明，靠 npm 自动装 0.110.0）。
-当 d.ts 里的某个引用解析不到时，**`skipLibCheck: true` 会把声明文件内部的报错静默吞掉**，
-只留下 `any` 漏进我们的代码。⚠️ **这一点（具体是哪个成员没解析到）我没有查到最后一层**——
-两版的 `query` / `Query` / `SDKMessage` / `BetaMessage` 声明看上去一致。
-但「换 SDK 版本 ⇒ 错误出现/消失」的因果关系已被上表证实，且可随时重跑复核。
+**为什么 0.3.199 会塌成 `any` —— 根因已查到最后一层（2026-09-22 补）**：
 
-**这是 `skipLibCheck` 的典型代价**：它让第三方类型错误变成我们自己代码里的「隐式 any」，
-报错位置指向调用点而不是根因。
+`0.3.199` 发布的 **`sdk.d.ts` 本身是自相矛盾的**：它引用了 28 处自己没有声明的类型名。
+把两个版本的声明文件直接交给 tsc（**关掉 `skipLibCheck`**）就能看见：
+
+| `@anthropic-ai/claude-agent-sdk` | `sdk.d.ts` 内部错误数 |
+|---|---|
+| `0.3.199`（lock 锁的） | ❌ **28 条** |
+| `0.3.241`（dev 在跑的） | ✅ **0 条** |
+
+其中致命的两条落在 `SDKMessage` 这个联合类型里（`sdk.d.ts:3762`）：
+
+```
+error TS2552: Cannot find name 'SDKControlRequestProgressMessage'
+error TS2304: Cannot find name 'SDKConversationResetMessage'
+```
+
+**一个联合类型里只要有一个成员解析不到，整个联合就退化成 `any`** —— 用 `IsAny<T>` 判定可直接证实：
+
+| `IsAny<SDKMessage>` | 结果 |
+|---|---|
+| `0.3.199` | **`true`**（联合已塌成 `any`） |
+| `0.3.241` | `false`（联合完好） |
+
+于是整条链闭合：
+
+```
+0.3.199 的 sdk.d.ts 引用未定义名
+  → SDKMessage 联合塌成 any
+  → query() 产出的 message 是 any
+  → message.message.content 是 any
+  → .filter((block) => …) 的回调参数失去上下文类型
+  → noImplicitAny 报 TS7006，位置在我们的调用点
+```
+
+而 `skipLibCheck: true`（本仓设置）把 d.ts 内部那 28 条错误**全部静默吞掉** ——
+所以界面上只看得到我们代码里的 TS7006，**没有任何线索指向 SDK**。
+
+⚠️ 注意根因**不是** peer 解析失败：两版 `sdk.d.ts` 的 import 头逐字节相同
+（`BetaMessage` 都来自 `@anthropic-ai/sdk/resources/beta/messages/messages.mjs`，该路径在本机
+`@anthropic-ai/sdk@0.110.0` 下能正常解析），两版声明的 `dependencies` 也完全一致。
+**是 0.3.199 这个已发布版本的声明文件自己坏了。**
+
+**可脱离 `node_modules` 复现**（这才是干净的最小复现，比替换整个包可靠得多）：
+
+```bash
+# 1. 取两版 tarball
+npm pack @anthropic-ai/claude-agent-sdk@0.3.199
+npm pack @anthropic-ai/claude-agent-sdk@0.3.241
+# 2. 各自解包，把 package/sdk.d.ts 分别放到能解析到仓库 node_modules 的目录下
+# 3. 复刻 ClaudeCodeExecutor.ts 的写法，只改 import 指向哪一版
+```
+
+同一份探针代码（`import type { SDKMessage }` + `m.message.content.filter((block) => …)`）：
+
+| 指向 | 结果 |
+|---|---|
+| `0.3.199/sdk.d.ts` | ❌ `error TS7006: Parameter 'block' implicitly has an 'any' type`（2 条，与 CI 同形状） |
+| `0.3.241/sdk.d.ts` | ✅ 0 errors |
+
+**这就是 `skipLibCheck` 的典型代价**：它把第三方声明文件里的错误变成我们自己代码里的「隐式 any」，
+报错位置指向调用点而不是根因。本仓为了不被几十个第三方 d.ts 的错误淹没而开着它，
+代价就是**这类缺陷只能靠换版本对撞才能定位**。
 
 ### 10.5 顺手修掉的一个可诊断性缺陷（`3790be6`）
 
@@ -1130,13 +1183,24 @@ CI 上唯一的线索是「Process completed with exit code 1」，而 job 日�
 分别报 `tsconfig.web.json: 1 errors` / `tsconfig.node.json: 1 errors` 并打印 `::error::…error TS2322`；
 移除探针后回到 0 errors。退出码语义未变。
 
-### 10.6 修法（未定 —— 三个选项，需要拍板）
+### 10.6 修法（未定 —— 需要拍板）
+
+**先补一个关键事实**：`package.json` 声明的是 `@anthropic-ai/claude-agent-sdk: ^0.3.199` ——
+**0.3.241 本来就在允许范围内**。也就是说 lock 不是「范围被写死」，而是**解析停在了版本下限**，
+而那个下限恰好是一个**声明文件坏掉的发布版**。这改变了三个选项的性价比：
 
 | 选项 | 做法 | 好处 | 代价/风险 |
 |---|---|---|---|
-| **A. 刷新 lock 到 dev 在跑的版本** | 用 npm 11 重新解析 lock（24 个包） | 一次消除根因；顺带修 `vite 6.4.2` 的 2 个 critical CVE；恢复「本机绿 ⇒ CI 绿」 | lock 变更面大；传递依赖也可能变，需再跑一次 CI 验证 |
-| **B. 只升 `@anthropic-ai/claude-agent-sdk` 到 0.3.241** | 单包 | 最小依赖改动，直接消掉这 4 条错误（已由替换实验证明） | 治标：另外 23 个漂移包仍会让本机与 CI 不一致 |
-| **C. 改代码，给 `block` 显式类型** | 2 个文件 4 处 | 零依赖风险，立刻绿 | 掩盖「lock 落后于 dev」这个真缺陷；且因为整条链已是 `any`，等于手工补回丢失的类型信息 |
+| **A. 刷新 lock 到 dev 在跑的版本** | 用 npm 11 重新解析 lock（24 个包） | 一次消除根因；顺带修 `vite 6.4.2` 的 2 个 critical CVE；恢复「本机绿 ⇒ CI 绿」 | lock 变更面大（24 包 + 传递依赖），**需要再跑一次 CI 才知道有没有新的失败**；不需要改任何 manifest 范围 |
+| **B. 只升 `@anthropic-ai/claude-agent-sdk` 到 0.3.241** | 单包（仍在既有 `^0.3.199` 范围内） | 最小改动、已由最小复现证明能消掉这 4 条；**且是从一个坏发布版移开，不只是「治标」** | 另外 23 个漂移包仍在 → 「本机绿 ≠ CI 绿」这条没解决 |
+| **C. 改代码，给 `block` 显式类型** | 2 个文件 4 处 | 零依赖风险，立刻绿 | **最差的选项**：整条链已是 `any`，等于手工补回丢失的类型信息；SDK 返回值的**任何**误用都不会再被类型系统拦住 |
 
-⚠️ 三个都没擅自做。按本报告 §八 的口径：**A 才是修根因**，
-但它的影响面超出「让门禁承重」这件事，属于依赖策略决策。
+**建议：先 B 后 A（分两步，各自一次 CI 运行）**
+
+- **第一步 B**：只动一个包，把 CI 从「永远红」推到「能跑完」，**先让门禁具备承重能力**。
+  这一步的判据很明确：`typecheck:budget` 变绿，且下游 4 个测试 job 与 `packaging` **真的被执行**（不再是 0s skipped）。
+- **第二步 A**：在 CI 已经可信的前提下再刷新 lock —— 此时若冒出新的失败，**那是真问题，会被如实报出来**；
+  而在 CI 还红着的时候做 A，新失败会被埋在「反正本来就红」里，等于白做。
+
+⚠️ 三个都**没有擅自做**。按本报告 §八 的口径：A 才是修根因，但它的影响面超出「让门禁承重」这件事，
+属于依赖策略决策；B 虽是单包，也仍是依赖变更。**请拍板走哪条。**
