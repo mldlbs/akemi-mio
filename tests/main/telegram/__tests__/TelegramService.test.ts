@@ -46,6 +46,23 @@ describe('TelegramService', () => {
       headers: { 'Content-Type': 'application/json' },
     })
 
+  /**
+   * 让 `initialize()` 走「已启用」分支。
+   *
+   * 门控是 `credentialsManager.get('telegram_enabled') ?? TELEGRAM_ENABLED`，
+   * 而 `TELEGRAM_ENABLED`（`packages/core/src/config/index.ts:227`）是 **import 时求值**
+   * 的模块级常量 —— 在开发机上只被那份**未入库**的 `.env` 打开。
+   * 所以下面这些用例本机绿、在全新检出（CI）里静默变成「未启用」：
+   * `initialize()` 提前 return，一个 fetch 都不发，`mockResolvedValueOnce`
+   * 的整条队列整体前移一格 → 断言全歪（不是功能坏了）。
+   * 走 credentials 这条缝就不依赖任何环境，也不给 `.env.template` 加真开关。
+   */
+  function enableTelegram(): void {
+    vi.mocked(credentialsManager.get).mockImplementation((name: string) =>
+      name === 'telegram_enabled' ? 'true' : null
+    )
+  }
+
   beforeEach(async () => {
     restoreTestDatabase = useIsolatedTestDatabase()
     process.env.TELEGRAM_SERVER_URL = 'https://test-telegram.local'
@@ -84,6 +101,7 @@ describe('TelegramService', () => {
   })
 
   it('starts polling when initialize can reach the telegram service', async () => {
+    enableTelegram()
     vi.mocked(fetch).mockResolvedValueOnce(okJson({ queueLength: 0 }))
 
     await tg.initialize()
@@ -499,6 +517,7 @@ describe('TelegramService', () => {
   })
 
   it('requeues messages when the agent reports BUSY', async () => {
+    enableTelegram()
     mockAgent.processExternalMessage.mockResolvedValue({
       error: 'BUSY',
       reply: undefined,
@@ -533,6 +552,7 @@ describe('TelegramService', () => {
 
   it('把内部错误码翻成可读文案，而不是把码甩给用户', async () => {
     vi.mocked(insertOutbox).mockClear()
+    enableTelegram()
     mockAgent.processExternalMessage.mockResolvedValue({ error: 'CIRCUIT_OPEN', reply: undefined })
     vi.mocked(fetch)
       .mockResolvedValueOnce(okJson({ queueLength: 0 }))
@@ -557,6 +577,7 @@ describe('TelegramService', () => {
   // telegram 不能照搬这个 null：消息已经发出去了，不给收尾就会永远停在「处理中…」。
   it('用户自己打断时也要给个收尾，不能静默留在「处理中…」', async () => {
     vi.mocked(insertOutbox).mockClear()
+    enableTelegram()
     mockAgent.processExternalMessage.mockResolvedValue({ error: 'INTERRUPTED', reply: undefined })
     vi.mocked(fetch)
       .mockResolvedValueOnce(okJson({ queueLength: 0 }))
