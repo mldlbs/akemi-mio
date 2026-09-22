@@ -51,7 +51,17 @@ describe('MemoryService 压力测试', () => {
       return ms.getFormattedContext().length > 0
     })
     expect(nonEmpty.length).toBeGreaterThan(0)
-  })
+    // ⚠️ 这个文件里**每个**用例都必须显式给超时。
+    //
+    // vitest 默认 testTimeout 是 5000ms，而这里的压力用例实测就在 3–24s 之间
+    // （1000 次 getFormattedContext ≈ 3.0s、读写混合 500 轮 ≈ 7.5s、
+    // 交替不下沉 ≈ 5.6s、1 万条 entry ≈ 24s）。用例是**同步**的，定时器没法
+    // 在它执行中途打断，只能在返回后补判 —— 于是「过不过」取决于机器负载，
+    // 同一份代码可能这次绿下次红（09-22 实测：同一台机器，一次 3009 全过，
+    // 一次这条 7455ms 判超时）。**flaky 的门禁不是门禁。**
+    //
+    // 文件里另两个用例本来就写了 30_000 / 60_000，中间三个漏了。
+  }, 30_000)
 
   it('读写混合 500 轮不崩溃', () => {
     for (let round = 0; round < 500; round++) {
@@ -65,7 +75,7 @@ describe('MemoryService 压力测试', () => {
     }
     const entries = ms.getEntries()
     expect(entries.length).toBeGreaterThan(0)
-  })
+  }, 30_000)
 
   it('getFormattedContext + recordInteraction 交替不下沉', () => {
     for (let i = 0; i < 1000; i++) {
@@ -75,7 +85,7 @@ describe('MemoryService 压力测试', () => {
       expect(typeof ctx).toBe('string')
     }
     expect(ms.getInteractionCount()).toBe(1000)
-  })
+  }, 30_000)
 
   it('1 万条 entry 后 prune 正确且内存稳定', () => {
     const memBefore = process.memoryUsage().heapUsed
