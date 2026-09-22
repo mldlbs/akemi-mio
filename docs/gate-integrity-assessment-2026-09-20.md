@@ -3162,13 +3162,33 @@ notice 并 `continue`，**绝不**静默通过 —— 否则又落回 FM-1（只
 pet/chat 会**永久红**——那不是回归，是产品设计动画。当前没红，**全靠「测量比渲染快」
 这个不受控的时序巧合**，正是 FM-8（抖动红）的定时炸弹 + FM-1（判据名不副实）的合体。
 
-**修复方案（三选一，待拍板）**：
-* **A. 白名单棘轮（推荐）**：每 kind 一份允许的空闲动画名集合（pet: breathe/float/glow/arms，
-  chat: dot-pulse，wallpaper: 空集），判红 = 空闲 running 里出现**白名单外的名字**。
-  新增产品动画 → 红 → 人工确认后加白名单（只紧不松）。前提是 notice 里能拿到动画名
-  —— ✅ 本次已把动画名加进形态窗口 notice，下次 CI run 即产出标定数据。
-* **B. pet/chat 只报数、wallpaper 判红**：实现最小，但 pet/chat 的回归守卫归零。
-* **C. 保持现状**：文档化「判据靠时序巧合才没误红」—— 不可接受。
+**修复方案（三选一，09-23 用户拍板「可以」= 方案 A）**：
+* **A. 白名单棘轮 ✅ 已实施**：每 kind 一份允许的空闲动画名集合（pet: breathe/float/
+  glow-pulse/arm-sway-l/arm-sway-r/deco-float，chat: dot-pulse，wallpaper: 空集），
+  判红 = 空闲 running 里出现**白名单外的名字**。新增产品动画 → 红 → 人工确认后加白名单
+  （只紧不松）。白名单按 CSS 静态分析列全：挂在**无条件渲染**元素上的动画（`pet-svg`/
+  `pet-glow`/双臂）+ **按情绪渲染**的 `pet-deco-float`；`chat-caret-blink` 仅 streaming
+  渲染，**不**进白名单（空闲时不存在，若空闲出现即回归）。
+* **B. pet/chat 只报数、wallpaper 判红**：实现最小，但 pet/chat 的回归守卫归零。（未选）
+* **C. 保持现状**：文档化「判据靠时序巧合才没误红」—— 不可接受。（未选）
+
+**方案 A 的验证（诚实记录）**：
+* 语法：`node --check` 通过。
+* **源码锚定断言**（直接从脚本文件正则抽取 `IDLE_ANIM_ALLOWLIST` + `idleAnimStrangers`
+  真实实现执行，防复制品漂移）：9 组断言全过 —— pet 正常空闲不红 / 白名单外红 /
+  wallpaper 空白名单=严格 0 / chat 产品点不红而 caret-blink 红 / `undefined` 与未知
+  kind 不崩 / 白名单条目数。
+* **变异检验**：从白名单删除 `'pet-float'` → 同一组断言立即红（`pet-float` 被标记为
+  stranger）⇒ 白名单内容**承重**，不是装饰。变异用 `cp` 还原。
+* ⚠️ **端到端变异未做**（本机无打包 exe 夹具，dev 实例占用中）→ 白名单与真实
+  Electron 渲染输出的匹配度**待 CI 裁决**：notice 已带动画名，若 CI 实测名字超出
+  白名单会红并暴露真实集合 —— 那是标定数据，不是误报。
+
+**顺带（09-23 同批）**：清理 scripts 根目录全部 3 个语法非法文件 ——
+`rc-cdp-verify.mjs`（43 个合并冲突标记，基线带入）、`rc-verify-adr008.mjs`（.mjs 扩展名
+装 TypeScript）、`check-status.js`（模板字符串损坏）—— 均为迁移期一次性脚本、活代码库
+零引用、从未能运行。前两个 `git mv` 归档至 `scripts/_archive/misc/`，第三个（未被
+git 追踪）直接 `mv`。归档后 scripts 根目录 **全部通过 `node --check`**。
 
 ⭐ 这次的教训和 §10.22 主窗口自检同构但方向相反：那次是「判据可能永远不红」，
 这次是「判据没红是巧合，红了会是假的」——**两个都是「没验证过判据在真实数据上长什么样」**。

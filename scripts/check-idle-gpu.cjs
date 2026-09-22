@@ -554,6 +554,29 @@ async function main() {
   // 「只量了主窗口」会让形态窗口里的回归从眼皮下溜过去）。复用主窗口同一套测量：
   // 在每个形态窗口上查空闲动画数 + 跑自检。拉不起来必须明确报「未覆盖」，不能静默通过。
   const FORMS = ['pet', 'chat', 'wallpaper']
+  // ── 空闲动画白名单（09-23 方案 A，用户拍板）────────────────────────────
+  // 形态窗口里有**产品意图的常驻动画**（宠物呼吸/漂浮、头像状态点脉冲），
+  // 「空闲 running>0 = 红」对 pet/chat 是误红 —— CI #81/#82 没红全靠基线测量
+  // 跑赢 React 渲染的时序巧合（见报告 §10.23）。判据改为**白名单棘轮**：
+  // 红 = 空闲 running 里出现白名单外的动画名。新增产品动画 → 红 → 人工确认后
+  // 加进白名单（只紧不松）。白名单按 CSS 静态分析列全（挂在无条件/按情绪渲染
+  // 元素上的动画），CI notice 已带动画名，实测若超出会红并暴露真实集合。
+  // 不进白名单的：chat-caret-blink（仅 streaming 时渲染，空闲不存在）。
+  const IDLE_ANIM_ALLOWLIST = {
+    pet: [
+      'pet-breathe',
+      'pet-float',
+      'pet-glow-pulse',
+      'pet-arm-sway-l',
+      'pet-arm-sway-r',
+      'pet-deco-float',
+    ],
+    chat: ['chat-dot-pulse'],
+    wallpaper: [],
+  }
+  // 纯函数：返回不在白名单里的空闲 running 动画（判红对象）。
+  const idleAnimStrangers = (kind, running, allowlist) =>
+    (running || []).filter((a) => !((allowlist[kind] || []).includes(a.name)))
   const checkForms = async () => {
     for (const kind of FORMS) {
       // 拉起：在主窗口上调 akemiForms.toggleForm(kind)。Lazy 创建，可能要等 target 出现。
@@ -605,21 +628,24 @@ async function main() {
         fws.removeEventListener('message', h)
         return out?.result?.result?.value
       }
-      // 空闲动画数：形态窗口在空闲时若有 running 动画 = 正是要抓的回归。
-      // ⚠️ 已知冲突（09-23 发现，判据修正待拍板）：pet/chat 有**产品意图的常驻动画**
-      // （.pet-svg 的 pet-breathe/pet-float、.chat-avatar-dot 的 chat-dot-pulse），
-      // 「空闲 running>0 = 红」一旦在 React 渲染完成后测量就会永久红 —— CI #81/#82
-      // 没红只是因为基线测量发生在 React 渲染完成前（pet 自检 4/4 = 2 注入 + 2 产品，
-      // 而 chat 整个测量期间都没渲染出内容）。见报告 §10.23「判据与产品现实冲突」。
+      // 基线测量：toggleForm 收起**之前**量（收起后窗口隐藏，数字无意义）。
+      // 空闲动画判红（白名单棘轮）见 IDLE_ANIM_ALLOWLIST 处注释。
       const base = await phase(`${kind}-基线`, fev)
       await ev(
         `(window.akemiForms && window.akemiForms.toggleForm(${JSON.stringify(kind)}))`,
       ) // 收起，避免污染下一个窗口的测量
-      if (base.animProbeOk && base.running.length > 0) {
-        fails.push(
-          `形态窗口 ${kind} 空闲时有 ${base.running.length} 个常驻动画在运行（应只有按需出现）：` +
-            base.running.map((a) => a.name).join(', '),
-        )
+      // 空闲动画判红（白名单棘轮）：只有**白名单外**的常驻 running 动画才红。
+      // 产品意图动画（见 IDLE_ANIM_ALLOWLIST 注释）在 pet/chat 空闲时是正常存在。
+      if (base.animProbeOk) {
+        const strangers = idleAnimStrangers(kind, base.running, IDLE_ANIM_ALLOWLIST)
+        if (strangers.length > 0) {
+          fails.push(
+            `形态窗口 ${kind} 空闲时有 ${strangers.length} 个白名单外的常驻动画：` +
+              `${strangers.map((a) => a.name).join(', ')}` +
+              `（白名单：${(IDLE_ANIM_ALLOWLIST[kind] || []).join(', ') || '空'}）。` +
+              '若是新的产品意图动画，把它加进本脚本 IDLE_ANIM_ALLOWLIST（棘轮只紧不松）',
+          )
+        }
       }
       // 自检：在形态窗口上注入重负载动画，看这条测量链在该窗口上能不能动。
       // ⚠️ **永久只报数，不判红**（CI #81/#82 实测裁决）：真实打包 exe 上，注入的
