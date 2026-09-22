@@ -2363,6 +2363,20 @@ push 之后 master 上的 run 列表（`?query=branch%3Amaster`）：
 ⚠️ 也正因为如此：**`Run 53` 的结果必须复查**，不能因为「分支上绿了」就假定默认分支也绿。
 这条判据本身就是本节 10.15 末尾那条教训的第二次应用。
 
+#### ✅ 复查结果：`Run 53` 与 `Run 54` **连续两笔绿**（09-22 已复核）
+
+| run | 提交 | 结论 |
+|---|---|---|
+| `Run 53 of CI`（35722147564） | `docs(gate): §10.17 纠正一处过度断言…` | ✅ `completed successfully` |
+| `Run 54 of CI`（35722394558） | `docs(gate): §10.18 —— 落地默认分支…` | ✅ `completed successfully` |
+
+**默认分支的 CI 从此不再是红的。** 同一页上紧挨着的历史全部 failed
+（`CI` #18–#28、`Weekly Codebase Audit` #23–#33、`Weekly Stress Test` #2），
+所以这不是「一直就绿」—— 是**这一次才第一次绿**。
+
+⇒ 至此「修在哪个分支」这条教训完成闭环：
+**分支绿不算数 → 快进默认分支 → 默认分支也绿了**。三步缺一步，结论都是错的。
+
 #### 顺带：`fix/gate-packaging` 现在与 `master` 同点
 
 两者都是 `fe25623`。后续改动仍按「先分支验证 → 再快进默认分支」的老路子走，
@@ -2407,6 +2421,31 @@ Chromium 即可（`snap()` 对不支持 `SystemInfo.getProcessInfo` 的浏览器
 > 从原则变成了**可执行的动作** —— 判据的可靠性靠**喂坏输入看它红不红**来确立，
 > 而不是靠当前数字好不好看。
 
+#### ✅ 更强的证据：CI 上真的说出了那句话（`fix/gate-packaging` CI #56 = 绿）
+
+本地夹具是替代品，**最终证据必须在 runner 上**。推 `ab0d3fd` 后
+`Run 56 of CI`（35723759041）= `completed successfully`，run 页 Annotations 区
+**逐字**是：
+
+```
+[idle-gpu] 页面 Akemi Mio index.html / 基线 GPU 0.0%（预算 20%） / 关动画 0.0%
+          / A-B 差值 0.0 个点（预算 15） / 基线总 CPU 3.1% / 基线动画 0/0
+[idle-gpu] 可量页面 1 个：index.html（本次只量了挑中的那一个）
+[idle-gpu] 被测页面一个 CSS 动画都没有：本次关于动画的判据（A/B 差值、常驻无限动画）
+          结构性为空，没有量到任何东西 —— 绿只由绝对预算那条承担
+```
+
+三点值得单独记下：
+
+| 观察 | 含义 |
+|---|---|
+| 三条注解都出现了，`%` 转义正确 | 新代码在 runner 上跑通，不只是在我本机的 Edge 夹具上 |
+| `基线动画 0/0` | **打包版主窗口确实一个 CSS 动画都没有** —— §10.17 的结论在 CI 上复现 |
+| **`可量页面 1 个：index.html`** | CI 里连**一个**形态窗口都不存在 ⇒ 扩大覆盖不能只改测量循环，**必须先有窗口**（见下） |
+
+⇒ 至此 §10.17「判据自己没法被标定」+「量的是什么看不见」两个缺陷**都已闭合**，
+且闭合的证据链是完整的：**本地夹具（含变异检验）→ CI 注解**。
+
 #### ⚠️ 本地直接复跑仍然做不到：**有一个 3 天前就在跑的 dev 实例占着 userData**
 
 `node scripts/check-idle-gpu.cjs`（用真实打包 exe）报：
@@ -2436,6 +2475,10 @@ Chromium 即可（`snap()` 对不支持 `SystemInfo.getProcessInfo` 的浏览器
   CDP 合成按键触发不了；但 `src/preload/index.ts` 的 `exposeInMainWorld('akemiForms', …)`
   是**无条件**暴露的，所以 CDP 里 `window.akemiForms.setFormVisible('wallpaper', true)`
   即可拉起（约十几行）。**这是改判据的覆盖面，超出本次拍板范围，先不动。**
+  ⚠️ CI #56 的 `可量页面 1 个：index.html` 给这条加了一个前提：
+  **CI 里一个形态窗口都不存在** ⇒ 扩大覆盖不是「改测量循环」那么简单，
+  **必须先让窗口存在**（拉起 → 等 target 出现 → 再量）。量不到时要**明确报「未覆盖」**，
+  不能静默跳过（否则就是 FM-1）。
 * 该文件的 prettier 漂移：`format:check` 只覆盖 `src/**/*.{ts,tsx,json,css}`、`lint` 只覆盖 `src/`，
   **`scripts/` 不在任何门禁内**。`HEAD` 版本已有 **37 行**漂移（本次新增区域再添同类 15 行，
   沿用文件既有风格）。属「已文档化但未门禁」，与 `subscription-store.js` 同类。
