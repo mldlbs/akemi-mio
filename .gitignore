@@ -96,6 +96,13 @@ scripts/probe*.py
 scripts/patch_*.py
 scripts/step3_*
 scripts/m56-capability-migration-report.ts
+# ⚠️ 凡**被测试 import** 的脚本必须 negate 回来，否则本机跑得通、CI 全新检出直接
+# `Cannot find module` —— 测试文件是进库的，它 import 的模块却不是。
+# 09-22 CI 实测：`tests/main/evolution/automation/__tests__/CapabilityMigrationReport.test.ts:3`
+# 报 `Cannot find module '../../../../../scripts/m56-capability-migration-report'`。
+# 上面 m56-observation-window 的 `!` 就是同一个坑的先例（`M56ObservationWindow.test.ts`
+# import 它），只是当时漏了这一个。加新的 m56 脚本时先 grep 一下有没有测试引用。
+!scripts/m56-capability-migration-report.ts
 scripts/m56-identity-gap-report.ts
 scripts/m56-observation-window.ts
 !scripts/m56-observation-window.ts
