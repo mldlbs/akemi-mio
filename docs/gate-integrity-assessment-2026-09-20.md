@@ -2129,6 +2129,9 @@ $ curl -sL https://github.com/mldlbs/akemi-mio/labels
   `wallpaper`/`pet`/`chat` 三个形态窗口完全没被守。
   「把量到了什么变成 notice」**09-22 已做并验证**（§10.19：受控夹具 + 变异检验通过）；
   **扩大覆盖**仍未做（已探明路径，见 §10.19 末尾）。
+* ⚠️ **`main-tests` 有一处抖动**（§10.20）：`connection.path.test.ts` 的 5s 超时
+  从未在 Windows runner 上标定过（本机 1.1–1.4s），约 1/4 概率把默认分支判红
+  —— **与代码质量无关的红，会让人学会忽略红**。处置选项已列，**未动**。
 * 覆盖率目标值 30/37/80 仍是**未还的债**（§10.8）。
 * `check:idle-gpu` 的 GPU 阈值仍未在 CI 上标定（§10.17 已把数字变成注解，
   CI #48 已拿到基线数字：GPU 0.0% / CPU 2.5%）。
@@ -2370,12 +2373,17 @@ push 之后 master 上的 run 列表（`?query=branch%3Amaster`）：
 | `Run 53 of CI`（35722147564） | `docs(gate): §10.17 纠正一处过度断言…` | ✅ `completed successfully` |
 | `Run 54 of CI`（35722394558） | `docs(gate): §10.18 —— 落地默认分支…` | ✅ `completed successfully` |
 
-**默认分支的 CI 从此不再是红的。** 同一页上紧挨着的历史全部 failed
+**默认分支的 CI 从此不再是「结构性地红」。** 同一页上紧挨着的历史全部 failed
 （`CI` #18–#28、`Weekly Codebase Audit` #23–#33、`Weekly Stress Test` #2），
 所以这不是「一直就绿」—— 是**这一次才第一次绿**。
 
 ⇒ 至此「修在哪个分支」这条教训完成闭环：
 **分支绿不算数 → 快进默认分支 → 默认分支也绿了**。三步缺一步，结论都是错的。
+
+> ⚠️ **但两笔绿之后立刻出现了第三笔红**：`Run 58`（35725473675）= `failed`，
+> 原因是一个**与本次改动无关的测试抖动**（`connection.path.test.ts` 超时）→ **§10.20**。
+> 所以准确的说法是「**结构性的红已经修好；剩下的是抖动**」——
+> 这两件事必须分开，否则会把「门禁坏了」和「门禁响了但响错了」混为一谈。
 
 #### 顺带：`fix/gate-packaging` 现在与 `master` 同点
 
@@ -2482,3 +2490,77 @@ Chromium 即可（`snap()` 对不支持 `SystemInfo.getProcessInfo` 的浏览器
 * 该文件的 prettier 漂移：`format:check` 只覆盖 `src/**/*.{ts,tsx,json,css}`、`lint` 只覆盖 `src/`，
   **`scripts/` 不在任何门禁内**。`HEAD` 版本已有 **37 行**漂移（本次新增区域再添同类 15 行，
   沿用文件既有风格）。属「已文档化但未门禁」，与 `subscription-store.js` 同类。
+
+
+### 10.20 ⚠️ 落地 master 后立刻撞上：`main-tests` 有一处**抖动**（`connection.path.test.ts` 超时）
+
+把 `ab0d3fd`+`4876be5` 快进到 `master`（`ce0018d..4876be5`）后，
+**`Run 58 of CI`（35725473675）= `failed`** —— 而**同一份脚本内容的
+`fix/gate-packaging` `Run 56` 是绿的**。这正是 §10.18 那条教训第三次生效：
+**默认分支必须单独复查。**
+
+#### 失败的是什么（run 页 Annotations 区，无需日志权限）
+
+```
+main-tests   ✗  Process completed with exit code 1.
+  tests/main/db/__tests__/connection.path.test.ts > database connection paths
+    > resolves database files from USER_DATA_DIR at initialization time
+  Error: Test timed out in 5000ms.
+   ❯ tests/main/db/__tests__/connection.path.test.ts:17:3
+```
+
+**与本次 idle-gpu 改动无关**：同一笔 run 里 idle-gpu 的三条新注解**逐字正常出现**
+（`基线动画 0/0` / `可量页面 1 个` / `结构性为空`），说明新脚本在 master 上跑通了。
+
+#### 判定「这是抖动，不是确定性失败」的依据
+
+| run | 树内容 | `main-tests` |
+|---|---|---|
+| `Run 53`（35722147564，master） | `fe25623` | ✅ 通过（整笔 `completed successfully`） |
+| `Run 54`（35722394558，master） | `ce0018d` | ✅ 通过 |
+| `Run 56`（35723759041，分支） | `ab0d3fd`（**含新脚本**） | ✅ 通过 |
+| `Run 58`（35725473675，master） | `4876be5`（**含新脚本**） | ❌ 超时 |
+
+`4876be5` 与 `ab0d3fd` 的差异**只有 43 行 markdown**（`docs/` 内），
+`connection.path.test.ts` 四次完全相同 ⇒ **同一份代码，结果不同 = 非确定性**。
+
+#### 已排除的机制（都不是原因）
+
+| 假设 | 证据 | 结论 |
+|---|---|---|
+| 5 个 job 抢同一台机器 | `main-tests`/`renderer-tests`/`preload-tests`/`mio-cli-tests`/`packaging` 都是 `needs: quality` 的**兄弟**，但 GitHub 托管 runner **每个 job 一台独立 VM** | ❌ 不成立 |
+| job 内部测试文件并行争用 | `vitest.config.ts:75` `fileParallelism: false` | ❌ 不成立 |
+| 覆盖率棘轮把它判红 | 报的是 `Test timed out`，不是 coverage threshold | ❌ 不成立 |
+
+#### 剩下的解释与本地余量
+
+测试本身的成本是**在全新临时库里跑 48 次 DB migration**
+（日志里 `db_migration_applying version 1..48`）。本机实测：
+
+| 场景 | 该测试耗时 | 对 5000ms 的余量 |
+|---|---|---|
+| `npx vitest run <file>` | **1374ms** | 3.6× |
+| `npx vitest run --coverage <file>`（CI 就是这条） | **1097ms** | 4.6× |
+
+而 `vitest.config.ts` **没有显式 `testTimeout`** → 用的是默认 5000ms。
+⇒ **这个超时是在一台不忙的机器上「继承」来的，从未针对 Windows runner 标定过。**
+（与 §四那条「阈值是在开发机上量的」是同一类问题：**阈值没在它真正运行的机器上标定**。）
+
+#### 为什么这件事严重：**抖动的门禁 = 会被学会忽略的门禁**
+
+这道门禁刚刚（§10.15–10.18）才从「50 次全废」修成「真的能红」。
+如果它现在以约 1/4 的概率因为**与代码质量无关**的原因变红，
+团队学到的是「`main-tests` 红可以重跑」—— 那正是 §四 FM 里
+**「常响的警告 = 永久盲区」**的翻版：红不再携带信息。
+
+⚠️ 但**不要因此把它判成「门禁没用」**（§10.17 那条教训的同一形状）：
+断言本身是对的，问题只在**超时这个与断言无关的参数**。
+
+#### 处置选项（**未动**，等拍板）
+
+| 方案 | 做法 | 代价 / 风险 |
+|---|---|---|
+| **A. 只给这一个测试放宽超时** | `it('…', { timeout: 30_000 }, …)`（或在 `vitest.config.ts` 设 `testTimeout`） | 最小、最贴合「成本来自 48 次 migration 而非断言」；⚠️会**掩盖** DB 初始化真的变慢的回归 |
+| **B. 降低测试成本** | 查这 48 次 migration 是否必需（能否只迁到目标版本 / 用内存库） | 治本，但要动 DB 初始化路径，影响面超出「让门禁承重」 |
+| **C. 只记录不改** | 保留现状 + 本节记录，遇到红就重跑 | 零风险；⚠️等于接受「红不携带信息」 |
+| **D. 先取证再决定** | 重跑该 run / 再推一笔看是否复现，估出真实抖动率 | 不改变任何东西，但要再等 ~15 分钟一轮 |
