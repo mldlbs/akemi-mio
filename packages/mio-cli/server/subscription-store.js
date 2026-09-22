@@ -9,10 +9,56 @@
 // would mean one store with two different notions of "where the data lives".
 //
 // The digest is cursor-based: digest_state.json records, per subscription, the
-// timestamp of the newest event already delivered. Running it again therefore
+// position of the newest event already delivered. Running it again therefore
 // returns only what is new -- which is the point, but also why a digest is not
 // idempotent and the cursor must be written even when nothing matched (otherwise
 // a subscription created just now would replay the whole trace history).
+//
+// A cursor is `{ time, id }` and is an *exclusive* bound: an event is delivered
+// iff it sorts strictly after it, with `id` breaking ties inside a millisecond.
+// The tie-break is not cosmetic. Both timestamps in play come from the same wall
+// clock -- task-store.js stamps the event, digest() stamps the cursor -- and the
+// gap between them is one small writeFileSync, so comparing time alone silently
+// swallowed every event that shared a millisecond with the cursor, permanently,
+// because the cursor only moves forward. Measured 2026-09-22: that gap is ~2ms
+// on a Defender-scanned Windows box but sub-millisecond on a CI runner, which is
+// why `digest respects topic filter` passed 30/30 locally and flaked about half
+// the time on CI. See __tests__/observer-digest-cursor.test.js.
+//
+// The `id` field has three states, and the difference matters:
+//   ''     a wall-clock cursor: digest() found nothing to deliver, so nothing at
+//          that instant has been consumed. The empty string sorts below every
+//          real id, so same-millisecond events are still delivered.
+//   null   a legacy cursor, written before the tie-break existed as a bare ISO
+//          string. `null` sorts above every real id, reproducing the old
+//          inclusive time comparison exactly -- so an upgrade never re-delivers.
+//   '<id>' an event cursor: the event with that id has been delivered.
+const WALL_CURSOR_ID = ''
+
+function readCursor(raw) {
+  if (typeof raw === 'string') {
+    const time = Date.parse(raw)
+    return Number.isFinite(time) ? { time, id: null } : null
+  }
+  if (raw && typeof raw === 'object' && typeof raw.time === 'string') {
+    const time = Date.parse(raw.time)
+    if (!Number.isFinite(time)) return null
+    return { time, id: typeof raw.id === 'string' ? raw.id : null }
+  }
+  return null
+}
+
+// Exclusive: true when `event` sorts strictly after `cursor`.
+function isNewEvent(eventTime, eventId, cursor) {
+  if (!cursor || cursor.time === null || eventTime === null) return true
+  if (eventTime !== cursor.time) return eventTime > cursor.time
+  // Same millisecond -- fall back to the id. Ids are `trace_<ms>_<hex>`, so the
+  // order inside a millisecond is by the random suffix: arbitrary, but stable,
+  // which is all "do not deliver twice" needs.
+  if (cursor.id === null) return false
+  if (typeof eventId !== 'string' || eventId === '') return true
+  return eventId > cursor.id
+}
 
 const fs = require('fs')
 const path = require('path')
@@ -148,10 +194,10 @@ function createSubscriptionStore(options = {}) {
     const matchedSubscriptionIds = new Set()
 
     for (const subscription of subscriptions) {
-      const cursor = state[subscription.id] || null
-      const cursorTime = cursor ? Date.parse(cursor) : null
+      const cursor = readCursor(state[subscription.id])
       const subscriptionEventTypes = subscription.eventTypes || []
       let lastEventTime = null
+      let lastEventId = WALL_CURSOR_ID
       for (const event of traces) {
         if (subscription.project && event.project && event.project !== subscription.project) {
           continue
@@ -168,9 +214,17 @@ function createSubscriptionStore(options = {}) {
           if (!haystack.includes(subscription.topic.toLowerCase())) continue
         }
         const eventTime = event.timestamp ? Date.parse(event.timestamp) : null
-        if (cursorTime !== null && eventTime !== null && eventTime <= cursorTime) continue
-        if (eventTime !== null && (lastEventTime === null || eventTime > lastEventTime)) {
-          lastEventTime = eventTime
+        if (!isNewEvent(eventTime, event.id, cursor)) continue
+        if (eventTime !== null) {
+          if (lastEventTime === null || eventTime > lastEventTime) {
+            lastEventTime = eventTime
+            lastEventId = typeof event.id === 'string' ? event.id : WALL_CURSOR_ID
+          } else if (eventTime === lastEventTime && typeof event.id === 'string' && event.id > lastEventId) {
+            // Several delivered events share the newest millisecond. The cursor
+            // has to sit on the highest id among them, otherwise the next digest
+            // would hand the lower ones out again.
+            lastEventId = event.id
+          }
         }
         if (seenIds.has(event.id)) continue
         seenIds.add(event.id)
@@ -189,9 +243,9 @@ function createSubscriptionStore(options = {}) {
       // Advance the cursor even when nothing matched: a brand-new subscription
       // has no cursor, and without this it would replay the entire history.
       if (lastEventTime !== null) {
-        state[subscription.id] = new Date(lastEventTime).toISOString()
+        state[subscription.id] = { time: new Date(lastEventTime).toISOString(), id: lastEventId }
       } else if (cursor === null) {
-        state[subscription.id] = digestTime
+        state[subscription.id] = { time: digestTime, id: WALL_CURSOR_ID }
       }
       if (events.length >= limit) break
     }
