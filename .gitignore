@@ -42,6 +42,11 @@ check-*.mjs
 scripts/query-shadow.*
 __*
 !__tests__/
+# `__*` 本意是拦临时探针（`__typecheck_probe.ts` 之类），但它会连正经的测试辅助
+# 模块一起吞掉：`tests/main/core/evaluation/__test_support__.ts` 被 3 个已跟踪的
+# 测试文件 import，却一直没进库 —— 于是本机跑得通、CI 全新检出直接
+# `Cannot find module`。别删这条否定，否则那两个测试在 CI 上会重新变红。
+!**/__test_support__.ts
 .claude/projects/
 .claude/tool_call_log.json
 .claude/tool-call-log-*.test.json
