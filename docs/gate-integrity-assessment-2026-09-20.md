@@ -966,6 +966,10 @@ CI 没有任何途径执行它。若要闭合这个循环，需推一个含变�
 
 ### ⚠️ 这个 job **尚未在 CI 实跑过** —— 诚实清单
 
+> **09-22 更新：首跑结果出来了 —— 它被 `needs: quality` 跳过了。**
+> `quality` 在第 6 步 `Type check (budget = 0)` 失败，`packaging` 与 4 个测试 job 全部 `skipped`（0s）。
+> 所以下表里「未验证」的每一项**仍然未验证**，而且现在知道**为什么**了 —— 见 §十。
+
 | 未验证项 | 为什么 | 首跑后该看什么 |
 |---|---|---|
 | job 本身能否绿 | 本机 `electron-vite build` 跑不起来（`emptyOutDir` 撞 safe-delete + GPU fatal，见记忆 §五）；`gh` **未登录**，看不到 Actions 结果 | 先看 `Build` / `Package` 两步是否成功 |
@@ -990,3 +994,149 @@ CI 没有任何途径执行它。若要闭合这个循环，需推一个含变�
 多一个 job：`npm ci` + `electron-vite build` + `electron-builder --dir` + 两次启动 exe 的冒烟/测量。
 比现有任一 job 都重。**如果这个代价不可接受，正确的退路是把它移到周期性 workflow
 （像 `weekly-stress.yml` 那样），而不是加 `continue-on-error`** —— 后者会造出新的 FM-6。
+
+---
+
+## 十、★ 09-22 第一次真跑 CI：`npm ci` 通了，露出下一道失败 —— 以及「本机绿 ≠ CI 绿」
+
+§五 修好安装链后第一次把提交推上去（`fix/gate-packaging` 分支，避开 master）。
+结果比预期重要得多。
+
+### 10.1 运行结果（run `35675394471`，commit `bd17732`）
+
+| 步骤 | 结果 |
+|---|---|
+| 4. `npm i -g npm@11` | ✅ |
+| **5. `npm ci`** | ✅ **成功** —— 这是安装链修复的实证，也是本仓**史上第一次** `npm ci` 在 CI 跑通 |
+| **6. `Type check (budget = 0)`** | ❌ **失败**（exit 1） |
+| 7–11. `Lint` / `Format check` / mio-cli 语法 / `check:form-registry` / `Build` | ⏭ 全部 **skipped** |
+| `main-tests` / `renderer-tests` / `preload-tests` / `mio-cli-tests` / `packaging` | ⏭ 全部 **skipped**（0s，被 `needs: quality` 拦住） |
+
+### 10.2 由此得到的第一个结论：**整条 CI 至今提供的保障是 0**
+
+`npm ci` 是 quality job 的第一步实质步骤，它**从 monorepo 化起就没成功过**（§5.2）。
+所以在此之前：
+
+- quality 里的 `typecheck` / `lint` / `format:check` / `build` **从未在 CI 执行**；
+- `main-tests` / `renderer-tests` / `preload-tests` / `mio-cli-tests` 四个 job **从未在 CI 执行**；
+- `packaging` 当然也没跑过。
+
+也就是说：本报告 §一 那张「19 道门禁」的表里，**凡是通过 CI 生效的结论，此前都只是「配置在文件里」**，
+不是「跑起来过」。修好安装链只是把**第二道**墙露出来 —— 这正是本报告反复讲的
+**FM-2「存在 ≠ 可用」在流水线层面的版本**：一条永远红的 CI，等价于没有 CI。
+
+### 10.3 第二个结论：**本机 node_modules 已经漂移出 lock，本机绿不能代表 CI 绿**
+
+实测（`node -e` 逐条比对 `package-lock.json` 与本机 `node_modules/*/package.json`）：
+
+```
+顶层依赖条目 855 · 本机缺失 93 · 版本与 lock 不一致 24
+```
+
+24 个漂移包里有 `vite` `react` `react-dom` `@types/react` `@types/node` `vitest`
+`electron` `@typescript-eslint/*` `eslint` `@testing-library/*` …——**全都直接影响 `tsc` / `eslint` 的结果**。
+
+| 包 | lock（= CI 会装） | 本机（dev 实际在跑） |
+|---|---|---|
+| `@anthropic-ai/claude-agent-sdk` | 0.3.199 | **0.3.241** |
+| `vite` | 6.4.2 | 6.4.3 |
+| `react` / `react-dom` | 19.2.6 | 19.2.8 |
+| `@types/react` | 19.2.15 | 19.2.18 |
+| `@types/node` | 22.19.19 | 22.20.1 |
+| `vitest` | 4.1.8 | 4.1.11 |
+| `electron` | 42.4.0 | 42.9.3 |
+| `eslint` | 10.4.1 | 10.9.0 |
+
+⚠️ 顺带修正一个我自己的说法：这不是「新 lock 把版本降级了」。**旧 lock（`ec5bbd3`）锁的就是这些较旧的版本**
+（`git show ec5bbd3:package-lock.json` 逐项一致），是**本机 node_modules 跑到了前面**。
+所以「`npm run typecheck` 本机绿」这句话，**从来没有在 lock 规定的依赖集上被验证过**。
+
+> 复核命令：
+> `node -e "const l=require('./package-lock.json'),fs=require('fs');let d=[];for(const[k,m]of Object.entries(l.packages)){if(!k.startsWith('node_modules/')||m.link)continue;try{if(JSON.parse(fs.readFileSync(k+'/package.json')).version!==m.version)d.push(k)}catch{}}console.log(d.length,d.join(' '))"`
+
+### 10.4 第三：那 4 条错误的确切根因（已用单包替换实验逐字节复现）
+
+CI 的注解给出了原文（这也是我顺手把 `typecheck:budget` 改成会打印错误的收益，见 10.5）：
+
+```
+packages/evolution/src/automation/ClaudeCodeExecutor.ts(70,22): error TS7006: Parameter 'block' implicitly has an 'any' type.
+packages/evolution/src/automation/ClaudeCodeExecutor.ts(71,19): error TS7006: Parameter 'block' implicitly has an 'any' type.
+packages/evolution/src/automation/CreativityExecutor.ts(101,22): error TS7006: Parameter 'block' implicitly has an 'any' type.
+packages/evolution/src/automation/CreativityExecutor.ts(102,19): error TS7006: Parameter 'block' implicitly has an 'any' type.
+```
+
+对应代码（两处同构）：
+
+```ts
+for await (const message of query({ prompt, options: {...} })) {   // query 来自 @anthropic-ai/claude-agent-sdk
+  if (message.type === 'assistant') {
+    agentOutput += message.message.content
+      .filter((block) => block.type === 'text')   // ← TS7006
+      .map((block) => block.text)                 // ← TS7006
+      .join('')
+  }
+}
+```
+
+**定位手段：把本机 `node_modules/@anthropic-ai/claude-agent-sdk` 单独换成 lock 锁的版本，其他一律不动。**
+（用 `mv` 改名备份、`cp -r` 换入，全程不删任何东西，可完整还原。）
+
+| 本机装哪个版本 | `npm run typecheck:budget` |
+|---|---|
+| **0.3.241**（dev 实际在跑） | ✅ 0 errors |
+| **0.3.199**（lock 锁的） | ❌ **4 errors，文件/行/列与 CI 一字不差** |
+
+**机制**（用探针文件让 tsc 报出推断类型，两版各测一次）：
+
+| 表达式 | 0.3.241 | 0.3.199 |
+|---|---|---|
+| `message.message` | `BetaMessage` | **`any`**（赋给任意字面量类型都不报错） |
+| `message.message.content` | `BetaContentBlock[]` | `any` |
+| `content[0]` | `BetaContentBlock` | `any` |
+
+`message.message` 塌成 `any` 之后，`.filter((block) => …)` 的回调参数**没有上下文类型** →
+`noImplicitAny` 报 TS7006。而 `content` 若是 `any[]` 则**不会**报（数组元素给了上下文类型 `any`）——
+这正是「只有 `any` 才报、`any[]` 不报」这个反直觉现象的解释。
+
+为什么 0.3.199 会塌成 `any`：它的 `sdk.d.ts` 用
+`import type { BetaMessage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'`
+（`@anthropic-ai/sdk` 是 **peerDependency**，本仓未直接声明，靠 npm 自动装 0.110.0）。
+当 d.ts 里的某个引用解析不到时，**`skipLibCheck: true` 会把声明文件内部的报错静默吞掉**，
+只留下 `any` 漏进我们的代码。⚠️ **这一点（具体是哪个成员没解析到）我没有查到最后一层**——
+两版的 `query` / `Query` / `SDKMessage` / `BetaMessage` 声明看上去一致。
+但「换 SDK 版本 ⇒ 错误出现/消失」的因果关系已被上表证实，且可随时重跑复核。
+
+**这是 `skipLibCheck` 的典型代价**：它让第三方类型错误变成我们自己代码里的「隐式 any」，
+报错位置指向调用点而不是根因。
+
+### 10.5 顺手修掉的一个可诊断性缺陷（`3790be6`）
+
+原来 `scripts/typecheck-budget.mjs` **只打印错误计数，把 tsc 的输出整个丢掉**：
+
+```
+  tsconfig.node.json: 4 errors
+  tsconfig.web.json: 0 errors
+TypeScript errors: 4 (budget: 0)
+FAIL: 4 errors exceeds budget ceiling of 0. Fix or triage before merging.
+```
+
+CI 上唯一的线索是「Process completed with exit code 1」，而 job 日志**要管理员权限才能下载**
+（实测 `GET /actions/jobs/<id>/logs` → **403 Must have admin rights**）。连本地失败也不知道错在哪。
+
+改成失败时按配置分组打印错误原文（≤30 条），并在 GitHub Actions 里加 `::error::` 前缀 →
+**直接变成 run 页面上的注解**，不必下载日志就能看见。上面 10.4 那 4 条就是这么拿到的。
+
+变异检验（两条都做）：往 `src/renderer/src/` 与 `src/preload/` 各放一个类型错误探针 →
+分别报 `tsconfig.web.json: 1 errors` / `tsconfig.node.json: 1 errors` 并打印 `::error::…error TS2322`；
+移除探针后回到 0 errors。退出码语义未变。
+
+### 10.6 修法（未定 —— 三个选项，需要拍板）
+
+| 选项 | 做法 | 好处 | 代价/风险 |
+|---|---|---|---|
+| **A. 刷新 lock 到 dev 在跑的版本** | 用 npm 11 重新解析 lock（24 个包） | 一次消除根因；顺带修 `vite 6.4.2` 的 2 个 critical CVE；恢复「本机绿 ⇒ CI 绿」 | lock 变更面大；传递依赖也可能变，需再跑一次 CI 验证 |
+| **B. 只升 `@anthropic-ai/claude-agent-sdk` 到 0.3.241** | 单包 | 最小依赖改动，直接消掉这 4 条错误（已由替换实验证明） | 治标：另外 23 个漂移包仍会让本机与 CI 不一致 |
+| **C. 改代码，给 `block` 显式类型** | 2 个文件 4 处 | 零依赖风险，立刻绿 | 掩盖「lock 落后于 dev」这个真缺陷；且因为整条链已是 `any`，等于手工补回丢失的类型信息 |
+
+⚠️ 三个都没擅自做。按本报告 §八 的口径：**A 才是修根因**，
+但它的影响面超出「让门禁承重」这件事，属于依赖策略决策。
