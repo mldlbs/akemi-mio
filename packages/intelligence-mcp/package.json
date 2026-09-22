@@ -10,8 +10,8 @@
     "./*": "./src/*"
   },
   "dependencies": {
-    "@akemi-mio/core": "workspace:*",
-    "@akemi-mio/intelligence": "workspace:*",
-    "@akemi-mio/intelligence-memory": "workspace:*"
+    "@akemi-mio/core": "*",
+    "@akemi-mio/intelligence": "*",
+    "@akemi-mio/intelligence-memory": "*"
   }
 }

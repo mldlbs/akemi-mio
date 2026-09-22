@@ -7,7 +7,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@akemi-mio/core": "workspace:*"
+    "@akemi-mio/core": "*"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

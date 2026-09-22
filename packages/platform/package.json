@@ -4,5 +4,5 @@
   "description": "Platform integrations: telegram, browser-agent, uumit, wallpaper",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "dependencies": { "@akemi-mio/core": "workspace:*" }
+  "dependencies": { "@akemi-mio/core": "*" }
 }

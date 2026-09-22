@@ -4,5 +4,5 @@
   "description": "Audio layer: ASR, TTS, speech, voicenote",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "dependencies": { "@akemi-mio/core": "workspace:*" }
+  "dependencies": { "@akemi-mio/core": "*" }
 }

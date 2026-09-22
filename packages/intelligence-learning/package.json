@@ -7,10 +7,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@akemi-mio/intelligence-memory": "workspace:*",
-    "@akemi-mio/core": "workspace:*",
-    "@akemi-mio/audio": "workspace:*",
-    "@akemi-mio/evolution": "workspace:*"
+    "@akemi-mio/intelligence-memory": "*",
+    "@akemi-mio/core": "*",
+    "@akemi-mio/audio": "*",
+    "@akemi-mio/evolution": "*"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

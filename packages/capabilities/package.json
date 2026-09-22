@@ -9,7 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@akemi-mio/core": "workspace:*"
+    "@akemi-mio/core": "*"
   },
   "devDependencies": {}
 }

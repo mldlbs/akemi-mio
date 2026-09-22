@@ -7,9 +7,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@akemi-mio/core": "workspace:*",
-    "@akemi-mio/capabilities": "workspace:*",
-    "@akemi-mio/intelligence-mcp": "workspace:*"
+    "@akemi-mio/core": "*",
+    "@akemi-mio/capabilities": "*",
+    "@akemi-mio/intelligence-mcp": "*"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

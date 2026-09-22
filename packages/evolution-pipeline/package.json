@@ -7,10 +7,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@akemi-mio/core": "workspace:*",
-    "@akemi-mio/intelligence": "workspace:*",
-    "@akemi-mio/evolution-goals": "workspace:*",
-    "@akemi-mio/evolution-cicd": "workspace:*"
+    "@akemi-mio/core": "*",
+    "@akemi-mio/intelligence": "*",
+    "@akemi-mio/evolution-goals": "*",
+    "@akemi-mio/evolution-cicd": "*"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

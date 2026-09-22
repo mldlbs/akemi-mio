@@ -1,5 +1,13 @@
 name: CI
 
+# Every job installs npm 11 before `npm ci`: npm 10 cannot build the ideal tree
+# for this dependency graph -- it dies with "Cannot read properties of null
+# (reading 'edgesOut')". That is reproducible with vitest@4.1 as the sole
+# dependency, so it is NOT caused by the workspace protocol; npm 11 fixes it
+# without loosening peer-dependency semantics (no --legacy-peer-deps needed).
+# `npm ci` happens to pass on npm 10 because it never re-resolves the tree, but
+# `npm install` and any future lock regeneration still require npm 11.
+
 on:
   push:
     branches: [master, main, 'refactor/**', 'feature/**', 'fix/**']
@@ -15,6 +23,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm i -g npm@11
       - run: npm ci
 
       # typecheck:budget rather than typecheck: it runs BOTH tsconfigs and reports a
@@ -63,6 +72,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm i -g npm@11
       - run: npm ci
       - name: Main process tests + coverage
         run: npx vitest run --coverage
@@ -76,6 +86,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm i -g npm@11
       - run: npm ci
       - name: Renderer tests + coverage
         run: npx vitest run --config vitest.config.renderer.ts --coverage
@@ -89,6 +100,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm i -g npm@11
       - run: npm ci
       - name: Preload tests
         run: npx vitest run --config vitest.config.preload.ts
@@ -102,6 +114,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm i -g npm@11
       - run: npm ci
 
       # The mio-agent-runtime CLI is plain CommonJS and uses node:test, so it is

@@ -5,5 +5,5 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": { "typecheck": "tsc --noEmit" },
-  "dependencies": { "@akemi-mio/core": "workspace:*", "electron-updater": ">=0.0.0" }
+  "dependencies": { "@akemi-mio/core": "*", "electron-updater": ">=0.0.0" }
 }

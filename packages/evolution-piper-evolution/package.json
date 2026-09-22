@@ -7,9 +7,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@akemi-mio/core": "workspace:*",
-    "@akemi-mio/audio": "workspace:*",
-    "@akemi-mio/evolution-plugin-system": "workspace:*"
+    "@akemi-mio/core": "*",
+    "@akemi-mio/audio": "*",
+    "@akemi-mio/evolution-plugin-system": "*"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

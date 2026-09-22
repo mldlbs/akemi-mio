@@ -3,6 +3,9 @@
   "version": "1.0.3",
   "description": "秋山澪 AI Voice Assistant Wallpaper",
   "main": "./out/main/index.js",
+  "engines": {
+    "npm": ">=11"
+  },
   "scripts": {
     "dev": "node scripts/dev.js",
     "build": "electron-vite build",

@@ -13,6 +13,7 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
+      - run: npm i -g npm@11
       - run: npm ci
 
       # No continue-on-error: a stress regression has to make this run red.

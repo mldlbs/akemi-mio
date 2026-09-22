@@ -7,8 +7,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@akemi-mio/core": "workspace:*",
-    "@akemi-mio/intelligence-learning": "workspace:*"
+    "@akemi-mio/core": "*",
+    "@akemi-mio/intelligence-learning": "*"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

@@ -4,5 +4,5 @@
   "description": "Evolution layer: self-evolution, superpowers, governance",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "dependencies": { "@akemi-mio/core": "workspace:*" }
+  "dependencies": { "@akemi-mio/core": "*" }
 }
