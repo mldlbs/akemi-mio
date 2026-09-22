@@ -2024,6 +2024,72 @@ js-yaml：ci.yml OK / weekly-audit.yml OK / weekly-stress.yml OK      （此前 
 * ⚠️ **`master` 上那份 `weekly-stress.yml` 还带着 `continue-on-error: true`** ——
   即便 `npm ci` 修好、测试跑起来，压测回归在默认分支上**仍然红不了**（FM-6 未除）。
 
+#### 处置（按 09-22 拍板）
+
+用户选择 **「等 CI #48–#50 全绿再快进」**。三步：
+
+1. 等 `2533092`(#48) / `ba122b5`(#49) / `a38a582`(#50) 三笔 CI 跑完并确认全绿 ——
+   其中 **#48 是唯一会真正跑到新 `check:idle-gpu` 的那笔**（本轮代码改动只有它被 CI 覆盖）。
+2. 然后**纯快进**默认分支（`master` 是 `fix/gate-packaging` 的直系祖先、0 分叉）：
+
+   ```
+   git -c http.proxy= -c https.proxy= push origin <sha>:refs/heads/master
+   ```
+
+   预演已通过：`--dry-run` 输出 `ec5bbd3..a38a582  a38a582 -> master`，
+   没有分支保护拦截。
+3. 落地后**必须复查两件事**：`master` 上 `weekly-audit.yml` 已合法、
+   以及**下一次调度（2026-09-28 04:00 GMT+8）是否真的执行了步骤**。
+   ⚠️ 这一步不能省 —— 本节的教训正是「**分支上绿 ≠ 默认分支上生效**」。
+
+⚠️ 快进带来的**开发环境后果**：`npm ci` 从此要求 **npm 11**（`fe3a130` 起），
+本地若仍是 npm 10 会撞 `edgesOut`（CI 里由 `npm i -g npm@11` 承担）。
+
+#### ⚠️ 已知的首次运行风险：`Create Issue` 会因**缺少 label** 而红（已查证）
+
+把 `weekly-audit.yml` 从头读了一遍，并查了仓库实际的 label 列表：
+
+```
+$ curl -sL https://github.com/mldlbs/akemi-mio/labels
+→ accessibility, bug, documentation, duplicate, enhancement,
+  good first issue, help wanted, invalid, question, wontfix
+```
+
+**只有 GitHub 的 10 个默认 label —— 没有 `audit`，也没有 `automated`。**
+而最后一步（第 88-100 行）：
+
+```yaml
+      - name: Create Issue          # ← 没有 continue-on-error
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({ …, labels: ['audit', 'automated'] });
+```
+
+`issues.create` 带**不存在的 label** 会被 API 判 **422 Validation Failed**
+→ 该步骤失败 → **整个 job 红**。
+
+⚠️ 这个红的性质很坏：**它不是任何代码质量发现引起的**，而是「报告没地方贴标签」。
+第一次真实调度（2026-09-28 04:00 GMT+8）最可能就红在这里 ——
+而这正是本报告一直在说的那类失败：**门禁红的原因与它要检的东西无关**。
+
+处置（都很小，语义可保持不变）：
+
+| 选项 | 做法 | 代价 |
+|---|---|---|
+| **A（最小、推荐）** | 在仓库 Settings → Labels 里**创建 `audit` 与 `automated`** | 一次 UI 操作，workflow 一行不改 |
+| B | 把 `labels:` 换成已存在的 label（如 `documentation`） | 改一行，但语义漂移 |
+| C | 去掉 `labels:` | 改一行，失去分类 |
+
+⚠️ 另外三处**同批需要留意的语义债**（本次未改，属「要不要这道门禁」的范畴）：
+
+* **4 处 `continue-on-error: true`**（第 22/28/56/65 行）—— 四个分析步骤永远不能让 job 红。
+  对「产报告 + 开 issue」这个意图而言**可能是故意的**，但报告里就分不出
+  「扫出来没问题」和「扫描根本没跑起来」。
+* **`npm install -D ts-prune`**（第 26 行）—— 在 CI 里**改 `package.json` + lockfile**；
+  一旦失败，死代码报告静默变成空文件。
+* **`node-version: 20`**（第 15 行）—— `ci.yml` 与 `weekly-stress.yml` 都已到 22，此处没对齐。
+
 ### 10.16 ★★★ 里程碑：CI 六个 job **首次全绿**，且连续三笔
 
 | run | commit | 结果 |
@@ -2149,4 +2215,70 @@ electron 进程（`--user-data-dir=%APPDATA%\akemi-mio`）在跑 —— 而且�
 * ⚠️ 顺带一条通用教训：**「实跑一次就绿」之后紧接着的三次复跑都红** ——
   这种时候先怀疑**自己上一次留下的状态**（这里是 1841 孤儿 + 共用的 userData），
   而不是先怀疑刚改的代码。改动本身在 WebSocket 之前/之后都不参与那条失败路径。
+
+#### ★★ 顺带发现 4（CI 上拿到数字后才发现）：**这道门禁量的是一个没有动画的窗口**
+
+上面两条「未观察到」在 **CI #48**（`2533092`，`completed successfully`）上补到了 ——
+两个 `::notice::` 都出现在 run 页的 Annotations 区（**不需要日志权限**），逐字：
+
+```
+packaging  [idle-gpu] 页面 Akemi Mio index.html
+           / 基线 GPU 0.0%（预算 20%） / 关动画 0.0% / A-B 差值 0.0 个点（预算 15）
+           / 基线总 CPU 2.5% / 基线运行中动画 0
+
+packaging  [idle-gpu] A/B 本次无信息量：基线就没有运行中动画，差值为 0 是必然的
+           （本次判定只由绝对预算那条承担）
+```
+
+✅ **机制本身验证成功**：`::notice::` 在 CI 上可见、`%` 转义正确（`0.0%（预算 20%）`）、
+页面标签给出了 `Akemi Mio index.html` —— §10.17 开头那个「判据没法被标定」的缺陷**已闭合**：
+以后每次运行的实测数字都能无权限读到。
+
+⚠️ **但它一上来就暴露了一个更深的缺陷。** 数字说：
+
+| 量到的 | 值 |
+|---|---|
+| 被测页面 | `Akemi Mio index.html`（**主窗口**） |
+| 基线运行中动画 | **0**（且 `anims.length` 也是 0） |
+| 基线 GPU | **0.0%** ≤ 预算 20 |
+| A-B 差值 | **0.0** ≤ 预算 15 |
+
+**两条判据同时结构性为空**：没有动画 ⇒ GPU 必然是 0、A/B 差值必然是 0。
+**这道门禁今天不可能红** —— 它绿不是因为「应用空闲时不烧 GPU」，而是因为**没东西可量**。
+
+而代码里其实**还有 72 条 `infinite` 动画**：
+
+```
+$ grep -rn 'infinite' src/renderer/src --include=*.css | wc -l
+72
+$ grep -rln 'infinite' src/renderer/src --include=*.css
+src/renderer/src/forms/chat/styles.css
+src/renderer/src/forms/pet/styles.css
+src/renderer/src/forms/wallpaper/styles.css      ← 历史上打爆到 136% 的那个窗口
+src/renderer/src/styles/components.css
+src/renderer/src/styles/layout.css
+src/renderer/src/styles/redesign.css
+```
+
+根因在页面选择上（`scripts/check-idle-gpu.cjs:234-236`）：
+
+```js
+const page =
+  list.filter((t) => t.type === 'page').find((t) => String(t.url).includes('index.html')) ||
+  list.filter((t) => t.type === 'page')[0]
+```
+
+**硬编码偏好 `index.html`（主窗口）**。而渲染层有 5 个入口
+（`electron.vite.config.ts` 的 `index` / `agent` / `pet` / `chat` / `wallpaper`），
+动画住在**形态窗口**里；主窗口渲染不到那些元素 ⇒ `document.getAnimations()` 返回空。
+
+⇒ 结论：**`check:idle-gpu` 只守主窗口，`wallpaper`/`pet`/`chat` 三个窗口完全没被守**。
+其中 `wallpaper` 正是 §四那个「停掉常驻动画，GPU 136% → 0.0%」事故的现场。
+脚本自己的文档写的是「防止『应用啥也不干却常驻吃满一个核』回归」——
+按这个意图，只量主窗口**覆盖不到它声称要防的那类回归**。
+
+> ⚠️ **这一段的价值恰在于它是怎么被发现的**：`2533092` 之前，这个门禁的输出只有
+> 「过 / 不过」，**没人能从结果里看出被测窗口有没有动画**。把数字变成注解之后，
+> **第一次运行就暴露了它一直是空的**。这是「可观测性本身就是门禁质量」的一个直接证据，
+> 也再次印证 §10.11 那条：**门禁失败（或通过）必须能让人看见它到底量了什么。**
 
