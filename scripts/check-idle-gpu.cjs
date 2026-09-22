@@ -242,11 +242,13 @@ async function main() {
   // 「真的空闲」还是「量到了一个空窗口」—— 后者会让这道门禁变成永远绿。
   // 多窗口形态（pet / chat / wallpaper / agent）下这个选择是隐式的，必须可见。
   const pageTargets = list.filter((t) => t.type === 'page')
-  const pageTag = `${page.title || '(无标题)'} ${String(page.url).split('/').pop()}`
+  // url 以 `/` 结尾时 basename 是空串，清单里会出现读不懂的空条目 —— 回退到标题。
+  const pageName = (t) => String(t.url).split('/').pop() || t.title || '(?)'
+  const pageTag = `${page.title || '(无标题)'} ${pageName(page)}`
   console.log(`[idle-gpu] 页面      ${pageTag}`)
   console.log(
     `[idle-gpu] 页面目标  ${pageTargets.length} 个：` +
-      pageTargets.map((t) => String(t.url).split('/').pop()).join(', '),
+      pageTargets.map(pageName).join(', '),
   )
   const ws = new WebSocket(page.webSocketDebuggerUrl)
   await new Promise((res, rej) => {
@@ -287,21 +289,28 @@ async function main() {
       gpus.push((gpu / INTERVAL_SEC) * 100)
       totals.push((total / INTERVAL_SEC) * 100)
     }
-    let anims = []
+    // 动画探测。必须把「探测失败」和「真的是 0 个」分开：
+    // 两者的 anims.length 都是 0，但对后者说「这个页面没有动画」是假话，
+    // 而下面的 notice 正是要断言这句话。
+    let anims = null
     try {
-      anims = JSON.parse(await ev(ANIM_EXPR))
+      const raw = await ev(ANIM_EXPR)
+      const parsed = raw == null ? null : JSON.parse(raw)
+      if (Array.isArray(parsed)) anims = parsed
     } catch {}
-    const running = anims.filter((a) => a.state === 'running')
+    const animProbeOk = anims !== null
+    const animList = anims || []
+    const running = animList.filter((a) => a.state === 'running')
     const g = median(gpus)
     const t = median(totals)
     console.log(
       `  [${tag}] GPU ${g.toFixed(1)}%  总 CPU ${t.toFixed(1)}%  ` +
-        `运行中动画 ${running.length}/${anims.length}` +
+        (animProbeOk ? `动画 ${running.length}/${animList.length}` : `动画 探测失败`) +
         (running.length
           ? '：' + running.map((a) => `${a.name} <${a.tag}> .${a.cls}`).join(' | ')
           : ''),
     )
-    return { gpu: g, total: t, running }
+    return { gpu: g, total: t, running, animCount: animList.length, animProbeOk }
   }
 
   console.log(`[idle-gpu] 预热中（跳过启动期抖动）...`)
@@ -344,12 +353,36 @@ async function main() {
       (ab
         ? ` / 关动画 ${ab.gpu.toFixed(1)}% / A-B 差值 ${delta.toFixed(1)} 个点（预算 ${DELTA_BUDGET}）`
         : ' / A-B 已跳过') +
-      ` / 基线总 CPU ${base.total.toFixed(1)}% / 基线运行中动画 ${base.running.length}`,
+      ` / 基线总 CPU ${base.total.toFixed(1)}%` +
+      (base.animProbeOk
+        ? ` / 基线动画 ${base.running.length}/${base.animCount}`
+        : ' / 基线动画 探测失败'),
   )
+  // 被测页面的清单也要发。这道门禁是隐式挑页面的（见上面 page 的选择逻辑），
+  // 只发挑中的那一个，「还有别的窗口没被量」这件事就看不见了 —— 而
+  // pet / chat / wallpaper 三个形态窗口的动画都住在各自的 styles.css 里。
+  notice(
+    `[idle-gpu] 可量页面 ${pageTargets.length} 个：` +
+      (pageTargets.map(pageName).join(', ') || '(无)') +
+      '（本次只量了挑中的那一个）',
+  )
+  // 页面一个 CSS 动画都没有时，这道门禁关于动画的两条判据（A/B 差值、
+  // 「常驻无限动画」）本次都**没有量到任何东西**。绿是绿，但要知道它是空绿。
+  if (!base.animProbeOk) {
+    notice(
+      '[idle-gpu] 动画探测失败：document.getAnimations() 没取到结果，' +
+        '本次关于动画的判据全都没有量到东西（只有绝对预算那条有效）',
+    )
+  } else if (base.animCount === 0) {
+    notice(
+      '[idle-gpu] 被测页面一个 CSS 动画都没有：本次关于动画的判据（A/B 差值、' +
+        '常驻无限动画）结构性为空，没有量到任何东西 —— 绿只由绝对预算那条承担',
+    )
+  }
   // A/B 只在「基线本来就有动画可关」时才带信息量。基线 0 个运行中动画时，
   // 差值为 0 是**必然**的 —— 这次绿其实只靠绝对预算那一条，得说清楚，
   // 否则会把一次没有信息量的通过读成「A/B 这条承重断言也验过了」。
-  if (ab && base.running.length === 0) {
+  if (ab && base.animProbeOk && base.animCount > 0 && base.running.length === 0) {
     notice(
       '[idle-gpu] A/B 本次无信息量：基线就没有运行中动画，差值为 0 是必然的' +
         '（本次判定只由绝对预算那条承担）',
