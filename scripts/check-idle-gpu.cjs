@@ -89,6 +89,11 @@ const median = (arr) => {
   const s = [...arr].sort((a, b) => a - b)
   return s[Math.floor(s.length / 2)]
 }
+// 进程类型直方图 → 一行可读文本（注解里用）。
+const fmtProcTypes = (t) =>
+  Object.entries(t || {})
+    .map(([k, v]) => `${k}x${v}`)
+    .join(' ') || '(无)'
 
 if (!EXE || !fs.existsSync(EXE)) {
   console.error('[idle-gpu] 找不到打包后的 AkemiMio.exe。')
@@ -178,6 +183,60 @@ const KILL_ANIM = `(function(){let s=document.getElementById('__mio_idle_gpu_kil
 if(!s){s=document.createElement('style');s.id='__mio_idle_gpu_kill';document.head.appendChild(s)}
 s.textContent='*,*::before,*::after{animation:none !important}';return 'on'})()`
 const RESTORE_ANIM = `(function(){const s=document.getElementById('__mio_idle_gpu_kill');if(s)s.remove();return 'off'})()`
+// ── 仪器自检 ──────────────────────────────────────────────────────────
+// 两条判据（绝对 GPU 预算、A/B 差值）都建立在同一个前提上：
+// **CSS 动画会体现在 GPU 进程的 CPU 时间上**。
+//
+// 而这个前提在 CI 上从来没被验证过：健康状态下应用一个常驻动画都没有
+// （atelier-control-glint 已在 80c530e 移除），于是基线差值必然是 0，
+// 「A/B 到底能不能红」在 runner 上永远是未测状态。如果哪天 GPU 计数在这台
+// runner 上失灵（纯软件渲染、压根没有 GPU 类型进程…），门禁会**永久绿** ——
+// 而它本该抓的那类回归正好从它眼皮下溜过去。
+//
+// 所以注入一条**确定无疑**的重负载动画（全视口 + 每帧重绘 + filter），
+// 看它能不能把 GPU 顶起来。v1 只报数不判红：标定数据还没有，先把这个
+// 未知量变成数字（同样的顺序用过一次：idle-gpu 的注解改动先只发 notice）。
+//
+// 挂到 documentElement 而不是 body：应用里 body 下可能有 transform 祖先，
+// 那会让 position:fixed 退化成相对该祖先定位，注入物可能只有 0 面积。
+const SELFCHECK_ON = `(function(){
+  var s=document.getElementById('__mio_idle_gpu_selfcheck_style');
+  if(!s){
+    s=document.createElement('style');s.id='__mio_idle_gpu_selfcheck_style';
+    s.textContent='@keyframes __mio_sc_spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}'+
+      '@keyframes __mio_sc_hue{from{filter:hue-rotate(0deg)}to{filter:hue-rotate(360deg)}}';
+    document.head.appendChild(s);
+  }
+  var d=document.getElementById('__mio_idle_gpu_selfcheck');
+  if(!d){
+    d=document.createElement('div');d.id='__mio_idle_gpu_selfcheck';
+    d.style.cssText='position:fixed;inset:0;z-index:2147483647;pointer-events:none;'+
+      'background:linear-gradient(45deg,#f00,#0f0,#00f);'+
+      'animation:__mio_sc_spin 1.2s linear infinite,__mio_sc_hue 2s linear infinite';
+    document.documentElement.appendChild(d);
+  }
+  return 'on'})()`
+
+// 返回清理后的残留状态，期望值恰好是 SELFCHECK_CLEAN。
+//
+// ⚠️ 这里**不能只数动画条数**。变异检验实测：故意留下注入的元素、只删掉 keyframes
+// 那一段 style，动画名就解析不到了，`getAnimations()` 归零 —— 于是「元素还挂在页面上」
+// 会被报成「清理干净」。所以元素与 style 都要单独查。
+// 三样都查的理由：动画在烧 GPU、元素在占合成层、style 在改全局样式，任一残留都会
+// 让后面的数字变脏，而它们互相之间并不同步消失。
+const SELFCHECK_OFF = `(function(){
+  var d=document.getElementById('__mio_idle_gpu_selfcheck');
+  var s=document.getElementById('__mio_idle_gpu_selfcheck_style');
+  if(d)d.remove(); if(s)s.remove();
+  var left=document.getAnimations().filter(function(a){
+    return String(a.animationName||'').indexOf('__mio_sc_')===0}).length;
+  var leftEl=document.getElementById('__mio_idle_gpu_selfcheck')?1:0;
+  var leftStyle=document.getElementById('__mio_idle_gpu_selfcheck_style')?1:0;
+  return String(left)+'|el'+leftEl+'|style'+leftStyle})()`
+
+/** 清理成功时的期望值（与上面的拼接格式逐字对应）。 */
+const SELFCHECK_CLEAN = '0|el0|style0'
+
 const ANIM_EXPR = `JSON.stringify(document.getAnimations().map((a) => ({
   name: a.animationName || '(?)',
   state: a.playState,
@@ -273,10 +332,12 @@ async function main() {
   async function phase(tag) {
     const gpus = []
     const totals = []
+    let last = null
     for (let i = 0; i < SAMPLES; i++) {
       const a = await snap()
       await sleep(INTERVAL_SEC * 1000)
       const b = await snap()
+      last = b
       let gpu = 0
       let total = 0
       for (const [id, p] of b) {
@@ -289,6 +350,11 @@ async function main() {
       gpus.push((gpu / INTERVAL_SEC) * 100)
       totals.push((total / INTERVAL_SEC) * 100)
     }
+    // 进程类型直方图。CI 上「GPU 0.0%」有两种完全不同的解释 —— 真的空闲，
+    // 或者压根没有 GPU 类型的进程可量（纯软件渲染）。这个直方图能把它们分开：
+    // 没有 `GPU` 这一项时，绝对预算与 A/B 两条判据都**永远不会触发**。
+    const procTypes = {}
+    for (const [, p] of last || []) procTypes[p.type] = (procTypes[p.type] || 0) + 1
     // 动画探测。必须把「探测失败」和「真的是 0 个」分开：
     // 两者的 anims.length 都是 0，但对后者说「这个页面没有动画」是假话，
     // 而下面的 notice 正是要断言这句话。
@@ -310,7 +376,15 @@ async function main() {
           ? '：' + running.map((a) => `${a.name} <${a.tag}> .${a.cls}`).join(' | ')
           : ''),
     )
-    return { gpu: g, total: t, running, animCount: animList.length, animProbeOk }
+    return {
+      gpu: g,
+      total: t,
+      running,
+      animCount: animList.length,
+      animProbeOk,
+      procTypes,
+      gpuProcs: procTypes.GPU || 0,
+    }
   }
 
   console.log(`[idle-gpu] 预热中（跳过启动期抖动）...`)
@@ -327,13 +401,36 @@ async function main() {
     await phase('恢复')
   }
 
+  // 仪器自检（见 SELFCHECK_ON 上方的注释）。⚠️ 只报数、**不参与 fails** ——
+  // 阈值还没有标定数据，先跑几轮把这个数字收上来，再决定它该不该判红。
+  // 一个一上来就判红、而阈值又是拍脑袋定的自检，就是 FM-8（抖动红）的制造机。
+  let sc = null
+  let scLeft = null
+  if (!SKIP_AB) {
+    await ev(SELFCHECK_ON)
+    await sleep(2500)
+    sc = await phase('自检')
+    scLeft = await ev(SELFCHECK_OFF)
+    await sleep(1500)
+  }
+
   const delta = ab ? base.gpu - ab.gpu : 0
+  // 自检差值以「关动画」那一段为参照：注入动画 vs 一个动画都没有。
+  const scDelta = sc && ab ? sc.gpu - ab.gpu : null
   console.log('')
   console.log(`  基线 GPU        ${base.gpu.toFixed(1)}%   预算 ${GPU_BUDGET}%`)
   if (ab) {
     console.log(`  关动画 GPU      ${ab.gpu.toFixed(1)}%`)
     console.log(`  A/B 差值        ${delta.toFixed(1)} 个点   预算 ${DELTA_BUDGET} 个点`)
   }
+  if (sc) {
+    console.log(`  自检 GPU        ${sc.gpu.toFixed(1)}%（注入全视口合成动画后）`)
+    console.log(
+      `  自检 差值       ${scDelta === null ? '(无参照)' : scDelta.toFixed(1) + ' 个点'}` +
+        `（对照「关动画」）  清理后残留 ${scLeft}（期望 ${SELFCHECK_CLEAN}）`,
+    )
+  }
+  console.log(`  进程类型        ${fmtProcTypes(base.procTypes)}`)
 
   const fails = []
   if (base.gpu > GPU_BUDGET) {
@@ -354,6 +451,7 @@ async function main() {
         ? ` / 关动画 ${ab.gpu.toFixed(1)}% / A-B 差值 ${delta.toFixed(1)} 个点（预算 ${DELTA_BUDGET}）`
         : ' / A-B 已跳过') +
       ` / 基线总 CPU ${base.total.toFixed(1)}%` +
+      ` / GPU 进程 ${base.gpuProcs}` +
       (base.animProbeOk
         ? ` / 基线动画 ${base.running.length}/${base.animCount}`
         : ' / 基线动画 探测失败'),
@@ -387,6 +485,42 @@ async function main() {
       '[idle-gpu] A/B 本次无信息量：基线就没有运行中动画，差值为 0 是必然的' +
         '（本次判定只由绝对预算那条承担）',
     )
+  }
+
+  // 仪器自检结果。这条注解回答一个此前完全未知的问题：
+  // **在这台机器上，CSS 动画到底会不会体现在 GPU 进程的 CPU 上。**
+  // 差值为 0 就说明两条判据都永远不会触发 —— 那种情况下的绿是空绿，
+  // 而且比「测到了 0」更糟：连判据本身都是死的。
+  if (sc) {
+    notice(
+      `[idle-gpu] 仪器自检：注入全视口合成动画后 GPU ${sc.gpu.toFixed(1)}%` +
+        `（对照「关动画」${ab.gpu.toFixed(1)}%，差值 ${
+          scDelta === null ? '(无参照)' : scDelta.toFixed(1)
+        } 个点）` +
+        ` / 自检动画 ${sc.running.length}/${sc.animCount}` +
+        ` / 清理后残留 ${scLeft}（期望 ${SELFCHECK_CLEAN}）` +
+        ` / 进程类型 ${fmtProcTypes(sc.procTypes)}`,
+    )
+    // ⚠️ 必须先把「注入没生效」和「注入生效但 GPU 不响应」分开 ——
+    // 两者的差值都是 0，但对后者说「这条链断了」才是对的，对前者说就是假话。
+    // 判别依据就在同一行里：自检那一段有没有看见注入的动画。
+    if (sc.running.length === 0) {
+      notice(
+        '[idle-gpu] ⚠️ 自检注入没生效：页面里看不到自检动画，本次自检无效' +
+          '（既不能说仪器好，也不能说仪器坏）',
+      )
+    } else if (scDelta !== null && scDelta <= 1) {
+      notice(
+        '[idle-gpu] ⚠️ 自检差值 ≈ 0：这台机器上「CSS 动画 → GPU 进程 CPU」这条链' +
+          '没有响应，绝对预算与 A/B 两条判据都不会触发 —— 本次的绿是空绿',
+      )
+    }
+    if (scLeft !== SELFCHECK_CLEAN) {
+      notice(
+        `[idle-gpu] ⚠️ 自检清理不干净（残留 ${scLeft}，期望 ${SELFCHECK_CLEAN}）：` +
+          '注入物没被完全移除，本次之后的数字不可信',
+      )
+    }
   }
 
   if (fails.length) {
