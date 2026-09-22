@@ -25,7 +25,7 @@
  *
  * 退出码：0 = 通过；1 = 超预算；2 = 运行失败（起不来/连不上）。
  */
-const { spawn } = require('child_process')
+const { spawn, spawnSync } = require('child_process')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -46,6 +46,21 @@ const INTERVAL_SEC = Number(arg('interval', 8))
 const GPU_BUDGET = Number(arg('gpu-budget', 20))       // 空闲 GPU 上限（%）
 const DELTA_BUDGET = Number(arg('delta-budget', 15))   // A/B 差值上限（百分点）
 const SKIP_AB = flag('no-ab')
+
+// GitHub Actions 注解。公开仓的 job 日志要管理员权限才能读，只有 check-run
+// annotation 无认证可读 —— 所以「想让以后能标定的数字」必须离开日志、变成注解。
+//   - 实测数字在**每次**运行都发一条 ::notice::（通过与失败都发）：
+//     --gpu-budget / --delta-budget 的默认值 20/15 是在有真 GPU 的开发机上量出来的，
+//     和软件光栅化的 runner 不可比，而重标定唯一的依据就是这几个数字；
+//   - 失败时额外发 ::error::，这样红的那次能直接说清「谁超了哪个预算」，
+//     不需要日志权限。
+// 门禁语义不变：只加输出，不动判据。
+const inActions = process.env.GITHUB_ACTIONS === 'true'
+// workflow-command 格式里 `%` 必须转义，否则含 `20%` 的一行会把注解弄坏。
+// ⚠️ 顺序要紧：先转义 `%`，再处理 \r\n —— 反过来的话刚插入的 `%0D` 会被二次转义成 `%250D`。
+const esc = (s) => String(s).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')
+const notice = (s) => { if (inActions) console.log(`::notice::${esc(s)}`) }
+const annErr = (s) => { if (inActions) console.log(`::error::${esc(s)}`) }
 
 // ── 定位 exe ────────────────────────────────────────────────────────────
 // 优先标准的 dist-electron；没有的话退到 dist-electron-pkg* 里挑最新的。
@@ -119,7 +134,21 @@ let killed = false
 function shutdown(code) {
   if (!killed) {
     killed = true
-    try { process.kill(child.pid) } catch {}
+    // ⚠️ 按**进程树**杀。Electron 会再拉一个 MCP 子进程（node.exe，监听 1841），
+    // `process.kill(child.pid)` 只结束主进程 → 孤儿占着 1841。
+    // 实测：1841 上有孤儿时，下一次运行以 `EXIT=2` 失败（先 WebSocket `non-101`，
+    // 再跑一次变成 `/json/list` 一直不响应）；把 1841 上的孤儿杀掉后即可恢复。
+    // ⚠️ 局限（同样实测）：`taskkill /T` 只在**主进程还活着**时才管用。主进程若已
+    // 自己退出（`non-101` 那次就是），孙子进程会被 reparent 而逃掉 → 失败路径上
+    // 仍可能留孤儿，需要人工 `netstat -ano | grep :1841` 清一下。
+    // CI 的 runner 是一次性的，不受影响；这是本地反复跑才会踩的坑。
+    try {
+      if (process.platform === 'win32') {
+        spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+      } else {
+        process.kill(child.pid)
+      }
+    } catch {}
   }
   setTimeout(() => process.exit(code), 1200)
 }
@@ -192,6 +221,16 @@ async function main() {
   }
 
   const list = await getList()
+  if (!list) {
+    // 区分「应用起不来」和「应用起来了但页面目标等不到」。后者最典型的原因是
+    // 端口 1841 被上一次运行留下的 MCP 孤儿占着（见 shutdown 的注释）——
+    // 打包 exe 的 MCP 子进程起不来，页面就一直不出现。
+    console.error('[idle-gpu] /json/list 一直没响应（但 /json/version 通了）。')
+    console.error('  最可能：上一次运行留下的 MCP 孤儿占着 1841，导致这次 MCP 起不来。')
+    console.error('  查一下 `netstat -ano | grep :1841`，把占用者杀掉再重跑。')
+    console.error(`  （另注：开发实例与打包 exe 共用 userData ${userDataDir()}）`)
+    return 2
+  }
   const page =
     list.filter((t) => t.type === 'page').find((t) => String(t.url).includes('index.html')) ||
     list.filter((t) => t.type === 'page')[0]
@@ -199,6 +238,16 @@ async function main() {
     console.error('[idle-gpu] 找不到页面目标。')
     return 2
   }
+  // 把「到底量了哪个页面」打出来。否则「0 动画 + 0% CPU」这种结果分不清是
+  // 「真的空闲」还是「量到了一个空窗口」—— 后者会让这道门禁变成永远绿。
+  // 多窗口形态（pet / chat / wallpaper / agent）下这个选择是隐式的，必须可见。
+  const pageTargets = list.filter((t) => t.type === 'page')
+  const pageTag = `${page.title || '(无标题)'} ${String(page.url).split('/').pop()}`
+  console.log(`[idle-gpu] 页面      ${pageTag}`)
+  console.log(
+    `[idle-gpu] 页面目标  ${pageTargets.length} 个：` +
+      pageTargets.map((t) => String(t.url).split('/').pop()).join(', '),
+  )
   const ws = new WebSocket(page.webSocketDebuggerUrl)
   await new Promise((res, rej) => {
     ws.addEventListener('open', res)
@@ -287,10 +336,33 @@ async function main() {
     )
   }
 
+  // 标定数据：每次运行都发（通过与失败都发）。没有这几个数字就没法把
+  // --gpu-budget / --delta-budget 从「开发机上的值」标定成「CI 上的值」。
+  notice(
+    `[idle-gpu] 页面 ${pageTag}` +
+      ` / 基线 GPU ${base.gpu.toFixed(1)}%（预算 ${GPU_BUDGET}%）` +
+      (ab
+        ? ` / 关动画 ${ab.gpu.toFixed(1)}% / A-B 差值 ${delta.toFixed(1)} 个点（预算 ${DELTA_BUDGET}）`
+        : ' / A-B 已跳过') +
+      ` / 基线总 CPU ${base.total.toFixed(1)}% / 基线运行中动画 ${base.running.length}`,
+  )
+  // A/B 只在「基线本来就有动画可关」时才带信息量。基线 0 个运行中动画时，
+  // 差值为 0 是**必然**的 —— 这次绿其实只靠绝对预算那一条，得说清楚，
+  // 否则会把一次没有信息量的通过读成「A/B 这条承重断言也验过了」。
+  if (ab && base.running.length === 0) {
+    notice(
+      '[idle-gpu] A/B 本次无信息量：基线就没有运行中动画，差值为 0 是必然的' +
+        '（本次判定只由绝对预算那条承担）',
+    )
+  }
+
   if (fails.length) {
     console.log('')
     console.log('  ✗ 未通过：')
-    for (const f of fails) console.log(`    - ${f}`)
+    for (const f of fails) {
+      console.log(`    - ${f}`)
+      annErr(`[idle-gpu] ${f}`)
+    }
     if (base.running.length) {
       console.log('    当前默认就在跑的动画：')
       for (const a of base.running) {
