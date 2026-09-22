@@ -2077,9 +2077,14 @@ $ curl -sL https://github.com/mldlbs/akemi-mio/labels
 
 | 选项 | 做法 | 代价 |
 |---|---|---|
-| **A（最小、推荐）** | 在仓库 Settings → Labels 里**创建 `audit` 与 `automated`** | 一次 UI 操作，workflow 一行不改 |
+| **A（最小）** | 在仓库 Settings → Labels 里**创建 `audit` 与 `automated`** | 一次 UI 操作，workflow 一行不改 |
 | B | 把 `labels:` 换成已存在的 label（如 `documentation`） | 改一行，但语义漂移 |
 | C | 去掉 `labels:` | 改一行，失去分类 |
+
+#### ✅ 处置结果（09-22 拍板：**改代码去掉 label 依赖**，见 §10.21）
+
+选了「不让 workflow 依赖仓库里预先存在的 label」这条路 ——
+**自愈式建 label + 显式声明 `permissions`**。详细验证见 §10.21。
 
 ⚠️ 另外三处**同批需要留意的语义债**（本次未改，属「要不要这道门禁」的范畴）：
 
@@ -2122,8 +2127,9 @@ $ curl -sL https://github.com/mldlbs/akemi-mio/labels
   **09-22 已闭合**（§10.18：纯快进到 `fe25623`，`master` 的 CI 第一次有机会变绿）。
 * `weekly-stress` 两次红**已查清**（§10.15 事实 3：死在 `npm ci`，测试被 skipped），
   但**下一次调度（2026-09-28）能否真的跑起来**仍未验证。
-* ⚠️ **`weekly-audit` 首次运行几乎必红在 `Create Issue`**（缺 `audit`/`automated` 两个 label，
-  §10.15「已知的首次运行风险」）—— 需在 09-28 之前处置。
+* ✅ ~~**`weekly-audit` 首次运行几乎必红在 `Create Issue`**（缺 `audit`/`automated` 两个 label）~~
+  —— **09-22 已闭合**（§10.21：改成自愈式建 label，并补上缺失的 `permissions: issues: write`，
+  桩件 + 变异检验通过）。
 * `weekly-audit` 的 4 处 `continue-on-error` 语义问题未动。
 * ⚠️ **`check:idle-gpu` 只守主窗口**（§10.17 顺带发现 4）——
   `wallpaper`/`pet`/`chat` 三个形态窗口完全没被守。
@@ -2532,19 +2538,41 @@ main-tests   ✗  Process completed with exit code 1.
 | job 内部测试文件并行争用 | `vitest.config.ts:75` `fileParallelism: false` | ❌ 不成立 |
 | 覆盖率棘轮把它判红 | 报的是 `Test timed out`，不是 coverage threshold | ❌ 不成立 |
 
-#### 剩下的解释与本地余量
+#### 成本实测：**迁移不是大头，冷模块加载才是**（原假设被推翻）
 
-测试本身的成本是**在全新临时库里跑 48 次 DB migration**
-（日志里 `db_migration_applying version 1..48`）。本机实测：
+第一版猜测是「48 次 DB migration 太慢」。用一个**临时探针测试**直接量了各阶段
+（`tests/main/db/__tests__/zz-scratch-timing.test.ts`，跑完即删，未提交）：
 
-| 场景 | 该测试耗时 | 对 5000ms 的余量 |
+```
+[probe] import=988ms  initDatabase=88ms  close=14ms
+[probe] second initDatabase (fresh dir, warm module)=83ms
+[probe] third initDatabase (same dir, migrations already applied)=10ms
+```
+
+| 阶段 | 耗时 | 占整条测试的比例 |
 |---|---|---|
-| `npx vitest run <file>` | **1374ms** | 3.6× |
-| `npx vitest run --coverage <file>`（CI 就是这条） | **1097ms** | 4.6× |
+| `await import('@akemi-mio/core/db/connection')`（**冷**） | **988ms** | **~81%** |
+| `initDatabase()`（含 **48 次 migration**） | 88ms | ~7% |
+| `closeDatabase()` | 14ms | ~1% |
+
+⇒ **48 次迁移只要 88ms** —— 「降低迁移成本」这个方向**基本不会有用**
+（把迁移砍到 0 也只能省 88ms）。真正的成本是**冷启动时加载那个模块图**
+（better-sqlite3 原生模块 + drizzle + 迁移模块）。
+
+这也解释了为什么它特别容易在 CI 上超时：冷 FS + 覆盖率插桩 + Windows Defender
+扫新文件，都会放大**模块加载**这一项，而它与该测试要断言的东西（路径解析）无关。
 
 而 `vitest.config.ts` **没有显式 `testTimeout`** → 用的是默认 5000ms。
+本机整条测试 1374ms（无覆盖率）/ 1097ms（`--coverage`，CI 就是这条），
+对 5000ms 是 3.6–4.6× 余量 —— 而 CI 上被吃掉了。
+
 ⇒ **这个超时是在一台不忙的机器上「继承」来的，从未针对 Windows runner 标定过。**
 （与 §四那条「阈值是在开发机上量的」是同一类问题：**阈值没在它真正运行的机器上标定**。）
+
+⚠️ 该测试**不能**把动态 import 挪到测试体外：它的全部意义就在于
+「先删掉 `USER_DATA_DIR` 再 import（证明 import 时不解析路径）→ 再设上它并
+`initDatabase()`（证明 init 时才解析）」。
+冷 import 是这个断言的**机制本身**，不是可以优化掉的浪费。
 
 #### 为什么这件事严重：**抖动的门禁 = 会被学会忽略的门禁**
 
@@ -2560,7 +2588,83 @@ main-tests   ✗  Process completed with exit code 1.
 
 | 方案 | 做法 | 代价 / 风险 |
 |---|---|---|
-| **A. 只给这一个测试放宽超时** | `it('…', { timeout: 30_000 }, …)`（或在 `vitest.config.ts` 设 `testTimeout`） | 最小、最贴合「成本来自 48 次 migration 而非断言」；⚠️会**掩盖** DB 初始化真的变慢的回归 |
-| **B. 降低测试成本** | 查这 48 次 migration 是否必需（能否只迁到目标版本 / 用内存库） | 治本，但要动 DB 初始化路径，影响面超出「让门禁承重」 |
+| **A. 只给这一个测试放宽超时** | `it('…', { timeout: 30_000 }, …)`（或在 `vitest.config.ts` 设 `testTimeout`） | 最小；实测支持它：超时预算被**模块加载**吃掉，而该测试断言的是**路径**不是**速度**；⚠️仍会**掩盖** DB 初始化真的变慢的回归（虽然它本来也不是性能门禁） |
+| ~~**B. 降低测试成本**~~ | ~~查这 48 次 migration 是否必需~~ | ❌ **已被实测否决**：迁移只占 88ms（7%），砍掉也救不了；成本在冷 import（988ms），而那个 import 是该断言的**机制本身** |
 | **C. 只记录不改** | 保留现状 + 本节记录，遇到红就重跑 | 零风险；⚠️等于接受「红不携带信息」 |
-| **D. 先取证再决定** | 重跑该 run / 再推一笔看是否复现，估出真实抖动率 | 不改变任何东西，但要再等 ~15 分钟一轮 |
+| **D. 先取证再决定** | 重跑该 run / 再推一笔看是否复现，估出真实抖动率 | 不改变任何东西，但要再等 ~15 分钟一轮（09-22 已顺带取证一轮：`54bfd36` 的 docs-only 推送） |
+
+
+### 10.21 ✅ 还掉 `weekly-audit` 的 label 债，并补上**缺失的 `permissions`**（09-22 拍板）
+
+按 09-22 拍板（「改代码去掉 label 依赖」）改了 `.github/workflows/weekly-audit.yml`。
+**不是**去建两个 label，而是让 workflow **不再依赖**仓库里预先存在它们。
+
+#### 改了什么
+
+**1）`Create Issue` 改为自愈式建 label**
+
+```js
+const wanted = ['audit', 'automated'];
+const labels = [];
+for (const name of wanted) {
+  try {
+    await github.rest.issues.getLabel({ ...context.repo, name });   // 存在就直接用
+    labels.push(name);
+  } catch (e) {
+    if (e.status !== 404) throw e;
+    try {
+      await github.rest.issues.createLabel({ ...context.repo, name, color: 'ededed' });
+      labels.push(name);                                            // 404 → 建出来
+    } catch (e2) {
+      core.warning(`创建 label "${name}" 失败（${e2.status}）：本次省略该 label`);
+    }                                                               // 建不了 → 只 warning
+  }
+}
+await github.rest.issues.create({ …, labels });
+```
+
+关键设计：**建 label 失败也不能让 job 红**（只 `core.warning`）。
+审计 job 的成败应当由**审计结果**决定，而不是由「报告能不能贴标签」决定。
+
+**2）补上 `permissions:`（这是同一次查证里发现的**第二个**红点）**
+
+原文件**没有 `permissions:` 块** → token 权限取决于仓库设置，
+**新建仓库默认只读** → `issues.create` 会直接 **403**，
+和 label 存不存在毫无关系。现在显式声明：
+
+```yaml
+permissions:
+  contents: read    # checkout
+  issues: write     # 建 issue / label
+```
+
+> ⚠️ 这条比 label 那条更隐蔽：label 缺失至少会报 `422 Validation Failed`，
+> 而权限不足报 403，两者都指向「创建 issue」这一步，**不看日志分不出**（而日志要管理员权限）。
+
+#### 验证（两级，都不靠「看起来对」）
+
+**① 静态**：`js-yaml.load` 能解析 + 内嵌 JS 过 `node --check`
+
+```
+YAML OK  name= "Weekly Codebase Audit"   triggers= schedule+workflow_dispatch
+permissions= {"contents":"read","issues":"write"}   内嵌 JS 语法 OK
+```
+
+**② 行为（桩件 + 变异检验）**：把脚本从 YAML 里抽出来，用假的
+`github` / `context` / `core` 跑四个分支：
+
+| 分支 | 期望 | 结果 |
+|---|---|---|
+| 两个 label 都已存在 | 不建、直接用 | ✅ `["audit","automated"]`，未调用 `createLabel` |
+| 都不存在 | 先建再用 | ✅ `createLabel` 调用两次 |
+| 都不存在且建不了 | 省略 label，**issue 仍创建** | ✅ `labels: []` + 2 条 warning |
+| 只存在 `audit` | 补建 `automated` | ✅ `createLabel` 只调用一次 |
+
+**变异检验**：把 `wanted` 从 `['audit','automated']` 改成 `['audit']` → **6 项断言翻红** ⇒
+桩件是承重的（不是「怎么改都绿」）。恢复用 `cp`（**没用 git**），md5 与备份一致。
+
+#### 仍未动（属「要不要这道门禁」的范畴）
+
+`weekly-audit` 的另外三处语义债：**4 处 `continue-on-error: true`**、
+`npm install -D ts-prune` 污染 `package.json`、`node-version: 20` 与 CI 的 22 不一致。
+这些改的是**门禁的语义**，不是「让它别因为无关原因红」，所以按惯例先给选项。

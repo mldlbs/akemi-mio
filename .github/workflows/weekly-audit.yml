@@ -1,5 +1,12 @@
 name: Weekly Codebase Audit
 
+# 这个 workflow 要写 issue，所以必须显式声明权限：不声明的话 token 权限取决于
+# 仓库设置（新仓库默认只读）→ `issues.create` 直接 403，而失败点与审计结果无关。
+# 只给需要的两项：contents: read（checkout）+ issues: write（建 issue / label）。
+permissions:
+  contents: read
+  issues: write
+
 on:
   schedule:
     - cron: '0 20 * * 0'
@@ -91,10 +98,32 @@ jobs:
           script: |
             const fs = require('fs');
             const report = fs.readFileSync('audit-report.md', 'utf8');
+            // ⚠️ `issues.create` 的 `labels` 里只要有**一个**名字在仓库里不存在，
+            // 整个请求就 422 —— 于是「首次调度」会红在创建 issue 这一步，
+            // 与审计结果毫无关系。本仓只有 GitHub 默认的 10 个 label，
+            // 并没有 audit / automated。
+            // 所以这里不再假设它们已存在：404 就建，建不了就省略这个 label
+            // （只发 warning，绝不因此让整个审计 job 变红）。
+            const wanted = ['audit', 'automated'];
+            const labels = [];
+            for (const name of wanted) {
+              try {
+                await github.rest.issues.getLabel({ ...context.repo, name });
+                labels.push(name);
+              } catch (e) {
+                if (e.status !== 404) throw e;
+                try {
+                  await github.rest.issues.createLabel({ ...context.repo, name, color: 'ededed' });
+                  labels.push(name);
+                } catch (e2) {
+                  core.warning(`创建 label "${name}" 失败（${e2.status}）：本次省略该 label`);
+                }
+              }
+            }
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `Weekly Codebase Audit — ${new Date().toISOString().slice(0,10)}`,
               body: report,
-              labels: ['audit', 'automated']
+              labels
             });
