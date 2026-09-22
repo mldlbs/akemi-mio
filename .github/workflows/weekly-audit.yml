@@ -64,20 +64,26 @@ jobs:
           if ($missing.Count -gt 0) { Write-Output "Env vars not documented in README:"; $missing | ForEach-Object { Write-Output "- $_" } }
         continue-on-error: true
 
+      # ⚠️ 这个块标量的每一行都必须比 `run:` 缩进更深。
+      # 它曾经把 PowerShell here-string 顶到第 0 列（`@"` / `"@` 都在行首）→
+      # YAML 的 `run: |` 在那里就地结束，后面的行被当成根级节点 → **整个文件解析失败**。
+      # 后果不是「这个 job 红了」，而是 GitHub 每次 push 建一个 **0 job** 的失败 run：
+      # 该 workflow 从来没执行过任何一步（49 次运行全部如此）。
+      # 这里缩进 10 格；YAML 会按块基准统一剥掉，交给 PowerShell 时 `@"`/`"@` 仍在行首 —— 这正是 here-string 需要的。
       - name: Create report
         run: |
-@"
-## Weekly Audit Report — $(Get-Date -Format 'yyyy-MM-dd')
+          @"
+          ## Weekly Audit Report — $(Get-Date -Format 'yyyy-MM-dd')
 
-### Test Results
-$(if (Test-Path test-results.json) { $r = Get-Content test-results.json | ConvertFrom-Json; "$($r.numPassedTests)/$($r.numTotalTests) passed" } else { "No test results" })
+          ### Test Results
+          $(if (Test-Path test-results.json) { $r = Get-Content test-results.json | ConvertFrom-Json; "$($r.numPassedTests)/$($r.numTotalTests) passed" } else { "No test results" })
 
-### Dead Code
-$(if ((Get-Item dead-code-report.txt).Length -gt 0) { Get-Content dead-code-report.txt | Select-Object -First 30 | Out-String } else { "None found" })
+          ### Dead Code
+          $(if ((Get-Item dead-code-report.txt).Length -gt 0) { Get-Content dead-code-report.txt | Select-Object -First 30 | Out-String } else { "None found" })
 
-### Long Functions (>80 lines)
-$(if ((Get-Item long-functions.txt).Length -gt 0) { Get-Content long-functions.txt | Out-String } else { "None found" })
-"@ | Set-Content -Path audit-report.md
+          ### Long Functions (>80 lines)
+          $(if ((Get-Item long-functions.txt).Length -gt 0) { Get-Content long-functions.txt | Out-String } else { "None found" })
+          "@ | Set-Content -Path audit-report.md
 
       - name: Create Issue
         uses: actions/github-script@v7

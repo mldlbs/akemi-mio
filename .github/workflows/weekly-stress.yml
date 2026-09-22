@@ -11,7 +11,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 与 ci.yml 对齐。Node 20 对 vitest 本身不算致命（engines 是
+          # ^20 || ^22 || >=24），但没理由让这道门禁跑在和 push 面不同的版本上。
+          node-version: 22
           cache: 'npm'
       - run: npm i -g npm@11
       - run: npm ci
@@ -21,6 +23,12 @@ jobs:
       # actual coverage -- the step could fail and the job still went green,
       # and nothing notified anyone. The suite takes ~40s, so a real failure
       # is cheap to surface. See docs/gate-integrity-assessment-2026-09-20.md §七 FM-6.
+      #
+      # Through run-with-annotations.mjs: both 09-13 and 09-20 runs came back as a
+      # bare `Process completed with exit code 1` with **no** vitest annotations --
+      # i.e. the failure was upstream of the test run, and the check-run said nothing
+      # useful. That is the same diagnosability defect fixed for mio-cli-tests
+      # (report §10.11 / DETAILS §20.6).
       - name: Run stress tests
-        run: npm run test:stress
+        run: node scripts/run-with-annotations.mjs npm run test:stress
         timeout-minutes: 15
