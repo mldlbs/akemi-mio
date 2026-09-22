@@ -126,22 +126,31 @@ jobs:
       # The mio-agent-runtime CLI is plain CommonJS and uses node:test, so it is
       # not covered by any of the vitest configs above -- without this job none
       # of its tests run in CI at all.
+      #
+      # These four steps go through run-with-annotations.mjs because none of them
+      # is vitest: vitest emits `::error::` lines by itself, so its failures come
+      # back as readable check-run annotations, but `node --test` and the plain
+      # node check scripts do not. Until 2026-09-22 the entire job's annotation
+      # for a failure was "Process completed with exit code 1." -- the real error
+      # was only in the job log, which needs admin rights to read even on a
+      # public repo. The wrapper is transparent (same exit code) and only adds
+      # annotations on failure.
       - name: mio-agent-runtime tests
-        run: npm test --workspace mio-agent-runtime
+        run: node scripts/run-with-annotations.mjs npm test --workspace mio-agent-runtime
 
       - name: README commands match the CLI
-        run: npm run check:cli-docs
+        run: node scripts/run-with-annotations.mjs npm run check:cli-docs
 
       # Every MCP tool must stay reachable from the terminal and documented;
       # mio.insight.generate drifted out of both for weeks before anyone noticed.
       - name: MCP tools are reachable from the CLI
-        run: npm run check:coverage
+        run: node scripts/run-with-annotations.mjs npm run check:coverage
 
       # Reachable on paper is not the same as offered at runtime: a failing
       # isXxxAvailable() hides a tool from tools/list while its dispatch case
       # survives, which is invisible to every other gate.
       - name: MCP tools are actually offered at runtime
-        run: npm run check:mcp-live
+        run: node scripts/run-with-annotations.mjs npm run check:mcp-live
 
   # The two gates in this job need a real packaged exe, which no other job
   # produces -- until 2026-09-21 they simply never ran anywhere. They are the
