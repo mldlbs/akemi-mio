@@ -1674,3 +1674,127 @@ CI runner 的盘更快、工作区被排除实时扫描 → **地板可能 <1ms�
   真正的游标读写全在 `subscription-store.js`（`readDigestState` / `writeDigestState`），
   所以本次游标格式变更的影响面就是那一个文件。
 
+### 10.14 ★★ `main-tests` 的最后一红：4 条用例隐式依赖**未入库的 `.env`**（`2415bd4`）
+
+#### 症状
+
+`main-tests` 在 CI 上稳定红 4 条，而本机跑同一个文件 **24/24 全过**。
+run #39 / #40 / #41 三次连续都是同样这 4 条，注解里的断言行号固定：
+`91:29`、`520:37`、`553:19`、`577:19`。
+
+#### 先被证伪的假设：poll 计时器抢响应
+
+`startPolling()`（`TelegramService.ts:256`）是
+`this.pollTimer = setInterval(() => this.poll(), 1000)`，而几条用例各挂了
+2 个 `mockResolvedValueOnce`。看起来很像「CI 慢 → 测试体超过 1000ms →
+定时器抢走第 2 个响应」。
+
+**实测证伪**：带 `--coverage` 跑该文件 → **24/24，测试体 185ms**。
+离 1000ms 差得远，poll 根本没机会跑。（幸好测了 —— 这个假说「听起来非常合理」。）
+
+#### 根因（机制链）
+
+1. `initialize()` 的门控（`TelegramService.ts:182-184`）：
+   ```ts
+   const enabledFlag = credentialsManager.get('telegram_enabled')
+   const isEnabled = enabledFlag !== null ? enabledFlag === 'true' : TELEGRAM_ENABLED
+   if (!isEnabled) { log('INFO', 'telegram_disabled', …); return }   // :184
+   ```
+   测试把 `credentialsManager.get` mock 成恒返回 `null` → 落到 `TELEGRAM_ENABLED`。
+2. `TELEGRAM_ENABLED` 是 `packages/core/src/config/index.ts:227` 的
+   **模块级常量**（import 时求值，不是读时求值）。
+3. 它唯一变成 `true` 的来源，是开发机上那份**未跟踪**的 `.env:34`
+   （`.gitignore:7` 排除 `.env`）。
+4. CI 全新检出**没有 `.env`** → 常量 = `false` → `initialize()` 在 `:184` 提前 `return`。
+5. 于是**一个 fetch 都不发**：`/health` 没被消费 →
+   `mockResolvedValueOnce` 的整条队列**整体前移一格**。
+6. 那 4 条的断言恰好都落在「被前移」之后：`isRunning` 仍 `false`、`retryQueue` 空、
+   `insertOutbox` 里一条 `edit` 都没有。
+
+> ⚠️ 关键认知：**红的是断言的坐标，不是功能**。`initialize()` 一个请求没发，
+> 后面每个 `sendMessageSync` 都拿到了本该给上一个调用的 mock。
+> 这类「队列整体错位」在断言层面长得像功能 bug，实际是夹具问题。
+
+#### 决定性复现（本机，双向）
+
+```
+mv .env .env.off  →  npx vitest run <该文件>   →  Tests 4 failed | 20 passed
+mv .env.off .env  →  npx vitest run <该文件>   →  Tests 24 passed
+```
+失败断言与 CI 注解**逐字一致**：`expected false to be true` /
+`expected 0 to be greater than or equal to 1` /
+`expected '' to contain '自动恢复'` / `expected '' to contain '取消'`。
+
+这是「本机绿 / CI 红」的**第 4 种机制**（前三种见 §10.3 / §10.9：`node_modules/electron/dist`
+旧缓存、`packages/{insight,observer}/dist` 旧缓存、被 gitignore 的文件躺在工作区）。
+
+#### 同一个 bug 类的第 4 例
+
+「测试依赖了未入库（gitignored）的文件」：
+
+| # | 未入库的东西 | 修法 |
+|---|---|---|
+| 1 | `__test_support__.ts` | `d1951cd` |
+| 2 | `scripts/m56-capability-migration-report.ts` | `dca48c9` |
+| 3 | `extensions/fanqie-mcp/fanqie-mcp.mjs` | `37cde4b` |
+| 4 | **`.env`（`TELEGRAM_ENABLED=true`）** | `2415bd4` |
+
+#### 审计：还有没有别的键在暗中起作用
+
+把 `.env` 的 **24 个键**与 `.env.template` 对差 —— 后者有**零个活跃键**
+（`comm -23 env-keys tpl-keys` 输出全部 24 个），所以 CI 拿不到任何行为开关。
+逐个在 `tests/` 里检索行为开关：
+
+* 只有 **`TELEGRAM_ENABLED`** 造成了失败。
+* `EVOLUTION_DISABLE_GIT_SNAPSHOT` / `EVOLUTION_SERVICE_DISABLED` 只在
+  `packages/main/src/bootstrap/AppRuntime.ts:2106` 与
+  `packages/evolution-core/src/EvolutionUtils.ts:8` 被引用，**无测试依赖**。
+* `TelegramTargetRouter.test.ts` / `IntegrationRC1.test.ts` / `SocialPublishService.test.ts`
+  都自己显式设 env，不受 `.env` 影响。
+
+#### 修法：在测试侧（`2415bd4`）
+
+两条路都不能走：
+
+* **不给 `.env.template` 加 `TELEGRAM_ENABLED=true`** —— 那会让 CI 真的去连外部服务。
+* **不把 `.env` 进库** —— 它含真实 `TELEGRAM_CHAT_ID=8878140402`。
+
+于是改用文件里**已经存在的缝**：`credentialsManager.get('telegram_enabled')` → `'true'`。
+同文件 `106` / `121` / `136` 行本来就是这么做的 —— 说明作者的意图就是
+「默认关、按需开」，这 4 条只是**漏了**。新增局部助手 `enableTelegram()`，
+在 4 条里各调一次（`+21/-0`）。
+
+> ⚠️ 为什么**不**用 `vi.hoisted` 设 `process.env.TELEGRAM_ENABLED`：那样也能工作
+> （`vi.hoisted` 在 import 之前跑，能赶上常量求值），但**多一层脆弱** ——
+> `packages/core/src/config/index.ts:160-170` 有个**手写 `.env` 解析器**，会
+> **无条件覆盖** `process.env` 里的同名键。所以将来只要有人在 `.env` 里写
+> `TELEGRAM_ENABLED=false`，hoisted 的值就会被打掉，用例重新变红。
+> 走 credentials 这条缝**完全不碰环境**，也不依赖模块加载顺序。
+
+#### 承重性验证
+
+| 条件 | 结果 |
+|---|---|
+| 带 `.env`，跑该文件 | 24/24 |
+| 移走 `.env`，跑该文件 | 24/24 |
+| 移走 `.env` + 变异 `'true'` → `'false'` | **4 failed**（行号 109/539/573/598 = 那 4 条） |
+| 移走 `.env`，跑**全量** `npx vitest run` | **292 files passed / 3009 tests passed**（另 1 file、3 tests skipped） |
+
+最后一行是关键：**CI 看到的条件（无 `.env`）下全量绿**，而不是只有那一个文件绿。
+
+#### CI 闭环
+
+run #41（`ae4cbd3`）的 `main-tests` 注解正是这 4 条、行号 `91/520/553/577` ——
+与本机复现逐字对应。同一次 run 的 **`mio-cli-tests` = success**，
+即 §10.12 的游标 tie-break 在真实 CI 上承重（该 job 至今两次绿：#38、#41）。
+
+#### 顺带发现（未修，记录以免重复踩）
+
+同文件 `:51` 的 `process.env.TELEGRAM_SERVER_URL = 'https://test-telegram.local'`
+是**死赋值** —— `TELEGRAM_SERVER_URL`（`config/index.ts:230`）同样是 import 时求值的
+常量，此刻已冻结。测试之所以仍然过，是因为它们只断言**路径**
+（`expect.stringContaining('/health')`、`'/edit'`），没有任何一条断言 host。
+也就是说：它**看起来**在测 `test-telegram.local`，实际走的是默认
+`https://skills.crlkcloud.cyou/telegram`。修它会让 20 条用例的 `baseUrl` 一起变，
+属「影响面超出『让门禁承重』」，故未动 —— 但这行**应该**要么补上 mock，要么删掉。
+
