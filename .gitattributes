@@ -1,5 +1,13 @@
 # Auto detect text files and perform LF normalization
-* text=auto
+#
+# `eol=lf` 不能省：只写 `text=auto` 时，检出用平台默认行尾，Windows 上就是
+# CRLF（实测：core.autocrlf=true 的全新检出，文件里是 \r\n）。CI 跑在
+# windows-latest 上，于是工作区全是 CRLF，而 prettier 的 endOfLine 默认是
+# `lf` → `format:check` 会把**每一个文件**都判成未格式化，门禁恒红。
+# 本机之所以看不出来，是因为工作区恰好是 LF（文件由工具写入、从未重新检出）。
+# 钉死 `eol=lf` 后，各平台检出一致，这道门禁才是在检查「格式」而不是「行尾」。
+# 属性是逐项覆盖的：下面 `*.ts text diff=typescript` 只改 text/diff，eol 仍是 lf。
+* text=auto eol=lf
 
 # Source files
 *.ts text diff=typescript

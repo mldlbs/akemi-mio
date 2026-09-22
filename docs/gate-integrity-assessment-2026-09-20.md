@@ -1204,3 +1204,88 @@ CI 上唯一的线索是「Process completed with exit code 1」，而 job 日�
 
 ⚠️ 三个都**没有擅自做**。按本报告 §八 的口径：A 才是修根因，但它的影响面超出「让门禁承重」这件事，
 属于依赖策略决策；B 虽是单包，也仍是依赖变更。**请拍板走哪条。**
+
+> **✅ 已拍板（2026-09-22）：走「先 B 后 A」。** 第一步 B 已实施为 `e255fa5`，
+> 结果与后续发现见 §10.7；第二步 A（刷新 24 包 lock）**等 CI 能完整跑通后再做**。
+
+### 10.7 B 已实施，失败点前移：`format:check` 在 CI 上恒红（根因是 `.gitattributes` 没钉 `eol`）
+
+用户选了「先 B 后 A」。B 落地为 `e255fa5`（只改 9 个 lock 条目，35 增 35 删），
+推到 `fix/gate-packaging` 后 CI run **#32**（`35686514345`）的结果：
+
+| 步骤 | #31（`57e1c00`，只有文档） | **#32（`e255fa5`，含 B）** |
+|---|---|---|
+| `npm i -g npm@11` / `npm ci` | ✅ | ✅ |
+| `Type check (budget = 0)` | ❌ 4 条 TS7006 | ✅ **绿** |
+| `Lint` | ⏭ skipped | ✅ **绿**（注解里有 11 条 warning） |
+| **`Format check`** | ⏭ skipped | ❌ **红 ← 新的失败点** |
+| mio-cli 语法 / form-registry / Build | ⏭ skipped | ⏭ skipped（在前一步断了） |
+| 4 个测试 job + `packaging` | ⏭ skipped | ⏭ skipped |
+
+**这正好验证了「先 B 后 A」的理由**：修掉第一道之后，露出的第二道是**之前被跳过、从来没跑过**的。
+`quality` 这一步从 5 分 55 秒跑到断点，说明它确实在干活，不是空转。
+
+#### 根因：检出成 CRLF，而 prettier 默认 `endOfLine: lf`
+
+本机 `npm run format:check` 是**绿的**，CI 是红的 —— 又一处「本机绿 ≠ CI 绿」，
+但**这次与 lock 漂移无关**（先排除了它：`prettier` 本机与 lock 都是 3.9.6，版本一致）。
+
+`src/**` 文件转成 CRLF 后 prettier 立刻报 `[warn]` 且 exit 1，还原后逐字节相同 —— 机制成立。
+但「CI 上是不是 CRLF」不能靠印象，于是做了一个**独立实验**：在临时 git 仓库里用同样的
+`.gitattributes` + `core.autocrlf=true`，提交一个 LF 文件，删掉再重新检出，看落地行尾。
+
+| `.gitattributes` | 全新检出后的行尾 |
+|---|---|
+| **现状** `* text=auto` + `*.ts text diff=typescript` | **CRLF**（`\r\n`） |
+| 改成 `* text=auto eol=lf` | **LF** |
+
+`git check-attr` 同时确认：更具体的 `*.ts text diff=typescript` **不会**覆盖 `eol` ——
+git 属性是**逐项**覆盖的，`eol` 仍取自 `* text=auto eol=lf`。
+
+完整因果链：
+
+```
+.gitattributes 标了 text 却没钉 eol
+  → 检出用平台默认行尾 → windows-latest 上就是 CRLF
+  → prettier 的 endOfLine 默认是 lf → 把**每一个**文件都判成未格式化
+  → format:check 恒红
+```
+
+**为什么藏了这么久**：本机工作区恰好是 LF（文件由编辑器/工具写入，从未重新检出），
+而 `git status` 始终干净 —— 因为 `text=auto` 在比较时会规范化行尾，
+**工作区是 CRLF 还是 LF，git 根本不会告诉你**。所以这个差异在本机是不可见的。
+
+#### 修法（一条线）
+
+`.gitattributes` 第一行 `* text=auto` → `* text=auto eol=lf`，并写明为什么不能省。
+钉死之后各平台检出一致，这道门禁才是在检查「格式」而不是「行尾」。
+
+#### 顺手补上可诊断性（同 10.5 的做法）
+
+`format:check` 原来直接跑 `prettier --check`：不合规文件清单打到 **stderr**，
+而 CI 的 job 日志要管理员权限（实测 403）→ 失败时页面上只有一句
+「Process completed with exit code 1」，不知道是哪个文件。
+
+新增 `scripts/format-check.mjs`（`package.json` 的 `format:check` 改为调它）：
+把每个文件转成 `::error::` 注解，run 页面直接可见；并把退出码分成三态
+——**0 = 合规 / 1 = 有文件未格式化 / 2 = prettier 自己跑不起来**
+（沿用 §六 那条教训：门禁必须把「工具坏了」和「检查没过」分开，否则 CI 红会被误读成
+「有人提交了未格式化的代码」）。
+
+四条路径实测：绿 → exit 0；放一个不合规文件 → exit 1 且指名文件；
+`GITHUB_ACTIONS=true` → 输出 `::error::<file> 未按 Prettier 格式化`；
+放一个语法错误文件让 prettier 退 2 → 本脚本退 **2**（而不是 1）。
+
+#### ⚠️ 一个差点让我误报的坑（值得单列）
+
+第一次验证时我用 `__fmt_probe.ts` 当探针，prettier 说「所有匹配的文件都合规」——
+看起来像是**本地门禁在空转**。差一点就把它当成 FM-1 写进报告。
+
+真相：`.gitignore` 里有 `__*`（一条忽略所有 `__` 开头文件的规则），
+而 **prettier 3 默认把 `.gitignore` 也当忽略清单**（`ignorePath` 默认 `['.gitignore', '.prettierignore']`），
+所以探针被静默跳过。换成不含 `__` 的文件名，prettier 立刻正常报错。
+
+**教训：用探针文件做变异检验时，探针名不能落在 `.gitignore` 里。**
+（`tsc` 不读 `.gitignore`，所以之前给 `typecheck:budget` 用的 `__typecheck_probe.ts` 没暴露这个问题；
+是 prettier 会读，才把它顶出来。）
+
