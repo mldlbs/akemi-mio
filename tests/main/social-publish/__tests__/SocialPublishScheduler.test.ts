@@ -6,6 +6,21 @@ import { SocialPublishScheduler } from '@akemi-mio/capabilities/social-publish/S
 import type { ICapabilityService, CapabilityBinding } from '@akemi-mio/capabilities/capability/types'
 
 const FIXED_NOW = new Date('2026-08-13T12:00:00+08:00').getTime()
+
+// scheduledAt 是**不带时区**的本地时间字符串（调度器用 new Date(s) 解析，按本机
+// 时区理解），而 FIXED_NOW 是一个固定瞬间 —— 两者混用会让「是否到期」取决于跑测
+// 机器的时区。夹具原先写死 "2026-08-13 11:00"：在 UTC+8（本机）下早于 FIXED_NOW，
+// 在 UTC（CI runner）下却晚于它，于是同一份代码本机全绿、CI 上 8 个用例全返 0。
+// 统一从 FIXED_NOW 反推本地时间字符串，保证在任意时区下语义一致。
+function localStamp(ms: number): string {
+  const d = new Date(ms)
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+const DUE_AT = localStamp(FIXED_NOW - 60 * 60 * 1000) // 到期前 1 小时
+const NOT_DUE_AT = localStamp(FIXED_NOW + 21 * 60 * 60 * 1000) // 之后 21 小时
+
 const DRAFT_REL = 'drafts/2026-08-13-x/douyin/x.md'
 
 class FakeCapabilityService implements ICapabilityService {
@@ -32,7 +47,7 @@ published:
 `
 
 function item(overrides: Record<string, unknown> = {}): string {
-  const scheduledAt = overrides.scheduledAt ?? '2026-08-13 11:00'
+  const scheduledAt = overrides.scheduledAt ?? DUE_AT
   const platform = overrides.platform ?? 'telegram'
   const status = overrides.status ?? 'scheduled'
   return [
@@ -100,12 +115,12 @@ describe('SocialPublishScheduler', () => {
 
   it('未到期项保留在 scheduled', async () => {
     writeDraft()
-    writeFileSync(join(dir, 'config', 'content_calendar.yaml'), CALENDAR(item({ scheduledAt: '2026-08-14 09:00' })), 'utf-8')
+    writeFileSync(join(dir, 'config', 'content_calendar.yaml'), CALENDAR(item({ scheduledAt: NOT_DUE_AT })), 'utf-8')
     const s = scheduler(() => ({ status: 'published' }))
     const result = await s.runOnce()
     expect(result.posted).toBe(0)
     const raw = readFileSync(join(dir, 'config', 'content_calendar.yaml'), 'utf-8')
-    expect(raw).toContain('2026-08-14 09:00')
+    expect(raw).toContain(NOT_DUE_AT)
     expect(raw).toContain('status: scheduled')
   })
 
