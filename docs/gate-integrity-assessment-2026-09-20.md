@@ -1289,3 +1289,192 @@ git 属性是**逐项**覆盖的，`eol` 仍取自 `* text=auto eol=lf`。
 （`tsc` 不读 `.gitignore`，所以之前给 `typecheck:budget` 用的 `__typecheck_probe.ts` 没暴露这个问题；
 是 prettier 会读，才把它顶出来。）
 
+---
+
+### 10.8 ★★ 三道覆盖率门禁：**三个从未被求值过的数字**
+
+`quality` 转绿、下游 job 第一次真的执行之后，露出来的第一件事是：
+`main-tests`、`renderer-tests`、`preload-tests` 三个 job 的**用例全部通过**，
+红的是覆盖率阈值。
+
+#### 实测 vs 阈值
+
+| job | 配置文件 | 阈值 (lines/funcs/branches/stmts) | 实测 | 差 | 用例 |
+|---|---|---|---|---|---|
+| `main-tests` | `vitest.config.ts` | 30 / 25 / 20 / 30 | 23.25 / 23.21 / 18.14 / 22.51 | 约 7pp | 3009 全过 |
+| `renderer-tests` | `vitest.config.renderer.ts` | 37 / 35 / 26 / 35 | 20.00 / 22.41 / 16.37 / 19.87 | 13–17pp | 449 全过 |
+| `preload-tests` | `vitest.config.preload.ts` | 80 / 80 / 80 / 80 | 37.85 / 35.29 / 42.85 / 38.70 | **约 42pp** | 94 全过 |
+
+#### 它们为什么一直没被发现
+
+三条**互相独立**的原因，正好覆盖三种失效模式：
+
+1. **`main-tests` / `renderer-tests`：从来没跑起来过。** `npm ci` 从 monorepo 化起
+   就没通过（§10.2），而这两个 job 都是 `needs: quality`。**一个永远红的 CI 等价于
+   没有 CI** —— 阈值写在配置里、看起来像门禁，实际从未被求值。
+2. **`preload-tests`：跑起来了，但门禁根本没开。** 它的 CI 命令是
+   `npx vitest run --config vitest.config.preload.ts` —— **不带 `--coverage`**。
+   vitest 只在带 `--coverage` 时才评估 `thresholds`，所以那组 80/80/80/80
+   是**一块写得像门禁、实际从未生效的配置**（FM-2 的教科书样本）。
+3. **阈值本身没有历史。** `git log -S "thresholds"` 只命中 `244af61`
+   （`chore: fresh repository baseline (rebuild #3c)`）—— 那是仓库历史的根提交。
+   也就是说**没有任何一次「通过」的记录可以对照**。
+
+#### 分母里是什么：一半是「被加载但从未执行」的文件
+
+用 lcov 把分母拆开（`coverage/lcov.info`）：
+
+| | 文件数 | 可执行行 | 命中 | 0% 的文件 | 0% 文件占的行 |
+|---|---|---|---|---|---|
+| main | 1229 | 81003 | 18835 (23.25%) | **536 个（43.6%）** | 26286 行（**32.5%**） |
+| renderer | 132 | 7925 | 1585 (20.00%) | **69 个（52.3%）** | 4112 行（**51.9%**） |
+
+> 这里有个**差点走错的路**：我最初的假设是「阈值是按旧版 `coverage.all: false`
+> 语义标定的，升级到 vitest 4 后分母膨胀了」。查下来**反了** ——
+> vitest v4 的迁移指南写明 *"In Vitest v4 we have removed `coverage.all` completely
+> and defaulted to include only covered files in the report."*，即 v4 的默认**更窄**；
+> 而我们的配置**显式定义了 `coverage.include`**，按文档此时报告会包含
+> 「匹配该 glob 的已覆盖 **与** 未覆盖文件」，所以分母就是整个 glob。
+> 顺带一个可诊断性细节：`--coverage.all=false` 在 v4 里**被静默忽略**
+> （实测加不加这个 flag，三套数字一模一样），因为该选项已被删除。
+
+`main` 的分母按包拆开是 **60 个包**，其中 **17 个包命中为 0**（4763 行，占 5.9%）；
+最大的三个包是 `evolution`（128 文件 / 10944 行 / 18.6%）、
+`capabilities`（161 / 10658 / 16.9%）、`audio`（109 / 9847 / 20.4%）。
+
+`renderer` 的 0% 里有**一个包是死的**：`src/renderer/src/widgets/`
+—— **34 个文件、2326 行、0%**，占分母的 **29%**。而按项目记录
+（`MEMORY.md` §三）**`widgets/` 已退役**，壁纸早已迁到
+`forms/wallpaper/WallpaperForm.tsx`；`grep` 确认**没有任何生产代码 import 它**
+（唯一提到它的 `visualSystem.test.ts` 是把两个文件当**文本**读来做断言，
+不是导入）。退役代码以 0% 的形式占着分母，把整体覆盖率从 28% 压到 20%。
+
+#### 拍板：标定成棘轮（不是把数字改小就完事）
+
+用户选择「**先修口径，再按实测标定成棘轮**」，与仓库已有的
+`--max-warnings 130` 做法一致（§四：lint 的计数阈值只能「只降不升」地调）。具体：
+
+1. **修口径**：`vitest.config.renderer.ts` 的 `coverage.exclude` 增加
+   `src/renderer/src/widgets/**` —— 退役代码不该算进「测试覆盖了多少活代码」。
+   （代码本身**保留**，删除是另一笔独立改动。）
+2. **阈值改成略低于实测的棘轮**，每个数字留约 1.2–1.9pp 余量：
+
+   | job | 旧 | 新 | 实测（新口径） |
+   |---|---|---|---|
+   | main | 30 / 25 / 20 / 30 | **22 / 22 / 17 / 21** | 23.25 / 23.21 / 18.14 / 22.51 |
+   | renderer | 37 / 35 / 26 / 35 | **27 / 27 / 20 / 26** | 28.30 / 28.68 / 21.71 / 27.86 |
+   | preload | 80 / 80 / 80 / 80 | **36 / 34 / 41 / 37** | 37.85 / 35.29 / 42.85 / 38.70 |
+
+3. **给 `preload-tests` 补上 `--coverage`** —— 不补的话第 2 步改的数字仍然是死的。
+
+**为什么要留余量**：覆盖率**不是完全确定的**。同一份代码、同一台机器，
+`main` 两次实测得到 23.25 与 23.28，`renderer` 的 branches 两次得到 21.69 与 21.71。
+差 0.03pp 量级，但足以把零余量的棘轮顶红。
+
+**这道门禁的承重性怎么确认**：不需要再做变异检验 ——
+**我们已经直接观测到它在更高阈值下变红**（三套全是红的），
+现在把数字降到实测之下再观测到变绿。红/绿走的是同一条代码路径，
+只是数字不同。`preload` 那条尤其干净：`--coverage` 一加上就红（37.85 < 80），
+阈值一改就绿，说明开关和阈值都真的在起作用。
+
+#### ⚠️ 这一节必须留下的债（别让棘轮变成「达标」）
+
+棘轮守护的是「**不许退步**」，不是「达到某个质量线」。原来的目标值
+**30 / 37 / 80** 仍然没达到，只是从「从未被求值的数字」变成了「已知未达标的数字」：
+
+| job | 目标 | 现在 | 差距 |
+|---|---|---|---|
+| main | 30% lines | 23.25% | 需再覆盖约 5500 行 |
+| renderer | 37% lines | 28.30% | 需再覆盖约 690 行 |
+| preload | 80% lines | 37.85% | 需再覆盖约 177 行（261 行未覆盖，散在 159 个小段里） |
+
+`preload` 是三者里**唯一现实可做**的：分母只有 `src/preload/index.ts` 一个文件、
+420 行可执行代码，缺的 177 行是一条条独立的 IPC 通道处理器。
+`main` 与 `renderer` 则要先处理「536 / 69 个文件一行都没执行过」这件事
+—— 那更像是**测试策略**问题（很多是 Electron / LLM 绑定代码），不是「再写几个用例」。
+
+---
+
+### 10.9 ★ `packaging` 首次实跑失败：**`npm ci` 根本不会下载 Electron 二进制**
+
+#### 症状：一个 3 秒的失败
+
+CI #33 里 `packaging` job 的 `Package (unpacked directory)` 步骤
+**3 秒就退出了**（`07:13:58Z` → `07:14:01Z`）。而本机同一条命令
+（`npx electron-builder --win --dir`）要跑 **8 分钟**，并且**成功**产出
+`dist-electron/win-unpacked/AkemiMio.exe`（221MB，日志里一个 error 都没有）。
+
+**3 秒这个数字本身就是线索**：electron-builder 的启动序列
+（读配置 → 检测 packageManager → 解析 electron 版本 → 校验 electronDist）
+大约就是 3 秒，之后才开始拷 1.6GB 的 Electron。所以它死在**开始拷贝之前**。
+
+#### 根因
+
+`electron-builder.yml` 里有一行：
+
+```yaml
+electronDist: node_modules/electron/dist
+```
+
+它假定 `npm ci` 会把 Electron 二进制放到 `node_modules/electron/dist`。
+**这个假定对 electron 42 不成立**：
+
+```
+$ curl -s https://registry.npmmirror.com/electron/42.4.0 | jq '.scripts'
+null                                    # ← 没有 scripts 字段，即没有 postinstall
+$ jq '.scripts' node_modules/electron/package.json   # 本机装的是 42.9.3
+{}                                      # ← 同样没有
+```
+
+两版都只提供 `"bin": {"electron": "cli.js", "install-electron": "install.js"}`
+—— 二进制改由 **`install-electron` 这个显式命令**下载，npm 装包时不会自动跑。
+锁文件也自洽：`hasInstallScript: true` 的包有 16 个（`esbuild`、`sharp`、`koffi`、
+`bufferutil`、`onnxruntime-node`…），**`electron` 不在其中**。
+
+所以全新 `npm ci` 之后 `node_modules/electron/dist` **不存在** →
+electron-builder 在「using custom unpacked Electron distribution」那一步立即失败。
+
+#### 为什么本机一直是绿的（又一次「本机绿 ≠ CI 绿」）
+
+本机的 `node_modules/electron/dist` 是 **Aug 24 12:52** 建好的（345MB，含
+`path.txt`），从此一直躺在 node_modules 里 —— 期间 `npm ci` 从未在本机成功跑过
+（§10.3）。**一个从未被清理的缓存目录，把一条 CI 上必然失败的路径伪装成了本机正常。**
+
+#### 验证（隔离副本，不动本机 node_modules）
+
+第一次尝试「把 dist 移走再跑 install.js」**失败得很有教育意义**：
+`mv: cannot move 'dist' to 'dist.bak': Permission denied` ——
+有 **5 个 `electron.exe` 进程**正占着这个目录。而由于 `mv` 失败、`dist` 其实没被移走，
+随后的「install.js 跑完 dist 还在 → 重建成功」是**假阳性**。
+
+改用隔离副本（把 electron 包的几个文件拷到 `.tmp/electron-install-test/`，
+使 `require('@electron/get')` 仍能沿目录向上解析到仓库 node_modules）：
+
+```
+$ node install.js        # 该目录下没有 dist
+exit=0
+✅ dist 重建成功: 345M   # 11 秒，含 electron.exe / path.txt
+```
+
+即：**`install.js` 确实能重建 dist，且是幂等的**（dist 已在时它空转退 0，
+实测 `exit=0` 且目录大小不变）。
+
+#### 修法
+
+`.github/workflows/ci.yml` 的 `packaging` job 在 `Package` 之前加一步：
+
+```yaml
+- name: Fetch Electron binary (npm ci does not)
+  run: node node_modules/electron/install.js
+```
+
+并写明上述机制（含「3 秒」这个症状特征），免得以后有人看到这一步觉得多余而删掉。
+
+#### ⚠️ 遗留：这个 job 里的另外两道门禁仍未标定
+
+`Package` 之后的两个步骤
+（`check:renderer-entries`、`check:idle-gpu`）**到本文写作时仍然一次都没跑过**
+—— 它们依赖打包产物，而打包在 CI 上从来没成功过。`check:idle-gpu` 的
+GPU 阈值本来就注明「在 CI 上未标定」，现在连首次标定的机会都还没有。
+**下一个 CI run 才是它们真正的首跑。**
+
