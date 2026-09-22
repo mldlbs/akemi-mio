@@ -45,6 +45,14 @@ const SAMPLES = Number(arg('samples', 3))
 const INTERVAL_SEC = Number(arg('interval', 8))
 const GPU_BUDGET = Number(arg('gpu-budget', 20))       // 空闲 GPU 上限（%）
 const DELTA_BUDGET = Number(arg('delta-budget', 15))   // A/B 差值上限（百分点）
+// 仪器自检的**下限**：注入的重负载动画必须把 GPU 顶起来这么多，否则判「仪器失灵」。
+//
+// ⚠️ 这个值是**下限**而且刻意压得很低，因为它的用途不是性能门槛，
+// 只是要把「仪器死了（≈0）」和「仪器活着（≈147）」分开 —— 中间隔了三个数量级。
+// 标定数据（CI runner，四笔 run）：147.3 / 147.2 / 146.9 / 147.6，极差 0.7 个点；
+// 本机 headless Edge 夹具：43.3 / 19.9（本机有别的进程在抢资源，波动大得多）。
+// 取 5 对 CI 有约 29 倍余量，对波动最大的本机也有约 4 倍余量。
+const SELFCHECK_MIN = Number(arg('selfcheck-min', 5))  // 自检差值下限（百分点）
 const SKIP_AB = flag('no-ab')
 
 // GitHub Actions 注解。公开仓的 job 日志要管理员权限才能读，只有 check-run
@@ -194,8 +202,12 @@ const RESTORE_ANIM = `(function(){const s=document.getElementById('__mio_idle_gp
 // 而它本该抓的那类回归正好从它眼皮下溜过去。
 //
 // 所以注入一条**确定无疑**的重负载动画（全视口 + 每帧重绘 + filter），
-// 看它能不能把 GPU 顶起来。v1 只报数不判红：标定数据还没有，先把这个
-// 未知量变成数字（同样的顺序用过一次：idle-gpu 的注解改动先只发 notice）。
+// 看它能不能把 GPU 顶起来。
+//
+// v1 只报数不判红（阈值没有标定数据，一上来就判红就是 FM-8 的制造机）；
+// v2 起判红，因为 v1 已经把标定数据收上来了：CI 四笔 147.3 / 147.2 / 146.9 / 147.6
+// （极差 0.7），本机两次 43.3 / 19.9（本机有别的实例在抢资源）。
+// 下限取 5 ⇒ CI 上有约 29 倍余量，本机最差那次也有 4 倍。
 //
 // 挂到 documentElement 而不是 body：应用里 body 下可能有 transform 祖先，
 // 那会让 position:fixed 退化成相对该祖先定位，注入物可能只有 0 面积。
@@ -427,7 +439,7 @@ async function main() {
     console.log(`  自检 GPU        ${sc.gpu.toFixed(1)}%（注入全视口合成动画后）`)
     console.log(
       `  自检 差值       ${scDelta === null ? '(无参照)' : scDelta.toFixed(1) + ' 个点'}` +
-        `（对照「关动画」）  清理后残留 ${scLeft}（期望 ${SELFCHECK_CLEAN}）`,
+        `（对照「关动画」，下限 ${SELFCHECK_MIN}）  清理后残留 ${scLeft}（期望 ${SELFCHECK_CLEAN}）`,
     )
   }
   console.log(`  进程类型        ${fmtProcTypes(base.procTypes)}`)
@@ -440,6 +452,29 @@ async function main() {
     fails.push(
       `A/B 差值 ${delta.toFixed(1)} 个点超预算 ${DELTA_BUDGET} —— 很可能有常驻无限动画在烧 GPU`,
     )
+  }
+  // 仪器自检判红。两条都要判，理由不同：
+  //   (a) 注入没生效 → 完全没有证据 → 本次的「绿」不可信；
+  //   (b) 注入生效但 GPU 不响应 → 两条判据都不会触发 → 同上。
+  // ⚠️ **只判 (b) 是不够的**：那样只要注入代码一坏，`自检动画 0/0` 会让自检变成装饰，
+  // 而「注入坏了」本身没有任何后果 —— 这正是 FM-6（能跑但不可能红）的形状。
+  // 「清理不干净」则**不**判红：清理发生在所有测量之后，不影响任何数字的可信度，
+  // 它只是本脚本自身的缺陷信号，保持 notice 就够了（判红会白添一条抖动来源）。
+  if (sc) {
+    // ⚠️ 用 `running` 而不是 `animCount`：动画存在但处于 paused 时同样造不出 GPU 负载，
+    // 同样是「没有证据」，而 animCount 会把它错报成「注入生效了」。
+    if (sc.running.length === 0) {
+      fails.push(
+        '仪器自检无效：注入的合成动画没有在运行，本次没有任何证据说明这条测量链是好的',
+      )
+    } else if (scDelta === null || scDelta < SELFCHECK_MIN) {
+      fails.push(
+        `仪器自检失败：注入重负载动画后 GPU 差值仅 ${
+          scDelta === null ? '(无参照)' : scDelta.toFixed(1)
+        } 个点，低于下限 ${SELFCHECK_MIN} —— 「动画 → GPU 进程 CPU」这条链在这台机器上` +
+          '没有响应，绝对预算与 A/B 两条判据都不会触发，本次的绿是空绿',
+      )
+    }
   }
 
   // 标定数据：每次运行都发（通过与失败都发）。没有这几个数字就没法把
@@ -501,20 +536,11 @@ async function main() {
         ` / 清理后残留 ${scLeft}（期望 ${SELFCHECK_CLEAN}）` +
         ` / 进程类型 ${fmtProcTypes(sc.procTypes)}`,
     )
-    // ⚠️ 必须先把「注入没生效」和「注入生效但 GPU 不响应」分开 ——
-    // 两者的差值都是 0，但对后者说「这条链断了」才是对的，对前者说就是假话。
-    // 判别依据就在同一行里：自检那一段有没有看见注入的动画。
-    if (sc.running.length === 0) {
-      notice(
-        '[idle-gpu] ⚠️ 自检注入没生效：页面里看不到自检动画，本次自检无效' +
-          '（既不能说仪器好，也不能说仪器坏）',
-      )
-    } else if (scDelta !== null && scDelta <= 1) {
-      notice(
-        '[idle-gpu] ⚠️ 自检差值 ≈ 0：这台机器上「CSS 动画 → GPU 进程 CPU」这条链' +
-          '没有响应，绝对预算与 A/B 两条判据都不会触发 —— 本次的绿是空绿',
-      )
-    }
+    // ⚠️ 「注入没生效」与「注入生效但 GPU 不响应」的差值都是 0，必须分开报
+    // —— 对后者说「这条链断了」才是对的，对前者说就是假话。判别依据就在同一行里：
+    // 自检那一段有没有看见**运行中**的注入动画。
+    // 这两种情形现在都已进 fails（v2），所以这里不再重复发 notice：
+    // 一条 ::error:: 注解已经在 run 页面上了，再发一条同义 notice 只是噪声。
     if (scLeft !== SELFCHECK_CLEAN) {
       notice(
         `[idle-gpu] ⚠️ 自检清理不干净（残留 ${scLeft}，期望 ${SELFCHECK_CLEAN}）：` +
