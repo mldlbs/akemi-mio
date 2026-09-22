@@ -95,11 +95,26 @@ try {
 console.log(`[idle-gpu] exe      ${EXE}`)
 console.log(`[idle-gpu] 预热 ${WARMUP_SEC}s，随后采 ${SAMPLES} 次 × ${INTERVAL_SEC}s`)
 
-const child = spawn(EXE, ['--remote-debugging-port=' + PORT], {
-  env,
-  cwd: path.dirname(EXE),
-  stdio: 'ignore',
+// spawn 失败有两条路，两条都得走 2（运行失败）而不是 1（超预算）：
+//   同步抛（EFTYPE 等，exe 存在但不可执行）+ 异步 'error' 事件（ENOENT 等，
+//   后者在 EventEmitter 上没人监听时也会直接抛）。
+// 不区分的话 CI 红会被误读成「GPU 回归」，实际是「应用根本没起来」。
+let child
+try {
+  child = spawn(EXE, ['--remote-debugging-port=' + PORT], {
+    env,
+    cwd: path.dirname(EXE),
+    stdio: 'ignore',
+  })
+} catch (e) {
+  console.error(`[idle-gpu] 起不来：${e.code || e.message}`)
+  process.exit(2)
+}
+child.on('error', (e) => {
+  console.error(`[idle-gpu] 起不来：${e.code || e.message}`)
+  process.exit(2)
 })
+
 let killed = false
 function shutdown(code) {
   if (!killed) {
