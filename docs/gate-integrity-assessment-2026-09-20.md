@@ -2118,12 +2118,18 @@ $ curl -sL https://github.com/mldlbs/akemi-mio/labels
 | `packaging` | §10.9：曾在 CI 上 3 秒失败 → 修复后实跑 |
 
 ⚠️ **但「全绿」不等于「门禁没问题了」**。仍未闭合的：
-* ⚠️⚠️ **`fix/gate-packaging` 整个分支（35 笔）还没落到默认分支 `master`** ——
-  两个 weekly 门禁的修复**因此都还是惰性的**（§10.15 末尾）。
-* `weekly-stress` 两次红未复跑（本节）。
-* `weekly-audit` 语义问题未动（4 处 `continue-on-error`）。
+* ✅ ~~`fix/gate-packaging` 整个分支（35 笔）还没落到默认分支 `master`~~ ——
+  **09-22 已闭合**（§10.18：纯快进到 `fe25623`，`master` 的 CI 第一次有机会变绿）。
+* `weekly-stress` 两次红**已查清**（§10.15 事实 3：死在 `npm ci`，测试被 skipped），
+  但**下一次调度（2026-09-28）能否真的跑起来**仍未验证。
+* ⚠️ **`weekly-audit` 首次运行几乎必红在 `Create Issue`**（缺 `audit`/`automated` 两个 label，
+  §10.15「已知的首次运行风险」）—— 需在 09-28 之前处置。
+* `weekly-audit` 的 4 处 `continue-on-error` 语义问题未动。
+* ⚠️ **`check:idle-gpu` 只守主窗口**（§10.17 顺带发现 4）——
+  `wallpaper`/`pet`/`chat` 三个形态窗口完全没被守；已拍板先做「把量到了什么变成 notice」。
 * 覆盖率目标值 30/37/80 仍是**未还的债**（§10.8）。
-* `check:idle-gpu` 的 GPU 阈值仍未在 CI 上标定（§10.17 已把数字变成注解，等 CI 跑完即可读）。
+* `check:idle-gpu` 的 GPU 阈值仍未在 CI 上标定（§10.17 已把数字变成注解，
+  CI #48 已拿到基线数字：GPU 0.0% / CPU 2.5%）。
 * `audit` 门禁仍未进 CI（要先还 32 个漏洞的债）。
 
 ### 10.17 `check:idle-gpu`：**判据自己没法被标定**（`2533092`）
@@ -2304,3 +2310,58 @@ const page =
 区分点在于：**如果给它喂进本该变红的输入，它会不会红**（→ §四「变异检验」）。
 对这道门禁，这个检验还没做（本地复跑被环境污染挡住）。
 
+
+### 10.18 ★★★ 落地默认分支：`master` 的 CI **第一次有机会变绿**（`fe25623`）
+
+按 09-22 拍板（「等 CI 全绿再快进」），CI #52 = `completed successfully` 之后执行了
+**纯快进**：
+
+```
+$ git push origin fe25623:refs/heads/master
+   ec5bbd3..fe25623  fe25623 -> master
+```
+
+38 笔、0 分叉、无 merge commit、无分支保护拦截。
+
+#### 落地后**在默认分支上**复查（不靠「分支上绿」推断）
+
+| 检查项 | 命令 | 结果 |
+|---|---|---|
+| `weekly-audit.yml` 能否解析 | `js-yaml` 直接 `load` | ✅ **OK**，`name="Weekly Codebase Audit"`，`triggers=schedule+workflow_dispatch` —— **该文件史上第一次合法** |
+| `weekly-stress.yml` 还有没有 `continue-on-error` | `grep -cE '^[[:space:]]*continue-on-error:'` | ✅ **0 处**（唯一一处字样在第 21 行的**注释**里） |
+| `package.json` 还剩几个 `workspace:` | `git grep -c '"workspace:'` | ✅ **0 个** |
+| `ci.yml` 是否升了 npm 11 | `grep -c 'npm i -g npm@11'` | ✅ **6 处** |
+
+> ⚠️ 这里有个自己差点踩的坑：第一次用 `grep -c 'continue-on-error'` 得到 **1**，
+> 差点报成「master 上还留着」。实际那行是
+> `# No continue-on-error: a stress regression has to make this run red.` ——
+> **注释**。判 YAML 指令必须用 `^[[:space:]]*key:` 这种锚定写法，
+> 否则注释/文档字符串会把结论带偏（同一类错误在 §四「常响的警告」里也出现过）。
+
+#### ★ 最有说服力的一幕：master 的 CI 历史**每一条都是 failed**
+
+push 之后 master 上的 run 列表（`?query=branch%3Amaster`）：
+
+```
+35722147564 | currently running:  Run 53 of CI. docs(gate): §10.17 纠正一处过度断言…
+35545632467 | failed:  Run 2  of Weekly Stress Test.
+35498567869 | failed:  Run 28 of CI.
+35498567184 | failed:  Run 33 of Weekly Codebase Audit.
+35498478091 | failed:  Run 27 of CI.
+35498477656 | failed:  Run 32 of Weekly Codebase Audit.
+35496047624 | failed:  Run 26 of CI.
+35496047233 | failed:  Run 31 of Weekly Codebase Audit.
+```
+
+**`Run 53 of CI` 是默认分支上第一条有资格变绿的运行。** 在它之前的每一条
+（`CI` #26/#27/#28、`Weekly Codebase Audit` #31/#32/#33、`Weekly Stress Test` #2）
+**全部 failed** —— 这正是「master 的 CI 自 monorepo 化以来一直是红的」的直接证据，
+而且它同时解释了「为什么这两天所有修复的证据都只长在分支上」。
+
+⚠️ 也正因为如此：**`Run 53` 的结果必须复查**，不能因为「分支上绿了」就假定默认分支也绿。
+这条判据本身就是本节 10.15 末尾那条教训的第二次应用。
+
+#### 顺带：`fix/gate-packaging` 现在与 `master` 同点
+
+两者都是 `fe25623`。后续改动仍按「先分支验证 → 再快进默认分支」的老路子走，
+因为本轮的核心教训正是**「修在哪个分支」是必须显式检查的一环**。
