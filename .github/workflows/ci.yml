@@ -109,7 +109,7 @@ jobs:
       - run: npm i -g npm@11
       - run: npm ci
       - name: Preload tests
-        run: npx vitest run --config vitest.config.preload.ts
+        run: npx vitest run --config vitest.config.preload.ts --coverage
 
   mio-cli-tests:
     runs-on: windows-latest
