@@ -606,6 +606,11 @@ async function main() {
         return out?.result?.result?.value
       }
       // 空闲动画数：形态窗口在空闲时若有 running 动画 = 正是要抓的回归。
+      // ⚠️ 已知冲突（09-23 发现，判据修正待拍板）：pet/chat 有**产品意图的常驻动画**
+      // （.pet-svg 的 pet-breathe/pet-float、.chat-avatar-dot 的 chat-dot-pulse），
+      // 「空闲 running>0 = 红」一旦在 React 渲染完成后测量就会永久红 —— CI #81/#82
+      // 没红只是因为基线测量发生在 React 渲染完成前（pet 自检 4/4 = 2 注入 + 2 产品，
+      // 而 chat 整个测量期间都没渲染出内容）。见报告 §10.23「判据与产品现实冲突」。
       const base = await phase(`${kind}-基线`, fev)
       await ev(
         `(window.akemiForms && window.akemiForms.toggleForm(${JSON.stringify(kind)}))`,
@@ -637,7 +642,9 @@ async function main() {
       notice(
         `[idle-gpu] 形态窗口 ${kind}：自检 GPU ${sc.gpu.toFixed(1)}%（差值 ${scDelta.toFixed(1)}` +
           ` 个点，下限 ${SELFCHECK_MIN}） / 自检动画 ${sc.running.length}/${sc.animCount}` +
-          ` / 空闲动画 ${base.running.length}/${base.animCount} / 残留 ${scLeft}`,
+          ` [${sc.running.map((a) => a.name).join(', ') || '-'}]` +
+          ` / 空闲动画 ${base.running.length}/${base.animCount}` +
+          ` [${base.running.map((a) => a.name).join(', ') || '-'}] / 残留 ${scLeft}`,
       )
       if (sc.running.length === 0) {
         // 只报数（不判红）：注入没生效只是说明这条链在该窗口上没被证明能动，
