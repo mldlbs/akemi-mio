@@ -164,6 +164,22 @@ jobs:
       - name: Build renderer + main bundles
         run: npm run build
 
+      # electron 42 的 npm 包**没有 postinstall**（实测 42.4.0 与 42.9.3 的
+      # package.json 里都没有 scripts 字段；锁文件里也没有 hasInstallScript），
+      # 二进制改由 `install-electron` 这个显式 bin 下载。于是全新 `npm ci` 之后
+      # node_modules/electron/dist 并不存在 —— 而 electron-builder.yml 里
+      # `electronDist: node_modules/electron/dist` 正指着它。
+      #
+      # 症状很有迷惑性：`electron-builder --win --dir` 在 **3 秒内**退出 1
+      # （本机同一命令要 8 分钟）。3 秒意味着它连 Electron 都还没开始拷，就死在
+      # 「using custom unpacked Electron distribution」那一步。本机之所以一直
+      # 看不出来，是因为 dist 早就在 node_modules 里躺着了（Aug 24 建好，从未
+      # 被清掉）—— 又一个「本机绿 ≠ CI 绿」。
+      #
+      # install.js 是幂等的：dist 已在时它空转退出 0。
+      - name: Fetch Electron binary (npm ci does not)
+        run: node node_modules/electron/install.js
+
       # --dir instead of the configured nsis target: both scripts below look for
       # dist-electron/win-unpacked/AkemiMio.exe, which is exactly what --dir
       # produces. It also skips the NSIS step and the winCodeSign download,
