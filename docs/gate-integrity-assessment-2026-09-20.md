@@ -11,16 +11,22 @@
 - 发现 **1 个实际失效的门禁**：`lint`（130 条常响警告 + 退出码恒 0）—— ✅ **已修**（`28358e4`）。
 - 发现 **2 道真实红**：`format:check`（20 文件）—— ✅ **已修**（`c4c3d2b`）；
   `audit` —— ⚠️ **无法运行**（根因见下条，非 CVE 问题）。
-- **2 道门禁无法运行**（缺打包产物，前置条件）。
-- ★ **新发现 FM-5：6 道门禁存在、可执行，却不在 CI 流水线上**（`typecheck:budget`、`test:unit:fast`、`test:stress`、`audit`、`check:renderer-entries`、`check:idle-gpu`）—— 见 §七。**其中 `check:renderer-entries` 最该补**（它守的是「三形态注册表不一致→空白屏」，其它门禁全看不见）。
-  ✅ **2026-09-21 已闭环**：确认它**必须**有打包 exe（`findExe()` 在形态检查之前就抛），
-  故改为补一道**静态等价门禁** `check:form-registry`（秒级、无产物依赖，已进 quality job）—— 见 §七·补记。
-  ⚠️ **同日更正**：原写「6 道不在任何流水线上」是**错的**，实际 **5 道** ——
-  `test:stress` 就在 `weekly-stress.yml:18`（09-20 只比对了 `ci.yml`，漏看另两个 workflow）。
-  📋 **FM-5 六道的当前状态（09-21 收尾）**：✅ `typecheck:budget` 已顶替 CI 的 typecheck 步骤；
-  ✅ `test:stress` 已修好并去掉 `continue-on-error`；🗑 `test:unit:fast` 已删（名不副实 + 冗余 + 无消费者）；
-  ⬜ 仍无人调用：`audit`（等安装链）、`check:idle-gpu`（需打包 exe）、
-  `check:renderer-entries`（需打包 exe；已由静态门禁 `check:form-registry` 覆盖其最关键的那类不一致）。
+- **2 道门禁无法运行**（缺打包产物，前置条件）→ ✅ **2026-09-22 已闭环**：
+  新增 `packaging` job 跑 electron-builder `--win --dir` 产出 exe，两道门禁都接了上去 —— 见 §九。
+- ★ **新发现 FM-5：门禁存在、可执行，却不在 CI 流水线上** —— 见 §七。
+  原写「**6 道**」，⚠️ **09-21 更正为 5 道**：`test:stress` 其实在 `weekly-stress.yml:18`
+  （09-20 只逐条比对了 `ci.yml`，漏看 `.github/workflows/` 下另两个文件）。
+  **其中 `check:renderer-entries` 最该补**（它守的是「三形态注册表不一致→空白屏」，其它门禁全看不见）。
+  📋 **五道的当前状态**：
+  | 门禁 | 状态 |
+  |---|---|
+  | `typecheck:budget` | ✅ 09-21 顶替 CI 的 typecheck 步骤（已做变异检验） |
+  | `test:stress` | ✅ 09-21 修好写法（12 passed）并去掉 `continue-on-error` |
+  | `test:unit:fast` | 🗑 09-21 已删（名不副实 8m23s + 是 CI 已跑内容的子集 + 无消费者） |
+  | `check:renderer-entries` | ✅ **09-22 进 CI**（`packaging` job）；另补静态等价门禁 `check:form-registry` 守住最关键的那类不一致 |
+  | `check:idle-gpu` | ✅ **09-22 进 CI**（同一个 `packaging` job） |
+  ⚠️ 新引入的 `packaging` job **尚未在 CI 实跑过**（本机无法预演打包，且 `gh` 未登录看不到运行结果）——
+  阈值与「打包形态能否在 runner 上启动」都待首跑标定，见 §九。
 - ★ ★ **新发现 FM-6（09-21）：门禁在流水线上，但 `continue-on-error: true` 摘掉了它的失败能力** ——
   `weekly-stress.yml`（`Run stress tests` 步骤）与 `weekly-audit.yml:21/27/55/64`。
   **而且查下去发现 `npm run test:stress` 当时连一个文件都没匹配到**（4 个 glob 全失配，
@@ -32,11 +38,15 @@
   **仓库用了 npm 从不支持的 `workspace:` 协议**（46 包 / 79 处），
   npm 的工作区解析是**按 name 匹配**而非协议。
   ⚠️ 上一轮曾归因于「`package-lock.json` 陈旧」——**那是错的**，已被最小复现推翻（见 §5.2）。
-  📋 **修复方案已验证但未应用**（用户 2026-09-21 决定暂缓）：`workspace:*`→`*` + 根 `.npmrc` 的
-  `legacy-peer-deps=true` + 重建 lock 1170 条目；`npm ci --dry-run` exit 0 —— **见 §5.2**。
-- 🔥 **应用修复后会暴露**：`audit` 将能跑，报 **31 漏洞（18 high/critical，含 2 critical）**——
-  当前仓库未应用修复，`audit` 仍因 lock 损坏 400 跑不了，故这 31 漏洞目前看不见。建议单列任务升级
-  vite/exceljs/sharp 等，**未擅自 `audit fix --force`**。
+  ✅ **修复方案已于 2026-09-22 应用**（用户批准「应用全套」）→ `fe3a130`，51 文件：
+  `workspace:*`→`*`（46 包 / 79 处）+ 删 `@akemi-mio/eventBus` 悬挂依赖 + **npm 11** 重建 lock
+  + CI 5 处显式装 npm 11 + 声明 `engines.npm >=11`。⚠️ **没有用 `.npmrc` 的 `legacy-peer-deps=true`** ——
+  缺陷二的正解是升级 npm（见 §5.2 的 09-22 更正），不需要任何 peer 语义让步。
+- 🔥 **`audit` 现在能跑了，而且是红的**（09-22 实测，安装链修好后的第一次）：
+  `npm audit --audit-level=high` → **exit 1，32 漏洞（14 moderate / 16 high / 2 critical）**。
+  2 个 critical：`protobufjs <=7.6.4`、`tar <=7.5.20`。
+  建议单列任务升级 vite / exceljs / sharp 等，**未擅自 `audit fix --force`**。
+  ⚠️ `audit` **故意仍未进 CI** —— 一进就让所有合并变红，那是既有的存量债，不该由门禁来背（见 §5.2 末）。
 - ★ **我自己有 2 处结论被推翻**：
   ① `format:check` 的「不建议动」是错的（见 §5.1 修正）；
   ② `npm ci` 的「lock 陈旧」归因是错的（见 §5.2 二次修正）。
@@ -525,51 +535,101 @@ npm ci --dry-run --legacy-peer-deps                   → exit 0, "added 1101 pa
 | 上一个 + 根部把 `canvas@^3.2.3` 加成 `optionalDependencies` | ❌ 仍 `edgesOut` 崩溃 |
 | 上一个 + **`--legacy-peer-deps`** | ✅ **exit 0** |
 
-**结论**：`--legacy-peer-deps` 是**目前唯一被实测证实可用**的路径 ——
-因为它**整体跳过 peer 解析**，那个通配符 peer 与递归下探根本不会发生。
-三个「精确」修法都失败，说明问题不在某一个 peer 的版本，
-而在**递归 peer-set 构建本身遇到无父节点时的空指针**（arborist 的健壮性缺口）。
+> ⚠️ **2026-09-22 更正：上面「唯一可用路径」的结论是错的。** 见下节。
+> 当时把「换 npm 11 也失败」记成了「npm 版本没用」，但那次**是在 `workspace:` 协议仍在的
+> 前提下测的** —— 协议不支持是缺陷一，任何 npm 版本都解不了，于是掩盖了 npm 11 对缺陷二的效果。
 
-### ⚠️ 修复方案已验证，暂缓应用（用户 2026-09-21 决定先不改）
+### ✅ 2026-09-22：缺陷二的正解是**升级 npm**，不是放宽 peer 语义
 
-修复方案已就绪（已实测验证，但**用户决定暂缓应用，未改动仓库**）。实际改动清单
-（与「改动清单」一致，第 3 点建议用 `.npmrc` 而非改 5 处 CI）：
+按「先构造能变绿的最小复现」把两个缺陷拆开重测：
 
-1. `workspace:*` → `*`：**46 个包 / 79 处**（JSON 感知替换，全 46 个文件解析合法，0 残留）。
-2. 删 `packages/audit` 的 `@akemi-mio/eventBus` 悬挂依赖（该成员不存在）。
-3. 仓库根 **`.npmrc`** 加 `legacy-peer-deps=true`（一处覆盖全部 5 处 `npm ci`，比改 CI 更干净）。
-4. 重建 `package-lock.json`（1053 → **1170** 条目）。
+**最小复现**（推翻了「与 `workspace:` 有关」的旧判断）：
 
-**验证（同隔离副本一致）**：
+| 场景 | 结果 |
+|---|---|
+| 单包、无 workspaces、**不涉及 `workspace:`**，只有 `vitest@^4.1.7` | ❌ 崩 `edgesOut` |
+| `jsdom` 单独 / `vite` 单独 | ✅ 装得上 |
+| `vitest 4.0.0` / `4.0.18` | ✅ 装得上 |
+| `vitest 4.1.0 / 4.1.4 / 4.1.7 / 4.1.11` | ❌ **全崩**（4.x 最新即 4.1.11） |
+
+→ **缺陷二与 `workspace:` 协议无关**，是 npm 10 在 vitest 4.1 的 peer 结构上触发的 arborist 空指针。
+
+**在真实依赖图上验证**（只拷 68 个 `package.json`，不需要源码）：
+
+| 组合 | 结果 |
+|---|---|
+| npm 10.9.7 + `workspace:*`→`*` | ❌ `edgesOut` 崩溃 |
+| npm 10.9.7 + 同样改动 + 删悬挂依赖 | ❌ **仍崩**（对照组：证明是 npm 版本的问题） |
+| **npm 11 + `workspace:*`→`*` + 删 `@akemi-mio/eventBus`** | ✅ **added 978 packages in 25s，exit 0** |
+
+生成的 lock（`npm@11 --package-lock-only`）质量与旧方案等价且更好：
 
 ```
-npm install --package-lock-only --legacy-peer-deps   → exit 0, "audited 1170 packages"
-npm ci --dry-run --legacy-peer-deps                  → exit 0
-生成 lock: 1170 条目 / workspaces=["packages/*"] / @akemi-mio/* 67 / link:true 68
+lockfileVersion 3 / 1195 条目 / link:true 68 / packages/* 73 / node_modules/@akemi-mio/* 67
+（--legacy-peer-deps 方案：1170 / 68 / 73 / 67）
 ```
 
-→ **应用后 CI 全部 5 处 `npm ci` 即可通**（`.npmrc` 自动生效）。当前仓库未应用，安装链仍「无法运行」。
+**意义**：用户 09-21 暂缓应用修复的理由是「唯一手段是 `--legacy-peer-deps` 这种全局放宽
+peer 语义的钝器」。**这个前提现在不成立了** —— 缺陷二可以靠升级 npm 解决，
+不需要任何 peer 语义上的让步。
 
-### 🔥 应用修复后会暴露的问题：`audit` 将能跑，报 **31 漏洞（18 high / critical）**
+**最终清单（✅ 2026-09-22 全部应用，提交 `fe3a130`，51 文件）**：
 
-安装链修好后 `npm audit` 因 lock 正常即可运行；当前仓库未应用修复，`audit` 仍因 lock 损坏 400 跑不了，
-若在已修复的副本上以 CI 口径（`npm audit --audit-level=high`）实测：
+1. ✅ 46 个 package.json 的 79 处 `workspace:*` → `*`（缺陷一，无替代）
+2. ✅ 删 `packages/audit` 的 `@akemi-mio/eventBus` 悬挂依赖
+3. ✅ 用 **npm 11** 重建 lock（`npx --yes npm@11 install --package-lock-only`）
+4. ✅ CI 增加 5 步显式装 npm 11（node 20/22 自带的是 npm 10，**不会**自带 11）
+5. ✅ `package.json` 声明 `engines.npm >= 11`
+
+⚠️ **第 3 点没用 `.npmrc`**：`legacy-peer-deps=true` 那版方案已被 09-22 的更正推翻（见上节），
+改用「5 处 CI 显式装 npm 11」。仓库里**没有** `.npmrc`。
+
+### ✅ 修复已应用（2026-09-22，`fe3a130`）
+
+改动清单与上面的最终清单一致。**实际生成的 lock 与本文档早先记录的方案版本不同**：
+
+| 指标 | `--legacy-peer-deps` 方案（未采用） | **npm 11 方案（已应用）** |
+|---|---|---|
+| 条目 | 1170 | **1194** |
+| `packages[""].workspaces` | `["packages/*"]` | `["packages/*"]` |
+| `link: true` | 68 | 68 |
+| `packages/*` | 73 | 73 |
+| `node_modules/@akemi-mio/*` | 67 | 67 |
+
+> 复核命令（注意 `workspaces` 在 `packages[""]` 里，**不在** lock 顶层 —— 顶层取 `l.workspaces` 得 `null`）：
+> `node -e "const l=require('./package-lock.json');console.log(l.lockfileVersion,Object.keys(l.packages).length,JSON.stringify(l.packages[''].workspaces))"`
+
+**最小复现（缺陷二）**：单包 `vitest@^4.1.7`（无 workspaces、不涉及 `workspace:`）即崩
+`Cannot read properties of null (reading 'edgesOut')`；`jsdom` / `vite` 单独 OK；
+`vitest@4.0.0` / `4.0.18` OK，`4.1.0`→`4.1.11` 全崩。**触发者是 vitest@4.1.x，不是本仓的协议问题。**
+
+→ CI 全部 5 处 `npm ci` 现已可通。判据：`grep -rl '"workspace:' --include=package.json packages/ | wc -l` 应为 **0**。
+
+### 🔥 `audit` 现在能跑，且是红的（09-22 实测）
+
+安装链修好后 `npm audit` 因 lock 正常即可运行。**09-22 在本仓库实测**：
 
 ```
 npm audit --audit-level=high   → exit 1
-31 vulnerabilities (13 moderate, 16 high, 2 critical)
+32 vulnerabilities (14 moderate, 16 high, 2 critical)
 ```
 
-含 2 个 **critical**（如 `vite <=6.4.2` 的 GHSA-v6wh-96g9-6wx3 / GHSA-fx2h-pf6j-xcff；
-`exceljs` 经 `uuid` 传递）。**这是安装链修好后才看得见的新问题，与安装链修复本身无关。**
+2 个 **critical**：`protobufjs <=7.6.4`、`tar <=7.5.20`。
+（09-20 在隔离副本上测得 31 个 / 13 moderate；现 32 个 / 14 moderate —— 差异来自上游 advisory 更新，
+不是本次改动引入。）**这是安装链修好后才看得见的新问题，与安装链修复本身无关。**
 
 ⚠️ **未处理**：`npm audit fix --force` 会大改版本、有破坏风险，未擅自执行。
 建议作为**独立任务**排期（升级 vite 到 6.4.3+、exceljs、sharp 等），不在本次安装链修复内。
-`audit` 门禁本身**仍不在 CI**（FM-5），所以目前不阻塞合并——但 2 个 critical 不应长期搁置。
+
+**为什么 `audit` 仍然没进 CI（这是刻意的，不是漏了）**：它现在能跑了，但**一进就让每次合并变红**
+（32 个漏洞全是**存量债**，不是本次改动引入）。把存量债挂在合并门上，结果一定是有人加
+`continue-on-error` —— 那就又造出一个 FM-6。正确顺序是**先还债（升依赖）再上门禁**，
+或者在还债期间把它放在**不阻塞合并**的周期性 workflow 里做趋势跟踪。这一步需要人定阈值/范围，
+所以留作决策项，未擅自加。
 
 ---
 
-## 六、⚠️ 无法运行的门禁（前置条件缺失）
+## 六、⚠️ 无法运行的门禁（前置条件缺失）→ ✅ 09-22 已闭环
 
 | 门禁 | 失败症状 | 退出码 | 缺什么 |
 |---|---|---|---|
@@ -577,13 +637,47 @@ npm audit --audit-level=high   → exit 1
 | `check:idle-gpu` | `[idle-gpu] 找不到打包后的 AkemiMio.exe` | **2** | 打包 exe |
 
 **两者的失败都是诚实的**（都在 `dist-electron`/exe 缺失时明确报错并给出非 0 退出码），
-不是 FM-2 意义上的假绿。它们的 `⚠️ unverified` 是因为**本次无法执行变异检验**。
+不是 FM-2 意义上的假绿。
 
 > 修法：`npm run build && npx electron-builder --win --dir` 生成产物后可补测。
 > 本机 `electron-vite build` 受 `emptyOutDir` 撞 safe-delete 限制（见记忆 §五），需按既有配方处理。
+> ✅ **09-22：这道修法已经写进 CI 了** —— 见 §九。所以本机无法预演这件事不再是障碍：
+> 门禁在 runner 上跑，而不是在我这台跑不起来的机器上跑。
 
 **另注**：`check:idle-gpu` 有一处设计值得留意 —— 它用 `process.exit(2)` 表达「缺前置条件」，
 与「检测到回归」区分开（后者 `exit(1)`）。这是好实践，建议其它门禁沿用。
+
+### ★ 但顺着这条线查出一个真缺陷：那份「2 = 运行失败」的契约当时是**假的**
+
+原文只看到脚本**声明**了 `退出码 0=通过 / 1=超预算 / 2=运行失败（起不来/连不上）`，
+没验证它在「起不来」这条路径上是否真的返回 2。09-22 实测（这是 `packaging` job 接线时顺手做的）：
+
+```
+node scripts/check-idle-gpu.cjs --exe=<空文件冒充的 exe>
+→ Error: spawn EFTYPE           ← 未捕获异常 + 栈回溯
+→ exit 1                        ← 不是契约承诺的 2
+```
+
+**根因**：`spawn` 在 exe 不可执行时是**同步抛出**的，而调用点（`check-idle-gpu.cjs:98`）在
+`try/catch` 之外，也不在 `main()` 的 `try` 里（它在顶层，早于那个 `setTimeout` 包装）。
+
+**影响（为什么这不是小事）**：CI 红会被**误读成「GPU 超预算」**（1），实际是「应用根本没起来」。
+这正是本次评估一直在打的那个靶子 —— 门禁的输出语义与它的实际行为不一致，
+而且**只有真跑一次才看得见**。它属于 FM-2 家族（「存在」≠「可用」）。
+
+**修法**（两条路径都得堵，实测两条都真实可达）：
+
+| 触发条件 | 失败路径 | 修法 |
+|---|---|---|
+| 空 `.exe` 文件 | **同步抛** `EFTYPE` | `try { spawn } catch → exit(2)` |
+| 目录冒充 exe / 路径不存在 | **异步 `'error'` 事件** `ENOENT` | `child.on('error', → exit(2))` |
+
+> 探针实测（`spawn` 空监听 → `Unhandled 'error' event` → **exit 1**）证明异步那条**不是死代码**：
+> 不挂监听，`ENOENT` 同样退化成 1。两条路径都各自做了「改坏 → 变红」的对照。
+
+修复后实测三种失败输入全部干净返回 **2** 并打印 `[idle-gpu] 起不来：<code>`，无栈回溯。
+**教训**：门禁自己声明的退出码契约，和门禁守的业务逻辑一样需要被验证 ——
+否则「区分 2 与 1」这个好实践只是注释里的一句好话。
 
 ---
 
@@ -610,9 +704,9 @@ npm audit --audit-level=high   → exit 1
 | **`typecheck:budget`** | `node scripts/typecheck-budget.mjs --budget 0` | ✅ **是（09-21 顶替原 typecheck 步骤）** |
 | **`test:unit:fast`** | ~~`vitest run --config vitest.config.unit-fast.ts`~~ | 🗑 **09-21 已删除** |
 | **`test:stress`** | 12 个 `*.stress/benchmark/endurance/baseline` 文件 | ⚠️ **CI 否，但 weekly-stress.yml:18 会跑**（见下方更正） |
-| **`audit`** | `npm audit --audit-level=high` | ❌ **否**（`weekly-audit.yml` 里 `npm audit` 出现 **0 次**） |
-| **`check:renderer-entries`** | `node scripts/check-renderer-entries.cjs` | ❌ **否** |
-| **`check:idle-gpu`** | `node scripts/check-idle-gpu.cjs` | ❌ **否** |
+| **`audit`** | `npm audit --audit-level=high` | ❌ **否 —— 且刻意不加**（09-22 它已能跑，但 32 个漏洞是存量债，见 §5.2 末） |
+| **`check:renderer-entries`** | `node scripts/check-renderer-entries.cjs` | ✅ **是（09-22 起，`packaging` job）** —— 见 §九 |
+| **`check:idle-gpu`** | `node scripts/check-idle-gpu.cjs` | ✅ **是（09-22 起，`packaging` job）** —— 见 §九 |
 
 > ⚠️ **本表原结论有一处错误，2026-09-21 更正**：原写「**6 道**门禁…不在**任何**流水线上」，
 > 但当时只逐条比对了 `ci.yml` 的 17 个 `run:` 步骤，**没有看 `.github/workflows/` 下的另外两个文件**。
@@ -821,7 +915,78 @@ CI 没有任何途径执行它。若要闭合这个循环，需推一个含变�
    先确认自己用的测量工具是对的。** 这 5 次里有 4 次是仪器错，不是被测对象错。
 
    **区分两类错**（口径不要混）：
-   - **测量误差 5 次**（上面列的那些）——仪器读错，被测对象其实没问题。
-   - **结论被推翻 2 次**——仪器是对的，但我**从正确读数推出了错误结论**，
-     且这两次都已写进正文修正（§5.1 `format:check` 的「不建议动」、§5.2 的「lock 陈旧」）。
-     共同特征是：**跳过了一次低成本的验证**（看改动预览 / 做最小复现）。
+   - **测量误差 6 次**（上面列的那些 + 09-22 新增 1 次）——仪器读错，被测对象其实没问题。
+     09-22 新增：**Node 里的 `/tmp` ≠ Git Bash 里的 `/tmp`** —— Node 把它解析成 `D:\tmp`，
+     写探针脚本时 `MODULE_NOT_FOUND`，一度像「脚本挂了」。同族于 `cmd | tail` 那次：
+     **同一个路径/退出码在两层工具里有两种含义。**
+   - **结论被推翻 4 次**——仪器是对的，但我**从正确读数推出了错误结论**，
+     且四次都已写进正文修正：
+     ① §5.1 `format:check` 的「不建议动」；② §5.2 的「lock 陈旧」；
+     ③ §七的「6 道门禁不在任何流水线上」（只查了 `ci.yml`，漏看另两个 workflow → 实为 5 道）；
+     ④ §5.2 的「npm 11 同样失败」（在 `workspace:` 协议仍在时测的 → 掩盖了 npm 11 对缺陷二的效果）。
+     共同特征是：**跳过了一次低成本的验证**（看改动预览 / 做最小复现 / 枚举全部 workflow / 换掉混杂变量）。
+
+---
+
+## 九、★ 09-22 收尾：把两道「需要打包产物」的门禁接进 CI
+
+### 背景
+
+§七 里 `check:renderer-entries` 与 `check:idle-gpu` 之所以没人调用，唯一原因是
+**CI 里没有任何 job 跑 electron-builder**，所以拿不到它们要的 `win-unpacked/AkemiMio.exe`。
+（`check:renderer-entries.cjs:52` 在**模块顶层**调 `findExe()`，`dist-electron/` 不存在就直接抛，
+**永远走不到形态检查段** —— 它进不了只跑 `npm ci` 的 quality job。）
+
+### 新增的 `packaging` job（`.github/workflows/ci.yml`）
+
+```yaml
+  packaging:
+    runs-on: windows-latest
+    needs: quality
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4   # node 20
+      - run: npm i -g npm@11
+      - run: npm ci
+      - run: npm run build                        # electron-vite build
+      - run: npx electron-builder --win --dir      # 产出 dist-electron/win-unpacked
+      - run: npm run check:renderer-entries
+      - run: npm run check:idle-gpu -- --warmup=30 --samples=2 --interval=6
+      - uses: actions/upload-artifact@v4           # if: failure() 才传，便于事后取证
+```
+
+### 三个设计决策（都是刻意的）
+
+| 决策 | 理由 |
+|---|---|
+| `--dir` 而**不是**配置里的 `nsis` | 两道门禁找的都是 `dist-electron/win-unpacked/AkemiMio.exe`；`--dir` 正好产出它，还省掉 NSIS 步骤与 winCodeSign 下载。**不为回答这个问题多花几分钟。** |
+| `needs: quality` | quality 已经红的时候不该再花 5–10 分钟打包。 |
+| 阈值用默认值、但**注释写明未标定** | 见下面的诚实清单。宁可让首跑给出真实读数，也不先编一个「一定过」的数字 —— 那正是 FM-4（断言是重言式）。 |
+
+### ⚠️ 这个 job **尚未在 CI 实跑过** —— 诚实清单
+
+| 未验证项 | 为什么 | 首跑后该看什么 |
+|---|---|---|
+| job 本身能否绿 | 本机 `electron-vite build` 跑不起来（`emptyOutDir` 撞 safe-delete + GPU fatal，见记忆 §五）；`gh` **未登录**，看不到 Actions 结果 | 先看 `Build` / `Package` 两步是否成功 |
+| 打包形态能否在 runner 上**启动** | 记忆里有过打包特有缺陷：提前调 `credentialsManager.get()` → 拒启动；缺 `CONSTITUTION.md` | 若 `check:renderer-entries` 报「没有 page 目标」= 应用没起来，**不是**渲染回归 |
+| `--gpu-budget=20` 是否适用于 runner | 该值来自有真 GPU 的开发机；runner 是软件光栅 | 看 `基线 GPU` 的实测值再**重新标定**，不要直接放宽 |
+| 打包耗时是否可接受 | 未测 | 看 job 时长；若过长，考虑改成只在 push 到 master 时跑 |
+
+**A/B 差值（`--delta-budget=15`）比绝对 GPU 更可跨机器**：它比的是**同一台机器、同一次运行内**
+「动画开」与「动画关」的差，直接对准「有常驻无限动画在烧 GPU」这一类回归，
+不吃机器绝对性能。所以绝对预算若首跑偏红，**优先信 A/B 那条**。
+
+### 判据：怎么确认它不是在重复 FM-1 / FM-6
+
+1. **它出现在 job 列表里**，且没有 `continue-on-error`（`grep -n "continue-on-error" .github/workflows/ci.yml` 应为空）。
+2. **它真的选中了文件/exe**：`check:renderer-entries` 会打印「主窗口 index.html / 形态 pet / chat / wallpaper / agent.html」逐项 ✓；
+   若只打印「打包目录不存在」就是**没跑起来**（§七 的老问题换了个位置复发）。
+3. **能变红**：`npm run check:renderer-entries` 在 exe 缺失时 exit 1；`check:idle-gpu` 在「起不来」时 exit 2
+   （09-22 刚把这个 2 修回来，见 §六）。**两个非 0 语义不同，别混着读。**
+
+### 成本
+
+多一个 job：`npm ci` + `electron-vite build` + `electron-builder --dir` + 两次启动 exe 的冒烟/测量。
+比现有任一 job 都重。**如果这个代价不可接受，正确的退路是把它移到周期性 workflow
+（像 `weekly-stress.yml` 那样），而不是加 `continue-on-error`** —— 后者会造出新的 FM-6。
