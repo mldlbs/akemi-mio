@@ -1798,3 +1798,80 @@ run #41（`ae4cbd3`）的 `main-tests` 注解正是这 4 条、行号 `91/520/55
 `https://skills.crlkcloud.cyou/telegram`。修它会让 20 条用例的 `baseUrl` 一起变，
 属「影响面超出『让门禁承重』」，故未动 —— 但这行**应该**要么补上 mock，要么删掉。
 
+### 10.15 ★★ 整个 weekly 门禁面是**坏的**：`weekly-audit.yml` 语法非法（0 job），`weekly-stress.yml` 两次全红
+
+> 这一节是查「`weekly-audit` 为什么每次 push 都红」时顺出来的。
+> ⚠️ 起因是一个**我差点信了的解释**：`weekly-audit.yml` 里有 4 处
+> `continue-on-error: true`（第 22/28/56/65 行），看起来正是 FM-6。
+> 但先查证据时发现：**这个 job 连一步都没跑过** —— 那 4 处 `continue-on-error`
+> 是**无关的**，真正的失效在更前面一层。
+
+#### 事实 1：`weekly-audit.yml` 从未启动过任何 job
+
+* 该 workflow 每次 push 产生一个 run，`event=push`，`conclusion=failure`；
+  查它的 job 列表 → **`total_count: 0`**（没有 job）。
+* run 的 `name` 字段显示为 **`.github/workflows/weekly-audit.yml`（文件路径）**，
+  而不是文件第 1 行写的 `Weekly Codebase Audit`。
+* 两者都与「GitHub 读不出这个文件」一致：读不到 `name:` → 退回显示路径；
+  建不出 job → 0 job。
+  （⚠️ 「为什么 `event` 是 `push`」我**没有**进一步验证机制；对本节结论无影响。）
+
+#### 事实 2：根因是 YAML 语法错误 —— `Create report` 步骤的 here-string 顶到了第 0 列
+
+`weekly-audit.yml` 第 67-80 行：
+
+```yaml
+      - name: Create report
+        run: |
+@"
+## Weekly Audit Report — $(Get-Date -Format 'yyyy-MM-dd')
+…
+"@ | Set-Content -Path audit-report.md
+```
+
+`run: |` 是 YAML **块标量**，其内容必须比 `run:` **缩进更深**。
+而 `@"` 与 `"@ | Set-Content …` 都在**第 0 列** → 块标量在那里就**结束**了，
+后面的内容被当成**根级** YAML 节点 → 结构崩掉。
+
+用仓库里现成的 `js-yaml` 直接验：
+
+```
+ci.yml               OK   name="CI"
+weekly-audit.yml     FAIL end of the stream or a document separator is expected (69:1)
+weekly-stress.yml    OK   name="Weekly Stress Test"
+```
+
+`69:1` 就是 `@"` 那一行、第 1 列。**只有这一个文件坏**（对照组两个都 OK）。
+
+> ⚠️ **方法论**：判「某个 workflow 是不是死了」不能只看 `conclusion`。
+> **`conclusion=failure` + `jobs=0` 是完全不同的一类失败**（文件根本没被解析），
+> 和「跑起来了、某一步红了」不是一回事。以后先看 job 数。
+> 这一条也解释了 10.3 里那个反常现象：`name` 显示成路径。
+
+#### 事实 3：`weekly-stress.yml` 解析正常，但**两次调度全红**
+
+* `on: schedule` + `workflow_dispatch`，**没有** `continue-on-error`
+  （文件里有注释明确写「a stress regression has to make this run red」）——
+  也就是说这道门禁的**意图**是对的。
+* 运行历史：**`total_count: 2`，两次都 `failure`**
+  （2026-09-13、2026-09-20，均 `schedule`）。
+* ⚠️ 先排除了「夹具没选中文件」这个 FM-6 变体：
+  `test:stress` = `vitest run .stress.test .benchmark.test endurance.test baseline.test`，
+  而这 4 个过滤词在主树里**都有真文件**
+  （`tests/main/agent/__tests__/AgentState.stress.test.ts` 等 8 个 `*.stress.test.ts`、
+  `db-benchmark.test.ts`、`startup-benchmark.test.ts`、`endurance.test.ts`、
+  `resource-baseline.test.ts`）→ **不是「0 文件」**。
+* 所以它红是**别的原因**，待查（下一步：本机跑 `npm run test:stress` 看真实输出）。
+  ⚠️ 另注：两个 weekly workflow 都是 `node-version: 20`，而 `ci.yml` 已统一到 22。
+
+#### 结论
+
+**「我们每周跑代码审计和压力测试」目前是假的**：一个从未启动（49 次失败 run，0 job），
+一个两次全红。CI 的 push 面已经接近全绿，**weekly 面则完全没有保障** ——
+而且它一直在产出红色 run，正是「常响的警告 = 永久盲区」的教科书形态。
+
+⚠️ 本节只做诊断，**未改**：修 YAML 会让它真的开始跑，而它一旦跑起来就会
+`npm install -D ts-prune`（改 `package.json`）、并在 `Create Issue` 步骤
+依赖 `audit`/`automated` 两个 label —— 这已经不是「让门禁承重」而是
+「要不要这道门禁、要成什么样」，需要拍板。
+
