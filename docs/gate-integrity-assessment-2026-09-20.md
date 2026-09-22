@@ -1937,3 +1937,93 @@ js-yaml：ci.yml OK / weekly-audit.yml OK / weekly-stress.yml OK      （此前 
 * `check:idle-gpu` 的 GPU 阈值仍未在 CI 上标定。
 * `audit` 门禁仍未进 CI（要先还 32 个漏洞的债）。
 
+### 10.17 `check:idle-gpu`：**判据自己没法被标定**（`2533092`）
+
+#### 缺陷：注释里的操作指令，按它做不到
+
+`ci.yml` 的 `Idle GPU budget` 步骤上写着：
+
+> THRESHOLDS ARE UNCALIBRATED ON CI. `--gpu-budget` / `--delta-budget` default to 20 / 15,
+> derived on a dev machine with a real GPU; GitHub runners are software-rasterised, so the
+> absolute number is not comparable yet. **If the absolute budget goes red on the first runs,
+> recalibrate it from the measured numbers** -- do NOT silence the step.
+
+问题在于：**「the measured numbers」读不到**。公开仓的 job 日志要管理员权限（403），
+只有 check-run annotation 无认证可读 —— 而这道门禁只往 stdout 打数字。
+于是「从实测数字重标定」这条指令**从写下的那天起就无法执行**。
+这是「门禁的判据自己没法被标定」那一类缺陷，和 §10.11 的「失败原因读不到」是同一个根。
+
+#### 修法：让数字离开日志
+
+* **每次运行**都发一条 `::notice::`（通过也发、失败也发），带上
+  基线 GPU / 关动画 GPU / A-B 差值 / 基线总 CPU / 基线运行中动画数
+  → 下次 CI 跑完就能直接从注解标定阈值，不需要任何权限。
+* **失败时**额外发 `::error::`，红的那次能直接说清「谁超了哪个预算」。
+* ⚠️ workflow-command 格式里 `%` 必须转义（`20%` → `20%25`，GitHub 会还原）。
+  **顺序要紧**：先转义 `%`，再处理 `\r\n` —— 反过来会把刚插入的 `%0D` 二次转义成 `%250D`。
+* 门禁语义**未变**：只加输出，不动判据（仍是 20 / 15）。
+
+#### 顺带发现 1：量的是哪个窗口，看不见
+
+本地实跑（`GITHUB_ACTIONS=true`）的结果是：
+
+```
+[基线] GPU 0.0%  总 CPU 0.0%  运行中动画 0/0
+```
+
+`0/0` 不是「0 个在跑」，而是**这个页面上一个动画都没有**。
+它既可能是「真的空闲」（`80c530e` 修好后的期望状态），也可能是
+**「量到了一个空窗口」**——后者会让这道门禁**永远绿**。
+
+而选窗口这件事是隐式的：
+
+```js
+const page = list.filter(t => t.type === 'page').find(t => t.url.includes('index.html'))
+          || list.filter(t => t.type === 'page')[0]
+```
+
+多窗口形态（pet / chat / wallpaper / agent）下，这个 fallback 会静默选到第一个页面目标。
+所以加了输出：**页面 title + 文件名 + 页面目标总数**，并把它写进 `::notice::`。
+「量到了什么」必须和「量出来多少」一起可见。
+
+#### 顺带发现 2：A/B 这次可能没有信息量
+
+`ci.yml` 的注释说 A/B 差值才是「load-bearing assertion」。但 A/B 只在
+**基线本来就有动画可关**时才带信息量 —— 基线 0 个运行中动画时，差值为 0 是**必然**的，
+这时那次绿其实**只由绝对预算那条承担**。所以基线无动画时额外发一条 notice 说明，
+免得把一次没有信息量的通过读成「A/B 这条承重断言也验过了」。
+
+#### 顺带发现 3：这道门禁会留下 MCP 孤儿，并且会毒死下一次运行
+
+`shutdown()` 原来只 `process.kill(child.pid)` —— 杀主进程，不杀进程树。
+Electron 会再拉一个 MCP 子进程（`node.exe`，监听 **1841**），它活下来。
+
+实测的连锁反应：
+
+| 运行 | 前置状态 | 结果 |
+|---|---|---|
+| 1 | 干净 | **EXIT=0**，正常出数 |
+| 2 | 1841 上有孤儿 | `EXIT=2`，`Received network error or non-101 status code` |
+| 3 | 1841 上又有孤儿 | `EXIT=2`，`Cannot read properties of null (reading 'filter')`（`/json/list` 一直不响应） |
+| 4 | 手工清掉孤儿后 | 仍 `EXIT=2`（non-101），且又留了一个孤儿 |
+
+改成 `taskkill /PID <pid> /T /F`（Windows）后，**主进程还活着时**整棵树会被收掉。
+⚠️ **局限（实测）**：主进程若已自己退出（`non-101` 那次就是），孙子进程会被 reparent
+而逃掉，失败路径上仍可能留孤儿 —— 所以注释里写明了要人工
+`netstat -ano | grep :1841` 清一下。
+
+⚠️ **不能**把「自动杀掉 1841 的占用者」写进门禁：**开发实例（`electron .`）的 MCP 服务
+同样监听 1841**，自动清会误杀用户正在跑的应用。本机当时就有 5 个 09-19 起的
+electron 进程（`--user-data-dir=%APPDATA%\akemi-mio`）在跑 —— 而且它们与打包 exe
+**共用同一个 userData 目录**，这也是本地反复实跑不稳定的背景之一。
+
+#### 验证状态（诚实记录）
+
+* ✅ `GITHUB_ACTIONS=true` 本地实跑一次 → `EXIT=0`，`::notice::` 如期出现、
+  `%` 转义正确（原文 `0.0%25`，GitHub 还原为 `0.0%`）。
+* ⚠️ **未观察到**：页面标签那两行、以及树杀后「不留孤儿」。本地后续三次复跑都被
+  上述环境污染挡住（共用 userData + 1841 孤儿），只做了 `node --check` 与代码路径审阅。
+* ⚠️ 顺带一条通用教训：**「实跑一次就绿」之后紧接着的三次复跑都红** ——
+  这种时候先怀疑**自己上一次留下的状态**（这里是 1841 孤儿 + 共用的 userData），
+  而不是先怀疑刚改的代码。改动本身在 WebSocket 之前/之后都不参与那条失败路径。
+
