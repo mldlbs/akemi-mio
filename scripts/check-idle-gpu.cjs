@@ -341,7 +341,7 @@ async function main() {
   }
 
   // 每次采样都取两个快照做差；只统计两次都存在的进程，避免新进程拉低分母
-  async function phase(tag) {
+  async function phase(tag, evaluate = ev) {
     const gpus = []
     const totals = []
     let last = null
@@ -372,7 +372,7 @@ async function main() {
     // 而下面的 notice 正是要断言这句话。
     let anims = null
     try {
-      const raw = await ev(ANIM_EXPR)
+      const raw = await evaluate(ANIM_EXPR)
       const parsed = raw == null ? null : JSON.parse(raw)
       if (Array.isArray(parsed)) anims = parsed
     } catch {}
@@ -548,6 +548,115 @@ async function main() {
       )
     }
   }
+
+  // ── 扩大覆盖：pet / chat / wallpaper 形态窗口 ──────────────────────────
+  // 主窗口只量 index.html，三个形态窗口的空闲动画完全没被守（FM-1 的反面：
+  // 「只量了主窗口」会让形态窗口里的回归从眼皮下溜过去）。复用主窗口同一套测量：
+  // 在每个形态窗口上查空闲动画数 + 跑自检。拉不起来必须明确报「未覆盖」，不能静默通过。
+  const FORMS = ['pet', 'chat', 'wallpaper']
+  const checkForms = async () => {
+    for (const kind of FORMS) {
+      // 拉起：在主窗口上调 akemiForms.toggleForm(kind)。Lazy 创建，可能要等 target 出现。
+      await ev(
+        `(window.akemiForms && window.akemiForms.toggleForm(${JSON.stringify(kind)}))`,
+      )
+      let target = null
+      for (let i = 0; i < 30; i++) {
+        const l = await getList()
+        target = (l || [])
+          .filter((t) => t.type === 'page')
+          .find(
+            (t) =>
+              String(t.url).endsWith(`/${kind}.html`) ||
+              String(t.url).endsWith(`${kind}.html`),
+          )
+        if (target) break
+        await sleep(500)
+      }
+      if (!target) {
+        // FM-1 的反面：拉不起来不能静默通过，必须明确说「这个窗口没被量到」。
+        notice(
+          `[idle-gpu] ⚠️ 形态窗口 ${kind} 未覆盖：toggleForm 后没有对应调试 target，` +
+            '本次没量到它的空闲 GPU',
+        )
+        continue
+      }
+      const fws = new WebSocket(target.webSocketDebuggerUrl)
+      await new Promise((res, rej) => {
+        fws.addEventListener('open', res)
+        fws.addEventListener('error', rej)
+      })
+      const fev = async (expr, waitMs = 2500) => {
+        const id = Math.floor(Math.random() * 1e6)
+        let out = null
+        const h = (m) => {
+          const j = JSON.parse(m.data)
+          if (j.id === id) out = j
+        }
+        fws.addEventListener('message', h)
+        fws.send(
+          JSON.stringify({
+            id,
+            method: 'Runtime.evaluate',
+            params: { expression: expr, returnByValue: true },
+          }),
+        )
+        await sleep(waitMs)
+        fws.removeEventListener('message', h)
+        return out?.result?.result?.value
+      }
+      // 空闲动画数：形态窗口在空闲时若有 running 动画 = 正是要抓的回归。
+      const base = await phase(`${kind}-基线`, fev)
+      await ev(
+        `(window.akemiForms && window.akemiForms.toggleForm(${JSON.stringify(kind)}))`,
+      ) // 收起，避免污染下一个窗口的测量
+      if (base.animProbeOk && base.running.length > 0) {
+        fails.push(
+          `形态窗口 ${kind} 空闲时有 ${base.running.length} 个常驻动画在运行（应只有按需出现）：` +
+            base.running.map((a) => a.name).join(', '),
+        )
+      }
+      // 自检：在形态窗口上注入重负载动画，看这条测量链在该窗口上能不能动。
+      // ⚠️ **先只报数，不判红**——和主窗口 v1 同一节奏。原因：headless 多标签下
+      // 后台窗口不合成动画、GPU 不响应，自检差值会是 0（本机实测 pet/chat 0.0、
+      // 主窗口单标签 44.5 → 多标签掉到 0.1）。在真实 Electron 窗口上这个假象不存在，
+      // 但「在 CI 上标定前」先判红 = 把夹具假象变成 FM-8。等 CI 上收几轮数据再升级。
+      await fev(SELFCHECK_ON)
+      await sleep(2500)
+      const sc = await phase(`${kind}-自检`, fev)
+      const scLeft = await fev(SELFCHECK_OFF)
+      await sleep(1500)
+      const scDelta = sc.gpu - base.gpu
+      console.log(
+        `\n  [${kind}] 自检 GPU ${sc.gpu.toFixed(1)}%  差值 ${scDelta.toFixed(1)} 个点` +
+          `（下限 ${SELFCHECK_MIN}）  残留 ${scLeft}`,
+      )
+      notice(
+        `[idle-gpu] 形态窗口 ${kind}：自检 GPU ${sc.gpu.toFixed(1)}%（差值 ${scDelta.toFixed(1)}` +
+          ` 个点，下限 ${SELFCHECK_MIN}） / 自检动画 ${sc.running.length}/${sc.animCount}` +
+          ` / 空闲动画 ${base.running.length}/${base.animCount} / 残留 ${scLeft}`,
+      )
+      if (sc.running.length === 0) {
+        // 只报数（不判红）：注入没生效只是说明这条链在该窗口上没被证明能动，
+        // 在后台窗口上这是常态，判红会误红。
+        notice(
+          `[idle-gpu] ⚠️ 形态窗口 ${kind} 自检：注入的合成动画没有在运行（该窗口的测量链尚未被证明能动）`,
+        )
+      } else if (scDelta === null || scDelta < SELFCHECK_MIN) {
+        notice(
+          `[idle-gpu] ⚠️ 形态窗口 ${kind} 自检差值仅 ${
+            scDelta === null ? '(无参照)' : scDelta.toFixed(1)
+          } 个点（< 下限 ${SELFCHECK_MIN}）：该窗口上的两条判据可能都不会触发，本次绿可能是空绿`,
+        )
+      }
+      if (scLeft !== SELFCHECK_CLEAN) {
+        notice(
+          `[idle-gpu] ⚠️ 形态窗口 ${kind} 自检清理不干净（残留 ${scLeft}，期望 ${SELFCHECK_CLEAN}）`,
+        )
+      }
+    }
+  }
+  await checkForms()
 
   if (fails.length) {
     console.log('')
