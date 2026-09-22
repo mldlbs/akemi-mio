@@ -32,8 +32,9 @@
 
 import { spawnSync } from 'node:child_process'
 
-const MAX_ANNOTATIONS = 40
+const MAX_ANNOTATIONS = 50
 const TAIL_LINES = 30
+const MAX_DIAGNOSTIC_LINES_PER_FAILURE = 20
 
 function annotate(text) {
   // `%` must be escaped in the workflow-command format, otherwise a line
@@ -43,6 +44,29 @@ function annotate(text) {
 
 function emit(line) {
   process.stdout.write(`::error::${annotate(line)}\n`)
+}
+
+// `node --test` writes each failing test's diagnostic block immediately *after*
+// its `not ok` line, and the block is indented YAML (duration, location, error,
+// expected, actual, code). Grabbing the global tail instead is what made the
+// first real CI failure unreadable: the run had 386 tests and the failing one
+// was #357, so the tail was entirely #385's output and the annotation said only
+// "not ok 357 - digest respects topic filter" with no reason. The reason
+// (`expected 1, actual 0`) lives in the block, not in the tail.
+function tapFailureBlocks(lines) {
+  const blocks = []
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^not ok /.test(lines[i])) continue
+    const block = [lines[i]]
+    let j = i + 1
+    while (j < lines.length && /^\s/.test(lines[j])) {
+      block.push(lines[j])
+      j++
+    }
+    blocks.push(block)
+    i = j - 1
+  }
+  return blocks
 }
 
 function emitFailure(text) {
@@ -59,15 +83,24 @@ function emitFailure(text) {
   for (const line of lines) {
     if (/^# (tests|pass|fail|cancelled|skipped)\b/.test(line)) push(line)
   }
-  // Every failing test name, so you can jump straight to it.
-  for (const line of lines) {
-    if (/^not ok /.test(line)) push(line)
+
+  // The diagnostic block of every failure: this is where the assertion message,
+  // the expected/actual values and the stack live.
+  const blocks = tapFailureBlocks(lines)
+  for (const block of blocks) {
+    for (const line of block.slice(0, MAX_DIAGNOSTIC_LINES_PER_FAILURE)) push(line)
+    if (block.length > MAX_DIAGNOSTIC_LINES_PER_FAILURE) {
+      push(`... ${block.length - MAX_DIAGNOSTIC_LINES_PER_FAILURE} more diagnostic line(s) for this failure`)
+    }
   }
-  // TAP diagnostics are multi-line YAML, so the stack and the expected/actual
-  // values only exist in the tail. This is also what catches a crash that never
-  // produced TAP at all (a stack trace, an npm error).
-  push('----- last lines of output -----')
-  for (const line of lines.slice(-TAIL_LINES)) push(line)
+
+  // The tail is the fallback for a command that never produced TAP at all: a
+  // crash, an npm error, or one of the plain node check scripts. When TAP
+  // blocks exist they are strictly more informative, so the budget goes to them.
+  if (blocks.length === 0) {
+    push('----- last lines of output -----')
+    for (const line of lines.slice(-TAIL_LINES)) push(line)
+  }
 
   for (const line of picked.slice(0, MAX_ANNOTATIONS)) emit(line)
   if (picked.length > MAX_ANNOTATIONS) {
