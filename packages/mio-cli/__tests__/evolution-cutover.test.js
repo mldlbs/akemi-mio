@@ -188,3 +188,63 @@ test('evolution authority plan and cutover apply are exposed as dry-run CLI prev
   assert.notEqual(realApply.status, 0)
   assert.match(realApply.stderr, /dryRun: true/)
 })
+
+// The failure message used to be a bare `--legacy is required`: it names a flag
+// but never says the value has to be JSON, and `mio help` listed none of these
+// flags either. Both halves are pinned, because fixing only the message would
+// still leave the command undiscoverable from `mio help`.
+test('evolution failures print the usage, naming the required JSON arguments', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mio-cli-cutover-'))
+
+  const missing = runCli(['evolution', 'shadow', 'record'], home)
+  assert.equal(missing.status, 1)
+  assert.match(missing.stderr, /--legacy is required/)
+  assert.match(missing.stderr, /--legacy JSON --modular JSON/)
+  assert.match(missing.stderr, /mio evolution shadow record --legacy/)
+
+  // stdout stays empty on failure, so `--json` callers get nothing to parse
+  // rather than usage text that reads like a malformed response.
+  const asJson = runCli(['--json', 'evolution', 'shadow', 'record'], home)
+  assert.equal(asJson.status, 1)
+  assert.equal(asJson.stdout, '')
+  assert.match(asJson.stderr, /--legacy is required/)
+})
+
+test('evolution names the missing sub-subcommand instead of printing one line', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mio-cli-cutover-'))
+
+  const incomplete = runCli(['evolution', 'cutover'], home)
+  assert.equal(incomplete.status, 1)
+  assert.match(incomplete.stderr, /mio evolution cutover needs 'readiness' or 'apply'/)
+
+  const unknown = runCli(['evolution', 'bogus'], home)
+  assert.equal(unknown.status, 1)
+  assert.match(unknown.stderr, /Unknown evolution subcommand: bogus/)
+})
+
+test('mio help and mio evolution --help document the evolution arguments', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mio-cli-cutover-'))
+
+  const help = runCli(['help'], home)
+  assert.equal(help.status, 0)
+  // Anchored to the full line: `/both required/` alone also matches the
+  // cutover apply line, so a mutation that drops the shadow flags would pass.
+  assert.match(
+    help.stdout,
+    /mio evolution shadow record\s+Record a shadow comparison sample \(--legacy\/--modular JSON; both required\)/,
+  )
+  assert.match(
+    help.stdout,
+    /mio evolution authority plan\s+Preview a gated authority switch plan \(--readiness JSON; required\)/,
+  )
+  assert.match(
+    help.stdout,
+    /mio evolution migration plan\s+Preview state migration diffs \(--legacy-records\/--modular-records JSON; required\)/,
+  )
+
+  // --help is the one path where usage belongs on stdout, and it exits 0.
+  const own = runCli(['evolution', '--help'], home)
+  assert.equal(own.status, 0)
+  assert.match(own.stdout, /Required arguments are inline JSON snapshots/)
+  assert.equal(own.stderr, '')
+})

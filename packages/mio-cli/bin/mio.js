@@ -214,9 +214,83 @@ function printDualWriteRecord(record, useJson) {
   console.log(`shadow=${record.shadow.matched ? 'matched' : 'mismatch'}`)
 }
 
+// Sub-subcommand per evolution command. `mio help` lists one line each, which
+// cannot say what they want -- and every one of them takes an inline JSON
+// snapshot rather than a file path. So a wrong invocation gets the whole
+// surface instead of a single line.
+const EVOLUTION_SUBCOMMANDS = {
+  shadow: ['record'],
+  'dual-write': ['record'],
+  cutover: ['readiness', 'apply'],
+  authority: ['plan'],
+  migration: ['plan'],
+}
+
+// Usage goes to stderr when the call failed, and to stdout only when it was
+// asked for (`mio evolution --help`). On failure stdout has to stay empty:
+// otherwise `mio --json evolution shadow record` prints usage text where the
+// caller is parsing JSON, and the caller reads that as a broken response
+// instead of "you left an argument out".
+function evolutionUsage(write = console.error) {
+  write(`Usage:
+  mio evolution status                    Show composed evolution module health
+  mio evolution report                    Cross-agent evolution report (--period 24h|7d|30d|all)
+  mio evolution shadow record             Record a shadow comparison sample
+  mio evolution dual-write record         Record a dual-write comparison sample
+  mio evolution cutover readiness         Assess shadow/dual-write cutover readiness
+  mio evolution cutover apply             Dry-run a cutover plan (never switches authority)
+  mio evolution authority plan            Preview a gated authority switch plan
+  mio evolution migration plan            Preview state migration diffs
+
+Required arguments are inline JSON snapshots, not file paths:
+  shadow record        --legacy JSON --modular JSON
+  dual-write record    --legacy-result JSON --modular-result JSON
+  cutover apply        --dry-run --plan JSON
+  authority plan       --readiness JSON
+  migration plan       --legacy-records JSON --modular-records JSON
+
+Optional:
+  --project P              Defaults to the current git repository name
+  --label L                Stored alongside a shadow/dual-write sample
+  --authoritative X        legacy|modular for dual-write (default legacy)
+  --input JSON             Extra input for both sides of a shadow comparison
+  --min-shadow-runs N      cutover readiness threshold
+  --max-mismatch-rate N    cutover readiness threshold
+  --json                   Global flag: write it before the subcommand
+
+Examples:
+  mio evolution shadow record --legacy '{"modules":7}' --modular '{"modules":7}'
+  mio evolution cutover readiness --min-shadow-runs 5`)
+}
+
 async function evolutionCommand(args, useJson) {
-  if (args[1] === 'status') return evolutionStatus(useJson)
-  if (args[1] === 'report') return evolutionReportCommand(args, useJson)
+  const sub = args[1]
+  if (!sub) {
+    evolutionUsage()
+    process.exitCode = 1
+    return
+  }
+  if (sub === 'help' || sub === '--help' || sub === '-h') {
+    evolutionUsage(console.log)
+    return
+  }
+  if (sub === 'status') return evolutionStatus(useJson)
+  if (sub === 'report') return evolutionReportCommand(args, useJson)
+
+  const subcommands = EVOLUTION_SUBCOMMANDS[sub]
+  if (!subcommands) {
+    console.error(`Unknown evolution subcommand: ${sub}`)
+    evolutionUsage()
+    process.exitCode = 1
+    return
+  }
+  if (!subcommands.includes(args[2] || null)) {
+    const wanted = subcommands.map((name) => `'${name}'`).join(' or ')
+    console.error(`mio evolution ${sub} needs ${wanted}`)
+    evolutionUsage()
+    process.exitCode = 1
+    return
+  }
   try {
     if (args[1] === 'shadow' && args[2] === 'record') {
       return printShadowRecord(
@@ -284,10 +358,16 @@ async function evolutionCommand(args, useJson) {
     }
   } catch (error) {
     console.error(error.message || error)
+    // A missing or malformed required argument is the common failure here, and
+    // the raw message (`--legacy is required`) never says it has to be JSON.
+    evolutionUsage()
     process.exitCode = 1
     return
   }
-  console.error('Usage: mio evolution status|report|shadow record|dual-write record|cutover readiness|cutover apply|authority plan|migration plan')
+  // Unreachable while EVOLUTION_SUBCOMMANDS and the dispatch above agree. Kept
+  // so that adding a subcommand to the table without a handler fails loudly
+  // instead of exiting 0.
+  console.error(`mio evolution ${args.slice(1).filter(Boolean).join(' ')} is listed but has no handler`)
   process.exitCode = 1
 }
 
@@ -2998,12 +3078,12 @@ Usage:
   mio agents evaluation       ADR-017 evaluation metrics: route adoption, behaviour change, recall quality, data hygiene (--project X, --since ISO)
   mio evolution status        Show composed evolution module health
   mio evolution report        Cross-agent evolution report: ecosystem, agents, memory health, suggestions (--period 24h|7d|30d|all)
-  mio evolution shadow record      Record a shadow comparison sample
-  mio evolution dual-write record  Record a dual-write comparison sample
-  mio evolution cutover readiness   Assess shadow/dual-write cutover readiness
-  mio evolution authority plan      Preview a gated authority switch plan
-  mio evolution migration plan      Preview state migration diffs
-  mio evolution cutover apply --dry-run   Dry-run a cutover plan without switching authority
+  mio evolution shadow record      Record a shadow comparison sample (--legacy/--modular JSON; both required)
+  mio evolution dual-write record  Record a dual-write comparison sample (--legacy-result/--modular-result JSON; required)
+  mio evolution cutover readiness   Assess shadow/dual-write cutover readiness (--min-shadow-runs/--max-mismatch-rate)
+  mio evolution authority plan      Preview a gated authority switch plan (--readiness JSON; required)
+  mio evolution migration plan      Preview state migration diffs (--legacy-records/--modular-records JSON; required)
+  mio evolution cutover apply --dry-run   Dry-run a cutover plan (--plan JSON and --dry-run are both required)
   mio observe                 Watch WorkBuddy transcripts and auto-ingest task outcomes
   mio observe --start|--stop|--status|--once   Manage the background observer daemon
   mio recall "<query>"        Search Mio memory from the terminal (same ranking as mio.memory.query)

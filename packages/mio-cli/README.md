@@ -559,9 +559,10 @@ reasons: shadow samples 2/5; shadow mismatch rate 0.5; dual-write has no samples
 
 说明：
 
-- **缺参时这一族的报错比其他命令简略：只打印一行 `--legacy is required`，没有用法、也没有示例。**
-  它不是崩溃——退出码是 1，什么都没写。值不是合法 JSON 时同理，报 `--legacy must be valid JSON`。
-  必填项见上表。
+- **缺参时会先给出原因（`--legacy is required`），紧接着打印完整用法与示例**，包括「参数是内联
+  JSON」这件事。用法写到 stderr、stdout 保持为空——所以 `mio --json` 的调用方拿到的是空输出，
+  而不是把用法文本当成 JSON 去解析。值不是合法 JSON 时同理，报 `--legacy must be valid JSON`。
+  子命令写漏了（如 `mio evolution cutover`）会明确说缺哪个：`needs 'readiness' or 'apply'`。
 - **`cutover apply` 是 dry-run only，而且 `--dry-run` 必须显式写上。** 只给 `--plan` 会被拒绝
   （`authority switch apply is dry-run only; pass dryRun: true ...`），只给 `--dry-run` 则报
   `--plan is required`。它**不会真的切换权威**，返回里 `applied` 恒为 `false`。
