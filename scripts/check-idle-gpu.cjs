@@ -586,6 +586,24 @@ async function main() {
         fws.removeEventListener('message', h)
         return out?.result?.result?.value
       }
+      // ── 等 React 渲染锚点出现（09-23 补）────────────────────────────────
+      // CI #87/#88 标定：基线若在 target 一出现就测，React 还没渲染（#root 空），
+      // base 恒 0/0 → 空闲动画判据**从未非空触发**（FM-6：门禁能跑但判据空转）。
+      // 等 React 渲染出形态自己的根元素再测基线，白名单棘轮才开始真正承重。
+      // 等不到不判红（保持旧行为），但显式 notice 说清基线可能漏检。
+      const ANCHOR = { pet: '.pet-svg', chat: '.chat-card', wallpaper: '.wp-stage' }
+      const anchorSel = ANCHOR[kind]
+      let rendered = false
+      for (let i = 0; i < 30; i++) {
+        rendered = (await fev(`!!document.querySelector('${anchorSel}')`, 500)) === true
+        if (rendered) break
+      }
+      if (!rendered) {
+        notice(
+          `[idle-gpu] ⚠️ 形态窗口 ${kind}：等了 15s 也没等到 React 渲染出 ${anchorSel}，` +
+            '基线可能在渲染完成前测量 —— 空闲动画判据本次可能漏检（不算失败，但要知道）',
+        )
+      }
       // 基线测量：toggleForm 收起**之前**量（收起后窗口隐藏，数字无意义）。
       // 空闲动画判红（白名单棘轮）见 IDLE_ANIM_ALLOWLIST 处注释。
       const base = await phase(`${kind}-基线`, fev)
