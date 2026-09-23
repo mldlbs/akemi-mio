@@ -226,6 +226,9 @@ test('observer validates its subcommands', () => {
   const unknown = run(ws, ['observer', 'bogus'])
   assert.equal(unknown.status, 1)
   assert.match(unknown.stderr, /Unknown observer subcommand: bogus/)
+  // Usage must go to stderr too, leaving stdout empty for `--json` callers.
+  assert.match(unknown.stderr, /Usage:/)
+  assert.equal(unknown.stdout, '')
 
   const help = run(ws, ['observer', 'help'])
   assert.equal(help.status, 0)

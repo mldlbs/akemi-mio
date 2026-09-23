@@ -168,6 +168,9 @@ test('creativity subcommand validates its arguments', () => {
   const unknown = run(ws.cwd, ws.env, ['creativity', 'bogus'])
   assert.equal(unknown.status, 1)
   assert.match(unknown.stderr, /Unknown creativity subcommand: bogus/)
+  // Usage must go to stderr too, leaving stdout empty for `--json` callers.
+  assert.match(unknown.stderr, /Usage:/)
+  assert.equal(unknown.stdout, '')
 
   // generate/ferment are now exposed (they use the shared LLM client), so they
   // fail on argument validation rather than being unknown subcommands.

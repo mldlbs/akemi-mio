@@ -243,6 +243,9 @@ test('policy subcommand validates its arguments', () => {
   const unknown = run(ws.cwd, ws.env, ['policy', 'bogus'])
   assert.equal(unknown.status, 1)
   assert.match(unknown.stderr, /Unknown policy subcommand: bogus/)
+  // Usage must go to stderr too, leaving stdout empty for `--json` callers.
+  assert.match(unknown.stderr, /Usage:/)
+  assert.equal(unknown.stdout, '')
 
   const noAction = run(ws.cwd, ws.env, ['policy', 'check'])
   assert.equal(noAction.status, 1)

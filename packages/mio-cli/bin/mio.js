@@ -266,7 +266,10 @@ Examples:
 async function evolutionCommand(args, useJson) {
   const sub = args[1]
   if (!sub) {
-    evolutionUsage(console.error)
+    // A bare command prints usage to stdout and exits 1, like `git` with no
+    // arguments -- that is what every other command family here does, so this
+    // one follows rather than inventing a second convention.
+    evolutionUsage()
     process.exitCode = 1
     return
   }
@@ -803,8 +806,8 @@ function printMemoryMerge(result) {
   console.log(`Undo with: mio memory restore --ids ${result.archived.join(',')}`)
 }
 
-function memoryUsage() {
-  console.log(`Usage:
+function memoryUsage(write = console.log) {
+  write(`Usage:
   mio memory analyze                        Report duplicates, low-quality records and kind histogram
   mio memory archive --ids a,b              Archive records (soft delete; hidden from recall/analyze)
   mio memory restore --ids a,b              Un-archive previously archived records
@@ -836,7 +839,7 @@ function memoryCommand(args, useJson) {
   }
   if (!['analyze', 'archive', 'restore', 'forget', 'merge', 'migrate'].includes(sub)) {
     console.error(`Unknown memory subcommand: ${sub}`)
-    memoryUsage()
+    memoryUsage(console.error)
     process.exitCode = 1
     return
   }
@@ -1031,8 +1034,8 @@ function cliExperienceStore() {
   })
 }
 
-function experienceUsage() {
-  console.log(`Usage:
+function experienceUsage(write = console.log) {
+  write(`Usage:
   mio experience list                            List reuse records (--status/--target-agent/--project/--limit)
   mio experience confirm --ids a,b               Confirm auto-claimed reuse (bulk supported)
   mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse manually
@@ -1102,7 +1105,7 @@ function experienceCommand(args, useJson) {
   }
   if (!['list', 'confirm', 'reuse'].includes(sub)) {
     console.error(`Unknown experience subcommand: ${sub}`)
-    experienceUsage()
+    experienceUsage(console.error)
     process.exitCode = 1
     return
   }
@@ -1194,8 +1197,8 @@ function experienceCommand(args, useJson) {
 // mio.policy.check has always been able to answer "has this action failed
 // before?", but only from inside an MCP session -- so in practice nobody asked
 // before running the command. This gives it a terminal entry point.
-function policyUsage() {
-  console.log(`Usage:
+function policyUsage(write = console.log) {
+  write(`Usage:
   mio policy check "<action>"     Historical risk for an action, from trace + memory evidence
 
 Options:
@@ -1284,7 +1287,7 @@ function policyCommand(args, useJson) {
   }
   if (sub !== 'check') {
     console.error(`Unknown policy subcommand: ${sub}`)
-    policyUsage()
+    policyUsage(console.error)
     process.exitCode = 1
     return
   }
@@ -1345,8 +1348,8 @@ function cliInsightStore() {
   return createInsightStore({ dataDir: MIO_HOME })
 }
 
-function insightUsage() {
-  console.log(`Usage:
+function insightUsage(write = console.log) {
+  write(`Usage:
   mio insight status                    Insight counts: total, reported, unreported, high-value
   mio insight list                      List insights
   mio insight generate                  Generate insights from context (calls an LLM)
@@ -1403,7 +1406,7 @@ function insightCommand(args, useJson) {
   const known = ['status', 'list', 'generate', 'mark-reported']
   if (!known.includes(sub)) {
     console.error(`Unknown insight subcommand: ${sub}`)
-    insightUsage()
+    insightUsage(console.error)
     process.exitCode = 1
     return
   }
@@ -1507,8 +1510,8 @@ function cliObserverStore() {
   return createObserverStore({})
 }
 
-function observerUsage() {
-  console.log(`Usage:
+function observerUsage(write = console.log) {
+  write(`Usage:
   mio observer status        Pipeline stage counts (observations/trends/topics/...)
   mio observer world-model   Entities, events, trends and narratives
   mio observer trends        Recent trend reports
@@ -1868,7 +1871,7 @@ function observerCommand(args, useJson) {
 
   if (!['status', 'world-model', 'trends', 'research', 'insights', 'essays', 'dag'].includes(sub)) {
     console.error(`Unknown observer subcommand: ${sub}`)
-    observerUsage()
+    observerUsage(console.error)
     process.exitCode = 1
     return
   }
@@ -1917,8 +1920,8 @@ function observerCommand(args, useJson) {
   }
 }
 
-function creativityUsage() {
-  console.log(`Usage:
+function creativityUsage(write = console.log) {
+  write(`Usage:
   mio creativity status              Show hypothesis counts and recent top ideas
   mio creativity list                List hypotheses (--status active|validated|rejected|draft, --limit N)
 
@@ -2080,7 +2083,7 @@ function creativityCommand(args, useJson) {
 
   if (!['status', 'list'].includes(sub)) {
     console.error(`Unknown creativity subcommand: ${sub}`)
-    creativityUsage()
+    creativityUsage(console.error)
     process.exitCode = 1
     return
   }

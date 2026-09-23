@@ -189,6 +189,9 @@ test('the CLI validates insight subcommands before touching the store', () => {
   const unknown = run(ws, ['insight', 'bogus'])
   assert.equal(unknown.status, 1)
   assert.match(unknown.stderr, /Unknown insight subcommand: bogus/)
+  // Usage must go to stderr too, leaving stdout empty for `--json` callers.
+  assert.match(unknown.stderr, /Usage:/)
+  assert.equal(unknown.stdout, '')
 
   // generate is exposed now (it was the only mio.insight.* tool without a
   // terminal entry point), but it must refuse to touch the LLM without context.

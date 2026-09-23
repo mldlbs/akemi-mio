@@ -256,6 +256,9 @@ test('experience subcommand validates its arguments', () => {
   const unknown = run(ws, ['experience', 'bogus'])
   assert.equal(unknown.status, 1)
   assert.match(unknown.stderr, /Unknown experience subcommand: bogus/)
+  // Usage must go to stderr too, leaving stdout empty for `--json` callers.
+  assert.match(unknown.stderr, /Usage:/)
+  assert.equal(unknown.stdout, '')
 
   const help = run(ws, ['experience', 'help'])
   assert.equal(help.status, 0)

@@ -241,6 +241,12 @@ test('memory subcommand validates its arguments', () => {
   const unknown = run(ws.cwd, ws.env, ['memory', 'bogus'])
   assert.equal(unknown.status, 1)
   assert.match(unknown.stderr, /Unknown memory subcommand: bogus/)
+  // The usage block belongs on stderr as well, and stdout must stay empty: a
+  // `--json` caller reads stdout, so usage text there would be parsed as the
+  // payload it asked for. Asserting only the "Unknown ..." line is not enough
+  // -- that line was already on stderr while the usage went to stdout.
+  assert.match(unknown.stderr, /Usage:/)
+  assert.equal(unknown.stdout, '')
 
   const noIds = run(ws.cwd, ws.env, ['memory', 'archive'])
   assert.equal(noIds.status, 1)
