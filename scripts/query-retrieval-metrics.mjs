@@ -49,13 +49,11 @@ async function main() {
 
   // ── 1. Session Compactions (main.db) ──
   console.log('▶ Compaction Coverage')
-  const hasCompactions = main.exec(
-    `SELECT name FROM sqlite_master WHERE type='table' AND name='session_compactions'`
-  )
+  const hasCompactions = main.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name='session_compactions'`)
   if (hasCompactions.length && hasCompactions[0].values.length > 0) {
     const compCount = main.exec('SELECT COUNT(*) FROM session_compactions')[0].values[0][0]
-    const sessCount = main.exec("SELECT COUNT(DISTINCT session_id) FROM messages WHERE session_id IS NOT NULL")[0].values[0][0]
-    const density = compCount > 0 ? (compCount / Math.max(1, sessCount) * 100).toFixed(1) : '0.0'
+    const sessCount = main.exec('SELECT COUNT(DISTINCT session_id) FROM messages WHERE session_id IS NOT NULL')[0].values[0][0]
+    const density = compCount > 0 ? ((compCount / Math.max(1, sessCount)) * 100).toFixed(1) : '0.0'
     console.log(`  Compaction rows:      ${compCount}`)
     console.log(`  Total sessions:       ${sessCount}`)
     console.log(`  Compaction density:   ${density}%`)
@@ -77,7 +75,9 @@ async function main() {
     const imp = main.exec('SELECT MIN(importance_score), MAX(importance_score), AVG(importance_score) FROM session_compactions')
     if (imp.length && imp[0].values.length > 0) {
       const [imin, imax, iavg] = imp[0].values[0]
-      console.log(`  Importance (min/max/avg): ${imin != null ? (+imin).toFixed(2) : 'N/A'} / ${imax != null ? (+imax).toFixed(2) : 'N/A'} / ${iavg != null ? (+iavg).toFixed(2) : 'N/A'}`)
+      console.log(
+        `  Importance (min/max/avg): ${imin != null ? (+imin).toFixed(2) : 'N/A'} / ${imax != null ? (+imax).toFixed(2) : 'N/A'} / ${iavg != null ? (+iavg).toFixed(2) : 'N/A'}`,
+      )
     }
   } else {
     console.log('  No session_compactions table found.')
@@ -91,9 +91,7 @@ async function main() {
     console.log('  events.db unavailable — skipping retrieval metrics.')
     console.log('  These will appear once events.db is readable.')
   } else {
-    const hasEventsTable = events.exec(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name='evaluation_events'`
-    )
+    const hasEventsTable = events.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name='evaluation_events'`)
     if (!hasEventsTable.length || !hasEventsTable[0].values.length) {
       console.log('  No evaluation_events table.')
     } else {
@@ -108,7 +106,7 @@ async function main() {
       const hits = events.exec(`
         SELECT COUNT(*) FROM evaluation_events WHERE type = 'session.digest.retrieved'
       `)[0].values[0][0]
-      const hitRate = totalRetrievals > 0 ? (hits / totalRetrievals * 100).toFixed(1) : 'N/A'
+      const hitRate = totalRetrievals > 0 ? ((hits / totalRetrievals) * 100).toFixed(1) : 'N/A'
       console.log(`  Total retrievals:       ${totalRetrievals}`)
       console.log(`  Hits:                   ${hits}`)
       console.log(`  Noops:                  ${noops}`)
@@ -163,7 +161,9 @@ async function main() {
           console.log(`    max:              ${avg(allScores.max).toFixed(4)}`)
           console.log(`    avg:              ${avg(allScores.avg).toFixed(4)}`)
           console.log(`    Attention avail:  ${((allScores.attentionAvailable / allScores.total) * 100).toFixed(1)}%`)
-          console.log(`    Token util rate:  ${(avg(allScores.tokenUtilization) / avg(allScores.tokenBudget) * 100).toFixed(1)}% (${avg(allScores.tokenUtilization).toFixed(0)} / ${avg(allScores.tokenBudget).toFixed(0)})`)
+          console.log(
+            `    Token util rate:  ${((avg(allScores.tokenUtilization) / avg(allScores.tokenBudget)) * 100).toFixed(1)}% (${avg(allScores.tokenUtilization).toFixed(0)} / ${avg(allScores.tokenBudget).toFixed(0)})`,
+          )
           console.log(`    Avg result count: ${avg(allScores.resultCounts).toFixed(1)}`)
         }
 
@@ -227,7 +227,7 @@ async function main() {
     const noopCount = events.exec(`SELECT COUNT(*) FROM evaluation_events WHERE type = 'session.digest.retrieved_noop'`)[0].values[0][0]
     const hitCount = events.exec(`SELECT COUNT(*) FROM evaluation_events WHERE type = 'session.digest.retrieved'`)[0].values[0][0]
     const totalR = noopCount + hitCount
-    const hitRate = totalR > 0 ? (hitCount / totalR * 100).toFixed(1) : 'N/A'
+    const hitRate = totalR > 0 ? ((hitCount / totalR) * 100).toFixed(1) : 'N/A'
     console.log(`  Hit rate documented                ${String(hitRate + '%').padEnd(9)} documented`)
   } else {
     console.log('  (events.db unavailable — cannot evaluate)')

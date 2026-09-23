@@ -139,7 +139,10 @@ async function inspect(target, label) {
       const d = m.params.exceptionDetails || {}
       events.push({ kind: 'exception', text: (d.exception && d.exception.description) || d.text || '' })
     } else if (m.method === 'Runtime.consoleAPICalled' && (m.params.type === 'error' || m.params.type === 'warning')) {
-      events.push({ kind: 'console.' + m.params.type, text: (m.params.args || []).map((a) => a.value ?? a.description ?? a.type).join(' ') })
+      events.push({
+        kind: 'console.' + m.params.type,
+        text: (m.params.args || []).map((a) => a.value ?? a.description ?? a.type).join(' '),
+      })
     } else if (m.method === 'Log.entryAdded') {
       const e = m.params.entry || {}
       if (e.level === 'error' || e.level === 'warning') events.push({ kind: 'log.' + e.level, text: `${e.text} ${e.url || ''}`.trim() })
@@ -177,19 +180,25 @@ async function inspect(target, label) {
 
   await send('Runtime.evaluate', { expression: PROBE_EXPR }, true)
   await sleep(collectMs)
-  try { ws.close() } catch {}
+  try {
+    ws.close()
+  } catch {}
 
   const probes = events.filter((e) => String(e.text).includes('__PROBE_'))
   const real = events.filter((e) => !String(e.text).includes('__PROBE_'))
   const instrumentOk = probes.length >= 2
 
   // 布局塌陷判据：根容器高度与视口差一截（百分比高度链失去确定高度的典型症状）
-  const collapsed =
-    Array.isArray(info.viewport) && Array.isArray(info.html) && info.html[1] < info.viewport[1] - 2
+  const collapsed = Array.isArray(info.viewport) && Array.isArray(info.html) && info.html[1] < info.viewport[1] - 2
 
   console.log('\n──────────────────────────────────────────')
   console.log(`【${label}】${target.title || '(无标题)'}`)
-  console.log('  url          :', String(info.url || target.url).split('/').pop())
+  console.log(
+    '  url          :',
+    String(info.url || target.url)
+      .split('/')
+      .pop(),
+  )
   console.log('  formKind     :', info.formKind)
   console.log('  DOM 节点     :', info.nodes, '（实际绘制', info.painted, '）')
   console.log('  视口 / html  :', (info.viewport || []).join('x'), '/', (info.html || []).join('x'), collapsed ? '  ❌ 高度塌陷' : '  ✓')
@@ -222,7 +231,10 @@ async function main() {
 
   // 主窗口的 CDP 连接留着，用来触发其它入口
   const mws = new WebSocket(main.webSocketDebuggerUrl)
-  await new Promise((res, rej) => { mws.addEventListener('open', res); mws.addEventListener('error', rej) })
+  await new Promise((res, rej) => {
+    mws.addEventListener('open', res)
+    mws.addEventListener('error', rej)
+  })
   const trigger = async (expr, ms = 4500) => {
     mws.send(JSON.stringify({ id: Date.now() % 100000, method: 'Runtime.evaluate', params: { expression: expr, awaitPromise: true } }))
     await sleep(ms)
@@ -267,7 +279,9 @@ setTimeout(async () => {
     console.log('失败:', e.message)
     exitCode = 1
   }
-  try { process.kill(child.pid) } catch {}
+  try {
+    process.kill(child.pid)
+  } catch {}
   await sleep(1500)
   process.exit(exitCode)
 }, 500)

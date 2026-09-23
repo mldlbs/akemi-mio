@@ -99,14 +99,21 @@ function probe(timeoutMs) {
         return
       }
       const i = next
-      p.stdin.write(JSON.stringify({
-        jsonrpc: '2.0', id: 100 + i, method: 'tools/call',
-        params: { name: names[i], arguments: SAFE_ARGS[names[i]] || {} },
-      }) + '\n')
+      p.stdin.write(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 100 + i,
+          method: 'tools/call',
+          params: { name: names[i], arguments: SAFE_ARGS[names[i]] || {} },
+        }) + '\n',
+      )
       // Nothing here should take long once network-backed tools have safe
       // arguments, so a tool that never answers is a finding, not a weather
       // report -- it only degrades to a warning if it is tolerated silently.
-      perCallTimer = setTimeout(() => { next += 1; sendNext() }, 30000)
+      perCallTimer = setTimeout(() => {
+        next += 1
+        sendNext()
+      }, 30000)
     }
 
     p.on('error', reject)
@@ -117,7 +124,11 @@ function probe(timeoutMs) {
       for (const line of lines) {
         if (!line.trim().startsWith('{')) continue
         let obj
-        try { obj = JSON.parse(line) } catch { continue }
+        try {
+          obj = JSON.parse(line)
+        } catch {
+          continue
+        }
 
         if (obj.id === 2 && obj.result && Array.isArray(obj.result.tools)) {
           names = obj.result.tools.map((t) => t.name).sort()
@@ -126,7 +137,10 @@ function probe(timeoutMs) {
         }
 
         if (obj.id >= 100) {
-          if (perCallTimer) { clearTimeout(perCallTimer); perCallTimer = null }
+          if (perCallTimer) {
+            clearTimeout(perCallTimer)
+            perCallTimer = null
+          }
           answers.set(obj.id, obj.error ? { error: obj.error.message || '' } : { ok: true })
           next += 1
           sendNext()
@@ -140,10 +154,14 @@ function probe(timeoutMs) {
       }
     })
 
-    p.stdin.write(JSON.stringify({
-      jsonrpc: '2.0', id: 1, method: 'initialize',
-      params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'mcp-live-gate', version: '1' } },
-    }) + '\n')
+    p.stdin.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'mcp-live-gate', version: '1' } },
+      }) + '\n',
+    )
     setTimeout(() => {
       p.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
       p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }) + '\n')
@@ -171,9 +189,12 @@ function diff(a, b) {
   const notOffered = diff(dispatched, live)
   if (notOffered.length) {
     problems.push(
-      'dispatchable but NOT offered by tools/list (' + notOffered.length + '): ' + notOffered.join(', ') +
-      '\n  an isXxxAvailable() gate is swallowing them -- check that the optional package resolves' +
-      '\n  (a checkout has no node_modules/@akemi-mio, so stores need the workspace fallback)'
+      'dispatchable but NOT offered by tools/list (' +
+        notOffered.length +
+        '): ' +
+        notOffered.join(', ') +
+        '\n  an isXxxAvailable() gate is swallowing them -- check that the optional package resolves' +
+        '\n  (a checkout has no node_modules/@akemi-mio, so stores need the workspace fallback)',
     )
   }
 
@@ -185,7 +206,10 @@ function diff(a, b) {
   const unanswered = []
   names.forEach((n, i) => {
     const a = answers.get(100 + i)
-    if (!a) { unanswered.push(n); return }
+    if (!a) {
+      unanswered.push(n)
+      return
+    }
     if (a.ok) return
     const marker = crashMarker(a.error)
     if (marker) crashed.push(n + '  [' + marker + ']  ' + String(a.error).split('\n')[0].slice(0, 120))
@@ -193,9 +217,11 @@ function diff(a, b) {
 
   if (crashed.length) {
     problems.push(
-      'these tools crash instead of rejecting the empty arguments (' + crashed.length + '):\n  ' +
-      crashed.join('\n  ') +
-      '\n  a caller sees an opaque TypeError that names neither the tool nor the missing field'
+      'these tools crash instead of rejecting the empty arguments (' +
+        crashed.length +
+        '):\n  ' +
+        crashed.join('\n  ') +
+        '\n  a caller sees an opaque TypeError that names neither the tool nor the missing field',
     )
   }
 
@@ -216,9 +242,20 @@ function diff(a, b) {
   }
 
   console.log(
-    'defined: ' + defined.size + ' | dispatched: ' + dispatched.size + ' | live: ' + live.size +
-    ' | called: ' + answers.size + ' | crashed: ' + crashed.length +
-    ' | unanswered: ' + unanswered.length + ' | survived: ' + survived
+    'defined: ' +
+      defined.size +
+      ' | dispatched: ' +
+      dispatched.size +
+      ' | live: ' +
+      live.size +
+      ' | called: ' +
+      answers.size +
+      ' | crashed: ' +
+      crashed.length +
+      ' | unanswered: ' +
+      unanswered.length +
+      ' | survived: ' +
+      survived,
   )
   if (unanswered.length) {
     // Network-backed tools can be slow. Not a failure -- the gate is about

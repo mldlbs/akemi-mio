@@ -43,8 +43,8 @@ const PORT = Number(arg('port', 9340))
 const WARMUP_SEC = Number(arg('warmup', 45))
 const SAMPLES = Number(arg('samples', 3))
 const INTERVAL_SEC = Number(arg('interval', 8))
-const GPU_BUDGET = Number(arg('gpu-budget', 20))       // 空闲 GPU 上限（%）
-const DELTA_BUDGET = Number(arg('delta-budget', 15))   // A/B 差值上限（百分点）
+const GPU_BUDGET = Number(arg('gpu-budget', 20)) // 空闲 GPU 上限（%）
+const DELTA_BUDGET = Number(arg('delta-budget', 15)) // A/B 差值上限（百分点）
 // 仪器自检的**下限**：注入的重负载动画必须把 GPU 顶起来这么多，否则判「仪器失灵」。
 //
 // ⚠️ 这个值是**下限**而且刻意压得很低，因为它的用途不是性能门槛，
@@ -52,7 +52,7 @@ const DELTA_BUDGET = Number(arg('delta-budget', 15))   // A/B 差值上限（百
 // 标定数据（CI runner，四笔 run）：147.3 / 147.2 / 146.9 / 147.6，极差 0.7 个点；
 // 本机 headless Edge 夹具：43.3 / 19.9（本机有别的进程在抢资源，波动大得多）。
 // 取 5 对 CI 有约 29 倍余量，对波动最大的本机也有约 4 倍余量。
-const SELFCHECK_MIN = Number(arg('selfcheck-min', 5))  // 自检差值下限（百分点）
+const SELFCHECK_MIN = Number(arg('selfcheck-min', 5)) // 自检差值下限（百分点）
 const SKIP_AB = flag('no-ab')
 
 // GitHub Actions 注解。公开仓的 job 日志要管理员权限才能读，只有 check-run
@@ -67,8 +67,12 @@ const inActions = process.env.GITHUB_ACTIONS === 'true'
 // workflow-command 格式里 `%` 必须转义，否则含 `20%` 的一行会把注解弄坏。
 // ⚠️ 顺序要紧：先转义 `%`，再处理 \r\n —— 反过来的话刚插入的 `%0D` 会被二次转义成 `%250D`。
 const esc = (s) => String(s).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')
-const notice = (s) => { if (inActions) console.log(`::notice::${esc(s)}`) }
-const annErr = (s) => { if (inActions) console.log(`::error::${esc(s)}`) }
+const notice = (s) => {
+  if (inActions) console.log(`::notice::${esc(s)}`)
+}
+const annErr = (s) => {
+  if (inActions) console.log(`::error::${esc(s)}`)
+}
 
 // ── 定位 exe ────────────────────────────────────────────────────────────
 // 优先标准的 dist-electron；没有的话退到 dist-electron-pkg* 里挑最新的。
@@ -303,8 +307,7 @@ async function main() {
     return 2
   }
   const page =
-    list.filter((t) => t.type === 'page').find((t) => String(t.url).includes('index.html')) ||
-    list.filter((t) => t.type === 'page')[0]
+    list.filter((t) => t.type === 'page').find((t) => String(t.url).includes('index.html')) || list.filter((t) => t.type === 'page')[0]
   if (!page) {
     console.error('[idle-gpu] 找不到页面目标。')
     return 2
@@ -317,10 +320,7 @@ async function main() {
   const pageName = (t) => String(t.url).split('/').pop() || t.title || '(?)'
   const pageTag = `${page.title || '(无标题)'} ${pageName(page)}`
   console.log(`[idle-gpu] 页面      ${pageTag}`)
-  console.log(
-    `[idle-gpu] 页面目标  ${pageTargets.length} 个：` +
-      pageTargets.map(pageName).join(', '),
-  )
+  console.log(`[idle-gpu] 页面目标  ${pageTargets.length} 个：` + pageTargets.map(pageName).join(', '))
   const ws = new WebSocket(page.webSocketDebuggerUrl)
   await new Promise((res, rej) => {
     ws.addEventListener('open', res)
@@ -384,9 +384,7 @@ async function main() {
     console.log(
       `  [${tag}] GPU ${g.toFixed(1)}%  总 CPU ${t.toFixed(1)}%  ` +
         (animProbeOk ? `动画 ${running.length}/${animList.length}` : `动画 探测失败`) +
-        (running.length
-          ? '：' + running.map((a) => `${a.name} <${a.tag}> .${a.cls}`).join(' | ')
-          : ''),
+        (running.length ? '：' + running.map((a) => `${a.name} <${a.tag}> .${a.cls}`).join(' | ') : ''),
     )
     return {
       gpu: g,
@@ -449,9 +447,7 @@ async function main() {
     fails.push(`空闲 GPU ${base.gpu.toFixed(1)}% 超预算 ${GPU_BUDGET}%`)
   }
   if (ab && delta > DELTA_BUDGET) {
-    fails.push(
-      `A/B 差值 ${delta.toFixed(1)} 个点超预算 ${DELTA_BUDGET} —— 很可能有常驻无限动画在烧 GPU`,
-    )
+    fails.push(`A/B 差值 ${delta.toFixed(1)} 个点超预算 ${DELTA_BUDGET} —— 很可能有常驻无限动画在烧 GPU`)
   }
   // 仪器自检判红。两条都要判，理由不同：
   //   (a) 注入没生效 → 完全没有证据 → 本次的「绿」不可信；
@@ -464,9 +460,7 @@ async function main() {
     // ⚠️ 用 `running` 而不是 `animCount`：动画存在但处于 paused 时同样造不出 GPU 负载，
     // 同样是「没有证据」，而 animCount 会把它错报成「注入生效了」。
     if (sc.running.length === 0) {
-      fails.push(
-        '仪器自检无效：注入的合成动画没有在运行，本次没有任何证据说明这条测量链是好的',
-      )
+      fails.push('仪器自检无效：注入的合成动画没有在运行，本次没有任何证据说明这条测量链是好的')
     } else if (scDelta === null || scDelta < SELFCHECK_MIN) {
       fails.push(
         `仪器自检失败：注入重负载动画后 GPU 差值仅 ${
@@ -482,30 +476,19 @@ async function main() {
   notice(
     `[idle-gpu] 页面 ${pageTag}` +
       ` / 基线 GPU ${base.gpu.toFixed(1)}%（预算 ${GPU_BUDGET}%）` +
-      (ab
-        ? ` / 关动画 ${ab.gpu.toFixed(1)}% / A-B 差值 ${delta.toFixed(1)} 个点（预算 ${DELTA_BUDGET}）`
-        : ' / A-B 已跳过') +
+      (ab ? ` / 关动画 ${ab.gpu.toFixed(1)}% / A-B 差值 ${delta.toFixed(1)} 个点（预算 ${DELTA_BUDGET}）` : ' / A-B 已跳过') +
       ` / 基线总 CPU ${base.total.toFixed(1)}%` +
       ` / GPU 进程 ${base.gpuProcs}` +
-      (base.animProbeOk
-        ? ` / 基线动画 ${base.running.length}/${base.animCount}`
-        : ' / 基线动画 探测失败'),
+      (base.animProbeOk ? ` / 基线动画 ${base.running.length}/${base.animCount}` : ' / 基线动画 探测失败'),
   )
   // 被测页面的清单也要发。这道门禁是隐式挑页面的（见上面 page 的选择逻辑），
   // 只发挑中的那一个，「还有别的窗口没被量」这件事就看不见了 —— 而
   // pet / chat / wallpaper 三个形态窗口的动画都住在各自的 styles.css 里。
-  notice(
-    `[idle-gpu] 可量页面 ${pageTargets.length} 个：` +
-      (pageTargets.map(pageName).join(', ') || '(无)') +
-      '（本次只量了挑中的那一个）',
-  )
+  notice(`[idle-gpu] 可量页面 ${pageTargets.length} 个：` + (pageTargets.map(pageName).join(', ') || '(无)') + '（本次只量了挑中的那一个）')
   // 页面一个 CSS 动画都没有时，这道门禁关于动画的两条判据（A/B 差值、
   // 「常驻无限动画」）本次都**没有量到任何东西**。绿是绿，但要知道它是空绿。
   if (!base.animProbeOk) {
-    notice(
-      '[idle-gpu] 动画探测失败：document.getAnimations() 没取到结果，' +
-        '本次关于动画的判据全都没有量到东西（只有绝对预算那条有效）',
-    )
+    notice('[idle-gpu] 动画探测失败：document.getAnimations() 没取到结果，' + '本次关于动画的判据全都没有量到东西（只有绝对预算那条有效）')
   } else if (base.animCount === 0) {
     notice(
       '[idle-gpu] 被测页面一个 CSS 动画都没有：本次关于动画的判据（A/B 差值、' +
@@ -516,10 +499,7 @@ async function main() {
   // 差值为 0 是**必然**的 —— 这次绿其实只靠绝对预算那一条，得说清楚，
   // 否则会把一次没有信息量的通过读成「A/B 这条承重断言也验过了」。
   if (ab && base.animProbeOk && base.animCount > 0 && base.running.length === 0) {
-    notice(
-      '[idle-gpu] A/B 本次无信息量：基线就没有运行中动画，差值为 0 是必然的' +
-        '（本次判定只由绝对预算那条承担）',
-    )
+    notice('[idle-gpu] A/B 本次无信息量：基线就没有运行中动画，差值为 0 是必然的' + '（本次判定只由绝对预算那条承担）')
   }
 
   // 仪器自检结果。这条注解回答一个此前完全未知的问题：
@@ -529,9 +509,7 @@ async function main() {
   if (sc) {
     notice(
       `[idle-gpu] 仪器自检：注入全视口合成动画后 GPU ${sc.gpu.toFixed(1)}%` +
-        `（对照「关动画」${ab.gpu.toFixed(1)}%，差值 ${
-          scDelta === null ? '(无参照)' : scDelta.toFixed(1)
-        } 个点）` +
+        `（对照「关动画」${ab.gpu.toFixed(1)}%，差值 ${scDelta === null ? '(无参照)' : scDelta.toFixed(1)} 个点）` +
         ` / 自检动画 ${sc.running.length}/${sc.animCount}` +
         ` / 清理后残留 ${scLeft}（期望 ${SELFCHECK_CLEAN}）` +
         ` / 进程类型 ${fmtProcTypes(sc.procTypes)}`,
@@ -542,10 +520,7 @@ async function main() {
     // 这两种情形现在都已进 fails（v2），所以这里不再重复发 notice：
     // 一条 ::error:: 注解已经在 run 页面上了，再发一条同义 notice 只是噪声。
     if (scLeft !== SELFCHECK_CLEAN) {
-      notice(
-        `[idle-gpu] ⚠️ 自检清理不干净（残留 ${scLeft}，期望 ${SELFCHECK_CLEAN}）：` +
-          '注入物没被完全移除，本次之后的数字不可信',
-      )
+      notice(`[idle-gpu] ⚠️ 自检清理不干净（残留 ${scLeft}，期望 ${SELFCHECK_CLEAN}）：` + '注入物没被完全移除，本次之后的数字不可信')
     }
   }
 
@@ -563,45 +538,28 @@ async function main() {
   // 元素上的动画），CI notice 已带动画名，实测若超出会红并暴露真实集合。
   // 不进白名单的：chat-caret-blink（仅 streaming 时渲染，空闲不存在）。
   const IDLE_ANIM_ALLOWLIST = {
-    pet: [
-      'pet-breathe',
-      'pet-float',
-      'pet-glow-pulse',
-      'pet-arm-sway-l',
-      'pet-arm-sway-r',
-      'pet-deco-float',
-    ],
+    pet: ['pet-breathe', 'pet-float', 'pet-glow-pulse', 'pet-arm-sway-l', 'pet-arm-sway-r', 'pet-deco-float'],
     chat: ['chat-dot-pulse'],
     wallpaper: [],
   }
   // 纯函数：返回不在白名单里的空闲 running 动画（判红对象）。
-  const idleAnimStrangers = (kind, running, allowlist) =>
-    (running || []).filter((a) => !((allowlist[kind] || []).includes(a.name)))
+  const idleAnimStrangers = (kind, running, allowlist) => (running || []).filter((a) => !(allowlist[kind] || []).includes(a.name))
   const checkForms = async () => {
     for (const kind of FORMS) {
       // 拉起：在主窗口上调 akemiForms.toggleForm(kind)。Lazy 创建，可能要等 target 出现。
-      await ev(
-        `(window.akemiForms && window.akemiForms.toggleForm(${JSON.stringify(kind)}))`,
-      )
+      await ev(`(window.akemiForms && window.akemiForms.toggleForm(${JSON.stringify(kind)}))`)
       let target = null
       for (let i = 0; i < 30; i++) {
         const l = await getList()
         target = (l || [])
           .filter((t) => t.type === 'page')
-          .find(
-            (t) =>
-              String(t.url).endsWith(`/${kind}.html`) ||
-              String(t.url).endsWith(`${kind}.html`),
-          )
+          .find((t) => String(t.url).endsWith(`/${kind}.html`) || String(t.url).endsWith(`${kind}.html`))
         if (target) break
         await sleep(500)
       }
       if (!target) {
         // FM-1 的反面：拉不起来不能静默通过，必须明确说「这个窗口没被量到」。
-        notice(
-          `[idle-gpu] ⚠️ 形态窗口 ${kind} 未覆盖：toggleForm 后没有对应调试 target，` +
-            '本次没量到它的空闲 GPU',
-        )
+        notice(`[idle-gpu] ⚠️ 形态窗口 ${kind} 未覆盖：toggleForm 后没有对应调试 target，` + '本次没量到它的空闲 GPU')
         continue
       }
       const fws = new WebSocket(target.webSocketDebuggerUrl)
@@ -631,9 +589,7 @@ async function main() {
       // 基线测量：toggleForm 收起**之前**量（收起后窗口隐藏，数字无意义）。
       // 空闲动画判红（白名单棘轮）见 IDLE_ANIM_ALLOWLIST 处注释。
       const base = await phase(`${kind}-基线`, fev)
-      await ev(
-        `(window.akemiForms && window.akemiForms.toggleForm(${JSON.stringify(kind)}))`,
-      ) // 收起，避免污染下一个窗口的测量
+      await ev(`(window.akemiForms && window.akemiForms.toggleForm(${JSON.stringify(kind)}))`) // 收起，避免污染下一个窗口的测量
       // 空闲动画判红（白名单棘轮）：只有**白名单外**的常驻 running 动画才红。
       // 产品意图动画（见 IDLE_ANIM_ALLOWLIST 注释）在 pet/chat 空闲时是正常存在。
       if (base.animProbeOk) {
@@ -662,8 +618,7 @@ async function main() {
       await sleep(1500)
       const scDelta = sc.gpu - base.gpu
       console.log(
-        `\n  [${kind}] 自检 GPU ${sc.gpu.toFixed(1)}%  差值 ${scDelta.toFixed(1)} 个点` +
-          `（下限 ${SELFCHECK_MIN}）  残留 ${scLeft}`,
+        `\n  [${kind}] 自检 GPU ${sc.gpu.toFixed(1)}%  差值 ${scDelta.toFixed(1)} 个点` + `（下限 ${SELFCHECK_MIN}）  残留 ${scLeft}`,
       )
       notice(
         `[idle-gpu] 形态窗口 ${kind}：自检 GPU ${sc.gpu.toFixed(1)}%（差值 ${scDelta.toFixed(1)}` +
@@ -675,9 +630,7 @@ async function main() {
       if (sc.running.length === 0) {
         // 只报数（不判红）：注入没生效只是说明这条链在该窗口上没被证明能动，
         // 在后台窗口上这是常态，判红会误红。
-        notice(
-          `[idle-gpu] ⚠️ 形态窗口 ${kind} 自检：注入的合成动画没有在运行（该窗口的测量链尚未被证明能动）`,
-        )
+        notice(`[idle-gpu] ⚠️ 形态窗口 ${kind} 自检：注入的合成动画没有在运行（该窗口的测量链尚未被证明能动）`)
       } else if (scDelta === null || scDelta < SELFCHECK_MIN) {
         notice(
           `[idle-gpu] ⚠️ 形态窗口 ${kind} 自检差值仅 ${
@@ -686,9 +639,7 @@ async function main() {
         )
       }
       if (scLeft !== SELFCHECK_CLEAN) {
-        notice(
-          `[idle-gpu] ⚠️ 形态窗口 ${kind} 自检清理不干净（残留 ${scLeft}，期望 ${SELFCHECK_CLEAN}）`,
-        )
+        notice(`[idle-gpu] ⚠️ 形态窗口 ${kind} 自检清理不干净（残留 ${scLeft}，期望 ${SELFCHECK_CLEAN}）`)
       }
     }
   }

@@ -26,7 +26,7 @@ async function main() {
   await win.waitForLoadState('domcontentloaded')
 
   // Wait a bit for all services to init
-  await new Promise(r => setTimeout(r, 8000))
+  await new Promise((r) => setTimeout(r, 8000))
 
   // Check if electronAPI.chat exists
   const hasAPI = await win.evaluate(() => {
@@ -74,7 +74,7 @@ async function main() {
       console.log(`  Error: ${err.message}`)
     }
     // Wait between messages
-    await new Promise(r => setTimeout(r, 3000))
+    await new Promise((r) => setTimeout(r, 3000))
   }
 
   console.log('')
@@ -86,7 +86,7 @@ async function main() {
   console.log('Now run: node scripts/query-retrieval-metrics.mjs')
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error('Fatal:', err)
   process.exit(1)
 })

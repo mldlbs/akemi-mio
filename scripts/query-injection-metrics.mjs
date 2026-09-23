@@ -33,7 +33,7 @@ function median(arr) {
 }
 
 function pct(a, b) {
-  return b > 0 ? (a / b * 100).toFixed(1) : 'N/A'
+  return b > 0 ? ((a / b) * 100).toFixed(1) : 'N/A'
 }
 
 async function main() {
@@ -53,9 +53,7 @@ async function main() {
   }
 
   // ── Check table ──
-  const hasTable = events.exec(
-    `SELECT name FROM sqlite_master WHERE type='table' AND name='evaluation_events'`,
-  )
+  const hasTable = events.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name='evaluation_events'`)
   if (!hasTable.length || !hasTable[0].values.length) {
     console.error('No evaluation_events table found.')
     events.close()
@@ -102,9 +100,7 @@ async function main() {
       FROM evaluation_events
       WHERE type = '${type}' AND val IS NOT NULL
     `)
-    return rows.length && rows[0].values.length > 0
-      ? rows[0].values.map(r => Number(r[0]))
-      : []
+    return rows.length && rows[0].values.length > 0 ? rows[0].values.map((r) => Number(r[0])) : []
   }
 
   function extractStrs(type, field) {
@@ -113,9 +109,7 @@ async function main() {
       FROM evaluation_events
       WHERE type = '${type}'
     `)
-    return rows.length && rows[0].values.length > 0
-      ? rows[0].values.map(r => String(r[0] || ''))
-      : []
+    return rows.length && rows[0].values.length > 0 ? rows[0].values.map((r) => String(r[0] || '')) : []
   }
 
   function extractTraceIds(type) {
@@ -123,9 +117,7 @@ async function main() {
       SELECT trace_id FROM evaluation_events
       WHERE type = '${type}'
     `)
-    return rows.length && rows[0].values.length > 0
-      ? rows[0].values.map(r => String(r[0] || ''))
-      : []
+    return rows.length && rows[0].values.length > 0 ? rows[0].values.map((r) => String(r[0] || '')) : []
   }
 
   const injected = count('memory.context.injected')
@@ -145,7 +137,7 @@ async function main() {
 
   // ── A2: Skipped rate ──
   const total = injected + skipped
-  const skipRate = total > 0 ? (skipped / total * 100) : 0
+  const skipRate = total > 0 ? (skipped / total) * 100 : 0
   console.log(`A2  injection_skipped rate                         ${skipRate.toFixed(1)}% (${skipped}/${total})`)
 
   if (skipped > 0) {
@@ -164,23 +156,23 @@ async function main() {
 
   // ── A3: Token overflow = 0 ──
   const tokens = extractNums('memory.context.injected', 'tokenEstimate')
-  const overflows = tokens.filter(t => t > 800).length
+  const overflows = tokens.filter((t) => t > 800).length
   console.log(`A3  tokenEstimate > 800 (overflow)                 ${overflows} / ${tokens.length}`)
   if (tokens.length > 0) {
-    console.log(`    └ avg: ${average(tokens).toFixed(0)}  min: ${Math.min(...tokens)}  max: ${Math.max(...tokens)}  median: ${median(tokens).toFixed(0)}`)
+    console.log(
+      `    └ avg: ${average(tokens).toFixed(0)}  min: ${Math.min(...tokens)}  max: ${Math.max(...tokens)}  median: ${median(tokens).toFixed(0)}`,
+    )
   }
 
   // ── A4: Trace correlation rate ──
   const injTraceIds = extractTraceIds('memory.context.injected')
-  const withTrace = injTraceIds.filter(id => id.length > 0).length
-  const traceRate = injTraceIds.length > 0 ? (withTrace / injTraceIds.length * 100) : 0
+  const withTrace = injTraceIds.filter((id) => id.length > 0).length
+  const traceRate = injTraceIds.length > 0 ? (withTrace / injTraceIds.length) * 100 : 0
 
   // Cross-reference: how many model.invoked share those traceIds
   const modelTraceRows = events.exec(`SELECT DISTINCT trace_id FROM evaluation_events WHERE type = 'model.invoked'`)
-  const modelTraceIds = new Set(
-    (modelTraceRows.length ? modelTraceRows[0].values : []).map(r => String(r[0])),
-  )
-  const matchedTraces = injTraceIds.filter(id => modelTraceIds.has(id)).length
+  const modelTraceIds = new Set((modelTraceRows.length ? modelTraceRows[0].values : []).map((r) => String(r[0])))
+  const matchedTraces = injTraceIds.filter((id) => modelTraceIds.has(id)).length
 
   // 1:N ratio: model.invoked per injection traceId
   let modelPerTrace = 'N/A'
@@ -192,7 +184,7 @@ async function main() {
       GROUP BY e.trace_id
     `)
     if (modelCounts.length && modelCounts[0].values.length > 0) {
-      const counts = modelCounts[0].values.map(r => Number(r[1]))
+      const counts = modelCounts[0].values.map((r) => Number(r[1]))
       modelPerTrace = average(counts).toFixed(2)
     }
   }
@@ -207,9 +199,7 @@ async function main() {
     FROM evaluation_events
     WHERE type = 'memory.context.injected'
   `)
-  const uniqSess = uniqueSessions.length && uniqueSessions[0].values.length > 0
-    ? Number(uniqueSessions[0].values[0][0])
-    : 0
+  const uniqSess = uniqueSessions.length && uniqueSessions[0].values.length > 0 ? Number(uniqueSessions[0].values[0][0]) : 0
   console.log(`A5  unique sessions with injections                ${uniqSess}`)
 
   // ── A6: Injection coverage per run ──
@@ -219,9 +209,7 @@ async function main() {
   const allModelInvocations = count('model.invoked')
   // Unique traceIds from model.invoked approximates total run() calls
   const uniqueModelTraceCount = modelTraceIds.size
-  const coverageRatio = uniqueModelTraceCount > 0
-    ? pct(uniqueRunTraces, uniqueModelTraceCount)
-    : 'N/A'
+  const coverageRatio = uniqueModelTraceCount > 0 ? pct(uniqueRunTraces, uniqueModelTraceCount) : 'N/A'
   console.log(`A6  injection coverage ratio (runs with injection)  `)
   console.log(`    └ unique injection traceIds (≈ runs w/ inject): ${uniqueRunTraces}`)
   console.log(`    └ unique model.invoked traceIds  (≈ total runs): ${uniqueModelTraceCount}`)
@@ -244,7 +232,9 @@ async function main() {
   // B2: avg sourceSessions
   const srcCounts = extractNums('memory.context.injected', 'sourceCount')
   const avgSources = srcCounts.length > 0 ? average(srcCounts) : 0
-  console.log(`B2  avg sourceSessions per injection                ${avgSources.toFixed(2)} (min: ${srcCounts.length > 0 ? Math.min(...srcCounts) : 'N/A'}, max: ${srcCounts.length > 0 ? Math.max(...srcCounts) : 'N/A'})`)
+  console.log(
+    `B2  avg sourceSessions per injection                ${avgSources.toFixed(2)} (min: ${srcCounts.length > 0 ? Math.min(...srcCounts) : 'N/A'}, max: ${srcCounts.length > 0 ? Math.max(...srcCounts) : 'N/A'})`,
+  )
 
   // B3: injected vs skipped — requires cross-session analysis, not available in Phase 3
   console.log(`B3  injected vs skipped response diff              ⏸ DEFERRED (Phase 4)`)

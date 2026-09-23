@@ -17,9 +17,7 @@ const path = require('path')
 const fs = require('fs')
 
 const repo = path.resolve(__dirname, '..')
-const distDir = process.env.MIO_DIST_DIR
-  ? path.resolve(process.env.MIO_DIST_DIR)
-  : path.join(repo, 'dist-electron')
+const distDir = process.env.MIO_DIST_DIR ? path.resolve(process.env.MIO_DIST_DIR) : path.join(repo, 'dist-electron')
 const outPng = process.argv[2] || path.join(repo, '.launch-capture', 'screen-exe.png')
 const waitMs = Number(process.argv[3] || 18000)
 
@@ -80,9 +78,7 @@ Write-Output ("saved " + $b.Width + "x" + $b.Height)
 function logDirs() {
   // Git Bash 里根本没有 APPDATA 这个环境变量，必须用 USERPROFILE 兜底，
   // 否则下面所有候选目录都不存在，日志永远读不到（会误判成"exe 没写日志"）
-  const appData =
-    process.env.APPDATA ||
-    (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, 'AppData', 'Roaming') : '')
+  const appData = process.env.APPDATA || (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, 'AppData', 'Roaming') : '')
   if (!appData) return []
   const names = ['akemi-mio', 'AkemiMio', 'Electron']
   const dirs = []
@@ -124,11 +120,7 @@ setTimeout(() => {
   const collected = newestLog()
   const fresh = collected.file && collected.mtime > baseline.mtime
   const dest = path.join(repo, '.launch-exe.log')
-  fs.writeFileSync(
-    dest,
-    collected && collected.text ? collected.text : '(no app log found)\n',
-    'utf8',
-  )
+  fs.writeFileSync(dest, collected && collected.text ? collected.text : '(no app log found)\n', 'utf8')
 
   try {
     execFileSync('taskkill', ['/IM', 'AkemiMio.exe', '/F', '/T'], { encoding: 'utf8' })

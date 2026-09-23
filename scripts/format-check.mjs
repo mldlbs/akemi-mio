@@ -14,7 +14,10 @@ import path from 'node:path'
 
 const require = createRequire(import.meta.url)
 
-const GLOB = 'src/**/*.{ts,tsx,json,css}'
+// 2026-09-23：扩围到 scripts/（此前只查 src/，23 个门禁脚本自身的格式漂移
+// 从未被守）。_archive/ 是归档目录（含大量故意保留的历史脚本），豁免。
+const GLOBS = ['src/**/*.{ts,tsx,json,css}', 'scripts/**/*.{js,mjs,cjs}', '!scripts/_archive/**']
+const GLOB_LABEL = GLOBS.join(' ')
 const MAX_DETAIL = 50
 const inActions = process.env.GITHUB_ACTIONS === 'true'
 
@@ -39,7 +42,7 @@ let stdout = ''
 let stderr = ''
 let status = 0
 try {
-  stdout = execFileSync(process.execPath, [prettierBin(), '--check', GLOB], {
+  stdout = execFileSync(process.execPath, [prettierBin(), '--check', ...GLOBS], {
     cwd: process.cwd(),
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -75,7 +78,7 @@ if (status !== 1 || lines.length === 0) {
   process.exit(2)
 }
 
-console.error(`--- prettier --check ${GLOB} (${lines.length} 个文件未格式化) ---`)
+console.error(`--- prettier --check ${GLOB_LABEL} (${lines.length} 个文件未格式化) ---`)
 for (const file of lines.slice(0, MAX_DETAIL)) {
   console.error(inActions ? `::error::${file} 未按 Prettier 格式化` : `${file} 未按 Prettier 格式化`)
 }

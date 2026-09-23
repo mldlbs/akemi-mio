@@ -17,9 +17,9 @@ const program = ts.createProgram({
     noEmit: true,
     baseUrl: '.',
     paths: {
-      '@/*': ['./src/*']
-    }
-  }
+      '@/*': ['./src/*'],
+    },
+  },
 })
 
 const diagnostics = ts.getPreEmitDiagnostics(program)

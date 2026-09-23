@@ -185,7 +185,9 @@ function main() {
     let adopted = 0
     for (const name of expected) {
       if (remoteShas[name] && remoteShas[name] !== refs[name]) {
-        log(`  ${opts.remote}/${name}: FETCH_HEAD had ${refs[name].slice(0, 10)}, remote has ${remoteShas[name].slice(0, 10)} — using remote`)
+        log(
+          `  ${opts.remote}/${name}: FETCH_HEAD had ${refs[name].slice(0, 10)}, remote has ${remoteShas[name].slice(0, 10)} — using remote`,
+        )
         refs[name] = remoteShas[name]
         adopted += 1
       }
@@ -289,7 +291,7 @@ function main() {
   const looseAfter = countRefs(refDir)
   log(
     `\nRepaired and packed. git resolves all ${expected.length} ref(s); ` +
-      `loose files under refs/remotes/${opts.remote}/: ${looseAfter}; fsck clean.`
+      `loose files under refs/remotes/${opts.remote}/: ${looseAfter}; fsck clean.`,
   )
   log('A subsequent plain `git fetch` may empty the loose refs again, but the packed copies keep working.')
   process.exit(0)

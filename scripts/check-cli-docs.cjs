@@ -56,14 +56,17 @@ const SAFE_ARGS = {
 
 // A minimal MCP handshake. `mio mcp` reads stdin until EOF and then exits, so
 // spawnSync can drive it without a wait-and-kill dance.
-const MCP_HANDSHAKE = [
-  JSON.stringify({
-    jsonrpc: '2.0', id: 1, method: 'initialize',
-    params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'doc-gate', version: '1' } },
-  }),
-  JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
-  JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
-].join('\n') + '\n'
+const MCP_HANDSHAKE =
+  [
+    JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'doc-gate', version: '1' } },
+    }),
+    JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+    JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+  ].join('\n') + '\n'
 const TIMEOUT_MS = 20000
 
 // A command that hits the timeout is retried once with a much longer budget.
@@ -106,10 +109,7 @@ function parseCommands(block) {
 }
 
 function isUnknown(output) {
-  return (
-    output.includes('Unknown command') ||
-    (output.includes('Unknown ') && output.includes('subcommand:'))
-  )
+  return output.includes('Unknown command') || (output.includes('Unknown ') && output.includes('subcommand:'))
 }
 
 // Probes a command that never exits on its own. Returns null when it behaved,
@@ -117,7 +117,9 @@ function isUnknown(output) {
 function probeSpecial(command) {
   if (command === 'observe') {
     const r = spawnSync(process.execPath, [CLI, 'observe', '--status'], {
-      encoding: 'utf8', env, timeout: TIMEOUT_MS,
+      encoding: 'utf8',
+      env,
+      timeout: TIMEOUT_MS,
     })
     if (r.error) return String(r.error.message || r.error)
     const out = `${r.stdout || ''}${r.stderr || ''}`
@@ -127,12 +129,13 @@ function probeSpecial(command) {
 
   if (command === 'mcp') {
     const r = spawnSync(process.execPath, [CLI, 'mcp'], {
-      encoding: 'utf8', env, timeout: TIMEOUT_MS, input: MCP_HANDSHAKE,
+      encoding: 'utf8',
+      env,
+      timeout: TIMEOUT_MS,
+      input: MCP_HANDSHAKE,
     })
     if (r.error) return String(r.error.message || r.error)
-    const line = (r.stdout || '')
-      .split('\n')
-      .find((l) => l.trim().startsWith('{') && l.includes('"id":2'))
+    const line = (r.stdout || '').split('\n').find((l) => l.trim().startsWith('{') && l.includes('"id":2'))
     if (!line) return 'mio mcp never answered tools/list'
     try {
       const tools = JSON.parse(line).result.tools
@@ -219,9 +222,7 @@ for (const { raw, command, sub } of commands) {
   if (marker) {
     drift.push({
       raw,
-      message: `crashes instead of reporting a usage problem [${marker}]: ${
-        output.trim().split('\n')[0].slice(0, 120)
-      }`,
+      message: `crashes instead of reporting a usage problem [${marker}]: ${output.trim().split('\n')[0].slice(0, 120)}`,
     })
   }
 }

@@ -16,7 +16,7 @@ function walk(dir) {
 // Restore Q01 if missing
 const q01 = 'docs/golden/analysis/Q01.json'
 if (!fs.existsSync(q01)) {
-  const bak = fs.readdirSync('docs/golden/analysis').find(f => f.includes('Q01') && f !== 'Q01.json')
+  const bak = fs.readdirSync('docs/golden/analysis').find((f) => f.includes('Q01') && f !== 'Q01.json')
   if (bak) {
     const src = path.join('docs/golden/analysis', bak)
     fs.copyFileSync(src, q01)
@@ -29,7 +29,7 @@ if (!fs.existsSync(q01)) {
 
 // Regenerate manifest
 const files = walk('docs/golden')
-const cases = files.map(f => {
+const cases = files.map((f) => {
   const d = JSON.parse(fs.readFileSync(f, 'utf8'))
   return { caseId: d.caseId, category: path.basename(path.dirname(f)) }
 })

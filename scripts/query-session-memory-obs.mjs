@@ -40,14 +40,12 @@ async function main() {
 
   // Migration status
   const migrations = main.exec('SELECT version FROM _migrations ORDER BY version')
-  const mVersions = migrations.length ? migrations[0].values.map(r => r[0]) : []
+  const mVersions = migrations.length ? migrations[0].values.map((r) => r[0]) : []
   console.log(`  Migrations applied: ${mVersions.length} total`)
   console.log(`  Migration v41: ${mVersions.includes(41) ? '✅' : '❌'}`)
 
   // Table exists
-  const hasTable = main.exec(
-    `SELECT name FROM sqlite_master WHERE type='table' AND name='session_compactions'`
-  )
+  const hasTable = main.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name='session_compactions'`)
   console.log(`  session_compactions table: ${hasTable.length && hasTable[0].values.length > 0 ? '✅' : '❌'}`)
 
   // Row count
@@ -61,7 +59,7 @@ async function main() {
       const summary = main.exec(
         `SELECT session_id, message_count, importance_score, topics, source,
                 session_start_at, session_end_at, created_at, trigger_reason
-         FROM session_compactions ORDER BY created_at DESC`
+         FROM session_compactions ORDER BY created_at DESC`,
       )
       if (summary.length && summary[0].values.length > 0) {
         console.log('')
@@ -71,9 +69,13 @@ async function main() {
         for (const row of summary[0].values) {
           const [sid, msgCnt, imp, topicsJson, source, startAt, endAt, , triggerReason] = row
           let topics = ''
-          try { topics = JSON.parse(topicsJson).slice(0, 3).join(', ') } catch {}
+          try {
+            topics = JSON.parse(topicsJson).slice(0, 3).join(', ')
+          } catch {}
           const dur = ((endAt - startAt) / 60000).toFixed(0)
-          console.log(`  ${String(sid).padEnd(30)} ${String(msgCnt).padEnd(5)} ${imp.toFixed(2)}  ${topics.padEnd(19)} ${String(source).padEnd(8)} ${String(triggerReason).padEnd(19)} ${dur}min`)
+          console.log(
+            `  ${String(sid).padEnd(30)} ${String(msgCnt).padEnd(5)} ${imp.toFixed(2)}  ${topics.padEnd(19)} ${String(source).padEnd(8)} ${String(triggerReason).padEnd(19)} ${dur}min`,
+          )
         }
       }
     }
@@ -105,10 +107,18 @@ async function main() {
   console.log('')
   console.log('  Target                          Current   Status')
   console.log('  ─────────────────────────────── ───────── ──────')
-  console.log(`  Compaction count ≥ 1              ${main.exec('SELECT COUNT(*) FROM session_compactions')[0].values[0][0]}        ${main.exec('SELECT COUNT(*) FROM session_compactions')[0].values[0][0] >= 1 ? '✅' : '⏳'}`)
-  console.log(`    ├ observation_threshold         ${main.exec("SELECT COUNT(*) FROM session_compactions WHERE trigger_reason = 'observation_threshold'")[0].values[0][0]}`)
-  console.log(`    ├ production_threshold          ${main.exec("SELECT COUNT(*) FROM session_compactions WHERE trigger_reason = 'production_threshold'")[0].values[0][0]}`)
-  console.log(`    └ idle                          ${main.exec("SELECT COUNT(*) FROM session_compactions WHERE trigger_reason = 'idle'")[0].values[0][0]}`)
+  console.log(
+    `  Compaction count ≥ 1              ${main.exec('SELECT COUNT(*) FROM session_compactions')[0].values[0][0]}        ${main.exec('SELECT COUNT(*) FROM session_compactions')[0].values[0][0] >= 1 ? '✅' : '⏳'}`,
+  )
+  console.log(
+    `    ├ observation_threshold         ${main.exec("SELECT COUNT(*) FROM session_compactions WHERE trigger_reason = 'observation_threshold'")[0].values[0][0]}`,
+  )
+  console.log(
+    `    ├ production_threshold          ${main.exec("SELECT COUNT(*) FROM session_compactions WHERE trigger_reason = 'production_threshold'")[0].values[0][0]}`,
+  )
+  console.log(
+    `    └ idle                          ${main.exec("SELECT COUNT(*) FROM session_compactions WHERE trigger_reason = 'idle'")[0].values[0][0]}`,
+  )
   console.log(`  Session switches ≥ 20            ${sessCount[0].values[0][0]}        ${sessCount[0].values[0][0] >= 20 ? '✅' : '⏳'}`)
   console.log(`  Memory failures = 0              —        ⏳`)
   console.log(`  Runtime regression = 0           —        ⏳`)

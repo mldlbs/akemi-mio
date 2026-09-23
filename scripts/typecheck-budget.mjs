@@ -16,11 +16,11 @@ const CONFIGS = ['tsconfig.node.json', 'tsconfig.web.json']
 function countErrors(config) {
   let output = ''
   try {
-    output = execFileSync(
-      process.execPath,
-      [require.resolve('typescript/bin/tsc'), '--noEmit', '-p', config],
-      { cwd: process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-    )
+    output = execFileSync(process.execPath, [require.resolve('typescript/bin/tsc'), '--noEmit', '-p', config], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
   } catch (err) {
     output = String(err.stdout || '') + String(err.stderr || '')
   }
