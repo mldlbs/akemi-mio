@@ -186,11 +186,11 @@ function main() {
   const retrievedCount = retrievedEvents.length
   console.log(`  Retrieved events:       ${retrievedCount}`)
 
-  let factorsPresent = { recency: false, frequency: false, importance: false, attention: false }
+  const factorsPresent = { recency: false, frequency: false, importance: false, attention: false }
   let factorStatCollector = { recency: [], frequency: [], importance: [], attention: [] }
 
   if (retrievedCount > 0) {
-    let recencyVals = [],
+    const recencyVals = [],
       freqVals = [],
       importanceVals = [],
       attentionVals = []

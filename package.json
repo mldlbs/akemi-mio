@@ -19,6 +19,7 @@
     "test:stress": "vitest run .stress.test .benchmark.test endurance.test baseline.test",
     "typecheck:budget": "node scripts/typecheck-budget.mjs --budget 0",
     "lint": "eslint src/ --ext .ts,.tsx",
+    "lint:scripts": "eslint \"scripts/**/*.cjs\" \"scripts/**/*.mjs\" \"scripts/**/*.js\" --max-warnings 23",
     "format": "prettier --write \"src/**/*.{ts,tsx,json,css}\" \"scripts/**/*.{js,mjs,cjs}\" \"!scripts/_archive/**\"",
     "format:check": "node scripts/format-check.mjs",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",

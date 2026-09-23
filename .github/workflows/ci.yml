@@ -51,8 +51,17 @@ jobs:
       - name: Lint
         run: npx eslint src/ --ext .ts,.tsx --max-warnings 130
 
+      # Same ratchet discipline as above, separate count. _archive/ is ignored
+      # in eslint.config.mjs. Current count is 23 (17 no-unused-vars +
+      # 6 no-useless-assignment); only ever lower it deliberately.
+      - name: Lint scripts
+        run: npm run lint:scripts
+
+      # Goes through scripts/format-check.mjs (not bare prettier): the wrapper
+      # covers scripts/ as well and turns each violation into a ::error::
+      # annotation visible on the run page (job logs need admin to download).
       - name: Format check
-        run: npx prettier --check "src/**/*.{ts,tsx,json,css}"
+        run: npm run format:check
 
       - name: mio-agent-runtime syntax gate
         run: npm run check --workspace mio-agent-runtime

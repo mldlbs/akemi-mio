@@ -31,6 +31,8 @@ function prettierBin() {
 }
 
 // 非 TTY 下 prettier 一般不着色，但本地/CI 都别赌这个。
+// \u001B 是 ANSI 转义前缀——这个正则的存在意义就是匹配控制字符，故豁免 no-control-regex。
+// eslint-disable-next-line no-control-regex
 const stripAnsi = (s) => s.replace(/\u001B\[[0-9;]*m/g, '')
 
 // prettier 的 --check 会为每个不合规文件打一行 `[warn] <相对路径>`，

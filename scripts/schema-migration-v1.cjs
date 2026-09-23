@@ -39,7 +39,7 @@ types = types.replace('Level 2 diff governed by RegressionPolicy.', 'Level 2 gov
 
 // Remove Level 2 section
 types = types.replace(
-  /\n\/\/ ═══════════════════════════════════════════════════════\n\/\/  Level 2: LLM Response Snapshot \(non-deterministic, future\)[\s\S]*?\/\/ ═══════════════════════════════════════════════════════\n\n/,
+  /\n\/\/ ═══════════════════════════════════════════════════════\n\/\/ {2}Level 2: LLM Response Snapshot \(non-deterministic, future\)[\s\S]*?\/\/ ═══════════════════════════════════════════════════════\n\n/,
   '\n',
 )
 
@@ -53,7 +53,7 @@ types = types.replace(/changelog: GoldenRevisionEntry\[\]/, 'revisionHistory: Go
 
 // Remove level2 from GoldenCase
 types = types.replace(
-  /  \/\*\*\n   \* Level 2: LLM response\.\n   \* @future — null in v0\.[\s\S]*?level2: (GoldenResponseSnapshot \| null)\n\n/,
+  / {2}\/\*\*\n {3}\* Level 2: LLM response\.\n {3}\* @future — null in v0\.[\s\S]*?level2: (GoldenResponseSnapshot \| null)\n\n/,
   '',
 )
 

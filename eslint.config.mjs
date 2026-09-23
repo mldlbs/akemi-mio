@@ -53,6 +53,15 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['dist-electron/', 'out/', 'node_modules/', '*.js', '*.cjs', '*.mjs'],
+    ignores: [
+      'dist-electron/',
+      'out/',
+      'node_modules/',
+      // 归档目录：故意保留的历史脚本（含语法非法的），不参与任何门禁
+      'scripts/_archive/',
+      '*.js',
+      '*.cjs',
+      '*.mjs',
+    ],
   },
 )
