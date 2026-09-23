@@ -159,6 +159,12 @@ test('task subcommand validates its arguments', () => {
   const unknown = run(ws.cwd, ws.env, ['task', 'bogus'])
   assert.equal(unknown.status, 1)
   assert.match(unknown.stderr, /Unknown task subcommand: bogus/)
+  // Naming the bad subcommand is not enough: with no usage block there is
+  // nothing left to find the right one in. It goes to stderr, so stdout stays
+  // empty and a `--json` caller never receives usage text where it expects JSON.
+  assert.match(unknown.stderr, /Usage:/)
+  assert.match(unknown.stderr, /mio task route/)
+  assert.equal(unknown.stdout, '')
 
   const noTask = run(ws.cwd, ws.env, ['task', 'route'])
   assert.equal(noTask.status, 1)

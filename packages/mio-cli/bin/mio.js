@@ -226,12 +226,12 @@ const EVOLUTION_SUBCOMMANDS = {
   migration: ['plan'],
 }
 
-// Usage goes to stderr when the call failed, and to stdout only when it was
-// asked for (`mio evolution --help`). On failure stdout has to stay empty:
-// otherwise `mio --json evolution shadow record` prints usage text where the
-// caller is parsing JSON, and the caller reads that as a broken response
-// instead of "you left an argument out".
-function evolutionUsage(write = console.error) {
+// Usage defaults to stdout because that is where `--help` belongs; the failure
+// paths pass console.error explicitly. On failure stdout has to stay empty:
+// otherwise `mio --json <cmd>` prints usage text where the caller is parsing
+// JSON, and the caller reads that as a broken response instead of "you left an
+// argument out".
+function evolutionUsage(write = console.log) {
   write(`Usage:
   mio evolution status                    Show composed evolution module health
   mio evolution report                    Cross-agent evolution report (--period 24h|7d|30d|all)
@@ -266,12 +266,12 @@ Examples:
 async function evolutionCommand(args, useJson) {
   const sub = args[1]
   if (!sub) {
-    evolutionUsage()
+    evolutionUsage(console.error)
     process.exitCode = 1
     return
   }
   if (sub === 'help' || sub === '--help' || sub === '-h') {
-    evolutionUsage(console.log)
+    evolutionUsage()
     return
   }
   if (sub === 'status') return evolutionStatus(useJson)
@@ -280,14 +280,14 @@ async function evolutionCommand(args, useJson) {
   const subcommands = EVOLUTION_SUBCOMMANDS[sub]
   if (!subcommands) {
     console.error(`Unknown evolution subcommand: ${sub}`)
-    evolutionUsage()
+    evolutionUsage(console.error)
     process.exitCode = 1
     return
   }
   if (!subcommands.includes(args[2] || null)) {
     const wanted = subcommands.map((name) => `'${name}'`).join(' or ')
     console.error(`mio evolution ${sub} needs ${wanted}`)
-    evolutionUsage()
+    evolutionUsage(console.error)
     process.exitCode = 1
     return
   }
@@ -360,7 +360,7 @@ async function evolutionCommand(args, useJson) {
     console.error(error.message || error)
     // A missing or malformed required argument is the common failure here, and
     // the raw message (`--legacy is required`) never says it has to be JSON.
-    evolutionUsage()
+    evolutionUsage(console.error)
     process.exitCode = 1
     return
   }
@@ -2678,10 +2678,8 @@ function printEvaluation(result) {
   }
 }
 
-function phase0Command(args, useJson) {
-  const sub = args[1]
-  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
-    console.log(`Usage:
+function phase0Usage(write = console.log) {
+  write(`Usage:
   mio phase0 report              Show the Phase 0 validation report (memory/trace/reuse evidence)
   mio phase0 report --format markdown   Render as Markdown
   mio phase0 report --json      Machine-readable report (same shape as mio.phase0.report)
@@ -2689,11 +2687,18 @@ function phase0Command(args, useJson) {
 Options:
   --project name     Project filter (defaults to the current directory name)
   --format markdown  Human-readable Markdown instead of JSON`)
+}
+
+function phase0Command(args, useJson) {
+  const sub = args[1]
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    phase0Usage()
     if (!sub) process.exitCode = 1
     return
   }
   if (sub !== 'report') {
     console.error(`Unknown phase0 subcommand: ${sub}`)
+    phase0Usage(console.error)
     process.exitCode = 1
     return
   }
@@ -2717,21 +2722,26 @@ Options:
   console.log(renderPhase0Markdown(report))
 }
 
-function hostCommand(args, useJson) {
-  const sub = args[1]
-  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
-    console.log(`Usage:
+function hostUsage(write = console.log) {
+  write(`Usage:
   mio host capabilities       Show what each host supports and whether it is installed
   mio host capabilities --json   Machine-readable (same shape as mio.host.capabilities)
 
 Notes:
   "installed" is probed live from each adapter, so it reflects this machine right
   now -- unlike \`mio install <host>\`, which only records intent in config.json.`)
+}
+
+function hostCommand(args, useJson) {
+  const sub = args[1]
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    hostUsage()
     if (!sub) process.exitCode = 1
     return
   }
   if (sub !== 'capabilities') {
     console.error(`Unknown host subcommand: ${sub}`)
+    hostUsage(console.error)
     process.exitCode = 1
     return
   }
@@ -2831,10 +2841,8 @@ function recordOutcomeCommand(args, useJson) {
   if (result.autoClaims) console.log(`  auto-claims: ${result.autoClaims.length}`)
 }
 
-function taskCommand(args, useJson) {
-  const sub = args[1]
-  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
-    console.log(`Usage:
+function taskUsage(write = console.log) {
+  write(`Usage:
   mio task route "<task>"     Which verified experiences apply to this task
   mio task route "<task>" --json    Machine-readable (same shape as mio.task.route)
 
@@ -2844,6 +2852,12 @@ Options:
   --limit N          Max routes (1-10, default 5)
 
 This is read-only: unlike the MCP call it does not write to the query log.`)
+}
+
+function taskCommand(args, useJson) {
+  const sub = args[1]
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    taskUsage()
     if (!sub) process.exitCode = 1
     return
   }
@@ -2853,6 +2867,7 @@ This is read-only: unlike the MCP call it does not write to the query log.`)
 
   if (sub !== 'route') {
     console.error(`Unknown task subcommand: ${sub}`)
+    taskUsage(console.error)
     process.exitCode = 1
     return
   }
