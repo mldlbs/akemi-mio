@@ -33,12 +33,12 @@ mio agents register --agent-id X   Register an observed agent (--yes to apply; p
 mio agents evaluation       ADR-017 evaluation metrics: route adoption, behaviour change, recall quality, data hygiene (--project X, --since ISO)
 mio evolution status        Show composed evolution module health
 mio evolution report        Cross-agent evolution report: ecosystem, agents, memory health, suggestions (--period 24h|7d|30d|all)
-mio evolution shadow record      Record a shadow comparison sample
-mio evolution dual-write record  Record a dual-write comparison sample
-mio evolution cutover readiness   Assess shadow/dual-write cutover readiness
-mio evolution authority plan      Preview a gated authority switch plan
-mio evolution migration plan      Preview state migration diffs
-mio evolution cutover apply --dry-run   Dry-run a cutover plan without switching authority
+mio evolution shadow record      Record a shadow comparison sample (--legacy/--modular JSON; both required)
+mio evolution dual-write record  Record a dual-write comparison sample (--legacy-result/--modular-result JSON; required)
+mio evolution cutover readiness   Assess shadow/dual-write cutover readiness (--min-shadow-runs/--max-mismatch-rate)
+mio evolution authority plan      Preview a gated authority switch plan (--readiness JSON; required)
+mio evolution migration plan      Preview state migration diffs (--legacy-records/--modular-records JSON; required)
+mio evolution cutover apply --dry-run   Dry-run a cutover plan (--plan JSON and --dry-run are both required)
 mio observe                 Watch WorkBuddy transcripts and auto-ingest task outcomes (foreground)
 mio observe --start|--stop|--status|--once   Manage the background observer daemon
 mio recall "<query>"        Search Mio memory from the terminal (--project/--scope/--kind/--tags/--limit)
@@ -461,7 +461,7 @@ mio observer trends --base-dir /path/to/.local/observer
 说明：
 
 - **两者都委托给与 MCP 服务端完全相同的共享实现** —— `server/insight-store.js` 与 `server/observer-store.js`。这是 `memory-store.js` / `experience-store.js` / `policy-store.js` / `creativity-engine.js` / `agent-store.js` 一路沿用的同一个模式：一份实现、两个入口，因此不可能各自漂移。
-- **只有 `insight generate` 仍是 MCP 专有**（`mio.insight.generate`）：它要调 LLM，CLI 把它当作未知子命令拒绝。`observer collect` / `observer ferment` 此前也被一起挡在 CLI 之外，理由是「它们属于 daemon」——这个理由不成立：`observe/observer.js` 那条 daemon 只 tail WorkBuddy 的 transcript，从不调用这两者。现在它们有了终端入口，默认走全部已配置源：
+- **`insight generate` 曾经是 MCP 专有**（`mio.insight.generate`）：它要调 LLM，CLI 一度把它当作未知子命令拒绝——现在四个 `insight` 子命令在终端上都有入口；`--memory` 与 `--summary` 至少给一个，否则在**任何 LLM 调用之前**就拒绝。`observer collect` / `observer ferment` 此前也被一起挡在 CLI 之外，理由是「它们属于 daemon」——这个理由不成立：`observe/observer.js` 那条 daemon 只 tail WorkBuddy 的 transcript，从不调用这两者。现在它们有了终端入口，默认走全部已配置源：
 
   ```bash
   mio observer collect                                  # 全部已配置源
@@ -509,6 +509,70 @@ Note: this advances the cursor; the next digest returns only newer events.
 - **数据位置不同，这是有意的。** 洞察存储在 `<MIO_HOME>/insights/insights.json`，与 `mio recall` / `mio policy check` 同处全局 `MIO_HOME`；观察研究管线则是按项目的，默认 `<cwd>/.local/observer`（与 MCP 服务端的默认值一致），可用 `--base-dir` 覆盖。
 - **`@akemi-mio/insight` 是可选依赖。** 未安装时 `mio insight status` 会失败并提示 `@akemi-mio/insight not installed`，而不是报告一个「看起来没有洞察」的全零结果——全零会掩盖「引擎根本没装」这件事。
 - **观察管线的空目录是正常状态。** 管线没跑过时，`observer status` 各阶段计数为 0 并提示 "No pipeline data yet."，其余视图显示 "No ... found."，都是有效输出而非错误。
+
+## 演化（evolution）
+
+`mio.evolution.*` 一族也是「一份实现、两个入口」，但它和前面几节有一处形态差异：
+**参数是内联的 JSON 快照，不是文件路径。** 这是这一族最常被误用的地方——`--legacy` 指的是
+「旧实现这次跑出来的结果」，不是某个待读取的文件。
+
+```bash
+mio evolution status
+mio evolution report --period 7d
+
+# 影子比对：把「旧实现」和「模块化实现」各自的输出喂进来做深比较
+mio evolution shadow record --legacy '{"modules":7}' --modular '{"modules":7}'
+mio evolution shadow record --project akemi-mio --label "status parity" \
+  --legacy '{"modules":7}' --modular '{"modules":9}'
+
+# 双写样本：--authoritative 声明谁是权威（省略即 legacy），两边各给一份写入结果
+mio evolution dual-write record --authoritative legacy \
+  --legacy-result '{"id":"mem-1","ok":true}' \
+  --modular-result '{"id":"mem-1","ok":true}'
+
+# 就绪度读的是上面两个台账，不是你「觉得」跑了几次
+mio evolution cutover readiness
+mio evolution cutover readiness --min-shadow-runs 5 --max-mismatch-rate 0.1
+```
+
+```text
+Shadow comparison shadow_1789912345678_ab12cd: mismatch
+diffs=1
+
+Cutover readiness for akemi-mio: fail
+shadow=2 dual-write=0
+reasons: shadow samples 2/5; shadow mismatch rate 0.5; dual-write has no samples
+```
+
+各子命令的参数：
+
+| 子命令 | 必填 | 可选 |
+|---|---|---|
+| `status` | 无 | 无 |
+| `report` | 无 | `--period`（`24h` / `7d` / `30d` / `all`）、`--project` |
+| `shadow record` | `--legacy <json>`、`--modular <json>` | `--project`、`--label`、`--input <json>` |
+| `dual-write record` | `--legacy-result <json>`、`--modular-result <json>` | `--authoritative`（`legacy` 或 `modular`，默认 `legacy`）、`--project`、`--label`、`--record <json>` |
+| `cutover readiness` | 无 | `--project`、`--min-shadow-runs N`、`--max-mismatch-rate N` |
+| `authority plan` | `--readiness <json>` | `--from`、`--to` |
+| `migration plan` | `--legacy-records <json>`、`--modular-records <json>` | 无 |
+| `cutover apply` | `--dry-run` **和** `--plan <json>` | `--project` |
+
+说明：
+
+- **缺参时这一族的报错比其他命令简略：只打印一行 `--legacy is required`，没有用法、也没有示例。**
+  它不是崩溃——退出码是 1，什么都没写。值不是合法 JSON 时同理，报 `--legacy must be valid JSON`。
+  必填项见上表。
+- **`cutover apply` 是 dry-run only，而且 `--dry-run` 必须显式写上。** 只给 `--plan` 会被拒绝
+  （`authority switch apply is dry-run only; pass dryRun: true ...`），只给 `--dry-run` 则报
+  `--plan is required`。它**不会真的切换权威**，返回里 `applied` 恒为 `false`。
+- **记样本会立刻影响 `cutover readiness`。** 记录落在 `<MIO_HOME>/evolution_shadow.jsonl` 与
+  `<MIO_HOME>/evolution_dual_write.jsonl`，`readiness` 读的就是这两个文件，所以**别拿测试数据
+  往真实 `MIO_HOME` 里写**：`shadow mismatch rate` 会被污染，之后真正的切换判据跟着失真。
+  想试跑就把 `MIO_HOME` 指到临时目录。
+- 两边深比较相等 → `matched`；不等 → `mismatch` 并给出 `diffs=N`。
+- `--project` 省略时取当前 git 仓库名，与 `mio recall` / `mio policy check` 的默认口径一致。
+- **`--json` 是全局 flag，必须写在子命令前面**：`mio --json evolution cutover readiness`。
+  写在后面不生效。
 
 ## Agent
 

@@ -94,7 +94,7 @@ mio observe --start        # 后台被动观察，自动沉淀任务结果到记
 mio recall "上次失败的根因"   # 从终端检索 Mio 记忆
 ```
 
-CLI 暴露 47 个 MCP 工具，覆盖记忆、观察管线、洞察自省、创意引擎与演化（evolution）五大域；运行时依赖 9 个 `@akemi-mio/*` 包，详见 [`packages/mio-cli/README.md`](packages/mio-cli/README.md)。
+CLI 暴露 49 个 MCP 工具，覆盖记忆、观察管线、洞察自省、创意引擎与演化（evolution）五大域；运行时依赖 9 个 `@akemi-mio/*` 包，详见 [`packages/mio-cli/README.md`](packages/mio-cli/README.md)。
 
 ## 模型权重
 
