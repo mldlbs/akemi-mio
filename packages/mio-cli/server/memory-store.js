@@ -286,16 +286,24 @@ function createMemoryStore(options = {}) {
     const scoreFor = (record) =>
       scoreRecord(record, query, project, evidence) +
       (scope === 'all' && isGlobalRecord(record) ? 0.5 : 0)
-    const results = readJsonl(memoryPath)
-      .filter((record) => record.archived !== true)
-      .filter((record) => matchesMemoryFilters(record, kind, tags))
-      .filter((record) => matchesProjectScope(record, project, scope))
-      .filter((record) => scoreFor(record) > 0)
-      .sort((a, b) => {
-        return scoreFor(b) - scoreFor(a)
-      })
+    // Score every candidate exactly once, then sort the scored pairs. Calling
+    // scoreFor() inside the comparator re-ran the whole tokenizer + CJK bigram
+    // scan O(n log n) times instead of O(n): measured on the real 1094-record
+    // store, one query invoked the scorer 6214 times (5.7x) and spent 84 ms of
+    // its 111 ms there. Sorting precomputed pairs is behaviour-identical --
+    // Array#sort is stable, so ties keep their original file order either way.
+    const scored = []
+    for (const record of readJsonl(memoryPath)) {
+      if (record.archived === true) continue
+      if (!matchesMemoryFilters(record, kind, tags)) continue
+      if (!matchesProjectScope(record, project, scope)) continue
+      const score = scoreFor(record)
+      if (score > 0) scored.push({ record, score })
+    }
+    const results = scored
+      .sort((a, b) => b.score - a.score)
       .slice(0, limit)
-      .map((record) => {
+      .map(({ record }) => {
         const ev = evidence.get(record.id)
         if (!ev) return record
         return {

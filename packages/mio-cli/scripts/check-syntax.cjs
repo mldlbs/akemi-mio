@@ -52,8 +52,22 @@ if (files.length === 0) {
 
 const failures = []
 for (const file of files) {
-  const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' })
-  if (result.status !== 0) {
+  // stdio[0] must not be a pipe. On Windows a piped stdin makes spawnSync fail
+  // with EBUSY before the child starts: status is null and stderr is empty, so
+  // every file reads as a syntax error and this gate is red 100% of the time.
+  // `node --check` never reads stdin, so 'ignore' costs nothing.
+  const result = spawnSync(process.execPath, ['--check', file], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  // "the checker did not run" and "the file does not parse" must stay separate:
+  // collapsing them is how a dead gate gets mistaken for a broken codebase.
+  if (result.error) {
+    failures.push({
+      file,
+      message: `could not run the syntax checker: ${result.error.code || result.error.message}`,
+    })
+  } else if (result.status !== 0) {
     failures.push({ file, message: (result.stderr || '').trim().split('\n')[0] })
   }
 }

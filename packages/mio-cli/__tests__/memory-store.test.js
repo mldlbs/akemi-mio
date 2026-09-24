@@ -157,3 +157,60 @@ test('CLI mio remember + mio recall round-trip against MIO_HOME', () => {
   const projectName = path.basename(cwd)
   assert.equal(payload.project, projectName)
 })
+
+// Regression guard for a real 4x slowdown: queryMemory used to call the scorer
+// from inside its sort comparator, so a query over N records invoked the scorer
+// O(N log N) times -- measured 6214 invocations for 1094 records on the real
+// store, 84 ms of a 111 ms query.
+//
+// The scorer reads Date.now() once per invocation (its recency boost), and a
+// read-only query has no other Date.now() call site, so the call count is a
+// faithful proxy for "how many times the scorer ran".
+test('queryMemory invokes the scorer at most once per record', () => {
+  const dataDir = tempDir('score-once')
+  const RECORDS = 120
+  const rows = []
+  for (let i = 0; i < RECORDS; i++) {
+    rows.push(
+      JSON.stringify({
+        id: 'mem_score_' + i,
+        timestamp: new Date(Date.UTC(2026, 0, 1 + (i % 300))).toISOString(),
+        kind: 'note',
+        content: 'renderer 形态窗口 性能 sharedtoken 第' + i + ' 条',
+        tags: ['perf'],
+        project: 'proj-a',
+        scope: 'project',
+        source: 'test-agent',
+      })
+    )
+  }
+  fs.writeFileSync(path.join(dataDir, 'memory.jsonl'), rows.join('\n') + '\n', 'utf8')
+
+  const store = makeStore(dataDir)
+  const realNow = Date.now
+  let nowCalls = 0
+  Date.now = () => {
+    nowCalls += 1
+    return realNow()
+  }
+  let result
+  try {
+    result = store.queryMemory({ query: 'renderer 形态窗口 性能', limit: 5 })
+  } finally {
+    Date.now = realNow
+  }
+
+  assert.equal(result.count, 5, 'the query itself must still work')
+
+  // Two branches on purpose. Without the first one, removing the recency boost
+  // would zero the counter and silently turn this guard into a no-op that
+  // passes no matter how much work the comparator does.
+  assert.ok(
+    nowCalls > 0,
+    'instrumentation is dead: the scorer never read Date.now(), so the bound below proves nothing'
+  )
+  assert.ok(
+    nowCalls <= RECORDS,
+    `scorer ran ${nowCalls} times for ${RECORDS} records -- work is happening inside the sort comparator`
+  )
+})

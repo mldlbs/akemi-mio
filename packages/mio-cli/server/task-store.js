@@ -224,13 +224,21 @@ function createTaskStore(options) {
     const scoreRelated = (record) =>
       scoreRecord(record, task, project, evidence) +
       (scope === 'all' && isGlobalRecord(record) ? 0.5 : 0)
-    const relatedMemories = memories
-      .filter((record) => !routedIds.has(record.id))
-      .filter((record) => matchesProjectScope(record, project, scope))
-      .filter((record) => scoreRelated(record) > 0)
-      .sort((a, b) => scoreRelated(b) - scoreRelated(a))
+    // Same shape as memory-store.queryMemory: score once, then sort the scored
+    // pairs. Scoring inside the comparator re-tokenized every candidate on every
+    // comparison, which is what made mio.task.route the slowest tool call
+    // (~100 ms median on a 1094-record store).
+    const scoredRelated = []
+    for (const record of memories) {
+      if (routedIds.has(record.id)) continue
+      if (!matchesProjectScope(record, project, scope)) continue
+      const score = scoreRelated(record)
+      if (score > 0) scoredRelated.push({ record, score })
+    }
+    const relatedMemories = scoredRelated
+      .sort((a, b) => b.score - a.score)
       .slice(0, Math.max(limit, 5))
-      .map((record) => {
+      .map(({ record }) => {
         const ev = evidence.get(record.id)
         return {
           id: record.id,
