@@ -93,8 +93,29 @@ function runHermes(args) {
 }
 
 function isInstalled() {
-  const out = runHermes(['mcp', 'list'])
-  return Boolean(out && out.indexOf(SERVER_NAME) !== -1)
+  // Read Hermes's own config instead of asking the binary. `hermes mcp list`
+  // costs ~1.8 s here (measured: Hermes is a packaged Python executable with a
+  // slow cold start), and listHostCapabilities() calls this once per host, so
+  // the moment the spawn started working again `mio.host.capabilities` went
+  // from ~3 ms to ~2 s. Hermes records registered MCP servers in config.yaml
+  // under `mcp_servers:`, so the file answers the same question in ~1 ms.
+  //
+  // Anchored on the YAML key rather than a plain substring: the config also
+  // contains the server script path, which includes "mio-intelligence-mcp" and
+  // would make a loose contains() report "installed" for a config that merely
+  // mentions the path.
+  //
+  // Trade-off, deliberately accepted: if a future Hermes stores MCP config
+  // somewhere this does not read, this reports false. That is no worse than
+  // what it did for a long time -- the spawn used to fail silently, so the
+  // answer was always false regardless.
+  const cfg = hermesConfigPath()
+  if (!fs.existsSync(cfg)) return false
+  try {
+    return new RegExp('^\\s*' + SERVER_NAME + '\\s*:', 'm').test(fs.readFileSync(cfg, 'utf8'))
+  } catch (_) {
+    return false
+  }
 }
 
 function install({ node, serverScript, home, workspace, project }) {
