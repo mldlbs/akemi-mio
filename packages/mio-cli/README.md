@@ -78,6 +78,25 @@ mio --json evolution status Machine-readable evolution module health
 mio --version                Print the version and exit (-V)
 ```
 
+## 输出流与退出码
+
+所有命令族共用同一套约定（12 个族一致，且每个族都有测试钉住）：
+
+| 情形 | stdout | stderr | 退出码 |
+|---|---|---|---|
+| 子命令写错 / 必填参数缺失 | **空** | 报错行 + 完整用法 | `1` |
+| 裸命令（如 `mio memory`） | 用法 | 空 | `1` |
+| `--help` | 用法 | 空 | `0` |
+
+- **失败时 stdout 必须为空**，因为 `mio --json` 的调用方读的是 stdout——用法文本落在那里
+  会被当成 payload 去解析。所以缺参时先给出原因（`--legacy is required`），紧接着把用法与
+  示例一起打到 stderr。
+- **裸命令不是错误**，只是"没说清要做什么"，所以用法走 stdout；但仍以 `1` 结束，
+  这样脚本不会把"什么都没做"当成成功。它打印的用法与 `<命令> --help` 完全相同，
+  区别只在退出码（`1` vs `0`）。
+- **例外**：`mio config` 与 `mio agents` 的裸命令是**真命令**（显示配置 / 列 agent），退出 `0`。
+- `mio help` 与 `<命令> --help` 都走 stdout 并退出 `0`。
+
 ## MCP 工具
 
 MCP 服务端在 5 大域共暴露 49 个工具：
@@ -560,7 +579,8 @@ reasons: shadow samples 2/5; shadow mismatch rate 0.5; dual-write has no samples
 说明：
 
 - **缺参时会先给出原因（`--legacy is required`），紧接着打印完整用法与示例**，包括「参数是内联
-  JSON」这件事。用法写到 stderr、stdout 保持为空——所以 `mio --json` 的调用方拿到的是空输出，
+  JSON」这件事。用法写到 stderr、stdout 保持为空（这是**全命令族的约定**，见上面
+  [输出流与退出码](#输出流与退出码) 一节）——所以 `mio --json` 的调用方拿到的是空输出，
   而不是把用法文本当成 JSON 去解析。值不是合法 JSON 时同理，报 `--legacy must be valid JSON`。
   子命令写漏了（如 `mio evolution cutover`）会明确说缺哪个：`needs 'readiness' or 'apply'`。
 - **`cutover apply` 是 dry-run only，而且 `--dry-run` 必须显式写上。** 只给 `--plan` 会被拒绝
