@@ -970,4 +970,4 @@ function createMemoryStore(options = {}) {
 
 // Module-level exports let sibling stores (e.g. experience-store.js) reuse the
 // same JSONL primitives instead of duplicating them and drifting apart.
-module.exports = { createMemoryStore, createId, readJsonl, appendJsonl, writeJsonl }
+module.exports = { createMemoryStore, createId, readJsonl, readJsonlCached, appendJsonl, writeJsonl }

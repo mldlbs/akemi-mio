@@ -18,7 +18,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { createId, readJsonl, appendJsonl, writeJsonl } = require('./memory-store.js')
+const { createId, readJsonlCached, appendJsonl, writeJsonl } = require('./memory-store.js')
 const { REUSE_STATUS_FILTERS } = require('./experience-store.js')
 const { createQueryLog } = require('./query-log.js')
 
@@ -112,7 +112,7 @@ function createTaskStore(options) {
     const scope = normalizeScope(args.scope)
     const limit = Math.min(Math.max(Number(args.limit) || 5, 1), 10)
 
-    const memories = readJsonl(memoryPath).filter((record) => record.archived !== true)
+    const memories = readJsonlCached(memoryPath).filter((record) => record.archived !== true)
     const memoryById = new Map(memories.map((record) => [record.id, record]))
     const evidence = loadEvidenceWeights()
 
@@ -131,7 +131,7 @@ function createTaskStore(options) {
     // experience. Confirming three records made the same route return 1. So
     // `count` is not a routing-quality signal until confirmations exist --
     // `gatedBy` below reports that distinction.
-    const reuseRecords = readJsonl(experienceReusePath)
+    const reuseRecords = readJsonlCached(experienceReusePath)
     const routeByMemory = new Map()
     for (const record of reuseRecords) {
       if (!REUSE_STATUS_FILTERS.verified(record)) continue
@@ -421,7 +421,7 @@ function createTaskStore(options) {
 
     // 3. Update agent registry
     const now = new Date().toISOString()
-    const agents = readJsonl(agentsPath)
+    const agents = readJsonlCached(agentsPath)
     const agent = agents.find((a) => a.agentId === agentId && a.project === project)
     if (agent) {
       agent.lastSeenAt = now
