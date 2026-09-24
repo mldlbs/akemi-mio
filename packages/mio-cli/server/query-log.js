@@ -12,9 +12,8 @@
 // mio-intelligence-mcp/index.js, one in task-store.js -- which had to be kept
 // equivalent by hand.
 
-const fs = require('fs')
 const path = require('path')
-const { readJsonl } = require('./memory-store.js')
+const { readJsonlCached, writeJsonl } = require('./memory-store.js')
 
 const MAX_RECENT_QUERIES = 200
 
@@ -31,7 +30,7 @@ function createQueryLog(options = {}) {
 
   function load() {
     const now = Date.now()
-    return readJsonl(queryPath)
+    return readJsonlCached(queryPath)
       .filter(
         (entry) =>
           entry &&
@@ -45,12 +44,7 @@ function createQueryLog(options = {}) {
 
   function persist(entries) {
     const limited = entries.slice(-MAX_RECENT_QUERIES)
-    fs.mkdirSync(dataDir, { recursive: true })
-    fs.writeFileSync(
-      queryPath,
-      limited.length > 0 ? limited.map((entry) => JSON.stringify(entry)).join('\n') + '\n' : '',
-      'utf8'
-    )
+    writeJsonl(queryPath, limited)
     return limited
   }
 

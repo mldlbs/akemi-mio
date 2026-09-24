@@ -12,7 +12,7 @@
 
 const path = require('path')
 
-const { readJsonl } = require('./memory-store.js')
+const { readJsonlCached } = require('./memory-store.js')
 
 // Outcomes that count against an action. `retry` is included because a retried
 // action is evidence the first attempt did not simply work.
@@ -139,7 +139,7 @@ function createPolicyStore(options = {}) {
     if (!action) throw new Error('policy.check requires action')
     const project = args.project || projectName()
     const actionTokens = tokenize(action)
-    const allTraces = readJsonl(tracePath)
+    const allTraces = readJsonlCached(tracePath)
     const scopedTraces = allTraces.filter(
       (event) => !(project && event.project && event.project !== project)
     )
@@ -186,7 +186,7 @@ function createPolicyStore(options = {}) {
       suggestion = 'Low historical risk. Proceed with normal checks.'
     }
     const evidence = loadEvidenceWeights()
-    const relatedMemories = readJsonl(memoryPath)
+    const relatedMemories = readJsonlCached(memoryPath)
       .filter((record) => scoreRecord(record, action, project, evidence) > 0)
       .sort(
         (a, b) => scoreRecord(b, action, project, evidence) - scoreRecord(a, action, project, evidence)

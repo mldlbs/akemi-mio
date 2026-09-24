@@ -12,7 +12,7 @@
 // unconfirmed auto-claims are otherwise invisible dead weight.
 
 const path = require('path')
-const { createId, readJsonl, appendJsonl, writeJsonl } = require('./memory-store.js')
+const { createId, readJsonlCached, appendJsonl, writeJsonl } = require('./memory-store.js')
 
 const REUSE_STATUS_FILTERS = Object.freeze({
   pending: (record) => record.source === 'auto_claim' && record.confirmed !== true,
@@ -64,7 +64,7 @@ function createExperienceStore(options = {}) {
     const targetAgent = String(args.targetAgent || '').trim().toLowerCase()
     const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 100)
 
-    let records = readJsonl(experiencePath)
+    let records = readJsonlCached(experiencePath)
     if (project) records = records.filter((record) => record.project === project)
     if (targetAgent) {
       records = records.filter(
@@ -116,7 +116,7 @@ function createExperienceStore(options = {}) {
     const confirmedBy = String(args.confirmedBy || 'agent').trim() || 'agent'
     const notes = args.notes ? String(args.notes).trim() : null
 
-    const records = readJsonl(experiencePath)
+    const records = readJsonlCached(experiencePath)
     const confirmedIds = []
     const confirmedRecords = []
     const notFound = []

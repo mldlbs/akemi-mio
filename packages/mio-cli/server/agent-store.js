@@ -13,7 +13,7 @@
 // agents.jsonl. `mio agents list` / `report` are about the latter.
 
 const path = require('path')
-const { createId, readJsonl, appendJsonl, writeJsonl } = require('./memory-store.js')
+const { createId, readJsonlCached, appendJsonl, writeJsonl } = require('./memory-store.js')
 
 function createAgentStore(options) {
   const dataDir = options.dataDir
@@ -26,7 +26,7 @@ function createAgentStore(options) {
 
   function listAgents(args = {}) {
     const project = args.project || null
-    let agents = readJsonl(agentsPath)
+    let agents = readJsonlCached(agentsPath)
     if (project) agents = agents.filter((a) => a.project === project)
     return {
       count: agents.length,
@@ -49,13 +49,13 @@ function createAgentStore(options) {
   function reportAgent(args = {}) {
     const targetAgent = args.agentId || null
     const project = args.project || projectName()
-    const agents = readJsonl(agentsPath)
+    const agents = readJsonlCached(agentsPath)
     const filtered = agents.filter(
       (a) => (!targetAgent || a.agentId === targetAgent) && (!project || a.project === project)
     )
-    const traces = readJsonl(tracePath)
-    const memories = readJsonl(memoryPath)
-    const reuses = readJsonl(experienceReusePath)
+    const traces = readJsonlCached(tracePath)
+    const memories = readJsonlCached(memoryPath)
+    const reuses = readJsonlCached(experienceReusePath)
     const reports = filtered.map((agent) => {
       const agentTraces = traces.filter((t) => t.agent === agent.agentId)
       const outcomes = agentTraces.filter((t) => t.event_type === 'task_outcome')
@@ -101,7 +101,7 @@ function createAgentStore(options) {
     const hostType = args.hostType || 'mcp'
     const capabilities = Array.isArray(args.capabilities) ? args.capabilities : []
     const now = new Date().toISOString()
-    const agents = readJsonl(agentsPath)
+    const agents = readJsonlCached(agentsPath)
     const existing = agents.find((a) => a.agentId === agentId && a.project === project)
     let result
     if (existing) {
