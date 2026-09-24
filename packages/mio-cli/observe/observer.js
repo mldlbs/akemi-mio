@@ -733,6 +733,28 @@ function findOpencodeBin() {
         .split(/\r?\n/)
         .map((s) => s.trim())
         .filter(Boolean)
+      // ⚠️ Known dead end on Windows, recorded by decision rather than "fixed"
+      // (measured 2026-09-24). This filter prefers .cmd/.bat, but
+      // runOpencodeQuery() spawns the result WITHOUT shell:true, and Node
+      // refuses to spawn a .cmd/.bat without a shell:
+      //
+      //   spawn opencode.cmd   no shell    status=null  error=EINVAL
+      //   spawn opencode.cmd   shell:true  status=0     stdout="1.15.12"
+      //
+      // So when the only thing on PATH is an npm shim (e.g. `opencode.cmd`),
+      // findOpencodeBin() returns a path that can never be executed, every
+      // query below returns null, and the opencode observer silently ingests
+      // nothing. On a machine where `where opencode` yields only `opencode`
+      // and `opencode.cmd`, neither is spawnable without a shell.
+      //
+      // Adding shell:true is NOT the fix: cmd.exe would then parse '>' in the
+      // SQL as output redirection, which is precisely what the comment above
+      // this block exists to prevent. The two constraints really do conflict.
+      //
+      // Net behaviour is identical either way (null before and after), so it is
+      // left alone. The bundled opencode-ai .exe path above is unaffected and
+      // does work. If you change this, write the test that proves the payload
+      // survives -- not just that status === 0.
       const preferred =
         process.platform === 'win32'
           ? lines.filter((p) => /\.(exe|cmd|bat)$/i.test(p))
