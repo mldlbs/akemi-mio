@@ -8,6 +8,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { writeJsonl } = require('./memory-store.js')
 
 // Age-based JSONL stores (records carry an ISO `timestamp` field).
 const AGE_BASED_FILES = ['traces.jsonl', 'experience_reuse.jsonl']
@@ -39,15 +40,6 @@ function createRetention(options = {}) {
     const backup = `${file}.bak-prune-${now()}`
     fs.copyFileSync(file, backup)
     return backup
-  }
-
-  function writeJsonl(file, values) {
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(
-      file,
-      values.length > 0 ? values.map((value) => JSON.stringify(value)).join('\n') + '\n' : '',
-      'utf8'
-    )
   }
 
   function planAgeBased(name, cutoff) {

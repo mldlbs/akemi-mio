@@ -39,8 +39,9 @@ function readJsonl(file) {
 // through appendJsonl/writeJsonl drops the entry explicitly. The one window
 // left is an outside process rewriting a file in the same millisecond to the
 // exact same byte count; the consequence is a single stale query, not corrupt
-// data. `mio prune` (retention.js) writes with its own helper, but it removes
-// records, so the size check catches it.
+// data. `mio prune` (retention.js) now writes through this module's writeJsonl
+// (or calls dropCache directly), so its prunes invalidate the cache explicitly
+// instead of relying on the size check.
 const readCache = new Map()
 
 // Haystacks are memoized against the record objects the cache hands out, so a
