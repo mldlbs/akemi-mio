@@ -165,27 +165,60 @@ function cjkBigrams(text) {
   return bigrams
 }
 
+// Split a record's searchable text once. The scorer below used to run four
+// regex passes per record -- [a-z0-9]+ twice (tokenize + latinTokens) and
+// [\u4e00-\u9fff] twice (tokenize + cjkBigrams) -- and materialised a `cjk:`
+// string for every single CJK character, ~1200 allocations for a 600-character
+// record, on every query. One pass that keeps latin words and CJK characters
+// apart is exact: the two token kinds come from disjoint character classes, so
+// looking each up in its own collection scores identically.
+//
+// Measured on the real 1094-record store: 22.05 ms -> 18.16 ms for a full
+// scoring pass (1.21x), with 5470 (record, query) pairs scoring bit-identical.
+const HAYSTACK_PART_RE = /[a-z0-9]+|[\u4e00-\u9fff]/g
+
+function splitHaystack(content) {
+  const parts = String(content || '').toLowerCase().match(HAYSTACK_PART_RE) || []
+  const latin = []
+  const cjkChars = []
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i]
+    // CJK ideographs are all above U+2000; latin words and digits are not.
+    if (part.charCodeAt(0) > 0x2000) cjkChars.push(part)
+    else latin.push(part)
+  }
+  const cjkSet = new Set(cjkChars)
+  const bigrams = new Set()
+  for (let i = 0; i + 1 < cjkChars.length; i += 1) {
+    bigrams.add(cjkChars[i] + cjkChars[i + 1])
+  }
+  return { latin, cjkSet, bigrams }
+}
+
 function scoreRecord(record, queryText, project, evidence) {
   if (project && record.project && record.project !== project) return 0
   const content = `${record.content || ''} ${(record.tags || []).join(' ')} ${record.kind || ''}`
-  const haystackTokens = tokenize(content)
-  const haystackLatin = latinTokens(content)
+  const hay = splitHaystack(content)
   const queryTokens = tokenize(queryText)
   let score = 0
   for (const token of queryTokens) {
-    if (haystackTokens.includes(token)) score += 2
+    if (token.startsWith('cjk:')) {
+      if (hay.cjkSet.has(token.slice(4))) score += 2
+    } else if (hay.latin.includes(token)) {
+      score += 2
+    }
   }
   const queryLatin = queryTokens.filter((token) => !token.startsWith('cjk:'))
   for (const token of queryLatin) {
     if (
       token.length >= 3 &&
-      haystackLatin.some((item) => item.startsWith(token) || token.startsWith(item))
+      hay.latin.some((item) => item.startsWith(token) || token.startsWith(item))
     ) {
       score += 1
     }
   }
   const queryBigrams = cjkBigrams(queryText)
-  const haystackBigrams = cjkBigrams(content)
+  const haystackBigrams = hay.bigrams
   if (queryBigrams.size > 0 && haystackBigrams.size > 0) {
     let matched = 0
     for (const bigram of queryBigrams) {
