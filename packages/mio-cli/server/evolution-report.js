@@ -7,30 +7,14 @@
 // its data directory from MIO_DATA_DIR while the CLI uses MIO_HOME, and each has
 // its own projectName() -- so this module owns no path or environment policy.
 
-const fs = require('fs')
 const path = require('path')
+const { readJsonlCached } = require('./memory-store.js')
 
 const REPORT_FILES = {
   memory: 'memory.jsonl',
   trace: 'traces.jsonl',
   reuse: 'experience_reuse.jsonl',
   agent: 'agents.jsonl',
-}
-
-function readJsonl(file) {
-  if (!fs.existsSync(file)) return []
-  return fs
-    .readFileSync(file, 'utf8')
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line)
-      } catch (_) {
-        return null
-      }
-    })
-    .filter(Boolean)
 }
 
 const PERIOD_MS = {
@@ -65,10 +49,10 @@ function createEvolutionReport({ dataDir, projectName }) {
     const periodMs = PERIOD_MS[period] === undefined ? Infinity : PERIOD_MS[period]
     const cutoff = periodMs === Infinity ? 0 : now - periodMs
 
-    const memories = readJsonl(files.memory).filter((m) => !project || m.project === project || !m.project)
-    const traces = readJsonl(files.trace).filter((t) => !project || t.project === project)
-    const reuses = readJsonl(files.reuse).filter((r) => !project || r.project === project)
-    const agents = readJsonl(files.agent).filter((a) => !project || a.project === project)
+    const memories = readJsonlCached(files.memory).filter((m) => !project || m.project === project || !m.project)
+    const traces = readJsonlCached(files.trace).filter((t) => !project || t.project === project)
+    const reuses = readJsonlCached(files.reuse).filter((r) => !project || r.project === project)
+    const agents = readJsonlCached(files.agent).filter((a) => !project || a.project === project)
 
     const filteredTraces = cutoff ? traces.filter((t) => new Date(t.timestamp).getTime() >= cutoff) : traces
     const filteredMemories = cutoff ? memories.filter((m) => new Date(m.timestamp).getTime() >= cutoff) : memories

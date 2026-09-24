@@ -7,22 +7,7 @@
 
 const fs = require('fs')
 const path = require('path')
-
-function readJsonl(file) {
-  if (!fs.existsSync(file)) return []
-  return fs
-    .readFileSync(file, 'utf8')
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line)
-      } catch (_) {
-        return null
-      }
-    })
-    .filter(Boolean)
-}
+const { readJsonlCached } = require('./memory-store.js')
 
 function isVerifiedReuse(record) {
   return (
@@ -42,7 +27,7 @@ function createDigest(options = {}) {
     const atTime = now()
     const cutoff = atTime - days * 86400000
 
-    const traces = readJsonl(path.join(home, 'traces.jsonl')).filter((trace) => {
+    const traces = readJsonlCached(path.join(home, 'traces.jsonl')).filter((trace) => {
       if (!trace || typeof trace !== 'object') return false
       const ts = Date.parse(trace.timestamp || '')
       if (!(Number.isFinite(ts) && ts >= cutoff)) return false
@@ -126,7 +111,7 @@ function createDigest(options = {}) {
       .sort((a, b) => b.tasks - a.tasks)
 
     // --- reuse evidence ---
-    const reuseRecords = readJsonl(path.join(home, 'experience_reuse.jsonl')).filter((record) => {
+    const reuseRecords = readJsonlCached(path.join(home, 'experience_reuse.jsonl')).filter((record) => {
       if (!record || typeof record !== 'object') return false
       if (project && record.project !== project) return false
       const ts = Date.parse(record.timestamp || '')

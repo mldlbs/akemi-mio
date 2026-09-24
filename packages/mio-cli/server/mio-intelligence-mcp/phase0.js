@@ -1,7 +1,7 @@
 'use strict'
 
-const fs = require('fs')
 const path = require('path')
+const { readJsonlCached } = require('../memory-store.js')
 
 const PHASE0_THRESHOLDS = Object.freeze({
   minHosts: 2,
@@ -53,22 +53,6 @@ function normalizeEventType(value) {
   if (typeof value !== 'string') return null
   const eventType = value.trim().toLowerCase()
   return eventType || null
-}
-
-function readJsonl(filePath) {
-  if (!fs.existsSync(filePath)) return []
-  return fs
-    .readFileSync(filePath, 'utf8')
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line)
-      } catch (_) {
-        return null
-      }
-    })
-    .filter(Boolean)
 }
 
 function filterByProject(records, project) {
@@ -279,9 +263,9 @@ function analyzePhase0(dataset) {
 
 function loadPhase0(dataDir, project) {
   const normalizedProject = project && project.trim() ? project.trim() : undefined
-  const memories = readJsonl(path.join(dataDir, 'memory.jsonl')).map(asRecord).filter(Boolean)
-  const traces = readJsonl(path.join(dataDir, 'traces.jsonl')).map(asRecord).filter(Boolean)
-  const reuseRecords = readJsonl(path.join(dataDir, 'experience_reuse.jsonl'))
+  const memories = readJsonlCached(path.join(dataDir, 'memory.jsonl')).map(asRecord).filter(Boolean)
+  const traces = readJsonlCached(path.join(dataDir, 'traces.jsonl')).map(asRecord).filter(Boolean)
+  const reuseRecords = readJsonlCached(path.join(dataDir, 'experience_reuse.jsonl'))
     .map(asRecord)
     .filter(Boolean)
 
