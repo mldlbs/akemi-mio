@@ -46,6 +46,34 @@ function hermesBin() {
   return null
 }
 
+// spawnSync() with a piped stdin fails on Windows with EBUSY before the child
+// even starts: status is null and stderr is empty, so every call below used to
+// return null and the Hermes adapter silently reported "not installed".
+// `stdio[0] = 'ignore'` fixes the calls that read no stdin. When there IS a
+// prompt answer to deliver it has to travel through a real file descriptor:
+// passing `input` alongside a non-pipe stdin makes Node drop the payload with
+// no error at all, which would leave `hermes mcp add` waiting forever for an
+// answer that never arrives -- worse than the crash it replaces.
+function spawnWithOptionalInput(command, args, opts) {
+  const { input, ...rest } = opts
+  if (input === undefined) {
+    return spawnSync(command, args, { ...rest, stdio: ['ignore', 'pipe', 'pipe'] })
+  }
+  const file = path.join(os.tmpdir(), 'mio-hermes-stdin-' + process.pid + '-' + Date.now())
+  fs.writeFileSync(file, input)
+  const fd = fs.openSync(file, 'r')
+  try {
+    return spawnSync(command, args, { ...rest, stdio: [fd, 'pipe', 'pipe'] })
+  } finally {
+    try {
+      fs.closeSync(fd)
+    } catch (_) {}
+    try {
+      fs.unlinkSync(file)
+    } catch (_) {}
+  }
+}
+
 function runHermes(args) {
   const bin = hermesBin()
   // `hermes mcp add` asks to confirm tool enablement interactively; pre-answer
@@ -55,8 +83,8 @@ function runHermes(args) {
   try {
     const isCmdShim = Boolean(bin && /\.(cmd|bat)$/i.test(bin))
     res = bin
-      ? spawnSync(bin, args, { encoding: 'utf8', timeout: 60000, windowsHide: true, input: input, shell: isCmdShim })
-      : spawnSync('hermes', args, { encoding: 'utf8', timeout: 60000, shell: true, windowsHide: true, input: input })
+      ? spawnWithOptionalInput(bin, args, { encoding: 'utf8', timeout: 60000, windowsHide: true, input: input, shell: isCmdShim })
+      : spawnWithOptionalInput('hermes', args, { encoding: 'utf8', timeout: 60000, shell: true, windowsHide: true, input: input })
   } catch (_) {
     return null
   }
@@ -112,7 +140,12 @@ function install({ node, serverScript, home, workspace, project }) {
 
 function isHermesOnPath() {
   try {
-    const res = spawnSync('where', ['hermes'], { encoding: 'utf8', shell: true })
+    // stdio[0] must not be a pipe: see spawnWithOptionalInput above.
+    const res = spawnSync('where', ['hermes'], {
+      encoding: 'utf8',
+      shell: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
     return res.status === 0 && /hermes/.test(res.stdout || '')
   } catch (_) {
     return false

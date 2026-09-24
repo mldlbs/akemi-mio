@@ -14,10 +14,15 @@ function earliestRunningSince(exePathFragment) {
       "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '*" +
       escaped +
       "*' } | ForEach-Object { [long]($_.CreationDate.ToUniversalTime() - [datetime]'1970-01-01').TotalMilliseconds }"
+    // stdio[0] must not be a pipe. On Windows a piped stdin makes spawnSync
+    // fail with EBUSY before powershell starts: status is null and stderr is
+    // empty, so this probe returned null every time and the "host is running an
+    // older config" warning never fired. powershell reads no stdin here.
     const res = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
       encoding: 'utf8',
       timeout: 10000,
       windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
     if (res.error || res.status !== 0) return null
     const times = (res.stdout || '')

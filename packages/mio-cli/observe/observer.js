@@ -719,7 +719,15 @@ function findOpencodeBin() {
   // stray files (e.g. "WHERE p.rowid > 0" -> a file named "0").
   try {
     const finder = process.platform === 'win32' ? 'where' : 'which'
-    const res = spawnSync(finder, ['opencode'], { encoding: 'utf8', windowsHide: true, timeout: 15000 })
+    // stdio[0] must not be a pipe: a piped stdin makes spawnSync fail with
+    // EBUSY before the child starts (status null, empty stderr), which would
+    // read as "opencode is not on PATH". `where` reads no stdin.
+    const res = spawnSync(finder, ['opencode'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 15000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
     if (res.status === 0 && res.stdout) {
       const lines = res.stdout
         .split(/\r?\n/)
@@ -744,7 +752,15 @@ function runOpencodeQuery(sql) {
   const args = ['db', sql, '--format', 'json']
   let res
   try {
-    res = spawnSync(bin, args, { encoding: 'utf8', timeout: 90000, windowsHide: true, maxBuffer: 256 * 1024 * 1024 })
+    // stdio[0] must not be a pipe: see findOpencodeBin above. `opencode db`
+    // takes its SQL as an argument and reads no stdin.
+    res = spawnSync(bin, args, {
+      encoding: 'utf8',
+      timeout: 90000,
+      windowsHide: true,
+      maxBuffer: 256 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
   } catch (_) {
     return null
   }
