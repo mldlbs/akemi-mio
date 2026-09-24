@@ -214,3 +214,43 @@ test('queryMemory invokes the scorer at most once per record', () => {
     `scorer ran ${nowCalls} times for ${RECORDS} records -- work is happening inside the sort comparator`
   )
 })
+
+// The MCP server is long-lived: every tool call re-reads the same append-only
+// logs. readJsonlCached() memoizes the parsed records keyed on (size, mtimeMs)
+// and drops the entry on every write through appendJsonl/writeJsonl. Two things
+// must hold: a warm read is byte-identical to a cold one, and a write made
+// through the public API invalidates the cache so a freshly recorded memory is
+// immediately queryable. The before/after search below would return the stale
+// 0 on a warm cache if dropCache() were not called on write.
+test('cross-call read cache is equivalent when warm and invalidates on write', () => {
+  const dataDir = tempDir('read-cache')
+  const rows = [
+    { id: 'mem_cache_1', kind: 'note', content: 'cache invalidation strategy', tags: ['perf'], project: 'proj-a', scope: 'project', source: 'test-agent' },
+    { id: 'mem_cache_2', kind: 'note', content: 'warm query cache perf', tags: ['perf'], project: 'proj-a', scope: 'project', source: 'test-agent' },
+    { id: 'mem_cache_3', kind: 'decision', content: 'cold read parse cost', tags: ['cache'], project: 'proj-a', scope: 'project', source: 'test-agent' },
+  ]
+  fs.writeFileSync(
+    path.join(dataDir, 'memory.jsonl'),
+    rows.map((r) => JSON.stringify(r)).join('\n') + '\n',
+    'utf8'
+  )
+
+  const store = makeStore(dataDir)
+
+  const cold = store.queryMemory({ query: 'cache perf', limit: 20 }).results.map((r) => r.id)
+  const warm = store.queryMemory({ query: 'cache perf', limit: 20 }).results.map((r) => r.id)
+  assert.deepEqual(warm, cold, 'a warm cache read must return identical ids and order as a cold read')
+
+  // Warm the cache against a token that does not exist yet.
+  assert.equal(
+    store.queryMemory({ query: 'brand-new-token-xyz' }).count,
+    0,
+    'sanity: the token is not present before the write'
+  )
+  // Public write path must drop the cache entry so the new record is visible.
+  store.recordMemory({ content: 'brand-new-token-xyz recorded via public path', kind: 'note', tags: 'cache' })
+  assert.ok(
+    store.queryMemory({ query: 'brand-new-token-xyz' }).count >= 1,
+    'the cache must be invalidated by the write so the newly recorded memory is immediately queryable'
+  )
+})

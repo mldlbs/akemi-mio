@@ -29,9 +29,62 @@ function readJsonl(file) {
     .filter(Boolean)
 }
 
+// --- cross-call read cache ------------------------------------------------
+// The MCP server is long-lived and re-reads the same append-only logs on every
+// tool call. On a 1094-record store that is ~7 ms to read+parse memory.jsonl
+// and ~13 ms more to rebuild every record's tokenized haystack -- about 20 ms
+// per query, against ~0.4 ms when both are warm.
+//
+// Validity: (size, mtimeMs) is checked on every call, and every write that goes
+// through appendJsonl/writeJsonl drops the entry explicitly. The one window
+// left is an outside process rewriting a file in the same millisecond to the
+// exact same byte count; the consequence is a single stale query, not corrupt
+// data. `mio prune` (retention.js) writes with its own helper, but it removes
+// records, so the size check catches it.
+const readCache = new Map()
+
+// Haystacks are memoized against the record objects the cache hands out, so a
+// fresh parse produces fresh objects and rebuilds them. Reassigned (not just
+// cleared) on every write because mergeMemory() mutates `survivor.tags` in
+// place, and tags are part of the haystack -- a WeakMap cannot be cleared, so
+// it is replaced.
+let haystackCache = new WeakMap()
+
+function dropCache(file) {
+  readCache.delete(file)
+  haystackCache = new WeakMap()
+}
+
+function readJsonlCached(file) {
+  let st
+  try {
+    st = fs.statSync(file)
+  } catch (_) {
+    dropCache(file)
+    return []
+  }
+  const hit = readCache.get(file)
+  if (hit !== undefined && hit.size === st.size && hit.mtimeMs === st.mtimeMs) {
+    return hit.records
+  }
+  const records = readJsonl(file)
+  readCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, records })
+  return records
+}
+
+function haystackFor(record) {
+  let hay = haystackCache.get(record)
+  if (hay === undefined) {
+    hay = splitHaystack(`${record.content || ''} ${(record.tags || []).join(' ')} ${record.kind || ''}`)
+    haystackCache.set(record, hay)
+  }
+  return hay
+}
+
 function appendJsonl(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   fs.appendFileSync(file, `${JSON.stringify(value)}\n`, 'utf8')
+  dropCache(file)
 }
 
 function writeJsonl(file, values) {
@@ -41,6 +94,7 @@ function writeJsonl(file, values) {
     values.length > 0 ? values.map((value) => JSON.stringify(value)).join('\n') + '\n' : '',
     'utf8'
   )
+  dropCache(file)
 }
 
 // --- Duplicate / quality analysis (mio.memory.analyze) ---------------------
@@ -197,8 +251,8 @@ function splitHaystack(content) {
 
 function scoreRecord(record, queryText, project, evidence) {
   if (project && record.project && record.project !== project) return 0
-  const content = `${record.content || ''} ${(record.tags || []).join(' ')} ${record.kind || ''}`
-  const hay = splitHaystack(content)
+  // Memoized against the record object itself: see haystackFor above.
+  const hay = haystackFor(record)
   const queryTokens = tokenize(queryText)
   let score = 0
   for (const token of queryTokens) {
@@ -288,7 +342,7 @@ function createMemoryStore(options = {}) {
 
   function loadEvidenceWeights() {
     const weights = new Map()
-    for (const record of readJsonl(experienceReusePath)) {
+    for (const record of readJsonlCached(experienceReusePath)) {
       if (!verifiedFilter(record)) continue
       const id = record.experienceId
       if (!id) continue
@@ -326,7 +380,7 @@ function createMemoryStore(options = {}) {
     // its 111 ms there. Sorting precomputed pairs is behaviour-identical --
     // Array#sort is stable, so ties keep their original file order either way.
     const scored = []
-    for (const record of readJsonl(memoryPath)) {
+    for (const record of readJsonlCached(memoryPath)) {
       if (record.archived === true) continue
       if (!matchesMemoryFilters(record, kind, tags)) continue
       if (!matchesProjectScope(record, project, scope)) continue
@@ -402,7 +456,7 @@ function createMemoryStore(options = {}) {
     const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 200)
     const includePayload = args.include_payload !== false
 
-    const all = readJsonl(tracePath)
+    const all = readJsonlCached(tracePath)
     const matched = all.filter((trace) => {
       if (!trace || typeof trace !== 'object') return false
       if (project && trace.project !== project) return false
@@ -483,7 +537,7 @@ function createMemoryStore(options = {}) {
   function analyzeMemory(args = {}) {
     const project = args.project || projectName()
     const limit = Math.min(Math.max(Number(args.limit) || 5, 1), 20)
-    const records = readJsonl(memoryPath).filter(
+    const records = readJsonlCached(memoryPath).filter(
       (record) => !project || record.project === project || !record.project
     )
     const archived = records.filter((record) => record.archived === true).length
@@ -577,7 +631,7 @@ function createMemoryStore(options = {}) {
     const project = args.project || projectName()
     const reason = args.reason ? String(args.reason).trim().slice(0, 200) : null
 
-    const records = readJsonl(memoryPath)
+    const records = readJsonlCached(memoryPath)
     const idSet = new Set(ids)
     const updated = []
     const unchanged = []
@@ -634,7 +688,7 @@ function createMemoryStore(options = {}) {
     // because "which divergence wins" is then undefined.
     const allowDivergent = args.allowDivergent === true || args.allowDivergent === 'true'
 
-    const records = readJsonl(memoryPath)
+    const records = readJsonlCached(memoryPath)
     const idSet = new Set(ids)
     // The project filter must be applied once, up front. Applying it only in the
     // archive loop let a mismatched project still rewrite the survivor's
@@ -777,7 +831,7 @@ function createMemoryStore(options = {}) {
     const restore = args.restore === true || args.restore === 'true'
     const reason = args.reason ? String(args.reason).trim().slice(0, 200) : null
 
-    const records = readJsonl(memoryPath)
+    const records = readJsonlCached(memoryPath)
     const idSet = new Set(ids)
     const archived = []
     // Ids that exist but are already in the requested state. Reported separately
@@ -836,7 +890,7 @@ function createMemoryStore(options = {}) {
     const reason = args.reason ? String(args.reason).trim().slice(0, 200) : null
     const by = args.by ? String(args.by).trim().slice(0, 80) : null
 
-    const records = readJsonl(memoryPath)
+    const records = readJsonlCached(memoryPath)
     const idSet = new Set(ids)
     const forgotten = []
     const notFound = [...ids]
