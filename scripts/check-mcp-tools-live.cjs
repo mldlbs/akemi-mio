@@ -36,6 +36,9 @@ const { crashMarker } = require('./lib/crash-messages.cjs')
 // stale entry fails the gate rather than quietly shrinking coverage.
 const SAFE_ARGS = {
   'mio.observer.collect': { sources: ['__gate_unknown_source__'] },
+  // pipeline defaults to a dry run already; be explicit so a future default
+  // change cannot turn the gate into a network/LLM client.
+  'mio.observer.pipeline': { run: false },
 }
 
 function definedTools() {

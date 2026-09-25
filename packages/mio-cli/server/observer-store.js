@@ -14,6 +14,19 @@
 const fs = require('fs')
 const path = require('path')
 
+// The observer pipeline is one of the LLM users, so it must read the same
+// resolved model configuration as creativity / insight. `isLlmConfigured()`
+// gates the override: when the user never configured an LLM we pass nothing and
+// let @akemi-mio/observer keep its own LLM_* / OBSERVER_* / Ollama fallback, so
+// an existing local-Ollama setup is not silently redirected to the hosted
+// default. This is the D2 fix -- the observer used to hardcode Ollama and
+// ignore `mio config llm` entirely.
+const { llmConfig, isLlmConfigured } = require('./llm-client.js')
+
+function observerLlmConfig() {
+  return isLlmConfigured() ? llmConfig() : undefined
+}
+
 // Observer research pipeline (optional -- installed via @akemi-mio/observer).
 // Loaded lazily at module level so the CLI can report availability without the
 // MCP server having to pass its own handles down.
@@ -31,10 +44,12 @@ function loadObserver() {
 
 let ObserverStore = null
 let ObserverService = null
+let ObserverLlmService = null
 try {
   const obs = loadObserver()
   ObserverStore = obs.ObserverStore
   ObserverService = obs.ObserverService
+  ObserverLlmService = obs.ObserverLlmService
 } catch {}
 
 // Subdirectories that make up the pipeline. `observerStatus` counts files in
@@ -60,6 +75,17 @@ function readJsonSafe(filePath) {
   } catch {
     return null
   }
+}
+
+// Today's DAG task id, matching DagStateMachine's `dag_YYYYMMDD` (LOCAL date).
+// Duplicated here rather than importing DagStateMachine because its constructor
+// mkdir's the dag directory, and the dry run below must not touch disk.
+function todayTaskId() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `dag_${y}${m}${day}`
 }
 
 function readJsonlSafe(filePath) {
@@ -184,7 +210,7 @@ function createObserverStore(options = {}) {
     // object made path.resolve() throw before any collector ran, so collect()
     // was dead on arrival for every caller. (collectorConfig was never read by
     // the package; it was invented here.)
-    const service = new ObserverService(baseDirOf(args))
+    const service = new ObserverService(baseDirOf(args), observerLlmConfig())
     const sources = args.sources || ['bilibili', 'hackernews', 'github', 'douyin', 'rss']
     const allObs = []
     for (const src of sources) {
@@ -210,7 +236,7 @@ function createObserverStore(options = {}) {
 
   async function ferment(args = {}) {
     if (!ObserverService) throw new Error('@akemi-mio/observer not installed')
-    const service = new ObserverService(baseDirOf(args))
+    const service = new ObserverService(baseDirOf(args), observerLlmConfig())
     const session = args.session || 'afternoon'
     try {
       const fermentation = service.getFermentation()
@@ -218,6 +244,81 @@ function createObserverStore(options = {}) {
       return { status: 'fermentation engine available but no ferment method' }
     } catch (e) {
       return { error: e.message }
+    }
+  }
+
+  // Drives the full research DAG (collect → trend → tension → research →
+  // multi-brain → compose → world model → publish → self-evolve). This is the
+  // entry point D1 found missing: runPipeline/tickPipeline/forcePipeline had no
+  // caller anywhere in mio-agent-runtime, so trends/research/insights stayed
+  // empty forever unless someone hand-instantiated the service.
+  //
+  // It is heavy (network + several LLM calls) and writes files, so like every
+  // other side-effecting command here it previews by default: without
+  // `run: true` it reads today's DAG state and the resolved LLM endpoint and
+  // returns a plan without constructing the service, which would mkdir the dag
+  // directory. That keeps the README doc gate and the MCP live gate (both call
+  // with empty arguments) offline and instant.
+  async function pipeline(args = {}) {
+    if (!ObserverService) throw new Error('@akemi-mio/observer not installed')
+    const baseDir = baseDirOf(args)
+    const mode = args.mode || 'analytical'
+    const llmConfig = observerLlmConfig()
+
+    if (!args.run) {
+      const taskId = todayTaskId()
+      const dag = readJsonSafe(path.join(baseDir, 'dag', `${taskId}.json`))
+      // Guard the diagnostic: an older published @akemi-mio/observer lacks
+      // ObserverLlmService.getInfo(), and a preview must never throw because of
+      // a package-version skew (the mio-cli side ships ahead of the package).
+      let llm = null
+      if (ObserverLlmService) {
+        try {
+          const svc = new ObserverLlmService(llmConfig)
+          if (svc && typeof svc.getInfo === 'function') llm = svc.getInfo()
+        } catch (_) {
+          llm = null
+        }
+      }
+      return {
+        dryRun: true,
+        baseDir,
+        mode,
+        observerAvailable: true,
+        taskId,
+        todayState: dag ? dag.state : null,
+        todayCompleted: Boolean(dag && dag.state === 'COMPLETED'),
+        llm,
+        hint: 'Re-run with --run (CLI) or {"run": true} (MCP) to execute the full DAG.',
+      }
+    }
+
+    const service = new ObserverService(baseDir, llmConfig)
+    const envelope = await service.forcePipeline(mode)
+    if (!envelope) {
+      return {
+        dryRun: false,
+        baseDir,
+        mode,
+        ran: true,
+        completed: false,
+        reason: 'forcePipeline returned null (today already completed, or a run is in progress)',
+      }
+    }
+    const payload = envelope.payload || {}
+    return {
+      dryRun: false,
+      baseDir,
+      mode,
+      ran: true,
+      completed: envelope.dagState && envelope.dagState.state === 'COMPLETED',
+      type: envelope.type,
+      taskId: envelope.dagState ? envelope.dagState.taskId : null,
+      topic: payload.topic || null,
+      sections: Array.isArray(payload.sections) ? payload.sections.length : 0,
+      insightId: payload.id || null,
+      durationMs: envelope.metadata ? envelope.metadata.taskDurationMs : null,
+      llmCalls: envelope.metadata ? envelope.metadata.llmCalls : null,
     }
   }
 
@@ -232,6 +333,7 @@ function createObserverStore(options = {}) {
     dag,
     collect,
     ferment,
+    pipeline,
   }
 }
 

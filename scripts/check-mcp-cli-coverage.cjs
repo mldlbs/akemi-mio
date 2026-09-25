@@ -72,6 +72,7 @@ const MCP_TO_CLI = {
   'mio.observer.ferment': ['observer', 'ferment'],
   'mio.observer.ingest': ['observer', 'ingest'],
   'mio.observer.insights': ['observer', 'insights'],
+  'mio.observer.pipeline': ['observer', 'pipeline'],
   'mio.observer.research': ['observer', 'research'],
   'mio.observer.status': ['observer', 'status'],
   'mio.observer.subscribe': ['observer', 'subscribe'],

@@ -65,6 +65,7 @@ mio observer <view>          Observer research pipeline views (research pipeline
                              status|world-model|trends|research|insights|essays|dag (--base-dir DIR)
 mio observer collect         Fetch from the configured sources (--sources a,b/--keywords k1,k2/--limit N)
 mio observer ferment         Run the fermentation engine (--session morning|afternoon|night)
+mio observer pipeline        Run the research DAG (previews by default; --run executes, --mode neutral|analytical|creative)
 mio observer ingest --trace-id T --event-type E   Record a trace event (--payload JSON/--outcome)
 mio observer subscribe --event-types a,b          Subscribe to events (--yes to apply; previews by default)
 mio observer digest                               New events since the last digest (advances the cursor)
@@ -99,13 +100,13 @@ mio --version                Print the version and exit (-V)
 
 ## MCP 工具
 
-MCP 服务端在 5 大域共暴露 49 个工具：
+MCP 服务端在 5 大域共暴露 50 个工具：
 
 ### 记忆（11）
 `mio.memory.query` · `mio.memory.record` · `mio.memory.archive` · `mio.memory.merge` · `mio.memory.migrate` · `mio.memory.analyze` · `mio.memory.forget` · `mio.experience.list` · `mio.experience.confirm` · `mio.experience.reuse` · `mio.policy.check`
 
-### 观察管线（14）
-`mio.observer.world_model` · `mio.observer.trends` · `mio.observer.research` · `mio.observer.insights` · `mio.observer.status` · `mio.observer.collect` · `mio.observer.ferment` · `mio.observer.essays` · `mio.observer.dag` · `mio.observer.ingest` · `mio.observer.subscribe` · `mio.observer.digest`
+### 观察管线（15）
+`mio.observer.world_model` · `mio.observer.trends` · `mio.observer.research` · `mio.observer.insights` · `mio.observer.status` · `mio.observer.collect` · `mio.observer.ferment` · `mio.observer.pipeline` · `mio.observer.essays` · `mio.observer.dag` · `mio.observer.ingest` · `mio.observer.subscribe` · `mio.observer.digest`
 `mio.trace.query` — 按类型/结果/agent/项目/时间窗口查询 trace 日志（任务结果、工具错误）；CLI 上也可通过 `mio traces` 调用
 `mio.digest.generate` — 把近期数据聚合成可执行的 digest（agent 成功率、项目活跃度、错误热点、复用证据、建议）；CLI 上也可通过 `mio digest` 调用
 
@@ -490,6 +491,15 @@ mio observer trends --base-dir /path/to/.local/observer
   ```
 
   两者都依赖可选包 `@akemi-mio/observer`（未安装时提示 `not installed`，不是空结果）。`collect` 会**联网**抓取，`ferment` 需要 LLM；它们**不做预览**，因为预览意味着把数据抓两遍。单个源失败不会中断整次运行——该源会以 `errors: ...` 出现在输出里，其余源照常统计。
+- **`mio observer pipeline` 是研究 DAG 的入口**（`collect → trend → tension → research → multi-brain → compose → world model → publish → self-evolve`）。此前 `runPipeline` / `tickPipeline` / `forcePipeline` 在 mio-agent-runtime 里**没有任何调用方**，所以 trends / research / insights 默认永远是空的，只有手动实例化服务才能跑通。它同样依赖 `@akemi-mio/observer`，会**联网并调用多次 LLM**，因此和 `subscribe` 一样**默认只预览**（读今天的 DAG 状态与解析后的 LLM 端点，不构造服务、不建目录），`--run` 才真正执行：
+
+  ```bash
+  mio observer pipeline                    # 预览（离线、秒回）
+  mio observer pipeline --run              # 执行完整 DAG
+  mio observer pipeline --mode creative --run
+  ```
+
+- **观察者的 LLM 现在与 creativity / insight 共用同一份配置**。此前 `ObserverLlmService` 把 Ollama 地址与模型写死（`localhost:11434` / `qwen2.5:7b`，只认 `OBSERVER_*` 环境变量），完全无视 `mio config llm` —— 于是 `mio config llm` 配好的 deepseek 只对 server 侧生效，观察管道仍然空转。现在 `observer-store.js` 通过共享的 `server/llm-client.js` 解析配置并注入：用户配置过（`config.json` 的 `llm` 或 `LLM_*` 环境变量）就用它，否则保持 `@akemi-mio/observer` 自己的 `LLM_*` / `OBSERVER_*` / 本地 Ollama 回退，不会把既有本地 Ollama 用户静默改道到托管默认值。端点按 URL 形态自动选择传输：含 `/chat/completions` 走 OpenAI 兼容协议，否则按 Ollama 处理。
 - **`mio observer ingest` 记录任意 trace 事件**（`tool_call` / `error` / `retry` / `task_outcome`）：
 
   ```bash

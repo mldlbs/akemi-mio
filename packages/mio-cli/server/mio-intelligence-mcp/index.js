@@ -861,6 +861,18 @@ const TOOLS = [
     },
   },
   {
+    name: 'mio.observer.pipeline',
+    description: 'Run the Observer research DAG (collect -> trend -> tension -> research -> multi-brain -> compose -> world model -> publish). Heavy: network plus several LLM calls. Previews by default; pass run:true to execute.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', description: 'Writing mode: neutral | analytical | creative (default: analytical)' },
+        run: { type: 'boolean', description: 'Execute the pipeline. Default false returns a dry-run plan without network or LLM calls.' },
+        baseDir: { type: 'string', description: 'Observer data directory' },
+      },
+    },
+  },
+  {
     name: 'mio.observer.essays',
     description: 'List published or draft essays from the Observer.',
     inputSchema: {
@@ -939,6 +951,10 @@ function observerCollect(args = {}) {
 
 function observerFerment(args = {}) {
   return observerStore.ferment(args)
+}
+
+function observerPipeline(args = {}) {
+  return observerStore.pipeline(args)
 }
 
 function observerEssays(args = {}) {
@@ -1045,6 +1061,8 @@ async function callTool(name, args = {}) {
       return observerCollect(args)
     case 'mio.observer.ferment':
       return observerFerment(args)
+    case 'mio.observer.pipeline':
+      return observerPipeline(args)
     case 'mio.observer.essays':
       return observerEssays(args)
     case 'mio.observer.dag':

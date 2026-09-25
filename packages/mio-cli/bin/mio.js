@@ -1530,6 +1530,9 @@ function observerUsage(write = console.log) {
                              [--limit N]  (needs @akemi-mio/observer; hits the network)
   mio observer ferment       Run the fermentation engine over recent observations
                              (--session morning|afternoon|night; needs @akemi-mio/observer)
+  mio observer pipeline      Run the full research DAG (collect → trend → research →
+                             insights → world model). Previews by default; --run
+                             executes it (network + LLM). --mode neutral|analytical|creative
 
 Options:
   --base-dir DIR     Observer data directory (default: <cwd>/.local/observer)
@@ -1540,6 +1543,8 @@ Options:
   --sources a,b      Sources to collect from (default: all configured)
   --keywords a,b     Keyword filter, OR matched (collect)
   --session label    Fermentation session (default: afternoon)
+  --mode name        Writing mode for the pipeline (default: analytical)
+  --run              Actually execute the pipeline (default: preview)
   --json             Machine-readable output (same shape as mio.observer.*)`)
 }
 
@@ -1854,6 +1859,62 @@ async function observerFermentCommand(args, useJson) {
   printObserverFerment(result, session)
 }
 
+// The pipeline entry point D1 was missing: runPipeline/tickPipeline/forcePipeline
+// had no caller in mio-agent-runtime, so the observer's trend/research/insight
+// stages never ran on their own. It is heavy (network + several LLM calls), so
+// it follows the same rule as `mio observer subscribe` and `mio task
+// record-outcome`: preview by default, execute only with --run.
+const PIPELINE_MODES = ['neutral', 'analytical', 'creative']
+
+function printObserverPipeline(result) {
+  if (result.dryRun) {
+    console.log(`Observer pipeline preview (mode=${result.mode}, base-dir=${result.baseDir})`)
+    const state = result.todayState || 'no task yet'
+    const done = result.todayCompleted ? ' (already completed)' : ''
+    console.log(`  today ${result.taskId}: ${state}${done}`)
+    if (result.llm) {
+      const key = result.llm.hasApiKey ? 'key set' : 'no key'
+      console.log(`  LLM: ${result.llm.provider} ${result.llm.model} (${key})`)
+      console.log(`       ${result.llm.apiUrl}`)
+    } else {
+      console.log('  LLM: unknown (observer package did not expose ObserverLlmService)')
+    }
+    console.log('\nPreview only. Re-run with --run to execute the full DAG (network + LLM calls).')
+    return
+  }
+  if (!result.completed) {
+    console.log(`Observer pipeline did not complete: ${result.reason || 'unknown reason'}`)
+    process.exitCode = 1
+    return
+  }
+  console.log(`Observer pipeline completed (${result.type}, ${result.durationMs || 0}ms, ${result.llmCalls || 0} LLM call(s))`)
+  if (result.topic) console.log(`  topic: ${result.topic}`)
+  console.log(`  sections: ${result.sections}`)
+  if (result.insightId) console.log(`  insight: ${result.insightId}`)
+}
+
+async function observerPipelineCommand(args, useJson) {
+  const flags = args.slice(2)
+  const mode = optionValue(flags, '--mode') || 'analytical'
+  if (!PIPELINE_MODES.includes(mode)) {
+    console.error(`--mode must be one of: ${PIPELINE_MODES.join(', ')}`)
+    process.exitCode = 1
+    return
+  }
+  const base = { baseDir: optionValue(flags, '--base-dir') }
+  const run = flagPresent(flags, '--run')
+  let result
+  try {
+    result = await cliObserverStore().pipeline({ ...base, mode, run })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+  if (useJson) return jsonOrText(result, true)
+  printObserverPipeline(result)
+}
+
 function observerCommand(args, useJson) {
   const sub = args[1]
   if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
@@ -1868,6 +1929,7 @@ function observerCommand(args, useJson) {
   // returned rather than called -- main() is async and awaits them.
   if (sub === 'collect') return observerCollectCommand(args, useJson)
   if (sub === 'ferment') return observerFermentCommand(args, useJson)
+  if (sub === 'pipeline') return observerPipelineCommand(args, useJson)
 
   if (!['status', 'world-model', 'trends', 'research', 'insights', 'essays', 'dag'].includes(sub)) {
     console.error(`Unknown observer subcommand: ${sub}`)
@@ -3131,6 +3193,7 @@ Usage:
   mio observer digest                               New events since the last digest (advances cursor)
   mio observer collect         Fetch from the configured sources (--sources/--keywords/--limit)
   mio observer ferment         Run the fermentation engine (--session morning|afternoon|night)
+  mio observer pipeline        Run the research DAG (previews; --run to execute, --mode neutral|analytical|creative)
   mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
   mio host capabilities        Show what each host supports and whether it is installed
   mio task route "<task>"      Which verified experiences apply to this task (--project/--scope/--limit)

@@ -50,6 +50,8 @@ const NEVER_EXITS = new Set(['mcp', 'observe'])
 const SAFE_ARGS = {
   'observer:collect': ['--sources', '__doc_gate_unknown_source__'],
   'observer:ferment': [],
+  // pipeline previews by default (no network, no LLM); --run is what executes.
+  'observer:pipeline': [],
   'config:llm': [],
   'insight:generate': [],
 }
