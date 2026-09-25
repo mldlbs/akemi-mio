@@ -1,5 +1,6 @@
 import { log } from './logger'
 import { ObserverLlmService } from './ObserverLlmService'
+import type { ObserverLlmConfig } from './ObserverLlmService'
 import { ObserverStore } from './ObserverStore'
 import { FermentationEngine } from './FermentationEngine'
 import { WritingGate } from './WritingGate'
@@ -54,8 +55,12 @@ export class ObserverService {
   private lastPipelineDate = ''
   private pipelineRunning = false
 
-  constructor(baseDir?: string) {
-    this.llm = new ObserverLlmService()
+  // `llmConfig` is how a host injects the model connection it already resolved
+  // (mio-cli reads config.json for creativity/insight and passes the same
+  // values here). Omitted, the LLM service falls back to LLM_* / OBSERVER_*
+  // environment variables and then its Ollama default -- see D2.
+  constructor(baseDir?: string, llmConfig?: ObserverLlmConfig) {
+    this.llm = new ObserverLlmService(llmConfig)
     this.store = new ObserverStore(baseDir)
     this.fermentation = new FermentationEngine(this.llm, this.store)
     this.writingGate = new WritingGate(this.llm, this.store)

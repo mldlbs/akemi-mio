@@ -1,6 +1,7 @@
 import { ObserverService } from './ObserverService'
 import { ObserverStore } from './ObserverStore'
 import { ObserverLlmService } from './ObserverLlmService'
+import type { ObserverLlmConfig } from './ObserverLlmService'
 import { DagStateMachine } from './DagStateMachine'
 import { TrendEngine } from './TrendEngine'
 import { TensionFieldEngine } from './TensionFieldEngine'
@@ -85,13 +86,15 @@ export type {
   OutputEnvelope,
 } from './types'
 
+export type { ObserverLlmConfig, ObserverLlmInfo, ObserverGenerateOptions } from './ObserverLlmService'
+
 export { DEFAULT_EVOLUTION_WEIGHTS, DEFAULT_EVOLUTION_THRESHOLDS, DEFAULT_EVOLUTION_PARAMS, WRITING_MODE_LABELS, INSIGHT_SECTION_TITLES } from './types'
 
 export let observerService: ObserverService | null = null
 
-export function initObserver(baseDir?: string): ObserverService {
+export function initObserver(baseDir?: string, llmConfig?: ObserverLlmConfig): ObserverService {
   if (!observerService) {
-    observerService = new ObserverService(baseDir)
+    observerService = new ObserverService(baseDir, llmConfig)
   }
   return observerService
 }
