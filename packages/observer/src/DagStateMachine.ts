@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'fs'
 import { resolve } from 'path'
 import { log } from './logger'
+import { PipelineLock } from './PipelineLock'
 import type { TaskState, DagStateFile } from './types'
 
 // ── 状态转移表 ──────────────────────────────────────────────
@@ -34,10 +35,21 @@ function ensureDir(dir: string): void {
 // ── DagStateMachine ─────────────────────────────────────────
 export class DagStateMachine {
   private dagDir: string
+  private runLock: PipelineLock
 
   constructor(observerBaseDir: string) {
     this.dagDir = resolve(observerBaseDir, 'dag')
     ensureDir(this.dagDir)
+    this.runLock = new PipelineLock(resolve(this.dagDir, 'pipeline.lock'))
+  }
+
+  /** 跨进程抢占一次运行锁；false 表示另一个进程正在跑管道。 */
+  acquireRunLock(): boolean {
+    return this.runLock.acquire()
+  }
+
+  releaseRunLock(): void {
+    this.runLock.release()
   }
 
   /** 创建今天的 DAG 任务。如果已有未完成的任务则返回它。 */

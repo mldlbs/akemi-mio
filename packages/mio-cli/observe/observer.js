@@ -1695,9 +1695,35 @@ function pidFile(home) {
   return path.join(home, 'observe.pid')
 }
 
-function readPid(home) {
+function researchPidFile(home) {
+  return path.join(home, 'research.pid')
+}
+
+function researchLogFile(home) {
+  return path.join(home, 'research.log')
+}
+
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
   try {
-    const pid = Number(fs.readFileSync(pidFile(home), 'utf8').trim())
+    process.kill(pid, 0)
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+function readPid(home) {
+  return readPidFile(pidFile(home))
+}
+
+function readResearchPid(home) {
+  return readPidFile(researchPidFile(home))
+}
+
+function readPidFile(file) {
+  try {
+    const pid = Number(fs.readFileSync(file, 'utf8').trim())
     return Number.isInteger(pid) && pid > 0 ? pid : null
   } catch (_) {
     return null
@@ -1705,14 +1731,11 @@ function readPid(home) {
 }
 
 function isRunning(home) {
-  const pid = readPid(home)
-  if (!pid) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (_) {
-    return false
-  }
+  return pidAlive(readPid(home))
+}
+
+function isResearchRunning(home) {
+  return pidAlive(readResearchPid(home))
 }
 
 function startBackground(home) {
@@ -1745,6 +1768,69 @@ function stopBackground(home) {
   return { running: false, stopped: Boolean(pid), pid: pid || null }
 }
 
+// ---------------------------------------------------------------------------
+// research scheduler daemon (`mio observe --start --research`)
+//
+// D6: ObserverService's own scheduler (collector intervals + the daily
+// pipeline tick) needed a process to live in. The transcript daemon could have
+// hosted it in-process, but that daemon is spawned with cwd: home, so its
+// `<cwd>/.local/observer` would resolve to MIO_HOME -- a second observation
+// directory that `mio observer status` in the project would never see. Running
+// `mio observer serve` as its own child with the *launcher's* cwd keeps one
+// data directory per working directory, exactly like every other observer
+// command, and keeps a crash in either half from taking down the other.
+//
+// spawn/kill are injectable so tests never signal a real pid.
+// ---------------------------------------------------------------------------
+
+function startResearchBackground(home, opts = {}) {
+  const cwd = opts.cwd || process.cwd()
+  const spawnImpl = opts.spawn || spawn
+  if (isResearchRunning(home)) {
+    return { running: true, started: false, pid: readResearchPid(home), baseDir: path.join(cwd, '.local', 'observer') }
+  }
+  const script = path.join(__dirname, '..', 'bin', 'mio.js')
+  const baseDir = path.join(cwd, '.local', 'observer')
+  // The scheduler logs to stdout, so a detached child with stdio:'ignore' would
+  // be undiagnosable ("is it running? did it collect?"). Handing it an append
+  // fd instead of a pipe is deliberate: a pipe nobody reads fills up after
+  // ~64KB and the scheduler would block on its own log.
+  fs.mkdirSync(home, { recursive: true })
+  const logFd = fs.openSync(researchLogFile(home), 'a')
+  let child
+  try {
+    child = spawnImpl(
+      process.execPath,
+      [script, 'observer', 'serve', '--base-dir', baseDir],
+      {
+        detached: true,
+        stdio: ['ignore', logFd, logFd],
+        windowsHide: true,
+        cwd,
+      }
+    )
+  } finally {
+    fs.closeSync(logFd)
+  }
+  if (child.unref) child.unref()
+  fs.writeFileSync(researchPidFile(home), String(child.pid), 'utf8')
+  return { running: true, started: true, pid: child.pid, baseDir, logFile: researchLogFile(home) }
+}
+
+function stopResearchBackground(home, killImpl) {
+  const kill = killImpl || process.kill
+  const pid = readResearchPid(home)
+  if (pid) {
+    try {
+      kill(pid)
+    } catch (_) {}
+    try {
+      fs.unlinkSync(researchPidFile(home))
+    } catch (_) {}
+  }
+  return { running: false, stopped: Boolean(pid), pid: pid || null }
+}
+
 module.exports = {
   INTERVAL_MS,
   homeDir,
@@ -1770,6 +1856,11 @@ module.exports = {
   stopBackground,
   isRunning,
   readPid,
+  startResearchBackground,
+  stopResearchBackground,
+  isResearchRunning,
+  readResearchPid,
+  researchLogFile,
   // exported for tests: the numeric-segment guard here was silently dead for
   // several releases because nothing exercised it (see __tests__/observer-project.test.js)
   projectFromDirName,

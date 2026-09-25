@@ -27,7 +27,7 @@ const { CreativityEngine } = require('../server/creativity-engine.js')
 const { createAgentStore } = require('../server/agent-store.js')
 const { createEvaluationStore } = require('../server/evaluation-store.js')
 const { createInsightStore } = require('../server/insight-store.js')
-const { createObserverStore } = require('../server/observer-store.js')
+const { createObserverStore, isObserverAvailable } = require('../server/observer-store.js')
 const { loadPhase0, renderPhase0Markdown } = require('../server/mio-intelligence-mcp/phase0.js')
 const { listHostCapabilities } = require('../server/host-capabilities.js')
 const { createTaskStore } = require('../server/task-store.js')
@@ -1533,6 +1533,10 @@ function observerUsage(write = console.log) {
   mio observer pipeline      Run the full research DAG (collect → trend → research →
                              insights → world model). Previews by default; --run
                              executes it (network + LLM). --mode neutral|analytical|creative
+  mio observer serve         Keep the research scheduler running in this terminal:
+                             collectors on their intervals + one pipeline run per
+                             day. Previews with --dry-run (that is what runs it
+                             the README/doc gate); Ctrl+C stops it.
 
 Options:
   --base-dir DIR     Observer data directory (default: <cwd>/.local/observer)
@@ -1918,6 +1922,66 @@ async function observerPipelineCommand(args, useJson) {
   printObserverPipeline(result)
 }
 
+function printObserverServe(result) {
+  if (result.dryRun) {
+    console.log(`Observer research scheduler preview (base-dir=${result.baseDir})`)
+    if (result.llm) {
+      const key = result.llm.hasApiKey ? 'key set' : 'no key'
+      console.log(`  LLM: ${result.llm.provider} ${result.llm.model} (${key})`)
+      console.log(`       ${result.llm.apiUrl}`)
+    } else {
+      console.log('  LLM: unknown (observer package did not expose ObserverLlmService)')
+    }
+    if (result.schedule) {
+      console.log(`  pipeline: first tick ${result.schedule.pipelineFirstTickMs}ms, then every ${result.schedule.pipelineTickMs}ms`)
+      console.log(`  gate: ${result.schedule.pipelineGate}`)
+      console.log(`  lock: ${result.schedule.lockFile}`)
+    }
+    console.log('\nPreview only. Re-run without --dry-run to keep the scheduler running (Ctrl+C stops it).')
+    return
+  }
+  console.log(`Observer research scheduler running (base-dir=${result.baseDir})`)
+  console.log(`  ${result.schedule ? result.schedule.collectors : 'collectors started'}`)
+  console.log(`  pipeline: first tick ${result.schedule ? result.schedule.pipelineFirstTickMs : 5000}ms, then every ${result.schedule ? result.schedule.pipelineTickMs : 60000}ms`)
+  console.log('  Stops with Ctrl+C (or `mio observe --stop` when started that way).')
+}
+
+// D6: `mio observer serve` is the long-lived host for ObserverService.start().
+// Without it the scheduler inside the service had no caller, so tickPipeline's
+// daily gate never fired and trends/research/insights only appeared if someone
+// ran `mio observer pipeline --run` by hand. It stays in the foreground on
+// purpose -- a scheduler is a process, not a request -- and `--dry-run` exists
+// both as a preview and as the probe `check:cli-docs` runs, so the documented
+// command can never hang the gate.
+async function observerServeCommand(args, useJson) {
+  const flags = args.slice(2)
+  const base = { baseDir: optionValue(flags, '--base-dir') }
+  const dryRun = flagPresent(flags, '--dry-run')
+  let result
+  try {
+    result = await cliObserverStore().serve({ ...base, dryRun })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+  if (useJson && result.dryRun) return jsonOrText(result, true)
+  if (result.dryRun) {
+    printObserverServe(result)
+    return
+  }
+  if (useJson) console.log(JSON.stringify({ serving: true, baseDir: result.baseDir, schedule: result.schedule }))
+  else printObserverServe(result)
+  const stop = typeof result.stop === 'function' ? result.stop : () => {}
+  const shutdown = (signal) => {
+    stop()
+    console.log('Observer research scheduler stopped (' + signal + ')')
+    process.exit(0)
+  }
+  process.once('SIGINT', () => shutdown('SIGINT'))
+  process.once('SIGTERM', () => shutdown('SIGTERM'))
+}
+
 function observerCommand(args, useJson) {
   const sub = args[1]
   if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
@@ -1933,6 +1997,7 @@ function observerCommand(args, useJson) {
   if (sub === 'collect') return observerCollectCommand(args, useJson)
   if (sub === 'ferment') return observerFermentCommand(args, useJson)
   if (sub === 'pipeline') return observerPipelineCommand(args, useJson)
+  if (sub === 'serve') return observerServeCommand(args, useJson)
 
   if (!['status', 'world-model', 'trends', 'research', 'insights', 'essays', 'dag'].includes(sub)) {
     console.error(`Unknown observer subcommand: ${sub}`)
@@ -3098,26 +3163,67 @@ function mcpCommand() {
   require(SERVER_SCRIPT)
 }
 
-function observeCommand(args) {
+// `--research` is opt-in: it adds a second child (mio observer serve) that owns
+// the collector intervals and the daily pipeline tick. It is deliberately not
+// on by default -- starting the transcript watcher should not silently start
+// spending LLM calls in the background (D6).
+function startResearchScheduler(cwd) {
+  if (!isObserverAvailable()) {
+    return { running: false, started: false, pid: null, skipped: '@akemi-mio/observer not installed' }
+  }
+  return observer.startResearchBackground(MIO_HOME, { cwd })
+}
+
+function observeCommand(args, jsonFlag = false) {
   const flags = args.slice(1)
-  const useJson = flags.includes('--json')
+  // main() already strips --json from argv and passes it as the second
+  // argument; the local check is kept for direct callers. Without the
+  // parameter `mio observe --json --status` silently printed text.
+  const useJson = jsonFlag || flags.includes('--json')
+  const research = flags.includes('--research')
   if (flags.includes('--start')) {
     const result = observer.startBackground(MIO_HOME)
-    if (useJson) return jsonOrText(result, true)
+    const researchResult = research ? startResearchScheduler(process.cwd()) : null
+    if (useJson) {
+      return jsonOrText({ ...result, research: researchResult || { running: null, started: false, pid: null } }, true)
+    }
     console.log(result.started ? 'Observer started.' : 'Observer already running.')
+    if (researchResult) {
+      if (researchResult.skipped) console.log('Research scheduler skipped: ' + researchResult.skipped)
+      else if (researchResult.started) console.log('Research scheduler started (pid ' + researchResult.pid + ', base-dir ' + researchResult.baseDir + ')')
+      else console.log('Research scheduler already running (pid ' + researchResult.pid + ')')
+    }
     return
   }
   if (flags.includes('--stop')) {
     const result = observer.stopBackground(MIO_HOME)
-    if (useJson) return jsonOrText(result, true)
+    const researchResult = observer.stopResearchBackground(MIO_HOME)
+    if (useJson) {
+      return jsonOrText(
+        { ...result, research: { running: false, stopped: researchResult.stopped, pid: researchResult.pid } },
+        true
+      )
+    }
     console.log(result.stopped ? 'Observer stopped.' : 'Observer was not running.')
+    console.log(researchResult.stopped ? 'Research scheduler stopped.' : 'Research scheduler was not running.')
     return
   }
   if (flags.includes('--status')) {
     const running = observer.isRunning(MIO_HOME)
     const pid = observer.readPid(MIO_HOME)
-    if (useJson) return jsonOrText({ running, pid }, true)
+    const researchRunning = observer.isResearchRunning(MIO_HOME)
+    const researchPid = observer.readResearchPid(MIO_HOME)
+    const researchInfo = { running: researchRunning, pid: researchPid, logFile: observer.researchLogFile(MIO_HOME) }
+    if (useJson) return jsonOrText({ running, pid, research: researchInfo }, true)
     console.log(running ? 'Observer: running (pid ' + pid + ')' : 'Observer: not running')
+    console.log(
+      researchRunning ? 'Research scheduler: running (pid ' + researchPid + ')' : 'Research scheduler: not running'
+    )
+    return
+  }
+  if (flags.includes('--research') && !flags.includes('--start')) {
+    console.error('--research only applies to --start; run `mio observer serve` to run the scheduler in this terminal.')
+    process.exitCode = 1
     return
   }
   if (flags.includes('--once')) {
@@ -3168,7 +3274,7 @@ Usage:
   mio evolution migration plan      Preview state migration diffs (--legacy-records/--modular-records JSON; required)
   mio evolution cutover apply --dry-run   Dry-run a cutover plan (--plan JSON and --dry-run are both required)
   mio observe                 Watch WorkBuddy transcripts and auto-ingest task outcomes
-  mio observe --start|--stop|--status|--once   Manage the background observer daemon
+  mio observe --start [--research]|--stop|--status|--once   Manage the background observer daemon
   mio recall "<query>"        Search Mio memory from the terminal (same ranking as mio.memory.query)
   mio traces                  Show recent observer traces (--type/--outcome/--agent/--since/--limit/--compact)
   mio remember "<content>"    Write a memory record from the terminal (same schema as mio.memory.record)
@@ -3197,6 +3303,7 @@ Usage:
   mio observer collect         Fetch from the configured sources (--sources/--keywords/--limit)
   mio observer ferment         Run the fermentation engine (--session morning|afternoon|night)
   mio observer pipeline        Run the research DAG (previews; --run to execute, --mode neutral|analytical|creative)
+  mio observer serve           Keep the research scheduler running (previews with --dry-run; Ctrl+C stops it)
   mio phase0 report            Show the Phase 0 validation report (--project X, --format markdown)
   mio host capabilities        Show what each host supports and whether it is installed
   mio task route "<task>"      Which verified experiences apply to this task (--project/--scope/--limit)
@@ -3232,7 +3339,7 @@ async function main() {
     case 'agents':
       return agentsCommand(args, useJson)
     case 'observe':
-      return observeCommand(args)
+      return observeCommand(args, useJson)
     case 'recall':
       return recallCommand(args, useJson)
     case 'traces':

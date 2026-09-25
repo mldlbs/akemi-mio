@@ -52,6 +52,9 @@ const SAFE_ARGS = {
   'observer:ferment': [],
   // pipeline previews by default (no network, no LLM); --run is what executes.
   'observer:pipeline': [],
+  // serve is the long-lived scheduler: without --dry-run it would keep the
+  // probe process alive until the gate's timeout, which reads as a hang.
+  'observer:serve': ['--dry-run'],
   'config:llm': [],
   'insight:generate': [],
 }

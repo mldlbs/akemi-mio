@@ -332,6 +332,64 @@ function createObserverStore(options = {}) {
     }
   }
 
+  // D6: the scheduler host. ObserverService.start() wires the per-collector
+  // intervals, a 60s pipeline tick and a 5s first tick, and tickPipeline skips
+  // while today's DAG is COMPLETED -- i.e. the daily research engine already
+  // existed, it just had no long-lived caller anywhere in mio-agent-runtime.
+  // This is that caller.
+  //
+  // Deliberately NOT exposed as an MCP tool: every MCP server that connects
+  // would start its own scheduler against the same dag file, and a client
+  // restart would leave a second one running. The cross-process PipelineLock
+  // keeps runs from interleaving, but a scheduler is a process-lifetime
+  // concern, so it belongs to `mio observer serve` and `mio observe --research`
+  // (both single pid-managed processes), not to a tool call.
+  //
+  // Like `pipeline`, the dry run never constructs the service: the constructor
+  // mkdir's the dag directory and start() begins fetching, and this path is
+  // what `check:cli-docs` runs.
+  async function serve(args = {}) {
+    if (!ObserverService) throw new Error('@akemi-mio/observer not installed')
+    const baseDir = baseDirOf(args)
+    const llmConfig = observerLlmConfig()
+    const schedule = {
+      collectors: 'every source collects on start, then on its own interval (30m weibo / 1h rss,hn,douyin,bilibili / 4h github-trending)',
+      pipelineTickMs: 60000,
+      pipelineFirstTickMs: 5000,
+      pipelineGate: "runs while today's DAG is not COMPLETED -- one full run per day, retried until it completes",
+      lockFile: path.join(baseDir, 'dag', 'pipeline.lock'),
+    }
+    let llm = null
+    if (ObserverLlmService) {
+      try {
+        const svc = new ObserverLlmService(llmConfig)
+        if (svc && typeof svc.getInfo === 'function') llm = svc.getInfo()
+      } catch (_) {
+        llm = null
+      }
+    }
+    if (args.dryRun) {
+      return {
+        dryRun: true,
+        baseDir,
+        observerAvailable: true,
+        llm,
+        schedule,
+        hint: 'Re-run without --dry-run to keep the scheduler in the foreground (Ctrl+C stops it).',
+      }
+    }
+    const service = new ObserverService(baseDir, llmConfig)
+    await service.start()
+    return {
+      dryRun: false,
+      serving: true,
+      baseDir,
+      llm,
+      schedule,
+      stop: () => service.stop(),
+    }
+  }
+
   return {
     baseDir: defaultBaseDir,
     status,
@@ -344,6 +402,7 @@ function createObserverStore(options = {}) {
     collect,
     ferment,
     pipeline,
+    serve,
   }
 }
 

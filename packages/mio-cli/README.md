@@ -40,7 +40,7 @@ mio evolution authority plan      Preview a gated authority switch plan (--readi
 mio evolution migration plan      Preview state migration diffs (--legacy-records/--modular-records JSON; required)
 mio evolution cutover apply --dry-run   Dry-run a cutover plan (--plan JSON and --dry-run are both required)
 mio observe                 Watch WorkBuddy transcripts and auto-ingest task outcomes (foreground)
-mio observe --start|--stop|--status|--once   Manage the background observer daemon
+mio observe --start [--research]|--stop|--status|--once   Manage the background observer daemon (--research also starts the research scheduler)
 mio recall "<query>"        Search Mio memory from the terminal (--project/--scope/--kind/--tags/--limit)
 mio traces                  Show recent observer traces (--type/--outcome/--agent/--since/--limit/--compact)
 mio prune --days 30         Trim old traces/queries/reuse records and observe.log (--dry-run to preview; --memory needs --yes)
@@ -66,6 +66,7 @@ mio observer <view>          Observer research pipeline views (research pipeline
 mio observer collect         Fetch from the configured sources (--sources a,b/--keywords k1,k2/--limit N)
 mio observer ferment         Run the fermentation engine (--session morning|afternoon|night)
 mio observer pipeline        Run the research DAG (previews by default; --run executes, --mode neutral|analytical|creative)
+mio observer serve           Keep the research scheduler running (previews with --dry-run; Ctrl+C stops it)
 mio observer ingest --trace-id T --event-type E   Record a trace event (--payload JSON/--outcome)
 mio observer subscribe --event-types a,b          Subscribe to events (--yes to apply; previews by default)
 mio observer digest                               New events since the last digest (advances the cursor)
@@ -498,6 +499,20 @@ mio observer trends --base-dir /path/to/.local/observer
   mio observer pipeline --run              # 执行完整 DAG
   mio observer pipeline --mode creative --run
   ```
+
+- **`mio observer serve` 让"日更引擎"真正自动跑起来**（D6）。`ObserverService.start()` 早就配好了各源的采集间隔、60 秒一次的管道 tick 与 5 秒后的首次 tick，并在"今天的 DAG 已 `COMPLETED`"时跳过——但 runtime 里**没有任何长驻进程调用过它**，这些闸门一次都没生效过，trends / research / insights 只有手动 `mio observer pipeline --run` 才会出现。现在有了宿主：
+
+  ```bash
+  mio observer serve              # 前台常驻：采集 + 每日一次完整 DAG（Ctrl+C 停）
+  mio observer serve --dry-run    # 只打印计划：baseDir / LLM / tick 周期 / 锁文件
+  mio observe --start --research  # 顺带把调度器作为第二个受 pid 管理的子进程拉起
+  ```
+
+  - `--dry-run` 不构造服务、不建目录、不联网，因此也是文档门禁实跑的参数（`SAFE_ARGS['observer:serve']`）。
+  - `--research` 是**显式开关**：默认 `mio observe --start` 只启动转写观察守护，不会悄悄开始花 LLM 调用。研究子进程日志写到 `<MIO_HOME>/research.log`（用 append fd 而不是管道：没人读的管道写满 64KB 就会把调度器卡死），`mio observe --status --json` 给出它的 pid 与日志路径，`mio observe --stop` 一并停掉两者。
+  - 研究数据仍落在**启动它的那个工作目录**的 `<cwd>/.local/observer`（与 `mio observer status` 一致）：子进程显式收到 `--base-dir`，因为转写守护 spawn 时 cwd 被钉成 `MIO_HOME`，若在守护进程里直接起调度，会多出一套谁也读不到的观察目录。
+  - 刻意**不提供** `mio.observer.serve` 这类 MCP 工具：每个连上的 MCP server 都会各起一个调度器，客户端一重启就多一个。
+  - `ObserverService` 内的 `pipelineRunning` 只防同进程并发；serve 子进程、守护与手动 `--run` 是三个进程，所以 `runPipeline` 现在还要抢 `<baseDir>/dag/pipeline.lock`（`O_EXCL` 建文件 + pid / mtime TTL，持有者已死即可接管）。锁被占时直接返回 `null`，不排队。
 
 - **观察者的 LLM 现在与 creativity / insight 共用同一份配置**。此前 `ObserverLlmService` 把 Ollama 地址与模型写死（`localhost:11434` / `qwen2.5:7b`，只认 `OBSERVER_*` 环境变量），完全无视 `mio config llm` —— 于是 `mio config llm` 配好的 deepseek 只对 server 侧生效，观察管道仍然空转。现在 `observer-store.js` 通过共享的 `server/llm-client.js` 解析配置并注入：用户配置过（`config.json` 的 `llm` 或 `LLM_*` 环境变量）就用它，否则保持 `@akemi-mio/observer` 自己的 `LLM_*` / `OBSERVER_*` / 本地 Ollama 回退，不会把既有本地 Ollama 用户静默改道到托管默认值。端点按 URL 形态自动选择传输：含 `/chat/completions` 走 OpenAI 兼容协议，否则按 Ollama 处理。
 - **`mio observer ingest` 记录任意 trace 事件**（`tool_call` / `error` / `retry` / `task_outcome`）：

@@ -122,6 +122,13 @@ export class ObserverService {
       log('WARN', 'pipeline_already_running')
       return null
     }
+    // pipelineRunning only guards this process; mio observe's daemon, a
+    // `mio observer serve` loop and a manual `pipeline --run` are three
+    // separate processes reading the same dag file. One run at a time.
+    if (!this.dag.acquireRunLock()) {
+      log('INFO', 'pipeline_skipped_locked')
+      return null
+    }
     this.pipelineRunning = true
     const startedAt = Date.now()
     const logTag = `pipe_${new Date().toISOString().slice(11, 19)}`
@@ -200,6 +207,7 @@ export class ObserverService {
       return null
     } finally {
       this.pipelineRunning = false
+      this.dag.releaseRunLock()
     }
   }
 
