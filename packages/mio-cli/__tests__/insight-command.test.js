@@ -429,3 +429,57 @@ test('insight status reports counts when installed, or says it is not', () => {
     assert.match(result.stderr, /@akemi-mio\/insight not installed/)
   }
 })
+
+// The CLI must wire chatJson into createInsightStore exactly like the MCP
+// server does ({ dataDir, chatJson }). Without it the real generator stores
+// `this.llm = { chatJson: undefined }` and dies at generate time with
+// "TypeError: this.llm.chatJson is not a function" -- the fakes above never
+// touch the deps object, so this records what the CLI actually passed in.
+test('insight generate passes chatJson into the store', () => {
+  const ws = workspace()
+  const preload = path.join(ws.cwd, 'chatjson-preload.js')
+  const recordFile = path.join(ws.cwd, 'chatjson.json')
+  fs.writeFileSync(
+    preload,
+    `'use strict'
+const Module = require('node:module')
+const fs = require('node:fs')
+const original = Module._load
+class FakeInsightStore {
+  constructor(file) { this.items = [] }
+  getAll() { return this.items }
+  getUnreported() { return this.items }
+  getHighValueUnreported() { return [] }
+  markReported() {}
+  addMany(list) { this.items.push(...list) }
+}
+class FakeInsightGenerator {
+  constructor(deps) {
+    fs.writeFileSync(process.env.RECORD_FILE, JSON.stringify({
+      chatJsonType: typeof (deps && deps.chatJson),
+    }))
+  }
+  async generate() { return [] }
+}
+Module._load = function (request, ...rest) {
+  if (request === '@akemi-mio/insight') {
+    return { InsightStore: FakeInsightStore, InsightGenerator: FakeInsightGenerator }
+  }
+  return original.call(this, request, ...rest)
+}
+`
+  )
+  const result = spawnSync(
+    process.execPath,
+    ['-r', preload, CLI, 'insight', 'generate', '--summary', 'x', '--json'],
+    { cwd: ws.cwd, encoding: 'utf8', env: { ...ws.env, RECORD_FILE: recordFile } }
+  )
+
+  assert.equal(result.status, 0, result.stderr)
+  const rec = JSON.parse(fs.readFileSync(recordFile, 'utf8'))
+  assert.equal(
+    rec.chatJsonType,
+    'function',
+    'cliInsightStore() must call createInsightStore({ dataDir: MIO_HOME, chatJson })'
+  )
+})

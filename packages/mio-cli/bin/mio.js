@@ -1345,7 +1345,7 @@ function policyCommand(args, useJson) {
 // warns when no LLM is configured and accepts --json like every other command.
 // ═════════════════════════════════════════════════════════════
 function cliInsightStore() {
-  return createInsightStore({ dataDir: MIO_HOME })
+  return createInsightStore({ dataDir: MIO_HOME, chatJson })
 }
 
 function insightUsage(write = console.log) {
