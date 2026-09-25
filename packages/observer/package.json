@@ -1,6 +1,6 @@
 {
   "name": "@akemi-mio/observer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Autonomous observer system — data collection, trend detection, deep research, multi-brain analysis, and world model",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
