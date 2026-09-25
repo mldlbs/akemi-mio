@@ -1884,6 +1884,9 @@ function printObserverPipeline(result) {
   }
   if (!result.completed) {
     console.log(`Observer pipeline did not complete: ${result.reason || 'unknown reason'}`)
+    // Show what the run actually produced, so a failing exit code is diagnosable
+    // instead of a bare "unknown reason".
+    console.log(`  sections=${result.sections || 0} topic=${result.topic || 'none'} insight=${result.insightId || 'none'}`)
     process.exitCode = 1
     return
   }

@@ -166,6 +166,54 @@ test('pipeline reports a null envelope as incomplete instead of throwing', async
   assert.match(result.reason, /null/)
 })
 
+// D5, consumer half. @akemi-mio/observer < 0.1.2 published the insight while the
+// dag still said STORED (it transitioned to COMPLETED afterwards), so a strict
+// COMPLETED check reported success=false for a run that had fully succeeded --
+// `mio observer pipeline --run` then exited 1. This branch is only reachable
+// when publishing returned an envelope at all, so STORED means "published".
+test('an envelope published at STORED (pre-0.1.2 producer) counts as completed', async () => {
+  resetEnv()
+  const { fake } = recordingFake({
+    envelope: {
+      type: 'daily_research',
+      dagState: { taskId: 'dag_20260925', state: 'STORED' },
+      payload: { id: 'insight-1', topic: 'old producer', sections: [{}, {}] },
+      metadata: { taskDurationMs: 42, llmCalls: 2 },
+    },
+  })
+  const { createObserverStore } = loadStoreWith(fake)
+  const store = createObserverStore({ baseDir: path.join(os.tmpdir(), 'mio-pipeline-stored') })
+
+  const result = await store.pipeline({ run: true })
+
+  assert.equal(result.ran, true)
+  assert.equal(result.completed, true, 'a published envelope must not be reported as a failure (D5)')
+  assert.equal(Object.hasOwn(result, 'reason'), false)
+})
+
+// A dag state that is neither COMPLETED nor publish-time STORED is a real
+// failure and must say so: the CLI used to print "unknown reason" because the
+// store returned no reason at all on this path.
+test('an unexpected dag state fails with a reason instead of no reason', async () => {
+  resetEnv()
+  const { fake } = recordingFake({
+    envelope: {
+      type: 'daily_research',
+      dagState: { taskId: 'dag_20260925', state: 'WRITING' },
+      payload: { id: 'insight-1', topic: 't', sections: [] },
+      metadata: { taskDurationMs: 1, llmCalls: 0 },
+    },
+  })
+  const { createObserverStore } = loadStoreWith(fake)
+  const store = createObserverStore({ baseDir: path.join(os.tmpdir(), 'mio-pipeline-badstate') })
+
+  const result = await store.pipeline({ run: true })
+
+  assert.equal(result.completed, false)
+  assert.match(result.reason, /WRITING/)
+  assert.doesNotMatch(result.reason, /unknown reason/)
+})
+
 test('pipeline preview survives an older observer package without getInfo', async () => {
   resetEnv()
   // The published @akemi-mio/observer can lag this CLI and have no getInfo().

@@ -169,8 +169,13 @@ export class ObserverService {
 
       // Step 8: Output
       log('INFO', `${logTag}_output`)
-      const envelope = await this.output.publishInsight(insight, dag, startedAt)
+      // COMPLETED before publishing, not after: publishInsight snapshots dag.state
+      // into envelope.dagState, so publishing while the dag still said STORED made
+      // every successful run look incomplete to consumers checking for COMPLETED.
+      // publishInsight only builds the envelope (no I/O), and a later throw still
+      // reaches failTask(), which overwrites this state.
       dag = this.dag.transition(dag, 'COMPLETED')
+      const envelope = await this.output.publishInsight(insight, dag, startedAt)
 
       // Step 9: Self Evolution
       const repeated = this.store.getRecentTopics(7).length > 3

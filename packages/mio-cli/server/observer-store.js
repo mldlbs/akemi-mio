@@ -306,12 +306,22 @@ function createObserverStore(options = {}) {
       }
     }
     const payload = envelope.payload || {}
+    // dagState.state is COMPLETED on @akemi-mio/observer >= 0.1.2, which marks the
+    // dag COMPLETED *before* publishInsight snapshots it into the envelope.
+    // Older producers published while the dag still said STORED even though the
+    // run had in fact finished, and a strict COMPLETED check turned every success
+    // into completed:false (D5). This branch only exists when publishing
+    // succeeded, so STORED counts as completed; anything else is a real failure
+    // and must carry a reason, otherwise the CLI can only print "unknown reason".
+    const state = envelope.dagState ? envelope.dagState.state : null
+    const completed = state === 'COMPLETED' || state === 'STORED'
     return {
       dryRun: false,
       baseDir,
       mode,
       ran: true,
-      completed: envelope.dagState && envelope.dagState.state === 'COMPLETED',
+      completed,
+      ...(completed ? {} : { reason: `unexpected dag state: ${state || 'missing'} (expected COMPLETED)` }),
       type: envelope.type,
       taskId: envelope.dagState ? envelope.dagState.taskId : null,
       topic: payload.topic || null,
