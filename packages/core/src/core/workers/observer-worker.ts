@@ -5,7 +5,7 @@
  * 可在 worker 中独立运行，不阻塞主线程。
  *
  * IPC 协议（通过 WorkerPool.sendTaskAndWait）：
- * - { method: 'init', data: { baseDir } } → 初始化 ObserverService
+ * - { method: 'init', data: { baseDir, llmConfig? } } → 初始化 ObserverService
  * - { method: 'initLlm' } → 检查 Ollama + 初始化 LLM
  * - { method: 'start' } → 启动采集器 + pipeline 定时器
  * - { method: 'stop' } → 优雅关闭
@@ -37,7 +37,11 @@ async function handleTask(msg: { taskId: string; name?: string; method?: string;
 
   if (method === 'init') {
     const { ObserverService } = await import('@akemi-mio/intelligence-observer/ObserverService')
-    const service = new ObserverService(data?.baseDir)
+    // llmConfig is optional: the shell passes the resolved model connection so
+    // the pipeline uses the same LLM as the rest of the app instead of the
+    // hardcoded Ollama default. Without it, ObserverLlmService falls back to
+    // LLM_* / OBSERVER_* env vars.
+    const service = new ObserverService(data?.baseDir, data?.llmConfig)
     ;(globalThis as any).__observerService = service
     parentPort?.postMessage({ type: 'result', taskId, success: true, data: { initialized: true } })
     return

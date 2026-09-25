@@ -1,6 +1,7 @@
 import { ObserverService } from './ObserverService'
 import { ObserverStore } from './ObserverStore'
 import { ObserverLlmService } from './ObserverLlmService'
+import type { ObserverLlmConfig } from './ObserverLlmService'
 import { DagStateMachine } from './DagStateMachine'
 import { TrendEngine } from './TrendEngine'
 import { TensionFieldEngine } from './TensionFieldEngine'
@@ -28,9 +29,9 @@ export {
 
 export let observerService: ObserverService | null = null
 
-export function initObserver(): ObserverService {
+export function initObserver(baseDir?: string, llmConfig?: ObserverLlmConfig): ObserverService {
   if (!observerService) {
-    observerService = new ObserverService()
+    observerService = new ObserverService(baseDir, llmConfig)
   }
   return observerService
 }

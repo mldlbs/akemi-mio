@@ -1,5 +1,6 @@
 import { log } from '@akemi-mio/core/logger/Logger'
 import { ObserverLlmService } from './ObserverLlmService'
+import type { ObserverLlmConfig } from './ObserverLlmService'
 import { ObserverStore } from './ObserverStore'
 import { FermentationEngine } from './FermentationEngine'
 import { WritingGate } from './WritingGate'
@@ -54,8 +55,12 @@ export class ObserverService {
   private lastPipelineDate = ''
   private pipelineRunning = false
 
-  constructor(baseDir?: string) {
-    this.llm = new ObserverLlmService()
+  // Optional `llmConfig` mirrors packages/observer: a host that has already
+  // resolved the model connection injects it here instead of relying on the
+  // process environment. Omitted, the LLM service falls back to LLM_* /
+  // OBSERVER_* env vars and then its Ollama default.
+  constructor(baseDir?: string, llmConfig?: ObserverLlmConfig) {
+    this.llm = new ObserverLlmService(llmConfig)
     this.store = new ObserverStore(baseDir)
     this.fermentation = new FermentationEngine(this.llm, this.store)
     this.writingGate = new WritingGate(this.llm, this.store)
