@@ -700,9 +700,20 @@ function opencodeDbPath() {
   return path.join(opencodeDataDir(), 'opencode.db')
 }
 
+// Resolved once per observer process: the bin does not move mid-run, and
+// re-running `where`/`which` on every query doubled the subprocess count of
+// every cycle for zero information. Re-resolves only when the cached path
+// vanishes from disk. A null result is deliberately NOT cached so an opencode
+// installed mid-run is still picked up.
+let resolvedOpencodeBin
+
 function findOpencodeBin() {
+  if (resolvedOpencodeBin && fs.existsSync(resolvedOpencodeBin)) {
+    return resolvedOpencodeBin
+  }
   if (process.env.OPENCODE_BIN && fs.existsSync(process.env.OPENCODE_BIN)) {
-    return process.env.OPENCODE_BIN
+    resolvedOpencodeBin = process.env.OPENCODE_BIN
+    return resolvedOpencodeBin
   }
   const exeDir = path.dirname(process.execPath)
   const candidates = [
@@ -760,7 +771,10 @@ function findOpencodeBin() {
           ? lines.filter((p) => /\.(exe|cmd|bat)$/i.test(p))
           : lines
       const first = (preferred.length > 0 ? preferred : lines).find((p) => fs.existsSync(p))
-      if (first) return first
+      if (first) {
+        resolvedOpencodeBin = first
+        return first
+      }
     }
   } catch (_) {}
   return null
@@ -987,16 +1001,20 @@ function runOpencodeCycle(home, state, sinks, opts) {
   const maxAgeMs = (opts && opts.maxAgeMs) || 24 * 60 * 60 * 1000
 
   // First run: seed the rowid cursor to the first part written within the
-  // backfill window so ancient history never floods MIO_HOME.
+  // backfill window so ancient history never floods MIO_HOME. One round trip:
+  // the scalar subselects return NULL for first_rid when nothing was written
+  // inside the window, which maps to the same "fall back to MAX(rowid)" branch
+  // the previous two-query version had.
   if (!state.ocSeeded) {
     const ts = Date.now() - maxAgeMs
-    const first = runOpencodeQuery('SELECT rowid FROM part WHERE time_created >= ' + ts + ' ORDER BY rowid LIMIT 1')
+    const seed = runOpencodeQuery(
+      'SELECT (SELECT rowid FROM part WHERE time_created >= ' + ts + ' ORDER BY rowid LIMIT 1) AS first_rid, ' +
+        '(SELECT COALESCE(MAX(rowid), 0) FROM part) AS max_rid'
+    )
     let rid = 0
-    if (Array.isArray(first) && first.length > 0) {
-      rid = Number(first[0].rowid) || 0
-    } else {
-      const maxRow = runOpencodeQuery('SELECT COALESCE(MAX(rowid), 0) AS rid FROM part')
-      if (Array.isArray(maxRow) && maxRow.length > 0) rid = Number(maxRow[0].rid) || 0
+    if (Array.isArray(seed) && seed.length > 0) {
+      const firstRid = Number(seed[0].first_rid)
+      rid = Number.isFinite(firstRid) && firstRid > 0 ? firstRid : Number(seed[0].max_rid) || 0
     }
     state.ocLastRowid = rid
     state.ocSeeded = true
