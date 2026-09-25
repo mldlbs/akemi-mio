@@ -34,6 +34,14 @@ describe('database connection paths', () => {
     }
   })
 
+  // 超时给到 30s（默认 5s）。§10.20 的 A′（beforeAll 预热冷 import）只消除了
+  // **冷 import**；09-25 实测：测试体里 `initDatabase()` 仍有 ~250–500ms 的
+  // **真·每次调用**成本（建 2 个 SQLite 库 + 同步迁移；`runMigrations` 无动态 import），
+  // 而且**不可预热** —— 在 beforeAll 里额外预热一次 initDatabase 后，body 的 init 并未下降
+  // （warmInit 485–529ms，body init 仍 246–504ms）。CI 冷/资源争用时这段真活儿会放大到
+  // >5s ⇒ 假红（Run #97 复现；§10.20 当初否决「放宽超时」的理由是「成本可预热」，已被实测推翻）。
+  // 该测试只做 3 个确定性的 existsSync 断言，放宽超时不掩盖代码回归（只去掉机器速度敏感性）；
+  // 真正的死循环/挂起仍会在 30s 判红。
   it('resolves database files from USER_DATA_DIR at initialization time', async () => {
     const fixedRoot = mkdtempSync(join(tmpdir(), 'akemi-db-fixed-'))
     const dynamicRoot = mkdtempSync(join(tmpdir(), 'akemi-db-dynamic-'))
@@ -65,5 +73,5 @@ describe('database connection paths', () => {
     expect(existsSync(join(dynamicRoot, 'databases', 'main.db'))).toBe(true)
     expect(existsSync(join(dynamicRoot, 'databases', 'events.db'))).toBe(true)
     expect(existsSync(join(fixedRoot, 'databases', 'main.db'))).toBe(false)
-  })
+  }, 30_000)
 })

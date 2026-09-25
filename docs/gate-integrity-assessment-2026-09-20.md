@@ -2771,6 +2771,34 @@ beforeAll(async () => {
 > 抖动至少会红，假通过永远绿。
 
 
+#### ⚠️ 补正（09-25）：A′ 只消除了冷 import，残留是 `initDatabase()` 的**真·每次调用**成本
+
+Run #97（`e18bdd4`，一笔与本测试**无关**的 mio-cli 改动）在 `main-tests` 又红在同一处
+（`connection.path.test.ts` 超时）。复核后发现本节的前提**不完整**：
+
+- A′ 把**冷 import** 挪进 `beforeAll` 后，测试体里 `await import(connection)` 确实只剩
+  4~19ms（本机实测）—— **A′ 按设计生效**；
+- 但测试体真正的大头是 `initDatabase()`：本机 **246~504ms**。它不是冷启动，而是
+  **每次真的建 2 个 SQLite 库 + 跑同步迁移**（`runMigrations` 无动态 import）；
+- **不可预热**（反证）：在 `beforeAll` 里额外预热一次 `initDatabase()`（临时目录）后，
+  测试体的 `init` **没有下降**（warmInit 485~529ms，body init 仍 246~504ms）。
+
+⇒ 本节「成本在冷 import（957ms）」的归因**漏掉了 initDatabase 的真活儿**。CI 冷/资源争用
+时这 ~300ms 会放大到 >5s，5s 超时因此仍会偶发判红。**当初否决 A（放宽超时）的理由是
+「成本可预热、所以不必放宽」——该前提已被上述反证推翻。**
+
+> ⚠️ 附带一个探针可用性的坑：vitest 4.1.7 的 `context.annotate()`（以及 `console.log`）
+> **不会**变成 GitHub 的 `::notice::` —— 它只被 reporter 打印到 console（=job log，需管理员
+> 权限）。CI 上无认证可见的通道**只有「测试失败」**（vitest 自发的 `::error::`）。所以
+> 「加个只打印的分步耗时探针」在 CI 上等于没加。
+
+#### ✅ 处置（09-25）：放宽该测试超时到 30s
+
+给 `connection.path.test.ts` 的用例加 `30_000`（默认 5s）。理由：该测试只做 3 个
+**确定性** `existsSync` 断言，放宽超时**不掩盖代码回归**（只去掉机器速度敏感性）；
+真正的死循环/挂起仍会在 30s 判红。变异检验：把最后一条断言改成 `toBe(true)` → 如期变红。
+
+
 ### 10.21 ✅ 还掉 `weekly-audit` 的 label 债，并补上**缺失的 `permissions`**（09-22 拍板）
 
 按 09-22 拍板（「改代码去掉 label 依赖」）改了 `.github/workflows/weekly-audit.yml`。
