@@ -339,6 +339,43 @@ async function main() {
     ws.removeEventListener('message', h)
     return out?.result?.result?.value
   }
+  // 裸 CDP 调用（Runtime.evaluate 之外的 method 用）。与 ev/fev 一样串行发 ——
+  // 并发会互相楔住（见 MCP server 的 rl.on('line') 教训）。
+  const cdp = (sock, method, params, waitMs = 1500) => {
+    const id = Math.floor(Math.random() * 1e6)
+    let out = null
+    const h = (m) => {
+      const j = JSON.parse(m.data)
+      if (j.id === id) out = j
+    }
+    sock.addEventListener('message', h)
+    sock.send(JSON.stringify({ id, method, params: params || {} }))
+    return sleep(waitMs).then(() => {
+      sock.removeEventListener('message', h)
+      return out
+    })
+  }
+
+  // ── 测量前提：把 prefers-reduced-motion 钉回 no-preference（09-23 探针定案）──
+  // CI #89/#90 三形态「空闲动画」恒 0/0、等渲染锚点也没用的根因：CI runner
+  // 系统级开了「减少动态效果」，而 forms/shared.css 的可达性规则把 .form-root
+  // 内所有产品动画压成 0.001ms×1 —— finished 且未 fill 的 CSS 动画不再是
+  // relevant，getAnimations() 恒空（本地用 Emulation.setEmulatedMedia 复现，
+  // 数据与 CI 逐字一致；pet 自检里那两个 pet-deco-float 是装饰动画的 delay
+  // 残留 —— kill 规则覆盖 duration/iteration-count 但**不覆盖 delay**）。
+  // 门禁要量的是「设计意图」的动画集，不是可达性模式下的有意空集。
+  // 自检注入 div 挂 documentElement、在 .form-root 之外，本来就不受影响 ——
+  // 这也解释了为什么主窗口自检 147% 而产品基线恒 0。
+  // 回读 matchMedia 进 notice：这个前提本身必须可见（FM-6 纪律：判据的前提
+  // 失效时，「 healthy 」与「盲」不可区分）。
+  await cdp(ws, 'Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+  })
+  const reduceMain = await ev(`matchMedia('(prefers-reduced-motion: reduce)').matches`, 1500)
+  // 回读也要进 console：notice 只在 GITHUB_ACTIONS 下才输出，本地跑这道门禁时
+  // 这个前提就完全看不见了 —— 而它恰恰是「本地为什么量不到 CI 那个现象」的答案。
+  // 本文件其余每个事实都是 console + notice 双通道，这里保持一致。
+  console.log(`[idle-gpu] 前提      reduce=${reduceMain}（已钉回 no-preference）`)
 
   // 每次采样都取两个快照做差；只统计两次都存在的进程，避免新进程拉低分母
   async function phase(tag, evaluate = ev) {
@@ -479,6 +516,7 @@ async function main() {
       (ab ? ` / 关动画 ${ab.gpu.toFixed(1)}% / A-B 差值 ${delta.toFixed(1)} 个点（预算 ${DELTA_BUDGET}）` : ' / A-B 已跳过') +
       ` / 基线总 CPU ${base.total.toFixed(1)}%` +
       ` / GPU 进程 ${base.gpuProcs}` +
+      ` / reduce=${reduceMain}` +
       (base.animProbeOk ? ` / 基线动画 ${base.running.length}/${base.animCount}` : ' / 基线动画 探测失败'),
   )
   // 被测页面的清单也要发。这道门禁是隐式挑页面的（见上面 page 的选择逻辑），
@@ -586,6 +624,11 @@ async function main() {
         fws.removeEventListener('message', h)
         return out?.result?.result?.value
       }
+      // 同主窗口：钉回 no-preference（理由见主窗口处的注释），并回读进 notice。
+      await cdp(fws, 'Emulation.setEmulatedMedia', {
+        features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+      })
+      const reduceForm = await fev(`matchMedia('(prefers-reduced-motion: reduce)').matches`, 1500)
       // ── 等 React 渲染锚点出现（09-23 补）────────────────────────────────
       // CI #87/#88 标定：基线若在 target 一出现就测，React 还没渲染（#root 空），
       // base 恒 0/0 → 空闲动画判据**从未非空触发**（FM-6：门禁能跑但判据空转）。
@@ -636,14 +679,16 @@ async function main() {
       await sleep(1500)
       const scDelta = sc.gpu - base.gpu
       console.log(
-        `\n  [${kind}] 自检 GPU ${sc.gpu.toFixed(1)}%  差值 ${scDelta.toFixed(1)} 个点` + `（下限 ${SELFCHECK_MIN}）  残留 ${scLeft}`,
+        `\n  [${kind}] 自检 GPU ${sc.gpu.toFixed(1)}%  差值 ${scDelta.toFixed(1)} 个点` +
+          `（下限 ${SELFCHECK_MIN}）  残留 ${scLeft}` +
+          ` / reduce=${reduceForm}`,
       )
       notice(
         `[idle-gpu] 形态窗口 ${kind}：自检 GPU ${sc.gpu.toFixed(1)}%（差值 ${scDelta.toFixed(1)}` +
           ` 个点，下限 ${SELFCHECK_MIN}） / 自检动画 ${sc.running.length}/${sc.animCount}` +
           ` [${sc.running.map((a) => a.name).join(', ') || '-'}]` +
           ` / 空闲动画 ${base.running.length}/${base.animCount}` +
-          ` [${base.running.map((a) => a.name).join(', ') || '-'}] / 残留 ${scLeft}`,
+          ` [${base.running.map((a) => a.name).join(', ') || '-'}] / reduce=${reduceForm} / 残留 ${scLeft}`,
       )
       if (sc.running.length === 0) {
         // 只报数（不判红）：注入没生效只是说明这条链在该窗口上没被证明能动，
