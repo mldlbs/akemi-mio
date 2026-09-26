@@ -1,3 +1,4 @@
+import { httpFetch } from '../http'
 import { log } from '../logger'
 import type { Collector, Observation } from '../types'
 
@@ -28,7 +29,7 @@ export class DouyinCollector implements Collector {
 
     for (const url of this.apis) {
       try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+        const res = await httpFetch(url, { signal: AbortSignal.timeout(10000) })
         if (!res.ok) continue
         const body = (await res.json()) as DouyinApiResponse
         const list = body?.data ?? []

@@ -45,14 +45,22 @@ function mockItemNull() {
 
 describe('HackerNewsCollector', () => {
   let collector: HackerNewsCollector
+  let savedNoProxy: string | undefined
 
   beforeEach(() => {
     collector = new HackerNewsCollector()
     mockFetch.mockReset()
     global.fetch = mockFetch as any
+    // httpFetch() (D7) resolves env + the Windows system proxy first, so on a
+    // machine with ProxyEnable=1 this would go through undici and silently
+    // bypass the global fetch mock. NO_PROXY=* pins the test to the direct path.
+    savedNoProxy = process.env.NO_PROXY
+    process.env.NO_PROXY = '*'
   })
 
   afterEach(() => {
+    if (savedNoProxy === undefined) delete process.env.NO_PROXY
+    else process.env.NO_PROXY = savedNoProxy
     vi.restoreAllMocks()
   })
 

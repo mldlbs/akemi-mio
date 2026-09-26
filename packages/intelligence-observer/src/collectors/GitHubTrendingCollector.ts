@@ -1,3 +1,4 @@
+import { httpFetch } from '../http'
 import { log } from '@akemi-mio/core/logger/Logger'
 import type { Collector, Observation } from '../types'
 
@@ -27,7 +28,7 @@ export class GitHubTrendingCollector implements Collector {
 
     // 尝试 API
     try {
-      const res = await fetch('https://hot.imsyy.top/hellogithub', { signal: AbortSignal.timeout(10000) })
+      const res = await httpFetch('https://hot.imsyy.top/hellogithub', { signal: AbortSignal.timeout(10000) })
       if (res.ok) {
         const body = (await res.json()) as GHApiResponse
         const list = body?.data ?? []
@@ -47,7 +48,7 @@ export class GitHubTrendingCollector implements Collector {
 
     // Fallback: scrape
     try {
-      const res = await fetch('https://github.com/trending?since=daily', {
+      const res = await httpFetch('https://github.com/trending?since=daily', {
         headers: { 'User-Agent': 'Mozilla/5.0' },
         signal: AbortSignal.timeout(15000),
       })

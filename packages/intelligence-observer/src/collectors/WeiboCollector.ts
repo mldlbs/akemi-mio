@@ -1,3 +1,4 @@
+import { httpFetch } from '../http'
 import { log } from '@akemi-mio/core/logger/Logger'
 import type { Collector, Observation } from '../types'
 
@@ -25,7 +26,7 @@ export class WeiboCollector implements Collector {
       this.apiIndex = (this.apiIndex + 1) % this.apis.length
 
       try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+        const res = await httpFetch(url, { signal: AbortSignal.timeout(10000) })
         if (!res.ok) continue
 
         const data = await res.json()

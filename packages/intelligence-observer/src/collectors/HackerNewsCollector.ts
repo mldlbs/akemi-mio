@@ -1,3 +1,4 @@
+import { httpFetch } from '../http'
 import { log } from '@akemi-mio/core/logger/Logger'
 import type { Collector, Observation } from '../types'
 
@@ -20,7 +21,7 @@ export class HackerNewsCollector implements Collector {
 
     try {
       // 1. 获取 top stories ID 列表
-      const idsRes = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json', {
+      const idsRes = await httpFetch('https://hacker-news.firebaseio.com/v0/topstories.json', {
         signal: AbortSignal.timeout(15000),
       })
       if (!idsRes.ok) {
@@ -36,7 +37,7 @@ export class HackerNewsCollector implements Collector {
         const batch = topIds.slice(i, i + batchSize)
         const stories = await Promise.all(
           batch.map((id) =>
-            fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, {
+            httpFetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, {
               signal: AbortSignal.timeout(10000),
             })
               .then((r) => (r.ok ? r.json() : null))

@@ -1,3 +1,4 @@
+import { httpFetch } from '../http'
 import { log } from '../logger'
 import type { Collector, Observation } from '../types'
 
@@ -40,7 +41,7 @@ export class BilibiliCollector implements Collector {
 
     // 热搜词
     try {
-      const res = await fetch('https://s.search.bilibili.com/main/hotword', {
+      const res = await httpFetch('https://s.search.bilibili.com/main/hotword', {
         headers: this.headers,
         signal: AbortSignal.timeout(10000),
       })
@@ -62,7 +63,7 @@ export class BilibiliCollector implements Collector {
 
     // 热门视频
     try {
-      const res = await fetch('https://api.bilibili.com/x/web-interface/popular?ps=10&pn=1', {
+      const res = await httpFetch('https://api.bilibili.com/x/web-interface/popular?ps=10&pn=1', {
         headers: this.headers,
         signal: AbortSignal.timeout(10000),
       })

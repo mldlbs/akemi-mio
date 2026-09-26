@@ -1,3 +1,4 @@
+import { httpFetch } from '../http'
 import { log } from '../logger'
 import type { Collector, Observation } from '../types'
 
@@ -92,7 +93,7 @@ export class RSSCollector implements Collector {
 
     for (const serviceUrl of services) {
       try {
-        const res = await fetch(serviceUrl, {
+        const res = await httpFetch(serviceUrl, {
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
           signal: AbortSignal.timeout(15000),
         })

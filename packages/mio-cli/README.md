@@ -133,7 +133,7 @@ MCP 服务端在 5 大域共暴露 50 个工具：
 | `@akemi-mio/evolution-strategy` | 演化策略引擎 |
 | `@akemi-mio/evolution-safety` | 安全护栏 |
 | `@akemi-mio/evolution-scheduler` | 演化调度器 |
-| `@akemi-mio/observer` | ObserverService —— 多源数据采集、趋势分析、深度研究、世界模型、发酵、DAG 状态机、自演化引擎（零 npm 依赖） |
+| `@akemi-mio/observer` | ObserverService —— 多源数据采集、趋势分析、深度研究、世界模型、发酵、DAG 状态机、自演化引擎（唯一运行时依赖 `undici`，只用于走代理采集） |
 | `@akemi-mio/insight` | InsightService —— 基于 LLM 的洞察生成、冲突/漂移/重复/停滞目标/摩擦检测器、在场服务、洞察打分（零 npm 依赖） |
 
 以下 `@akemi-mio` 包同样位于本 monorepo 中并独立发布，但**不是**本 CLI 的依赖——其源码从不 import 它们，因此未声明在 `package.json` 里：
@@ -513,6 +513,12 @@ mio observer trends --base-dir /path/to/.local/observer
   - 研究数据仍落在**启动它的那个工作目录**的 `<cwd>/.local/observer`（与 `mio observer status` 一致）：子进程显式收到 `--base-dir`，因为转写守护 spawn 时 cwd 被钉成 `MIO_HOME`，若在守护进程里直接起调度，会多出一套谁也读不到的观察目录。
   - 刻意**不提供** `mio.observer.serve` 这类 MCP 工具：每个连上的 MCP server 都会各起一个调度器，客户端一重启就多一个。
   - `ObserverService` 内的 `pipelineRunning` 只防同进程并发；serve 子进程、守护与手动 `--run` 是三个进程，所以 `runPipeline` 现在还要抢 `<baseDir>/dag/pipeline.lock`（`O_EXCL` 建文件 + pid / mtime TTL，持有者已死即可接管）。锁被占时直接返回 `null`，不排队。
+
+- **采集会走系统与环境里配置的代理**（D7）。6 个采集源共 9 处请求此前直接用全局 `fetch`，而 Node 的 fetch **不读任何代理配置**——所以浏览器能打开的页面，采集全部超时（issue #3：Windows 开着系统代理、直连不通时，weibo / rss / hackernews / douyin / bilibili / github-trending 全军覆没）。现在统一走 `@akemi-mio/observer` 的 `httpFetch()`：
+  - 代理按顺序取：`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`（大小写皆可）→ Windows 系统代理（`reg query` 读 HKCU Internet Settings 的 `ProxyEnable` / `ProxyServer` / `ProxyOverride`，进程内缓存 30 秒）。`ProxyServer` 的 `h=..;https=..` 与单值两种写法都认，**端口读实时注册表**——issue 里写的 7990 早已不是本机端口，硬编码必然过期。
+  - 绕过：`NO_PROXY` 与 `ProxyOverride`，支持 `*`、`<local>`、`*.zhihu.com`、`127.*`、裸域名（含子域）。
+  - **解析不到代理就走原生 `fetch`，与从前逐字节一致**；解析到代理时用 `undici` 的 `ProxyAgent`（CONNECT 隧道，https 与 http 目标同样处理）。代理连不上（`ECONNREFUSED` / `ENOTFOUND` / `EHOSTUNREACH`）会**回退直连**并记 `proxy_fallback_direct`，避免"系统代理开着但客户端已关"把原本能通的直连也搞坏。
+  - `ObserverLlmService` 不在这条通路上（issue 只讲采集失败）。
 
 - **观察者的 LLM 现在与 creativity / insight 共用同一份配置**。此前 `ObserverLlmService` 把 Ollama 地址与模型写死（`localhost:11434` / `qwen2.5:7b`，只认 `OBSERVER_*` 环境变量），完全无视 `mio config llm` —— 于是 `mio config llm` 配好的 deepseek 只对 server 侧生效，观察管道仍然空转。现在 `observer-store.js` 通过共享的 `server/llm-client.js` 解析配置并注入：用户配置过（`config.json` 的 `llm` 或 `LLM_*` 环境变量）就用它，否则保持 `@akemi-mio/observer` 自己的 `LLM_*` / `OBSERVER_*` / 本地 Ollama 回退，不会把既有本地 Ollama 用户静默改道到托管默认值。端点按 URL 形态自动选择传输：含 `/chat/completions` 走 OpenAI 兼容协议，否则按 Ollama 处理。
 - **`mio observer ingest` 记录任意 trace 事件**（`tool_call` / `error` / `retry` / `task_outcome`）：
