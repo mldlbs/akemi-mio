@@ -253,11 +253,20 @@ const SELFCHECK_OFF = `(function(){
 /** 清理成功时的期望值（与上面的拼接格式逐字对应）。 */
 const SELFCHECK_CLEAN = '0|el0|style0'
 
+// ⚠️ `className` 在 SVG 元素上是 `SVGAnimatedString`，直接 `String()` 只会得到
+// `"[object SVGAnimatedString]"` —— 而 pet 那一族的动画目标**全是 SVG**，于是
+// 「是哪个元素在动」这条最关键的定位信息在注解里一直是垃圾。取 `.baseVal` 才是真类名。
 const ANIM_EXPR = `JSON.stringify(document.getAnimations().map((a) => ({
   name: a.animationName || '(?)',
   state: a.playState,
   tag: a.effect && a.effect.target ? a.effect.target.tagName : null,
-  cls: a.effect && a.effect.target ? String(a.effect.target.className || '').slice(0, 40) : null,
+  cls: a.effect && a.effect.target
+    ? String(
+        (a.effect.target.className && a.effect.target.className.baseVal) ||
+          a.effect.target.className ||
+          '',
+      ).slice(0, 40)
+    : null,
 })))`
 
 async function main() {
@@ -517,7 +526,10 @@ async function main() {
       ` / 基线总 CPU ${base.total.toFixed(1)}%` +
       ` / GPU 进程 ${base.gpuProcs}` +
       ` / reduce=${reduceMain}` +
-      (base.animProbeOk ? ` / 基线动画 ${base.running.length}/${base.animCount}` : ' / 基线动画 探测失败'),
+      (base.animProbeOk
+        ? ` / 基线动画 ${base.running.length}/${base.animCount}` +
+          ` [${base.running.map((a) => `${a.name} <${a.tag}> .${a.cls}`).join(' | ') || '-'}]`
+        : ' / 基线动画 探测失败'),
   )
   // 被测页面的清单也要发。这道门禁是隐式挑页面的（见上面 page 的选择逻辑），
   // 只发挑中的那一个，「还有别的窗口没被量」这件事就看不见了 —— 而
