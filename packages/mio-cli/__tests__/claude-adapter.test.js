@@ -102,9 +102,16 @@ test('claude adapter install writes user-scope mcpServers and CLAUDE.md rules', 
     assert.equal(JSON.parse(entry.env.MIO_CONTEXT).agentId, 'claude-code')
 
     const userRules = fs.readFileSync(path.join(configDir, 'CLAUDE.md'), 'utf8')
-    assert.ok(userRules.includes('<!-- MIO_INTELLIGENCE_BEGIN -->'))
     const projectRules = fs.readFileSync(path.join(workspace, 'CLAUDE.md'), 'utf8')
+    assert.ok(userRules.includes('<!-- MIO_INTELLIGENCE_BEGIN -->'))
     assert.ok(projectRules.includes('<!-- MIO_INTELLIGENCE_BEGIN -->'))
+    for (const rules of [userRules, projectRules]) {
+      assert.ok(rules.includes('mcp__mio-intelligence__mio.memory.query'))
+      assert.ok(
+        !rules.includes('mio-intelligence_mio.'),
+        'Claude Code resolves tools as mcp__<server>__<tool>, so the bare prefix must not ship'
+      )
+    }
     assert.equal(adapter.isInstalled(), true)
 
     // Re-install: blocks already present -> rules unchanged (same semantics

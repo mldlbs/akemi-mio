@@ -86,6 +86,25 @@ function configNeedsRepair(serverScript) {
   return configured !== needle
 }
 
+// Installed configs written before 0.13.4 baked an install-time project into
+// MIO_CONTEXT, which overrides the server's git-based project derivation and
+// mis-attributes memory writes. Rewriting the entry drops it; `cwd` pins the
+// server process to the workspace so derivation has a stable starting point.
+function contextNeedsRepair() {
+  const config = readConfig()
+  const mcp = config && config.mcp && config.mcp['mio-intelligence']
+  if (!mcp) return false
+  const raw = mcp.environment && mcp.environment.MIO_CONTEXT
+  if (typeof raw !== 'string') return true
+  let context
+  try {
+    context = JSON.parse(raw)
+  } catch (_) {
+    return true
+  }
+  return Boolean(context && typeof context === 'object' && ('project' in context || 'workspace' in context))
+}
+
 function restartWarningMessage() {
   return restartWarning({
     hostLabel: 'OpenCode Desktop',
@@ -102,11 +121,11 @@ function isInstalled() {
   return instructions.includes(INSTRUCTIONS_BEGIN) && instructions.includes(INSTRUCTIONS_END)
 }
 
-function install({ node, serverScript, home, workspace, project }) {
+function install({ node, serverScript, home }) {
   const target = configPath()
   const config = readConfig() || {}
   const configInstalled = Boolean(config.mcp && config.mcp['mio-intelligence'])
-  const needsRepair = configInstalled && configNeedsRepair(serverScript)
+  const needsRepair = configInstalled && (configNeedsRepair(serverScript) || contextNeedsRepair())
 
   let configChanged = false
   let backup = null
@@ -120,8 +139,6 @@ function install({ node, serverScript, home, workspace, project }) {
     const existingMcp = config.mcp && typeof config.mcp === 'object' ? config.mcp : {}
     const context = JSON.stringify({
       agentId: 'opencode',
-      project: project || path.basename(workspace || process.cwd()),
-      workspace: workspace || process.cwd(),
       sessionId: 'opencode-session',
     })
     const next = {
@@ -132,6 +149,7 @@ function install({ node, serverScript, home, workspace, project }) {
           enabled: true,
           type: 'local',
           command: [node, serverScript],
+          cwd: '.',
           environment: {
             MIO_DATA_DIR: home,
             MIO_CONTEXT: context,
@@ -152,7 +170,7 @@ function install({ node, serverScript, home, workspace, project }) {
   if (configChanged && instructionsResult.changed) {
     message = 'OpenCode Mio MCP installed and global Mio rules injected into AGENTS.md. Restart OpenCode to load them.'
   } else if (needsRepair && !instructionsResult.changed) {
-    message = 'OpenCode Mio MCP repaired (server path updated). Restart OpenCode to load it.'
+    message = 'OpenCode Mio MCP repaired (server path or context updated). Restart OpenCode to load it.'
   } else if (instructionsResult.changed) {
     message = 'OpenCode Mio MCP already installed. Injected global Mio rules into AGENTS.md. Restart OpenCode to load them.'
   } else {
@@ -173,4 +191,12 @@ function install({ node, serverScript, home, workspace, project }) {
   }
 }
 
-module.exports = { configPath, globalInstructionsPath, isInstalled, install, configNeedsRepair, restartWarningMessage }
+module.exports = {
+  configPath,
+  globalInstructionsPath,
+  isInstalled,
+  install,
+  configNeedsRepair,
+  contextNeedsRepair,
+  restartWarningMessage,
+}
