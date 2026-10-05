@@ -85,10 +85,16 @@ function runHermes(args) {
     res = bin
       ? spawnWithOptionalInput(bin, args, { encoding: 'utf8', timeout: 60000, windowsHide: true, input: input, shell: isCmdShim })
       : spawnWithOptionalInput('hermes', args, { encoding: 'utf8', timeout: 60000, shell: true, windowsHide: true, input: input })
-  } catch (_) {
-    return null
+  } catch (err) {
+    const msg = `hermes ${args.join(' ')} failed: ${err.message || err}`
+    console.error(msg)
+    throw new Error(msg)
   }
-  if (res.error || res.status !== 0) return null
+  if (res.error || res.status !== 0) {
+    const msg = `hermes ${args.join(' ')} exited ${res.status}: ${res.stderr || res.stdout || 'no output'}`
+    console.error(msg)
+    throw new Error(msg)
+  }
   return (res.stdout || '') + (res.stderr || '')
 }
 

@@ -72,8 +72,8 @@ function readJsonSafe(filePath) {
   if (!fs.existsSync(filePath)) return null
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'))
-  } catch {
-    return null
+  } catch (err) {
+    throw new Error(`Failed to parse JSON from ${filePath}: ${err.message}`)
   }
 }
 
@@ -91,19 +91,20 @@ function todayTaskId() {
 function readJsonlSafe(filePath) {
   if (!fs.existsSync(filePath)) return []
   try {
-    return fs
+    const lines = fs
       .readFileSync(filePath, 'utf8')
       .trim()
       .split('\n')
       .filter(Boolean)
-      .map((l) => {
-        try {
-          return JSON.parse(l)
-        } catch {
-          return null
-        }
-      })
-      .filter(Boolean)
+    const results = []
+    for (let i = 0; i < lines.length; i++) {
+      try {
+        results.push(JSON.parse(lines[i]))
+      } catch (err) {
+        console.warn(`Skipping corrupted line ${i + 1} in ${filePath}: ${err.message}`)
+      }
+    }
+    return results
   } catch {
     return []
   }

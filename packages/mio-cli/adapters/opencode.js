@@ -99,8 +99,9 @@ function contextNeedsRepair() {
   let context
   try {
     context = JSON.parse(raw)
-  } catch (_) {
-    return true
+  } catch (err) {
+    console.error('Invalid MIO_CONTEXT JSON in opencode config:', err.message)
+    return false
   }
   return Boolean(context && typeof context === 'object' && ('project' in context || 'workspace' in context))
 }

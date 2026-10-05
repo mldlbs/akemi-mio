@@ -72,13 +72,16 @@ function createEvolutionCutoverTools({ dataDir, appendJsonl, readJsonl, projectN
     const project = projectFromArgs(args)
     const shadowRuns = readJsonl(shadowPath).filter((record) => record.project === project)
     const dualWriteRuns = readJsonl(dualWritePath).filter((record) => record.project === project)
+    // Apply documented defaults (schema says minShadowRuns: 5, maxMismatchRate: 0)
+    const minShadowRuns = Number.isFinite(args.minShadowRuns) ? args.minShadowRuns : 5
+    const maxMismatchRate = Number.isFinite(args.maxMismatchRate) ? args.maxMismatchRate : 0
     return {
       project,
       ...assessCutoverReadiness({
         shadowRuns,
         dualWriteRuns,
-        minShadowRuns: Number.isFinite(args.minShadowRuns) ? args.minShadowRuns : undefined,
-        maxMismatchRate: Number.isFinite(args.maxMismatchRate) ? args.maxMismatchRate : undefined,
+        minShadowRuns,
+        maxMismatchRate,
       }),
     }
   }

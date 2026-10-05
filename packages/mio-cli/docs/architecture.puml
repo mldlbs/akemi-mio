@@ -46,7 +46,7 @@ package "MCP Server (server/mio-intelligence-mcp/)" as MCP #D5F5E3 {
     [policyCheck] as POL
   }
 
-  card "Observer 模块 (12 Tools)" as OBS_TOOLS {
+  card "Observer 模块 (11 Tools)" as OBS_TOOLS {
     [observerWorldModel] as OBS_WM
     [observerTrends] as OBS_TR
     [observerResearch] as OBS_RSR
@@ -56,9 +56,8 @@ package "MCP Server (server/mio-intelligence-mcp/)" as MCP #D5F5E3 {
     [observerFerment] as OBS_FERM
     [observerEssays] as OBS_ESS
     [observerDag] as OBS_DAG
-    [observerIngest] as OBS_ING
+    [observerPipeline] as OBS_PIPE
     [observerSubscribe] as OBS_SUB
-    [observerDigest] as OBS_DG
   }
 
   card "Insight 模块 (4 Tools)" as INS_TOOLS {
@@ -75,12 +74,15 @@ package "MCP Server (server/mio-intelligence-mcp/)" as MCP #D5F5E3 {
     [creativityStatus] as CR_STS
   }
 
-  card "Idea & Evolution (7 Tools)" as EVO_TOOLS {
-    [ideaGenerate] as IDEA_G
-    [ideaList] as IDEA_L
-    [evolutionSuggest] as EVO_SUG
+  card "Evolution (9 Tools)" as EVO_TOOLS {
     [evolutionReport] as EVO_RPT
-    [evolutionStrategies] as EVO_STR
+    [evolutionStatus] as EVO_STS
+    [evolutionShadowRecord] as EVO_SHD
+    [evolutionDualWriteRecord] as EVO_DW
+    [evolutionCutoverReadiness] as EVO_CR
+    [evolutionMigrationPlan] as EVO_MIG
+    [evolutionAuthorityPlan] as EVO_AUTH
+    [evolutionCutoverApply] as EVO_APPLY
     [phase0Report] as P0
   }
 
@@ -147,9 +149,9 @@ RT_MOD --> D_TRACES
 PKG_OBS --> D_OBS
 
 legend right
-  <size:10><b>mio-agent-runtime v0.5.17</b></size>
-  <size:10>41 MCP Tools</size>
-  <size:10>5 Domains</size>
+  <size:10><b>mio-agent-runtime v0.13.4</b></size>
+  <size:10>50 MCP Tools</size>
+  <size:10>13 Domains</size>
   <size:10>13 @akemi-mio/* packages</size>
 endlegend
 

@@ -27,14 +27,13 @@ const path = require('path')
 const DEFAULT_API_URL = 'https://opencode.ai/zen/go/v1/chat/completions'
 const DEFAULT_MODEL = 'deepseek-v4-flash'
 
-// Resolve the directory holding config.json. The CLI and the MCP server use
-// different data dirs by design (MIO_HOME vs MIO_DATA_DIR||cwd/.mio-intelligence),
-// so we honour whichever is set and fall back to the CLI default. No third
-// convention is introduced here on purpose.
+// Resolve the directory holding config.json. The CLI uses MIO_HOME
+// (~/.mio-intelligence by default). The MCP server uses MIO_DATA_DIR ||
+// cwd/.mio-intelligence. This module serves the CLI-facing `llm-config`/
+// `config llm` commands, so we follow the CLI convention: MIO_HOME first.
 function homeDir() {
   return (
     process.env.MIO_HOME ||
-    process.env.MIO_DATA_DIR ||
     path.join(os.homedir(), '.mio-intelligence')
   )
 }

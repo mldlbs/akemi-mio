@@ -195,7 +195,10 @@ function saveState(home, state) {
   try {
     fs.mkdirSync(home, { recursive: true })
     fs.writeFileSync(stateFile(home), JSON.stringify(state) + '\n', 'utf8')
-  } catch (_) {}
+  } catch (err) {
+    console.error('Failed to save observer state:', err.message || err)
+    throw err
+  }
 }
 
 function listTranscripts() {
@@ -410,7 +413,10 @@ function updateProjectContext(state, cwd, line, targetFile) {
     content = content.trimEnd() + '\n\n' + block + '\n'
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.writeFileSync(target, content, 'utf8')
-  } catch (_) {}
+  } catch (err) {
+    console.error(`Failed to update ${path.basename(target)} for ${key}:`, err.message || err)
+    throw err
+  }
 }
 
 function localDateKey(ts) {
@@ -436,7 +442,10 @@ function writeWorkbuddyDigest(turn, outcome, summary) {
       '\n## Mio 自动摘要 (' + time + ')\n' +
       '- outcome: ' + outcome + ' | tools: ' + turn.toolCount + ' | ' + summary.slice(0, 160) + '\n'
     fs.appendFileSync(file, entry, 'utf8')
-  } catch (_) {}
+  } catch (err) {
+    console.error('Failed to write WorkBuddy digest:', err.message || err)
+    throw err
+  }
 }
 
 function emitWorkbuddyOutcome(turn, sinks, state) {

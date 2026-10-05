@@ -6,7 +6,7 @@ graph LR
   CLI --> AHR["hermes"]
   ADX & AOC & AWB & AHR -->|"stdio JSON-RPC"| MCP
 
-  subgraph MCP["MCP Server — 41 Tools"]
+  subgraph MCP["MCP Server — 50 Tools"]
     direction TB
     SW{"callTool"}
     subgraph T1["Memory ×10"]
@@ -14,10 +14,10 @@ graph LR
       X["experience.list·confirm·reuse"]
       P["policy.check"]
     end
-    subgraph T2["Observer ×12"]
+    subgraph T2["Observer ×11"]
       W["world_model·trends·research·insights·status"]
-      C["collect·ferment·essays·dag"]
-      S["ingest·subscribe·digest"]
+      C["collect·ferment·essays·dag·pipeline"]
+      S["subscribe"]
     end
     subgraph T3["Insight ×4"]
       I["status·list·mark_reported·generate"]
@@ -25,9 +25,8 @@ graph LR
     subgraph T4["Creativity ×4"]
       R["generate·ferment·list·status"]
     end
-    subgraph T5["Idea+Evolution ×7"]
-      E["idea.generate·list"]
-      V["evolution.suggest·report·strategies"]
+    subgraph T5["Evolution ×9"]
+      E["evolution.report·status·shadow_record·dual_write_record·cutover_readiness·migration_plan·authority_plan·cutover_apply"]
       Z["phase0.report"]
     end
     SW --> T1 & T2 & T3 & T4 & T5

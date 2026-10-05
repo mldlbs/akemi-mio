@@ -359,7 +359,7 @@ Historically risky: ...
 
 说明：
 
-- **它读取全局 `MIO_HOME`，而非每项目目录。** MCP 服务端把数据目录解析为 `MIO_DATA_DIR || cwd/.mio-intelligence`，因此从任意目录发起的 MCP 调用看到的是空存储；CLI 刻意指向累积的全局日志。`mio mcp` 是例外：它先把 `MIO_DATA_DIR` 钉到 `MIO_HOME` 再启动服务端，于是 stdio 入口与终端读写同一份数据（宿主适配器显式传入的 `MIO_DATA_DIR` 仍然优先）。用 `--project` 把 trace 集合限定到某个项目。
+- **它读取全局 `MIO_HOME`，而非每项目目录。** MCP 服务端把数据目录解析为 `MIO_DATA_DIR || cwd/.mio-intelligence`，因此从任意目录发起的 MCP 调用看到的是空存储；CLI 刻意指向累积的全局日志。`mio mcp` 是例外：它先把 `MIO_DATA_DIR` 钉到 `MIO_HOME` 再启动服务端，于是 stdio 入口与终端读写同一份数据。注意：各桌面宿主适配器（codex、opencode、workbuddy、hermes、claude-code）在启动 MCP 服务端时会**显式传入**各自的 `MIO_DATA_DIR`（指向宿主的配置目录），因此它们**不共享** CLI 的 `MIO_HOME`；只有 `mio mcp`（直接 stdio 连接）才与终端读写同一份数据。用 `--project` 把 trace 集合限定到某个项目。
 - **风险即失败占比**，`>= 0.4` 为高，`>= 0.2` 为中。`retry` 与 `aborted` 与 `failure`、`error` 一并计为失败。无匹配历史报告 `UNKNOWN`，与 `LOW`（干净记录）不同。
 - **匹配可能被通用 token 带偏。** 匹配是对动作 token 的宽松 OR，所以像 `task` 这样的动作几乎匹配每条 trace，因为关键词 `task` 几乎出现在所有 payload 中。当动作中*每个* token 都至少出现在半数候选 trace 里时，CLI 会打印警告，而不是让等级自说自话：
 
@@ -505,7 +505,7 @@ mio observer trends --base-dir /path/to/.local/observer
   mio observer ferment --session morning                # morning|afternoon|night
   ```
 
-  两者都依赖可选包 `@akemi-mio/observer`（未安装时提示 `not installed`，不是空结果）。`collect` 会**联网**抓取，`ferment` 需要 LLM；它们**不做预览**，因为预览意味着把数据抓两遍。单个源失败不会中断整次运行——该源会以 `errors: ...` 出现在输出里，其余源照常统计。
+  两者都依赖可选包 `@akemi-mio/observer`（未安装时提示 `not installed`，不是空结果）。`collect` 会**联网**抓取，`ferment` 需要 LLM；它们**不做预览**，因为预览意味着把数据抓两遍。单个源失败不会中断整次运行——该源会以 `errors: ...` 出现在输出里，其余源照常统计。`collect` 会**联网**抓取，`ferment` 需要 LLM；它们**不做预览**，因为预览意味着把数据抓两遍。单个源失败不会中断整次运行——该源会以 `errors: ...` 出现在输出里，其余源照常统计。
 - **`mio observer pipeline` 是研究 DAG 的入口**（`collect → trend → tension → research → multi-brain → compose → world model → publish → self-evolve`）。此前 `runPipeline` / `tickPipeline` / `forcePipeline` 在 mio-agent-runtime 里**没有任何调用方**，所以 trends / research / insights 默认永远是空的，只有手动实例化服务才能跑通。它同样依赖 `@akemi-mio/observer`，会**联网并调用多次 LLM**，因此和 `subscribe` 一样**默认只预览**（读今天的 DAG 状态与解析后的 LLM 端点，不构造服务、不建目录），`--run` 才真正执行：
 
   ```bash

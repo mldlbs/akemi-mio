@@ -564,7 +564,9 @@ function digestCommand(args, useJson) {
     let state = {}
     try {
       state = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
-    } catch (_) {}
+    } catch (err) {
+      throw new Error(`Failed to parse ${stateFile}: ${err.message}`)
+    }
     state.contexts = state.contexts || {}
     const stamp = new Date().toLocaleString('zh-CN', { hour12: false })
 
@@ -595,6 +597,7 @@ function digestCommand(args, useJson) {
     }
 
     let written = 0
+    const writeBackFailures = []
     for (const cwd of targetCwds) {
       const line = projectLine.get(path.basename(cwd).toLowerCase())
       if (!line) continue
@@ -602,13 +605,18 @@ function digestCommand(args, useJson) {
         observer.updateProjectContext(state, cwd, stamp + ' | ' + line, 'CLAUDE.md')
         observer.updateProjectContext(state, cwd, stamp + ' | ' + line, 'AGENTS.md')
         written += 1
-      } catch (_) {}
+      } catch (err) {
+        const wsName = path.basename(cwd)
+        console.error(`Write-back failed for ${wsName}:`, err.message || err)
+        writeBackFailures.push({ workspace: wsName, error: err.message || String(err) })
+      }
     }
     fs.mkdirSync(MIO_HOME, { recursive: true })
     fs.writeFileSync(stateFile, JSON.stringify(state) + '\n', 'utf8')
     report.writeBack = {
       workspaces: written,
       skipped: Object.keys(state.contexts).length - written,
+      failures: writeBackFailures,
       projects: [...projectLine.values()],
     }
   }
@@ -626,6 +634,10 @@ function digestCommand(args, useJson) {
     console.log(
       `Write-back: ${report.writeBack.workspaces} workspace(s), ${report.writeBack.skipped} skipped (no digest data)`,
     )
+    if (report.writeBack.failures && report.writeBack.failures.length > 0) {
+      console.error(`  ${report.writeBack.failures.length} write-back failure(s):`)
+      for (const f of report.writeBack.failures) console.error(`    - ${f.workspace}: ${f.error}`)
+    }
     for (const line of report.writeBack.projects) console.log(`  - ${line}`)
   }
 }
@@ -3187,22 +3199,33 @@ function installCommand(host, useJson) {
     }
     writeConfig(config)
   }
+  let observerCycleOk = true
   try {
     observer.runCycle(MIO_HOME, observer.loadState(MIO_HOME), observer.createSinks(MIO_HOME))
-  } catch (_) {}
+  } catch (err) {
+    console.error('Observer cycle failed during install:', err.message || err)
+    observerCycleOk = false
+  }
   let observerStarted = false
   try {
     observerStarted = observer.startBackground(MIO_HOME).started
-  } catch (_) {}
+  } catch (err) {
+    console.error('Observer background startup failed during install:', err.message || err)
+    observerStarted = false
+  }
   if (useJson) {
     result.observer = {
       running: observer.isRunning(MIO_HOME),
       started: observerStarted,
+      cycleOk: observerCycleOk,
     }
     jsonOrText(result, true)
     return
   }
   console.log(result.message || `${host} adapter completed.`)
+  if (!observerCycleOk) {
+    console.error('Warning: observer cycle failed during install; run `mio observe --once` manually.')
+  }
   console.log(
     observer.isRunning(MIO_HOME)
       ? 'Observer daemon running.'
