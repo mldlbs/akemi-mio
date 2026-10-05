@@ -20,7 +20,7 @@ const { createSubscriptionStore } = require('../subscription-store.js')
 const { createDigest } = require('../digest.js')
 const { createEvolutionReport } = require('../evolution-report.js')
 
-const { CreativityEngine } = require('../creativity-engine.js')
+const { CreativityEngine, sourcesFromInsights } = require('../creativity-engine.js')
 // The observer and insight engines are optional dependencies. Their stores own
 // the require and expose isObserverAvailable() / isInsightAvailable() so tool
 // registration can be gated on them, and both the MCP server and the CLI share
@@ -684,12 +684,12 @@ const TOOLS = [
   },
   {
     name: 'mio.creativity.status',
-    description: 'Show creativity engine status: hypothesis counts, active/validated/rejected, recent top ideas.',
+    description: 'Show creativity engine status: hypothesis counts, active/validated/rejected/draft, recent top ideas.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'mio.creativity.list',
-    description: 'List creativity hypotheses with optional status filter.',
+    description: 'List creativity hypotheses with optional status filter. Newest 20 by default; pass limit: 0 for everything.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -700,7 +700,7 @@ const TOOLS = [
   },
   {
     name: 'mio.creativity.generate',
-    description: 'Generate new creative hypotheses by combining concept sources via LLM. Returns ideas with novelty/feasibility/impact scores.',
+    description: 'Generate new creative hypotheses by combining concept sources via LLM. Returns ideas with novelty/feasibility/impact scores. Pass sources, or set fromInsights to seed them from stored insights.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -718,9 +718,12 @@ const TOOLS = [
             required: ['name', 'content'],
           },
         },
+        fromInsights: {
+          type: 'boolean',
+          description: 'Seed concept sources from stored insights (highest score first), merged with any explicit sources. Needs @akemi-mio/insight and at least one stored insight.',
+        },
         strategy: { type: 'string', description: 'Generation strategy: explore (cross-domain), signal (provocative), stable (conservative). Auto-selected if omitted.' },
       },
-      required: ['sources'],
     },
   },
   {
@@ -965,6 +968,24 @@ function observerDag(args = {}) {
   return observerStore.dag(args)
 }
 
+// `fromInsights` seeds generation from what the insight engine already noticed
+// instead of making the caller hand-write concept sources. Only this entry
+// point knows which store is authoritative, so the read happens here; the
+// insight -> { name, content } mapping itself lives in ../creativity-engine.js
+// so the CLI's `--from-insights` lands on the same shapes.
+function generationSources(args) {
+  const supplied = args.sources
+  if (!args.fromInsights) return supplied
+  if (!isInsightAvailable()) {
+    throw new Error('mio.creativity.generate fromInsights requires the optional package @akemi-mio/insight')
+  }
+  const seeds = sourcesFromInsights(insightStore.list({}))
+  if (seeds.length === 0) {
+    throw new Error('mio.creativity.generate fromInsights: no stored insights yet (run `mio insight generate` first)')
+  }
+  return Array.isArray(supplied) ? supplied.concat(seeds) : seeds
+}
+
 async function callTool(name, args = {}) {
   switch (name) {
     case 'mio.memory.query':
@@ -1036,7 +1057,7 @@ async function callTool(name, args = {}) {
     case 'mio.creativity.list':
       return creativityEngine.list(args)
     case 'mio.creativity.generate':
-      return creativityEngine.generate(args.sources, args.strategy)
+      return creativityEngine.generate(generationSources(args), args.strategy)
     case 'mio.creativity.ferment':
       return creativityEngine.ferment(args.limit)
     case 'mio.insight.status':

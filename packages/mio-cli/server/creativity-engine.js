@@ -4,6 +4,20 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 
+// Cache validity key for a JSONL file: a (size, mtimeMs) pair, the same
+// guard server/insight-store.js uses (commit 0ba7fa8). Every getter below used
+// to latch its parsed array forever, so a long-running MCP process answered
+// `mio.creativity.list` from the copy it loaded at startup and a
+// `mio creativity generate` in another process stayed invisible until restart.
+function fileSignature(filePath) {
+  try {
+    const st = fs.statSync(filePath)
+    return `${st.size}:${st.mtimeMs}`
+  } catch (_) {
+    return 'missing'
+  }
+}
+
 // ═══════════════════════════════════════════════
 //  JSONL Store — ideas, combos, experiments
 // ═══════════════════════════════════════════════
@@ -17,6 +31,9 @@ class CreativityStore {
     this._hypotheses = null
     this._combos = null
     this._experiments = null
+    this._hypothesesSig = null
+    this._combosSig = null
+    this._experimentsSig = null
   }
 
   _ensureDir() {
@@ -42,8 +59,10 @@ class CreativityStore {
   }
 
   getHypotheses(opts = {}) {
-    if (this._hypotheses === null) {
+    const sig = fileSignature(this.hypothesesPath)
+    if (this._hypotheses === null || this._hypothesesSig !== sig) {
       this._hypotheses = this._readJsonl(this.hypothesesPath)
+      this._hypothesesSig = sig
     }
     let list = this._hypotheses
     if (opts.status) list = list.filter(h => h.status === opts.status)
@@ -53,6 +72,7 @@ class CreativityStore {
 
   addHypothesis(h) {
     this._appendJsonl(this.hypothesesPath, h)
+    this._hypothesesSig = fileSignature(this.hypothesesPath)
     if (this._hypotheses) this._hypotheses.push(h)
   }
 
@@ -63,30 +83,37 @@ class CreativityStore {
     Object.assign(all[idx], patch)
     this._hypotheses = all
     this._rewriteFile(this.hypothesesPath, all)
+    this._hypothesesSig = fileSignature(this.hypothesesPath)
     return true
   }
 
   getCombos(limit) {
-    if (this._combos === null) {
+    const sig = fileSignature(this.combosPath)
+    if (this._combos === null || this._combosSig !== sig) {
       this._combos = this._readJsonl(this.combosPath)
+      this._combosSig = sig
     }
     return limit ? this._combos.slice(-limit) : this._combos
   }
 
   addCombo(c) {
     this._appendJsonl(this.combosPath, c)
+    this._combosSig = fileSignature(this.combosPath)
     if (this._combos) this._combos.push(c)
   }
 
   getExperiments() {
-    if (this._experiments === null) {
+    const sig = fileSignature(this.experimentsPath)
+    if (this._experiments === null || this._experimentsSig !== sig) {
       this._experiments = this._readJsonl(this.experimentsPath)
+      this._experimentsSig = sig
     }
     return this._experiments
   }
 
   addExperiment(e) {
     this._appendJsonl(this.experimentsPath, e)
+    this._experimentsSig = fileSignature(this.experimentsPath)
     if (this._experiments) this._experiments.push(e)
   }
 
@@ -178,6 +205,30 @@ function evaluateNovelty(idea, recent, rejected) {
 //  Creativity Engine — main orchestrator
 // ═══════════════════════════════════════════════
 
+// Concept sources drawn from stored insights, backing
+// `mio.creativity.generate { fromInsights: true }` / `mio creativity generate
+// --from-insights`. The *caller* supplies the insight records because only the
+// entry point knows which store is authoritative (MIO_HOME for the CLI, the
+// MCP server's MIO_DATA_DIR); this only maps them onto the { name, content,
+// type, weight } shape the concept mixer pairs up. Highest score first, capped
+// so one busy insight run cannot turn into dozens of LLM calls.
+function sourcesFromInsights(insights, limit = 10) {
+  return (Array.isArray(insights) ? insights : [])
+    .filter(i => i && (i.title || i.description || i.content))
+    .slice()
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, limit)
+    .map(i => ({
+      name: String(i.title || i.id || 'insight').replace(/\s+/g, ' ').slice(0, 60),
+      content: [
+        i.description || i.content || i.title || '',
+        Array.isArray(i.evidence) && i.evidence.length > 0 ? `Evidence: ${i.evidence.join('; ')}` : '',
+      ].filter(Boolean).join('\n'),
+      type: 'insight',
+      weight: 0.7,
+    }))
+}
+
 const STRATEGY_CYCLE = ['explore', 'signal', 'stable']
 
 class CreativityEngine {
@@ -221,6 +272,11 @@ class CreativityEngine {
 
     // Generate hypotheses via LLM
     const ideas = []
+    // A failed pair used to vanish: `catch {}` swallowed the exception and a
+    // chatJson `{ error }` payload fell through the `if (result.data)` guard,
+    // so the caller saw `ideas: []` with no explanation of whether the LLM was
+    // down, the JSON was unparseable, or every pair really was a duplicate.
+    const errors = []
     for (const [a, b] of pairs) {
       const prompt = this._buildGenerationPrompt(a, b, strat, recent.slice(-10), rejected.slice(-5))
       try {
@@ -229,48 +285,57 @@ class CreativityEngine {
           temperature: strat === 'explore' ? 0.8 : 0.4,
         })
 
-        if (result.data) {
-          const h = {
-            id: crypto.randomUUID(),
-            title: result.data.title || 'Untitled',
-            idea: result.data.idea || '',
-            expectedBenefit: result.data.expectedBenefit || '',
-            risk: result.data.risk || '',
-            novelty: Math.min(100, Math.max(0, result.data.novelty || 50)),
-            feasibility: Math.min(100, Math.max(0, result.data.feasibility || 50)),
-            impact: Math.min(100, Math.max(0, result.data.impact || 50)),
-            sourceLabels: [a.name, b.name],
-            status: 'active',
-            createdAt: Date.now(),
-            strategy: strat,
-          }
-
-          // Novelty check
-          const verdict = evaluateNovelty(h, recent, rejected)
-          if (verdict.shouldReject) {
-            h.status = 'rejected'
-            h.rejectionReason = verdict.rejectReason
-          } else {
-            h.novelty = verdict.adjustedNovelty
-          }
-
-          this.store.addHypothesis(h)
-          ideas.push(h)
-
-          // Record combo
-          this.store.addCombo({
-            id: crypto.randomUUID(),
-            sources: [a.name, b.name],
-            description: h.title,
-            createdAt: Date.now(),
+        if (!result || !result.data) {
+          errors.push({
+            pair: [a.name, b.name],
+            error: (result && result.error) || 'LLM returned no data',
           })
+          continue
         }
+
+        const h = {
+          id: crypto.randomUUID(),
+          title: result.data.title || 'Untitled',
+          idea: result.data.idea || '',
+          expectedBenefit: result.data.expectedBenefit || '',
+          risk: result.data.risk || '',
+          novelty: Math.min(100, Math.max(0, result.data.novelty || 50)),
+          feasibility: Math.min(100, Math.max(0, result.data.feasibility || 50)),
+          impact: Math.min(100, Math.max(0, result.data.impact || 50)),
+          sourceLabels: [a.name, b.name],
+          status: 'active',
+          createdAt: Date.now(),
+          strategy: strat,
+        }
+
+        // Novelty check
+        const verdict = evaluateNovelty(h, recent, rejected)
+        if (verdict.shouldReject) {
+          h.status = 'rejected'
+          h.rejectionReason = verdict.rejectReason
+        } else {
+          h.novelty = verdict.adjustedNovelty
+        }
+
+        this.store.addHypothesis(h)
+        ideas.push(h)
+
+        // Record combo
+        this.store.addCombo({
+          id: crypto.randomUUID(),
+          sources: [a.name, b.name],
+          description: h.title,
+          createdAt: Date.now(),
+        })
       } catch (err) {
-        // LLM call failed, skip this pair
+        errors.push({
+          pair: [a.name, b.name],
+          error: String((err && err.message) || err),
+        })
       }
     }
 
-    return { ideas, strategy: strat, pairsAttempted: pairs.length }
+    return { ideas, strategy: strat, pairsAttempted: pairs.length, errors }
   }
 
   async ferment(limit = 5) {
@@ -283,6 +348,9 @@ class CreativityEngine {
     }
 
     const results = []
+    // Same reason as generate(): a failing review used to be indistinguishable
+    // from a hypothesis that simply had nothing new to say.
+    const errors = []
     for (const h of fermentable) {
       const prompt = `Review and refine this hypothesis. Current state:
 Title: ${h.title}
@@ -297,34 +365,41 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty, feasibility, impa
           temperature: 0.3,
         })
 
-        if (result.data) {
-          const patch = {
-            title: result.data.title || h.title,
-            idea: result.data.idea || h.idea,
-            expectedBenefit: result.data.expectedBenefit || h.expectedBenefit,
-            risk: result.data.risk || h.risk,
-            novelty: Math.min(100, Math.max(0, result.data.novelty || h.novelty)),
-            feasibility: Math.min(100, Math.max(0, result.data.feasibility || h.feasibility)),
-            impact: Math.min(100, Math.max(0, result.data.impact || h.impact)),
-            fermentedAt: Date.now(),
-            fermentCount: (h.fermentCount || 0) + 1,
-          }
-
-          if (result.data.verdict === 'reject') {
-            patch.status = 'rejected'
-          } else if (result.data.verdict === 'promote' && (h.novelty + h.feasibility + h.impact) > 200) {
-            patch.status = 'validated'
-          }
-
-          this.store.updateHypothesis(h.id, patch)
-          results.push({ id: h.id, title: h.title, verdict: result.data.verdict, reason: result.data.reason })
+        if (!result || !result.data) {
+          errors.push({
+            id: h.id,
+            title: h.title,
+            error: (result && result.error) || 'LLM returned no data',
+          })
+          continue
         }
+
+        const patch = {
+          title: result.data.title || h.title,
+          idea: result.data.idea || h.idea,
+          expectedBenefit: result.data.expectedBenefit || h.expectedBenefit,
+          risk: result.data.risk || h.risk,
+          novelty: Math.min(100, Math.max(0, result.data.novelty || h.novelty)),
+          feasibility: Math.min(100, Math.max(0, result.data.feasibility || h.feasibility)),
+          impact: Math.min(100, Math.max(0, result.data.impact || h.impact)),
+          fermentedAt: Date.now(),
+          fermentCount: (h.fermentCount || 0) + 1,
+        }
+
+        if (result.data.verdict === 'reject') {
+          patch.status = 'rejected'
+        } else if (result.data.verdict === 'promote' && (h.novelty + h.feasibility + h.impact) > 200) {
+          patch.status = 'validated'
+        }
+
+        this.store.updateHypothesis(h.id, patch)
+        results.push({ id: h.id, title: h.title, verdict: result.data.verdict, reason: result.data.reason })
       } catch (err) {
-        // skip
+        errors.push({ id: h.id, title: h.title, error: String((err && err.message) || err) })
       }
     }
 
-    return { fermented: results.length, results }
+    return { fermented: results.length, results, errors }
   }
 
   status() {
@@ -332,12 +407,16 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty, feasibility, impa
     const active = this.store.getHypotheses({ status: 'active' })
     const validated = this.store.getHypotheses({ status: 'validated' })
     const rejected = this.store.getHypotheses({ status: 'rejected' })
+    // draft is a real state -- ferment() reviews draft + active -- so hiding it
+    // here made `status` and `list --status draft` disagree.
+    const draft = this.store.getHypotheses({ status: 'draft' })
 
     return {
       ...count,
       active: active.length,
       validated: validated.length,
       rejected: rejected.length,
+      draft: draft.length,
       recentIdeas: active.slice(-5).map(h => ({
         id: h.id,
         title: h.title,
@@ -349,8 +428,12 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty, feasibility, impa
     }
   }
 
+  // The MCP schema and the CLI usage text both promise a default of 20; the
+  // implementation returned the whole store, so a large one flooded the tool
+  // result. `limit: 0` (and only 0) opts back into "everything".
   list(opts = {}) {
-    return this.store.getHypotheses(opts).map(h => ({
+    const limit = opts.limit === undefined ? 20 : opts.limit
+    return this.store.getHypotheses({ ...opts, limit }).map(h => ({
       id: h.id,
       title: h.title,
       idea: h.idea,
@@ -399,4 +482,4 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty, feasibility, impa
   }
 }
 
-module.exports = { CreativityEngine, CreativityStore }
+module.exports = { CreativityEngine, CreativityStore, sourcesFromInsights }

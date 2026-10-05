@@ -23,10 +23,10 @@ const { createEvolutionCutoverTools } = require('../server/evolution-cutover.js'
 const { createMemoryStore } = require('../server/memory-store.js')
 const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
-const { CreativityEngine } = require('../server/creativity-engine.js')
+const { CreativityEngine, sourcesFromInsights } = require('../server/creativity-engine.js')
 const { createAgentStore } = require('../server/agent-store.js')
 const { createEvaluationStore } = require('../server/evaluation-store.js')
-const { createInsightStore } = require('../server/insight-store.js')
+const { createInsightStore, isInsightAvailable } = require('../server/insight-store.js')
 const { createObserverStore, isObserverAvailable } = require('../server/observer-store.js')
 const { loadPhase0, renderPhase0Markdown } = require('../server/mio-intelligence-mcp/phase0.js')
 const { listHostCapabilities } = require('../server/host-capabilities.js')
@@ -2060,8 +2060,9 @@ function creativityUsage(write = console.log) {
 
 Options:
   --status name      Filter list by status
-  --limit N          Max results for list / ferment (default 20 / 5)
+  --limit N          Max results for list / ferment (default 20 / 5); --limit 0 lists everything
   --source "name|content"   A concept source for generate; repeat 2+ times
+  --from-insights    Seed generate's sources from stored insights (needs @akemi-mio/insight)
   --strategy explore|signal|stable   Generation strategy (auto-selected if omitted)
   --json             Machine-readable output (same shape as the mio.creativity.* tools)
 
@@ -2069,6 +2070,7 @@ Examples:
   mio creativity status
   mio creativity list --status rejected --limit 10
   mio creativity generate --source "auth|token rotation" --source "cache|write-through"
+  mio creativity generate --from-insights --source "auth|token rotation"
 
 generate/ferment call an LLM using the shared client. Configure it with
 LLM_API_URL / LLM_KEY / LLM_CHAT_MODEL (the same environment the MCP server
@@ -2079,7 +2081,7 @@ reads). A local Ollama works:
 function printCreativityStatus(result) {
   console.log('Creativity engine:')
   console.log(`  hypotheses: ${result.hypotheses}  combos: ${result.combos}  experiments: ${result.experiments}`)
-  console.log(`  active: ${result.active}  validated: ${result.validated}  rejected: ${result.rejected}`)
+  console.log(`  active: ${result.active}  validated: ${result.validated}  rejected: ${result.rejected}  draft: ${result.draft}`)
   if (result.recentIdeas.length === 0) {
     console.log('No hypotheses yet.')
     return
@@ -2136,12 +2138,56 @@ function warnIfLlmUnconfigured() {
   console.log('(or set LLM_API_URL / LLM_KEY / LLM_CHAT_MODEL in the environment)')
 }
 
+// Failed LLM calls used to disappear: `generate` swallowed them and `ferment`
+// reported "Nothing fermented", so a dead endpoint looked exactly like "no new
+// ideas". Both now surface them; the JSON shapes carry `errors` as well.
+function printCreativityErrors(errors, label) {
+  if (!Array.isArray(errors) || errors.length === 0) return
+  console.log(`\n${errors.length} ${label}(s) failed:`)
+  for (const err of errors) {
+    const who = err.pair ? err.pair.join(' + ') : (err.title || err.id)
+    console.log(`- ${who}: ${err.error}`)
+  }
+}
+
 function creativityGenerateCommand(args, useJson) {
   const flags = args.slice(2)
-  const sources = parseSources(flags)
+  let sources = parseSources(flags)
+
+  // `--from-insights` seeds the mixer with whatever the insight engine has
+  // already noticed. It reads the *CLI's* store (global MIO_HOME), the same
+  // one `mio insight list` shows, and merges with any explicit --source.
+  if (flagPresent(flags, '--from-insights')) {
+    if (!isInsightAvailable()) {
+      console.error('mio creativity generate --from-insights requires the optional package @akemi-mio/insight')
+      process.exitCode = 1
+      return
+    }
+    let seeds
+    try {
+      seeds = sourcesFromInsights(cliInsightStore().list({}))
+    } catch (error) {
+      console.error(error.message || error)
+      process.exitCode = 1
+      return
+    }
+    if (seeds.length === 0) {
+      console.error('mio creativity generate --from-insights: no stored insights yet (run `mio insight generate` first)')
+      process.exitCode = 1
+      return
+    }
+    sources = sources.concat(seeds)
+  }
+
   if (sources.length < 2) {
-    console.error('mio creativity generate requires at least two --source "name|content" arguments')
-    console.error('Example: mio creativity generate --source "auth|token rotation" --source "cache|write-through cache"')
+    if (flagPresent(flags, '--from-insights')) {
+      console.error(`mio creativity generate needs at least 2 concept sources; --from-insights only supplied ${sources.length}.`)
+      console.error('Add more --source "name|content" arguments, or generate more insights first.')
+    } else {
+      console.error('mio creativity generate requires at least two --source "name|content" arguments')
+      console.error('Example: mio creativity generate --source "auth|token rotation" --source "cache|write-through cache"')
+      console.error('Or seed them with --from-insights (uses stored insights as concepts).')
+    }
     process.exitCode = 1
     return
   }
@@ -2170,6 +2216,7 @@ function creativityGenerateCommand(args, useJson) {
       console.log(`   novelty=${idea.novelty} feasibility=${idea.feasibility} impact=${idea.impact} | ${idea.id}`)
       if (idea.rejectionReason) console.log(`   rejected: ${idea.rejectionReason}`)
     })
+    printCreativityErrors(resolved.errors, 'pair')
   })
 }
 
@@ -2191,12 +2238,16 @@ function creativityFermentCommand(args, useJson) {
     if (useJson) return jsonOrText(resolved, true)
     if (resolved.fermented === 0) {
       console.log(`Nothing fermented: ${resolved.reason || 'no eligible hypotheses'}`)
+      // Every review can fail while there was something to review; without
+      // this the endpoint outage read as "the store is empty".
+      printCreativityErrors(resolved.errors, 'review')
       return
     }
     console.log(`Fermented ${resolved.fermented} hypothesis/hypotheses`)
     for (const r of resolved.results || []) {
       console.log(`- ${r.title || r.id}: ${r.verdict || 'updated'}${r.reason ? ` — ${r.reason}` : ''}`)
     }
+    printCreativityErrors(resolved.errors, 'review')
   })
 }
 
@@ -3160,6 +3211,13 @@ function installCommand(host, useJson) {
 }
 
 function mcpCommand() {
+  // The MCP server resolves its data dir as `MIO_DATA_DIR || <cwd>/.mio-intelligence`,
+  // while every CLI subcommand reads the global MIO_HOME. Left alone, `mio mcp`
+  // launched from a scratch directory built a second, empty store there and
+  // `mio.creativity.list` / `mio.recall` disagreed with `mio creativity list` /
+  // `mio recall`. Pinning it makes the stdio server see the same data as the
+  // terminal; an explicit MIO_DATA_DIR still wins (adapters set one on purpose).
+  if (!process.env.MIO_DATA_DIR) process.env.MIO_DATA_DIR = MIO_HOME
   require(SERVER_SCRIPT)
 }
 
@@ -3289,7 +3347,7 @@ Usage:
   mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse
   mio creativity status        Show creativity hypothesis counts and recent top ideas
   mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
-  mio creativity generate      Generate hypotheses from 2+ --source "name|content" (calls an LLM)
+  mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
   mio creativity ferment       Review and refine active hypotheses (calls an LLM)
   mio insight status           Insight counts: total, reported, unreported, high-value
   mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)

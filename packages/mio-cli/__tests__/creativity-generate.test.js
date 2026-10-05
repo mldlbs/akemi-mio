@@ -18,7 +18,7 @@ const { spawnSync } = require('node:child_process')
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..')
 const CLI = path.join(repoRoot, 'packages', 'mio-cli', 'bin', 'mio.js')
-const { CreativityEngine } = require('../server/creativity-engine.js')
+const { CreativityEngine, CreativityStore, sourcesFromInsights } = require('../server/creativity-engine.js')
 
 function workspace(label) {
   const mioHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mio-gen-' + label + '-'))
@@ -114,13 +114,60 @@ test('generate rejects a missing sources array with a usable message', async () 
   )
 })
 
-test('generate skips a pair when the LLM call fails', async () => {
+test('generate reports a pair whose LLM call failed instead of dropping it', async () => {
   const ws = workspace('gen-fail')
   const engine = engineWith(ws, async () => ({ error: 'HTTP 500' }))
 
   const result = await engine.generate(twoSources())
   assert.deepEqual(result.ideas, [])
+  assert.equal(result.pairsAttempted, 1)
+  assert.equal(result.errors.length, 1, 'the failure is reported, not swallowed')
+  assert.deepEqual(result.errors[0].pair, ['auth', 'cache'])
+  assert.match(result.errors[0].error, /HTTP 500/)
   assert.equal(fs.existsSync(hypothesesFile(ws)), false, 'nothing persisted on failure')
+})
+
+test('generate reports a thrown LLM call with the error message', async () => {
+  const ws = workspace('gen-throw')
+  const engine = engineWith(ws, async () => {
+    throw new Error('ECONNREFUSED 127.0.0.1:11434')
+  })
+
+  const result = await engine.generate(twoSources())
+  assert.deepEqual(result.ideas, [])
+  assert.equal(result.errors.length, 1)
+  assert.match(result.errors[0].error, /ECONNREFUSED/)
+})
+
+test('generate succeeds for one pair and still reports the others failing', async () => {
+  const ws = workspace('gen-partial')
+  let call = 0
+  const idea = {
+    title: 'Only one pair made it',
+    idea: 'combine A and B',
+    expectedBenefit: 'b',
+    risk: 'r',
+    novelty: 70,
+    feasibility: 60,
+    impact: 80,
+  }
+  const engine = engineWith(ws, async () => {
+    call += 1
+    return call === 1 ? { data: idea } : { error: 'HTTP 503' }
+  })
+
+  // Three sources produce three pairs, so one success and two failures are
+  // distinguishable from "everything worked" and from "nothing worked".
+  const sources = [
+    { name: 'auth', content: 'token rotation' },
+    { name: 'cache', content: 'write-through cache' },
+    { name: 'queue', content: 'backpressure' },
+  ]
+  const result = await engine.generate(sources)
+  assert.equal(result.pairsAttempted, 3)
+  assert.equal(result.ideas.length, 1)
+  assert.equal(result.errors.length, 2)
+  assert.equal(readHypotheses(ws).length, 1)
 })
 
 test('ferment updates an active hypothesis and records the verdict', async () => {
@@ -173,6 +220,120 @@ test('ferment reports nothing to do when the store is empty', async () => {
   assert.equal(result.reason, 'no fermentable hypotheses')
 })
 
+test('ferment surfaces a failing review instead of reporting "nothing to do"', async () => {
+  const ws = workspace('ferment-fail')
+  const dir = path.join(ws.mioHome, 'creativity')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'creativity-hypotheses.jsonl'),
+    JSON.stringify({
+      id: 'h1',
+      title: 'Needs a review',
+      idea: 'original idea',
+      status: 'draft',
+      novelty: 70,
+      feasibility: 70,
+      impact: 70,
+      sourceLabels: ['auth', 'cache'],
+      createdAt: Date.now(),
+    }) + '\n',
+    'utf8'
+  )
+
+  const engine = engineWith(ws, async () => ({ error: 'HTTP 500' }))
+  const result = await engine.ferment(5)
+
+  assert.equal(result.fermented, 0)
+  assert.equal(result.errors.length, 1, 'an outage must not read as an empty store')
+  assert.equal(result.errors[0].id, 'h1')
+  assert.match(result.errors[0].error, /HTTP 500/)
+  assert.equal(readHypotheses(ws)[0].fermentCount, undefined, 'nothing was persisted')
+})
+
+test('the store re-reads a hypothesis file another process changed', () => {
+  // The MCP server is long-running while `mio creativity generate` writes from
+  // a separate process. Latching the parsed array forever is exactly the stale
+  // cache bug insight-store.js fixed in 0ba7fa8.
+  const ws = workspace('stale')
+  const dir = path.join(ws.mioHome, 'creativity')
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, 'creativity-hypotheses.jsonl')
+  const row = (id) =>
+    JSON.stringify({
+      id,
+      title: 'Hypothesis ' + id,
+      idea: 'combine A and B',
+      status: 'active',
+      novelty: 60,
+      feasibility: 50,
+      impact: 70,
+      sourceLabels: ['A', 'B'],
+      createdAt: Date.now(),
+    })
+
+  fs.writeFileSync(file, row('h1') + '\n', 'utf8')
+  const store = new CreativityStore(dir)
+  assert.equal(store.getHypotheses().length, 1)
+
+  fs.appendFileSync(file, row('h2') + '\n', 'utf8')
+  assert.equal(store.getHypotheses().length, 2, 'external write invalidates the cache')
+
+  fs.writeFileSync(file, row('h3') + '\n', 'utf8')
+  assert.equal(store.getHypotheses().length, 1, 'an external rewrite is picked up too')
+})
+
+// ── fromInsights: seeding concept sources from stored insights ──
+
+test('sourcesFromInsights maps stored insights to concept sources, best first', () => {
+  const insights = [
+    { id: 'i1', title: 'Low value', description: 'meh', score: 0.2, evidence: [] },
+    {
+      id: 'i2',
+      title: 'High value',
+      description: 'the cache is thrashing',
+      score: 0.9,
+      evidence: ['slow queries'],
+    },
+  ]
+
+  const sources = sourcesFromInsights(insights)
+  assert.equal(sources.length, 2)
+  assert.equal(sources[0].name, 'High value', 'highest score seeds the first concept')
+  assert.equal(sources[0].type, 'insight')
+  assert.match(sources[0].content, /thrashing/)
+  assert.match(sources[0].content, /slow queries/, 'evidence travels with the description')
+
+  assert.deepEqual(sourcesFromInsights(undefined), [])
+  assert.deepEqual(sourcesFromInsights([]), [])
+  assert.equal(
+    sourcesFromInsights(insights, 1).length,
+    1,
+    'the cap keeps one busy insight run from exploding into LLM calls'
+  )
+})
+
+test('generate consumes sources built from insights', async () => {
+  const ws = workspace('gen-insight')
+  const idea = {
+    title: 'Seeded from an insight',
+    idea: 'combine two observations',
+    expectedBenefit: 'b',
+    risk: 'r',
+    novelty: 65,
+    feasibility: 55,
+    impact: 75,
+  }
+  const engine = engineWith(ws, llmReturning(idea))
+
+  const result = await engine.generate(sourcesFromInsights([
+    { id: 'i1', title: 'auth', description: 'token rotation', score: 0.8 },
+    { id: 'i2', title: 'cache', description: 'write-through', score: 0.7 },
+  ]))
+  assert.equal(result.ideas.length, 1)
+  assert.deepEqual(result.ideas[0].sourceLabels, ['auth', 'cache'])
+  assert.equal(result.errors.length, 0)
+})
+
 // ── CLI level: argument validation only (a real run would need the network) ──
 
 function run(ws, args) {
@@ -201,4 +362,50 @@ test('CLI documents generate and ferment', () => {
   assert.match(help.stdout, /mio creativity generate/)
   assert.match(help.stdout, /mio creativity ferment/)
   assert.match(help.stdout, /LLM_API_URL/)
+  assert.match(help.stdout, /--from-insights/, 'the seed flag is discoverable from help')
+  assert.match(help.stdout, /--limit 0/, 'the default-20 / limit-0 contract is discoverable')
+})
+
+test('CLI generate --from-insights refuses to run without usable seeds', () => {
+  const ws = workspace('cli-seed')
+  const out = run(ws, ['creativity', 'generate', '--from-insights'])
+  assert.equal(out.status, 1)
+  // Either @akemi-mio/insight is missing or the store is empty; both must name
+  // the flag rather than falling through to the generic "needs two sources".
+  assert.match(out.stderr, /from-insights/)
+  assert.equal(fs.existsSync(hypothesesFile(ws)), false, 'nothing is written when seeding fails')
+})
+
+test('CLI generate --from-insights still needs two concepts in total', (t) => {
+  const { isInsightAvailable } = require('../server/insight-store.js')
+  if (!isInsightAvailable()) return t.skip('@akemi-mio/insight is not installed here')
+
+  const ws = workspace('cli-seed-one')
+  const dir = path.join(ws.mioHome, 'insights')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'insights.json'),
+    JSON.stringify({
+      version: 1,
+      insights: [
+        {
+          id: 'i1',
+          detector: 'friction',
+          title: 'auth',
+          description: 'token rotation',
+          evidence: [],
+          score: 0.9,
+          confidence: 0.8,
+          createdAt: Date.now(),
+        },
+      ],
+      reportedIds: [],
+    }),
+    'utf8'
+  )
+
+  const out = run(ws, ['creativity', 'generate', '--from-insights'])
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /at least 2 concept sources/)
+  assert.equal(fs.existsSync(hypothesesFile(ws)), false)
 })

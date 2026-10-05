@@ -47,12 +47,13 @@ rectangle "MCP Server (stdio)" as MCP #D5F5E3 {
     :操作 CreativityEngine (JSONL);
     case (generate)
       :调用 LLM 概念生成;
+      :fromInsights 时并入 InsightStore 种子;
     case (ferment)
       :交叉关联发酵;
-  case (mio.idea.*)
-    :idea_generate / idea_list;
+    case (status/list)
+      :返回状态计数 / 最近 20 条假设;
   case (mio.evolution.*)
-    :evolution_suggest / report;
+    :status / report / shadow / dual-write / cutover / migration / authority;
   endswitch
 }
 

@@ -55,7 +55,7 @@ mio memory migrate --ids a,b --scope global|project   Move records between the p
 mio policy check "<action>" Check the historical risk of an action before running it (--project; reads global MIO_HOME)
 mio creativity status        Show creativity hypothesis counts and recent top ideas (reads global MIO_HOME)
 mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
-mio creativity generate      Generate hypotheses from 2+ --source "name|content" (calls an LLM)
+mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
 mio creativity ferment       Review and refine active hypotheses (calls an LLM)
 mio insight status           Insight counts: total, reported, unreported, high-value (needs @akemi-mio/insight)
 mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)
@@ -359,7 +359,7 @@ Historically risky: ...
 
 说明：
 
-- **它读取全局 `MIO_HOME`，而非每项目目录。** MCP 服务端把数据目录解析为 `MIO_DATA_DIR || cwd/.mio-intelligence`，因此从任意目录发起的 MCP 调用看到的是空存储；CLI 刻意指向累积的全局日志。用 `--project` 把 trace 集合限定到某个项目。
+- **它读取全局 `MIO_HOME`，而非每项目目录。** MCP 服务端把数据目录解析为 `MIO_DATA_DIR || cwd/.mio-intelligence`，因此从任意目录发起的 MCP 调用看到的是空存储；CLI 刻意指向累积的全局日志。`mio mcp` 是例外：它先把 `MIO_DATA_DIR` 钉到 `MIO_HOME` 再启动服务端，于是 stdio 入口与终端读写同一份数据（宿主适配器显式传入的 `MIO_DATA_DIR` 仍然优先）。用 `--project` 把 trace 集合限定到某个项目。
 - **风险即失败占比**，`>= 0.4` 为高，`>= 0.2` 为中。`retry` 与 `aborted` 与 `failure`、`error` 一并计为失败。无匹配历史报告 `UNKNOWN`，与 `LOW`（干净记录）不同。
 - **匹配可能被通用 token 带偏。** 匹配是对动作 token 的宽松 OR，所以像 `task` 这样的动作几乎匹配每条 trace，因为关键词 `task` 几乎出现在所有 payload 中。当动作中*每个* token 都至少出现在半数候选 trace 里时，CLI 会打印警告，而不是让等级自说自话：
 
@@ -386,7 +386,7 @@ mio creativity list --json
 ```text
 Creativity engine:
   hypotheses: 5  combos: 3  experiments: 1
-  active: 2  validated: 1  rejected: 1
+  active: 2  validated: 1  rejected: 1  draft: 1
 
 Recent top ideas:
 - Plugin architecture  (novelty=80 feasibility=70 impact=90 score=240)
@@ -396,7 +396,10 @@ Recent top ideas:
 说明：
 
 - **它委托给与 MCP 服务端相同的 `CreativityEngine`**，因此终端的 `mio creativity list` 看到的是与 `mio.creativity.list` 工具完全一致的假设。存储位于 `<MIO_HOME>/creativity/creativity-hypotheses.jsonl`；CLI 指向全局 `MIO_HOME`，与 `mio policy check` 一致。
+- **`list` 默认只返回最新 20 条**，与 `mio.creativity.list` 的 schema 承诺一致；`--limit 0`（或 MCP 的 `limit: 0`）才是「全部」。存储很大时默认全量返回会把工具结果撑爆。
+- **`status` 计入 `draft`。** `draft` 是发酵中的真实状态（`ferment` 会同时处理 `draft` 与 `active`），此前漏计导致 `status` 与 `list --status draft` 对不上。
 - **空存储是正常状态。** 引擎运行之前，`status` 报告全零计数，`list` 显示 "No hypotheses match." 两者都是有效输出，不是错误。
+- **缓存会在文件变化时失效。** 三个 JSONL 的读取按 `(size, mtime)` 校验，因此另一个进程写入后长驻的 MCP 服务端无需重启就能看到——与 `server/insight-store.js` 同一套守卫。
 
 ### 生成与发酵（`generate` / `ferment`）
 
@@ -405,14 +408,25 @@ Recent top ideas:
 
 ```bash
 mio creativity generate --source "auth|token rotation" --source "cache|write-through"
+mio creativity generate --from-insights --source "auth|token rotation"
 mio creativity ferment --limit 3
 ```
 
 - `--source "名称|内容"` **至少两个**：引擎是把概念两两配对来产生新假设的，
   一个来源在构造上就不可能产出组合（此时**不会**调用 LLM，直接返回
   `need at least 2 sources`）。
-- `ferment` 会复核 `active` 假设并更新分数；`verdict=promote` 且总分 > 200 时
+- **`--from-insights`（MCP 侧为 `fromInsights: true`）用已存洞察补足概念来源**：
+  读取 `mio insight list` 能看到的同一份存储，按分数取前 10 条映射成
+  `{ name, content, type: 'insight' }`，再与显式的 `--source` 合并。它只在
+  `@akemi-mio/insight` 已安装且至少存有一条洞察时有意义，否则明确报错而不是
+  静默当作「没有来源」。因为来源可由它提供，`mio.creativity.generate` 的
+  `sources` 不再是 schema 必填项。
+- `ferment` 会复核 `active` / `draft` 假设并更新分数；`verdict=promote` 且总分 > 200 时
   升为 `validated`，`verdict=reject` 则标记为 `rejected`。
+- **失败的 LLM 调用会出现在结果里，不再被吞掉。** 返回值带 `errors`
+  （`generate` 是 `pair` + 原因，`ferment` 是 `id` + 原因），CLI 也会在正文后
+  打印 `N pair(s) failed:`。此前 `catch {}` 让「端点挂了」与「这一对确实没有
+  新意」长得一模一样——`ideas: []` / `Nothing fermented` 两种输出都无法区分。
 
 #### LLM 配置
 

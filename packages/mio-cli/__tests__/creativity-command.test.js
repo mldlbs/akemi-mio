@@ -78,6 +78,7 @@ test('creativity status reports zero when the store is empty', () => {
   assert.equal(result.active, 0)
   assert.equal(result.validated, 0)
   assert.equal(result.rejected, 0)
+  assert.equal(result.draft, 0)
   assert.deepEqual(result.recentIdeas, [])
 
   const text = run(ws.cwd, ws.env, ['creativity', 'status'])
@@ -100,29 +101,43 @@ test('creativity status aggregates counts by status', () => {
   assert.equal(result.active, 2)
   assert.equal(result.validated, 1)
   assert.equal(result.rejected, 1)
+  assert.equal(result.draft, 1, 'draft is a real state and must be counted')
   assert.equal(result.recentIdeas.length, 2, 'recentIdeas is the last 5 active, capped by available active')
 
   const top = result.recentIdeas.find((i) => i.id === 'h1')
   assert.ok(top, 'h1 should be among recent ideas')
   assert.equal(top.score, 80 + 70 + 90)
+
+  // status and the list filter must agree on the same store.
+  assert.equal(result.draft, listJson(ws, ['--status', 'draft']).length)
 })
 
-test('creativity list shows all hypotheses by default', () => {
+test('creativity list returns the newest 20 by default and everything with --limit 0', () => {
   const ws = workspace('listall')
-  seedHypotheses(ws, [
-    hypothesis('h1', 'active'),
-    hypothesis('h2', 'rejected'),
-    hypothesis('h3', 'validated'),
-  ])
+  const many = Array.from({ length: 25 }, (_, i) => hypothesis(`h${i + 1}`, 'active'))
+  seedHypotheses(ws, many)
 
   const items = listJson(ws)
-  assert.equal(items.length, 3)
-  assert.ok(items.every((h) => h.id && h.title && typeof h.score === 'number'))
+  assert.equal(items.length, 20, 'default limit is 20, matching the MCP schema and usage text')
+  assert.deepEqual(
+    items.map((h) => h.id),
+    many.slice(-20).map((h) => h.id),
+    'the default slice is the newest, not the oldest'
+  )
+
+  const all = listJson(ws, ['--limit', '0'])
+  assert.equal(all.length, 25, 'limit 0 is the documented opt-out back to everything')
 
   const text = run(ws.cwd, ws.env, ['creativity', 'list'])
   assert.equal(text.status, 0, text.stderr)
-  assert.match(text.stdout, /Hypotheses: 3 shown/)
-  assert.match(text.stdout, /h1/)
+  assert.match(text.stdout, /Hypotheses: 20 shown/)
+  assert.match(text.stdout, /h25/)
+  assert.doesNotMatch(text.stdout, /h1\b/, 'the oldest rows are past the default window')
+
+  // A small store is unaffected: nothing is hidden when there are <= 20 rows.
+  const small = workspace('listsmall')
+  seedHypotheses(small, [hypothesis('h1', 'active'), hypothesis('h2', 'rejected')])
+  assert.equal(listJson(small).length, 2)
 })
 
 test('creativity list filters by status', () => {
