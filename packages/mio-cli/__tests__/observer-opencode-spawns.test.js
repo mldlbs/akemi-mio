@@ -68,7 +68,25 @@ function makeSpawnHarness(rowsForSql) {
   return { spawns, dbSpawns, finderSpawns, fakeBin, fakeSpawnSync }
 }
 
+// The tests assert exact finder-spawn counts, but findOpencodeBin() has a
+// bundled-exe fast path (observer.js: candidates next to process.execPath)
+// that fires whenever opencode-ai happens to be installed globally next to
+// node.exe -- zero spawns, assertions expecting 1 fail. Block just those
+// candidate paths so the test always exercises the `where`/`which` branch,
+// on any machine.
+function blockBundledOpencodeBin(t) {
+  const realExistsSync = fs.existsSync
+  fs.existsSync = (p) => {
+    if (typeof p === 'string' && /opencode-ai[/\\]bin[/\\]opencode\.exe$/i.test(p)) return false
+    return realExistsSync(p)
+  }
+  t.after(() => {
+    fs.existsSync = realExistsSync
+  })
+}
+
 function withTempDataDir(t) {
+  blockBundledOpencodeBin(t)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mio-ocspawn-'))
   fs.writeFileSync(path.join(dir, 'opencode.db'), 'sqlite placeholder')
   const prevDataDir = process.env.OPENCODE_DATA_DIR
