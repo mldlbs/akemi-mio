@@ -117,6 +117,13 @@ async function chatJson(userText, opts = {}) {
   const system = opts.system || 'You are a creative AI assistant. Output JSON.'
   const temperature = opts.temperature ?? 0.3
 
+  // response_format must match the prompt's top-level shape. Prompts that
+  // demand a top-level JSON array (InsightPrompt) can be rejected outright
+  // (HTTP 400) by OpenAI-compatible gateways that enforce json_object, so
+  // array callers omit the field and rely on prompt + fence-stripping parse.
+  const wantsArray = opts.responseFormat === 'array'
+  const responseFormat = wantsArray ? undefined : { type: 'json_object' }
+
   try {
     const resp = await fetch(apiUrl, {
       method: 'POST',
@@ -132,7 +139,7 @@ async function chatJson(userText, opts = {}) {
           { role: 'system', content: system },
           { role: 'user', content: userText },
         ],
-        response_format: { type: 'json_object' },
+        ...(responseFormat ? { response_format: responseFormat } : {}),
       }),
       signal: AbortSignal.timeout(opts.timeoutMs || 30000),
     })

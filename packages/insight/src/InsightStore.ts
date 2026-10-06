@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { dirname } from 'path'
 import type { Insight, InsightStoreData } from './types'
-import { STORE_VERSION } from './types'
+import { STORE_VERSION, MAX_INSIGHTS } from './types'
 import { log } from './logger'
 
 export class InsightStore {
@@ -18,7 +18,17 @@ export class InsightStore {
       if (!existsSync(this.filePath)) {
         return { version: STORE_VERSION, insights: [], reportedIds: [] }
       }
-      return JSON.parse(readFileSync(this.filePath, 'utf-8'))
+      const parsed = JSON.parse(readFileSync(this.filePath, 'utf-8'))
+      if (!parsed || typeof parsed !== 'object') {
+        return { version: STORE_VERSION, insights: [], reportedIds: [] }
+      }
+      return {
+        version: typeof parsed.version === 'number' ? parsed.version : STORE_VERSION,
+        insights: Array.isArray(parsed.insights)
+          ? parsed.insights.filter((i: any) => i && typeof i === 'object' && typeof i.id === 'string')
+          : [],
+        reportedIds: Array.isArray(parsed.reportedIds) ? parsed.reportedIds.filter((r: any) => typeof r === 'string') : [],
+      }
     } catch {
       return { version: STORE_VERSION, insights: [], reportedIds: [] }
     }
@@ -37,6 +47,12 @@ export class InsightStore {
   addMany(insights: Insight[]): void {
     if (insights.length === 0) return
     this.data.insights.push(...insights)
+    if (this.data.insights.length > MAX_INSIGHTS) {
+      this.data.insights.sort((a, b) => b.createdAt - a.createdAt)
+      const removed = this.data.insights.length - MAX_INSIGHTS
+      this.data.insights.length = MAX_INSIGHTS
+      log('INFO', 'insight_capped', { removed })
+    }
     this.save()
     log('INFO', 'insight_stored_batch', { count: insights.length })
   }

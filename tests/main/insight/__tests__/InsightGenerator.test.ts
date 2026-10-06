@@ -456,4 +456,13 @@ describe('InsightGenerator', () => {
       expect.objectContaining({ maxTokens: expect.any(Number), timeoutMs: expect.any(Number) }),
     )
   })
+
+  it('提示词要求顶层数组：调用 LLM 时声明 responseFormat array（L1）', async () => {
+    chatJson.mockResolvedValue({ data: [] })
+    await generator.generate(ctx)
+    expect(chatJson).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ responseFormat: 'array' }),
+    )
+  })
 })

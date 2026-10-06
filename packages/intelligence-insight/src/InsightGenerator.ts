@@ -50,7 +50,15 @@ function normalizeDetection(d: unknown): RawDetection | null {
 export interface InsightGeneratorDeps {
   chatJson: (
     userText: string,
-    options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string; maxTokens?: number },
+    options?: {
+      system?: string
+      temperature?: number
+      timeoutMs?: number
+      requestId?: string
+      maxTokens?: number
+      /** 提示词要求顶层数组：llm-client 据此省略 response_format json_object（L1） */
+      responseFormat?: 'object' | 'array'
+    },
   ) => Promise<{ data?: any; error?: string }>
 }
 
@@ -92,6 +100,7 @@ export class InsightGenerator {
         temperature: 0.3,
         timeoutMs: 15000,
         maxTokens: 2000,
+        responseFormat: 'array',
       })
 
       if (result.error) {

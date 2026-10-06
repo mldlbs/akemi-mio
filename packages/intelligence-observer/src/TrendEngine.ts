@@ -161,7 +161,8 @@ ${obsText}
     const obsById = new Map(observations.map((o) => [o.id, o]))
     const keywordMap: Record<string, Observation[]> = {}
 
-    for (const entry of result.data) {
+    // 模型偶尔给远超 5-15 的条数：上限 25，防止全量灌进 dedup 提示词（L5）
+    for (const entry of result.data.slice(0, 25)) {
       if (!entry.keyword || !Array.isArray(entry.matched_ids)) continue
       const obs = entry.matched_ids.map((id) => obsById.get(id)).filter((o): o is Observation => o !== undefined)
       if (obs.length === 0) continue

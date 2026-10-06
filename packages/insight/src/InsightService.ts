@@ -161,6 +161,7 @@ export class InsightService {
       }
 
       this.store.addMany(insights)
+      this.store.prune()
       const highValue = insights.filter((i) => i.score >= MIN_REPORT_SCORE && i.confidence >= MIN_REPORT_CONFIDENCE)
 
       if (highValue.length > 0) {

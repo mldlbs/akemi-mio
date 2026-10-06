@@ -210,7 +210,10 @@ ${desc}
 
   private extractUncertainties(result: ResearchResult, uncertainties: WorldUncertainty[]): void {
     for (const conflict of result.conflicts) {
-      if (conflict.evidence.includes('不确定') || conflict.evidence.includes('可能') || conflict.evidence.includes('未经证实')) {
+      // evidence 类型声明是 string，但 LLM 常回数组：两种形态都要能判关键词（L7）
+      const evidence = conflict.evidence as string | string[] | undefined
+      const evidenceText = Array.isArray(evidence) ? evidence.join(' ') : String(evidence ?? '')
+      if (evidenceText.includes('不确定') || evidenceText.includes('可能') || evidenceText.includes('未经证实')) {
         uncertainties.push({
           id: `unc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           topic: `${conflict.partyA} vs ${conflict.partyB}`,

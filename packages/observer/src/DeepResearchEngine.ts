@@ -99,6 +99,10 @@ ${context ? context.slice(0, 1000) : '（无直接相关数据）'}
 
 请用一段话概括这个主题的核心内容。不需要分析，只需要列举已知的关键信息。`
     const result = await this.llm.generate(prompt, { temperature: 0.5, maxTokens: 2048 })
+    if (result.error) {
+      log('WARN', 'research_fallback_summary_failed', { topic, error: result.error })
+      return null
+    }
     return result.data ?? null
   }
 

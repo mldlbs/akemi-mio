@@ -1,6 +1,7 @@
 import { getRawDb, markDirty } from '@akemi-mio/core/db/connection'
 import { log } from '@akemi-mio/core/logger/Logger'
 import type { Insight } from '@akemi-mio/intelligence-insight/types'
+import { MAX_INSIGHTS } from '@akemi-mio/intelligence-insight/types'
 
 function rowToInsight(obj: any): Insight {
   return {
@@ -31,6 +32,11 @@ export class DrizzleInsightStore {
         'INSERT OR IGNORE INTO insights (id, detector, title, description, evidence, score, confidence, reported, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)',
         [item.id, item.detector, item.title, item.description, JSON.stringify(item.evidence), item.score, item.confidence, item.createdAt],
       )
+    }
+    const cnt = this.count()
+    if (cnt > MAX_INSIGHTS) {
+      db.run(`DELETE FROM insights WHERE id NOT IN (SELECT id FROM insights ORDER BY created_at DESC LIMIT ${MAX_INSIGHTS})`)
+      log('INFO', 'insight_capped', { removed: cnt - MAX_INSIGHTS })
     }
     markDirty()
     log('INFO', 'insight_stored_batch', { count: items.length })

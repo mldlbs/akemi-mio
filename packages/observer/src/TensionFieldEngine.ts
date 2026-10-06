@@ -98,10 +98,13 @@ export class TensionFieldEngine {
 
     for (const signal of trends.signals.slice(0, 10)) {
       const popularity = signal.score
-      const novelty = await this.rateNovelty(signal.keyword, worldEntityNames)
+      // 两个 LLM 评分互不依赖：并行把每条信号从两次串行往返降为一次（L4）
+      const [novelty, tension] = await Promise.all([
+        this.rateNovelty(signal.keyword, worldEntityNames),
+        this.calcMultiTension(signal.keyword, uncertainties, signal),
+      ])
       const diversity = this.calcDiversity(signal.keyword, recentTopicNames)
       const memoryGap = this.calcMemoryGap(signal.keyword, recentTopicNames)
-      const tension = await this.calcMultiTension(signal.keyword, uncertainties, signal)
       const probability = w.alpha * popularity + w.beta * novelty + w.gamma * diversity + w.delta * memoryGap + w.epsilon * tension
 
       candidates.push({
@@ -213,7 +216,13 @@ ${pool}
   private async suggestFromObservations(trends: TrendReport): Promise<{ topic: string }[]> {
     const prompt = `基于 ${trends.sourceSummary.totalItemsReceived} 条观察，请推荐 1-3 个值得研究的热门话题。只输出 JSON 数组：["topic1", "topic2"]`
     const result = await this.llm.generateJson<string[]>(prompt, { temperature: 0.5, maxTokens: 1024 })
-    if (result.error || !result.data) return []
-    return result.data.slice(0, 3).map((t) => ({ topic: t }))
+    if (result.error || !Array.isArray(result.data)) return []
+    // LLM 可能给出非字符串/超长 topic：校验 + 截断后再进后续所有提示词（L4）
+    return result.data
+      .filter((t): t is string => typeof t === 'string')
+      .map((t) => t.trim().slice(0, 60))
+      .filter(Boolean)
+      .slice(0, 3)
+      .map((topic) => ({ topic }))
   }
 }
