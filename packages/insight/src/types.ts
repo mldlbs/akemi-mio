@@ -64,6 +64,8 @@ export interface ReturnReport {
 export type PresenceState = 'active' | 'away'
 
 export const STORE_VERSION = 1
+/** insight store 容量上限：超出后按 createdAt 保留最新（M9） */
+export const MAX_INSIGHTS = 500
 export const DEFAULT_TRIGGER_POLICY: InsightTriggerPolicy = {
   minIdleMinutes: 30,
   minNewMessages: 20,

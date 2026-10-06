@@ -112,6 +112,7 @@ describe('InsightService', () => {
       await service.forceAnalysis()
 
       expect(store.addMany).toHaveBeenCalled()
+      expect(store.prune).toHaveBeenCalled()
       const addedInsights = (store.addMany as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(addedInsights[0].title).toBe('新洞察')
     })

@@ -239,4 +239,26 @@ test('chatJson passes maxTokens through to the request body', async () => {
   }
 })
 
+test('chatJson omits response_format for array-shaped prompts (L1)', async () => {
+  // Prompts that demand a top-level JSON array get a 400 from gateways that
+  // enforce json_object, so responseFormat: 'array' must omit the field.
+  const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mio-llm-arr-'))
+  const client = loadLlmClient(testDir)
+  const original = globalThis.fetch
+  let body = null
+  globalThis.fetch = async (_url, opts) => {
+    body = JSON.parse(opts.body)
+    return { ok: true, json: async () => ({ choices: [{ message: { content: '[]' } }] }) }
+  }
+  try {
+    const out = await client.chatJson('go', { responseFormat: 'array' })
+    assert.equal(out.error, undefined)
+    assert.deepEqual(out.data, [])
+    assert.equal(body.response_format, undefined, 'array shape must not send json_object')
+  } finally {
+    globalThis.fetch = original
+    fs.rmSync(testDir, { recursive: true, force: true })
+  }
+})
+
 test.after(resetEnv)
