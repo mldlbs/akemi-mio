@@ -116,6 +116,7 @@ export class IdeaStore {
     if (patch.novelty !== undefined) h.novelty = patch.novelty
     if (patch.feasibility !== undefined) h.feasibility = patch.feasibility
     if (patch.impact !== undefined) h.impact = patch.impact
+    if (patch.logic !== undefined) h.logic = patch.logic
     if (patch.mergedInto !== undefined) h.mergedInto = patch.mergedInto
     this.save()
     return true

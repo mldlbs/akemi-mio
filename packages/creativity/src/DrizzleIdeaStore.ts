@@ -26,6 +26,7 @@ function parseHypothesis(obj: any): Hypothesis {
     }
   }
   if (obj.merged_into != null) h.mergedInto = String(obj.merged_into)
+  if (obj.logic != null) h.logic = Number(obj.logic)
   if (obj.implemented_commit_sha != null) h.implementedCommitSha = String(obj.implemented_commit_sha)
   if (obj.implemented_at != null) h.implementedAt = Number(obj.implemented_at)
   if (obj.implementation_note != null) h.implementationNote = String(obj.implementation_note)
@@ -204,6 +205,7 @@ export class DrizzleIdeaStore {
     if (patch.novelty !== undefined) push('novelty', patch.novelty)
     if (patch.feasibility !== undefined) push('feasibility', patch.feasibility)
     if (patch.impact !== undefined) push('impact', patch.impact)
+    if (patch.logic !== undefined) push('logic', patch.logic)
     if (patch.mergedInto !== undefined) push('merged_into', patch.mergedInto)
     if (sets.length === 0) return false
     params.push(id)
@@ -276,7 +278,7 @@ export class DrizzleIdeaStore {
   private insertHypothesis(h: Hypothesis): void {
     const db = getRawDb()
     db.run(
-      'INSERT OR IGNORE INTO hypotheses (id, title, idea, expected_benefit, risk, source_labels, novelty, feasibility, impact, status, created_at, source_details, implemented_commit_sha, implemented_at, implementation_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT OR IGNORE INTO hypotheses (id, title, idea, expected_benefit, risk, source_labels, novelty, feasibility, impact, logic, status, created_at, source_details, implemented_commit_sha, implemented_at, implementation_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         h.id,
         h.title,
@@ -287,6 +289,7 @@ export class DrizzleIdeaStore {
         h.novelty,
         h.feasibility,
         h.impact,
+        h.logic ?? null,
         h.status,
         h.createdAt,
         h.sourceDetails ? JSON.stringify(h.sourceDetails) : null,
