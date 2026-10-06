@@ -1,4 +1,4 @@
-﻿import { log } from '@akemi-mio/core/logger/Logger'
+import { log } from '@akemi-mio/core/logger/Logger'
 
 export interface ObserverGenerateOptions {
   system?: string
@@ -65,7 +65,7 @@ function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '')
 }
 
-// Explicit config > generic LLM_* env (shared with the rest of the app) >
+// Explicit config > generic LLM_* env (shared with server/llm-client.js) >
 // observer-specific env (legacy) > built-in Ollama default. The legacy
 // OBSERVER_OLLAMA_URL / OBSERVER_MODEL names keep working so existing setups do
 // not break, but anything the host passes in wins.
@@ -105,8 +105,8 @@ function resolveConfig(explicit?: ObserverLlmConfig): ResolvedLlmConfig {
  * Two transports, chosen by URL shape: an OpenAI-compatible
  * `/chat/completions` endpoint, or a local Ollama (`/api/chat`). No npm
  * dependency either way. A host that has already resolved the model
- * configuration passes it to the constructor; standalone callers get the
- * environment-variable fallback and the previous Ollama default.
+ * configuration (mio-cli) passes it to the constructor; standalone callers get
+ * the environment-variable fallback and the previous Ollama default.
  */
 export class ObserverLlmService {
   private loaded = false
@@ -134,9 +134,9 @@ export class ObserverLlmService {
     // An OpenAI-compatible endpoint has no cheap, universal health probe
     // (listing models needs auth and is not always implemented), so we mark it
     // ready optimistically and let generate() surface a real error. This
-    // matches the rest of the app's LLM clients, which also do no preflight.
-    // Ollama keeps its /api/tags check because its failure mode was the
-    // empty-shell output D2 described.
+    // matches server/llm-client.js, which also does no preflight. Ollama keeps
+    // its /api/tags check because its failure mode was the empty-shell output
+    // D2 described.
     if (this.config.provider === 'openai') {
       this.loaded = true
       log('INFO', 'observer_llm_ready', {
@@ -258,7 +258,13 @@ export class ObserverLlmService {
           return { data: JSON.parse(match[1].trim()) as T }
         } catch {}
       }
-      return { data: result.data as any }
+      // A prose answer is an error, not degraded data. Returning the raw
+      // string as T made every caller that only checked truthiness treat an
+      // unparseable answer as a parsed object (e.g. clusters: undefined
+      // surfacing later as silent empties). Callers already branch on
+      // `result.error`, so surface it there.
+      log('WARN', 'observer_llm_non_json', { preview: (result.data || '').slice(0, 120) })
+      return { error: `模型返回的不是 JSON: ${(result.data || '').slice(0, 120)}` }
     }
   }
 

@@ -212,6 +212,194 @@ test('ferment updates an active hypothesis and records the verdict', async () =>
   assert.equal(typeof stored[0].fermentedAt, 'number')
 })
 
+test('ferment promotes on the refined scores, not the stale pre-review ones', async () => {
+  // The gate used to read the OLD totals, so a review that raised an idea
+  // over the bar (or dropped one under it) changed nothing about the verdict.
+  const ws = workspace('ferment-newscore')
+  const dir = path.join(ws.mioHome, 'creativity')
+  fs.mkdirSync(dir, { recursive: true })
+  // Old total: 60+50+50 = 160 (would fail the >200 gate on stale scores)
+  fs.writeFileSync(
+    path.join(dir, 'creativity-hypotheses.jsonl'),
+    JSON.stringify({
+      id: 'h1',
+      title: 'Weak draft',
+      idea: 'original idea',
+      status: 'active',
+      novelty: 60,
+      feasibility: 50,
+      impact: 50,
+      sourceLabels: ['auth', 'cache'],
+      createdAt: Date.now(),
+    }) + '\n',
+    'utf8'
+  )
+
+  const engine = engineWith(ws, llmReturning({
+    novelty: 80,
+    feasibility: 75,
+    impact: 85, // new total 240 > 200
+    logic: 70,
+    verdict: 'promote',
+    reason: 'review strengthened it',
+  }))
+
+  await engine.ferment(5)
+  const stored = readHypotheses(ws)
+  assert.equal(stored[0].status, 'validated', 'refined scores decide the gate')
+  assert.equal(stored[0].novelty, 80)
+})
+
+test('ferment promote requires logic >= 60 when the review rescored it', async () => {
+  const ws = workspace('ferment-logic')
+  const dir = path.join(ws.mioHome, 'creativity')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'creativity-hypotheses.jsonl'),
+    JSON.stringify({
+      id: 'h1',
+      title: 'Pretty but incoherent',
+      idea: 'handwavy chain',
+      status: 'active',
+      novelty: 90,
+      feasibility: 90,
+      impact: 90,
+      sourceLabels: ['a', 'b'],
+      createdAt: Date.now(),
+    }) + '\n',
+    'utf8'
+  )
+
+  const engine = engineWith(ws, llmReturning({
+    novelty: 90,
+    feasibility: 90,
+    impact: 90,
+    logic: 30, // tight scores but a broken causal chain
+    verdict: 'promote',
+    reason: 'sounds good',
+  }))
+
+  await engine.ferment(5)
+  const stored = readHypotheses(ws)
+  assert.equal(stored[0].status, 'active', 'a failing logic gate must not validate')
+  assert.equal(stored[0].logic, 30, 'the review still records its rescore')
+})
+
+test('ferment merge folds the idea into the named target and marks it merged', async () => {
+  const ws = workspace('ferment-merge')
+  const dir = path.join(ws.mioHome, 'creativity')
+  fs.mkdirSync(dir, { recursive: true })
+  const rows = [
+    {
+      id: 'h1',
+      title: 'Duplicate angle',
+      idea: 'take one',
+      status: 'active',
+      novelty: 70,
+      feasibility: 70,
+      impact: 70,
+      sourceLabels: ['a', 'b'],
+      createdAt: Date.now(),
+    },
+    {
+      id: 'h2',
+      title: 'Canonical idea',
+      idea: 'take two',
+      status: 'active',
+      novelty: 70,
+      feasibility: 70,
+      impact: 70,
+      sourceLabels: ['c', 'd'],
+      createdAt: Date.now(),
+    },
+  ]
+  fs.writeFileSync(
+    path.join(dir, 'creativity-hypotheses.jsonl'),
+    rows.map((r) => JSON.stringify(r)).join('\n') + '\n',
+    'utf8'
+  )
+
+  // First review merges h1 into h2; h2's own review is a plain keep so the
+  // target's absorbed content is not overwritten by the same canned reply.
+  let call = 0
+  const engine = engineWith(ws, async () => {
+    call += 1
+    return call === 1
+      ? { data: { verdict: 'merge', mergeWithId: 'h2', idea: 'combined into one', reason: 'two takes of the same idea' } }
+      : { data: { verdict: 'keep', reason: 'already canonical' } }
+  })
+
+  const result = await engine.ferment(10)
+  const mergeResult = result.results.find((r) => r.id === 'h1')
+  assert.equal(mergeResult.verdict, 'merge')
+
+  const stored = readHypotheses(ws)
+  const reviewed = stored.find((h) => h.id === 'h1')
+  const target = stored.find((h) => h.id === 'h2')
+  assert.equal(reviewed.status, 'merged', 'the folded-away side is marked merged')
+  assert.equal(reviewed.mergedInto, 'h2')
+  assert.match(target.idea, /combined into one/, 'the target absorbs the reviewed idea')
+  assert.match(target.idea, /take two/, 'and keeps its own content')
+})
+
+test('ferment reports an unresolvable merge as keep, never as a merge that did not happen', async () => {
+  const ws = workspace('ferment-merge-miss')
+  const dir = path.join(ws.mioHome, 'creativity')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'creativity-hypotheses.jsonl'),
+    JSON.stringify({
+      id: 'h1',
+      title: 'Orphan merge',
+      idea: 'original',
+      status: 'active',
+      novelty: 70,
+      feasibility: 70,
+      impact: 70,
+      sourceLabels: ['a', 'b'],
+      createdAt: Date.now(),
+    }) + '\n',
+    'utf8'
+  )
+
+  const engine = engineWith(ws, llmReturning({
+    verdict: 'merge',
+    mergeWithId: 'no-such-id',
+    reason: 'misremembered the id',
+  }))
+
+  const result = await engine.ferment(5)
+  assert.equal(result.results[0].verdict, 'keep', 'an unresolvable target degrades to keep')
+  const stored = readHypotheses(ws)
+  assert.equal(stored[0].status, 'active')
+})
+
+test('generate scores the logic dimension and defaults it when absent', async () => {
+  const ws = workspace('gen-logic')
+  const base = {
+    title: 'A titled idea',
+    idea: 'premise -> mechanism -> outcome',
+    expectedBenefit: 'b',
+    risk: 'r',
+    novelty: 70,
+    feasibility: 60,
+    impact: 80,
+  }
+
+  const engine = engineWith(ws, llmReturning({ ...base, logic: 85 }))
+  await engine.generate(twoSources(), 'explore')
+  let stored = readHypotheses(ws)
+  assert.equal(stored[0].logic, 85)
+
+  // A reviewer/model that does not know the field still gets a neutral value
+  // instead of undefined (which would poison score arithmetic downstream).
+  const ws2 = workspace('gen-logic-default')
+  const engine2 = engineWith(ws2, llmReturning({ ...base }))
+  await engine2.generate(twoSources(), 'explore')
+  const stored2 = readHypotheses(ws2)
+  assert.equal(stored2[0].logic, 50)
+})
+
 test('ferment reports nothing to do when the store is empty', async () => {
   const ws = workspace('ferment-empty')
   const engine = engineWith(ws, llmReturning({ verdict: 'keep' }))

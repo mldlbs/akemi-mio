@@ -1,8 +1,16 @@
 import { log } from '@akemi-mio/core/logger/Logger'
+import { QualityGate } from './QualityGate'
 import type { ObserverLlmService } from './ObserverLlmService'
 import type { ObserverStore } from './ObserverStore'
 import type { TopicCandidate, ResearchResult, BrainOutput, InsightOutput, InsightSection, WritingMode, BrainContributions } from './types'
 import { INSIGHT_SECTION_TITLES, WRITING_MODE_LABELS } from './types'
+
+// CJK text has no spaces: split(/\s+/) counted a whole Chinese essay as 1
+// "word", so the metadata was useless as a quality signal. Count non-space
+// characters instead — meaningful for mixed Chinese/English content.
+function countChars(text: string): number {
+  return text.replace(/\s+/g, '').length
+}
 
 /**
  * InsightComposer — 五段式结构化输出
@@ -11,14 +19,17 @@ import { INSIGHT_SECTION_TITLES, WRITING_MODE_LABELS } from './types'
  * 3 种写作模式 (neutral/analytical/creative) 控制语气。
  *
  * 写入格式 = YAML frontmatter + markdown（兼容 essays/published/）
+ * 成稿前过 QualityGate：评审不过的降级 drafts/，评分与问题记入 metadata。
  */
 export class InsightComposer {
   private llm: ObserverLlmService
   private store: ObserverStore
+  private gate: QualityGate
 
   constructor(llm: ObserverLlmService, store: ObserverStore) {
     this.llm = llm
     this.store = store
+    this.gate = new QualityGate(llm)
   }
 
   async compose(topic: TopicCandidate, research: ResearchResult, brainOutputs: BrainOutput[], mode: WritingMode): Promise<InsightOutput> {
@@ -87,7 +98,9 @@ export class InsightComposer {
 
     const contributions = this.calcContributions(brainOutputs)
     const content = this.formatInsightMarkdown(topic, sections, mode, missingSections)
-    this.store.saveEssay(content, 'published')
+    const review = await this.gate.review(content)
+    const essayStatus = review.pass ? 'published' : 'draft'
+    this.store.saveEssay(content, essayStatus)
 
     const insight: InsightOutput = {
       id,
@@ -97,16 +110,26 @@ export class InsightComposer {
       sections,
       ...(missingSections.length > 0 ? { missingSections } : {}),
       metadata: {
-        wordCount: content.split(/\s+/).length,
+        wordCount: countChars(content),
         confidence: sections.length / 5,
         brainContributions: contributions,
         llmCalls: sectionGens.length + 1,
         durationMs: Date.now() - startedAt,
+        qualityScore: review.score,
+        ...(review.issues.length > 0 ? { qualityIssues: review.issues.slice(0, 5) } : {}),
+        essayStatus,
       },
     }
 
     this.store.saveInsight(insight)
-    log('INFO', 'insight_composed', { id, topic: topic.topic, mode, sections: `${sections.length}/5` })
+    log('INFO', 'insight_composed', {
+      id,
+      topic: topic.topic,
+      mode,
+      sections: `${sections.length}/5`,
+      essayStatus,
+      qualityScore: review.score,
+    })
     return insight
   }
 

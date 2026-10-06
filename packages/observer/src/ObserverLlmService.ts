@@ -258,7 +258,13 @@ export class ObserverLlmService {
           return { data: JSON.parse(match[1].trim()) as T }
         } catch {}
       }
-      return { data: result.data as any }
+      // A prose answer is an error, not degraded data. Returning the raw
+      // string as T made every caller that only checked truthiness treat an
+      // unparseable answer as a parsed object (e.g. clusters: undefined
+      // surfacing later as silent empties). Callers already branch on
+      // `result.error`, so surface it there.
+      log('WARN', 'observer_llm_non_json', { preview: (result.data || '').slice(0, 120) })
+      return { error: `模型返回的不是 JSON: ${(result.data || '').slice(0, 120)}` }
     }
   }
 
