@@ -281,8 +281,17 @@ class CreativityEngine {
       const prompt = this._buildGenerationPrompt(a, b, strat, recent.slice(-10), rejected.slice(-5))
       try {
         const result = await this.chatJson(prompt, {
-          system: `You are a creative hypothesis generator. Output JSON with fields: title, idea, expectedBenefit, risk, novelty (0-100), feasibility (0-100), impact (0-100). Generate ONE novel hypothesis by combining the given concepts.`,
+          system: [
+            'You are a creative hypothesis generator. Generate ONE novel hypothesis by combining the given concepts.',
+            'Reasoning rules:',
+            '1. First state the synergy mechanism: WHY these two concepts combine (what shared structure or complementary gap), not just THAT they pair.',
+            '2. Then give a causal chain: premise -> mechanism -> outcome. Each step must follow from the previous one; no unexplained jumps.',
+            '3. Be concrete: name the component, the change, and the observable effect. Vague claims ("improve efficiency", "be better") score 0 on logic.',
+            '4. State the strongest counter-risk honestly; an idea with no real risk is not being analyzed.',
+            'Output JSON with fields: title (<=60 chars), idea (the full causal chain, 100-250 words), expectedBenefit, risk, novelty (0-100), feasibility (0-100), impact (0-100), logic (0-100: how tight and complete the causal chain is).',
+          ].join('\n'),
           temperature: strat === 'explore' ? 0.8 : 0.4,
+          maxTokens: 900,
         })
 
         if (!result || !result.data) {
@@ -302,6 +311,11 @@ class CreativityEngine {
           novelty: Math.min(100, Math.max(0, result.data.novelty || 50)),
           feasibility: Math.min(100, Math.max(0, result.data.feasibility || 50)),
           impact: Math.min(100, Math.max(0, result.data.impact || 50)),
+          // logic is the fourth scoring dimension: a high-novelty idea with a
+          // broken causal chain must be visibly weaker than one that reasons
+          // cleanly. Defaults to 50 so records written before it existed keep
+          // a neutral value instead of NaN.
+          logic: Math.min(100, Math.max(0, result.data.logic ?? 50)),
           sourceLabels: [a.name, b.name],
           status: 'active',
           createdAt: Date.now(),
@@ -355,14 +369,27 @@ class CreativityEngine {
       const prompt = `Review and refine this hypothesis. Current state:
 Title: ${h.title}
 Idea: ${h.idea}
-Novelty: ${h.novelty}, Feasibility: ${h.feasibility}, Impact: ${h.impact}
+Novelty: ${h.novelty}, Feasibility: ${h.feasibility}, Impact: ${h.impact}, Logic: ${h.logic ?? '(not scored)'}
 
-Output JSON with: title, idea, expectedBenefit, risk, novelty, feasibility, impact, verdict (promote/keep/reject/merge), reason.`
+Review checklist (apply in order):
+1. Causal chain: does the idea explain WHY A leads to B at each step? If a step is asserted without a mechanism, lower logic and rewrite the step.
+2. Evidence: is each claim traceable to the given idea text, or is it speculation presented as fact? Flag speculation.
+3. Falsifiability: can you state how this idea would prove wrong? If not, say so in reason.
+4. Concrete over vague: reject filler claims ("improve efficiency") by rewriting them with the specific component and effect.
+
+Verdict rules:
+- promote: the idea is mature AND the refined scores justify landing (novelty + feasibility + impact > 200 with logic >= 60).
+- merge: only when this idea is clearly complementary to another stored one; set mergeWithId to that hypothesis id.
+- reject: the causal chain cannot be repaired, or the premise lost its supporting signals.
+- keep: everything else.
+
+Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibility (0-100), impact (0-100), logic (0-100), verdict (promote/keep/reject/merge), reason, mergeWithId (only for merge).`
 
       try {
         const result = await this.chatJson(prompt, {
-          system: 'You are a creative hypothesis reviewer. Output JSON with refined scores and a verdict.',
+          system: 'You are a critical creative hypothesis reviewer. Reward tight causal reasoning, penalize vagueness. Output JSON only.',
           temperature: 0.3,
+          maxTokens: 900,
         })
 
         if (!result || !result.data) {
@@ -382,18 +409,50 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty, feasibility, impa
           novelty: Math.min(100, Math.max(0, result.data.novelty || h.novelty)),
           feasibility: Math.min(100, Math.max(0, result.data.feasibility || h.feasibility)),
           impact: Math.min(100, Math.max(0, result.data.impact || h.impact)),
+          logic: Math.min(100, Math.max(0, result.data.logic ?? h.logic ?? 50)),
           fermentedAt: Date.now(),
           fermentCount: (h.fermentCount || 0) + 1,
         }
 
-        if (result.data.verdict === 'reject') {
+        let verdict = result.data.verdict
+        if (verdict === 'reject') {
           patch.status = 'rejected'
-        } else if (result.data.verdict === 'promote' && (h.novelty + h.feasibility + h.impact) > 200) {
+        } else if (verdict === 'merge') {
+          // merge used to fall through silently: the verdict was echoed back
+          // in the results but nothing was merged. Now it behaves like
+          // IdeaFermentationEngine -- the reviewed idea is folded into the
+          // target and marked merged, or downgraded to keep when the target
+          // id is unknown (an unresolvable merge is not a merge).
+          const target = result.data.mergeWithId
+            ? this.store.getHypotheses().find((x) => x.id === result.data.mergeWithId)
+            : null
+          if (target && target.id !== h.id) {
+            target.idea = [target.idea, patch.idea].filter(Boolean).join('\n---\n')
+            target.fermentedAt = patch.fermentedAt
+            target.fermentCount = (target.fermentCount || 0) + 1
+            this.store.updateHypothesis(target.id, {
+              idea: target.idea,
+              fermentedAt: target.fermentedAt,
+              fermentCount: target.fermentCount,
+            })
+            patch.status = 'merged'
+            patch.mergedInto = target.id
+          } else {
+            // An unresolvable merge target is not a merge; report it honestly
+            // as keep so the caller never sees a merge that did not happen.
+            verdict = 'keep'
+          }
+        }
+
+        // The logic gate only applies when the review actually rescored logic;
+        // a reviewer that omits the field cannot fail a gate it never saw.
+        const logicOk = result.data.logic === undefined || patch.logic >= 60
+        if (verdict === 'promote' && (patch.novelty + patch.feasibility + patch.impact) > 200 && logicOk) {
           patch.status = 'validated'
         }
 
         this.store.updateHypothesis(h.id, patch)
-        results.push({ id: h.id, title: h.title, verdict: result.data.verdict, reason: result.data.reason })
+        results.push({ id: h.id, title: h.title, verdict, reason: result.data.reason })
       } catch (err) {
         errors.push({ id: h.id, title: h.title, error: String((err && err.message) || err) })
       }
@@ -423,6 +482,9 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty, feasibility, impa
         novelty: h.novelty,
         feasibility: h.feasibility,
         impact: h.impact,
+        // Undefined keys vanish over JSON (the CLI path); keep them out here
+        // too so the engine and the CLI round-trip deep-equal.
+        ...(h.logic !== undefined ? { logic: h.logic } : {}),
         score: h.novelty + h.feasibility + h.impact,
       })),
     }
@@ -441,18 +503,24 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty, feasibility, impa
       novelty: h.novelty,
       feasibility: h.feasibility,
       impact: h.impact,
+      ...(h.logic !== undefined ? { logic: h.logic } : {}),
       score: h.novelty + h.feasibility + h.impact,
       sourceLabels: h.sourceLabels,
       createdAt: h.createdAt,
       fermentedAt: h.fermentedAt,
       fermentCount: h.fermentCount,
+      ...(h.mergedInto !== undefined ? { mergedInto: h.mergedInto } : {}),
     }))
   }
 
   _buildGenerationPrompt(a, b, strategy, recentHypotheses, rejectedHypotheses) {
+    // Long sources used to be pasted unbounded, crowding the instructions out
+    // of the context window; 600 chars keeps the pairing signal without the
+    // flood.
+    const clip = (s, n = 600) => (s.length > n ? s.slice(0, n) + '…' : s)
     let prompt = `Combine these two concepts into ONE novel hypothesis:\n\n`
-    prompt += `Concept A: "${a.name}" — ${a.content}\n`
-    prompt += `Concept B: "${b.name}" — ${b.content}\n\n`
+    prompt += `Concept A: "${a.name}" — ${clip(a.content)}\n`
+    prompt += `Concept B: "${b.name}" — ${clip(b.content)}\n\n`
     prompt += `Strategy: ${strategy}\n`
 
     if (strategy === 'explore') {
@@ -462,6 +530,15 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty, feasibility, impa
     } else {
       prompt += `Stable combination. Conservative refinement of existing ideas.\n`
     }
+
+    // The logical-quality bar, stated where the model composes rather than
+    // only in the system prompt: synergy mechanism, explicit causal chain,
+    // and no claims that cannot name their mechanism.
+    prompt += `\nQuality requirements:\n`
+    prompt += `- The idea must explain the synergy mechanism: WHY these two concepts combine.\n`
+    prompt += `- Write the proposal as a causal chain (premise -> mechanism -> outcome), each step following from the last.\n`
+    prompt += `- Be specific: component, change, observable effect. No bare claims like "improve efficiency".\n`
+    prompt += `- The title must be self-contained (a reader sees only the title in lists).\n`
 
     if (recentHypotheses.length > 0) {
       prompt += `\nRecent ideas (avoid duplicates):\n`
@@ -477,7 +554,7 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty, feasibility, impa
       }
     }
 
-    prompt += `\nOutput JSON: {"title": "...", "idea": "...", "expectedBenefit": "...", "risk": "...", "novelty": 0-100, "feasibility": 0-100, "impact": 0-100}`
+    prompt += `\nOutput JSON: {"title": "...", "idea": "...", "expectedBenefit": "...", "risk": "...", "novelty": 0-100, "feasibility": 0-100, "impact": 0-100, "logic": 0-100}`
     return prompt
   }
 }

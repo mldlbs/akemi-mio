@@ -52,10 +52,12 @@ function isInsightAvailable() {
   return Boolean(InsightStore)
 }
 
-// Score at or above which an unreported insight is counted as high-value in the
-// status summary.
-const INSIGHT_HIGH_VALUE_SCORE = 0.7
-const INSIGHT_HIGH_VALUE_LIMIT = 50
+// "High value" means score >= 50 (0-100 scale) AND confidence >= 0.7 (0-1).
+// These used to be named INSIGHT_HIGH_VALUE_SCORE = 0.7 / ..._LIMIT = 50 and
+// were passed in (LIMIT, SCORE) order -- correct only because the constants
+// happened to occupy each other's slots. Named for what they are now.
+const INSIGHT_HIGH_VALUE_SCORE_THRESHOLD = 50
+const INSIGHT_HIGH_VALUE_CONFIDENCE_THRESHOLD = 0.7
 
 function createInsightStore(options = {}) {
   const dataDir = options.dataDir
@@ -94,7 +96,10 @@ function createInsightStore(options = {}) {
       total: all.length,
       unreported: unreported.length,
       reported: all.length - unreported.length,
-      highValue: s.getHighValueUnreported(INSIGHT_HIGH_VALUE_LIMIT, INSIGHT_HIGH_VALUE_SCORE).length,
+      highValue: s.getHighValueUnreported(
+        INSIGHT_HIGH_VALUE_SCORE_THRESHOLD,
+        INSIGHT_HIGH_VALUE_CONFIDENCE_THRESHOLD,
+      ).length,
     }
   }
 
@@ -137,9 +142,26 @@ function createInsightStore(options = {}) {
     }
     const insights = await generator.generate(ctx)
     if (InsightStore && storePath) {
-      requireStore().addMany(insights)
+      // addMany is a pure push: every `mio insight generate` run used to
+      // append another copy of the same detection. Drop titles the store
+      // already holds (reported or not) so re-running is idempotent.
+      const s = requireStore()
+      const seen = new Set(s.getAll().map((i) => String(i.title || '').trim().toLowerCase()))
+      // Dedup against the store AND within the batch -- a generator that emits
+      // the same detection twice in one run must not survive just because the
+      // second copy was not there when the set was built.
+      const fresh = []
+      for (const i of insights || []) {
+        if (!i) continue
+        const key = i.title ? String(i.title).trim().toLowerCase() : null
+        if (key !== null && seen.has(key)) continue
+        if (key !== null) seen.add(key)
+        fresh.push(i)
+      }
+      if (fresh.length > 0) s.addMany(fresh)
+      return { generated: fresh.length, duplicates: (insights || []).length - fresh.length, insights: fresh }
     }
-    return { generated: insights.length, insights }
+    return { generated: (insights || []).length, insights }
   }
 
   return {
@@ -154,6 +176,6 @@ function createInsightStore(options = {}) {
 module.exports = {
   createInsightStore,
   isInsightAvailable,
-  INSIGHT_HIGH_VALUE_SCORE,
-  INSIGHT_HIGH_VALUE_LIMIT,
+  INSIGHT_HIGH_VALUE_SCORE_THRESHOLD,
+  INSIGHT_HIGH_VALUE_CONFIDENCE_THRESHOLD,
 }

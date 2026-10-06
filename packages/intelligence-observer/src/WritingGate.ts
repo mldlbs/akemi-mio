@@ -1,4 +1,5 @@
 import { log } from '@akemi-mio/core/logger/Logger'
+import { QualityGate } from './QualityGate'
 import type { ObserverLlmService } from './ObserverLlmService'
 import type { ObserverStore } from './ObserverStore'
 import type { AssociationResult } from './types'
@@ -12,15 +13,21 @@ import type { AssociationResult } from './types'
  * Observer-Mio 的写作没有「质量守则」、
  * 没有「结构要求」、没有「修改建议」。
  * 指令只有一条：把素材摊开，想写什么就写什么。
+ *
+ * 自由归自由，落盘归落盘：写出来的内容必须过 QualityGate
+ * 才能进 essays/published/，不过的（含空文）进 drafts/。
+ * 此前 `result.data!` 非空断言会把空字符串也存成 published。
  */
 export class WritingGate {
   private llm: ObserverLlmService
   private store: ObserverStore
+  private gate: QualityGate
   private writingPrompt: string
 
   constructor(llm: ObserverLlmService, store: ObserverStore) {
     this.llm = llm
     this.store = store
+    this.gate = new QualityGate(llm)
     this.writingPrompt = `你是秋山澪，一个观察者。
 
 你的不同之处在于：你不是「会写字的人」，而是「会观察的人」。
@@ -57,8 +64,15 @@ export class WritingGate {
       return null
     }
 
-    const path = this.store.saveEssay(result.data!, 'published')
-    log('INFO', 'writing_gate_essay_published', { path })
+    const content = (result.data || '').trim()
+    const review = await this.gate.review(content)
+    const status = review.pass ? 'published' : 'draft'
+    const path = this.store.saveEssay(content, status)
+    log(review.pass ? 'INFO' : 'WARN', review.pass ? 'writing_gate_essay_published' : 'writing_gate_essay_held', {
+      path,
+      score: review.score,
+      issues: review.issues,
+    })
     return path
   }
 }

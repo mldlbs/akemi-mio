@@ -323,6 +323,27 @@ test('insight generate persists what the generator returns', async () => {
   assert.equal(fake.instances[0].items.length, 3)
 })
 
+test('insight generate dedupes against titles the store already holds', async () => {
+  // addMany was a pure push: every re-run appended another copy of the same
+  // detection, so the store grew without bound.
+  const fake = makeFakeWithGenerator(
+    [insight('existing', 0.9, { title: 'Cache is thrashing' })],
+    () => [
+      insight('g1', 0.8, { title: 'Cache is thrashing' }), // duplicate (case-insensitive)
+      insight('g2', 0.7, { title: 'Auth token churn' }),   // new
+      insight('g3', 0.6, { title: '  auth token churn ' }), // duplicate after trim
+    ]
+  )
+  const { createInsightStore } = loadStoreWithFake(fake.module)
+  const store = createInsightStore({ dataDir: '/tmp/whatever' })
+
+  const result = await store.generate({ memories: [{ content: 'x' }] })
+  assert.equal(result.generated, 1, 'only the genuinely new insight is stored')
+  assert.equal(result.duplicates, 2)
+  assert.equal(fake.instances[0].items.length, 2, 'no duplicate titles pile up')
+  assert.equal(result.insights[0].title, 'Auth token churn')
+})
+
 test('insight generate --json emits the same shape as the MCP tool', () => {
   const ws = workspace()
   const { result } = runWithFake(ws, ['insight', 'generate', '--memory', 'decision|moved parsing', '--json'])

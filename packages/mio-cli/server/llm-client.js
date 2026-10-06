@@ -127,6 +127,7 @@ async function chatJson(userText, opts = {}) {
       body: JSON.stringify({
         model,
         temperature,
+        ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: userText },
@@ -139,10 +140,24 @@ async function chatJson(userText, opts = {}) {
     if (!resp.ok) return { error: `HTTP ${resp.status}` }
     const json = await resp.json()
     const text = json.choices?.[0]?.message?.content || ''
+
+    // Parse failures used to return { data: rawText }, so a prose answer
+    // masqueraded as a parsed object: callers testing truthy `result.data`
+    // stored an untitled, score-less record (and polluted the novelty
+    // dedup pool). A model that answered with anything but JSON is an
+    // error, not a degraded success. One retry with a code fence stripped
+    // covers models that wrap JSON despite response_format.
     try {
       return { data: JSON.parse(text) }
-    } catch {
-      return { data: text }
+    } catch (_) {}
+    const stripped = text.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')
+    try {
+      return { data: JSON.parse(stripped) }
+    } catch (_) {
+      return {
+        error: 'model returned unparseable JSON',
+        raw: String(text).slice(0, 300),
+      }
     }
   } catch (err) {
     return { error: String(err) }

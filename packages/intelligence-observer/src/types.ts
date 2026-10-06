@@ -173,6 +173,12 @@ export interface InsightOutput {
     brainContributions: BrainContributions
     llmCalls: number
     durationMs: number
+    /** QualityGate review score 0-100; -1 when the review could not run. */
+    qualityScore?: number
+    /** Up to a few concrete issues the reviewer reported. */
+    qualityIssues?: string[]
+    /** 'published' only when the gate passed; otherwise 'draft'. */
+    essayStatus?: string
   }
 }
 
