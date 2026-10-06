@@ -78,6 +78,90 @@ describe('InsightScorer', () => {
     })
   })
 
+  describe('分数尺度与 clamp（H5）', () => {
+    it('三维都落在 [0,1] 时按 0-1 尺度归一到 0-100', () => {
+      const [r] = scorer.score(
+        [
+          {
+            detector: 'a', type: 'hot_topic', severity: 'medium',
+            title: '小数分', description: '', evidence: ['e1'],
+            novelty: 0.8, impact: 0.9, actionability: 0.7,
+          },
+        ],
+        ctx,
+      )
+      // 0.8/0.9/0.7 → 80/90/70 → 80*0.4+90*0.4+70*0.2 = 82
+      expect(r.score).toBe(82)
+    })
+
+    it('越界值 clamp 到 0-100 而不是算出 >100 或负分', () => {
+      const [r] = scorer.score(
+        [
+          {
+            detector: 'a', type: 'hot_topic', severity: 'high',
+            title: '越界', description: '', evidence: ['e1'],
+            novelty: 150, impact: -20, actionability: 50,
+          },
+        ],
+        ctx,
+      )
+      // 100*0.4 + 0*0.4 + 50*0.2 = 50
+      expect(r.score).toBe(50)
+      expect(r.score).toBeLessThanOrEqual(100)
+      expect(r.score).toBeGreaterThanOrEqual(0)
+    })
+
+    it('NaN/缺失维度不产生 NaN 分', () => {
+      const [r] = scorer.score(
+        [
+          {
+            detector: 'a', type: 'hot_topic', severity: 'medium',
+            title: '缺维度', description: '', evidence: ['e1'],
+            novelty: undefined as unknown as number, impact: 50, actionability: 50,
+          },
+        ],
+        ctx,
+      )
+      expect(Number.isFinite(r.score)).toBe(true)
+      expect(r.score).toBe(30)
+    })
+  })
+
+  describe('零交互上下文的 freshness（H1）', () => {
+    const longEvidence = Array.from({ length: 4 }, (_, i) => `证据${i}` + 'x'.repeat(60))
+    const base: RawDetection = {
+      detector: 'a', type: 'hot_topic', severity: 'medium',
+      title: 't', description: 'd', evidence: longEvidence,
+      novelty: 50, impact: 50, actionability: 50,
+    }
+
+    it('interactionCount=0 且有近期记忆时 confidence 可达 0.7 高价值线', () => {
+      const cliCtx: DetectionContext = {
+        memoryEntries: [{ type: 'note', content: 'recent', createdAt: Date.now() }],
+        summaries: [], interactionCount: 0, plans: [], eventCount: 0,
+      }
+      const [r] = scorer.score([base], cliCtx)
+      expect(r.confidence).toBeGreaterThanOrEqual(0.7)
+    })
+
+    it('interactionCount=0 且无记忆时回落旧下限 0.2', () => {
+      const bareCtx: DetectionContext = {
+        memoryEntries: [], summaries: [], interactionCount: 0, plans: [], eventCount: 0,
+      }
+      const [r] = scorer.score([base], bareCtx)
+      expect(r.confidence).toBe(0.2)
+    })
+
+    it('记忆超过 7 天按陈旧数据 0.4 计', () => {
+      const staleCtx: DetectionContext = {
+        memoryEntries: [{ type: 'note', content: 'old', createdAt: Date.now() - 30 * 24 * 60 * 60 * 1000 }],
+        summaries: [], interactionCount: 0, plans: [], eventCount: 0,
+      }
+      const [r] = scorer.score([base], staleCtx)
+      expect(r.confidence).toBe(0.4)
+    })
+  })
+
   describe('filterLowValue', () => {
     it('过滤掉 score < 20 的洞察', () => {
       const insights: Insight[] = [
@@ -298,5 +382,78 @@ describe('InsightGenerator', () => {
     })
     await generator.generate(ctx)
     expect(eventBus.emit).toHaveBeenCalledWith('insight.candidate.generated', { count: 1 })
+  })
+
+  it('坏记录被跳过，不毁掉整批（H2）', async () => {
+    chatJson.mockResolvedValue({
+      data: [
+        { title: '', description: '空标题应该被丢弃', evidence: ['e'] },
+        123,
+        { evidence: ['只有证据没有标题'] },
+        {
+          title: '字符串 evidence 归一为数组',
+          description: 'd',
+          detector: 'insight_llm',
+          severity: 'sometypo',
+          evidence: '单条字符串证据，超过五十个字符，用来验证归一后仍能算出质量',
+          novelty: 90,
+          impact: 85,
+          actionability: 80,
+        },
+      ],
+    })
+    const results = await generator.generate(ctx)
+    expect(results).toHaveLength(1)
+    expect(results[0].title).toBe('字符串 evidence 归一为数组')
+    expect(Array.isArray(results[0].evidence)).toBe(true)
+    expect(results[0].evidence).toHaveLength(1)
+  })
+
+  it('detector=conflict 与 infoType 原样透传（M8）', async () => {
+    chatJson.mockResolvedValue({
+      data: [
+        {
+          title: '信息矛盾',
+          description: 'd',
+          detector: 'conflict',
+          infoType: '不确定',
+          severity: 'high',
+          evidence: ['e1', 'e2', 'e3', 'e4'],
+          novelty: 70,
+          impact: 70,
+          actionability: 70,
+        },
+      ],
+    })
+    const results = await generator.generate(ctx)
+    expect(results[0].detector).toBe('conflict')
+    expect(results[0].infoType).toBe('不确定')
+  })
+
+  it('一次生成最多入库 10 条', async () => {
+    chatJson.mockResolvedValue({
+      data: Array.from({ length: 12 }, (_, i) => ({
+        title: `洞察${i}`,
+        description: 'd',
+        detector: 'insight_llm',
+        severity: 'medium',
+        evidence: ['e1'],
+        novelty: 80,
+        impact: 80,
+        actionability: 80,
+      })),
+    })
+    const results = await generator.generate(ctx)
+    expect(results.length).toBeLessThanOrEqual(10)
+    expect(results.length).toBeGreaterThan(0)
+  })
+
+  it('调用 LLM 时带上 maxTokens，避免无界输出撞 15s 超时', async () => {
+    chatJson.mockResolvedValue({ data: [] })
+    await generator.generate(ctx)
+    expect(chatJson).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ maxTokens: expect.any(Number), timeoutMs: expect.any(Number) }),
+    )
   })
 })

@@ -8,6 +8,8 @@ export interface RawDetection {
   novelty: number
   impact: number
   actionability: number
+  /** 信息分层标注：已知事实 / 合理推测 / 不确定（LLM 输出，可缺省） */
+  infoType?: string
 }
 
 export interface Insight {
@@ -19,6 +21,7 @@ export interface Insight {
   score: number
   confidence: number
   createdAt: number
+  infoType?: string
 }
 
 export interface InsightStoreLike {
