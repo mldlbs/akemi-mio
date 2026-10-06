@@ -37,7 +37,7 @@ export class IdeaFermentationEngine {
   private store: IdeaStoreLike
   private chatJson: (
     userText: string,
-    options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string },
+    options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string; maxTokens?: number },
   ) => Promise<{ data?: any; error?: string }>
   private getSignals: () => CreativitySource[]
   private minFermentRounds = 1
@@ -51,7 +51,7 @@ export class IdeaFermentationEngine {
     store: IdeaStoreLike,
     chatJson: (
       userText: string,
-      options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string },
+      options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string; maxTokens?: number },
     ) => Promise<{ data?: any; error?: string }>,
     getSignals: () => CreativitySource[],
   ) {
@@ -76,6 +76,8 @@ export class IdeaFermentationEngine {
       system: FERMENT_SYSTEM_PROMPT,
       temperature: 0.5,
       timeoutMs: this.llmTimeoutMs,
+      // 输出无界会顶满超时（M2）：发酵 verdict 上限 900 tokens
+      maxTokens: 900,
     })
 
     if (result.error) {
@@ -88,20 +90,26 @@ export class IdeaFermentationEngine {
   }
 
   private buildPrompt(candidates: Hypothesis[], signals: CreativitySource[]): string {
+    // 素材截断（M2）：h.idea 800 字、risk 200 字、信号最多 20 条 × 300 字，
+    // 与 mio-cli creativity-engine 的 clip() 同步，防止单条素材挤出指令。
+    const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '…' : s)
     const candidateText = candidates
       .map(
         (h, i) =>
           `${i + 1}. [${h.id}] ${h.title}\n` +
-          `   内容: ${h.idea}\n` +
+          `   内容: ${clip(String(h.idea ?? ''), 800)}\n` +
           `   新颖度 ${h.novelty} / 可行性 ${h.feasibility} / 影响 ${h.impact} / 逻辑 ${h.logic ?? '未评分'}\n` +
           `   已发酵轮数: ${h.fermentCount ?? 0}\n` +
-          `   风险: ${h.risk}`,
+          `   风险: ${clip(String(h.risk ?? ''), 200)}`,
       )
       .join('\n')
 
     const signalText =
       signals.length > 0
-        ? signals.map((s) => `- [${s.type}] ${s.name}: ${s.content}`).join('\n')
+        ? signals
+            .slice(0, 20)
+            .map((s) => `- [${s.type}] ${s.name}: ${clip(String(s.content ?? ''), 300)}`)
+            .join('\n')
         : '（无）'
 
     return `以下是需要发酵的 ${candidates.length} 个创意点子（draft 状态）：

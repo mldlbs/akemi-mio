@@ -1,5 +1,13 @@
 import type { CreativitySource, ConceptCombo, ExternalSignal } from './types'
 
+// 输入素材统一截断（M2）：对照 mio-cli creativity-engine 的 clip()。
+// 来源 600 字、信号 300 字，超长素材会把指令挤出上下文窗口。
+const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '…' : s)
+/** 外部信号条数上限：CreativityService 会把全部 trends+insights 灌进来（M2） */
+const MAX_SIGNALS = 20
+/** 配对条数上限：调用方约束（topCombos 3/5）失效时的防御（M2） */
+const MAX_COMBOS = 10
+
 /**
  * Creativity System Prompt — 给 LLM 的创造力提示词
  * 定义 AI 作为"概念重组引擎"的角色。
@@ -112,11 +120,12 @@ export function buildCreativityPrompt(
   const sections: string[] = []
 
   // 来源列表
-  const sourceLines = sources.map((s) => `  [${s.type}] ${s.name}: ${s.content}`).join('\n')
+  const sourceLines = sources.map((s) => `  [${s.type}] ${s.name}: ${clip(s.content, 600)}`).join('\n')
   sections.push(`【可用概念来源】\n${sourceLines}`)
 
   // 推荐配对 — 支持 2-way 和 3-way 组合
   const comboLines = combos
+    .slice(0, MAX_COMBOS)
     .map((c, i) => {
       const comboStr = c.sources.length === 3 ? `${c.sources[0]} × ${c.sources[1]} × ${c.sources[2]}` : `${c.sources[0]} × ${c.sources[1]}`
       return `  ${i + 1}. ${comboStr} — ${c.description}`
@@ -140,7 +149,7 @@ export function buildCreativityPrompt(
  * - 提示 LLM 用外部信号审视/挑战已有的来源组合，而不是组合它们
  */
 function buildExternalSignalBlock(signals: ExternalSignal[]): string {
-  const lines = signals.map((s) => `  [${s.type}@${s.source}] ${s.raw}`).join('\n')
+  const lines = signals.slice(0, MAX_SIGNALS).map((s) => `  [${s.type}@${s.source}] ${clip(s.raw, 300)}`).join('\n')
   return `【外部信号 — 作为审视视角，不可配对】
 
 以下信号来自 Observer 的真实世界趋势和洞察。它们不应被直接与概念来源组合配对。

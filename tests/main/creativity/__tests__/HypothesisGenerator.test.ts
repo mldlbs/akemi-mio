@@ -92,6 +92,15 @@ describe('HypothesisGenerator', () => {
       expect(results[0].id).toMatch(/^hyp_tpl_/)
     })
 
+    it('chatJson 调用带上 maxTokens 1200（M2：输出无界会顶满超时）', async () => {
+      chatJson.mockResolvedValue({ data: [] })
+      await generator.generate([makeCombo({ sources: ['A', 'B'] })], [makeSource('A'), makeSource('B')])
+      expect(chatJson).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ maxTokens: 1200 }),
+      )
+    })
+
     it('LLM 返回空数组时降级到 TemplateLibrary', async () => {
       chatJson.mockResolvedValue({ data: [] })
 

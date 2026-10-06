@@ -211,4 +211,37 @@ describe('IdeaFermentationEngine', () => {
     expect(store.getFermentableHypotheses).toHaveBeenCalledWith(8)
     expect(chatJson).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ timeoutMs: 180000 }))
   })
+
+  it('chatJson 调用带上 maxTokens 900（M2：输出无界会顶满超时）', async () => {
+    const { store } = createStore([makeHyp()])
+    chatJson.mockResolvedValue({ data: { results: [] } })
+    await makeEngine(store).ferment()
+    expect(chatJson).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ maxTokens: 900 }),
+    )
+  })
+
+  it('超长 idea/风险/信号被截断进提示词（M2：idea 800、risk 200、信号 20 条×300）', async () => {
+    const signals = Array.from({ length: 30 }, (_, i) => ({
+      type: 'trend',
+      name: `信号${i}`,
+      content: '信'.repeat(500),
+      weight: 0.8,
+    }))
+    const { store } = createStore([makeHyp({ idea: '长'.repeat(2000), risk: '险'.repeat(500) })])
+    chatJson.mockResolvedValue({ data: { results: [{ id: 'h1', verdict: 'keep', reason: 'ok' }] } })
+
+    await makeEngine(store, signals).ferment()
+
+    const prompt = chatJson.mock.calls[0][0] as string
+    expect(prompt).toContain('长'.repeat(800) + '…')
+    expect(prompt).not.toContain('长'.repeat(801))
+    expect(prompt).toContain('险'.repeat(200) + '…')
+    expect(prompt).not.toContain('险'.repeat(201))
+    expect(prompt).toContain('信号19')
+    expect(prompt).not.toContain('信号20')
+    expect(prompt).toContain('信'.repeat(300) + '…')
+    expect(prompt).not.toContain('信'.repeat(301))
+  })
 })

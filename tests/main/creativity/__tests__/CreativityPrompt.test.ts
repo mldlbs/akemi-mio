@@ -47,4 +47,31 @@ describe('buildCreativityPrompt', () => {
     const prompt = buildCreativityPrompt(sources, combos, [])
     expect(prompt).not.toContain('外部信号')
   })
+
+  it('来源内容超 600 字被截断（M2）', () => {
+    const longSources = [{ name: 'Memory', content: '源'.repeat(1000), type: 'knowledge' as const, weight: 0.9 }]
+    const prompt = buildCreativityPrompt(longSources, combos)
+    expect(prompt).toContain('源'.repeat(600) + '…')
+    expect(prompt).not.toContain('源'.repeat(601))
+  })
+
+  it('外部信号上限 20 条且单条截断 300 字（M2）', () => {
+    const signals: ExternalSignal[] = Array.from({ length: 30 }, () => ({
+      source: 'Observer',
+      raw: '信'.repeat(500),
+      type: 'trend',
+    }))
+    const prompt = buildCreativityPrompt(sources, combos, signals)
+    const lines = prompt.match(/\[trend@Observer\]/g) || []
+    expect(lines).toHaveLength(20)
+    expect(prompt).toContain('信'.repeat(300) + '…')
+    expect(prompt).not.toContain('信'.repeat(301))
+  })
+
+  it('配对上限 10 条（M2：调用方约束失效时的防御）', () => {
+    const many = Array.from({ length: 15 }, (_, i) => ({ sources: ['A', 'B'], description: `组合${i}` }))
+    const prompt = buildCreativityPrompt(sources, many)
+    expect(prompt).toContain('组合9')
+    expect(prompt).not.toContain('组合10')
+  })
 })
