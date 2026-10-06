@@ -157,8 +157,10 @@ ${signalText}
 
       if (r.verdict === 'promote') {
         const ageOk = now - h.createdAt >= this.minAgeMs
-                // 后置去重: active 池中已有相似假设则跳过 promote
-                const activeHyps = candidates.filter(c => c.status === 'active' || c.status === 'experimenting')
+                // 后置去重: active/validated 池中已有相似假设则跳过 promote
+                //（promote 直接置 validated，与 mio-cli creativity-engine 对齐，
+                //  否则 stats.adopted 永远为 0——没有任何路径写入 validated）
+                const activeHyps = candidates.filter(c => c.status === 'active' || c.status === 'experimenting' || c.status === 'validated')
                 const newNovelty = clampScore(r.novelty, h.novelty)
                 const newFeasibility = clampScore(r.feasibility, h.feasibility)
                 const newImpact = clampScore(r.impact, h.impact)
@@ -170,7 +172,7 @@ ${signalText}
                 const logicOk = logicScore >= 60
                 if (rounds >= this.minFermentRounds && ageOk && promotedCount < this.maxPromotePerRound && !this.isDuplicate(h, activeHyps) && scoreOk && logicOk) {
           this.store.updateHypothesisFermentation(h.id, {
-            status: 'active',
+            status: 'validated',
             fermentCount: rounds,
             lastFermentedAt: now,
             fermentLog: [...(h.fermentLog ?? []), entry],

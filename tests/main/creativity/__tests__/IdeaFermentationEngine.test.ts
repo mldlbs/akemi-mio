@@ -57,14 +57,14 @@ describe('IdeaFermentationEngine', () => {
     chatJson.mockReset()
   })
 
-  it('promote：满 2 轮且年龄 ≥24h 才升级为 active', async () => {
+  it('promote：满 2 轮且年龄 ≥24h 才升级为 validated', async () => {
     const { store, updates } = createStore([makeHyp({ id: 'h1', fermentCount: 1 })])
     chatJson.mockResolvedValue({
       data: { results: [{ id: 'h1', verdict: 'promote', reason: '成熟', novelty: 80, feasibility: 80, impact: 80, logic: 70 }] },
     })
     const result = await makeEngine(store).ferment()
     expect(result.promoted).toContain('h1')
-    expect(updates[0].patch.status).toBe('active')
+    expect(updates[0].patch.status).toBe('validated')
     expect(updates[0].patch.fermentCount).toBe(2)
     expect(updates[0].patch.logic).toBe(70)
   })
@@ -200,7 +200,7 @@ describe('IdeaFermentationEngine', () => {
     })
     const result = await makeEngine(store).ferment()
     expect(result.promoted).toHaveLength(4)
-    const activeCount = updates.filter((u) => u.patch.status === 'active').length
+    const activeCount = updates.filter((u) => u.patch.status === 'validated').length
     expect(activeCount).toBe(4)
   })
 

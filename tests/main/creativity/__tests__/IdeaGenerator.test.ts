@@ -88,6 +88,56 @@ describe('IdeaGenerator', () => {
     })
   })
 
+  describe('generateIdeas — feasibility gate（主路径与 dream 同一套门槛）', () => {
+    it('可行性 < 30 的假设被过滤，不再只有 dream 路径过门', async () => {
+      const gen = new IdeaGenerator(chatJson as any, 0, 42)
+      gen.setTemperature(0)
+      chatJson.mockResolvedValue({
+        data: [
+          {
+            title: '不可行方案',
+            idea: '这是一个描述足够长的方案文本不少于二十个字的内容',
+            expectedBenefit: '说不清',
+            risk: '无法落地',
+            sourceLabels: ['ASR', 'MCP'],
+            novelty: 90,
+            feasibility: 20,
+            impact: 90,
+            relevance: '两者在任务上下文中形成因果协同并提升整体体验',
+          },
+        ],
+      })
+
+      const sources = [makeSource('ASR', 'knowledge'), makeSource('MCP', 'knowledge')]
+      const ideas = await gen.generateIdeas(sources, 5, 'explore')
+      expect(ideas).toHaveLength(0)
+    })
+
+    it('novelty > 80 且 feasibility < 40 时要求更长描述，短描述被拦', async () => {
+      const gen = new IdeaGenerator(chatJson as any, 0, 42)
+      gen.setTemperature(0)
+      chatJson.mockResolvedValue({
+        data: [
+          {
+            title: '可疑高新颖',
+            idea: '描述太短的方案不到六十个字的内容',
+            expectedBenefit: '存疑',
+            risk: '存疑',
+            sourceLabels: ['ASR', 'MCP'],
+            novelty: 95,
+            feasibility: 35,
+            impact: 80,
+            relevance: '两者在任务上下文中形成因果协同并提升整体体验',
+          },
+        ],
+      })
+
+      const sources = [makeSource('ASR', 'knowledge'), makeSource('MCP', 'knowledge')]
+      const ideas = await gen.generateIdeas(sources, 5, 'explore')
+      expect(ideas).toHaveLength(0)
+    })
+  })
+
   describe('generateIdeas — externalSignals passthrough', () => {
     it('externalSignals 参数被透传到 HypothesisGenerator', async () => {
       const gen = new IdeaGenerator(chatJson as any, 0, 42)

@@ -23,7 +23,11 @@ export class OutputLayer {
     const conflicts = world.narratives.filter((n) => n.title === insight.topic).length > 0 ? 0.5 : 0.2
     const eventVelocity = world.events.length > 5 ? Math.min(1, world.events.length / 30) : 0.1
     const uncertainties = (world.uncertainties?.length ?? 0) > 3 ? 0.6 : 0.2
-    return parseFloat(((conflicts + eventVelocity + uncertainties) / 3).toFixed(2))
+    // 三项的理论上限是 (0.5 + 1 + 0.6) / 3 = 0.7 —— 阈值 0.7 用 `>` 比较
+    // 时数学上永远不可达（isAnomaly 恒为 false）。按理论上限归一到 0-1，
+    // 满证据 = 1.0，" > 0.7" 才真正可以触发。
+    const raw = (conflicts + eventVelocity + uncertainties) / 3
+    return Math.min(1, parseFloat((raw / 0.7).toFixed(2)))
   }
 
   async publishInsight(

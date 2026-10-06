@@ -64,12 +64,16 @@ export class IdeaGenerator {
     // 3. 用 LLM 生成假设（外部信号作为审视视角注入，不参与配对）
     const hypotheses = await this.hypothesisGen.generate(combos, activeSources, false, externalSignals)
 
-    // 4. 策略感知的新颖性门禁 — stable 模式同类型配对新颖度天然偏低，
+    // 4. 可行性/质量门禁（与 dream 模式同一套门槛）——此前只有梦境路径
+    //    过 feasibilityGate，主路径仅按 novelty 筛，可行性 0 分也能入库。
+    const feasible = this.feasibilityGate(hypotheses)
+
+    // 5. 策略感知的新颖性门禁 — stable 模式同类型配对新颖度天然偏低，
     //    降低阈值避免误杀；signal 模式需要更高的新颖度才有价值
     const noveltyThreshold = strategy === 'stable' ? 30 : strategy === 'signal' ? 40 : 35
-    const novel = hypotheses.filter((h) => h.novelty >= noveltyThreshold)
+    const novel = feasible.filter((h) => h.novelty >= noveltyThreshold)
 
-    // 5. 为每个假设生成实验方案
+    // 6. 为每个假设生成实验方案
     const ideas = novel.slice(0, maxIdeas).map((h) => ({
       hypothesis: h,
       experiment: this.experimentPlanner.plan(h),

@@ -47,8 +47,9 @@ export class InsightComposer {
     if (s1) sections.push({ title: INSIGHT_SECTION_TITLES[1], content: s1 })
     else missingSections.push(INSIGHT_SECTION_TITLES[1])
 
+    // 每段一句核心判断（结论先行）：只给禁词表时模型爱铺陈、把判断埋进长段。
     const SECTION_SYSTEM =
-      '用中文回答。禁止使用：然而、不仅、而且、因此、总之、显而易见、不可忽视、值得关注、引人深思、从某种意义上说、由此可见、综上所述。直接写内容，不要自我评价。'
+      '用中文回答。每段先用一句话给出核心判断，再展开解释。禁止使用：然而、不仅、而且、因此、总之、显而易见、不可忽视、值得关注、引人深思、从某种意义上说、由此可见、综上所述。直接写内容，不要自我评价。'
     const sectionGens: { index: number; title: string; prompt: string; system: string; temperature: number }[] = [
       {
         index: 2,
@@ -86,10 +87,13 @@ export class InsightComposer {
       },
     ]
 
+    // 单段硬上限：prompt 里写了"200 字内"但模型不一定会遵守，长输出
+    // 不截断会直接灌进成文并撑爆 Telegram 4096 上限。
+    const MAX_SECTION_CHARS = 600
     for (const gen of sectionGens) {
       const result = await this.llm.generate(gen.prompt, { system: gen.system, temperature: gen.temperature, maxTokens: 2048 })
       if (result.data && result.data.length > 20) {
-        sections.push({ title: gen.title, content: result.data })
+        sections.push({ title: gen.title, content: result.data.slice(0, MAX_SECTION_CHARS) })
       } else {
         missingSections.push(gen.title)
         log('WARN', 'insight_section_empty', { section: gen.title, error: result.error })
