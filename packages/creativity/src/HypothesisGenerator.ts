@@ -16,7 +16,7 @@ export class HypothesisGenerator {
   private rng: RandomGenerator
   private chatJson: (
     userText: string,
-    options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string },
+    options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string; maxTokens?: number },
   ) => Promise<{ data?: any; error?: string }>
   private templateLib: TemplateLibrary
   private localModel: LocalModelService
@@ -24,7 +24,7 @@ export class HypothesisGenerator {
   constructor(
     chatJson: (
       userText: string,
-      options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string },
+      options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string; maxTokens?: number },
     ) => Promise<{ data?: any; error?: string }>,
     seed?: number,
   ) {
@@ -150,6 +150,8 @@ export class HypothesisGenerator {
         system: CREATIVITY_SYSTEM_PROMPT,
         temperature: dreamMode ? 1.0 : 0.8,
         timeoutMs: 60000,
+        // 输出无界会顶满超时（M2）：生成上限 1200 tokens
+        maxTokens: 1200,
       })
 
       if (result.error) {
