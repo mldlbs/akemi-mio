@@ -28,7 +28,7 @@ export interface FermentLogEntry {
   at: number
   verdict: FermentVerdict
   reason: string
-  score?: { novelty: number; feasibility: number; impact: number }
+  score?: { novelty: number; feasibility: number; impact: number; logic?: number }
 }
 
 export interface HypothesisFermentationPatch {
@@ -40,6 +40,7 @@ export interface HypothesisFermentationPatch {
   novelty?: number
   feasibility?: number
   impact?: number
+  logic?: number
   mergedInto?: string
 }
 
@@ -54,6 +55,8 @@ export interface Hypothesis {
   novelty: number
   feasibility: number
   impact: number
+  /** 逻辑一致性评分 0-100（第四维，评审/生成时打分，可缺省视为 50） */
+  logic?: number
   status: 'draft' | 'active' | 'experimenting' | 'validated' | 'rejected'
   createdAt: number
   /** 实现难度 1-5（LLM 生成�?*/

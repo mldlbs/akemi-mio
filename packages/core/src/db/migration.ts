@@ -1023,6 +1023,23 @@ const MIGRATIONS: Migration[] = [
     irreversible: true,
     category: 'schema',
   },
+  {
+    version: 49,
+    sql: (db) => {
+      // 第四评分维度 logic：与 creativity 侧 promote 门控（logic >= 60）对齐。
+      const columns = new Set<string>()
+      const stmt = db.prepare('PRAGMA table_info(hypotheses)')
+      while (stmt.step()) {
+        const row = stmt.getAsObject()
+        if (typeof row.name === 'string') columns.add(row.name)
+      }
+      stmt.free()
+      if (!columns.has('logic')) db.run('ALTER TABLE hypotheses ADD COLUMN logic REAL')
+    },
+    revert: '',
+    irreversible: true,
+    category: 'schema',
+  },
 ]
 
 // 导出迁移数组供测试验证

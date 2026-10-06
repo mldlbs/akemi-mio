@@ -195,6 +195,7 @@ test('ferment updates an active hypothesis and records the verdict', async () =>
     novelty: 80,
     feasibility: 75,
     impact: 85,
+    logic: 70,
     verdict: 'promote',
     reason: 'scores improved',
   }))
@@ -283,6 +284,69 @@ test('ferment promote requires logic >= 60 when the review rescored it', async (
   const stored = readHypotheses(ws)
   assert.equal(stored[0].status, 'active', 'a failing logic gate must not validate')
   assert.equal(stored[0].logic, 30, 'the review still records its rescore')
+})
+
+test('ferment promote cannot waive the logic gate by omitting the field', async () => {
+  // The old gate skipped whenever the review left logic out, so a reviewer
+  // that simply forgot the field promoted anything. Now it falls back to
+  // the stored score (50 when the record predates the dimension).
+  const ws = workspace('ferment-logic-omitted')
+  const dir = path.join(ws.mioHome, 'creativity')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'creativity-hypotheses.jsonl'),
+    JSON.stringify({
+      id: 'h1',
+      title: 'Untouched idea',
+      idea: 'original idea',
+      status: 'active',
+      novelty: 90,
+      feasibility: 90,
+      impact: 90,
+      sourceLabels: ['a', 'b'],
+      createdAt: Date.now(),
+    }) + '\n',
+    'utf8'
+  )
+
+  const engine = engineWith(ws, llmReturning({
+    novelty: 90,
+    feasibility: 90,
+    impact: 90,
+    // no logic field at all
+    verdict: 'promote',
+    reason: 'looks mature',
+  }))
+
+  await engine.ferment(5)
+  const stored = readHypotheses(ws)
+  assert.equal(stored[0].status, 'active', 'missing logic falls back to 50 and fails the gate')
+  assert.equal(stored[0].logic, 50, 'the neutral fallback is recorded on the hypothesis')
+})
+
+test('generate clamps hostile LLM scores and truncates overlong titles', async () => {
+  // Math.max(0, 'high') is NaN: it used to be persisted as-is and then
+  // poisoned (novelty + feasibility + impact) > 200 with NaN > 200 === false.
+  const ws = workspace('gen-clamp')
+  const engine = engineWith(ws, llmReturning({
+    title: 'T'.repeat(80),
+    idea: 'a long enough idea body',
+    expectedBenefit: 'b',
+    risk: 'r',
+    novelty: 'high',
+    feasibility: 120,
+    impact: -5,
+    logic: 'abc',
+  }))
+
+  const result = await engine.generate(twoSources())
+  assert.equal(result.ideas.length, 1)
+  const stored = readHypotheses(ws)
+  assert.equal(stored[0].title.length, 60, 'title is bounded to 60 chars')
+  assert.equal(stored[0].novelty, 55, 'NaN coerces to the 50 fallback (+5 novelty adjustment)')
+  assert.equal(stored[0].feasibility, 100, 'out-of-range high clamps to 100')
+  assert.equal(stored[0].impact, 0, 'negative clamps to 0')
+  assert.equal(stored[0].logic, 50, 'non-numeric logic falls back to 50 instead of NaN')
 })
 
 test('ferment merge folds the idea into the named target and marks it merged', async () => {

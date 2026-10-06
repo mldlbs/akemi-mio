@@ -18,6 +18,15 @@ function fileSignature(filePath) {
   }
 }
 
+// One clamp for every LLM score: coerce, reject NaN/Infinity (a model that
+// returns "high" used to store NaN and poison the sum gate), then bound to
+// 0-100. Missing values fall back so old records keep a neutral score.
+function clamp100(value, fallback = 50) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(100, Math.max(0, n))
+}
+
 // ═══════════════════════════════════════════════
 //  JSONL Store — ideas, combos, experiments
 // ═══════════════════════════════════════════════
@@ -304,18 +313,18 @@ class CreativityEngine {
 
         const h = {
           id: crypto.randomUUID(),
-          title: result.data.title || 'Untitled',
+          title: String(result.data.title || 'Untitled').slice(0, 60),
           idea: result.data.idea || '',
           expectedBenefit: result.data.expectedBenefit || '',
           risk: result.data.risk || '',
-          novelty: Math.min(100, Math.max(0, result.data.novelty || 50)),
-          feasibility: Math.min(100, Math.max(0, result.data.feasibility || 50)),
-          impact: Math.min(100, Math.max(0, result.data.impact || 50)),
+          novelty: clamp100(result.data.novelty || 50),
+          feasibility: clamp100(result.data.feasibility || 50),
+          impact: clamp100(result.data.impact || 50),
           // logic is the fourth scoring dimension: a high-novelty idea with a
           // broken causal chain must be visibly weaker than one that reasons
           // cleanly. Defaults to 50 so records written before it existed keep
           // a neutral value instead of NaN.
-          logic: Math.min(100, Math.max(0, result.data.logic ?? 50)),
+          logic: clamp100(result.data.logic ?? 50),
           sourceLabels: [a.name, b.name],
           status: 'active',
           createdAt: Date.now(),
@@ -402,14 +411,14 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
         }
 
         const patch = {
-          title: result.data.title || h.title,
+          title: String(result.data.title || h.title).slice(0, 60),
           idea: result.data.idea || h.idea,
           expectedBenefit: result.data.expectedBenefit || h.expectedBenefit,
           risk: result.data.risk || h.risk,
-          novelty: Math.min(100, Math.max(0, result.data.novelty || h.novelty)),
-          feasibility: Math.min(100, Math.max(0, result.data.feasibility || h.feasibility)),
-          impact: Math.min(100, Math.max(0, result.data.impact || h.impact)),
-          logic: Math.min(100, Math.max(0, result.data.logic ?? h.logic ?? 50)),
+          novelty: clamp100(result.data.novelty || h.novelty),
+          feasibility: clamp100(result.data.feasibility || h.feasibility),
+          impact: clamp100(result.data.impact || h.impact),
+          logic: clamp100(result.data.logic ?? h.logic ?? 50),
           fermentedAt: Date.now(),
           fermentCount: (h.fermentCount || 0) + 1,
         }
@@ -444,9 +453,11 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
           }
         }
 
-        // The logic gate only applies when the review actually rescored logic;
-        // a reviewer that omits the field cannot fail a gate it never saw.
-        const logicOk = result.data.logic === undefined || patch.logic >= 60
+        // The gate is unconditional: patch.logic already folds in the
+        // review's score, the stored score, or 50. A reviewer that omits
+        // the field falls back to the stored/neutral value — omitting logic
+        // must not waive the gate it exists to enforce.
+        const logicOk = Number.isFinite(patch.logic) && patch.logic >= 60
         if (verdict === 'promote' && (patch.novelty + patch.feasibility + patch.impact) > 200 && logicOk) {
           patch.status = 'validated'
         }

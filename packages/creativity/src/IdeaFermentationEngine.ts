@@ -19,7 +19,12 @@ const FERMENT_SYSTEM_PROMPT = `你是一个点子发酵师。
 function clampScore(value: any, fallback: number): number {
   const n = Number(value)
   if (!Number.isFinite(n)) return fallback
-  return Math.max(10, Math.min(100, Math.round(n)))
+  // 下界必须是 0：模型给 0 分是合法信号（旧下界 10 会把 0 分洗成 10 分）。
+  return Math.max(0, Math.min(100, Math.round(n)))
+}
+
+function hasNumeric(value: any): boolean {
+  return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
 }
 
 /**
@@ -88,7 +93,7 @@ export class IdeaFermentationEngine {
         (h, i) =>
           `${i + 1}. [${h.id}] ${h.title}\n` +
           `   内容: ${h.idea}\n` +
-          `   新颖度 ${h.novelty} / 可行性 ${h.feasibility} / 影响 ${h.impact}\n` +
+          `   新颖度 ${h.novelty} / 可行性 ${h.feasibility} / 影响 ${h.impact} / 逻辑 ${h.logic ?? '未评分'}\n` +
           `   已发酵轮数: ${h.fermentCount ?? 0}\n` +
           `   风险: ${h.risk}`,
       )
@@ -116,15 +121,16 @@ ${signalText}
       "novelty": 0-100,
       "feasibility": 0-100,
       "impact": 0-100,
+      "logic": 0-100,
       "enrichedIdea": "可选，强化后的点子描述",
       "mergeWithId": "可选，verdict=merge 时合并的目标点子id",
-      "mergedIdea": { "title": "", "idea": "", "expectedBenefit": "", "risk": "", "sourceLabels": [], "novelty": 0, "feasibility": 0, "impact": 0 }
+      "mergedIdea": { "title": "", "idea": "", "expectedBenefit": "", "risk": "", "sourceLabels": [], "novelty": 0, "feasibility": 0, "impact": 0, "logic": 0 }
     }
   ]
 }
 
 评判标准：
-- promote：仅当点子足够成熟且当前信号支持落地；
+- promote：novelty+feasibility+impact > 200 且 logic >= 60（缺省按 50 计，等于不过门），同时点子足够成熟且当前信号支持落地；
 - merge：仅当两个点子互补可合并（mergedIdea 给出合并后的完整点子）；
 - reject：点子已失去价值或明确不可行；
 - keep：其余情况，留在发酵池继续观察。`
@@ -153,15 +159,25 @@ ${signalText}
         const ageOk = now - h.createdAt >= this.minAgeMs
                 // 后置去重: active 池中已有相似假设则跳过 promote
                 const activeHyps = candidates.filter(c => c.status === 'active' || c.status === 'experimenting')
-                if (rounds >= this.minFermentRounds && ageOk && promotedCount < this.maxPromotePerRound && !this.isDuplicate(h, activeHyps)) {
+                const newNovelty = clampScore(r.novelty, h.novelty)
+                const newFeasibility = clampScore(r.feasibility, h.feasibility)
+                const newImpact = clampScore(r.impact, h.impact)
+                // 与 mio-cli creativity-engine 对齐的 promote 门控：新分数
+                // 总和 > 200 且 logic >= 60。评审忘写 logic 时回退假设存量
+                // 分数（缺省 50），门控不能被"漏字段"绕过。
+                const logicScore = hasNumeric(r.logic) ? clampScore(r.logic, 50) : (h.logic ?? 50)
+                const scoreOk = newNovelty + newFeasibility + newImpact > 200
+                const logicOk = logicScore >= 60
+                if (rounds >= this.minFermentRounds && ageOk && promotedCount < this.maxPromotePerRound && !this.isDuplicate(h, activeHyps) && scoreOk && logicOk) {
           this.store.updateHypothesisFermentation(h.id, {
             status: 'active',
             fermentCount: rounds,
             lastFermentedAt: now,
             fermentLog: [...(h.fermentLog ?? []), entry],
-            novelty: clampScore(r.novelty, h.novelty),
-            feasibility: clampScore(r.feasibility, h.feasibility),
-            impact: clampScore(r.impact, h.impact),
+            novelty: newNovelty,
+            feasibility: newFeasibility,
+            impact: newImpact,
+            logic: logicScore,
           })
           promoted.push(h.id)
                     promotedCount++
@@ -217,6 +233,11 @@ ${signalText}
         novelty: clampScore(mergedIdea.novelty, h.novelty),
         feasibility: clampScore(mergedIdea.feasibility, h.feasibility),
         impact: clampScore(mergedIdea.impact, h.impact),
+        ...(hasNumeric(mergedIdea.logic)
+          ? { logic: clampScore(mergedIdea.logic, h.logic ?? 50) }
+          : h.logic !== undefined
+            ? { logic: h.logic }
+            : {}),
         status: 'draft',
         createdAt: now,
       }
@@ -261,8 +282,16 @@ ${signalText}
       at: now,
       verdict: 'keep',
       reason: r.reason ?? '',
-      score: { novelty: h.novelty, feasibility: h.feasibility, impact: h.impact },
+      score: {
+        novelty: h.novelty,
+        feasibility: h.feasibility,
+        impact: h.impact,
+        ...(h.logic !== undefined ? { logic: h.logic } : {}),
+      },
     }
+    const nextLogic = hasNumeric(r.logic)
+      ? Math.round((h.logic ?? 50) * 0.4 + clampScore(r.logic, 50) * 0.6)
+      : h.logic
     const patch: HypothesisFermentationPatch = {
       fermentCount: rounds,
       lastFermentedAt: now,
@@ -270,6 +299,7 @@ ${signalText}
       novelty: r.novelty != null ? Math.round(h.novelty * 0.4 + clampScore(r.novelty, h.novelty) * 0.6) : h.novelty,
       feasibility: r.feasibility != null ? Math.round(h.feasibility * 0.4 + clampScore(r.feasibility, h.feasibility) * 0.6) : h.feasibility,
       impact: r.impact != null ? Math.round(h.impact * 0.4 + clampScore(r.impact, h.impact) * 0.6) : h.impact,
+      ...(nextLogic !== undefined ? { logic: nextLogic } : {}),
     }
     if (typeof r.enrichedIdea === 'string' && r.enrichedIdea.trim().length > 0) {
       patch.idea = r.enrichedIdea

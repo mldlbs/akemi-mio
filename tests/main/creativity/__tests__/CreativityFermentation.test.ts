@@ -53,7 +53,7 @@ describe('CreativityService 发酵集成', () => {
     }
     store.getFermentableHypotheses = vi.fn(() => [h])
     chatJson.mockResolvedValue({
-      data: { results: [{ id: 'h1', verdict: 'promote', reason: 'ok', novelty: 80, feasibility: 80, impact: 80 }] },
+      data: { results: [{ id: 'h1', verdict: 'promote', reason: 'ok', novelty: 80, feasibility: 80, impact: 80, logic: 70 }] },
     })
 
     const deps = {

@@ -60,12 +60,44 @@ describe('IdeaFermentationEngine', () => {
   it('promote：满 2 轮且年龄 ≥24h 才升级为 active', async () => {
     const { store, updates } = createStore([makeHyp({ id: 'h1', fermentCount: 1 })])
     chatJson.mockResolvedValue({
-      data: { results: [{ id: 'h1', verdict: 'promote', reason: '成熟', novelty: 80, feasibility: 80, impact: 80 }] },
+      data: { results: [{ id: 'h1', verdict: 'promote', reason: '成熟', novelty: 80, feasibility: 80, impact: 80, logic: 70 }] },
     })
     const result = await makeEngine(store).ferment()
     expect(result.promoted).toContain('h1')
     expect(updates[0].patch.status).toBe('active')
     expect(updates[0].patch.fermentCount).toBe(2)
+    expect(updates[0].patch.logic).toBe(70)
+  })
+
+  it('promote 门控：logic < 60 时降级为 keep', async () => {
+    const { store, updates } = createStore([makeHyp({ id: 'h1', fermentCount: 1 })])
+    chatJson.mockResolvedValue({
+      data: { results: [{ id: 'h1', verdict: 'promote', reason: '好看但推理断裂', novelty: 90, feasibility: 90, impact: 90, logic: 30 }] },
+    })
+    const result = await makeEngine(store).ferment()
+    expect(result.promoted).toHaveLength(0)
+    expect(updates[0].patch.status).toBeUndefined()
+    expect(updates[0].patch.logic).toBe(38) // keep 混合: 50*0.4 + 30*0.6
+  })
+
+  it('promote 门控：评审漏写 logic 时回退存量/50，不允许绕过', async () => {
+    const { store, updates } = createStore([makeHyp({ id: 'h1', fermentCount: 1 })])
+    chatJson.mockResolvedValue({
+      data: { results: [{ id: 'h1', verdict: 'promote', reason: '漏字段', novelty: 90, feasibility: 90, impact: 90 }] },
+    })
+    const result = await makeEngine(store).ferment()
+    expect(result.promoted).toHaveLength(0)
+    expect(updates[0].patch.status).toBeUndefined()
+  })
+
+  it('promote 门控：新分数总和 ≤ 200 时降级为 keep', async () => {
+    const { store, updates } = createStore([makeHyp({ id: 'h1', fermentCount: 1, novelty: 60, feasibility: 60, impact: 60 })])
+    chatJson.mockResolvedValue({
+      data: { results: [{ id: 'h1', verdict: 'promote', reason: '分不够', novelty: 60, feasibility: 60, impact: 60, logic: 75 }] },
+    })
+    const result = await makeEngine(store).ferment()
+    expect(result.promoted).toHaveLength(0)
+    expect(updates[0].patch.status).toBeUndefined()
   })
 
   it('promote 但年龄不足时降级为 keep，留在 draft', async () => {
@@ -87,6 +119,15 @@ describe('IdeaFermentationEngine', () => {
     await makeEngine(store).ferment()
     expect(updates[0].patch.novelty).toBe(78) // 60*0.4 + 90*0.6 = 78
     expect(updates[0].patch.feasibility).toBe(66)
+  })
+
+  it('keep：clamp 下界是 0，0 分不会被洗成 10 分', async () => {
+    const { store, updates } = createStore([makeHyp({ id: 'h1', novelty: 60, feasibility: 60, impact: 60 })])
+    chatJson.mockResolvedValue({
+      data: { results: [{ id: 'h1', verdict: 'keep', reason: '归零', novelty: 0, feasibility: 60, impact: 60 }] },
+    })
+    await makeEngine(store).ferment()
+    expect(updates[0].patch.novelty).toBe(24) // 60*0.4 + 0*0.6 = 24（旧下界会得 30）
   })
 
   it('reject：标记 rejected 并记录理由', async () => {
@@ -154,7 +195,7 @@ describe('IdeaFermentationEngine', () => {
     const { store, updates } = createStore(hyps)
     chatJson.mockResolvedValue({
       data: {
-        results: hyps.map((h) => ({ id: h.id, verdict: 'promote', reason: 'ok', novelty: 80, feasibility: 80, impact: 80 })),
+        results: hyps.map((h) => ({ id: h.id, verdict: 'promote', reason: 'ok', novelty: 80, feasibility: 80, impact: 80, logic: 70 })),
       },
     })
     const result = await makeEngine(store).ferment()
