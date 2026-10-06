@@ -130,7 +130,11 @@ function createInsightStore(options = {}) {
         createdAt: m.createdAt || m.timestamp || Date.now(),
       })),
       summaries: args.summaries || [],
-      interactionCount: 0,
+      // 桌面端有真实交互流；CLI 默认没有。调用方可显式传入
+      // interactionCount/eventCount（如 MCP 侧按 trace 统计），
+      // 不传时 Scorer 会按记忆新鲜度给 confidence 兜底（旧逻辑
+      // 恒 0.2 会把 highValue 永久压成 0）。
+      interactionCount: Number(args.interactionCount) || 0,
       plans: (args.plans || []).map((p) => ({
         title: p.title || p.name || '',
         status: p.status || 'unknown',
@@ -138,7 +142,7 @@ function createInsightStore(options = {}) {
         steps: p.steps || [],
         createdAt: p.createdAt || Date.now(),
       })),
-      eventCount: 0,
+      eventCount: Number(args.eventCount) || 0,
     }
     const insights = await generator.generate(ctx)
     if (InsightStore && storePath) {

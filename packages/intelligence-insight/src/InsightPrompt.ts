@@ -28,7 +28,7 @@ export const INSIGHT_SYSTEM_PROMPT = `你是秋山澪（Mio）的"自我观察�
 - 每条洞察必须有具体的证据引用，不要泛泛而谈
 - 标题不超过 20 字，描述不超过 200 字
 - 优先关注"现在可以改进"的问题，而不仅仅是"值得关注"
-- **禁止输出空数组作为偷懒手段**。如果实在没有发现，也必须输出至少一条"当前没有明显问题"的观察，并说明为什么认为没问题
+- **宁缺毋滥**：没有真发现就返回空数组 []，不要用"当前没有明显问题"之类的占位洞察凑数（占位条目会污染 dedup 和高价值统计）
 - **每个洞察必须标注信息类型**：[已知事实] / [合理推测] / [不确定]
 
 【第二轮审查】
@@ -46,7 +46,7 @@ export const INSIGHT_SYSTEM_PROMPT = `你是秋山澪（Mio）的"自我观察�
   {
     "title": "简短标题（≤20字）",
     "description": "详细描述，包含具体证据和推理过程（≤200字）",
-    "detector": "insight_llm",
+    "detector": "insight_llm 或 conflict（发现自相矛盾信息时）",
     "evidence": ["证据1：来自记忆或对话的具体内容", "证据2"],
     "novelty": 0-100,
     "impact": 0-100,
@@ -56,7 +56,7 @@ export const INSIGHT_SYSTEM_PROMPT = `你是秋山澪（Mio）的"自我观察�
   }
 ]
 
-如果没有发现任何有价值的洞察，返回一个包含"当前无发现"的单条数组并说明理由。`
+如果没有发现任何有价值的洞察，直接返回空数组 []（合法输出，不要编造）。`
 
 /**
  * 构建 Insight 用户提示词
@@ -69,20 +69,21 @@ export function buildInsightPrompt(ctx: DetectionContext): string {
   if (ctx.memoryEntries.length > 0) {
     const memText = ctx.memoryEntries
       .slice(-30) // 最近 30 条
-      .map((e) => `[${e.type}] ${e.content}`)
+      .map((e) => `[${e.type}] ${String(e.content).slice(0, 300)}`)
       .join('\n')
     sections.push(`【对话记忆】\n${memText}`)
   }
 
   // 摘要
   if (ctx.summaries.length > 0) {
-    const summaryText = ctx.summaries.slice(-10).join('\n')
+    const summaryText = ctx.summaries.slice(-10).map((s) => String(s).slice(0, 300)).join('\n')
     sections.push(`【对话摘要】\n${summaryText}`)
   }
 
   // 计划
   if (ctx.plans.length > 0) {
     const planText = ctx.plans
+      .slice(0, 10)
       .map((p) => {
         const done = p.steps.filter((s) => s.status === 'done').length
         const total = p.steps.length
