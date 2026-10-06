@@ -64,7 +64,7 @@ describe('CreativityService 发酵集成', () => {
     const service = new CreativityService(store, deps as any, chatJson as any, undefined, 0, 42, undefined, '', undefined, undefined)
     const result = await service.forceFerment()
     expect(result.promoted).toContain('h1')
-    expect(store.updateHypothesisFermentation).toHaveBeenCalledWith('h1', expect.objectContaining({ status: 'active' }))
+    expect(store.updateHypothesisFermentation).toHaveBeenCalledWith('h1', expect.objectContaining({ status: 'validated' }))
   })
 
   it('cycle 通过来源总线聚合 external 来源', async () => {
