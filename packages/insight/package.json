@@ -1,6 +1,6 @@
 {
   "name": "@akemi-mio/insight",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Self-observation insight engine — detects patterns in memory and generates actionable insights",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
