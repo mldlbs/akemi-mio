@@ -58,6 +58,37 @@ workspace-only.
 5. Implementation path: **publish the real packages** (Option A). Publishing
    decision for core/creativity supersedes the README workspace-only note.
 
+## Frozen boundaries (from spec review)
+
+1. **`idea.generate` is a one-shot stateless pipeline**, five independent
+   steps: memory grounding → source aggregation → generation → novelty gate →
+   persistence. No adoption, experiment tracking, or learning logic may be
+   added to it later. The `experiment` field in its response is the
+   pre-existing `ExperimentPlanner` output of `IdeaGenerator` (2026-08-12),
+   not a new responsibility.
+2. **CreativityStore vs Memory**: CreativityStore holds candidate hypotheses
+   (`draft`/`active`/.../`validated`); Memory holds adopted, long-term
+   experience. Generation writes only CreativityStore; a Memory write happens
+   only after an agent decides to adopt, via its own `memory.record`.
+3. **Source semantics must stay distinguishable**: facts, experiences,
+   hypotheses, observations, and external information may not collapse into
+   anonymous `{domain, content}` blobs (see Capability 2 for required fields
+   and prompt presentation).
+4. **Novelty is not quality**: it serves two distinct purposes — a dedup gate
+   during generation and a relative ranking signal for display — and must not
+   be presented or named as an idea quality score.
+
+### Status machine (verified current behavior)
+
+`creativity generate` persists hypotheses with `status: 'active'` after its
+refined-score gate; a failed novelty check stores `rejected` directly.
+`ferment` can `promote → validated` (score gate: novelty + feasibility +
+impact > 200 and logic ≥ 60) or `reject`/`merge`. Both `draft` and `active`
+are fermentable, so `draft` is a real initial state, not a cold storage.
+There is **no `adopted` state and no adopt command** — the
+`validated → adoption → Memory` leg is unverified and tracked as follow-up
+work (Out of scope here).
+
 ## Architecture
 
 ### Package changes
@@ -131,6 +162,25 @@ New module `packages/mio-cli/server/creativity-sources.js` with providers
 | insight | observation | gated by `isInsightAvailable` |
 | observer-trends | external | gated by `isObserverAvailable` (network) |
 
+**Required source metadata** — `CreativitySource` already carries `type`
+(knowledge/behavior/insight/failure/random/provocation/feedback) and `weight`;
+the following fields are added so evidence stays distinguishable:
+
+| field | meaning | who fills it |
+|---|---|---|
+| `origin` | provider + record id, e.g. `memory:mem_1791...` | provider (required) |
+| `originId` | original record id for back-referencing | provider when available |
+| `confidence` | 0-1 credibility hint; omit when unknowable | provider (optional) |
+| `timestamp` | source record time (ISO) | provider when available |
+
+Presentation contract: `HypothesisGenerator`'s prompt must group and prefix
+sources by `type` (e.g. `[fact/trace] ...`, `[experience/memory] ...`,
+`[hypothesis] ...`, `[observation] ...`, `[external] ...`) so the LLM cannot
+conflate evidence classes; adding fields without prompt presentation would be
+inert. Persisted `provenance.sources` on each stored idea is a per-source
+summary of `{name, type, origin, timestamp}` so a reviewer can tell what
+evidence an idea was based on.
+
 Injection points:
 
 - `idea.generate`: fully automatic.
@@ -142,10 +192,22 @@ Failures inside providers are already tolerated by `SourceAggregator`
 
 ### Capability 3 — novelty ranking
 
-- `mio creativity list --sort novelty`: score every stored hypothesis with
-  `evaluateNovelty(candidate, recent, rejected)`, sort by `adjustedNovelty`
-  descending, expose a `score` field. Read-only; nothing is written back.
+One scorer, two explicitly separated roles:
+
+- **Generation dedup gate** (absolute): inside `idea.generate`, `evaluateNovelty`
+  rejects near-duplicates of rejected hypotheses and down-scores near-
+  duplicates of recent ones. Its only job is preventing the same idea from
+  being generated twice.
+- **Ranking signal** (relative): `mio creativity list --sort novelty` scores
+  every stored hypothesis against the rest, sorts by `adjustedNovelty`
+  descending, and exposes the value as **`noveltyScore`** (not `score`, to
+  avoid reading it as a general grade). Read-only; nothing written back.
   Bound the O(n²) pair comparison (cap ~200 stored hypotheses considered).
+
+Explicit non-goal: `noveltyScore` is **not** an idea quality score and must
+not be documented, labeled, or aggregated as one. Ranking by value/feasibility
+is out of scope for this change.
+
 - Delete the inline `evaluateNovelty` in `creativity-engine.js:196` and
   require `@akemi-mio/creativity/NoveltyScorer` directly.
 
@@ -166,13 +228,22 @@ Failures inside providers are already tolerated by `SourceAggregator`
 ## Test Strategy
 
 - Root vitest: IdeaGenerator goal-driven flow with a mocked `chatJson`;
-  `creativity-sources` providers against a temporary `MIO_HOME` fixture;
-  novelty sorting order and score field.
+  `creativity-sources` providers against a temporary `MIO_HOME` fixture
+  (including required `origin` fields and type-prefixed prompt output);
+  novelty sorting order and `noveltyScore` field.
 - `mio-cli` node:test: `__tests__/idea-generate.test.js` covering both the CLI
   command and the MCP tool following the existing fake-`chatJson` pattern;
   `list --sort novelty`; regression of `creativity generate` after auto-top-up
   changes its less-than-two-sources behavior; engine tests after the inline
   scorer removal.
+- **Package API compatibility smoke (two stages)**:
+  1. Local: `npm pack` core and creativity, install both tarballs into a clean
+     temp project, `require` each exported subpath, and actually run
+     `IdeaGenerator` (stub chatJson), `SourceAggregator` (stub provider), and
+     `NoveltyScorer.evaluateNovelty`.
+  2. After publish: install `@akemi-mio/creativity` from the registry into a
+     clean temp project (core resolves transitively) and repeat the subpath
+     runs — this is the "green locally, broken after publish" guard.
 - Gate run before completion: root vitest (3080 + new), typecheck:node/web,
   `mio-cli` `npm test` + `npm run check` (cli-docs, mcp-live, coverage,
   syntax).
@@ -192,6 +263,12 @@ Failures inside providers are already tolerated by `SourceAggregator`
 
 - Replacing the remaining ~23 KB of `creativity-engine.js` orchestration with
   package implementations (tracked separately).
+- **The `validated → adoption → Memory` lifecycle loop**: there is no adopt
+  command/state today and no enforced link between a stored hypothesis and a
+  later `memory.record`. Designing that contract (adopt event + required
+  `hypothesis:<id>` reference in recorded Memory) is a separate follow-up task,
+  not folded into `idea.generate`.
+- Ranking by quality/value/impact or synthesizing a combined idea score.
 - Publishing any package besides core/creativity/mio-cli.
 - Changing observer/insight behavior, Memory schema, or Evolution tooling.
 - Amending the pushed-history BOM commit `a53cb50` or deciding the CLAUDE.md
@@ -202,11 +279,17 @@ Failures inside providers are already tolerated by `SourceAggregator`
 - `mio idea generate --goal ...` returns LLM-generated ideas with provenance,
   persists them as `draft`, and writes no Mio Memory records.
 - `mio creativity list --sort novelty` orders stored hypotheses by adjusted
-  novelty with a visible score.
+  novelty with a visible `noveltyScore`, documented as a novelty signal and
+  not a quality grade.
+- Every stored idea from `idea.generate` carries `provenance.sources` entries
+  with `{name, type, origin, timestamp}` and generation prompts show sources
+  type-prefixed (evidence classes remain distinguishable end to end).
 - `creativity-engine.js` contains no inline `evaluateNovelty`.
 - `mio.idea.generate` exists in the MCP tool list; docs and tool counts agree
   (cli-docs / mcp-live checks green).
 - `@akemi-mio/core@0.1.0` and `@akemi-mio/creativity@0.1.0` are visible on the
   npm registry; `mio-agent-runtime@0.14.0` installs globally with the
   creativity dependency resolved; `mio --help` smoke passes.
+- Both package API compatibility smoke stages pass (local tarball install and
+  clean registry install with real subpath runs).
 - All gates green: root vitest, typecheck, mio-cli test + check.
