@@ -65,4 +65,15 @@ describe('InsightComposer', () => {
     expect(insight.metadata.qualityScore).toBe(85)
     expect(store.saveInsight).toHaveBeenCalledWith(insight)
   })
+
+  it('confidence 对齐 qualityScore，完整度单独记 sectionCompleteness（M7）', async () => {
+    const llm = makeLlm()
+    const store = makeStore()
+    const insight = await compose(llm, store)
+
+    expect(insight.metadata.qualityScore).toBe(85)
+    expect(insight.metadata.confidence).toBeCloseTo(0.85, 5)
+    expect(insight.metadata.sectionCompleteness).toBeCloseTo(insight.sections.length / 5, 5)
+    expect(insight.metadata.sectionCompleteness).toBeLessThanOrEqual(1)
+  })
 })

@@ -44,11 +44,16 @@ export class WorldModelStore {
         existing.lastSeen = new Date().toISOString()
         existing.occurrences++
         for (const a of ne.aliases) {
-          if (!existing.aliases.includes(a)) existing.aliases.push(a)
+          if (!existing.aliases.includes(a) && existing.aliases.length < 8) existing.aliases.push(a)
         }
       } else {
         entities.push(ne)
       }
+    }
+    // 实体总量上限：按出现次数保留最常见的
+    if (entities.length > 300) {
+      entities.sort((a, b) => b.occurrences - a.occurrences)
+      entities.length = 300
     }
 
     // 2. 事件记录
@@ -61,6 +66,11 @@ export class WorldModelStore {
       significance: insight.metadata.confidence,
     }
     events.push(event)
+    // 事件总量上限：按时间滚动保留最近 200 条
+    if (events.length > 200) {
+      events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      events.length = 200
+    }
 
     // 3. 趋势更新
     this.updateTrends(trends, event, newEntities)
@@ -109,17 +119,23 @@ ${text}
     })
     if (result_.error || !result_.data) return []
 
+    const allowedTypes: WorldEntityType[] = ['person', 'organization', 'concept', 'event', 'technology']
     const now = new Date().toISOString()
-    return result_.data
-      .filter((e) => e.name && e.name.length > 1)
+    const list = Array.isArray(result_.data) ? result_.data : []
+    return list
+      .slice(0, 15)
+      .filter((e) => e && typeof e.name === 'string' && e.name.trim().length > 1)
       .map((e) => ({
         id: `ent_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        name: e.name.trim(),
-        type: e.type || 'concept',
+        name: e.name.trim().slice(0, 60),
+        type: allowedTypes.includes(e.type) ? e.type : 'concept',
         firstSeen: now,
         lastSeen: now,
         occurrences: 1,
-        aliases: e.aliases ?? [],
+        aliases: (Array.isArray(e.aliases) ? e.aliases : [])
+          .filter((a): a is string => typeof a === 'string' && a.trim().length > 0)
+          .map((a) => a.trim().slice(0, 60))
+          .slice(0, 5),
         properties: {},
       }))
   }
@@ -168,7 +184,10 @@ ${text}
       return
     }
 
-    const desc = narratives.map((n) => `叙事「${n.title}」: ${n.eventIds.length} 个事件，置信度 ${n.confidence}`).join('\n')
+    const desc = narratives
+      .slice(-10)
+      .map((n) => `叙事「${n.title}」: ${n.eventIds.length} 个事件，置信度 ${n.confidence}`)
+      .join('\n')
     const prompt = `新事件：「${event.title}」
 
 已有叙事：
@@ -177,10 +196,10 @@ ${desc}
 这个事件应该归入哪个已有叙事？输出叙事标题（精确匹配），都不适合输出 "NEW"。只输出一个名字。`
 
     const result_ = await this.llm.generate(prompt, { temperature: 0.1, maxTokens: 256 })
-    const matchedTitle = result_.data?.trim()
+    const matchedTitle = this.normalizeTitle(result_.data)
 
-    if (matchedTitle && matchedTitle !== 'NEW') {
-      const narrative = narratives.find((n) => n.title === matchedTitle)
+    if (matchedTitle && matchedTitle !== 'new') {
+      const narrative = narratives.find((n) => this.normalizeTitle(n.title) === matchedTitle)
       if (narrative) {
         if (!narrative.eventIds.includes(event.id)) narrative.eventIds.push(event.id)
         for (const e of entities) {
@@ -189,11 +208,26 @@ ${desc}
         narrative.confidence = parseFloat(Math.min(0.95, narrative.confidence + 0.05).toFixed(2))
         narrative.lastUpdated = new Date().toISOString()
         narrative.evolution.push({ at: new Date().toISOString(), summary: `新事件: ${event.title}` })
+        this.trimNarratives(narratives)
         return
       }
     }
 
     narratives.push(this.createNarrative(event, entities, result))
+    this.trimNarratives(narratives)
+  }
+
+  private normalizeTitle(t: string | undefined | null): string {
+    return String(t ?? '')
+      .trim()
+      .replace(/["“”'']/g, '')
+      .toLowerCase()
+  }
+
+  private trimNarratives(narratives: WorldNarrative[]): void {
+    if (narratives.length <= 50) return
+    narratives.sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime())
+    narratives.length = 50
   }
 
   private createNarrative(event: WorldEvent, entities: WorldEntity[], result: ResearchResult): WorldNarrative {
@@ -240,7 +274,9 @@ ${desc}
       const fromEntity = newEntities.find((e) => link.cause.includes(e.name)) ?? allEntities.find((e) => link.cause.includes(e.name))
       const toEntity = newEntities.find((e) => link.effect.includes(e.name)) ?? allEntities.find((e) => link.effect.includes(e.name))
       if (fromEntity && toEntity && fromEntity.id !== toEntity.id) {
-        relations.push({ from: fromEntity.id, to: toEntity.id, type: 'causes', weight: link.confidence })
+        const raw = Number(link.confidence)
+        const weight = Number.isFinite(raw) ? Math.min(1, Math.max(0, raw > 1 ? raw / 100 : raw)) : 0.5
+        relations.push({ from: fromEntity.id, to: toEntity.id, type: 'causes', weight })
       }
     }
 

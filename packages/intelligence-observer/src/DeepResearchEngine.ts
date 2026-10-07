@@ -125,8 +125,9 @@ ${context ? context.slice(0, 1000) : '（无直接相关数据）'}
 已知相关信息：
 ${context || '（无直接相关数据）'}
 
-请从所有已知信息中，列举关于这个主题的重要事实。注意：
-- 区分「确认的事实」和「推测/传言」
+请从上方【已知相关信息】中，列举关于这个主题的重要事实。注意：
+- 只允许基于上方已知信息，禁止引入外部记忆或常识编造
+- 每条推测/传言必须以「推测：」前缀开头，确认的事实直接写
 - 标注每条信息的时间线（如果可推断）
 - 指出哪些信息源互相矛盾
 
@@ -175,17 +176,18 @@ ${context}
     if (structural?.output) {
       const parsed = this.tryParseJson(structural.output)
       if (parsed) {
-        facts = parsed.facts ?? []
-        timeline = parsed.timeline ?? []
-        causalLinks = parsed.causalLinks ?? []
-        perspectives = parsed.perspectives ?? []
+        facts = this.asArray(parsed.facts).slice(0, 10)
+        timeline = this.asArray(parsed.timeline).slice(0, 8)
+        causalLinks = this.asArray(parsed.causalLinks).slice(0, 5)
+        perspectives = this.asArray(parsed.perspectives)
+        conflicts = this.asArray(parsed.conflicts).slice(0, 5)
       }
     }
 
     const conflict = phases.find((p) => p.phase === 'conflict_analysis' && p.output)
     if (conflict?.output) {
       const parsed = this.tryParseJson(conflict.output)
-      if (parsed?.conflicts) conflicts = parsed.conflicts
+      if (parsed) conflicts = this.asArray(parsed.conflicts).slice(0, 5)
     }
 
     if (facts.length === 0) {
@@ -195,10 +197,15 @@ ${context}
           .split('\n')
           .map((l) => l.replace(/^[-•*]\s*/, '').trim())
           .filter((l) => l.length > 5 && !l.startsWith('{'))
+          .slice(0, 10)
       }
     }
 
     return { topicId, phases, facts, timeline, causalLinks, perspectives, conflicts }
+  }
+
+  private asArray(v: unknown): any[] {
+    return Array.isArray(v) ? v : []
   }
 
   private tryParseJson(text: string): Record<string, any> | null {

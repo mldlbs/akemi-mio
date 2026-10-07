@@ -170,6 +170,8 @@ export interface InsightOutput {
   metadata: {
     wordCount: number
     confidence: number
+    /** 段落完整度 sections/5；confidence 此前被误用作完整度，现拆开。 */
+    sectionCompleteness?: number
     brainContributions: BrainContributions
     llmCalls: number
     durationMs: number
