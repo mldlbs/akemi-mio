@@ -115,7 +115,10 @@ export class InsightComposer {
       ...(missingSections.length > 0 ? { missingSections } : {}),
       metadata: {
         wordCount: countChars(content),
-        confidence: sections.length / 5,
+        // confidence 原先 = sections.length/5，其实是完整度；对齐 qualityScore，
+        // 完整度单独用 sectionCompleteness 表达。
+        confidence: typeof review.score === 'number' && review.score >= 0 ? Math.min(1, review.score / 100) : 0,
+        sectionCompleteness: sections.length / 5,
         brainContributions: contributions,
         llmCalls: sectionGens.length + 1,
         durationMs: Date.now() - startedAt,

@@ -58,20 +58,20 @@ export class MultiBrainModel {
     const pOut: BrainOutput = {
       brain: 'perception',
       generatedAt: new Date().toISOString(),
-      content: perception ?? researchSummary,
-      confidence: perception ? 0.7 : 0.3,
+      content: perception ?? this.degradedFallback('感知脑', researchSummary),
+      confidence: this.deriveConfidence(perception),
     }
     const cOut: BrainOutput = {
       brain: 'curiosity',
       generatedAt: new Date().toISOString(),
-      content: curiosity ?? researchSummary,
-      confidence: curiosity ? 0.7 : 0.3,
+      content: curiosity ?? this.degradedFallback('好奇脑', researchSummary),
+      confidence: this.deriveConfidence(curiosity),
     }
     const aOut: BrainOutput = {
       brain: 'analyst',
       generatedAt: new Date().toISOString(),
-      content: analyst ?? researchSummary,
-      confidence: analyst ? 0.7 : 0.3,
+      content: analyst ?? this.degradedFallback('分析脑', researchSummary),
+      confidence: this.deriveConfidence(analyst),
     }
 
     // writer 接收前三脑输出作为上下文
@@ -85,8 +85,8 @@ export class MultiBrainModel {
     const wOut: BrainOutput = {
       brain: 'writer',
       generatedAt: new Date().toISOString(),
-      content: writer ?? writerContext,
-      confidence: writer ? 0.7 : 0.3,
+      content: writer ?? this.degradedFallback('写作脑', writerContext),
+      confidence: this.deriveConfidence(writer),
     }
 
     const outputs = [pOut, cOut, aOut, wOut]
@@ -112,9 +112,24 @@ export class MultiBrainModel {
     if (result.conflicts.length > 0) {
       lines.push('')
       lines.push('冲突：')
-      lines.push(...result.conflicts.map((c) => `- ${c.partyA} vs ${c.partyB}: ${c.nature}`))
+      lines.push(...result.conflicts.slice(0, 5).map((c) => `- ${c.partyA} vs ${c.partyB}: ${c.nature}`))
     }
     return lines.join('\n')
+  }
+
+  /** 失败回退时打标：让下游知道这不是该脑的真实产出。 */
+  private degradedFallback(brain: string, fallback: string): string {
+    return `（${brain}生成失败，以下为回退的研究摘要，非该脑产出）\n${fallback}`
+  }
+
+  /** confidence 按输出长度推导，替代硬编码 0.7/0.3。 */
+  private deriveConfidence(output: string | null): number {
+    if (!output) return 0.2
+    const len = output.trim().length
+    if (len < 50) return 0.3
+    if (len < 200) return 0.5
+    if (len < 600) return 0.7
+    return 0.85
   }
 
   private async runBrain(brain: BrainName, mode: WritingMode, previousContent: string): Promise<string | null> {
@@ -123,7 +138,14 @@ export class MultiBrainModel {
 
     let userPrompt: string
     if (brain === 'perception') {
-      userPrompt = `以下是研究结果：\n${previousContent}\n\n你观察到了什么模式？`
+      userPrompt =
+        `以下是研究结果：\n${previousContent}\n\n` +
+        '只列出你在上方素材中观察到的事实，每行一条，用「观察到：」开头。\n' +
+        '只允许使用上方已有的信息，不得新增任何外部信息，不做分析不下结论。'
+    } else if (brain === 'analyst') {
+      userPrompt =
+        `前序分析：${previousContent}\n\n` +
+        '只输出因果链，每行用「因为→所以」格式，基于上方素材做因果连接，不得引入上方没有的新信息。'
     } else if (brain === 'writer') {
       userPrompt = `${previousContent}\n\n用第一人称「我」写一段随笔，别列点，像在说话。`
     } else {
