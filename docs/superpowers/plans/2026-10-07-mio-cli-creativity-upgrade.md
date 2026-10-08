@@ -1857,7 +1857,7 @@ git add packages/mio-cli/bin/mio.js packages/mio-cli/__tests__/creativity-autoso
 - Create: `packages/mio-cli/server/idea-generate.js`
 - Test: `packages/mio-cli/__tests__/idea-generate.test.js` (new, in-process only — CLI spawn tests arrive with Task 13, the MCP surface with Task 12)
 
-- [ ] **Step 1: Write the failing node:test file**
+- [x] **Step 1: Write the failing node:test file**
 
 ```js
 'use strict'
@@ -2019,7 +2019,7 @@ test('answers with a reason instead of throwing when there is only one source', 
 })
 ```
 
-- [ ] **Step 2: Run and see it fail**
+- [x] **Step 2: Run and see it fail**
 
 ```powershell
 node --test packages/mio-cli/__tests__/idea-generate.test.js
@@ -2027,7 +2027,7 @@ node --test packages/mio-cli/__tests__/idea-generate.test.js
 
 Expected: FAIL — cannot find `../server/idea-generate.js`.
 
-- [ ] **Step 3: Create `packages/mio-cli/server/idea-generate.js`**
+- [x] **Step 3: Create `packages/mio-cli/server/idea-generate.js`**
 
 ```js
 'use strict'
@@ -2168,7 +2168,7 @@ async function runIdeaGenerate(options) {
 module.exports = { runIdeaGenerate, groundingFrom }
 ```
 
-- [ ] **Step 4: Run and see it pass**
+- [x] **Step 4: Run and see it pass**
 
 ```powershell
 node --test packages/mio-cli/__tests__/idea-generate.test.js
@@ -2177,7 +2177,7 @@ npm run check --prefix packages/mio-cli
 
 Expected: PASS + syntax check 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/mio-cli/server/idea-generate.js packages/mio-cli/__tests__/idea-generate.test.js
