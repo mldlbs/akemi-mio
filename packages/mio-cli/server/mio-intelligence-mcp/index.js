@@ -735,7 +735,7 @@ const TOOLS = [
           type: 'boolean',
           description: 'Seed concept sources from stored insights (highest score first), merged with any explicit sources. Needs @akemi-mio/insight and at least one stored insight.',
         },
-        strategy: { type: 'string', description: 'Generation strategy: explore (cross-domain), signal (provocative), stable (conservative). Auto-selected if omitted.' },
+        strategy: { type: 'string', description: 'Generation strategy: explore (cross-domain), signal (provocative), stable (conservative). Auto-selected if omitted. Pair dedup is per strategy: the same source pair may be tried once under each strategy.' },
       },
     },
   },

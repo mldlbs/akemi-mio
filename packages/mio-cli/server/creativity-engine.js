@@ -162,14 +162,34 @@ function mulberry32(seed) {
   }
 }
 
-function mixConcepts(sources, exploredPairs, rng) {
+// One concept-pair identity. `--source "name|content"` allows omitting the
+// pipe, so `name` can degrade into the entire description (often >1k chars):
+// with the raw name as identity, a tail edit mints a brand-new pair and
+// silently bypasses dedup. Trim + first 120 chars is short enough to read in
+// a key and long enough that genuine sources do not collide.
+function pairSourceKey(name) {
+  return String(name == null ? '' : name).trim().slice(0, 120)
+}
+
+function mixConcepts(sources, exploredPairs, rng, strategy) {
   if (sources.length < 2) return []
+  // Dedup identity is (pair, strategy): `strategy` picks the prompt and the
+  // temperature, so the documented fallback "hit 409, retry with another
+  // strategy" is a genuinely different experiment. Without the suffix every
+  // retry recomputed the same key and returned the same deterministic
+  // `all pairs already explored` — three LLM-less no-ops in a row.
+  const strat = String(strategy || '')
   const pairs = []
   for (let i = 0; i < sources.length; i++) {
     for (let j = i + 1; j < sources.length; j++) {
-      const key = `${sources[i].name}||${sources[j].name}`
-      const reverseKey = `${sources[j].name}||${sources[i].name}`
+      const a = pairSourceKey(sources[i].name)
+      const b = pairSourceKey(sources[j].name)
+      const key = strat ? `${a}||${b}||${strat}` : `${a}||${b}`
+      const reverseKey = strat ? `${b}||${a}||${strat}` : `${b}||${a}`
       if (exploredPairs.has(key) || exploredPairs.has(reverseKey)) continue
+      // Records written without a strategy field carry the unsuffixed key;
+      // they must keep blocking every strategy (the old semantics).
+      if (strat && (exploredPairs.has(`${a}||${b}`) || exploredPairs.has(`${b}||${a}`))) continue
       pairs.push([sources[i], sources[j]])
     }
   }
@@ -266,14 +286,35 @@ class CreativityEngine {
     const strat = strategy || STRATEGY_CYCLE[this.strategyIndex % STRATEGY_CYCLE.length]
     this.strategyIndex++
 
-    // Mix concepts
+    // Mix concepts. Keys carry the strategy each record was written with, so
+    // explore -> signal -> stable retries each get their own attempt while a
+    // record without a strategy stays unsuffixed and blocks every strategy.
     const recent = this.store.getHypotheses({ limit: 30 })
     const rejected = this.store.getHypotheses({ status: 'rejected', limit: 50 })
-    const exploredPairs = new Set(recent.flatMap(h => (h.sourceLabels || []).map((l, i, a) => i > 0 ? `${a[i-1]}||${l}` : '')).filter(Boolean))
-    const pairs = mixConcepts(sources, exploredPairs, this.rng.bind(this))
+    const exploredPairs = new Set(
+      recent.flatMap((h) =>
+        (h.sourceLabels || []).flatMap((l, i, a) => {
+          if (i === 0) return []
+          const x = pairSourceKey(a[i - 1])
+          const y = pairSourceKey(l)
+          return h.strategy ? [`${x}||${y}||${h.strategy}`] : [`${x}||${y}`]
+        })
+      )
+    )
+    const pairs = mixConcepts(sources, exploredPairs, this.rng.bind(this), strat)
 
     if (pairs.length === 0) {
-      return { ideas: [], reason: 'all pairs already explored' }
+      // The bare string made a deterministic failure look like "this strategy
+      // did not work, maybe the next one will" — callers that degrade by
+      // switching strategy burned two LLM-less retries before learning the
+      // material pool itself was exhausted.
+      const candidatePairs = (sources.length * (sources.length - 1)) / 2
+      return {
+        ideas: [],
+        reason: `all pairs already explored for strategy "${strat}" (${sources.length} sources, ${candidatePairs} candidate pairs)`,
+        strategy: strat,
+        pairsAvailable: 0,
+      }
     }
 
     // Generate hypotheses via LLM
