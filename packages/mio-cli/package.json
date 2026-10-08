@@ -17,6 +17,7 @@
     "!server/mio-intelligence-mcp/__tests__"
   ],
   "scripts": {
+    "pretest": "node scripts/link-workspace.cjs",
     "check": "node scripts/check-syntax.cjs",
     "test": "node --test \"__tests__/*.test.js\" \"server/mio-intelligence-mcp/__tests__/*.test.js\"",
     "prepack": "npm run check",
