@@ -134,6 +134,6 @@
     }
   },
   "include": ["src/preload/**/*.ts","electron.vite.config.ts","packages/*/src/**/*.ts"],
-  "exclude": ["src/**/__tests__/**","src/**/*.test.ts","out/","dist-electron/","build/","coverage/"]
+  "exclude": ["src/**/__tests__/**","src/**/*.test.ts","out/","dist-electron/","build/","coverage/","packages/core/src/types-augment.d.ts"]
 }
 

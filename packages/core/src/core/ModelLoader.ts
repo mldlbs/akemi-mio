@@ -1,7 +1,10 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { existsSync, readFileSync } from 'fs'
-import { env as transformersEnv } from '@xenova/transformers'
+// @xenova/transformers is ESM-only; a static import is TS1479 under the
+// node16 CJS build. require() keeps the same runtime shape.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { env: transformersEnv } = require('@xenova/transformers') as { env: any }
 import { log } from '@akemi-mio/core/logger/Logger'
 
 /** userData 优先，回退安装目录 */

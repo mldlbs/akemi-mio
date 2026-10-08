@@ -57,8 +57,8 @@ export class EvaluationStore implements EvaluationRepository {
 
   async init(): Promise<void> {
     if (this.dbReady) return
-    const { getEventDatabase } = await import('@akemi-mio/core/db/connection')
-    const { getEventRawDb } = await import('@akemi-mio/core/db/connection')
+    const { getEventDatabase } = await import('../../db/connection.js')
+    const { getEventRawDb } = await import('../../db/connection.js')
     this.db = getEventDatabase() as any
     this.raw = {
       run: (s, p) => getEventRawDb().run(s, p),

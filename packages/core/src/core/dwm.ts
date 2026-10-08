@@ -1,4 +1,7 @@
-import koffi from 'koffi'
+// koffi ships ESM-only typings; under the node16 CJS build a static import is
+// TS1479. require() is what the bundler emitted anyway — same runtime shape.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const koffi = require('koffi') as any
 import { BrowserWindow } from 'electron'
 import { log } from '@akemi-mio/core/logger/Logger'
 

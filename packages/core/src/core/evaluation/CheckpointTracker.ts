@@ -28,7 +28,7 @@ export class CheckpointTracker {
   private async ensureRaw(): Promise<RawDb | null> {
     if (this.raw) return this.raw
     try {
-      const { getRawDb } = await import('@akemi-mio/core/db/connection')
+      const { getRawDb } = await import('../../db/connection.js')
       const rdb = getRawDb()
       this.raw = {
         run: (s, p) => rdb.run(s, p),

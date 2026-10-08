@@ -13,7 +13,7 @@ export class EventStore implements EventStoreEngine {
 
   async init(): Promise<void> {
     if (this.initialized) return
-    const { getEventDatabase } = await import('@akemi-mio/core/db/connection')
+    const { getEventDatabase } = await import('../../db/connection.js')
     this.db = getEventDatabase()
     this.initialized = true
     log('INFO', 'event_store_ready')
@@ -28,8 +28,8 @@ export class EventStore implements EventStoreEngine {
   }): Promise<void> {
     if (!this.initialized) return
     try {
-      const { events } = await import('@akemi-mio/core/db/schema')
-      const { getEventDatabase } = await import('@akemi-mio/core/db/connection')
+      const { events } = await import('../../db/schema/index.js')
+      const { getEventDatabase } = await import('../../db/connection.js')
       const db = getEventDatabase()
       await db.insert(events).values({
         channel: event.channel,
@@ -46,8 +46,8 @@ export class EventStore implements EventStoreEngine {
   async query(channel: string, sinceTimestamp: number, limit = 100): Promise<any[]> {
     if (!this.initialized) return []
     try {
-      const { events } = await import('@akemi-mio/core/db/schema')
-      const { getEventDatabase } = await import('@akemi-mio/core/db/connection')
+      const { events } = await import('../../db/schema/index.js')
+      const { getEventDatabase } = await import('../../db/connection.js')
       const db = getEventDatabase()
       const rows: any[] = (await db
         .select()
@@ -63,8 +63,8 @@ export class EventStore implements EventStoreEngine {
   async prune(olderThan: number): Promise<number> {
     if (!this.initialized) return 0
     try {
-      const { events } = await import('@akemi-mio/core/db/schema')
-      const { getEventDatabase } = await import('@akemi-mio/core/db/connection')
+      const { events } = await import('../../db/schema/index.js')
+      const { getEventDatabase } = await import('../../db/connection.js')
       const db = getEventDatabase()
       const all = await db.select().from(events).all()
       const toDelete = all.filter((e: any) => e.timestamp < olderThan).map((e: any) => e.id)
