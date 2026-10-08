@@ -32,10 +32,11 @@ export class IdeaGenerator {
     ) => Promise<{ data?: any; error?: string }>,
     temperature = 0.3,
     seed?: number,
+    rotationSeed = 0,
   ) {
     this.rng = resolveRandom(seed)
     this.mixer = new ConceptMixer(seed)
-    this.hypothesisGen = new HypothesisGenerator(chatJson, seed)
+    this.hypothesisGen = new HypothesisGenerator(chatJson, seed, rotationSeed)
     this.experimentPlanner = new ExperimentPlanner(seed)
     this.temperature = temperature
   }
@@ -49,6 +50,7 @@ export class IdeaGenerator {
     maxIdeas = 5,
     strategy: Strategy = 'explore',
     externalSignals: ExternalSignal[] = [],
+    method?: string,
   ): Promise<CreativeIdea[]> {
     if (sources.length < 2) return []
 
@@ -62,7 +64,7 @@ export class IdeaGenerator {
     if (combos.length === 0) return []
 
     // 3. 用 LLM 生成假设（外部信号作为审视视角注入，不参与配对）
-    const hypotheses = await this.hypothesisGen.generate(combos, activeSources, false, externalSignals)
+    const hypotheses = await this.hypothesisGen.generate(combos, activeSources, false, externalSignals, method)
 
     // 4. 可行性/质量门禁（与 dream 模式同一套门槛）——此前只有梦境路径
     //    过 feasibilityGate，主路径仅按 novelty 筛，可行性 0 分也能入库。
