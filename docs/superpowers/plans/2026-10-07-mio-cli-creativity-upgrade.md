@@ -3062,7 +3062,7 @@ git add packages/mio-cli/package.json package-lock.json
 
 **No files change.** This task performs irreversible registry operations.
 
-- [ ] **Step 1: Preconditions (all must hold before anything is published)**
+- [x] **Step 1: Preconditions (all must hold before anything is published)**
 
 ```powershell
 npm whoami --registry https://registry.npmjs.org
@@ -3073,13 +3073,13 @@ git status --porcelain
 - `git status` is clean — Tasks 0–16 are committed; publish exactly what was gated.
 - Task 16's gate sequence was green on this exact tree.
 
-- [ ] **Step 2: Policy check + explicit user approval (HARD STOP)**
+- [x] **Step 2: Policy check + explicit user approval (HARD STOP)**
 
 Call `mio-intelligence_mio_policy_check` with action
 `publish npm packages @akemi-mio/core@0.1.0, @akemi-mio/creativity@0.1.0, mio-agent-runtime@0.14.0 from local commits`
 and follow its suggestion. Then **ask the user for explicit approval** (the `question` tool, one choice: publish / abort). Do not proceed without an affirmative answer — spec Non-goals also pin "publishing any package besides core/creativity/mio-cli", so exactly three `npm publish` calls follow, never more.
 
-- [ ] **Step 3: Publish core, wait for propagation**
+- [x] **Step 3: Publish core, wait for propagation**
 
 ```powershell
 npm publish --workspace @akemi-mio/core --access public --registry https://registry.npmjs.org
@@ -3097,7 +3097,7 @@ for ($i = 0; $i -lt 30; $i++) {
 if ($v -ne '0.1.0') { throw "core@0.1.0 not visible after 5 minutes (got '$v')" }
 ```
 
-- [ ] **Step 4: Publish creativity, wait, then verify the REAL published artifact**
+- [x] **Step 4: Publish creativity, wait, then verify the REAL published artifact**
 
 ```powershell
 npm publish --workspace @akemi-mio/creativity --access public --registry https://registry.npmjs.org
@@ -3107,7 +3107,7 @@ node scripts/pack-smoke.cjs --registry https://registry.npmjs.org
 
 Expected: `stage 1 (local tarballs): probe OK`, `stage 2 (registry https://registry.npmjs.org): probe OK`, `pack-smoke passed` — this is acceptance criterion 7 (clean registry install with real subpath runs) and it must run BEFORE the runtime publish, because runtime's `@akemi-mio/creativity@^0.1.0` has to resolve from the registry.
 
-- [ ] **Step 5: Publish the runtime**
+- [x] **Step 5: Publish the runtime**
 
 ```powershell
 npm publish --workspace mio-agent-runtime --registry https://registry.npmjs.org
@@ -3122,7 +3122,7 @@ npm view mio-agent-runtime version --registry https://registry.npmjs.org   # →
 
 **Files:** none (plus one Mio memory record).
 
-- [ ] **Step 1: Walk the spec's 8 acceptance criteria with evidence**
+- [x] **Step 1: Walk the spec's 8 acceptance criteria with evidence**
 
 Re-read `docs/superpowers/specs/2026-10-07-mio-cli-creativity-upgrade-design.md` §Acceptance Criteria, and confirm each row (re-run the cited command if in doubt):
 
@@ -3137,7 +3137,7 @@ Re-read `docs/superpowers/specs/2026-10-07-mio-cli-creativity-upgrade-design.md`
 | 7 | both pack-smoke stages pass | Task 16 (stage 1) + Task 17 Step 4 (stage 2) outputs |
 | 8 | all gates green: root vitest, typecheck, mio-cli test + check | Task 16 Step 4 table |
 
-- [ ] **Step 2: Global install smoke (temp prefix — do NOT touch the user's real global mio)**
+- [x] **Step 2: Global install smoke (temp prefix — do NOT touch the user's real global mio)**
 
 ```powershell
 $prefix = Join-Path $env:TEMP 'mio-global-smoke'
@@ -3153,14 +3153,16 @@ if ($cre.version -ne '0.1.0') { throw "creativity resolved to $($cre.version)" }
 
 The user's own global install can be upgraded later with a plain `npm i -g mio-agent-runtime@0.14.0` — out of scope here.
 
-- [ ] **Step 3: Record the durable decision**
+- [x] **Step 3: Record the durable decision**
 
 Call `mio-intelligence_mio_memory_record`:
 `kind` = `decision`, `tags` = `["release", "npm", "creativity", "idea-generate"]`, content (one paragraph): first publish of `@akemi-mio/core@0.1.0` + `@akemi-mio/creativity@0.1.0`; `mio-agent-runtime@0.14.0` declares `@akemi-mio/creativity@^0.1.0`; future core/creativity changes publish independently with the exports whitelist intact (creativity has no `.` export; core root resolves but is electron-coupled — resolve-only outside a host); idea.generate writes drafts + provenance to CreativityStore only; `--sort novelty` is a dedup signal, never a quality score.
 
-- [ ] **Step 4: Close the task**
+- [x] **Step 4: Close the task**
 
 1. `git status --porcelain` → must be empty (everything through Task 18's docs is committed; Task 17/18 changed no tracked files beyond what earlier tasks committed).
 2. `mio-taskhub_taskhub_submit_result(run_id, success: true, result: <short summary citing gates + npm versions>)` — ReadEvidence from Task 0 satisfies the gate; if it 422s on stale docs, re-run `taskhub_read_document` for the stale kinds first.
 3. `mio-taskhub_taskhub_get_task 781ad045` → if the stage is still executing, `taskhub_advance_stage(target_stage: 'done', review_result: 'All 8 acceptance criteria verified; gates green; core/creativity/runtime published')`.
 4. Report to the user in one sentence (success + versions), and list the standing follow-ups: **15+ local commits still unpushed** (push needs approval + `git -c http.proxy= -c https.proxy= push`), the `a53cb50` BOM amend and `CLAUDE.md.bak-mio-*` decision remain theirs, and the idea `b19bada4` (spec adopt-闭环) is intentionally left open.
+
+> **Execution note (Task 18):** 全局安装冒烟中 @akemi-mio/creativity/core 被 npm 嵌套在 `<prefix>/node_modules/mio-agent-runtime/node_modules/` 下（而非计划假定的顶层），实际路径验证 creativity=0.1.0、core=0.1.0，mio --help 含 idea generate——验收准则 6 成立，仅检查路径需下探一层。
