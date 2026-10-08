@@ -2745,7 +2745,7 @@ git add packages/mio-cli/README.md docs/architecture.puml scripts/check-mcp-cli-
 - Create: `scripts/pack-smoke.cjs`
 - Modify: root `package.json` (two scripts)
 
-- [ ] **Step 1: Add the root scripts**
+- [x] **Step 1: Add the root scripts**
 
 In `package.json` `scripts`, after `check:mcp-live`:
 
@@ -2754,7 +2754,7 @@ In `package.json` `scripts`, after `check:mcp-live`:
 "smoke:pack:registry": "node scripts/pack-smoke.cjs --registry https://registry.npmjs.org"
 ```
 
-- [ ] **Step 2: Create `scripts/pack-smoke.cjs`**
+- [x] **Step 2: Create `scripts/pack-smoke.cjs`**
 
 ```js
 'use strict'
@@ -2950,7 +2950,7 @@ function installDirInit() {
 })
 ```
 
-- [ ] **Step 3: Run it (stage 1) — after Tasks 2/3/7 have built `dist/`**
+- [x] **Step 3: Run it (stage 1) — after Tasks 2/3/7 have built `dist/`**
 
 ```powershell
 node scripts/pack-smoke.cjs
@@ -2968,7 +2968,9 @@ Failure modes this is designed to catch: a missing `dist` file that `files: ["di
 
 Notes: temp dirs are removed only on success (a failure keeps them for inspection); paths are asserted space-free implicitly — `os.tmpdir()` and the repo path contain no spaces here, which matters because the npm fallback uses `shell: true`.
 
-- [ ] **Step 4: Commit**
+> **Execution note (Task 15):** `assertBuildOutputs` 原样写死 `dist/index.js`，但 `@akemi-mio/creativity` 无根入口（`main: ./dist/IdeaGenerator.js`、exports 无 `.`），原实现在 build 成功后仍必然失败。已改为读取包 `package.json` 的 `main` 断言（意图不变：构建没跑就 fail）。
+
+- [x] **Step 4: Commit**
 
 ```powershell
 git add scripts/pack-smoke.cjs package.json

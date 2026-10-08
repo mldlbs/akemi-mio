@@ -37,6 +37,8 @@
     "check:cli-docs": "node scripts/check-cli-docs.cjs",
     "check:coverage": "node scripts/check-mcp-cli-coverage.cjs",
     "check:mcp-live": "node scripts/check-mcp-tools-live.cjs",
+    "smoke:pack": "node scripts/pack-smoke.cjs",
+    "smoke:pack:registry": "node scripts/pack-smoke.cjs --registry https://registry.npmjs.org",
     "git:fetch": "node scripts/git-fetch-safe.cjs"
   },
   "dependencies": {
