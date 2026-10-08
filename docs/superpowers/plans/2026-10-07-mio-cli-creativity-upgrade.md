@@ -2419,14 +2419,16 @@ git add packages/mio-cli/server/mio-intelligence-mcp/index.js packages/mio-cli/s
 - Modify: `packages/mio-cli/bin/mio.js` (require, `ideaUsage`/`ideaGenerateCommand`/`ideaCommand`, help line, dispatch)
 - Modify: `packages/mio-cli/__tests__/idea-generate.test.js` (append spawn tests)
 
-- [ ] **Step 1: Append the failing spawn tests to `idea-generate.test.js`**
+- [x] **Step 1: Append the failing spawn tests to `idea-generate.test.js`**
 
 ```js
 // ─── CLI surface (spawn) ────────────────────────────────────────────────
 
 const { spawnSync } = require('node:child_process')
 
-const CLI = path.resolve(__dirname, '..', '..', 'bin', 'mio.js')
+// plan typo (executed note): '..','..','bin' resolves to packages/bin/mio.js;
+// __tests__ sits inside packages/mio-cli, so one level up is enough.
+const CLI = path.resolve(__dirname, '..', 'bin', 'mio.js')
 
 function runCli(ws, args) {
   return spawnSync(process.execPath, [CLI, ...args], {
@@ -2494,7 +2496,7 @@ test('CLI: grounded end-to-end run persists drafts with provenance', () => {
 })
 ```
 
-- [ ] **Step 2: Run and see it fail**
+- [x] **Step 2: Run and see it fail**
 
 ```powershell
 node --test packages/mio-cli/__tests__/idea-generate.test.js
@@ -2502,7 +2504,7 @@ node --test packages/mio-cli/__tests__/idea-generate.test.js
 
 Expected: FAIL — `Unknown command: idea` (exit 1, stderr without `requires --goal`).
 
-- [ ] **Step 3: Implement in `bin/mio.js`**
+- [x] **Step 3: Implement in `bin/mio.js`**
 
 (a) After the `creativity-sources.js` require (added in Task 10):
 
@@ -2603,7 +2605,7 @@ function ideaCommand(args, useJson) {
       return ideaCommand(args, useJson)
 ```
 
-- [ ] **Step 4: Run and see it pass**
+- [x] **Step 4: Run and see it pass**
 
 ```powershell
 node --test packages/mio-cli/__tests__/idea-generate.test.js
@@ -2615,7 +2617,9 @@ Expected: PASS — all in-process + spawn tests, full mio-cli suite, syntax 0.
 
 Notes on determinism: every spawn sets `MIO_HOME` to the test's temp dir and `cwd` there too (so the observer trends provider reads an empty `<cwd>/.local/observer`), and pins `LLM_API_URL` to a refused address. `--json` output is pure JSON (`jsonOrText`), so `JSON.parse(out.stdout)` is safe.
 
-- [ ] **Step 5: Commit**
+> **Deviation (executed):** the core logger (`Logger.log`) echoes every event with `console.log`, and the idea pipeline fires several events (`source_aggregator_build`, `hypothesis_*`, `local_model_*`) that corrupted `JSON.parse(out.stdout)` — the plan's "pure JSON" assumption held for other commands only because they fire no log events. `ideaGenerateCommand` now routes that echo to stderr while the pipeline runs in `--json` mode (restored in `finally`). A second plan typo was fixed inline: `path.resolve(__dirname, '..', '..', 'bin', ...)` pointed at `packages/bin/mio.js`; one `..` is correct.
+
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/mio-cli/bin/mio.js packages/mio-cli/__tests__/idea-generate.test.js

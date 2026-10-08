@@ -25,6 +25,7 @@ const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine, sourcesFromInsights } = require('../server/creativity-engine.js')
 const { buildAutoSources, topUpSources } = require('../server/creativity-sources.js')
+const { runIdeaGenerate, groundingFrom } = require('../server/idea-generate.js')
 const { createAgentStore } = require('../server/agent-store.js')
 const { createEvaluationStore } = require('../server/evaluation-store.js')
 const { createInsightStore, isInsightAvailable } = require('../server/insight-store.js')
@@ -2295,6 +2296,90 @@ function creativityFermentCommand(args, useJson) {
   })
 }
 
+function ideaUsage() {
+  console.error('usage: mio idea generate --goal "one line" [--context "..."] [--constraint "..."] [--num N] [--json]')
+}
+
+async function ideaGenerateCommand(args, useJson) {
+  const flags = args.slice(2)
+  const goal = (optionValue(flags, '--goal') || '').trim()
+  if (!goal) {
+    console.error('mio idea generate requires --goal "..."')
+    ideaUsage()
+    process.exitCode = 1
+    return
+  }
+  const context = optionValue(flags, '--context') || ''
+  const constraints = optionValues(flags, '--constraint')
+  let numIdeas
+  try {
+    numIdeas = parseNumberOption(flags, '--num')
+  } catch (error) {
+    console.error(error.message || error)
+    ideaUsage()
+    process.exitCode = 1
+    return
+  }
+
+  // Grounding from the CLI's global MIO_HOME. A failed query degrades to "no
+  // grounding" — never a hard error (spec Capability 1: local-first, tolerant).
+  // The core logger echoes every event to stdout; in --json mode that would
+  // corrupt the payload jsonOrText must own, so the echo is routed to stderr
+  // while the pipeline runs (executed deviation — the plan assumed pure JSON).
+  const echoLog = useJson ? console.log : null
+  if (useJson) console.log = (...params) => console.error(...params)
+
+  let result
+  try {
+    let grounding = { sources: [], relatedMemoryIds: [], groundedWith: 0 }
+    try {
+      const qr = await cliMemoryStore().queryMemory({ query: goal, limit: 3, scope: 'all' })
+      grounding = groundingFrom(qr)
+    } catch (_) {}
+
+    if (!useJson) warnIfLlmUnconfigured()
+
+    result = await runIdeaGenerate({
+      goal,
+      context,
+      constraints,
+      numIdeas,
+      chatJson,
+      store: cliCreativityEngine().store,
+      groundingSources: grounding.sources,
+      relatedMemoryIds: grounding.relatedMemoryIds,
+      autoSources: cliAutoSources(),
+    })
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  } finally {
+    if (useJson) console.log = echoLog
+  }
+
+  if (useJson) return jsonOrText(result, true)
+  if (result.reason) {
+    console.log(`No ideas generated: ${result.reason}`)
+    return
+  }
+  console.log(`Generated ${result.ideas.length} idea(s) (grounded with ${result.groundedWith} memories)`)
+  result.ideas.forEach((idea) => {
+    console.log(`- [${idea.hypothesis.status}] ${idea.title}`)
+    console.log(`  novelty=${idea.hypothesis.novelty} feasibility=${idea.hypothesis.feasibility} impact=${idea.hypothesis.impact} | ${idea.hypothesis.id}`)
+    if (idea.provenance && idea.provenance.technique) console.log(`  technique=${idea.provenance.technique}`)
+    if (idea.hypothesis.rejectionReason) console.log(`  rejected: ${idea.hypothesis.rejectionReason}`)
+  })
+  console.log(`Persisted ${result.persistedIds.length} idea(s)`)
+}
+
+function ideaCommand(args, useJson) {
+  const sub = args[1]
+  if (sub === 'generate') return ideaGenerateCommand(args, useJson)
+  ideaUsage()
+  process.exitCode = 1
+}
+
 function creativityCommand(args, useJson) {
   const sub = args[1]
 
@@ -3411,6 +3496,7 @@ Usage:
   mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --sort novelty, --limit N)
   mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
   mio creativity ferment       Review and refine active hypotheses (calls an LLM)
+  mio idea generate --goal "..."   Grounded idea pipeline: auto sources, novelty gate, persisted (calls an LLM)
   mio insight status           Insight counts: total, reported, unreported, high-value
   mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)
   mio insight generate         Generate insights from context (--memory "kind|content"/--summary "text"; calls an LLM)
@@ -3474,6 +3560,8 @@ async function main() {
       return policyCommand(args, useJson)
     case 'creativity':
       return creativityCommand(args, useJson)
+    case 'idea':
+      return ideaCommand(args, useJson)
     case 'insight':
       return insightCommand(args, useJson)
     case 'observer':
