@@ -245,8 +245,8 @@ package "MCP 工具层 (41 Tools)" as MCP_TOOLS #E8DAEF {
     [generate / ferment / list / status] as T_CREATE
   }
 
-  card "Idea & Evolution (7)" as TOOLS_EVO {
-    [idea.generate / idea.list] as T_EVO_1
+  card "Idea & Evolution (6)" as TOOLS_EVO {
+    [idea.generate] as T_EVO_1
     [evolution.suggest / report / strategies] as T_EVO_2
     [phase0.report] as T_EVO_3
   }

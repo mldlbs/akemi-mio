@@ -57,6 +57,7 @@ mio creativity status        Show creativity hypothesis counts and recent top id
 mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
 mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
 mio creativity ferment       Review and refine active hypotheses (calls an LLM)
+mio idea generate --goal "..."   Grounded idea pipeline: auto sources + novelty gate, persisted (calls an LLM)
 mio insight status           Insight counts: total, reported, unreported, high-value (needs @akemi-mio/insight)
 mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)
 mio insight generate         Generate insights from context (--memory "kind|content"/--summary "text"; calls an LLM)
@@ -101,7 +102,7 @@ mio --version                Print the version and exit (-V)
 
 ## MCP 工具
 
-MCP 服务端在 5 大域共暴露 50 个工具：
+MCP 服务端在 5 大域共暴露 51 个工具：
 
 ### 记忆（11）
 `mio.memory.query` · `mio.memory.record` · `mio.memory.archive` · `mio.memory.merge` · `mio.memory.migrate` · `mio.memory.analyze` · `mio.memory.forget` · `mio.experience.list` · `mio.experience.confirm` · `mio.experience.reuse` · `mio.policy.check`
@@ -114,15 +115,15 @@ MCP 服务端在 5 大域共暴露 50 个工具：
 ### 洞察自省（4）
 `mio.insight.status` · `mio.insight.list` · `mio.insight.mark_reported` · `mio.insight.generate`
 
-### 创意引擎（4）
-`mio.creativity.generate` · `mio.creativity.ferment` · `mio.creativity.list` · `mio.creativity.status`
+### 创意引擎（5）
+`mio.creativity.generate` · `mio.creativity.ferment` · `mio.creativity.list` · `mio.creativity.status` · `mio.idea.generate`
 
 ### 任务、Agent 与演化（16）
 `mio.task.route` · `mio.task.record_outcome` · `mio.agent.register` · `mio.agent.list` · `mio.agent.report` · `mio.agent.evaluation` · `mio.host.capabilities` · `mio.evolution.status` · `mio.evolution.report` · `mio.evolution.shadow.record` · `mio.evolution.dual_write.record` · `mio.evolution.cutover.readiness` · `mio.evolution.cutover.apply` · `mio.evolution.migration.plan` · `mio.evolution.authority.plan` · `mio.phase0.report`
 
 ## 包
 
-`mio-agent-runtime` 依赖发布在 `@akemi-mio` scope 下的 **9** 个包（声明于 `package.json`，均为 `0.1.0`）。它们仅在源码变更时才发布，所以普通的 CLI 发布不会重新发布这些包。
+`mio-agent-runtime` 依赖发布在 `@akemi-mio` scope 下的 **10** 个包（声明于 `package.json`，均为 `0.1.0`）。它们仅在源码变更时才发布，所以普通的 CLI 发布不会重新发布这些包。
 
 | 依赖 | 说明 |
 |---|---|
@@ -135,6 +136,7 @@ MCP 服务端在 5 大域共暴露 50 个工具：
 | `@akemi-mio/evolution-scheduler` | 演化调度器 |
 | `@akemi-mio/observer` | ObserverService —— 多源数据采集、趋势分析、深度研究、世界模型、发酵、DAG 状态机、自演化引擎（唯一运行时依赖 `undici`，只用于走代理采集） |
 | `@akemi-mio/insight` | InsightService —— 基于 LLM 的洞察生成、冲突/漂移/重复/停滞目标/摩擦检测器、在场服务、洞察打分（零 npm 依赖） |
+| `@akemi-mio/creativity` | IdeaGenerator / NoveltyScorer / SourceAggregator —— `mio idea generate` 与创意引擎的生成算法（依赖 `@akemi-mio/core`） |
 
 以下 `@akemi-mio` 包同样位于本 monorepo 中并独立发布，但**不是**本 CLI 的依赖——其源码从不 import 它们，因此未声明在 `package.json` 里：
 
@@ -146,9 +148,9 @@ MCP 服务端在 5 大域共暴露 50 个工具：
 
 它们可直接被其它 Node 项目消费。`mio-agent-runtime` 自身是 CLI + MCP server 包。
 
-### 与宿主耦合的包（不发布）
+### 曾经不发布的两个包（现已发布）
 
-`@akemi-mio/core` 与 `@akemi-mio/creativity` 通过 `workspace:*` 链接在本 monorepo 内部消费，因此从源码构建，**不**发布到 npm。`packages/cli/` 已不存在。不要把这两个包加进下游 `package.json`——安装会失败。
+`@akemi-mio/core` 与 `@akemi-mio/creativity` 自 `mio-agent-runtime@0.14.0` 起发布到 npm（`0.1.0`）。`@akemi-mio/creativity` 是本 CLI 的直接依赖，`@akemi-mio/core` 经由它传递引入；其它 Node 项目可直接安装这两个包。
 
 ## 宿主说明
 
@@ -414,7 +416,7 @@ mio creativity ferment --limit 3
 
 - `--source "名称|内容"` **至少两个**：引擎是把概念两两配对来产生新假设的，
   一个来源在构造上就不可能产出组合（此时**不会**调用 LLM，直接返回
-  `need at least 2 sources`）。
+  `need at least 2 sources`）。显式来源不足 2 个时，本地自动来源（memory / traces / 已存假设；MCP 侧还含 insight 与 observer 趋势）会先把列表补齐到 2——显式 `--source` 永远排在前面且不被替换；补齐后仍不足 2 个才报上面的错。
 - **`--from-insights`（MCP 侧为 `fromInsights: true`）用已存洞察补足概念来源**：
   读取 `mio insight list` 能看到的同一份存储，按分数取前 10 条映射成
   `{ name, content, type: 'insight' }`，再与显式的 `--source` 合并。它只在
@@ -428,10 +430,24 @@ mio creativity ferment --limit 3
   打印 `N pair(s) failed:`。此前 `catch {}` 让「端点挂了」与「这一对确实没有
   新意」长得一模一样——`ideas: []` / `Nothing fermented` 两种输出都无法区分。
 
+### 目标驱动的 idea 流水线（`mio idea generate`）
+
+一个 goal 直接产出可实验的假设（MCP 面为 `mio.idea.generate`），来源全程本地优先组装：
+
+```bash
+mio idea generate --goal "降低 MCP 调用延迟" --context "近三天 p95 上升" --constraint "不引入新依赖"
+mio idea generate --goal "扩大命令覆盖" --json
+```
+
+- **来源顺序**：goal → context → constraints → 记忆 grounding（取前 3 条，`scope: all`）→ 本地自动来源（memory / traces / 已存假设，MCP 侧还含 insight 与 observer 趋势），按 `origin` 去重；凑不足 2 个时返回 `reason` 文案而不是报错。
+- **每条 idea 都持久化**到 `<MIO_HOME>/creativity/creativity-hypotheses.jsonl`（`draft`，带 `provenance`：strategy / technique / relatedMemoryIds / 命中来源 / generatedAt），**绝不写入 Mio memory**。
+- **novelty 门禁**：与已 `rejected` 假设近似重复的候选落盘为 `rejected` 并带 `rejectionReason`；与近期假设相似的只降分。拒绝的假设同样入库，供后续去重。
+- `--num` 钳制在 1..3（默认 3）；`--json` 返回完整结构 `{ ideas, generatedAt, groundedWith, persistedIds }`。
+
 #### LLM 配置
 
-只有 4 条命令会调用大模型：`mio creativity generate` / `ferment`、
-`mio insight generate`、`mio observer ferment`。它们共用
+只有 5 条命令会调用大模型：`mio creativity generate` / `ferment`、
+`mio idea generate`、`mio insight generate`、`mio observer ferment`。它们共用
 `server/llm-client.js` 这一份实现，配置也共用同一套解析顺序：
 
 ```

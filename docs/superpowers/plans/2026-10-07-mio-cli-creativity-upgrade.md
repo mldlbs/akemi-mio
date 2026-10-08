@@ -2635,7 +2635,7 @@ git add packages/mio-cli/bin/mio.js packages/mio-cli/__tests__/idea-generate.tes
 - Modify: `docs/architecture.puml`
 - Modify: `scripts/check-mcp-cli-coverage.cjs`
 
-- [ ] **Step 1: README edits**
+- [x] **Step 1: README edits**
 
 (a) Command block — after the `mio creativity ferment` line, insert:
 
@@ -2697,7 +2697,7 @@ mio idea generate --goal "扩大命令覆盖" --json
 `mio idea generate`、`mio insight generate`、`mio observer ferment`。
 ```
 
-- [ ] **Step 2: `docs/architecture.puml`**
+- [x] **Step 2: `docs/architecture.puml`**
 
 Replace inside the `Idea & Evolution` card:
 
@@ -2708,7 +2708,7 @@ Replace inside the `Idea & Evolution` card:
 
 (The old `idea.list` never shipped; `Creativity (4)` at line 244 stays 4 — `mio.idea.generate` is counted in the EVO card, not the CREATIVITY card.)
 
-- [ ] **Step 3: `scripts/check-mcp-cli-coverage.cjs`**
+- [x] **Step 3: `scripts/check-mcp-cli-coverage.cjs`**
 
 In `MCP_TO_CLI`, after the `mio.host.capabilities` line (keeps the table alphabetical: host < idea < insight):
 
@@ -2716,7 +2716,7 @@ In `MCP_TO_CLI`, after the `mio.host.capabilities` line (keeps the table alphabe
   'mio.idea.generate': ['idea', 'generate'],
 ```
 
-- [ ] **Step 4: Run the doc gates**
+- [x] **Step 4: Run the doc gates**
 
 ```powershell
 npm run check:coverage
@@ -2730,7 +2730,7 @@ Expected:
 
 Why `mio idea generate` passes the docs probe even though it exits 1: the gate only fails on `Unknown ...` output or a `crashMarker` (opaque TypeError etc.); a usage error that names the missing flag is the contract. Baselines verified in this checkout: 50 tools / 55 README commands before this task.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/mio-cli/README.md docs/architecture.puml scripts/check-mcp-cli-coverage.cjs
