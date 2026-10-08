@@ -155,3 +155,76 @@ test('answers with a reason instead of throwing when there is only one source', 
   assert.match(res.reason, /at least 2/)
   assert.equal(fs.existsSync(ws.file), false)
 })
+
+// ������ CLI surface (spawn) ������������������������������������������������������������������������������������������������
+
+const { spawnSync } = require('node:child_process')
+
+// plan typo (executed note): '..','..','bin' resolves to packages/bin/mio.js;
+// __tests__ sits inside packages/mio-cli, so one level up is enough.
+const CLI = path.resolve(__dirname, '..', 'bin', 'mio.js')
+
+function runCli(ws, args) {
+  return spawnSync(process.execPath, [CLI, ...args], {
+    cwd: ws.mioHome,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      MIO_HOME: ws.mioHome,
+      LLM_API_URL: 'http://127.0.0.1:9/v1/chat/completions',
+    },
+  })
+}
+
+function seedCliMemory(ws) {
+  fs.writeFileSync(
+    path.join(ws.mioHome, 'memory.jsonl'),
+    JSON.stringify({
+      id: 'g1',
+      timestamp: '2026-10-06T01:00:00.000Z',
+      kind: 'decision',
+      content: '�ӳ��Ż��ľ��������Ƚ��� MCP �����ӳ�',
+      scope: 'global',
+    }) + '\n',
+    'utf8'
+  )
+}
+
+test('CLI: missing --goal fails with usage', () => {
+  const ws = workspace()
+  const out = runCli(ws, ['idea', 'generate'])
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /requires --goal/)
+  assert.match(out.stderr, /usage: mio idea generate/)
+})
+
+test('CLI: --num must be a number', () => {
+  const ws = workspace()
+  const out = runCli(ws, ['idea', 'generate', '--goal', 'x', '--num', 'abc'])
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /--num must be a number/)
+})
+
+test('CLI: goal alone answers with a reason instead of an error', () => {
+  const ws = workspace()
+  const out = runCli(ws, ['idea', 'generate', '--goal', 'lonely goal'])
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /No ideas generated: need at least 2 sources/)
+})
+
+test('CLI: grounded end-to-end run persists drafts with provenance', () => {
+  const ws = workspace()
+  seedCliMemory(ws)
+  const out = runCli(ws, ['idea', 'generate', '--goal', '���� MCP �����ӳ�', '--json'])
+  assert.equal(out.status, 0, out.stderr)
+
+  const payload = JSON.parse(out.stdout)
+  assert.ok(payload.ideas.length >= 1)
+  assert.equal(payload.groundedWith, 1)
+  assert.deepEqual(payload.ideas[0].provenance.relatedMemoryIds, ['g1'])
+  assert.equal(payload.ideas[0].hypothesis.status, 'draft')
+  assert.equal(payload.persistedIds.length, payload.ideas.length)
+
+  const rows = readRows(ws.file)
+  assert.ok(rows.some((r) => r.id === payload.persistedIds[0] && r.provenance))
+})
