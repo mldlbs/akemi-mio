@@ -2,7 +2,39 @@
   "name": "@akemi-mio/creativity",
   "version": "0.1.0",
   "description": "Creativity layer: ideas, writing, blog, image, inspiration",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
-  "dependencies": { "@akemi-mio/core": "*" }
+  "main": "./dist/IdeaGenerator.js",
+  "types": "./dist/IdeaGenerator.d.ts",
+  "exports": {
+    "./IdeaGenerator": {
+      "types": "./dist/IdeaGenerator.d.ts",
+      "require": "./dist/IdeaGenerator.js",
+      "default": "./dist/IdeaGenerator.js"
+    },
+    "./SourceAggregator": {
+      "types": "./dist/SourceAggregator.d.ts",
+      "require": "./dist/SourceAggregator.js",
+      "default": "./dist/SourceAggregator.js"
+    },
+    "./NoveltyScorer": {
+      "types": "./dist/NoveltyScorer.d.ts",
+      "require": "./dist/NoveltyScorer.js",
+      "default": "./dist/NoveltyScorer.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "require": "./dist/types.js",
+      "default": "./dist/types.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "dependencies": {
+    "@akemi-mio/core": "^0.1.0"
+  }
 }
