@@ -1,5 +1,5 @@
 import type { Hypothesis, ConceptCombo, CreativitySource, ExternalSignal } from './types'
-import { CREATIVITY_SYSTEM_PROMPT, buildCreativityPrompt } from './CreativityPrompt'
+import { CREATIVITY_SYSTEM_PROMPT, buildCreativityPrompt, buildSystemPrompt, pickTechnique } from './CreativityPrompt'
 import { TemplateLibrary } from './TemplateLibrary'
 import { LocalModelService } from './LocalModelService'
 import { resolveRandom, type RandomGenerator } from '@akemi-mio/core/utils/random'
@@ -20,6 +20,8 @@ export class HypothesisGenerator {
   ) => Promise<{ data?: any; error?: string }>
   private templateLib: TemplateLibrary
   private localModel: LocalModelService
+  private rotationSeed = 0
+  private callCount = 0
 
   constructor(
     chatJson: (
@@ -27,11 +29,13 @@ export class HypothesisGenerator {
       options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string; maxTokens?: number },
     ) => Promise<{ data?: any; error?: string }>,
     seed?: number,
+    rotationSeed = 0,
   ) {
     this.chatJson = chatJson
     this.rng = resolveRandom(seed)
     this.templateLib = new TemplateLibrary(seed)
     this.localModel = new LocalModelService()
+    this.rotationSeed = rotationSeed
   }
 
   /**
@@ -50,13 +54,18 @@ export class HypothesisGenerator {
     dreamMode = false,
     /** 外部信号 — 不参与配对，作为审视视角注入 LLM */
     externalSignals: ExternalSignal[] = [],
+    /** 显式技法；缺省走五技法轮换（rotationSeed + 调用次数） */
+    method?: string,
   ): Promise<Hypothesis[]> {
     if (combos.length === 0) return []
+    const technique = method ?? pickTechnique(this.rotationSeed + this.callCount)
+    this.callCount += 1
 
     // 第一级：远程 LLM 驱动生成
-    const llmResults = await this.tryLLM(sources, combos, dreamMode, externalSignals)
+    const llmResults = await this.tryLLM(sources, combos, dreamMode, externalSignals, technique)
     if (llmResults.length > 0) {
-      return llmResults.map((r) => ({
+      return this.tag(
+        llmResults.map((r) => ({
         id: `hyp_${Date.now()}_${++this.idCounter}_${this.rng().toString(36).slice(2, 4)}`,
         title: r.title,
         idea: r.idea,
@@ -69,15 +78,18 @@ export class HypothesisGenerator {
         impact: Math.max(10, Math.min(100, r.impact)),
         status: 'draft' as const,
         createdAt: Date.now(),
-      }))
+        })),
+        technique,
+      )
     }
 
     // 第二级：本地 transformers.js 模型
     if (this.localModel.isEnabled) {
       log('INFO', 'hypothesis_fallback_local', { count: combos.length })
-      const localResults = await this.tryLocalModel(sources, combos, dreamMode)
+      const localResults = await this.tryLocalModel(sources, combos, dreamMode, technique)
       if (localResults.length > 0) {
-        return localResults.map((r) => ({
+        return this.tag(
+          localResults.map((r) => ({
           id: `hyp_local_${Date.now()}_${++this.idCounter}_${this.rng().toString(36).slice(2, 4)}`,
           title: r.title,
           idea: r.idea,
@@ -90,7 +102,9 @@ export class HypothesisGenerator {
           impact: Math.max(10, Math.min(100, r.impact)),
           status: 'draft' as const,
           createdAt: Date.now(),
-        }))
+          })),
+          technique,
+        )
       }
     }
 
@@ -104,12 +118,15 @@ export class HypothesisGenerator {
       if (h) tplResults.push(h)
     }
     if (tplResults.length > 0) {
-      return tplResults
+      return this.tag(tplResults, technique)
     }
 
     // 第四级：原始模板兜底
     log('WARN', 'hypothesis_fallback_legacy', { count: combos.length })
-    return combos.map((combo) => this.templateFallback(combo))
+    return this.tag(
+      combos.map((combo) => this.templateFallback(combo)),
+      technique,
+    )
   }
 
   /**
@@ -120,6 +137,7 @@ export class HypothesisGenerator {
     combos: ConceptCombo[],
     dreamMode: boolean,
     externalSignals: ExternalSignal[] = [],
+    technique: string = '',
   ): Promise<
     Array<{
       title: string
@@ -147,7 +165,7 @@ export class HypothesisGenerator {
 
     try {
       const result = await this.chatJson(prompt, {
-        system: CREATIVITY_SYSTEM_PROMPT,
+        system: buildSystemPrompt(technique),
         temperature: dreamMode ? 1.0 : 0.8,
         timeoutMs: 60000,
         // 输出无界会顶满超时（M2）：生成上限 1200 tokens
@@ -182,6 +200,7 @@ export class HypothesisGenerator {
     sources: CreativitySource[],
     combos: ConceptCombo[],
     dreamMode: boolean,
+    technique: string = '',
   ): Promise<
     Array<{
       title: string
@@ -204,7 +223,7 @@ export class HypothesisGenerator {
     const prompt = buildCreativityPrompt(sources, comboInfo)
 
     const result = await this.localModel.generate(prompt, {
-      system: CREATIVITY_SYSTEM_PROMPT,
+      system: buildSystemPrompt(technique),
       temperature: dreamMode ? 0.8 : 0.6,
       maxTokens: dreamMode ? 1024 : 768,
     })
@@ -228,6 +247,11 @@ export class HypothesisGenerator {
   private hasRelevanceJustification(i: any): boolean {
     const relevance = typeof i.relevance === 'string' ? i.relevance.trim() : ''
     return relevance.length >= 10
+  }
+
+  /** 记录本轮使用的轮换技法（idea.generate 的 provenance.technique 字段写它）。 */
+  private tag(hypotheses: Hypothesis[], technique: string): Hypothesis[] {
+    return hypotheses.map((h) => ({ ...h, technique }))
   }
 
   /** 根据 sourceLabels 构建来源深度详情（默认 shallow） */
