@@ -24,6 +24,7 @@ const { createMemoryStore } = require('../server/memory-store.js')
 const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine, sourcesFromInsights } = require('../server/creativity-engine.js')
+const { buildAutoSources, topUpSources } = require('../server/creativity-sources.js')
 const { createAgentStore } = require('../server/agent-store.js')
 const { createEvaluationStore } = require('../server/evaluation-store.js')
 const { createInsightStore, isInsightAvailable } = require('../server/insight-store.js')
@@ -2164,6 +2165,26 @@ function printCreativityErrors(errors, label) {
   }
 }
 
+// Auto sources for generate's top-up: the same local providers the MCP server
+// uses, assembled from the CLI's global MIO_HOME (spec Capability 2). Every
+// layer degrades to [] — a missing optional package or an unreadable store
+// must never fail `mio creativity generate`.
+function cliAutoSources() {
+  let insights = []
+  let trends = []
+  try {
+    if (isInsightAvailable()) insights = cliInsightStore().list({}) || []
+  } catch (_) {}
+  try {
+    if (isObserverAvailable()) trends = cliObserverStore().trends({ limit: 3 }) || []
+  } catch (_) {}
+  try {
+    return buildAutoSources({ dataDir: MIO_HOME, insights, trends })
+  } catch (_) {
+    return []
+  }
+}
+
 function creativityGenerateCommand(args, useJson) {
   const flags = args.slice(2)
   let sources = parseSources(flags)
@@ -2191,6 +2212,15 @@ function creativityGenerateCommand(args, useJson) {
       return
     }
     sources = sources.concat(seeds)
+  }
+
+  // Auto top-up (spec Capability 2, injection point 2): explicit --source
+  // entries win; when fewer than two remain, local memory/traces/stored
+  // hypotheses (plus insight/observer observations) fill the gap. If the
+  // topped-up set is still short, the errors below keep their old wording.
+  if (sources.length < 2) {
+    const topped = topUpSources(sources, cliAutoSources())
+    if (topped.length >= 2) sources = topped
   }
 
   if (sources.length < 2) {

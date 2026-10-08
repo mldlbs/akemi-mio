@@ -1704,7 +1704,7 @@ git add packages/mio-cli/server/creativity-engine.js packages/mio-cli/bin/mio.js
 - Modify: `packages/mio-cli/bin/mio.js` (require, `cliAutoSources()`, top-up seam)
 - Test: `packages/mio-cli/__tests__/creativity-autosources.test.js` (new)
 
-- [ ] **Step 1: Write the failing node:test file**
+- [x] **Step 1: Write the failing node:test file**
 
 ```js
 'use strict'
@@ -1780,7 +1780,7 @@ test('two explicit sources still run without needing local data', () => {
 })
 ```
 
-- [ ] **Step 2: Run and see it fail**
+- [x] **Step 2: Run and see it fail**
 
 ```powershell
 node --test packages/mio-cli/__tests__/creativity-autosources.test.js
@@ -1788,7 +1788,7 @@ node --test packages/mio-cli/__tests__/creativity-autosources.test.js
 
 Expected: FAIL — the first two tests exit 1 with `at least two --source` (no top-up seam yet); the last two already pass.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 (a) After the `creativity-engine.js` require in `bin/mio.js` (line 26), add:
 
@@ -1833,7 +1833,7 @@ function cliAutoSources() {
   }
 ```
 
-- [ ] **Step 4: Run and see it pass**
+- [x] **Step 4: Run and see it pass**
 
 ```powershell
 node --test packages/mio-cli/__tests__/creativity-autosources.test.js
@@ -1842,7 +1842,7 @@ npm test --prefix packages/mio-cli -- creativity
 
 Expected: PASS — including the existing `creativity-generate.test.js` argument-validation tests: their temp homes hold no local data, so top-up is a no-op there and their exit-1 contracts are untouched.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/mio-cli/bin/mio.js packages/mio-cli/__tests__/creativity-autosources.test.js
