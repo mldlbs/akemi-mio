@@ -2968,7 +2968,7 @@ Failure modes this is designed to catch: a missing `dist` file that `files: ["di
 
 Notes: temp dirs are removed only on success (a failure keeps them for inspection); paths are asserted space-free implicitly — `os.tmpdir()` and the repo path contain no spaces here, which matters because the npm fallback uses `shell: true`.
 
-> **Execution note (Task 15):** `assertBuildOutputs` 原样写死 `dist/index.js`，但 `@akemi-mio/creativity` 无根入口（`main: ./dist/IdeaGenerator.js`、exports 无 `.`），原实现在 build 成功后仍必然失败。已改为读取包 `package.json` 的 `main` 断言（意图不变：构建没跑就 fail）。
+> **Execution note (Task 15):** `assertBuildOutputs` 原样写死 `dist/index.js`，但 `@akemi-mio/creativity` 无根入口（`main: ./dist/IdeaGenerator.js`、exports 无 `.`），原实现在 build 成功后仍必然失败。已改为读取包 `package.json` 的 `main` 断言（意图不变：构建没跑就 fail）。另：计划原样的 `catch (_)` 触发 `no-unused-vars` 让 lint:scripts 达 24/23，已改为无绑定 `catch {`（Gate 要求 ≤23）。
 
 - [x] **Step 4: Commit**
 
@@ -2985,7 +2985,7 @@ git add scripts/pack-smoke.cjs package.json
 - Modify: `packages/mio-cli/package.json` (version + dependency)
 - Modify: `package-lock.json` (via `npm install --package-lock-only` — never a bare `npm install`)
 
-- [ ] **Step 1: Bump and declare**
+- [x] **Step 1: Bump and declare**
 
 In `packages/mio-cli/package.json`:
 
@@ -2998,7 +2998,7 @@ In `packages/mio-cli/package.json`:
 
 (don't forget the comma on the previous line; `@akemi-mio/core` comes in transitively via creativity and is never a direct dependency — mio-cli source does not import it).
 
-- [ ] **Step 2: Refresh the lockfile only**
+- [x] **Step 2: Refresh the lockfile only**
 
 ```powershell
 npm install --package-lock-only
@@ -3006,7 +3006,7 @@ npm install --package-lock-only
 
 Expected: exit 0, `package-lock.json` gains the `packages/mio-cli` → `@akemi-mio/creativity` edge. On disk, resolution keeps working through the Task 1 junctions (root + package-level), which is why the lock refresh must not become a full `npm install`.
 
-- [ ] **Step 3: Fresh builds + link**
+- [x] **Step 3: Fresh builds + link**
 
 ```powershell
 npm run build --prefix packages/core
@@ -3017,7 +3017,7 @@ node packages/mio-cli/bin/mio.js --version
 
 Expected: both builds exit 0; link prints `exists` lines (junctions from Task 1 still present); version prints `0.14.0`.
 
-- [ ] **Step 4: Full gate sequence, in this order**
+- [x] **Step 4: Full gate sequence, in this order**
 
 ```powershell
 npm test
@@ -3049,7 +3049,7 @@ Expected, gate by gate:
 
 Renderer/preload vitest configs and `check:renderer-entries` are CI's job and untouched by this work — do not block on them locally.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/mio-cli/package.json package-lock.json

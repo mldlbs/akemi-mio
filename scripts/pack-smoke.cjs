@@ -72,7 +72,7 @@ function pack(pkgName) {
   let filename
   try {
     filename = JSON.parse(out)[0].filename
-  } catch (_) {
+  } catch {
     return fail(`${pkgName}: npm pack --json output was not parseable`, out)
   }
   return path.join(dest, filename)
