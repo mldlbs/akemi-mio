@@ -695,6 +695,7 @@ const TOOLS = [
       properties: {
         status: { type: 'string', description: 'Filter by status: active, validated, rejected, draft.' },
         limit: { type: 'number', description: 'Max results. Default 20.' },
+        sort: { type: 'string', description: "Sort order: 'novelty' ranks stored hypotheses by relative noveltyScore (a dedup signal, NOT a quality score), newest 200 candidates capped. Default: newest." },
       },
     },
   },

@@ -60,9 +60,9 @@
 
 **Trigger:** the user has explicitly approved this plan. Nothing below runs before that.
 
-- [ ] **taskhub:** `taskhub_get_task 781ad045` → `taskhub_claim`（**必须传 `task_id=781ad045`**）→ 对 claim 返回的每个 `kind` 调 `taskhub_read_document(task_id, kind, run_id=<claim 返回>)` 产生 ReadEvidence → 需要时 `taskhub_heartbeat(run_id)` 保活。缺 ReadEvidence 时 `taskhub_submit_result` 会 422。
-- [ ] **doc lifecycle:** pre-push 钩子要求 spec/api/plan 达到 `approved`。spec 已 approved；若 plan 尚未批准，先 `taskhub_set_doc_status(task_id='781ad045', kind='plan', state='approved')`。
-- [ ] **branch:** 开工分支命名 `task-781ad045`（若尚不存在则 `git checkout -b task-781ad045`）。
+- [x] **taskhub:** `taskhub_get_task 781ad045` → `taskhub_claim`（**必须传 `task_id=781ad045`**）→ 对 claim 返回的每个 `kind` 调 `taskhub_read_document(task_id, kind, run_id=<claim 返回>)` 产生 ReadEvidence → 需要时 `taskhub_heartbeat(run_id)` 保活。缺 ReadEvidence 时 `taskhub_submit_result` 会 422。
+- [x] **doc lifecycle:** pre-push 钩子要求 spec/api/plan 达到 `approved`。spec 已 approved；若 plan 尚未批准，先 `taskhub_set_doc_status(task_id='781ad045', kind='plan', state='approved')`。
+- [x] **branch:** 开工分支命名 `task-781ad045`（若尚不存在则 `git checkout -b task-781ad045`）。
 
 ---
 
@@ -72,7 +72,7 @@
 - Create: `packages/mio-cli/scripts/link-workspace.cjs`
 - Modify: `packages/mio-cli/package.json`
 
-- [ ] **Step 1: Create the link script**
+- [x] **Step 1: Create the link script**
 
 ```js
 #!/usr/bin/env node
@@ -129,7 +129,7 @@ for (const { at, target } of links) {
 }
 ```
 
-- [ ] **Step 2: Wire the pretest hook**
+- [x] **Step 2: Wire the pretest hook**
 
 In `packages/mio-cli/package.json`, add to `scripts` (keep every existing entry):
 
@@ -137,7 +137,7 @@ In `packages/mio-cli/package.json`, add to `scripts` (keep every existing entry)
 "pretest": "node scripts/link-workspace.cjs",
 ```
 
-- [ ] **Step 3: Verify idempotency and resolution**
+- [x] **Step 3: Verify idempotency and resolution**
 
 Run (PowerShell):
 
@@ -161,7 +161,7 @@ console.log(rootReq.resolve('@akemi-mio/core/package.json'))
 
 Run `node tmp-resolve-check.js` — it must print four paths under `packages\` (the root links are what let root vitest resolve `@akemi-mio/creativity/*`). Package roots resolve before any build exists; subpaths come in Tasks 2–3. Delete the temp file.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```powershell
 git add packages/mio-cli/scripts/link-workspace.cjs packages/mio-cli/package.json
@@ -176,7 +176,7 @@ git add packages/mio-cli/scripts/link-workspace.cjs packages/mio-cli/package.jso
 - Create: `packages/core/tsconfig.build.json`
 - Modify: `packages/core/package.json`
 
-- [ ] **Step 1: Create `packages/core/tsconfig.build.json`**
+- [x] **Step 1: Create `packages/core/tsconfig.build.json`**
 
 Standalone (NOT extending `tsconfig.base.json`, whose `moduleResolution: bundler` + `composite` cannot emit CJS for npm):
 
@@ -199,7 +199,7 @@ Standalone (NOT extending `tsconfig.base.json`, whose `moduleResolution: bundler
 }
 ```
 
-- [ ] **Step 2: Rewrite `packages/core/package.json`**
+- [x] **Step 2: Rewrite `packages/core/package.json`**
 
 ```json
 {
@@ -242,7 +242,7 @@ Standalone (NOT extending `tsconfig.base.json`, whose `moduleResolution: bundler
 
 Notes: `db`/`credentials`/`ipc` subpaths are intentionally NOT exported (spec: npm consumers cannot require them). The root `.` export exists (core's index is the supported entry).
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 ```powershell
 npm run build --prefix packages/core
@@ -252,7 +252,7 @@ Expected: exit 0, `packages/core/dist/index.js`, `dist/index.d.ts`, `dist/logger
 
 If `tsc` reports errors: they are real type errors the root typecheck did not cover. Fix them in `src/` with minimal, targeted changes — **do not** weaken `strict`, do not add `// @ts-nocheck`. If an error is a missing ambient module (e.g. an optional import), add a scoped `declare module` in a new `packages/core/src/types-augment.d.ts` instead of installing anything.
 
-- [ ] **Step 4: Verify subpath requires from a junction consumer**
+- [x] **Step 4: Verify subpath requires from a junction consumer**
 
 Create `tmp-core-check.js`:
 
@@ -274,7 +274,7 @@ console.log('core exports OK')
 
 Run `node tmp-core-check.js` → `core exports OK`. Delete the temp file.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/core/tsconfig.build.json packages/core/package.json packages/core/src
@@ -289,7 +289,7 @@ git add packages/core/tsconfig.build.json packages/core/package.json packages/co
 - Create: `packages/creativity/tsconfig.build.json`
 - Modify: `packages/creativity/package.json`
 
-- [ ] **Step 1: Create `packages/creativity/tsconfig.build.json`**
+- [x] **Step 1: Create `packages/creativity/tsconfig.build.json`**
 
 `files` (not `include`) pins the published surface to the four capability entrypoints; tsc follows their import graph automatically, so `db`/`capabilities`/`intelligence-*` never enter `dist`:
 
@@ -319,7 +319,7 @@ git add packages/core/tsconfig.build.json packages/core/package.json packages/co
 
 `moduleResolution: node16` resolves `@akemi-mio/core/*` through the Task-1 junction + Task-2 `exports` (so core MUST be built first — it is, by task order).
 
-- [ ] **Step 2: Rewrite `packages/creativity/package.json`**
+- [x] **Step 2: Rewrite `packages/creativity/package.json`**
 
 ```json
 {
@@ -366,7 +366,7 @@ git add packages/core/tsconfig.build.json packages/core/package.json packages/co
 
 The root entry is deliberately absent from `exports` (spec: its index chain reaches db storage) — bare `require('@akemi-mio/creativity')` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`, which is the intended contract.
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 ```powershell
 npm run build --prefix packages/creativity
@@ -374,7 +374,7 @@ npm run build --prefix packages/creativity
 
 Expected: exit 0; `dist/` contains `IdeaGenerator.js`, `SourceAggregator.js`, `NoveltyScorer.js`, `types.js`, `CreativityPrompt.js`, `HypothesisGenerator.js`, `ConceptMixer.js`, `ExperimentPlanner.js`, `TemplateLibrary.js`, `LocalModelService.js` + `.d.ts` — and **no** `db`/`capabilities`/`index.js`.
 
-- [ ] **Step 4: Verify subpath requires + root refusal**
+- [x] **Step 4: Verify subpath requires + root refusal**
 
 Create `tmp-cre-check.js`:
 
@@ -399,7 +399,7 @@ console.log('creativity exports OK')
 
 Run → `creativity exports OK`. Delete temp file.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/creativity/tsconfig.build.json packages/creativity/package.json packages/creativity/dist 2>$null
@@ -416,7 +416,7 @@ git add packages/creativity/tsconfig.build.json packages/creativity/package.json
 - Modify: `packages/creativity/src/types.ts`
 - Test: `tests/main/creativity/source-provenance.test.ts` (new)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -463,7 +463,7 @@ describe('creativity source provenance fields', () => {
 })
 ```
 
-- [ ] **Step 2: Run and see it fail**
+- [x] **Step 2: Run and see it fail**
 
 ```powershell
 npx vitest run tests/main/creativity/source-provenance.test.ts
@@ -471,7 +471,7 @@ npx vitest run tests/main/creativity/source-provenance.test.ts
 
 Expected: FAIL — `Property 'origin' does not exist on type 'CreativitySource'` (type errors surface as test file compile failure).
 
-- [ ] **Step 3: Implement — extend the interfaces in `types.ts`**
+- [x] **Step 3: Implement — extend the interfaces in `types.ts`**
 
 In `packages/creativity/src/types.ts`, replace the `CreativitySource` interface (currently lines 9–16) with:
 
@@ -521,7 +521,7 @@ In the `Hypothesis` interface (line 47 block), add after `createdAt: number`:
   provenance?: HypothesisProvenance
 ```
 
-- [ ] **Step 4: Run and see it pass**
+- [x] **Step 4: Run and see it pass**
 
 ```powershell
 npx vitest run tests/main/creativity/source-provenance.test.ts
@@ -530,7 +530,7 @@ npm run typecheck:node
 
 Expected: PASS + typecheck exit 0 (interface additions are additive; nothing else references them yet).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/creativity/src/types.ts tests/main/creativity/source-provenance.test.ts
@@ -545,7 +545,7 @@ git add packages/creativity/src/types.ts tests/main/creativity/source-provenance
 - Modify: `packages/creativity/src/CreativityPrompt.ts`
 - Test: `tests/main/creativity/creativity-prompt.test.ts` (new)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -600,7 +600,7 @@ describe('grouped source presentation', () => {
 })
 ```
 
-- [ ] **Step 2: Run and see it fail**
+- [x] **Step 2: Run and see it fail**
 
 ```powershell
 npx vitest run tests/main/creativity/creativity-prompt.test.ts
@@ -608,7 +608,7 @@ npx vitest run tests/main/creativity/creativity-prompt.test.ts
 
 Expected: FAIL — `TECHNIQUE_CYCLE`/`pickTechnique` not exported; grouped headers absent.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `packages/creativity/src/CreativityPrompt.ts`:
 
@@ -692,7 +692,9 @@ export function pickTechnique(seed: number): string {
 }
 ```
 
-- [ ] **Step 4: Run and see it pass**
+> **Deviation (executed):** the snippet above contradicts this task's own test (`pickTechnique(-1)` must be `Constraint-Inversion`, but `Math.abs(-1)%5 === 1` → `Analogy`). Implemented wrap-around modulo `((Math.floor(seed) % len) + len) % len` instead, which satisfies every test case (0→SCAMPER, 1→Analogy, 5→SCAMPER, -1→Constraint-Inversion).
+
+- [x] **Step 4: Run and see it pass**
 
 ```powershell
 npx vitest run tests/main/creativity/creativity-prompt.test.ts
@@ -701,7 +703,7 @@ npm run typecheck:node
 
 Expected: PASS, typecheck 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/creativity/src/CreativityPrompt.ts tests/main/creativity/creativity-prompt.test.ts
@@ -716,7 +718,7 @@ git add packages/creativity/src/CreativityPrompt.ts tests/main/creativity/creati
 - Modify: `packages/creativity/src/HypothesisGenerator.ts`
 - Test: `tests/main/creativity/hypothesis-method.test.ts` (new)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -785,7 +787,7 @@ describe('HypothesisGenerator method threading', () => {
 })
 ```
 
-- [ ] **Step 2: Run and see it fail**
+- [x] **Step 2: Run and see it fail**
 
 ```powershell
 npx vitest run tests/main/creativity/hypothesis-method.test.ts
@@ -793,7 +795,7 @@ npx vitest run tests/main/creativity/hypothesis-method.test.ts
 
 Expected: FAIL — `generate` takes 4 arguments / constructor takes 2 / `technique` not set.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `packages/creativity/src/HypothesisGenerator.ts`:
 
@@ -879,7 +881,7 @@ and wrap the four return sites of `generate`:
 
 (`CREATIVITY_SYSTEM_PROMPT` stays imported: it is a public export of `CreativityPrompt` and other consumers may hold it.)
 
-- [ ] **Step 4: Run and see it pass**
+- [x] **Step 4: Run and see it pass**
 
 ```powershell
 npx vitest run tests/main/creativity/hypothesis-method.test.ts tests/main/creativity/creativity-prompt.test.ts
@@ -888,7 +890,7 @@ npm run typecheck:node
 
 Expected: PASS, typecheck 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/creativity/src/HypothesisGenerator.ts tests/main/creativity/hypothesis-method.test.ts
@@ -903,7 +905,7 @@ git add packages/creativity/src/HypothesisGenerator.ts tests/main/creativity/hyp
 - Modify: `packages/creativity/src/IdeaGenerator.ts`
 - Test: `tests/main/creativity/idea-generator.test.ts` (new)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -975,7 +977,7 @@ describe('IdeaGenerator goal-driven flow', () => {
 })
 ```
 
-- [ ] **Step 2: Run and see it fail**
+- [x] **Step 2: Run and see it fail**
 
 ```powershell
 npx vitest run tests/main/creativity/idea-generator.test.ts
@@ -983,7 +985,7 @@ npx vitest run tests/main/creativity/idea-generator.test.ts
 
 Expected: FAIL — constructor rejects the 4th argument (`Expected 1-3 arguments`) / `technique` undefined.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `packages/creativity/src/IdeaGenerator.ts`:
 
@@ -1025,7 +1027,7 @@ line 65 becomes:
     const hypotheses = await this.hypothesisGen.generate(combos, activeSources, false, externalSignals, method)
 ```
 
-- [ ] **Step 4: Run and see it pass**
+- [x] **Step 4: Run and see it pass**
 
 ```powershell
 npx vitest run tests/main/creativity/
@@ -1034,7 +1036,7 @@ npm run typecheck:node
 
 Expected: all `tests/main/creativity/*` PASS, typecheck 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/creativity/src/IdeaGenerator.ts tests/main/creativity/idea-generator.test.ts
@@ -1050,7 +1052,7 @@ git add packages/creativity/src/IdeaGenerator.ts tests/main/creativity/idea-gene
 - Modify: `packages/mio-cli/server/creativity-engine.js` (small: export `isoOf`, origin fields on `sourcesFromInsights`, weight 0.78)
 - Test: `tests/main/creativity/creativity-sources.test.ts` (new)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
@@ -1163,7 +1165,7 @@ describe('sourcesFromInsights origin fields', () => {
 })
 ```
 
-- [ ] **Step 2: Run and see it fail**
+- [x] **Step 2: Run and see it fail**
 
 ```powershell
 npx vitest run tests/main/creativity/creativity-sources.test.ts
@@ -1171,7 +1173,7 @@ npx vitest run tests/main/creativity/creativity-sources.test.ts
 
 Expected: FAIL — cannot find `packages/mio-cli/server/creativity-sources.js` / `origin` undefined.
 
-- [ ] **Step 3: Engine pre-edits (`creativity-engine.js`)**
+- [x] **Step 3: Engine pre-edits (`creativity-engine.js`)**
 
 (a) Add `isoOf` next to `clamp100` (after line 28):
 
@@ -1208,7 +1210,7 @@ function isoOf(value) {
 module.exports = { CreativityEngine, CreativityStore, sourcesFromInsights, isoOf }
 ```
 
-- [ ] **Step 4: Create `packages/mio-cli/server/creativity-sources.js`**
+- [x] **Step 4: Create `packages/mio-cli/server/creativity-sources.js`**
 
 ```js
 'use strict'
@@ -1399,7 +1401,7 @@ function topUpSources(explicit, auto) {
 module.exports = { buildAutoSources, topUpSources, trendSources, memoryProvider, traceProviders, hypothesesProvider }
 ```
 
-- [ ] **Step 5: Run and see it pass**
+- [x] **Step 5: Run and see it pass**
 
 ```powershell
 npx vitest run tests/main/creativity/creativity-sources.test.ts
@@ -1408,7 +1410,7 @@ npm run check --prefix packages/mio-cli
 
 Expected: PASS + syntax check 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add packages/mio-cli/server/creativity-sources.js packages/mio-cli/server/creativity-engine.js tests/main/creativity/creativity-sources.test.ts
@@ -1425,7 +1427,7 @@ git add packages/mio-cli/server/creativity-sources.js packages/mio-cli/server/cr
 - Modify: `packages/mio-cli/server/mio-intelligence-mcp/index.js` (list schema `sort`)
 - Test: `packages/mio-cli/__tests__/creativity-list-sort.test.js` (new), `tests/main/creativity/novelty-sort.test.ts` (new)
 
-- [ ] **Step 1: Write the failing node:test file**
+- [x] **Step 1: Write the failing node:test file**
 
 ```js
 'use strict'
@@ -1520,7 +1522,7 @@ test('CLI rejects an unknown --sort and accepts novelty', () => {
 })
 ```
 
-- [ ] **Step 2: Run and see it fail**
+- [x] **Step 2: Run and see it fail**
 
 ```powershell
 npm test --prefix packages/mio-cli -- creativity-list-sort
@@ -1528,7 +1530,7 @@ npm test --prefix packages/mio-cli -- creativity-list-sort
 
 Expected: FAIL — rows lack `noveltyScore`, order wrong (insertion order), CLI: `unknown option` or ignored `--sort`.
 
-- [ ] **Step 3: Write the failing root vitest twin (spec: root vitest covers sort order + field)**
+- [x] **Step 3: Write the failing root vitest twin (spec: root vitest covers sort order + field)**
 
 `tests/main/creativity/novelty-sort.test.ts`:
 
@@ -1568,14 +1570,18 @@ describe('creativity list sort=novelty', () => {
     const rows = engine.list({})
     expect(rows.length).toBe(2)
     expect(rows[0].noveltyScore).toBeUndefined()
-    expect(rows[0].score).toBe(160) // 20 + 50 + 50 — legacy quality sum untouched
+    // plan typo (executed note): comment math 20 + 50 + 50 = 120, and the
+    // legacy quality sum really is 120 — original text said toBe(160).
+    expect(rows[0].score).toBe(120) // 20 + 50 + 50 — legacy quality sum untouched
   })
 })
 ```
 
 Run `npx vitest run tests/main/creativity/novelty-sort.test.ts` → FAIL (same reasons).
 
-- [ ] **Step 4: Implement the engine changes**
+> **Deviation (executed):** the embedded assertion above originally read `toBe(160)`, contradicting its own comment (`20 + 50 + 50`) and the engine's legacy `score: novelty + feasibility + impact` (verified actual = 120). Fixed to `toBe(120)`.
+
+- [x] **Step 4: Implement the engine changes**
 
 In `packages/mio-cli/server/creativity-engine.js`:
 
@@ -1632,7 +1638,7 @@ function listRow(h) {
   }
 ```
 
-- [ ] **Step 5: CLI changes (`bin/mio.js`)**
+- [x] **Step 5: CLI changes (`bin/mio.js`)**
 
 (a) In `creativityCommand` list branch (line 2292), replace the `engine.list({...})` call with:
 
@@ -1665,7 +1671,7 @@ line 2075 gains `--sort novelty     Rank list by relative noveltyScore (a dedup 
 (d) `mio --help` text (line 3372) becomes:
 `  mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --sort novelty, --limit N)`
 
-- [ ] **Step 6: MCP schema change (`server/mio-intelligence-mcp/index.js`)**
+- [x] **Step 6: MCP schema change (`server/mio-intelligence-mcp/index.js`)**
 
 In the `mio.creativity.list` inputSchema properties (after line 697):
 
@@ -1675,7 +1681,7 @@ In the `mio.creativity.list` inputSchema properties (after line 697):
 
 (Dispatch already passes `args` through: `case 'mio.creativity.list': return creativityEngine.list(args)` — no change needed.)
 
-- [ ] **Step 7: Run all affected tests**
+- [x] **Step 7: Run all affected tests**
 
 ```powershell
 npm test --prefix packages/mio-cli -- creativity
@@ -1684,7 +1690,7 @@ npx vitest run tests/main/creativity/
 
 Expected: PASS. **Known behavioural migration** (intended, spec Decision 4): the package scorer no longer auto-rejects on *recent* similarity (it down-scores 15 when Jaccard > 0.5) and no longer adds the inline `+5` clean bonus; Chinese reject reasons replace the English ones. If an existing assertion in `creativity-generate.test.js` depended on the old inline behaviour, update the fixture: duplicate a **rejected** hypothesis's title+idea text to trigger a reject (threshold 0.6), or assert the down-scored `novelty` value instead of the bonus. No test currently greps for `too similar to recent`/`adjustedNovelty` (verified 2026-10-07). If an assertion still fails, migrate it per this note — never re-add an inline scorer to the engine.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```powershell
 git add packages/mio-cli/server/creativity-engine.js packages/mio-cli/bin/mio.js packages/mio-cli/server/mio-intelligence-mcp/index.js packages/mio-cli/__tests__/creativity-list-sort.test.js tests/main/creativity/novelty-sort.test.ts

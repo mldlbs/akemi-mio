@@ -343,7 +343,9 @@ test('generate clamps hostile LLM scores and truncates overlong titles', async (
   assert.equal(result.ideas.length, 1)
   const stored = readHypotheses(ws)
   assert.equal(stored[0].title.length, 60, 'title is bounded to 60 chars')
-  assert.equal(stored[0].novelty, 55, 'NaN coerces to the 50 fallback (+5 novelty adjustment)')
+  // FR: novelty now comes from @akemi-mio/creativity/NoveltyScorer (the inline
+  // +5 clean bonus is gone) — NaN still coerces to the 50 fallback, as-is.
+  assert.equal(stored[0].novelty, 50, 'NaN coerces to the 50 fallback (package scorer has no +5 bonus)')
   assert.equal(stored[0].feasibility, 100, 'out-of-range high clamps to 100')
   assert.equal(stored[0].impact, 0, 'negative clamps to 0')
   assert.equal(stored[0].logic, 50, 'non-numeric logic falls back to 50 instead of NaN')
