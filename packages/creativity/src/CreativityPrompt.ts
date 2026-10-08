@@ -104,8 +104,68 @@ const METHOD_DESCRIPTIONS: Record<string, string> = {
   'Rearrange（重排）': '思考：如果交换两个来源的执行顺序，会怎样？如果让被动变为主动、同步变为异步、集中变为分散？',
 }
 
+/** The five techniques mio.idea.generate rotates through (0.5.2 table). */
+export const TECHNIQUE_CYCLE = [
+  'SCAMPER',
+  'Analogy',
+  'First-Principles',
+  'Random-Stimulus',
+  'Constraint-Inversion',
+] as const
+
+Object.assign(METHOD_DESCRIPTIONS, {
+  SCAMPER: '综合使用 SCAMPER 七问（替代/组合/适应/修改/另作他用/消除/重排）逐项审视两个来源，挑出最有产出的一问作为方案主轴。',
+  Analogy: '类比迁移：找出两个来源之外、结构上同构的成熟系统/自然机制，把它的解法迁移到当前组合上，并说明结构对应关系。',
+  'First-Principles': '第一性原理：剥掉两个来源的既有实现假设，回到最底层的事实与约束重新推导方案，明确哪些步骤是被传统做法掩盖的。',
+  'Random-Stimulus': '随机刺激：引入一个与两来源无关的外部概念（随便挑一个真实存在的产品/生物机制），强制建立连接并解释其合理性。',
+  'Constraint-Inversion': '约束反转：把当前方案默认成立的约束（预算/延迟/顺序）反过来假设成立，构造在反转约束下依然成立的方案。',
+})
+
+/** Deterministic rotation: seed with the stored-hypothesis count so CLI and MCP cycles agree across processes. */
+export function pickTechnique(seed: number): string {
+  const len = TECHNIQUE_CYCLE.length
+  const idx = ((Math.floor(seed) % len) + len) % len
+  return TECHNIQUE_CYCLE[idx]
+}
+
 /** 旧版常量保留兼容，实际应使用 buildSystemPrompt() */
 export const CREATIVITY_SYSTEM_PROMPT = buildSystemPrompt()
+
+/** Evidence-class label shown to the LLM (spec Capability 2 presentation contract). */
+const TYPE_LABELS: Record<string, string> = {
+  knowledge: 'fact',
+  behavior: 'trace',
+  insight: 'observation',
+  failure: 'failure',
+  feedback: 'experience',
+  random: 'random',
+  provocation: 'provocation',
+}
+
+/** Stable group order — facts first, provocations last. */
+const TYPE_ORDER = ['knowledge', 'behavior', 'feedback', 'insight', 'failure', 'provocation', 'random']
+
+/** Group sources by `type`, prefix every line with its evidence label and append provenance metadata. */
+function buildSourceBlock(sources: CreativitySource[]): string {
+  const byType = new Map<string, CreativitySource[]>()
+  for (const s of sources) {
+    const list = byType.get(s.type) ?? []
+    list.push(s)
+    byType.set(s.type, list)
+  }
+  const groups: string[] = []
+  for (const type of TYPE_ORDER) {
+    const list = byType.get(type)
+    if (!list || list.length === 0) continue
+    const label = TYPE_LABELS[type] || type
+    const lines = list.map((s) => {
+      const meta = [s.origin, s.timestamp].filter(Boolean).join(' @')
+      return `  - [${label}] ${s.name}${meta ? ` (${meta})` : ''}: ${clip(s.content, 600)}`
+    })
+    groups.push(`【${label} · ${type}】\n${lines.join('\n')}`)
+  }
+  return groups.join('\n\n')
+}
 
 /**
  * 构建 Creativity 用户提示词
@@ -120,8 +180,7 @@ export function buildCreativityPrompt(
   const sections: string[] = []
 
   // 来源列表
-  const sourceLines = sources.map((s) => `  [${s.type}] ${s.name}: ${clip(s.content, 600)}`).join('\n')
-  sections.push(`【可用概念来源】\n${sourceLines}`)
+  sections.push(`【可用概念来源 — 按证据类型分组】\n${buildSourceBlock(sources)}`)
 
   // 推荐配对 — 支持 2-way 和 3-way 组合
   const comboLines = combos
