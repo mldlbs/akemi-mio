@@ -27,6 +27,13 @@ function clamp100(value, fallback = 50) {
   return Math.min(100, Math.max(0, n))
 }
 
+// ISO timestamp for provenance: accepts epoch ms or date strings, returns
+// undefined when the value is missing or unparsable.
+function isoOf(value) {
+  const t = typeof value === 'number' ? value : Date.parse(value || '')
+  return Number.isFinite(t) ? new Date(t).toISOString() : undefined
+}
+
 // ═══════════════════════════════════════════════
 //  JSONL Store — ideas, combos, experiments
 // ═══════════════════════════════════════════════
@@ -234,7 +241,11 @@ function sourcesFromInsights(insights, limit = 10) {
         Array.isArray(i.evidence) && i.evidence.length > 0 ? `Evidence: ${i.evidence.join('; ')}` : '',
       ].filter(Boolean).join('\n'),
       type: 'insight',
-      weight: 0.7,
+      // > 0.7: IdeaGenerator.applyTemperature keeps any weight>0.7 source unconditionally.
+      weight: 0.78,
+      origin: `insight:${i.id || i.title || 'unknown'}`,
+      ...(i.id ? { originId: i.id } : {}),
+      ...(isoOf(i.createdAt) ? { timestamp: isoOf(i.createdAt) } : {}),
     }))
 }
 
@@ -570,4 +581,4 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
   }
 }
 
-module.exports = { CreativityEngine, CreativityStore, sourcesFromInsights }
+module.exports = { CreativityEngine, CreativityStore, sourcesFromInsights, isoOf }
