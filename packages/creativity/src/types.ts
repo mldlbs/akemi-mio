@@ -13,6 +13,28 @@ export interface CreativitySource {
   sourceDepth?: 'shallow' | 'medium' | 'full'
   type: 'knowledge' | 'behavior' | 'insight' | 'failure' | 'random' | 'provocation' | 'feedback'
   weight: number
+  /** Provider + record id, e.g. `memory:mem_1791…`. Required on auto-aggregated sources (spec Capability 2). */
+  origin?: string
+  /** Original record id for back-referencing. */
+  originId?: string
+  /** 0-1 credibility hint; omit when unknowable. */
+  confidence?: number
+  /** Source record time, ISO 8601. */
+  timestamp?: string
+}
+
+/** Where and how an idea.generate result was produced (spec Capability 1). */
+export interface HypothesisProvenance {
+  /** Pairing strategy used to build source combos: explore | stable | signal. */
+  strategy?: string
+  /** Rotation technique used for the prompt (mirrors `Hypothesis.technique`). */
+  technique?: string
+  /** Memory record ids that grounded the goal (0-3, newest first). */
+  relatedMemoryIds?: string[]
+  /** Assembled sources that fed generation, filtered to the labels actually used. */
+  sources?: Array<{ name: string; type: string; origin?: string; timestamp?: string }>
+  /** When the idea was generated, ISO 8601. */
+  generatedAt?: string
 }
 
 export interface ConceptCombo {
@@ -59,6 +81,10 @@ export interface Hypothesis {
   logic?: number
   status: 'draft' | 'active' | 'experimenting' | 'validated' | 'rejected'
   createdAt: number
+  /** The rotation technique this hypothesis was generated with (idea.generate provenance.technique). */
+  technique?: string
+  /** Idea-generation provenance; `mio.idea.generate` persists this with the record. */
+  provenance?: HypothesisProvenance
   /** 实现难度 1-5（LLM 生成�?*/
   implementationDifficulty?: number
   /** 预计开发时间（LLM 生成，如 "1-2�?�?*/
