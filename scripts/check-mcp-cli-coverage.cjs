@@ -54,6 +54,7 @@ const MCP_TO_CLI = {
   'mio.experience.list': ['experience', 'list'],
   'mio.experience.reuse': ['experience', 'reuse'],
   'mio.host.capabilities': ['host', 'capabilities'],
+  'mio.idea.generate': ['idea', 'generate'],
   'mio.insight.generate': ['insight', 'generate'],
   'mio.insight.list': ['insight', 'list'],
   'mio.insight.mark_reported': ['insight', 'mark-reported'],
