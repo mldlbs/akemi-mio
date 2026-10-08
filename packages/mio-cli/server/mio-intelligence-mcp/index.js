@@ -21,6 +21,8 @@ const { createDigest } = require('../digest.js')
 const { createEvolutionReport } = require('../evolution-report.js')
 
 const { CreativityEngine, sourcesFromInsights } = require('../creativity-engine.js')
+const { buildAutoSources, topUpSources } = require('../creativity-sources.js')
+const { runIdeaGenerate, groundingFrom } = require('../idea-generate.js')
 // The observer and insight engines are optional dependencies. Their stores own
 // the require and expose isObserverAvailable() / isInsightAvailable() so tool
 // registration can be gated on them, and both the MCP server and the CLI share
@@ -175,6 +177,16 @@ const memoryStore = createMemoryStore({
   projectName,
   agentId: runtimeAgentId,
   queryLog,
+  verifiedFilter: REUSE_STATUS_FILTERS.verified,
+})
+
+// Second memory-store instance WITHOUT the shared queryLog: idea.generate's
+// grounding recall is tool-side context gathering, not a user query — it must
+// not append to queries.jsonl (that log exists for recall-style queries).
+const groundingMemoryStore = createMemoryStore({
+  dataDir,
+  projectName,
+  agentId: runtimeAgentId,
   verifiedFilter: REUSE_STATUS_FILTERS.verified,
 })
 
@@ -737,6 +749,21 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'mio.idea.generate',
+    description:
+      'Generate up to 3 concrete, experiment-backed hypotheses from one goal. Sources are assembled locally (goal, context/constraints, Mio memory grounding, local memory/traces/stored hypotheses) and every idea is persisted to the CreativityStore with provenance — Mio memory is never written. Returns { ideas, generatedAt, groundedWith, persistedIds }, or { reason } when fewer than two sources are available.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        goal: { type: 'string', description: 'The one-line goal the ideas should pursue (required).' },
+        context: { type: 'string', description: 'Optional free-form background.' },
+        constraints: { type: 'array', items: { type: 'string' }, description: 'Optional hard constraints.' },
+        numIdeas: { type: 'number', description: 'How many ideas to return; clamped to 1..3, default 3.' },
+      },
+      required: ['goal'],
+    },
+  },
 
   // ═══ Observer Research Pipeline ═══
 
@@ -969,6 +996,25 @@ function observerDag(args = {}) {
   return observerStore.dag(args)
 }
 
+// Local auto sources shared by generate's top-up and idea.generate — the same
+// providers the CLI assembles (spec Capability 2). Every layer degrades to []
+// so a missing optional package or an unreadable store never fails a tool call.
+function autoSources() {
+  let insights = []
+  let trends = []
+  try {
+    if (isInsightAvailable()) insights = insightStore.list({}) || []
+  } catch (_) {}
+  try {
+    trends = observerStore.trends({ limit: 3 }) || []
+  } catch (_) {}
+  try {
+    return buildAutoSources({ dataDir, insights, trends })
+  } catch (_) {
+    return []
+  }
+}
+
 // `fromInsights` seeds generation from what the insight engine already noticed
 // instead of making the caller hand-write concept sources. Only this entry
 // point knows which store is authoritative, so the read happens here; the
@@ -976,15 +1022,24 @@ function observerDag(args = {}) {
 // so the CLI's `--from-insights` lands on the same shapes.
 function generationSources(args) {
   const supplied = args.sources
-  if (!args.fromInsights) return supplied
-  if (!isInsightAvailable()) {
-    throw new Error('mio.creativity.generate fromInsights requires the optional package @akemi-mio/insight')
+  // Nothing to top up and no fromInsights: return as-is so the engine keeps
+  // throwing its documented "requires sources" error for empty calls.
+  if (!args.fromInsights && !(Array.isArray(supplied) && supplied.length)) return supplied
+  let base = supplied
+  if (args.fromInsights) {
+    if (!isInsightAvailable()) {
+      throw new Error('mio.creativity.generate fromInsights requires the optional package @akemi-mio/insight')
+    }
+    const seeds = sourcesFromInsights(insightStore.list({}))
+    if (seeds.length === 0) {
+      throw new Error('mio.creativity.generate fromInsights: no stored insights yet (run `mio insight generate` first)')
+    }
+    base = Array.isArray(supplied) ? supplied.concat(seeds) : seeds
   }
-  const seeds = sourcesFromInsights(insightStore.list({}))
-  if (seeds.length === 0) {
-    throw new Error('mio.creativity.generate fromInsights: no stored insights yet (run `mio insight generate` first)')
-  }
-  return Array.isArray(supplied) ? supplied.concat(seeds) : seeds
+  // Explicit sources always win; local memory/traces/stored hypotheses only
+  // top a short list up to the two entries the mixer needs (spec Capability 2,
+  // injection point 2 — the MCP twin of `mio creativity generate`).
+  return topUpSources(Array.isArray(base) ? base : [], autoSources())
 }
 
 async function callTool(name, args = {}) {
@@ -1061,6 +1116,26 @@ async function callTool(name, args = {}) {
       return creativityEngine.generate(generationSources(args), args.strategy)
     case 'mio.creativity.ferment':
       return creativityEngine.ferment(args.limit)
+    case 'mio.idea.generate': {
+      const goal = typeof args.goal === 'string' ? args.goal.trim() : ''
+      if (!goal) throw new Error('mio.idea.generate requires goal: a non-empty string')
+      let grounding = { sources: [], relatedMemoryIds: [], groundedWith: 0 }
+      try {
+        const qr = await groundingMemoryStore.queryMemory({ query: goal, limit: 3, scope: 'all' })
+        grounding = groundingFrom(qr)
+      } catch (_) {}
+      return runIdeaGenerate({
+        goal,
+        context: typeof args.context === 'string' ? args.context : '',
+        constraints: Array.isArray(args.constraints) ? args.constraints.filter((c) => typeof c === 'string') : [],
+        numIdeas: args.numIdeas,
+        chatJson,
+        store: creativityEngine.store,
+        groundingSources: grounding.sources,
+        relatedMemoryIds: grounding.relatedMemoryIds,
+        autoSources: autoSources(),
+      })
+    }
     case 'mio.insight.status':
       return insightStatus()
     case 'mio.insight.list':

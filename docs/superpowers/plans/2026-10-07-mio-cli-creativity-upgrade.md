@@ -2192,7 +2192,7 @@ git add packages/mio-cli/server/idea-generate.js packages/mio-cli/__tests__/idea
 - Modify: `packages/mio-cli/server/mio-intelligence-mcp/index.js` (requires, `groundingMemoryStore`, `autoSources()`, `generationSources` top-up, TOOLS entry, dispatch case)
 - Modify: `packages/mio-cli/server/mio-intelligence-mcp/__tests__/creativity.test.js` (env pin, fromInsights rewrite, four new tests)
 
-- [ ] **Step 1: Edit the test file**
+- [x] **Step 1: Edit the test file**
 
 (a) After `process.env.MIO_DATA_DIR = dataDir` add:
 
@@ -2268,7 +2268,7 @@ test('mio.idea.generate grounds on memory and persists drafts with provenance', 
 })
 ```
 
-- [ ] **Step 2: Run and see it fail**
+- [x] **Step 2: Run and see it fail**
 
 ```powershell
 npm test --prefix packages/mio-cli -- creativity
@@ -2276,7 +2276,7 @@ npm test --prefix packages/mio-cli -- creativity
 
 Expected: FAIL — `mio.idea.generate` unknown tool; the rewritten fromInsights test still sees `reason: 'need at least 2 sources'` (no top-up seam).
 
-- [ ] **Step 3: Implement in `server/mio-intelligence-mcp/index.js`**
+- [x] **Step 3: Implement in `server/mio-intelligence-mcp/index.js`**
 
 (a) After the `creativity-engine.js` require (line 23):
 
@@ -2395,7 +2395,7 @@ function generationSources(args) {
 
 (`scope: 'all'` — idea grounding wants global + project knowledge, and project inference can be ambiguous for tool callers.)
 
-- [ ] **Step 4: Run and see it pass**
+- [x] **Step 4: Run and see it pass**
 
 ```powershell
 npm test --prefix packages/mio-cli -- creativity
@@ -2404,7 +2404,7 @@ npm run check --prefix packages/mio-cli
 
 Expected: PASS + syntax 0. The file's earlier tests are untouched: `MIO_DATA_DIR` keeps all state in a temp dir, and their temp homes hold no memory/traces, so top-up is a no-op for them.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/mio-cli/server/mio-intelligence-mcp/index.js packages/mio-cli/server/mio-intelligence-mcp/__tests__/creativity.test.js
