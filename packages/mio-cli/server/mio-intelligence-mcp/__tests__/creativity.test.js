@@ -15,6 +15,9 @@ const path = require('node:path')
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mio-cre-mcp-'))
 process.env.MIO_DATA_DIR = dataDir
+// The generate top-up and idea.generate both reach the engine's chatJson:
+// pin the endpoint to a refused address so no test can ever touch a real LLM.
+process.env.LLM_API_URL = 'http://127.0.0.1:9/v1/chat/completions'
 
 const { callTool, rl, TOOLS } = require('../index.js')
 const { isInsightAvailable } = require('../../insight-store.js')
@@ -138,12 +141,63 @@ test('mio.creativity.generate fromInsights hands the seed to the engine', async 
     },
   ])
 
-  // One seed is one concept, and the engine refuses to call an LLM for a single
-  // source -- so this proves the insight actually became a concept without
-  // touching the network.
+  // One insight seed alone is still one concept — but the local auto sources
+  // top it up (the active hypothesis below), so the engine clears the
+  // two-source gate, attempts its pair(s), and fails each one against the
+  // refused LLM endpoint. That combination proves the seed became a concept
+  // without ever touching the network.
+  seedHypotheses([hypothesis('b', 'active')])
   const result = await callTool('mio.creativity.generate', { fromInsights: true })
-  assert.deepEqual(result.ideas, [])
-  assert.equal(result.reason, 'need at least 2 sources')
+  assert.equal(result.reason, undefined, 'top-up pushed the seed past the two-source gate')
+  assert.ok(result.pairsAttempted >= 1)
+  assert.deepEqual(result.ideas, [], 'the engine has no template path — refused LLM means no ideas')
+  assert.equal(result.errors.length, result.pairsAttempted, 'every attempted pair reports its failure')
+})
+
+test('mio.creativity.generate tops a single explicit source up from local data', async () => {
+  seedHypotheses([hypothesis('b', 'active')])
+  const result = await callTool('mio.creativity.generate', {
+    sources: [{ name: 'auth', content: 'token rotation keeps getting hand-rolled' }],
+  })
+  assert.equal(result.reason, undefined, 'one explicit source + a stored hypothesis clears the gate')
+  assert.ok(result.pairsAttempted >= 1)
+  assert.deepEqual(result.ideas, [], 'LLM refused in tests; only the gate behaviour is under test')
+  assert.equal(result.errors.length, result.pairsAttempted)
+})
+
+test('mio.idea.generate registers the goal schema', () => {
+  const tool = TOOLS.find((t) => t.name === 'mio.idea.generate')
+  assert.ok(tool, 'the tool is registered')
+  assert.deepEqual(tool.inputSchema.required, ['goal'])
+  assert.ok(tool.inputSchema.properties.goal)
+  assert.ok(tool.inputSchema.properties.numIdeas)
+})
+
+test('mio.idea.generate without goal names the missing field', async () => {
+  await assert.rejects(() => callTool('mio.idea.generate'), /requires goal/)
+  await assert.rejects(() => callTool('mio.idea.generate', { context: 'x' }), /requires goal/)
+})
+
+test('mio.idea.generate grounds on memory and persists drafts with provenance', async () => {
+  seedHypotheses([])
+  fs.writeFileSync(
+    path.join(dataDir, 'memory.jsonl'),
+    JSON.stringify({
+      id: 'g1',
+      timestamp: '2026-10-06T01:00:00.000Z',
+      kind: 'decision',
+      content: '延迟优化的决定：优先降低 MCP 调用延迟',
+      scope: 'global',
+    }) + '\n',
+    'utf8'
+  )
+
+  const result = await callTool('mio.idea.generate', { goal: '降低 MCP 调用延迟' })
+  assert.ok(result.ideas.length >= 1)
+  assert.ok(result.groundedWith >= 1, 'the global decision matched the goal query')
+  assert.deepEqual(result.ideas[0].provenance.relatedMemoryIds, ['g1'])
+  assert.equal(result.ideas[0].hypothesis.status, 'draft')
+  assert.equal(typeof result.persistedIds[0], 'string')
 })
 
 after(() => {
