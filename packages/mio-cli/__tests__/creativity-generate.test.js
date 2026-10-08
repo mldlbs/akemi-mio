@@ -170,6 +170,142 @@ test('generate succeeds for one pair and still reports the others failing', asyn
   assert.equal(readHypotheses(ws).length, 1)
 })
 
+// ── per-strategy dedup: a fallback retry must not be a deterministic no-op ──
+
+test('generate re-tries the same sources under a new strategy but never the same one twice', async () => {
+  // The documented fallback is "409 -> retry with another strategy", but the
+  // pair key used to ignore `strategy`, so all three retries computed the
+  // same key and returned the same `all pairs already explored` without ever
+  // reaching the LLM. Identity is (pair, strategy) now.
+  const ws = workspace('gen-strategy')
+  const idea = {
+    title: 'Once per strategy',
+    idea: 'combine rotation with invalidation',
+    expectedBenefit: 'b',
+    risk: 'r',
+    novelty: 70,
+    feasibility: 60,
+    impact: 80,
+  }
+  let calls = 0
+  const engine = engineWith(ws, async () => {
+    calls += 1
+    return { data: idea }
+  })
+
+  const first = await engine.generate(twoSources(), 'explore')
+  assert.equal(first.ideas.length, 1)
+  assert.equal(calls, 1)
+
+  const fallback = await engine.generate(twoSources(), 'signal')
+  assert.equal(fallback.ideas.length, 1, 'a different strategy is a different experiment')
+  assert.equal(fallback.strategy, 'signal')
+  assert.equal(calls, 2)
+
+  const third = await engine.generate(twoSources(), 'stable')
+  assert.equal(third.ideas.length, 1)
+  assert.equal(calls, 3)
+
+  // Now every strategy has seen this pair — and the payload says so instead
+  // of returning a bare string that reads as "try another strategy".
+  const exhausted = await engine.generate(twoSources(), 'explore')
+  assert.deepEqual(exhausted.ideas, [])
+  assert.equal(calls, 3, 'an exhausted retry never reaches the LLM')
+  assert.equal(exhausted.strategy, 'explore')
+  assert.equal(exhausted.pairsAvailable, 0)
+  assert.match(exhausted.reason, /all pairs already explored for strategy "explore"/)
+  assert.match(exhausted.reason, /2 sources, 1 candidate pairs/)
+
+  // The reverse order is the same pair, also under the same strategy.
+  const reversed = await engine.generate([twoSources()[1], twoSources()[0]], 'explore')
+  assert.deepEqual(reversed.ideas, [], 'source order does not mint a new pair')
+  assert.equal(calls, 3)
+})
+
+test('records without a strategy field keep blocking every strategy', async () => {
+  // Legacy rows (written before the strategy field existed) carry the
+  // unsuffixed key; the extra un-suffixed comparison keeps the old
+  // "this pair was tried once" semantics for them.
+  const ws = workspace('gen-legacy')
+  const dir = path.join(ws.mioHome, 'creativity')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'creativity-hypotheses.jsonl'),
+    JSON.stringify({
+      id: 'h1',
+      title: 'Seeded before strategies existed',
+      idea: 'original',
+      status: 'active',
+      novelty: 70,
+      feasibility: 70,
+      impact: 70,
+      sourceLabels: ['auth', 'cache'],
+      createdAt: Date.now(),
+      // no strategy field on purpose
+    }) + '\n',
+    'utf8'
+  )
+
+  let calls = 0
+  const engine = engineWith(ws, async () => {
+    calls += 1
+    return { data: { title: 'x' } }
+  })
+
+  for (const strategy of ['explore', 'signal', 'stable']) {
+    const result = await engine.generate(twoSources(), strategy)
+    assert.deepEqual(result.ideas, [], `legacy record blocks ${strategy}`)
+  }
+  assert.equal(calls, 0, 'no strategy reaches the LLM for a legacy-blocked pair')
+})
+
+test('a long source name is one identity for up to 120 chars, so a tail edit cannot bypass dedup', async () => {
+  // `--source` without a pipe turns the whole description into `name`; a
+  // one-character edit at the end used to mint a brand-new key.
+  const ws = workspace('gen-longname')
+  const longName = 'GOAL_' + 'x'.repeat(300)
+  let calls = 0
+  const engine = engineWith(ws, async () => {
+    calls += 1
+    return {
+      data: { title: 'Idea', idea: 'chain', expectedBenefit: 'b', risk: 'r', novelty: 70, feasibility: 60, impact: 80 },
+    }
+  })
+
+  const first = await engine.generate(
+    [
+      { name: longName, content: 'goal text' },
+      { name: 'ctx', content: 'context text' },
+    ],
+    'explore'
+  )
+  assert.equal(first.ideas.length, 1)
+  assert.equal(calls, 1)
+
+  const editedTail = longName.replace(/x$/, 'y')
+  const second = await engine.generate(
+    [
+      { name: editedTail, content: 'goal text' },
+      { name: 'ctx', content: 'context text' },
+    ],
+    'explore'
+  )
+  assert.deepEqual(second.ideas, [], 'same first 120 chars = same pair')
+  assert.match(second.reason, /already explored/)
+  assert.equal(calls, 1)
+
+  // A genuinely different short name is not falsely collapsed onto the first.
+  const different = await engine.generate(
+    [
+      { name: 'goal-2', content: 'another goal' },
+      { name: 'ctx', content: 'context text' },
+    ],
+    'explore'
+  )
+  assert.equal(different.ideas.length, 1, 'truncation must not merge distinct sources')
+  assert.equal(calls, 2)
+})
+
 test('ferment updates an active hypothesis and records the verdict', async () => {
   const ws = workspace('ferment')
   const dir = path.join(ws.mioHome, 'creativity')

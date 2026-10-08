@@ -423,6 +423,13 @@ mio creativity ferment --limit 3
   `@akemi-mio/insight` 已安装且至少存有一条洞察时有意义，否则明确报错而不是
   静默当作「没有来源」。因为来源可由它提供，`mio.creativity.generate` 的
   `sources` 不再是 schema 必填项。
+- **判重粒度是（素材对 × `--strategy`）。** 同一对素材在 `explore` / `signal` /
+  `stable` 下各算一次实验——「409 就换 strategy 重试」是有效的降级而不是空转；
+  三种 strategy 都试过、且没有新素材时才真正耗尽，此时返回的 `reason` 会带上
+  strategy、来源数与候选对数（外加 `strategy` 与 `pairsAvailable: 0` 字段），
+  调用方可以据此区分「换个 strategy 有用」与「该补新素材了」。素材身份取名称
+  去空白后的**前 120 个字符**（`--source` 省略 `|` 时 name 会退化成整段描述，
+  描述尾部微调不得绕过判重）；没有 `strategy` 字段的旧记录仍挡住所有 strategy。
 - `ferment` 会复核 `active` / `draft` 假设并更新分数；`verdict=promote` 且总分 > 200 时
   升为 `validated`，`verdict=reject` 则标记为 `rejected`。
 - **失败的 LLM 调用会出现在结果里，不再被吞掉。** 返回值带 `errors`
