@@ -3,6 +3,7 @@
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
+const { evaluateNovelty } = require('@akemi-mio/creativity/NoveltyScorer')
 
 // Cache validity key for a JSONL file: a (size, mtimeMs) pair, the same
 // guard server/insight-store.js uses (commit 0ba7fa8). Every getter below used
@@ -181,43 +182,6 @@ function mixConcepts(sources, exploredPairs, rng) {
 }
 
 // ═══════════════════════════════════════════════
-//  Novelty Scorer — reject duplicates
-// ═══════════════════════════════════════════════
-
-function bigramSet(text) {
-  const s = new Set()
-  const lower = text.toLowerCase()
-  for (let i = 0; i < lower.length - 1; i++) {
-    s.add(lower.slice(i, i + 2))
-  }
-  return s
-}
-
-function jaccard(a, b) {
-  if (a.size === 0 && b.size === 0) return 1
-  let inter = 0
-  for (const x of a) if (b.has(x)) inter++
-  return inter / (a.size + b.size - inter)
-}
-
-function evaluateNovelty(idea, recent, rejected) {
-  const ideaBigrams = bigramSet(idea.title + ' ' + idea.idea)
-  for (const r of recent) {
-    const sim = jaccard(ideaBigrams, bigramSet(r.title + ' ' + r.idea))
-    if (sim > 0.7) {
-      return { shouldReject: true, rejectReason: `too similar to recent: "${r.title}" (sim=${sim.toFixed(2)})`, adjustedNovelty: idea.novelty }
-    }
-  }
-  for (const r of rejected) {
-    const sim = jaccard(ideaBigrams, bigramSet(r.title + ' ' + r.idea))
-    if (sim > 0.6) {
-      return { shouldReject: true, rejectReason: `matches rejected: "${r.title}" (sim=${sim.toFixed(2)})`, adjustedNovelty: idea.novelty }
-    }
-  }
-  return { shouldReject: false, adjustedNovelty: Math.min(100, idea.novelty + 5) }
-}
-
-// ═══════════════════════════════════════════════
 //  Creativity Engine — main orchestrator
 // ═══════════════════════════════════════════════
 
@@ -250,6 +214,28 @@ function sourcesFromInsights(insights, limit = 10) {
 }
 
 const STRATEGY_CYCLE = ['explore', 'signal', 'stable']
+
+// One row shape for every list variant — the fields JSON/CLI consumers already
+// depend on. `noveltyScore` is added only by sort=novelty (relative ranking),
+// never confused with the quality sum `score`.
+function listRow(h) {
+  return {
+    id: h.id,
+    title: h.title,
+    idea: h.idea,
+    status: h.status,
+    novelty: h.novelty,
+    feasibility: h.feasibility,
+    impact: h.impact,
+    ...(h.logic !== undefined ? { logic: h.logic } : {}),
+    score: h.novelty + h.feasibility + h.impact,
+    sourceLabels: h.sourceLabels,
+    createdAt: h.createdAt,
+    fermentedAt: h.fermentedAt,
+    fermentCount: h.fermentCount,
+    ...(h.mergedInto !== undefined ? { mergedInto: h.mergedInto } : {}),
+  }
+}
 
 class CreativityEngine {
   constructor(dataDir, chatJson) {
@@ -517,22 +503,19 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
   // result. `limit: 0` (and only 0) opts back into "everything".
   list(opts = {}) {
     const limit = opts.limit === undefined ? 20 : opts.limit
-    return this.store.getHypotheses({ ...opts, limit }).map(h => ({
-      id: h.id,
-      title: h.title,
-      idea: h.idea,
-      status: h.status,
-      novelty: h.novelty,
-      feasibility: h.feasibility,
-      impact: h.impact,
-      ...(h.logic !== undefined ? { logic: h.logic } : {}),
-      score: h.novelty + h.feasibility + h.impact,
-      sourceLabels: h.sourceLabels,
-      createdAt: h.createdAt,
-      fermentedAt: h.fermentedAt,
-      fermentCount: h.fermentCount,
-      ...(h.mergedInto !== undefined ? { mergedInto: h.mergedInto } : {}),
-    }))
+    if (opts.sort === 'novelty') {
+      // Relative novelty ranking (read-only, nothing written back). Pairwise
+      // Jaccard is O(n²) — bound candidates to the newest 200 (spec Risk 3).
+      const candidates = this.store.getHypotheses({ status: opts.status }).slice(-200)
+      const rows = candidates.map((h) => {
+        const others = candidates.filter((x) => x.id !== h.id)
+        const verdict = evaluateNovelty(h, others, [])
+        return { ...listRow(h), noveltyScore: verdict.adjustedNovelty }
+      })
+      rows.sort((a, b) => b.noveltyScore - a.noveltyScore || (b.createdAt || 0) - (a.createdAt || 0))
+      return limit === 0 ? rows : rows.slice(0, limit)
+    }
+    return this.store.getHypotheses({ status: opts.status, limit }).map(listRow)
   }
 
   _buildGenerationPrompt(a, b, strategy, recentHypotheses, rejectedHypotheses) {

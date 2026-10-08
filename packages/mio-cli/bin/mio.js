@@ -2065,7 +2065,7 @@ function observerCommand(args, useJson) {
 function creativityUsage(write = console.log) {
   write(`Usage:
   mio creativity status              Show hypothesis counts and recent top ideas
-  mio creativity list                List hypotheses (--status active|validated|rejected|draft, --limit N)
+  mio creativity list                List hypotheses (--status active|validated|rejected|draft, --sort novelty, --limit N)
 
   mio creativity generate        Generate hypotheses by combining sources (needs 2+ --source, calls an LLM)
   mio creativity ferment         Review/refine active hypotheses (calls an LLM)
@@ -2073,6 +2073,7 @@ function creativityUsage(write = console.log) {
 Options:
   --status name      Filter list by status
   --limit N          Max results for list / ferment (default 20 / 5); --limit 0 lists everything
+  --sort novelty     Rank list by relative noveltyScore (a dedup signal, not a quality score)
   --source "name|content"   A concept source for generate; repeat 2+ times
   --from-insights    Seed generate's sources from stored insights (needs @akemi-mio/insight)
   --strategy explore|signal|stable   Generation strategy (auto-selected if omitted)
@@ -2081,6 +2082,7 @@ Options:
 Examples:
   mio creativity status
   mio creativity list --status rejected --limit 10
+  mio creativity list --sort novelty
   mio creativity generate --source "auth|token rotation" --source "cache|write-through"
   mio creativity generate --from-insights --source "auth|token rotation"
 
@@ -2114,7 +2116,7 @@ function printCreativityList(items) {
   items.forEach((h, index) => {
     const when = h.createdAt ? new Date(h.createdAt).toISOString().slice(0, 19).replace('T', ' ') : ''
     const labels = Array.isArray(h.sourceLabels) && h.sourceLabels.length > 0 ? h.sourceLabels.join(' + ') : '—'
-    console.log(`${index + 1}. [${h.status}] ${h.title}  (N=${h.novelty} F=${h.feasibility} I=${h.impact} score=${h.score})`)
+    console.log(`${index + 1}. [${h.status}] ${h.title}  (N=${h.novelty} F=${h.feasibility} I=${h.impact} score=${h.score}${h.noveltyScore !== undefined ? ` noveltyScore=${h.noveltyScore}` : ''})`)
     console.log(`   ${labels} | ${when} | ${h.id}`)
     if (h.fermentCount) console.log(`   fermented ${h.fermentCount}x`)
   })
@@ -2289,9 +2291,16 @@ function creativityCommand(args, useJson) {
     if (sub === 'status') {
       result = engine.status()
     } else {
+      const sort = optionValue(flags, '--sort')
+      if (sort !== undefined && sort !== 'novelty') {
+        console.error(`mio creativity list: unknown --sort "${sort}" (supported: novelty)`)
+        process.exitCode = 1
+        return
+      }
       result = engine.list({
         status: optionValue(flags, '--status'),
         limit: parseNumberOption(flags, '--limit'),
+        sort,
       })
     }
   } catch (error) {
@@ -3369,7 +3378,7 @@ Usage:
   mio experience confirm --ids a,b   Confirm auto-claimed reuse (bulk supported)
   mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse
   mio creativity status        Show creativity hypothesis counts and recent top ideas
-  mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
+  mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --sort novelty, --limit N)
   mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
   mio creativity ferment       Review and refine active hypotheses (calls an LLM)
   mio insight status           Insight counts: total, reported, unreported, high-value
