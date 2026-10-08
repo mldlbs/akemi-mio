@@ -138,7 +138,7 @@ export class RetentionScheduler {
       deleted = (rows[0]?.c as number) ?? 0
       totalDeleted += deleted
       try {
-        const { markDirty } = await import('@akemi-mio/core/db/connection')
+        const { markDirty } = await import('../../db/connection.js')
         markDirty()
       } catch {
         /* 静默 */

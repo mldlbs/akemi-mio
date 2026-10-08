@@ -227,7 +227,7 @@ export class EventArchiver {
         totalDeleted += deleted
         // 触发周期性持久化
         try {
-          const { markDirty } = await import('@akemi-mio/core/db/connection')
+          const { markDirty } = await import('../../db/connection.js')
           markDirty()
         } catch {
           // 静默
