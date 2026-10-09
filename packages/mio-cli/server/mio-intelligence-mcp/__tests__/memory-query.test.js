@@ -19,7 +19,7 @@ process.env.MIO_CONTEXT = JSON.stringify({
   sessionId: 'test-session',
 })
 
-const { callTool, rl } = require('../index.js')
+const { callTool, rl, TOOLS } = require('../index.js')
 
 function writeMemories(records) {
   const file = path.join(dataDir, 'memory.jsonl')
@@ -92,6 +92,48 @@ test('memory.query kind+tags combined filter can return no results', async () =>
   })
   assert.equal(result.count, 0)
   assert.deepEqual(queryIds(result), [])
+})
+
+test('memory.record accepts hypothesisId and tags the record for the adopt join', async () => {
+  const schema = TOOLS.find((tool) => tool.name === 'mio.memory.record')
+  assert.ok(schema, 'the tool is registered')
+  assert.ok(
+    schema.inputSchema.properties.hypothesisId,
+    'hypothesisId is documented on the tool surface'
+  )
+  assert.deepEqual(schema.inputSchema.required, ['content'], 'the parameter stays optional')
+
+  writeMemories([])
+  const linked = await callTool('mio.memory.record', {
+    content: 'adopted hypothesis h-abc into the daily digest decision',
+    kind: 'decision',
+    tags: ['adoption'],
+    hypothesisId: 'h-abc',
+  })
+  assert.deepEqual(linked.tags, ['adoption', 'hypothesis:h-abc'])
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(linked, 'hypothesisId'),
+    false,
+    'the parameter never becomes a record field'
+  )
+
+  const plain = await callTool('mio.memory.record', {
+    content: 'plain record without any hypothesis join',
+    kind: 'note',
+  })
+  assert.deepEqual(plain.tags, [], 'omitting hypothesisId injects nothing')
+
+  const hit = await callTool('mio.memory.query', {
+    query: 'adopted hypothesis decision',
+    tags: ['hypothesis:h-abc'],
+  })
+  assert.deepEqual(queryIds(hit), [linked.id], 'the injected tag is searchable via tags AND')
+
+  const miss = await callTool('mio.memory.query', {
+    query: 'adopted hypothesis decision',
+    tags: ['hypothesis:h-zzz'],
+  })
+  assert.equal(miss.count, 0)
 })
 
 after(() => {

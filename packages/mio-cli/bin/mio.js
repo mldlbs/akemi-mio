@@ -678,18 +678,22 @@ function pruneCommand(args, useJson) {
 function rememberCommand(args, useJson) {
   const content = args[1]
   if (!content) {
-    console.error('Usage: mio remember "<content>" [--kind decision|context|problem|note] [--tags a,b] [--scope project|global] [--project name] [--json]')
+    console.error('Usage: mio remember "<content>" [--kind decision|context|problem|note] [--tags a,b] [--hypothesis-id id] [--scope project|global] [--project name] [--json]')
     process.exitCode = 1
     return
   }
   const flags = args.slice(2)
   const store = cliMemoryStore()
+  // optionValue returns the next token even if it is another flag; a bare
+  // trailing `--hypothesis-id` must not swallow `--json` as a "uuid".
+  const hypothesisId = optionValue(flags, '--hypothesis-id')
   let record
   try {
     record = store.recordMemory({
       content,
       kind: optionValue(flags, '--kind'),
       tags: splitTagsOption(flags, '--tags'),
+      hypothesisId: hypothesisId && !hypothesisId.startsWith('--') ? hypothesisId : undefined,
       scope: optionValue(flags, '--scope'),
       project: optionValue(flags, '--project'),
       source: 'cli',

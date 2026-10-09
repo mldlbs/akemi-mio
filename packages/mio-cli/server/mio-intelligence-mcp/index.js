@@ -351,6 +351,11 @@ const TOOLS = [
         content: { type: 'string', description: 'Memory content.' },
         kind: { type: 'string', description: 'Memory kind, such as decision, context, or problem.' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags.' },
+        hypothesisId: {
+          type: 'string',
+          description:
+            'Optional creativity hypothesis UUID. Injects the tag "hypothesis:<id>" so this record joins that hypothesis (the tag mio.creativity.adopt enforces); search it back via memory.query tags.',
+        },
         project: { type: 'string', description: 'Project name. Defaults to current directory name.' },
         scope: { type: 'string', description: 'Record scope: project (default) or global.' },
         source: { type: 'string', description: 'Recording source. Defaults to mcp.' },

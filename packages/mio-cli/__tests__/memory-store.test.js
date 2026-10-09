@@ -254,3 +254,49 @@ test('cross-call read cache is equivalent when warm and invalidates on write', (
     'the cache must be invalidated by the write so the newly recorded memory is immediately queryable'
   )
 })
+
+// hypothesisId sugar (idea b19bada4, task 2261a5f4): the injected tag must land
+// in the same tags array memory.query's AND filter searches — that shared tag
+// is the join key mio.creativity.adopt verifies — and omitting the parameter
+// must leave the legacy record shape untouched.
+test('recordMemory injects the hypothesis tag only when hypothesisId is given', () => {
+  const dataDir = tempDir('hypothesis-tag')
+  const store = makeStore(dataDir)
+
+  const plain = store.recordMemory({
+    content: 'adoption decision recorded without a hypothesis',
+    kind: 'decision',
+    tags: ['gateway'],
+  })
+  assert.deepEqual(
+    Object.keys(plain),
+    ['id', 'timestamp', 'kind', 'content', 'tags', 'project', 'scope', 'source'],
+    'the legacy record shape gains no field when hypothesisId is absent'
+  )
+  assert.deepEqual(plain.tags, ['gateway'], 'tags stay byte-identical without the parameter')
+
+  const linked = store.recordMemory({
+    content: 'adoption decision backed by hypothesis h-42',
+    kind: 'decision',
+    tags: ['gateway'],
+    hypothesisId: 'h-42',
+  })
+  assert.deepEqual(linked.tags, ['gateway', 'hypothesis:h-42'])
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(linked, 'hypothesisId'),
+    false,
+    'the parameter never becomes a record field — only the tag does'
+  )
+
+  const dup = store.recordMemory({
+    content: 'duplicate tag injection stays single',
+    tags: ['hypothesis:h-42'],
+    hypothesisId: 'h-42',
+  })
+  assert.deepEqual(dup.tags, ['hypothesis:h-42'], 'injection is idempotent when the tag already exists')
+
+  const hit = store.queryMemory({ query: 'backed by hypothesis', tags: ['gateway', 'hypothesis:h-42'] })
+  assert.equal(hit.count, 1, 'the injected tag participates in AND tag filtering')
+  const miss = store.queryMemory({ query: 'backed by hypothesis', tags: ['hypothesis:h-99'] })
+  assert.equal(miss.count, 0)
+})

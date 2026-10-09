@@ -256,3 +256,33 @@ test('memory subcommand validates its arguments', () => {
   assert.equal(help.status, 0)
   assert.match(help.stdout, /mio memory analyze/)
 })
+
+test('mio remember --hypothesis-id injects the join tag and omitting it keeps the legacy shape', () => {
+  const ws = workspace('remember-hypothesis')
+
+  const withFlag = remember(ws, 'adopted hypothesis decision h-77 in the daily digest', [
+    '--hypothesis-id',
+    'h-77',
+    '--json',
+  ])
+  const linked = JSON.parse(withFlag.stdout)
+  assert.deepEqual(linked.tags, ['hypothesis:h-77'])
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(linked, 'hypothesisId'),
+    false,
+    'the flag becomes a tag, never a record field'
+  )
+
+  remember(ws, 'plain decision without any hypothesis', ['--tags', 'plain,log'])
+  const rows = fs
+    .readFileSync(path.join(ws.mioHome, 'memory.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+  assert.deepEqual(rows[1].tags, ['plain', 'log'], 'without the flag no tag is injected')
+  assert.deepEqual(
+    Object.keys(rows[1]),
+    ['id', 'timestamp', 'kind', 'content', 'tags', 'project', 'scope', 'source'],
+    'the record written without the flag keeps the exact legacy shape'
+  )
+})

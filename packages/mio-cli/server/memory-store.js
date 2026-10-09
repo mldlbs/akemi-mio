@@ -518,12 +518,23 @@ function createMemoryStore(options = {}) {
     const content = String(args.content || '').trim()
     if (!content) throw new Error('memory.record requires a non-empty content')
     const scope = normalizeScope(args.scope)
+    // Adoption evidence (idea b19bada4, task 2261a5f4): hypothesisId is pure
+    // sugar for the exact tag `mio.creativity.adopt` enforces — the record
+    // joins the creativity hypothesis through the same `hypothesis:<uuid>`
+    // tag the tags AND-filter already searches. Omitted, the record keeps
+    // the exact legacy shape: no extra field, tags byte-identical.
+    const hypothesisId = String(args.hypothesisId || '').trim()
+    const tags = normalizeTags(args.tags)
+    if (hypothesisId) {
+      const tag = `hypothesis:${hypothesisId}`
+      if (!tags.includes(tag)) tags.push(tag)
+    }
     const record = {
       id: createId('mem'),
       timestamp: new Date().toISOString(),
       kind: args.kind || 'note',
       content,
-      tags: normalizeTags(args.tags),
+      tags,
       project: scope === 'global' ? null : args.project || projectName(),
       scope,
       source: args.source || agentId() || 'mcp',
