@@ -36,6 +36,14 @@ function loadDaily(observationsDir: string, date: string): DailyObservations {
   }
 }
 
+/** 去重规范化：剥 HTML 标签、折叠空白，使清洗前后的同一条目可互相命中 */
+export function normalizeForDedup(content: string): string {
+  return content
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 /**
  * ObserverStore — 观察数据的持久化层
  *
@@ -77,21 +85,42 @@ export class ObserverStore {
   // 原有方法（保持完全兼容）
   // ════════════════════════════════════════════════════════════
 
-  /** 生成去重指纹 */
+  /** 生成去重指纹（source + 规范化 content） */
   private fingerprint(obs: Observation): string {
-    return `${obs.source}::${obs.content}`
+    return `${obs.source}::${normalizeForDedup(obs.content)}`
   }
 
+  /**
+   * 入库并去重。指纹窗口 = 近 7 日 daily 文件（覆盖跨零点/隔天重采的
+   * 24h 与 7 天重复），批内互撞一并过滤（先到先留）；命中有日志计数。
+   */
   store(observations: Observation[]): void {
     if (observations.length === 0) return
     ensureDir(this.observationsDir)
 
     const date = today()
-    const daily = loadDaily(this.observationsDir, date)
-    const existingFps = new Set(daily.observations.map((o) => this.fingerprint(o)))
-    const newOnes = observations.filter((o) => !existingFps.has(this.fingerprint(o)))
+    const fps = new Set<string>()
+    const d = new Date()
+    for (let i = 0; i < 7; i++) {
+      const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      for (const o of loadDaily(this.observationsDir, ds).observations) fps.add(this.fingerprint(o))
+      d.setDate(d.getDate() - 1)
+    }
+
+    let skipped = 0
+    const newOnes = observations.filter((o) => {
+      const fp = this.fingerprint(o)
+      if (fps.has(fp)) {
+        skipped++
+        return false
+      }
+      fps.add(fp)
+      return true
+    })
+    if (skipped > 0) log('INFO', 'store_dedup', { skipped, stored: newOnes.length, windowDays: 7 })
     if (newOnes.length === 0) return
 
+    const daily = loadDaily(this.observationsDir, date)
     daily.observations.push(...newOnes)
     writeFileSync(resolve(this.observationsDir, `${date}.json`), JSON.stringify(daily, null, 2), 'utf-8')
   }
