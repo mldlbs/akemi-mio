@@ -3,6 +3,7 @@
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
+const { readJsonl } = require('./memory-store.js')
 const { evaluateNovelty } = require('@akemi-mio/creativity/NoveltyScorer')
 
 // Cache validity key for a JSONL file: a (size, mtimeMs) pair, the same
@@ -257,8 +258,55 @@ function listRow(h) {
   }
 }
 
+// --- read-side adoption join (idea b19bada4, design discussion 1d2e22e4 D3) ---
+// The store never gains an `adopted` status (D1/D4, see adoptHypothesis at the
+// bottom of this file): adoption is joined at READ time from the two evidence
+// axes the write side owns -- an append-only `creativity.adopt` trace event
+// (payload.hypothesisId = the CLAIM, written by mio.creativity.adopt) and a
+// `hypothesis:<id>` tag on a memory record (the EVIDENCE, injected by
+// mio.memory.record's hypothesisId parameter). The engine sits in
+// <dataRoot>/creativity on both hosts (MCP: path.join(dataDir, 'creativity');
+// CLI: path.join(MIO_HOME, 'creativity')), so the two evidence files are one
+// dirname up -- the same dataRoot convention adoptHypothesis documents.
+// Missing files are fine: readJsonl returns [] for them.
+//
+// The counts are informational joins, NOT ADR-017 metrics: no rate and no
+// threshold by design (D3 -- adoption rate was explicitly out of scope).
+// `sources` follows the routeAdoption pattern (evaluation-store.js): names
+// each axis' backing file and that it is durable, so a reader can tell
+// "0 adopted" apart from "evidence not kept". claimed/evidenced are raw
+// distinct ids (they can include ids no longer in the store); adopted is the
+// inner join against stored hypotheses, the only count that answers "which
+// surviving hypotheses were adopted".
+const ADOPTION_TAG_PREFIX = 'hypothesis:'
+
+const ADOPTION_SOURCES = Object.freeze({
+  events: { file: 'traces.jsonl', durable: true },
+  memory: { file: 'memory.jsonl', durable: true },
+})
+
+function readAdoptionEvidence(rootDir) {
+  const claimed = new Set()
+  for (const record of readJsonl(path.join(rootDir, 'traces.jsonl'))) {
+    if (!record || record.event_type !== 'creativity.adopt') continue
+    const id = record.payload && record.payload.hypothesisId
+    if (id) claimed.add(String(id))
+  }
+  const evidenced = new Set()
+  for (const record of readJsonl(path.join(rootDir, 'memory.jsonl'))) {
+    if (!record || !Array.isArray(record.tags)) continue
+    for (const tag of record.tags) {
+      if (typeof tag !== 'string' || !tag.startsWith(ADOPTION_TAG_PREFIX)) continue
+      const id = tag.slice(ADOPTION_TAG_PREFIX.length).trim()
+      if (id) evidenced.add(id)
+    }
+  }
+  return { claimed, evidenced }
+}
+
 class CreativityEngine {
   constructor(dataDir, chatJson) {
+    this.dataDir = dataDir
     this.store = new CreativityStore(dataDir)
     this.chatJson = chatJson
     this.strategyIndex = 0
@@ -510,6 +558,20 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
     return { fermented: results.length, results, errors }
   }
 
+  // Fresh per call: both evidence files are append-only and a long-lived MCP
+  // server must see new adopt events / memory tags without a restart (same
+  // rationale as the insight-store mtime cache -- minus the cache, since this
+  // is two small file reads on a read-only report path).
+  _adoption() {
+    const { claimed, evidenced } = readAdoptionEvidence(path.dirname(this.dataDir))
+    const storedIds = new Set(this.store.getHypotheses().map((h) => h.id))
+    const adoptedIds = new Set()
+    for (const id of [...claimed, ...evidenced]) {
+      if (storedIds.has(id)) adoptedIds.add(id)
+    }
+    return { claimed, evidenced, adoptedIds }
+  }
+
   status() {
     const count = this.store.count()
     const active = this.store.getHypotheses({ status: 'active' })
@@ -518,6 +580,7 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
     // draft is a real state -- ferment() reviews draft + active -- so hiding it
     // here made `status` and `list --status draft` disagree.
     const draft = this.store.getHypotheses({ status: 'draft' })
+    const adoption = this._adoption()
 
     return {
       ...count,
@@ -525,6 +588,19 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
       validated: validated.length,
       rejected: rejected.length,
       draft: draft.length,
+      // Derived join of the two evidence axes (see readAdoptionEvidence).
+      // metric:false is load-bearing: this is NOT an ADR-017 evaluation metric,
+      // so no rate and no threshold are reported -- adoption rate was explicitly
+      // out of scope (D3). sources names the backing files, routeAdoption style.
+      adoption: {
+        adopted: adoption.adoptedIds.size,
+        claimed: adoption.claimed.size,
+        evidenced: adoption.evidenced.size,
+        metric: false,
+        note:
+          'derived join of creativity.adopt events and hypothesis:<id> memory tags — informational; no rate or threshold by design',
+        sources: ADOPTION_SOURCES,
+      },
       recentIdeas: active.slice(-5).map(h => ({
         id: h.id,
         title: h.title,
@@ -544,6 +620,11 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
   // result. `limit: 0` (and only 0) opts back into "everything".
   list(opts = {}) {
     const limit = opts.limit === undefined ? 20 : opts.limit
+    // Same read-side join as status(): every row carries `adopted` so the two
+    // surfaces cannot disagree (the CLI/MCP entry points already share this
+    // engine). listRow() stays the pure store-row shape; decoration is here.
+    const adoption = this._adoption()
+    const decorate = (row) => ({ ...row, adopted: adoption.adoptedIds.has(row.id) })
     if (opts.sort === 'novelty') {
       // Relative novelty ranking (read-only, nothing written back). Pairwise
       // Jaccard is O(n²) — bound candidates to the newest 200 (spec Risk 3).
@@ -554,9 +635,13 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
         return { ...listRow(h), noveltyScore: verdict.adjustedNovelty }
       })
       rows.sort((a, b) => b.noveltyScore - a.noveltyScore || (b.createdAt || 0) - (a.createdAt || 0))
-      return limit === 0 ? rows : rows.slice(0, limit)
+      const decorated = rows.map(decorate)
+      return limit === 0 ? decorated : decorated.slice(0, limit)
     }
-    return this.store.getHypotheses({ status: opts.status, limit }).map(listRow)
+    return this.store
+      .getHypotheses({ status: opts.status, limit })
+      .map(listRow)
+      .map(decorate)
   }
 
   _buildGenerationPrompt(a, b, strategy, recentHypotheses, rejectedHypotheses) {

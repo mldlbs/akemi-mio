@@ -322,6 +322,56 @@ test('generate and ferment never write Mio memory while adoption is in play', as
   )
 })
 
+// --- read-side adoption join (idea b19bada4, D3) ---------------------------
+// The shared dataDir accumulates events/tags from the adopt tests above, so
+// these assertions are DELTAS around unique ids, never absolute counts.
+test('mio.creativity.status exposes the adoption join; list rows carry adopted', async () => {
+  const before = await callTool('mio.creativity.status')
+  const base = before.adoption
+  assert.ok(base && typeof base.adopted === 'number', 'status carries the adoption block')
+
+  seedHypotheses([hypothesis('adopt-join-e2e', 'active')])
+  fs.appendFileSync(
+    path.join(dataDir, 'traces.jsonl'),
+    JSON.stringify({
+      trace_id: 'adopt-join-e2e',
+      event_type: 'creativity.adopt',
+      outcome: 'success',
+      payload: { hypothesisId: 'adopt-join-e2e' },
+    }) + '\n',
+    'utf8'
+  )
+  fs.appendFileSync(
+    path.join(dataDir, 'memory.jsonl'),
+    JSON.stringify({ id: 'adopt-join-e2e-mem', content: 'tagged evidence', tags: ['hypothesis:adopt-join-e2e'] }) + '\n',
+    'utf8'
+  )
+
+  const after = await callTool('mio.creativity.status')
+  assert.equal(after.adoption.claimed - base.claimed, 1)
+  assert.equal(after.adoption.evidenced - base.evidenced, 1)
+  assert.equal(
+    after.adoption.adopted - base.adopted,
+    1,
+    'both axes carrying the same id join to a single adopted hypothesis'
+  )
+  assert.equal(after.adoption.metric, false)
+  assert.deepEqual(after.adoption.sources, {
+    events: { file: 'traces.jsonl', durable: true },
+    memory: { file: 'memory.jsonl', durable: true },
+  })
+
+  const rows = await callTool('mio.creativity.list', { limit: 0 })
+  const row = rows.find((r) => r.id === 'adopt-join-e2e')
+  assert.ok(row, 'the seeded hypothesis is listed')
+  assert.equal(row.adopted, true)
+
+  const statusTool = TOOLS.find((t) => t.name === 'mio.creativity.status')
+  assert.match(statusTool.description, /adoption/i, 'the tool description documents the join')
+  const listTool = TOOLS.find((t) => t.name === 'mio.creativity.list')
+  assert.match(listTool.description, /adopted/, 'the tool description documents the row flag')
+})
+
 after(() => {
   fs.rmSync(dataDir, { recursive: true, force: true })
   rl.close()

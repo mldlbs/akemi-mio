@@ -228,3 +228,101 @@ test('the CLI and the shared engine agree on the same hypotheses', () => {
     viaCliList.map((h) => h.id)
   )
 })
+
+// --- read-side adoption join (idea b19bada4, D3) ---------------------------
+// adoption is NOT a store status: status()/list() join the two write-side
+// evidence axes (creativity.adopt trace events + hypothesis:<id> memory tags)
+// at read time. These tests pin the join semantics: raw distinct counts per
+// axis, inner join for adopted, metric:false + sources annotation, and the
+// text-mode rendering. Each workspace is a fresh MIO_HOME, so counts are exact.
+
+function seedEvidenceFiles(ws, { events = [], records = [] }) {
+  if (events.length > 0) {
+    fs.writeFileSync(
+      path.join(ws.mioHome, 'traces.jsonl'),
+      events.map((e) => JSON.stringify(e)).join('\n') + '\n',
+      'utf8'
+    )
+  }
+  if (records.length > 0) {
+    fs.writeFileSync(
+      path.join(ws.mioHome, 'memory.jsonl'),
+      records.map((r) => JSON.stringify(r)).join('\n') + '\n',
+      'utf8'
+    )
+  }
+}
+
+test('creativity status joins adopt events and memory tags into non-metric adoption counts', () => {
+  const ws = workspace('adoptjoin')
+  seedHypotheses(ws, [hypothesis('h1', 'active'), hypothesis('h2', 'validated'), hypothesis('h3', 'draft')])
+  seedEvidenceFiles(ws, {
+    events: [
+      { trace_id: 't1', event_type: 'creativity.adopt', outcome: 'success', payload: { hypothesisId: 'h1' } },
+      { trace_id: 't2', event_type: 'creativity.adopt', outcome: 'success', payload: { hypothesisId: 'h1' } },
+      { trace_id: 't3', event_type: 'creativity.adopt', outcome: 'success', payload: { hypothesisId: 'ghost-event' } },
+      { trace_id: 't4', event_type: 'task_outcome', outcome: 'success', payload: { summary: 'unrelated' } },
+    ],
+    records: [
+      { id: 'm1', content: 'x', tags: ['hypothesis:h2', 'other'] },
+      { id: 'm2', content: 'y', tags: ['hypothesis:ghost-tag'] },
+      { id: 'm3', content: 'z', tags: [] },
+      { id: 'm4', content: 'w' },
+    ],
+  })
+
+  const result = statusJson(ws)
+  assert.equal(result.adoption.claimed, 2, 'distinct event ids, duplicates collapse, non-adopt events ignored')
+  assert.equal(result.adoption.evidenced, 2, 'distinct tag ids across records, missing tags field is fine')
+  assert.equal(result.adoption.adopted, 2, 'the inner join drops ghost ids that are not stored hypotheses')
+  assert.equal(result.adoption.metric, false, 'informational join, not an ADR-017 metric')
+  assert.match(result.adoption.note, /no rate or threshold/, 'D3: adoption rate and thresholds stay out of scope')
+  assert.deepEqual(result.adoption.sources, {
+    events: { file: 'traces.jsonl', durable: true },
+    memory: { file: 'memory.jsonl', durable: true },
+  })
+
+  const items = listJson(ws, ['--limit', '0'])
+  assert.deepEqual(
+    Object.fromEntries(items.map((h) => [h.id, h.adopted])),
+    { h1: true, h2: true, h3: false },
+    'list rows carry adopted: event hit, tag hit, and no-evidence states'
+  )
+})
+
+test('creativity adoption join is all-zero without evidence files and renders in text mode', () => {
+  const ws = workspace('adoptzero')
+  seedHypotheses(ws, [hypothesis('h1', 'active')])
+
+  const result = statusJson(ws)
+  assert.deepEqual(
+    {
+      adopted: result.adoption.adopted,
+      claimed: result.adoption.claimed,
+      evidenced: result.adoption.evidenced,
+    },
+    { adopted: 0, claimed: 0, evidenced: 0 },
+    'missing traces/memory files are normal, not an error'
+  )
+
+  const statusText = run(ws.cwd, ws.env, ['creativity', 'status'])
+  assert.equal(statusText.status, 0, statusText.stderr)
+  assert.match(
+    statusText.stdout,
+    /adoption: 0 adopted \(events=0 tags=0\) — derived join, not a metric/
+  )
+
+  fs.appendFileSync(
+    path.join(ws.mioHome, 'traces.jsonl'),
+    JSON.stringify({ trace_id: 't1', event_type: 'creativity.adopt', outcome: 'success', payload: { hypothesisId: 'h1' } }) + '\n',
+    'utf8'
+  )
+  const statusText2 = run(ws.cwd, ws.env, ['creativity', 'status'])
+  assert.equal(statusText2.status, 0, statusText2.stderr)
+  assert.match(statusText2.stdout, /adoption: 1 adopted \(events=1 tags=0\)/)
+
+  const listText = run(ws.cwd, ws.env, ['creativity', 'list'])
+  assert.equal(listText.status, 0, listText.stderr)
+  assert.match(listText.stdout, /\[active\] \[adopted\]/, 'adopted rows are marked in text mode')
+  assert.match(listText.stdout, /h1/)
+})

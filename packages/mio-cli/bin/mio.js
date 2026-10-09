@@ -2070,7 +2070,7 @@ function observerCommand(args, useJson) {
 
 function creativityUsage(write = console.log) {
   write(`Usage:
-  mio creativity status              Show hypothesis counts and recent top ideas
+  mio creativity status              Show hypothesis counts, recent top ideas, adoption join
   mio creativity list                List hypotheses (--status active|validated|rejected|draft, --sort novelty, --limit N)
 
   mio creativity generate        Generate hypotheses by combining sources (needs 2+ --source, calls an LLM)
@@ -2103,6 +2103,8 @@ function printCreativityStatus(result) {
   console.log('Creativity engine:')
   console.log(`  hypotheses: ${result.hypotheses}  combos: ${result.combos}  experiments: ${result.experiments}`)
   console.log(`  active: ${result.active}  validated: ${result.validated}  rejected: ${result.rejected}  draft: ${result.draft}`)
+  const adoption = result.adoption || { adopted: 0, claimed: 0, evidenced: 0 }
+  console.log(`  adoption: ${adoption.adopted} adopted (events=${adoption.claimed} tags=${adoption.evidenced}) — derived join, not a metric`)
   if (result.recentIdeas.length === 0) {
     console.log('No hypotheses yet.')
     return
@@ -2123,7 +2125,7 @@ function printCreativityList(items) {
   items.forEach((h, index) => {
     const when = h.createdAt ? new Date(h.createdAt).toISOString().slice(0, 19).replace('T', ' ') : ''
     const labels = Array.isArray(h.sourceLabels) && h.sourceLabels.length > 0 ? h.sourceLabels.join(' + ') : '—'
-    console.log(`${index + 1}. [${h.status}] ${h.title}  (N=${h.novelty} F=${h.feasibility} I=${h.impact} score=${h.score}${h.noveltyScore !== undefined ? ` noveltyScore=${h.noveltyScore}` : ''})`)
+    console.log(`${index + 1}. [${h.status}]${h.adopted ? ' [adopted]' : ''} ${h.title}  (N=${h.novelty} F=${h.feasibility} I=${h.impact} score=${h.score}${h.noveltyScore !== undefined ? ` noveltyScore=${h.noveltyScore}` : ''})`)
     console.log(`   ${labels} | ${when} | ${h.id}`)
     if (h.fermentCount) console.log(`   fermented ${h.fermentCount}x`)
   })
@@ -3533,7 +3535,7 @@ Usage:
   mio experience list        List experience reuse (--status pending|confirmed|verified)
   mio experience confirm --ids a,b   Confirm auto-claimed reuse (bulk supported)
   mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse
-  mio creativity status        Show creativity hypothesis counts and recent top ideas
+  mio creativity status        Show creativity hypothesis counts, recent top ideas, adoption join
   mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --sort novelty, --limit N)
   mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
   mio creativity ferment       Review and refine active hypotheses (calls an LLM)

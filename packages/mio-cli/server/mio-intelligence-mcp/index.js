@@ -701,12 +701,12 @@ const TOOLS = [
   },
   {
     name: 'mio.creativity.status',
-    description: 'Show creativity engine status: hypothesis counts, active/validated/rejected/draft, recent top ideas.',
+    description: 'Show creativity engine status: hypothesis counts, active/validated/rejected/draft, recent top ideas, plus the adoption evidence join — adopted/claimed/evidenced counts with sources (informational, NOT a metric; derived from creativity.adopt trace events and hypothesis:<id> memory tags).',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'mio.creativity.list',
-    description: 'List creativity hypotheses with optional status filter. Newest 20 by default; pass limit: 0 for everything.',
+    description: 'List creativity hypotheses with optional status filter. Newest 20 by default; pass limit: 0 for everything. Each row carries adopted: true when a creativity.adopt event or a hypothesis:<id> memory tag exists for its id (read-side evidence join, informational).',
     inputSchema: {
       type: 'object',
       properties: {

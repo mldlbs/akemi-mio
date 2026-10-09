@@ -53,7 +53,7 @@ mio memory forget --ids a,b     PERMANENTLY delete records (--yes required; writ
 mio memory merge --ids a,b  Merge duplicate records into one survivor (--keep/--allow-divergent; --yes required)
 mio memory migrate --ids a,b --scope global|project   Move records between the project and global layers
 mio policy check "<action>" Check the historical risk of an action before running it (--project; reads global MIO_HOME)
-mio creativity status        Show creativity hypothesis counts and recent top ideas (reads global MIO_HOME)
+mio creativity status        Show creativity hypothesis counts, recent top ideas, adoption join (reads global MIO_HOME)
 mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
 mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
 mio creativity ferment       Review and refine active hypotheses (calls an LLM)
@@ -390,6 +390,7 @@ mio creativity list --json
 Creativity engine:
   hypotheses: 5  combos: 3  experiments: 1
   active: 2  validated: 1  rejected: 1  draft: 1
+  adoption: 2 adopted (events=2, tags=2) — derived join, not a metric
 
 Recent top ideas:
 - Plugin architecture  (novelty=80 feasibility=70 impact=90 score=240)
@@ -403,6 +404,32 @@ Recent top ideas:
 - **`status` 计入 `draft`。** `draft` 是发酵中的真实状态（`ferment` 会同时处理 `draft` 与 `active`），此前漏计导致 `status` 与 `list --status draft` 对不上。
 - **空存储是正常状态。** 引擎运行之前，`status` 报告全零计数，`list` 显示 "No hypotheses match." 两者都是有效输出，不是错误。
 - **缓存会在文件变化时失效。** 三个 JSONL 的读取按 `(size, mtime)` 校验，因此另一个进程写入后长驻的 MCP 服务端无需重启就能看到——与 `server/insight-store.js` 同一套守卫。
+
+### 采用证据链（adopt / status / list）
+
+假设的「采用」**不在存储里**，而是三轴分离的证据链——store 只管评审，采用是假设与外部世界的关系：
+
+- **评审轴（`creativity-hypotheses.jsonl`）**：`draft → active → validated / rejected`，假说自身的生命周期，由 `generate` / `ferment` 推进。
+- **声称轴（`traces.jsonl`）**：`mio.creativity.adopt`（MCP `mio.creativity.adopt`）追加 `creativity.adopt` 事件，`payload.hypothesisId` 即声称；只写事件、绝不碰 memory，校验失败零写入。
+- **证据轴（`memory.jsonl`）**：`mio memory record ... --hypothesis-id <uuid>`（MCP 参数 `hypothesisId`）把 `hypothesis:<uuid>` 注入记录 tags；`mio memory query --tags hypothesis:<uuid>` 即按标签召回。`AGENTS.md` 规范：**采用假设做决策时 `memory.record` 必带 `hypothesisId`**——这是把决策与假设挂上钩的唯一写入口。
+
+`status` / `list` 在**读侧**把两轴 join 成派生计数（`mio.creativity.status` 返回）：
+
+```json
+"adoption": {
+  "adopted": 2, "claimed": 3, "evidenced": 2,
+  "metric": false,
+  "note": "derived join of creativity.adopt events and hypothesis:<id> memory tags — informational; no rate or threshold by design",
+  "sources": {
+    "events": { "file": "traces.jsonl", "durable": true },
+    "memory": { "file": "memory.jsonl", "durable": true }
+  }
+}
+```
+
+- `claimed` / `evidenced` 是两轴各自的 **distinct id 原始计数**（可以含已不在存储中的悬空 id）；`adopted` = 两集合并集与存储假设 id 的交集——只有它回答「**存下来的**假设里哪些被采用过」。原始与 join 并报，悬空证据因此可见而不是被静默吞掉。
+- **`metric: false` 是承重字段**：这是信息性派生 join，**不是** ADR-017 评估指标——没有 adoption rate、没有阈值。`sources` 照 `routeAdoption` 的模式注明每个轴的背书文件与 durable 性，于是「0 adopted（真没人用）」与「证据文件没留存（不可测）」能区分开。
+- `list` 每行带 `adopted: boolean`，文本模式在状态后显示 `[adopted]` 标记；JSON 输出即引擎结果，MCP 与 CLI 两侧天然一致。
 
 ### 生成与发酵（`generate` / `ferment`）
 
