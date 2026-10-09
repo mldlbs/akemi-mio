@@ -200,6 +200,128 @@ test('mio.idea.generate grounds on memory and persists drafts with provenance', 
   assert.equal(typeof result.persistedIds[0], 'string')
 })
 
+test('mio.creativity.adopt requires a hypothesisId', async () => {
+  await assert.rejects(
+    () => callTool('mio.creativity.adopt'),
+    /requires hypothesisId/
+  )
+  await assert.rejects(
+    () => callTool('mio.creativity.adopt', {}),
+    /requires hypothesisId/
+  )
+  await assert.rejects(
+    () => callTool('mio.creativity.adopt', { note: 'no id' }),
+    /requires hypothesisId/
+  )
+})
+
+test('mio.creativity.adopt rejects a hypothesis id that is not stored', async () => {
+  seedHypotheses([hypothesis('h-1', 'validated')])
+  await assert.rejects(
+    () => callTool('mio.creativity.adopt', { hypothesisId: 'ghost-id' }),
+    /no stored hypothesis with id "ghost-id"/
+  )
+})
+
+test('mio.creativity.adopt enforces the memory record and its hypothesis tag', async () => {
+  seedHypotheses([hypothesis('h-1', 'validated')])
+
+  await assert.rejects(
+    () => callTool('mio.creativity.adopt', { hypothesisId: 'h-1', memoryId: 'ghost-memory' }),
+    /no memory record with id "ghost-memory"/
+  )
+
+  fs.writeFileSync(
+    path.join(dataDir, 'memory.jsonl'),
+    JSON.stringify({ id: 'm-untagged', tags: ['decision'] }) + '\n',
+    'utf8'
+  )
+  await assert.rejects(
+    () => callTool('mio.creativity.adopt', { hypothesisId: 'h-1', memoryId: 'm-untagged' }),
+    /missing tag "hypothesis:h-1"/
+  )
+
+  // Every rejection above must happen before ingest: no event may exist yet.
+  const traceFile = path.join(dataDir, 'traces.jsonl')
+  const traces = fs.existsSync(traceFile)
+    ? fs.readFileSync(traceFile, 'utf8').split('\n').filter(Boolean)
+    : []
+  assert.equal(
+    traces.filter((line) => line.includes('creativity.adopt')).length,
+    0,
+    'a rejected adoption writes no creativity.adopt event'
+  )
+})
+
+test('mio.creativity.adopt records exactly one creativity.adopt event and leaves memory untouched', async () => {
+  seedHypotheses([hypothesis('h-adopt', 'validated')])
+  const memFile = path.join(dataDir, 'memory.jsonl')
+  fs.writeFileSync(
+    memFile,
+    JSON.stringify({ id: 'm-ok', tags: ['hypothesis:h-adopt'] }) + '\n',
+    'utf8'
+  )
+  const memBefore = fs.readFileSync(memFile, 'utf8')
+  const traceFile = path.join(dataDir, 'traces.jsonl')
+  const tracesBefore = fs.existsSync(traceFile) ? fs.readFileSync(traceFile, 'utf8') : ''
+
+  const result = await callTool('mio.creativity.adopt', {
+    hypothesisId: 'h-adopt',
+    memoryId: 'm-ok',
+    taskId: 'task-1',
+    note: 'shipped in the daily digest',
+  })
+  assert.equal(result.recorded, true)
+  assert.equal(result.hypothesisId, 'h-adopt')
+
+  const appended = fs.readFileSync(traceFile, 'utf8').slice(tracesBefore.length)
+  const newLines = appended.split('\n').filter(Boolean)
+  assert.equal(newLines.length, 1, 'exactly one event line appended')
+  const event = JSON.parse(newLines[0])
+  assert.equal(event.event_type, 'creativity.adopt')
+  assert.equal(event.outcome, 'success')
+  assert.equal(event.trace_id.startsWith('creativity-adopt:h-adopt:'), true)
+  assert.equal(event.payload.hypothesisId, 'h-adopt')
+  assert.equal(event.payload.memoryId, 'm-ok')
+  assert.equal(event.payload.taskId, 'task-1')
+
+  assert.equal(
+    fs.readFileSync(memFile, 'utf8'),
+    memBefore,
+    'adoption writes the trace only, never memory.jsonl'
+  )
+
+  // The hypothesis store is read for existence, never mutated by adoption.
+  const stored = fs
+    .readFileSync(path.join(dataDir, 'creativity', 'creativity-hypotheses.jsonl'), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+  assert.equal(stored.length, 1)
+  assert.equal(stored[0].status, 'validated', 'adoption does not flip the review status')
+})
+
+test('generate and ferment never write Mio memory while adoption is in play', async () => {
+  seedHypotheses([hypothesis('b', 'active')])
+  const memFile = path.join(dataDir, 'memory.jsonl')
+  const keeper = JSON.stringify({ id: 'keep', content: 'x', tags: [] }) + '\n'
+  fs.writeFileSync(memFile, keeper, 'utf8')
+
+  await callTool('mio.creativity.generate', {
+    sources: [
+      { name: 'auth', content: 'token rotation keeps getting hand-rolled' },
+      { name: 'cache', content: 'write-through cache is inconsistent' },
+    ],
+  })
+  await callTool('mio.creativity.ferment', { limit: 3 })
+
+  assert.equal(
+    fs.readFileSync(memFile, 'utf8'),
+    keeper,
+    'the generate/ferment write path extends no bytes to memory.jsonl'
+  )
+})
+
 after(() => {
   fs.rmSync(dataDir, { recursive: true, force: true })
   rl.close()

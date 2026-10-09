@@ -20,7 +20,7 @@ const { createSubscriptionStore } = require('../subscription-store.js')
 const { createDigest } = require('../digest.js')
 const { createEvolutionReport } = require('../evolution-report.js')
 
-const { CreativityEngine, sourcesFromInsights } = require('../creativity-engine.js')
+const { CreativityEngine, sourcesFromInsights, adoptHypothesis } = require('../creativity-engine.js')
 const { buildAutoSources, topUpSources } = require('../creativity-sources.js')
 const { runIdeaGenerate, groundingFrom } = require('../idea-generate.js')
 // The observer and insight engines are optional dependencies. Their stores own
@@ -750,6 +750,21 @@ const TOOLS = [
     },
   },
   {
+    name: 'mio.creativity.adopt',
+    description:
+      'Record that a stored creativity hypothesis was adopted: validates the hypothesis id, then appends a creativity.adopt trace event (who/when/what). Optionally enforces that the referenced memory record carries the hypothesis:<id> tag. Writes traces only — never Mio memory, never hypothesis status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        hypothesisId: { type: 'string', description: 'UUID of a stored hypothesis (creativity-hypotheses.jsonl). Must exist or the call fails.' },
+        memoryId: { type: 'string', description: 'Optional memory record id. If given, the record must exist and carry the tag "hypothesis:<hypothesisId>" or the call fails.' },
+        taskId: { type: 'string', description: 'Optional task id this adoption feeds.' },
+        note: { type: 'string', description: 'Optional short rationale for the adoption.' },
+      },
+      required: ['hypothesisId'],
+    },
+  },
+  {
     name: 'mio.idea.generate',
     description:
       'Generate up to 3 concrete, experiment-backed hypotheses from one goal. Sources are assembled locally (goal, context/constraints, Mio memory grounding, local memory/traces/stored hypotheses) and every idea is persisted to the CreativityStore with provenance — Mio memory is never written. Returns { ideas, generatedAt, groundedWith, persistedIds }, or { reason } when fewer than two sources are available.',
@@ -1116,6 +1131,8 @@ async function callTool(name, args = {}) {
       return creativityEngine.generate(generationSources(args), args.strategy)
     case 'mio.creativity.ferment':
       return creativityEngine.ferment(args.limit)
+    case 'mio.creativity.adopt':
+      return adoptHypothesis(creativityEngine, args, ingestObservation, dataDir)
     case 'mio.idea.generate': {
       const goal = typeof args.goal === 'string' ? args.goal.trim() : ''
       if (!goal) throw new Error('mio.idea.generate requires goal: a non-empty string')

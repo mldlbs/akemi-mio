@@ -605,4 +605,69 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
   }
 }
 
-module.exports = { CreativityEngine, CreativityStore, sourcesFromInsights, isoOf }
+// Adoption evidence (idea b19bada4, design discussion 1d2e22e4 D1/D4): the
+// store never gains an `adopted` status -- adoption is a relation between a
+// stored hypothesis and the outside world, not an attribute of the hypothesis,
+// so it lives as an append-only `creativity.adopt` trace event, optionally
+// cross-checked against a memory record carrying the `hypothesis:<id>` tag.
+// The host (MCP or CLI) passes its own ingestObservation so both entry points
+// write byte-identical events; dataRoot is the directory holding memory.jsonl
+// and traces.jsonl -- the engine sits in <dataRoot>/creativity on both hosts
+// (see cliCreativityEngine in bin/mio.js). Every validation failure happens
+// before ingest, so a rejected call never pollutes the event stream. This
+// function writes traces only: it never touches memory.jsonl (the
+// generate/ferment write nothing to Memory boundary extends here).
+function adoptHypothesis(engine, args = {}, ingest, dataRoot) {
+  const hypothesisId = String(args.hypothesisId || '').trim()
+  if (!hypothesisId) {
+    throw new Error('mio.creativity.adopt requires hypothesisId: a stored hypothesis UUID')
+  }
+  if (!engine.store.getHypotheses().some((h) => h.id === hypothesisId)) {
+    throw new Error(`mio.creativity.adopt: no stored hypothesis with id "${hypothesisId}"`)
+  }
+  const memoryId = String(args.memoryId || '').trim()
+  if (memoryId) {
+    const memoryPath = path.join(dataRoot, 'memory.jsonl')
+    const records = fs.existsSync(memoryPath)
+      ? fs
+          .readFileSync(memoryPath, 'utf-8')
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => {
+            try { return JSON.parse(line) } catch { return null }
+          })
+          .filter(Boolean)
+      : []
+    const record = records.find((r) => r && r.id === memoryId)
+    if (!record) {
+      throw new Error(`mio.creativity.adopt: no memory record with id "${memoryId}"`)
+    }
+    const tag = `hypothesis:${hypothesisId}`
+    if (!Array.isArray(record.tags) || !record.tags.includes(tag)) {
+      throw new Error(`mio.creativity.adopt: memory record "${memoryId}" is missing tag "${tag}"`)
+    }
+  }
+  if (typeof ingest !== 'function') {
+    throw new Error('mio.creativity.adopt: ingest is not available on this host')
+  }
+  const taskId = String(args.taskId || '').trim()
+  const note = String(args.note || '').trim()
+  const result = ingest({
+    trace_id: `creativity-adopt:${hypothesisId}:${Date.now()}`,
+    event_type: 'creativity.adopt',
+    outcome: 'success',
+    payload: {
+      hypothesisId,
+      ...(memoryId ? { memoryId } : {}),
+      ...(taskId ? { taskId } : {}),
+      ...(note ? { note } : {}),
+    },
+  })
+  return {
+    recorded: true,
+    hypothesisId,
+    event: (result && result.event) || result,
+  }
+}
+
+module.exports = { CreativityEngine, CreativityStore, sourcesFromInsights, isoOf, adoptHypothesis }

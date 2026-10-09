@@ -23,7 +23,7 @@ const { createEvolutionCutoverTools } = require('../server/evolution-cutover.js'
 const { createMemoryStore } = require('../server/memory-store.js')
 const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
-const { CreativityEngine, sourcesFromInsights } = require('../server/creativity-engine.js')
+const { CreativityEngine, sourcesFromInsights, adoptHypothesis } = require('../server/creativity-engine.js')
 const { buildAutoSources, topUpSources } = require('../server/creativity-sources.js')
 const { runIdeaGenerate, groundingFrom } = require('../server/idea-generate.js')
 const { createAgentStore } = require('../server/agent-store.js')
@@ -2071,6 +2071,7 @@ function creativityUsage(write = console.log) {
 
   mio creativity generate        Generate hypotheses by combining sources (needs 2+ --source, calls an LLM)
   mio creativity ferment         Review/refine active hypotheses (calls an LLM)
+  mio creativity adopt           Record an adoption event for a stored hypothesis (writes traces only)
 
 Options:
   --status name      Filter list by status
@@ -2296,10 +2297,45 @@ function creativityFermentCommand(args, useJson) {
   })
 }
 
+// mio.creativity.adopt from the terminal: same shared adoptHypothesis the MCP
+// server calls, same enforcement (id must exist; --memory-id must already
+// carry the hypothesis:<id> tag), event written to MIO_HOME/traces.jsonl.
+function creativityAdoptCommand(args, useJson) {
+  const flags = args.slice(2)
+  const hypothesisId = flags[0] && !flags[0].startsWith('--') ? String(flags[0]).trim() : ''
+  if (!hypothesisId) {
+    console.error('mio creativity adopt requires <hypothesisId>')
+    console.error('Usage: mio creativity adopt <hypothesisId> [--memory-id id] [--task-id id] [--note text] [--json]')
+    process.exitCode = 1
+    return
+  }
+
+  let result
+  try {
+    result = adoptHypothesis(
+      cliCreativityEngine(),
+      {
+        hypothesisId,
+        memoryId: optionValue(flags, '--memory-id'),
+        taskId: optionValue(flags, '--task-id'),
+        note: optionValue(flags, '--note'),
+      },
+      cliTaskStore().ingestObservation,
+      MIO_HOME
+    )
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+    return
+  }
+  if (useJson) return jsonOrText(result, true)
+  console.log(`Adopted hypothesis ${result.hypothesisId}`)
+  console.log(`  event: ${result.event && result.event.trace_id ? result.event.trace_id : 'creativity.adopt'}`)
+}
+
 function ideaUsage() {
   console.error('usage: mio idea generate --goal "one line" [--context "..."] [--constraint "..."] [--num N] [--json]')
 }
-
 async function ideaGenerateCommand(args, useJson) {
   const flags = args.slice(2)
   const goal = (optionValue(flags, '--goal') || '').trim()
@@ -2390,6 +2426,7 @@ function creativityCommand(args, useJson) {
   }
   if (sub === 'generate') return creativityGenerateCommand(args, useJson)
   if (sub === 'ferment') return creativityFermentCommand(args, useJson)
+  if (sub === 'adopt') return creativityAdoptCommand(args, useJson)
 
   if (!['status', 'list'].includes(sub)) {
     console.error(`Unknown creativity subcommand: ${sub}`)
@@ -3496,6 +3533,7 @@ Usage:
   mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --sort novelty, --limit N)
   mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
   mio creativity ferment       Review and refine active hypotheses (calls an LLM)
+  mio creativity adopt         Record an adoption event for a stored hypothesis (writes traces only)
   mio idea generate --goal "..."   Grounded idea pipeline: auto sources, novelty gate, persisted (calls an LLM)
   mio insight status           Insight counts: total, reported, unreported, high-value
   mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)
