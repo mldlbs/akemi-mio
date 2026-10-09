@@ -83,7 +83,7 @@ export class GitHubTrendingCollector implements Collector {
             id: `gh_${now.getTime()}_${idx++}`,
             timestamp: ts,
             source: this.name,
-            content: `【GitHub】${repoPath} ⭐${stars ? stars[1].trim() : '?'} — ${truncateAtWord(cleanDesc, 100)}`,
+            content: `【GitHub】${repoPath} ⭐${stars ? (stripHtml(stars[1]).trim() || '?') : '?'} — ${truncateAtWord(cleanDesc, 100)}`,
             metadata: { description: cleanDesc },
           })
       }
