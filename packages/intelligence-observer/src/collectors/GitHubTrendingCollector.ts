@@ -34,12 +34,15 @@ export class GitHubTrendingCollector implements Collector {
         const list = body?.data ?? []
         if (list.length > 0) {
           log('INFO', 'gh_trending_collected', { count: list.length })
-          return list.slice(0, 15).map((item, i) => ({
-            id: `gh_${now.getTime()}_${i}`,
-            timestamp: ts,
-            source: this.name,
-            content: `【GitHub】${item.title} ⭐${item.stars ?? '?'} — ${(item.description || '').slice(0, 100)}`,
-          }))
+          return list
+            .slice(0, 15)
+            .map((item, i) => ({
+              id: `gh_${now.getTime()}_${i}`,
+              timestamp: ts,
+              source: this.name,
+              content: `【GitHub】${stripHtml(String(item.title ?? ''))} ⭐${item.stars ?? '?'} — ${truncateAtWord(stripHtml(String(item.description ?? '')), 100)}`,
+            }))
+            .filter((obs) => /【GitHub】(\S)/.test(obs.content))
         }
       }
     } catch (err: any) {
@@ -60,15 +63,21 @@ export class GitHubTrendingCollector implements Collector {
         m: RegExpExecArray | null
       while ((m = articleRegex.exec(html)) !== null && repos.length < 15) {
         const a = m[1]
-        const title = a.match(/href="\/([^"]+)"/)
+        const hrefRe = /href="\/([^"]+)"/g
+        let repoPath: string | null = null,
+          hm: RegExpExecArray | null
+        while ((hm = hrefRe.exec(a)) !== null) {
+          repoPath = validRepoPath(hm[1])
+          if (repoPath) break
+        }
         const desc = a.match(/<p[^>]*class="[^"]*col-9[^"]*"[^>]*>([\s\S]*?)<\/p>/)
         const stars = a.match(/octicon-star[\s\S]*?<span[^>]*class="[^"]*d-inline-block[^"]*"[^>]*>([\s\S]*?)<\/span>/)
-        if (title)
+        if (repoPath)
           repos.push({
             id: `gh_${now.getTime()}_${idx++}`,
             timestamp: ts,
             source: this.name,
-            content: `【GitHub】${title[1].trim()} ⭐${stars ? stars[1].trim() : '?'} — ${desc ? stripHtml(desc[1]).slice(0, 100) : ''}`,
+            content: `【GitHub】${repoPath} ⭐${stars ? stars[1].trim() : '?'} — ${truncateAtWord(stripHtml(desc ? desc[1] : ''), 100)}`,
           })
       }
       if (repos.length > 0) {
@@ -81,6 +90,64 @@ export class GitHubTrendingCollector implements Collector {
 
     return []
   }
+}
+
+/**
+ * Path segments that look like a repo but never are one. Two-segment site
+ * links (`/topics/ai`, `/collections/x`) pass the owner/repo shape check, so
+ * known first-level GitHub sections are rejected explicitly; scanning then
+ * continues to the real repo anchor inside the same article.
+ */
+const REPO_PATH_BLOCKLIST = new Set([
+  'login',
+  'sponsors',
+  'sponsors_logos',
+  'topics',
+  'collections',
+  'settings',
+  'search',
+  'explore',
+  'marketplace',
+  'pricing',
+  'features',
+  'orgs',
+  'about',
+  'notifications',
+  'security',
+  'terms',
+  'privacy',
+  'contact',
+])
+
+/**
+ * Validates a scraped `/owner/repo` path. Rejects the anchors that actually
+ * appear first inside trending `<article>` blocks (`login?return_to=…`,
+ * `sponsors/…`), multi-segment links (`topics/…`, `collections/…`) and
+ * anything with characters a real GitHub owner/repo cannot contain.
+ * Returns the canonical `owner/repo` or null.
+ */
+export function validRepoPath(raw: string): string | null {
+  const cleaned = raw.split(/[?#]/)[0].trim().replace(/^\/+|\/+$/g, '')
+  const segs = cleaned.split('/').filter((s) => s.length > 0)
+  if (segs.length !== 2) return null
+  const [owner, repo] = segs
+  if (REPO_PATH_BLOCKLIST.has(owner.toLowerCase())) return null
+  if (!/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(repo)) return null
+  if (owner === '.' || owner === '..' || repo === '.' || repo === '..') return null
+  return `${owner}/${repo}`
+}
+
+/**
+ * Word-boundary truncation: never cuts inside a word. Falls back to the raw
+ * cut only when there is no usable space in the first half of the window
+ * (otherwise a spaceless slug would degrade to an arbitrarily short prefix).
+ */
+export function truncateAtWord(text: string, max: number): string {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max)
+  const lastSpace = cut.lastIndexOf(' ')
+  if (lastSpace > max * 0.5) return cut.slice(0, lastSpace).trimEnd()
+  return cut.trimEnd()
 }
 
 function stripHtml(text: string): string {
