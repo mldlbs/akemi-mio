@@ -18,6 +18,7 @@ import { BilibiliCollector } from './collectors/BilibiliCollector'
 import { DouyinCollector } from './collectors/DouyinCollector'
 import { GitHubTrendingCollector } from './collectors/GitHubTrendingCollector'
 import { HackerNewsCollector } from './collectors/HackerNewsCollector'
+import { sampleBySourceQuota, sourceFamily } from './sourceQuota'
 import type { Collector, FeedbackSignal, EvolutionParams, OutputEnvelope, WritingMode, Observation } from './types'
 
 const PIPELINE_INTERVAL_MS = 4 * 60 * 60 * 1000
@@ -156,7 +157,14 @@ export class ObserverService {
 
       // Step 4: Deep Research
       log('INFO', `${logTag}_research`)
-      const obs = this.store.readRecent(3).map((o) => `[${o.source}] ${o.content}`)
+      const recent = this.store.readRecent(3)
+      const sampled = sampleBySourceQuota(recent, 30, 5)
+      const obs = sampled.map((o) => `[${o.source}] ${o.content}`)
+      log('INFO', 'research_obs_sampled', {
+        total: recent.length,
+        sampled: sampled.length,
+        families: [...new Set(sampled.map((o) => sourceFamily(o.source)))].join(','),
+      })
       const researchResult = await this.research.research(topicSelection.topic, obs)
       dag = this.dag.transition(dag, 'ANALYZING')
 
