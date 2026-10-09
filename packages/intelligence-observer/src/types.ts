@@ -4,6 +4,10 @@ export interface Observation {
   timestamp: string // ISO 8601
   source: string // 'weibo-hot' | 'rss' | 'system' | 'chat'
   content: string // 具体事物，一句话
+  /** 原文/详情链接（HTTP(S)）；老数据无此字段，向后兼容 */
+  url?: string
+  /** 单源结构化附加信息（如完整描述、作者、分数）；老数据无此字段，向后兼容 */
+  metadata?: Record<string, unknown>
 }
 
 /** 发酵后形成的关联簇 */

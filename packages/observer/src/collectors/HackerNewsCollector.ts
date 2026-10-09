@@ -59,6 +59,7 @@ export class HackerNewsCollector implements Collector {
             timestamp: new Date((story.time || 0) * 1000).toISOString(),
             source: 'hackernews',
             content: `${story.title} (${points} points by ${by})`.slice(0, 200),
+            url,
           })
         }
       }

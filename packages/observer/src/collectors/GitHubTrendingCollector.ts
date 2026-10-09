@@ -36,12 +36,17 @@ export class GitHubTrendingCollector implements Collector {
           log('INFO', 'gh_trending_collected', { count: list.length })
           return list
             .slice(0, 15)
-            .map((item, i) => ({
-              id: `gh_${now.getTime()}_${i}`,
-              timestamp: ts,
-              source: this.name,
-              content: `【GitHub】${stripHtml(String(item.title ?? ''))} ⭐${item.stars ?? '?'} — ${truncateAtWord(stripHtml(String(item.description ?? '')), 100)}`,
-            }))
+            .map((item, i) => {
+              const title = stripHtml(String(item.title ?? ''))
+              const description = stripHtml(String(item.description ?? ''))
+              return {
+                id: `gh_${now.getTime()}_${i}`,
+                timestamp: ts,
+                source: this.name,
+                content: `【GitHub】${title} ⭐${item.stars ?? '?'} — ${truncateAtWord(description, 100)}`,
+                metadata: { description },
+              }
+            })
             .filter((obs) => /【GitHub】(\S)/.test(obs.content))
         }
       }
@@ -72,12 +77,14 @@ export class GitHubTrendingCollector implements Collector {
         }
         const desc = a.match(/<p[^>]*class="[^"]*col-9[^"]*"[^>]*>([\s\S]*?)<\/p>/)
         const stars = a.match(/octicon-star[\s\S]*?<span[^>]*class="[^"]*d-inline-block[^"]*"[^>]*>([\s\S]*?)<\/span>/)
+        const cleanDesc = stripHtml(desc ? desc[1] : '')
         if (repoPath)
           repos.push({
             id: `gh_${now.getTime()}_${idx++}`,
             timestamp: ts,
             source: this.name,
-            content: `【GitHub】${repoPath} ⭐${stars ? stars[1].trim() : '?'} — ${truncateAtWord(stripHtml(desc ? desc[1] : ''), 100)}`,
+            content: `【GitHub】${repoPath} ⭐${stars ? stars[1].trim() : '?'} — ${truncateAtWord(cleanDesc, 100)}`,
+            metadata: { description: cleanDesc },
           })
       }
       if (repos.length > 0) {

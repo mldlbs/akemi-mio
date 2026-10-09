@@ -73,6 +73,7 @@ export class RSSCollector implements Collector {
             timestamp: item.pubDate || ts,
             source: feedUrl,
             content: content.slice(0, 200),
+            ...(item.link && /^https?:\/\//.test(item.link) ? { url: item.link } : {}),
           })
         }
       } catch (err: any) {
