@@ -74,4 +74,22 @@ export type {
   RunnerEventSink,
   RunRuleResult,
 } from './WhenThenRunner'
+export {
+  parseStoppingRule,
+  evaluateStoppingRule,
+  checkPromotionGate,
+  assignExperimentMode,
+  routeExperimentMemoryPath,
+  isExperimentMode,
+  DEFAULT_STOPPING_RULE,
+} from './ExperimentRunStore'
+export type {
+  ExperimentRun,
+  ExperimentAssignment,
+  ExperimentOutcome,
+  StoppingRuleConfig,
+  StoppingDecision,
+  AssignmentResult,
+  PromotionGateResult,
+} from './ExperimentRunStore'
 export * from './types'
