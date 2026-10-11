@@ -53,4 +53,25 @@ export { ContentEnhancer } from './ContentEnhancer'
 export type { EnhancedSource } from './ContentEnhancer'
 export { deriveMechanismGraph, relationsToEdges, isMechanismHypothesis } from './MechanismGraph'
 export type { MechanismGraph, MechanismEdge, TraceEventLike } from './MechanismGraph'
+export {
+  runWhenThenRule,
+  evaluateWhen,
+  evaluateCondition,
+  lookupField,
+  compileBudgetToConstraints,
+  topologicalOrder,
+} from './WhenThenRunner'
+export type {
+  WhenThenRule,
+  ThenAction,
+  WhenCondition,
+  CompareOp,
+  ResourceBudgetSpec,
+  StepExecInput,
+  StepExecResult,
+  StepExecutor,
+  RunnerEvent,
+  RunnerEventSink,
+  RunRuleResult,
+} from './WhenThenRunner'
 export * from './types'
