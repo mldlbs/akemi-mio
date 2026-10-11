@@ -34,8 +34,13 @@ export class CapabilityResolver {
     if (toolHint) {
       const owner = def.providers.find((p) => p.tools.includes(toolHint))
       if (owner) {
-        log('INFO', 'capability_resolver.resolved', { capabilityId, mcpServerId: owner.mcpServerId, tool: toolHint })
-        return { capabilityId, provider: { mcpServerId: owner.mcpServerId, tool: toolHint }, confidence: 1.0 }
+        log('INFO', 'capability_resolver.resolved', {
+          capabilityId,
+          mcpServerId: owner.mcpServerId,
+          tool: toolHint,
+          contractVersion: def.version,
+        })
+        return { capabilityId, contractVersion: def.version, provider: { mcpServerId: owner.mcpServerId, tool: toolHint }, confidence: 1.0 }
       }
     }
 
@@ -56,6 +61,7 @@ export class CapabilityResolver {
 
     return {
       capabilityId,
+      contractVersion: def.version,
       provider: { mcpServerId: provider.mcpServerId, tool },
       confidence: 1.0,
     }
@@ -72,22 +78,37 @@ export class CapabilityResolver {
   }
 
   /**
-   * 反向解析 toolName → { capabilityId, tool }。
+   * 反向解析 toolName → { capabilityId, tool, contractVersion }。
    * 遍历 catalog 寻找定义该工具的 capability。
    * 未找到时返回 undefined。
    *
    * M5.5 D2: Memory identity 的唯一映射源。
+   * 机制涌现 P0: 一并返回 contractVersion，供候选追溯有效合同。
    */
-  resolveByTool(toolName: string): { capabilityId: string; tool: string } | undefined {
+  resolveByTool(toolName: string): { capabilityId: string; tool: string; contractVersion: string } | undefined {
     for (const def of this.catalog.getCapabilities()) {
       if (def.providers.length === 0) continue
       for (const provider of def.providers) {
         if (provider.tools.includes(toolName)) {
-          return { capabilityId: def.id, tool: toolName }
+          return { capabilityId: def.id, tool: toolName, contractVersion: def.version }
         }
       }
     }
     return undefined
   }
-}
 
+  /**
+   * 绑定校验（机制涌现 P0）：binding.contractVersion 与当前 catalog 定义比对。
+   * - 定义缺失 → invalid
+   * - 版本不等 → drift（调用方决定拒绝或 WARN）
+   * - 版本相等 → valid
+   */
+  validateBinding(binding: { capability: string; contractVersion: string }): { valid: boolean; drift?: boolean; currentVersion?: string } {
+    const def = this.catalog.get(binding.capability)
+    if (!def) return { valid: false }
+    if (def.version !== binding.contractVersion) {
+      return { valid: false, drift: true, currentVersion: def.version }
+    }
+    return { valid: true, currentVersion: def.version }
+  }
+}

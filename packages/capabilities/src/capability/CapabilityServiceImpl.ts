@@ -66,6 +66,7 @@ export class CapabilityServiceImpl implements ICapabilityService {
 
     const binding: CapabilityBinding = {
       capability: result.capabilityId,
+      contractVersion: result.contractVersion,
       provider: { type: 'mcp', id: result.provider.mcpServerId },
       tool: result.provider.tool,
     }
@@ -81,6 +82,22 @@ export class CapabilityServiceImpl implements ICapabilityService {
 
   async invoke(binding: CapabilityBinding, input: unknown): Promise<unknown> {
     const startedAt = Date.now()
+
+    // 机制涌现 P0: 绑定合同比对。drift 不阻断（快照语义），但必须可观测。
+    const validation = this.resolver.validateBinding(binding)
+    if (validation.drift) {
+      log('WARN', 'capability_service.contract_drift', {
+        capability: binding.capability,
+        boundVersion: binding.contractVersion,
+        currentVersion: validation.currentVersion,
+      })
+    } else if (!validation.valid) {
+      log('WARN', 'capability_service.binding_invalid', {
+        capability: binding.capability,
+        boundVersion: binding.contractVersion,
+      })
+    }
+
     log('INFO', 'capability_service.invoke', {
       capability: binding.capability,
       provider: binding.provider.id,
@@ -146,4 +163,3 @@ export class CapabilityServiceImpl implements ICapabilityService {
     return this.resolver.listResolvable()
   }
 }
-

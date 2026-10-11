@@ -69,6 +69,7 @@ import type { GuardrailPolicy } from './GuardrailTypes'
 import { DefaultGuardrailPolicy } from './GuardrailPolicy'
 import type { EvaluationEmitter } from './EvaluationEmitter'
 import type { GuardrailDecisionStore } from './GuardrailDecisionStore'
+import type { GuardrailTraceSink } from './GuardrailTraceSink'
 import { randomUUID } from 'crypto'
 
 export interface GuardrailPipelineConfig {
@@ -107,16 +108,24 @@ export class GuardrailPipeline {
   /** 最近一次从 Decision 生成的 decisionId（用于 Delivery Trace 关联） */
   private latestDecisionId: string | null = null
 
+  // ── 机制涌现 P0 (c): observer traces 写入 ──
+  /** 可选 sink：guardrail.triggered / guardrail.recovery 追加到 traces.jsonl */
+  private traceSink?: GuardrailTraceSink
+  /** 同 trace 内上次非 continue 的 action（recovery 判定用；pipeline 生命周期 = 单 trace） */
+  private lastNonContinueAction: 'warning' | 'terminate' | null = null
+
   constructor(
     policy?: GuardrailPolicy,
     config?: Partial<GuardrailPipelineConfig>,
     emitter?: EvaluationEmitter,
     decisionStore?: GuardrailDecisionStore,
+    traceSink?: GuardrailTraceSink,
   ) {
     this.policy = policy ?? new DefaultGuardrailPolicy()
     this.config = { ...DEFAULT_PIPELINE_CONFIG, ...config }
     this.emitter = emitter
     this.decisionStore = decisionStore
+    this.traceSink = traceSink
   }
 
   /**
@@ -163,7 +172,49 @@ export class GuardrailPipeline {
     // 写入 Evaluation Event（保留 — 见 AOR-001 O-2 Narrowed）
     this.emitGuardrailEvents(traceId, currentTurn, result)
 
+    // 机制涌现 P0 (c): guardrail.triggered / guardrail.recovery 入 traces
+    this.emitGuardrailTraceEvents(traceId, currentTurn, result)
+
     return result
+  }
+
+  private emitGuardrailTraceEvents(traceId: string, currentTurn: number, result: PipelineResult): void {
+    if (!this.traceSink) return
+    const action = result.decision.action
+    if (action === 'warning' || action === 'terminate') {
+      this.lastNonContinueAction = action
+      this.traceSink({
+        event_type: 'guardrail.triggered',
+        trace_id: traceId,
+        outcome: action === 'terminate' ? 'error' : 'failure',
+        payload: {
+          type: 'guardrail.triggered',
+          turn: currentTurn,
+          action,
+          reason: result.decision.reason,
+          decisionId: result.decisionId,
+          policyVersion: result.decision.policyVersion,
+        },
+      })
+      return
+    }
+    if (action === 'continue' && this.lastNonContinueAction) {
+      const previousAction = this.lastNonContinueAction
+      this.lastNonContinueAction = null
+      this.traceSink({
+        event_type: 'guardrail.recovery',
+        trace_id: traceId,
+        outcome: 'success',
+        payload: {
+          type: 'guardrail.recovery',
+          turn: currentTurn,
+          previousAction,
+          reason: result.decision.reason,
+          decisionId: result.decisionId,
+          policyVersion: result.decision.policyVersion,
+        },
+      })
+    }
   }
 
   private emitGuardrailEvents(traceId: string, currentTurn: number, result: PipelineResult): void {
@@ -205,5 +256,6 @@ export class GuardrailPipeline {
     this.lastCheckedTurn = -Infinity
     this.latestDecision = null
     this.latestRuntimeAction = null
+    this.lastNonContinueAction = null
   }
 }

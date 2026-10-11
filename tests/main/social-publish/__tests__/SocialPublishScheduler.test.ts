@@ -27,7 +27,7 @@ class FakeCapabilityService implements ICapabilityService {
   public calls: Array<{ binding: CapabilityBinding; input: unknown }> = []
   constructor(private readonly respond: (input: any) => unknown) {}
   async resolve(_capability: string): Promise<CapabilityBinding | undefined> {
-    return { capability: 'publishing', provider: { type: 'mcp', id: 'social-publish' }, tool: 'social_publish' }
+    return { capability: 'publishing', contractVersion: '1.0.0', provider: { type: 'mcp', id: 'social-publish' }, tool: 'social_publish' }
   }
   async invoke(binding: CapabilityBinding, input: unknown): Promise<unknown> {
     this.calls.push({ binding, input })

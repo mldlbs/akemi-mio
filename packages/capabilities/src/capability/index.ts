@@ -17,7 +17,13 @@ export { DEFAULT_CAPABILITIES, freezeDefaults, isDefaultsFrozen } from './Capabi
 export { CapabilityCatalog } from './CapabilityCatalog'
 export { CapabilityResolver } from './CapabilityResolver'
 export { CapabilityServiceImpl } from './CapabilityServiceImpl'
+export {
+  computeSnapshotId,
+  normalizeBindings,
+  hashLlmConfig,
+  type ExperimentSnapshotInput,
+  type SnapshotCapabilityBinding,
+} from './ExperimentSnapshot'
 export { CapabilitySchemaAdapter } from './CapabilitySchemaAdapter'
 export { CapabilityFunctionSchemaAdapter } from './CapabilityFunctionSchemaAdapter'
 export type { OpenAIFunctionSchema } from './CapabilityFunctionSchemaAdapter'
-

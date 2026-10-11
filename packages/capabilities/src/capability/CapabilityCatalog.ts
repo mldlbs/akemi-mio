@@ -43,6 +43,7 @@ export class CapabilityCatalog {
           def = {
             id: capId,
             description: capId,
+            version: manifest.version || '1',
             inputSchema,
             providers: [],
           }
@@ -94,4 +95,3 @@ export class CapabilityCatalog {
     return this.capabilities.has(id)
   }
 }
-

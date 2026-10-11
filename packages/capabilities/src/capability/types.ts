@@ -96,6 +96,9 @@ export interface AuditEntry {
 export interface CapabilityDefinition {
   id: string
   description: string
+  /** 机制涌现 P0 (R3/A4): 合同版本。Catalog 从 manifest.version 盖章；
+   *  缺失时回退 '1'。Binding 必须能追溯到非空版本。 */
+  version: string
   /** P1.3a: 用于生成 function calling schema 的 parameters。
    *  M1 阶段从 provider 的 tool schema 推断。禁止为空 {}。 */
   inputSchema: {
@@ -130,6 +133,8 @@ export interface CapabilityProvider {
 
 export interface ResolveResult {
   capabilityId: string
+  /** 机制涌现 P0: 合同版本快照（resolve 时从 definition 盖章） */
+  contractVersion: string
   provider: {
     mcpServerId: string
     tool: string
@@ -149,6 +154,8 @@ export interface ResolveResult {
  */
 export interface CapabilityBinding {
   capability: string
+  /** 机制涌现 P0 (R3): 合同版本。resolve 时盖章，invoke 不校验漂移（快照语义）。 */
+  contractVersion: string
   provider: {
     type: 'mcp'
     id: string
@@ -173,4 +180,3 @@ export interface ICapabilityService {
   invoke(binding: CapabilityBinding, input: unknown): Promise<unknown>
   listCapabilities(): string[]
 }
-

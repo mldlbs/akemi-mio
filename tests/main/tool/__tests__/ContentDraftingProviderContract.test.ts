@@ -42,6 +42,7 @@ describe('content.drafting provider contract', () => {
     expect(resolver.resolveByTool('fanqie_publish_novel')).toEqual({
       capabilityId: 'publishing',
       tool: 'fanqie_publish_novel',
+      contractVersion: '1.0.0',
     })
   })
 

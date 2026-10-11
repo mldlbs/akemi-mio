@@ -153,6 +153,7 @@ import { RepositoryEventIterator } from '@akemi-mio/core/core/evaluation/Reposit
 import { MetricsEngineImpl } from '@akemi-mio/core/core/evaluation/MetricsEngine'
 import { ToolEventBridge } from '@akemi-mio/core/core/evaluation/ToolEventBridge'
 import { GuardrailPipeline } from '@akemi-mio/core/core/evaluation/GuardrailPipeline'
+import { createFileGuardrailTraceSink } from '@akemi-mio/core/core/evaluation/GuardrailTraceSink'
 import { GuardrailProgressConsumer } from '@akemi-mio/core/core/evaluation/progress-consumers/GuardrailProgressConsumer'
 import { GuardrailConfigStore } from '@akemi-mio/core/core/evaluation/GuardrailConfigStore'
 import { GuardrailDecisionStore } from '@akemi-mio/core/core/evaluation/GuardrailDecisionStore'
@@ -757,7 +758,8 @@ export class AppRuntime {
     // WorkflowSchedulerV2 must exist before WorkflowRuntimeCheckpointableComponent
     // because descriptor.create() captures scheduler + workflowStore in closure.
     const { ComponentRegistryImpl } = await import('@akemi-mio/intelligence/runtime/ComponentRegistry')
-    const { WorkflowRuntimeCheckpointableComponent } = await import('@akemi-mio/intelligence/runtime/WorkflowRuntimeCheckpointableComponent')
+    const { WorkflowRuntimeCheckpointableComponent } =
+      await import('@akemi-mio/intelligence/runtime/WorkflowRuntimeCheckpointableComponent')
     this.componentRegistry = new ComponentRegistryImpl()
     this.componentRegistry.register({
       id: 'workflow-runtime',
@@ -912,7 +914,15 @@ export class AppRuntime {
     // GuardrailPipeline — 注入 ChatExecutor 的 GuardrailPipeline（需要 emitter 就绪）
     const guardrailDecisionStore = new GuardrailDecisionStore()
     this.guardrailDecisionStore = guardrailDecisionStore
-    const guardrailPipeline = new GuardrailPipeline(undefined, undefined, this.evaluationEmitter, guardrailDecisionStore)
+    // 机制涌现 P0 (c): guardrail.triggered / recovery 追加到 WORKSPACE traces.jsonl
+    const guardrailTraceSink = createFileGuardrailTraceSink(join(WORKSPACE_ROOT, 'traces.jsonl'))
+    const guardrailPipeline = new GuardrailPipeline(
+      undefined,
+      undefined,
+      this.evaluationEmitter,
+      guardrailDecisionStore,
+      guardrailTraceSink,
+    )
     agentService.setGuardrailPipeline(guardrailPipeline)
     // 注入 EvaluationEmitter 用于写入 Delivery Trace 事件
     agentService.setEvaluationEmitter(this.evaluationEmitter)
@@ -2128,7 +2138,8 @@ export class AppRuntime {
         pipeline.setExecutionPolicy(new ExecutionPolicy({ mode: 'shadow', policyVersion: '1.1.0' }))
         this.pipeline = pipeline
         // 注册 Evolution 插件（ServiceLoader 模式）
-        const { PluginServiceLoader, WallpaperPlugin, PluginCollectorAdapter, PluginExecutorAdapter } = await import('@akemi-mio/evolution-plugin-system')
+        const { PluginServiceLoader, WallpaperPlugin, PluginCollectorAdapter, PluginExecutorAdapter } =
+          await import('@akemi-mio/evolution-plugin-system')
         const pluginLoader = PluginServiceLoader.getInstance()
         const wallpaperPlugin = new WallpaperPlugin(process.cwd())
         pluginLoader.register(wallpaperPlugin)

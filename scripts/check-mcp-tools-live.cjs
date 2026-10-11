@@ -244,6 +244,21 @@ function diff(a, b) {
     problems.push('SAFE_ARGS names tools that no longer exist (coverage is quietly shrinking): ' + staleSafeArgs.join(', '))
   }
 
+  // 机制涌现 P0: 工具绑定版本非空（静态合同面）。CapabilityDefinition.version /
+  // ResolveResult.contractVersion / CapabilityBinding.contractVersion 被移除或改名
+  // 时，这里立刻变红——live gate 顺带守住合同可追溯性。
+  const capTypesPath = path.resolve(__dirname, '..', 'packages', 'capabilities', 'src', 'capability', 'types.ts')
+  const capTypesSrc = fs.readFileSync(capTypesPath, 'utf8')
+  if (!/export interface CapabilityDefinition \{[\s\S]*?\bversion:\s*string\b/.test(capTypesSrc)) {
+    problems.push('CapabilityDefinition.version missing or not typed string (contract version surface broke)')
+  }
+  if (!/export interface ResolveResult \{[\s\S]*?\bcontractVersion:\s*string\b/.test(capTypesSrc)) {
+    problems.push('ResolveResult.contractVersion missing or not typed string (binding trace surface broke)')
+  }
+  if (!/export interface CapabilityBinding \{[\s\S]*?\bcontractVersion:\s*string\b/.test(capTypesSrc)) {
+    problems.push('CapabilityBinding.contractVersion missing or not typed string (binding trace surface broke)')
+  }
+
   console.log(
     'defined: ' +
       defined.size +
