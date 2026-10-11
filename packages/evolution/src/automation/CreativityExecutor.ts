@@ -108,9 +108,9 @@ export class CreativityExecutor implements FixExecutor {
 
       const elapsedMs = Date.now() - startedAt
 
-      // 标记假设为 experimenting
+      // 标记假设为 testing
       if (hypothesisId && ideaStore) {
-        ideaStore.updateHypothesisStatus(hypothesisId, 'experimenting')
+        ideaStore.updateHypothesisStatus(hypothesisId, 'testing')
       }
 
       // 解析结果

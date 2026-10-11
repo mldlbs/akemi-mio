@@ -21,6 +21,12 @@ export class IdeaStore {
       const parsed = JSON.parse(readFileSync(this.filePath, 'utf-8'))
       // 兼容旧版本（缺少 exploredPairs 字段）
       if (!parsed.exploredPairs) parsed.exploredPairs = []
+      // P1 改名：旧记录 status=experimenting 归一为 testing（D2）
+      if (Array.isArray(parsed.hypotheses)) {
+        for (const h of parsed.hypotheses) {
+          if (h && h.status === 'experimenting') h.status = 'testing'
+        }
+      }
       return parsed
     } catch {
       return { version: CREATIVITY_STORE_VERSION, combos: [], hypotheses: [], experiments: [], dreamCycles: [], exploredPairs: [] }
@@ -85,7 +91,7 @@ export class IdeaStore {
   }
 
   getActiveExperiments(): ExperimentPlan[] {
-    const activeIds = new Set(this.data.hypotheses.filter((h) => h.status === 'experimenting').map((h) => h.id))
+    const activeIds = new Set(this.data.hypotheses.filter((h) => h.status === 'testing').map((h) => h.id))
     return this.data.experiments.filter((e) => activeIds.has(e.hypothesisId))
   }
 
@@ -138,7 +144,7 @@ export class IdeaStore {
       const key = h.sourceLabels.join('|')
       if (!stats[key]) stats[key] = { total: 0, active: 0, rejected: 0, adopted: 0 }
       stats[key].total++
-      if (h.status === 'active' || h.status === 'experimenting') stats[key].active++
+      if (h.status === 'active' || h.status === 'testing') stats[key].active++
       if (h.status === 'rejected') stats[key].rejected++
       if (h.status === 'validated') stats[key].adopted++
     }
@@ -162,4 +168,3 @@ export class IdeaStore {
     return this.data.hypotheses.find((h) => h.id === id)
   }
 }
-

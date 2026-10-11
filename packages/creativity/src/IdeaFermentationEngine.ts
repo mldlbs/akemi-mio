@@ -144,10 +144,7 @@ ${signalText}
 - keep：其余情况，留在发酵池继续观察。`
   }
 
-  private applyVerdicts(
-    candidates: Hypothesis[],
-    results: Array<Record<string, any>>,
-  ): FermentResult {
+  private applyVerdicts(candidates: Hypothesis[], results: Array<Record<string, any>>): FermentResult {
     const byId = new Map(candidates.map((c) => [c.id, c]))
     const now = Date.now()
     let promotedCount = 0
@@ -165,20 +162,27 @@ ${signalText}
 
       if (r.verdict === 'promote') {
         const ageOk = now - h.createdAt >= this.minAgeMs
-                // 后置去重: active/validated 池中已有相似假设则跳过 promote
-                //（promote 直接置 validated，与 mio-cli creativity-engine 对齐，
-                //  否则 stats.adopted 永远为 0——没有任何路径写入 validated）
-                const activeHyps = candidates.filter(c => c.status === 'active' || c.status === 'experimenting' || c.status === 'validated')
-                const newNovelty = clampScore(r.novelty, h.novelty)
-                const newFeasibility = clampScore(r.feasibility, h.feasibility)
-                const newImpact = clampScore(r.impact, h.impact)
-                // 与 mio-cli creativity-engine 对齐的 promote 门控：新分数
-                // 总和 > 200 且 logic >= 60。评审忘写 logic 时回退假设存量
-                // 分数（缺省 50），门控不能被"漏字段"绕过。
-                const logicScore = hasNumeric(r.logic) ? clampScore(r.logic, 50) : (h.logic ?? 50)
-                const scoreOk = newNovelty + newFeasibility + newImpact > 200
-                const logicOk = logicScore >= 60
-                if (rounds >= this.minFermentRounds && ageOk && promotedCount < this.maxPromotePerRound && !this.isDuplicate(h, activeHyps) && scoreOk && logicOk) {
+        // 后置去重: active/validated 池中已有相似假设则跳过 promote
+        //（promote 直接置 validated，与 mio-cli creativity-engine 对齐，
+        //  否则 stats.adopted 永远为 0——没有任何路径写入 validated）
+        const activeHyps = candidates.filter((c) => c.status === 'active' || c.status === 'testing' || c.status === 'validated')
+        const newNovelty = clampScore(r.novelty, h.novelty)
+        const newFeasibility = clampScore(r.feasibility, h.feasibility)
+        const newImpact = clampScore(r.impact, h.impact)
+        // 与 mio-cli creativity-engine 对齐的 promote 门控：新分数
+        // 总和 > 200 且 logic >= 60。评审忘写 logic 时回退假设存量
+        // 分数（缺省 50），门控不能被"漏字段"绕过。
+        const logicScore = hasNumeric(r.logic) ? clampScore(r.logic, 50) : (h.logic ?? 50)
+        const scoreOk = newNovelty + newFeasibility + newImpact > 200
+        const logicOk = logicScore >= 60
+        if (
+          rounds >= this.minFermentRounds &&
+          ageOk &&
+          promotedCount < this.maxPromotePerRound &&
+          !this.isDuplicate(h, activeHyps) &&
+          scoreOk &&
+          logicOk
+        ) {
           this.store.updateHypothesisFermentation(h.id, {
             status: 'validated',
             fermentCount: rounds,
@@ -190,9 +194,9 @@ ${signalText}
             logic: logicScore,
           })
           promoted.push(h.id)
-                    promotedCount++
-                    eventBus.emit('creativity.hypothesis.promoted', { hypothesisId: h.id, timestamp: Date.now() })
-                    continue
+          promotedCount++
+          eventBus.emit('creativity.hypothesis.promoted', { hypothesisId: h.id, timestamp: Date.now() })
+          continue
         }
         this.applyKeep(h, r, rounds, now)
         kept++
@@ -299,9 +303,7 @@ ${signalText}
         ...(h.logic !== undefined ? { logic: h.logic } : {}),
       },
     }
-    const nextLogic = hasNumeric(r.logic)
-      ? Math.round((h.logic ?? 50) * 0.4 + clampScore(r.logic, 50) * 0.6)
-      : h.logic
+    const nextLogic = hasNumeric(r.logic) ? Math.round((h.logic ?? 50) * 0.4 + clampScore(r.logic, 50) * 0.6) : h.logic
     const patch: HypothesisFermentationPatch = {
       fermentCount: rounds,
       lastFermentedAt: now,
@@ -341,8 +343,11 @@ ${signalText}
   }
 
   private tokenize(text: string): Set<string> {
-    return new Set((text || '').toLowerCase().split(/[\s,，。.、：:;；()（）[\]【】]+/).filter(t => t.length > 1))
+    return new Set(
+      (text || '')
+        .toLowerCase()
+        .split(/[\s,，。.、：:;；()（）[\]【】]+/)
+        .filter((t) => t.length > 1),
+    )
   }
-
 }
-

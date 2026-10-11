@@ -87,7 +87,7 @@ const MIGRATIONS: Migration[] = [
         novelty REAL NOT NULL,
         feasibility REAL NOT NULL,
         impact REAL NOT NULL,
-        status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','active','experimenting','validated','rejected')),
+        status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','active','testing','validated','rejected')),
         created_at INTEGER NOT NULL
       );
 
@@ -1035,6 +1035,40 @@ const MIGRATIONS: Migration[] = [
       }
       stmt.free()
       if (!columns.has('logic')) db.run('ALTER TABLE hypotheses ADD COLUMN logic REAL')
+    },
+    revert: '',
+    irreversible: true,
+    category: 'schema',
+  },
+  {
+    version: 50,
+    sql: (db) => {
+      // 机制涌现 P1（D2/D3）：Hypothesis 可选机制字段 + status experimenting→testing。
+      // SQLite 不支持 ALTER COLUMN CHECK；旧表 CHECK 仍含 'experimenting'，
+      // 故同时接受两个字面量，读侧 parseHypothesis 将 experimenting 归一为 testing。
+      const columns = new Set<string>()
+      const stmt = db.prepare('PRAGMA table_info(hypotheses)')
+      while (stmt.step()) {
+        const row = stmt.getAsObject()
+        if (typeof row.name === 'string') columns.add(row.name)
+      }
+      stmt.free()
+      const additions = [
+        ['proposed_relations', 'TEXT'],
+        ['falsification_conditions', 'TEXT'],
+        ['source_observation_ids', 'TEXT'],
+      ] as const
+      for (const [name, type] of additions) {
+        if (!columns.has(name)) db.run(`ALTER TABLE hypotheses ADD COLUMN ${name} ${type}`)
+      }
+      // 尝试放宽 CHECK（失败可忽略：已存在的 CHECK 约束无法在不重建表的情况下移除）
+      try {
+        db.run(
+          "UPDATE sqlite_master SET sql = replace(sql, \"'experimenting'\", \"'testing'\") WHERE type = 'table' AND name = 'hypotheses'",
+        )
+      } catch {
+        // 忽略：旧 CHECK 仍接受 experimenting；写侧只写 testing
+      }
     },
     revert: '',
     irreversible: true,

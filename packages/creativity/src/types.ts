@@ -79,7 +79,7 @@ export interface Hypothesis {
   impact: number
   /** 逻辑一致性评分 0-100（第四维，评审/生成时打分，可缺省视为 50） */
   logic?: number
-  status: 'draft' | 'active' | 'experimenting' | 'validated' | 'rejected'
+  status: 'draft' | 'active' | 'testing' | 'validated' | 'rejected'
   createdAt: number
   /** The rotation technique this hypothesis was generated with (idea.generate provenance.technique). */
   technique?: string
@@ -106,6 +106,21 @@ export interface Hypothesis {
   implementedCommitSha?: string
   implementedAt?: number
   implementationNote?: string
+  /** 机制假设：提出的关系边（带 proposedRelations 即机制假设，否则普通创意） */
+  proposedRelations?: ProposedRelation[]
+  /** 证伪条件：命中任一条件则机制假设可被拒绝 */
+  falsificationConditions?: string[]
+  /** 触发本假设的 observation/trace id 溯源 */
+  sourceObservationIds?: string[]
+}
+
+/** 机制图的一条候选边：A --[effect]--> B */
+export interface ProposedRelation {
+  from: string
+  to: string
+  effect: string
+  /** 推断来源：identity=verified | inferred（A6 confidence 映射） */
+  inference?: 'identity' | 'inferred'
 }
 
 export interface ExperimentPlan {

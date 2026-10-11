@@ -51,5 +51,6 @@ export function initCreativity(
 export { CreativityService, DrizzleIdeaStore }
 export { ContentEnhancer } from './ContentEnhancer'
 export type { EnhancedSource } from './ContentEnhancer'
+export { deriveMechanismGraph, relationsToEdges, isMechanismHypothesis } from './MechanismGraph'
+export type { MechanismGraph, MechanismEdge, TraceEventLike } from './MechanismGraph'
 export * from './types'
-

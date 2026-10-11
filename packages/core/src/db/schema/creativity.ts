@@ -18,13 +18,16 @@ export const hypotheses = sqliteTable('hypotheses', {
   novelty: real('novelty').notNull(),
   feasibility: real('feasibility').notNull(),
   impact: real('impact').notNull(),
-  status: text('status', { enum: ['draft', 'active', 'experimenting', 'validated', 'rejected'] })
+  status: text('status', { enum: ['draft', 'active', 'testing', 'validated', 'rejected'] })
     .notNull()
     .default('draft'),
   createdAt: integer('created_at').notNull(),
   implementedCommitSha: text('implemented_commit_sha'),
   implementedAt: integer('implemented_at'),
   implementationNote: text('implementation_note'),
+  proposedRelations: text('proposed_relations'),
+  falsificationConditions: text('falsification_conditions'),
+  sourceObservationIds: text('source_observation_ids'),
 })
 
 export const experiments = sqliteTable('experiments', {

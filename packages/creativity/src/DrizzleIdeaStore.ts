@@ -30,6 +30,29 @@ function parseHypothesis(obj: any): Hypothesis {
   if (obj.implemented_commit_sha != null) h.implementedCommitSha = String(obj.implemented_commit_sha)
   if (obj.implemented_at != null) h.implementedAt = Number(obj.implemented_at)
   if (obj.implementation_note != null) h.implementationNote = String(obj.implementation_note)
+  if (obj.proposed_relations) {
+    try {
+      h.proposedRelations = JSON.parse(obj.proposed_relations)
+    } catch {
+      h.proposedRelations = []
+    }
+  }
+  if (obj.falsification_conditions) {
+    try {
+      h.falsificationConditions = JSON.parse(obj.falsification_conditions)
+    } catch {
+      h.falsificationConditions = []
+    }
+  }
+  if (obj.source_observation_ids) {
+    try {
+      h.sourceObservationIds = JSON.parse(obj.source_observation_ids)
+    } catch {
+      h.sourceObservationIds = []
+    }
+  }
+  // 旧记录状态归一：experimenting → testing（P1 改名，D2）
+  if ((h.status as string) === 'experimenting') h.status = 'testing'
   return h
 }
 
@@ -156,7 +179,7 @@ export class DrizzleIdeaStore {
 
   getActiveExperiments(): ExperimentPlan[] {
     const db = getRawDb()
-    const activeIds = new Set(this.getHypotheses({ status: 'experimenting' }).map((h) => h.id))
+    const activeIds = new Set(this.getHypotheses({ status: 'testing' }).map((h) => h.id))
     return this.getExperiments().filter((e) => activeIds.has(e.hypothesisId))
   }
 
@@ -235,7 +258,7 @@ export class DrizzleIdeaStore {
       const key = h.sourceLabels.join('|')
       if (!stats[key]) stats[key] = { total: 0, active: 0, rejected: 0, adopted: 0 }
       stats[key].total++
-      if (h.status === 'active' || h.status === 'experimenting') stats[key].active++
+      if (h.status === 'active' || h.status === 'testing') stats[key].active++
       if (h.status === 'rejected') stats[key].rejected++
       if (h.status === 'validated') stats[key].adopted++
     }
@@ -277,8 +300,9 @@ export class DrizzleIdeaStore {
 
   private insertHypothesis(h: Hypothesis): void {
     const db = getRawDb()
+    const status = (h.status as string) === 'experimenting' ? 'testing' : h.status
     db.run(
-      'INSERT OR IGNORE INTO hypotheses (id, title, idea, expected_benefit, risk, source_labels, novelty, feasibility, impact, logic, status, created_at, source_details, implemented_commit_sha, implemented_at, implementation_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT OR IGNORE INTO hypotheses (id, title, idea, expected_benefit, risk, source_labels, novelty, feasibility, impact, logic, status, created_at, source_details, implemented_commit_sha, implemented_at, implementation_note, proposed_relations, falsification_conditions, source_observation_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         h.id,
         h.title,
@@ -290,14 +314,16 @@ export class DrizzleIdeaStore {
         h.feasibility,
         h.impact,
         h.logic ?? null,
-        h.status,
+        status,
         h.createdAt,
         h.sourceDetails ? JSON.stringify(h.sourceDetails) : null,
         h.implementedCommitSha ?? null,
         h.implementedAt ?? null,
         h.implementationNote ?? null,
+        h.proposedRelations && h.proposedRelations.length > 0 ? JSON.stringify(h.proposedRelations) : null,
+        h.falsificationConditions && h.falsificationConditions.length > 0 ? JSON.stringify(h.falsificationConditions) : null,
+        h.sourceObservationIds && h.sourceObservationIds.length > 0 ? JSON.stringify(h.sourceObservationIds) : null,
       ],
     )
   }
 }
-
