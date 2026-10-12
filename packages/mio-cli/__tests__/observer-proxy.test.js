@@ -202,14 +202,7 @@ test('D7 httpFetch: a dead proxy falls back to direct instead of failing the fet
 })
 
 test('D7: every collector fetches through httpFetch, in both copies', () => {
-  const collectors = [
-    'WeiboCollector',
-    'RSSCollector',
-    'HackerNewsCollector',
-    'DouyinCollector',
-    'BilibiliCollector',
-    'GitHubTrendingCollector',
-  ]
+  const collectors = ['RSSCollector', 'HackerNewsCollector', 'GitHubTrendingCollector']
   const copies = ['observer', 'intelligence-observer']
   const bareFetch = /(?<![A-Za-z0-9_.])fetch\(/
 

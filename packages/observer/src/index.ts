@@ -14,11 +14,8 @@ import { FermentationEngine } from './FermentationEngine'
 import { WritingGate } from './WritingGate'
 import { OutputLayer } from './OutputLayer'
 import { RSSCollector } from './collectors/RSSCollector'
-import { BilibiliCollector } from './collectors/BilibiliCollector'
 import { HackerNewsCollector } from './collectors/HackerNewsCollector'
 import { GitHubTrendingCollector } from './collectors/GitHubTrendingCollector'
-import { DouyinCollector } from './collectors/DouyinCollector'
-import { WeiboCollector } from './collectors/WeiboCollector'
 
 export {
   ObserverService,
@@ -36,11 +33,8 @@ export {
   WritingGate,
   OutputLayer,
   RSSCollector,
-  BilibiliCollector,
   HackerNewsCollector,
   GitHubTrendingCollector,
-  DouyinCollector,
-  WeiboCollector,
 }
 
 export type {

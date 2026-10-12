@@ -28,7 +28,7 @@ export class HackerNewsCollector implements Collector {
         log('WARN', 'hn_fetch_ids_failed', { status: idsRes.status })
         return []
       }
-      const ids: number[] = await idsRes.json()
+      const ids = (await idsRes.json()) as number[]
       const topIds = ids.slice(0, 30)
 
       // 2. 逐个获取详情（HN API 不支持批量）
@@ -40,12 +40,13 @@ export class HackerNewsCollector implements Collector {
             httpFetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, {
               signal: AbortSignal.timeout(10000),
             })
-              .then((r) => (r.ok ? r.json() : null))
+              .then(async (r) => (r.ok ? ((await r.json()) as Record<string, unknown>) : null))
               .catch(() => null),
           ),
         )
 
-        for (const story of stories) {
+        for (const raw of stories) {
+          const story = raw as any
           if (!story || story.type !== 'story' || !story.title) continue
           const url = story.url || `https://news.ycombinator.com/item?id=${story.id}`
           if (this.seenUrls.has(url)) continue

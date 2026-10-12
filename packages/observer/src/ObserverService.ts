@@ -14,8 +14,6 @@ import { WorldModelStore } from './WorldModelStore'
 import { SelfEvolutionEngine } from './SelfEvolutionEngine'
 import { OutputLayer } from './OutputLayer'
 import { RSSCollector } from './collectors/RSSCollector'
-import { BilibiliCollector } from './collectors/BilibiliCollector'
-import { DouyinCollector } from './collectors/DouyinCollector'
 import { GitHubTrendingCollector } from './collectors/GitHubTrendingCollector'
 import { HackerNewsCollector } from './collectors/HackerNewsCollector'
 import { sampleBySourceQuota, sourceFamily } from './sourceQuota'
@@ -96,8 +94,6 @@ export class ObserverService {
     this.output = new OutputLayer(this.store)
     this.collectors = [
       new RSSCollector(),
-      new BilibiliCollector(),
-      new DouyinCollector(),
       new GitHubTrendingCollector(),
       new HackerNewsCollector(),
     ]

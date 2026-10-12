@@ -10,6 +10,15 @@ interface RssFeedEntry {
   pubDate?: string
 }
 
+export interface FeedHealth {
+  feed: string
+  successes: number
+  failures: number
+  lastSuccessAt: string | null
+  lastFailureAt: string | null
+  lastError: string | null
+}
+
 /**
  * RSSCollector — 采集用户订阅的 RSS 源
  *
@@ -22,33 +31,30 @@ export class RSSCollector implements Collector {
 
   private feeds: string[]
   private seenUrls = new Set<string>()
+  private health = new Map<string, { successes: number; failures: number; lastSuccessAt: string | null; lastFailureAt: string | null; lastError: string | null }>()
 
   constructor(feeds?: string[]) {
     this.feeds = feeds ?? [
-      // 科技
+      // 中文科技
       'https://feeds.feedburner.com/ruanyifeng',
-      // 央视新闻
-      'http://www.cctv.com/program/rss/02/01/index.xml',
-      'http://www.cctv.com/program/rss/02/02/index.xml',
-      'http://www.cctv.com/program/rss/02/04/index.xml',
-      'http://www.cctv.com/program/rss/02/06/index.xml',
-      // 人民网
-      'http://www.people.com.cn/rss/politics.xml',
-      'http://www.people.com.cn/rss/world.xml',
-      'http://www.people.com.cn/rss/society.xml',
-      // 新华网
-      'http://www.xinhuanet.com/politics/news_politics.xml',
-      'http://www.xinhuanet.com/world/news_world.xml',
-      'http://www.xinhuanet.com/tech/news_tech.xml',
-      'http://www.xinhuanet.com/fortune/news_fortune.xml',
-      // RSSHub 代理（澎湃 / 财新）
-      'https://rsshub.app/thepaper/featured',
-      'https://rsshub.app/caixin/latest',
-      // 技术资讯
-      'https://feeds.feedburner.com/InfoqChinese',
-      'https://www.jiqizhixin.com/rss',
       'https://36kr.com/feed',
+      // 英文科技/行业
+      'https://techcrunch.com/feed/',
+      'https://www.theverge.com/rss/index.xml',
+      'https://feeds.arstechnica.com/arstechnica/index',
+      'https://www.wired.com/feed/rss',
+      'https://feeds.feedburner.com/oreillyradar',
+      // AI / ML
+      'https://www.marktechpost.com/feed/',
+      'https://www.artificialintelligence-news.com/feed/',
     ]
+    for (const f of this.feeds) {
+      this.health.set(f, { successes: 0, failures: 0, lastSuccessAt: null, lastFailureAt: null, lastError: null })
+    }
+  }
+
+  getHealth(): FeedHealth[] {
+    return [...this.health.entries()].map(([feed, h]) => ({ feed, ...h }))
   }
 
   async collect(): Promise<Observation[]> {
@@ -58,8 +64,13 @@ export class RSSCollector implements Collector {
     let idCounter = 0
 
     for (const feedUrl of this.feeds) {
+      const h = this.health.get(feedUrl)
       try {
         const items = await this.fetchFeed(feedUrl)
+        if (h) {
+          h.successes++
+          h.lastSuccessAt = now.toISOString()
+        }
         for (const item of items) {
           const url = item.link || item.title || ''
           if (url && this.seenUrls.has(url)) continue
@@ -77,12 +88,22 @@ export class RSSCollector implements Collector {
           })
         }
       } catch (err: any) {
+        if (h) {
+          h.failures++
+          h.lastFailureAt = now.toISOString()
+          h.lastError = err.message
+        }
         log('WARN', 'rss_collect_failed', { feed: feedUrl, error: err.message })
       }
     }
 
     if (this.seenUrls.size > 10000) {
       this.seenUrls = new Set([...this.seenUrls].slice(-5000))
+    }
+
+    const deadFeeds = this.getHealth().filter((h) => h.successes === 0 && h.failures > 0)
+    if (deadFeeds.length > 0) {
+      log('WARN', 'rss_feeds_dead', { feeds: deadFeeds.map((h) => h.feed) })
     }
 
     log('INFO', 'rss_collected', { feeds: this.feeds.length, new_items: all.length })
@@ -100,9 +121,10 @@ export class RSSCollector implements Collector {
         })
         if (!res.ok) continue
 
-        const json = await res.json()
-        if (json?.items && Array.isArray(json.items)) {
-          return json.items.map((item: any) => ({
+        const json = (await res.json()) as Record<string, unknown>
+        const j = json as any
+        if (j?.items && Array.isArray(j.items)) {
+          return j.items.map((item: any) => ({
             title: item.title,
             link: item.link || item.guid || '',
             description: item.description || item.content,
