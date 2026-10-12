@@ -29,6 +29,7 @@ const { runIdeaGenerate, groundingFrom } = require('../idea-generate.js')
 // one implementation (see ../observer-store.js and ../insight-store.js).
 const { createObserverStore, isObserverAvailable } = require('../observer-store.js')
 const { createInsightStore, isInsightAvailable } = require('../insight-store.js')
+const { mechanismRegistry, mechanismPromote, mechanismRollback } = require('../mechanism-registry.js')
 
 const SERVER_INFO = { name: 'mio-intelligence-mcp', version: '0.1.0' }
 const PROTOCOL_VERSION = '2024-11-05'
@@ -39,10 +40,7 @@ const PROTOCOL_VERSION = '2024-11-05'
 
 const { chatJson } = require('../llm-client.js')
 
-
-const dataDir = path.resolve(
-  process.env.MIO_DATA_DIR || path.join(process.cwd(), '.mio-intelligence')
-)
+const dataDir = path.resolve(process.env.MIO_DATA_DIR || path.join(process.cwd(), '.mio-intelligence'))
 const memoryPath = path.join(dataDir, 'memory.jsonl')
 const tracePath = path.join(dataDir, 'traces.jsonl')
 const experienceReusePath = path.join(dataDir, 'experience_reuse.jsonl')
@@ -91,11 +89,7 @@ function appendJsonl(file, value) {
 
 function writeJsonl(file, values) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(
-    file,
-    values.length > 0 ? values.map((value) => JSON.stringify(value)).join('\n') + '\n' : '',
-    'utf8'
-  )
+  fs.writeFileSync(file, values.length > 0 ? values.map((value) => JSON.stringify(value)).join('\n') + '\n' : '', 'utf8')
 }
 
 function readJsonl(file) {
@@ -128,15 +122,11 @@ function projectName() {
     return lastProjectName
   }
   try {
-    const commonDir = execFileSync(
-      'git',
-      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
-      {
-        cwd: currentCwd,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }
-    ).trim()
+    const commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+      cwd: currentCwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
     if (commonDir) {
       const repoRoot = path.dirname(commonDir)
       const name = path.basename(repoRoot)
@@ -161,11 +151,7 @@ const experienceStore = createExperienceStore({
   // Preserves the phase0 summary these tools have always returned.
   phase0Summary: (project) => summarizePhase0(loadPhase0(dataDir, project)),
 })
-const {
-  listReuse: listExperienceReuse,
-  confirmReuse: confirmExperienceReuse,
-  recordReuse: recordExperienceReuse,
-} = experienceStore
+const { listReuse: listExperienceReuse, confirmReuse: confirmExperienceReuse, recordReuse: recordExperienceReuse } = experienceStore
 
 // One query-log instance shared by the memory store (which records queries) and
 // the task store (which consumes them for auto-claim). This is what removes the
@@ -255,7 +241,9 @@ const { subscribe: subscribeObserver, digest: observerDigest } = subscriptionSto
 function phase0Report(args = {}) {
   const project = args.project || projectName()
   const report = loadPhase0(dataDir, project)
-  const format = String(args.format || 'json').trim().toLowerCase()
+  const format = String(args.format || 'json')
+    .trim()
+    .toLowerCase()
   if (format === 'markdown') {
     return {
       project,
@@ -302,7 +290,8 @@ const TOOLS = [
   },
   {
     name: 'mio.memory.forget',
-    description: 'Permanently delete memory records by id. This is the only irreversible memory operation: archive is reversible, and forget removes the record outright. An audit entry (id, project, timestamp, reason, kind, length, excerpt) is written to memory-forget-audit.jsonl before the delete, so a removal is always reconstructable. Prefer archive unless the record must actually be gone.',
+    description:
+      'Permanently delete memory records by id. This is the only irreversible memory operation: archive is reversible, and forget removes the record outright. An audit entry (id, project, timestamp, reason, kind, length, excerpt) is written to memory-forget-audit.jsonl before the delete, so a removal is always reconstructable. Prefer archive unless the record must actually be gone.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -315,14 +304,18 @@ const TOOLS = [
   },
   {
     name: 'mio.memory.merge',
-    description: 'Merge near-duplicate memory records into one survivor: the survivor gains a supersedes list and the others are archived. Refuses to merge records whose content differs unless keep and allowDivergent are both given, because concatenating divergent bodies corrupts them. Reversible via mio.memory.archive with restore.',
+    description:
+      'Merge near-duplicate memory records into one survivor: the survivor gains a supersedes list and the others are archived. Refuses to merge records whose content differs unless keep and allowDivergent are both given, because concatenating divergent bodies corrupts them. Reversible via mio.memory.archive with restore.',
     inputSchema: {
       type: 'object',
       properties: {
         ids: { type: 'array', items: { type: 'string' }, description: 'Memory record ids to merge (at least 2).' },
         project: { type: 'string', description: 'Project name filter. Defaults to current repository.' },
         keep: { type: 'string', description: 'Id of the record whose content survives. Defaults to the newest record in the set.' },
-        allowDivergent: { type: 'boolean', description: 'When true, allow merging records whose content differs. Requires keep so the surviving body is explicit.' },
+        allowDivergent: {
+          type: 'boolean',
+          description: 'When true, allow merging records whose content differs. Requires keep so the surviving body is explicit.',
+        },
         reason: { type: 'string', description: 'Optional merge reason.' },
       },
       required: ['ids'],
@@ -330,7 +323,8 @@ const TOOLS = [
   },
   {
     name: 'mio.memory.migrate',
-    description: 'Migrate memory records between project and global layers (P3). Moving to global makes the record reusable across projects (project set to null); moving to project restores project scoping.',
+    description:
+      'Migrate memory records between project and global layers (P3). Moving to global makes the record reusable across projects (project set to null); moving to project restores project scoping.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -382,13 +376,17 @@ const TOOLS = [
   },
   {
     name: 'mio.trace.query',
-    description: 'Query the observer trace log (traces.jsonl): task outcomes, tool errors, and ingested events. Newest first, with counts by event_type and outcome over the full filtered set.',
+    description:
+      'Query the observer trace log (traces.jsonl): task outcomes, tool errors, and ingested events. Newest first, with counts by event_type and outcome over the full filtered set.',
     inputSchema: {
       type: 'object',
       properties: {
         event_type: { type: 'string', description: 'Filter by event type (e.g. task_outcome, error, tool_call).' },
         outcome: { type: 'string', description: 'Filter by outcome (success, failure, error, aborted).' },
-        project: { type: 'string', description: 'Project name filter. Defaults to current repository; pass empty string for all projects.' },
+        project: {
+          type: 'string',
+          description: 'Project name filter. Defaults to current repository; pass empty string for all projects.',
+        },
         agent: { type: 'string', description: 'Filter by agent identifier (e.g. codex, claude-code, cli).' },
         host: { type: 'string', description: 'Filter by host identifier.' },
         since: { type: 'string', description: 'Only traces at or after this time (ISO 8601 or epoch ms).' },
@@ -400,7 +398,8 @@ const TOOLS = [
   },
   {
     name: 'mio.digest.generate',
-    description: 'Generate an actionable digest from recent traces/memory/reuse data: task throughput and success rates per agent, project activity, error hotspots, reuse evidence, and rule-based suggestions. Returns the report object with a markdown field.',
+    description:
+      'Generate an actionable digest from recent traces/memory/reuse data: task throughput and success rates per agent, project activity, error hotspots, reuse evidence, and rule-based suggestions. Returns the report object with a markdown field.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -411,11 +410,16 @@ const TOOLS = [
   },
   {
     name: 'mio.observer.subscribe',
-    description: 'Subscribe to observer events (project, event types, optional topic). New matching events are delivered via mio.observer.digest.',
+    description:
+      'Subscribe to observer events (project, event types, optional topic). New matching events are delivered via mio.observer.digest.',
     inputSchema: {
       type: 'object',
       properties: {
-        eventTypes: { type: 'array', items: { type: 'string' }, description: 'Event types to watch, e.g. error, retry, task_outcome. Empty means all.' },
+        eventTypes: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Event types to watch, e.g. error, retry, task_outcome. Empty means all.',
+        },
         project: { type: 'string', description: 'Project name. Defaults to current repository.' },
         topic: { type: 'string', description: 'Optional keyword; only events whose payload mentions it match.' },
         ttlDays: { type: 'number', description: 'Subscription lifetime in days. Defaults to 30.' },
@@ -436,7 +440,8 @@ const TOOLS = [
   },
   {
     name: 'mio.policy.check',
-    description: 'Check historical risk for an action before executing it, returning risk level, outcome counts, and recent failure examples.',
+    description:
+      'Check historical risk for an action before executing it, returning risk level, outcome counts, and recent failure examples.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -484,7 +489,10 @@ const TOOLS = [
       properties: {
         id: { type: 'string', description: 'Id of the auto-claimed reuse record returned by mio.observer.ingest.' },
         confirmedBy: { type: 'string', description: 'Who confirmed the reuse: agent or human. Defaults to agent.' },
-        outcomeImproved: { type: 'boolean', description: 'Override: true when the reused experience improved the task outcome. Defaults to the auto-claim value.' },
+        outcomeImproved: {
+          type: 'boolean',
+          description: 'Override: true when the reused experience improved the task outcome. Defaults to the auto-claim value.',
+        },
         notes: { type: 'string', description: 'Optional confirmation notes.' },
       },
       required: ['id'],
@@ -497,7 +505,11 @@ const TOOLS = [
       type: 'object',
       properties: {
         project: { type: 'string', description: 'Project name filter. Defaults to current repository.' },
-        status: { type: 'string', description: 'Filter: pending (auto-claim awaiting confirmation), confirmed, verified, auto_claim, agent_report, all. Defaults to all.' },
+        status: {
+          type: 'string',
+          description:
+            'Filter: pending (auto-claim awaiting confirmation), confirmed, verified, auto_claim, agent_report, all. Defaults to all.',
+        },
         targetAgent: { type: 'string', description: 'Filter records by target agent.' },
         limit: { type: 'number', description: 'Maximum records to return, 1-100. Defaults to 20.' },
       },
@@ -516,11 +528,12 @@ const TOOLS = [
   },
   {
     name: 'mio.task.route',
-    description: 'Route an incoming task to the most relevant verified experiences and related memories, and include an agent-health signal (from the latest digest) saying which agents to prefer or avoid. Turns recall plus observed performance into decision influence (P1).',
+    description:
+      'Route an incoming task to the most relevant verified experiences and related memories, and include an agent-health signal (from the latest digest) saying which agents to prefer or avoid. Turns recall plus observed performance into decision influence (P1).',
     inputSchema: {
       type: 'object',
       properties: {
-        task: { type: 'string', description: 'Task description to route, e.g. \'fix IPC communication bug\'.' },
+        task: { type: 'string', description: "Task description to route, e.g. 'fix IPC communication bug'." },
         project: { type: 'string', description: 'Project name filter. Defaults to current repository.' },
         scope: { type: 'string', description: 'Search scope: project (default), global, or all.' },
         limit: { type: 'number', description: 'Maximum routes, between 1 and 10. Defaults to 5.' },
@@ -577,7 +590,8 @@ const TOOLS = [
   },
   {
     name: 'mio.evolution.report',
-    description: 'Generate cross-agent evolution report: ecosystem summary, agent performance comparison, cross-agent patterns, memory health, and optimization suggestions (ADR-017 Evolution plane).',
+    description:
+      'Generate cross-agent evolution report: ecosystem summary, agent performance comparison, cross-agent patterns, memory health, and optimization suggestions (ADR-017 Evolution plane).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -684,7 +698,8 @@ const TOOLS = [
   },
   {
     name: 'mio.task.record_outcome',
-    description: 'Record task outcome with agent registry update and auto-claim experience reuse in one atomic call. Combines observer.ingest + agent stats + auto-claim for a complete task lifecycle closure.',
+    description:
+      'Record task outcome with agent registry update and auto-claim experience reuse in one atomic call. Combines observer.ingest + agent stats + auto-claim for a complete task lifecycle closure.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -701,24 +716,31 @@ const TOOLS = [
   },
   {
     name: 'mio.creativity.status',
-    description: 'Show creativity engine status: hypothesis counts, active/validated/rejected/draft, recent top ideas, plus the adoption evidence join — adopted/claimed/evidenced counts with sources (informational, NOT a metric; derived from creativity.adopt trace events and hypothesis:<id> memory tags).',
+    description:
+      'Show creativity engine status: hypothesis counts, active/validated/rejected/draft, recent top ideas, plus the adoption evidence join — adopted/claimed/evidenced counts with sources (informational, NOT a metric; derived from creativity.adopt trace events and hypothesis:<id> memory tags).',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'mio.creativity.list',
-    description: 'List creativity hypotheses with optional status filter. Newest 20 by default; pass limit: 0 for everything. Each row carries adopted: true when a creativity.adopt event or a hypothesis:<id> memory tag exists for its id (read-side evidence join, informational).',
+    description:
+      'List creativity hypotheses with optional status filter. Newest 20 by default; pass limit: 0 for everything. Each row carries adopted: true when a creativity.adopt event or a hypothesis:<id> memory tag exists for its id (read-side evidence join, informational).',
     inputSchema: {
       type: 'object',
       properties: {
         status: { type: 'string', description: 'Filter by status: active, validated, rejected, draft.' },
         limit: { type: 'number', description: 'Max results. Default 20.' },
-        sort: { type: 'string', description: "Sort order: 'novelty' ranks stored hypotheses by relative noveltyScore (a dedup signal, NOT a quality score), newest 200 candidates capped. Default: newest." },
+        sort: {
+          type: 'string',
+          description:
+            "Sort order: 'novelty' ranks stored hypotheses by relative noveltyScore (a dedup signal, NOT a quality score), newest 200 candidates capped. Default: newest.",
+        },
       },
     },
   },
   {
     name: 'mio.creativity.generate',
-    description: 'Generate new creative hypotheses by combining concept sources via LLM. Returns ideas with novelty/feasibility/impact scores. Pass sources, or set fromInsights to seed them from stored insights.',
+    description:
+      'Generate new creative hypotheses by combining concept sources via LLM. Returns ideas with novelty/feasibility/impact scores. Pass sources, or set fromInsights to seed them from stored insights.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -738,9 +760,14 @@ const TOOLS = [
         },
         fromInsights: {
           type: 'boolean',
-          description: 'Seed concept sources from stored insights (highest score first), merged with any explicit sources. Needs @akemi-mio/insight and at least one stored insight.',
+          description:
+            'Seed concept sources from stored insights (highest score first), merged with any explicit sources. Needs @akemi-mio/insight and at least one stored insight.',
         },
-        strategy: { type: 'string', description: 'Generation strategy: explore (cross-domain), signal (provocative), stable (conservative). Auto-selected if omitted. Pair dedup is per strategy: the same source pair may be tried once under each strategy.' },
+        strategy: {
+          type: 'string',
+          description:
+            'Generation strategy: explore (cross-domain), signal (provocative), stable (conservative). Auto-selected if omitted. Pair dedup is per strategy: the same source pair may be tried once under each strategy.',
+        },
       },
     },
   },
@@ -761,12 +788,67 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        hypothesisId: { type: 'string', description: 'UUID of a stored hypothesis (creativity-hypotheses.jsonl). Must exist or the call fails.' },
-        memoryId: { type: 'string', description: 'Optional memory record id. If given, the record must exist and carry the tag "hypothesis:<hypothesisId>" or the call fails.' },
+        hypothesisId: {
+          type: 'string',
+          description: 'UUID of a stored hypothesis (creativity-hypotheses.jsonl). Must exist or the call fails.',
+        },
+        memoryId: {
+          type: 'string',
+          description:
+            'Optional memory record id. If given, the record must exist and carry the tag "hypothesis:<hypothesisId>" or the call fails.',
+        },
         taskId: { type: 'string', description: 'Optional task id this adoption feeds.' },
         note: { type: 'string', description: 'Optional short rationale for the adoption.' },
       },
       required: ['hypothesisId'],
+    },
+  },
+  {
+    name: 'mio.mechanism.registry',
+    description:
+      'Query the mechanism registry: active/rolled_back MechanismVersion entries and PromotionRequest list. Thin JSONL store backed by mechanisms.jsonl.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mechanismId: { type: 'string', description: 'Optional mechanism id filter. Omit for all versions.' },
+        status: { type: 'string', description: 'Filter promotion requests by approvalStatus: pending | approved | rejected.' },
+      },
+    },
+  },
+  {
+    name: 'mio.mechanism.promote',
+    description:
+      'PromotionRequest flow: submit (gate-checked against experiment runs), approve (A5: approver must differ from submitter — enforced in code), or reject. Approve activates the new MechanismVersion and marks the previous active as rolled_back.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: 'submit | approve | reject' },
+        mechanismId: { type: 'string', description: 'Mechanism id (required for submit).' },
+        version: { type: 'number', description: 'Version number to promote (required for submit).' },
+        hypothesisId: { type: 'string', description: 'Optional hypothesis UUID this promotion is derived from.' },
+        experimentRunIds: { type: 'array', items: { type: 'string' }, description: 'Experiment run ids supporting this promotion.' },
+        submittedBy: { type: 'string', description: 'Submitter agent id (required for submit).' },
+        requestId: { type: 'string', description: 'Promotion request id (required for approve/reject).' },
+        approvedBy: { type: 'string', description: 'Approver agent id (required for approve/reject; must differ from submitter — A5).' },
+        reason: { type: 'string', description: 'Rejection reason (for reject).' },
+        gateOverride: {
+          type: 'object',
+          description: 'Optional { allowed, reason } to bypass the default checkSubmitGate computation (for thin CLI surface).',
+        },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'mio.mechanism.rollback',
+    description:
+      'Rollback the active version of a mechanism to its rollbackTo target. The current active is marked rolled_back; the previous version is restored to active.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mechanismId: { type: 'string', description: 'Mechanism id to roll back.' },
+      },
+      required: ['mechanismId'],
     },
   },
   {
@@ -789,163 +871,177 @@ const TOOLS = [
 
   // ═══ Insight Self-Observation ═══
 
-  ...(isInsightAvailable() ? [{
-    name: 'mio.insight.status',
-    description: 'Get insight engine status: total insights, unreported count, cooldown.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'mio.insight.list',
-    description: 'List stored insights with optional filters.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        unreported: { type: 'boolean', description: 'Only unreported insights' },
-        minScore: { type: 'number', description: 'Minimum score filter' },
-        detector: { type: 'string', description: 'Filter by detector name' },
-        limit: { type: 'number', description: 'Max results (default 20)' },
-      },
-    },
-  },
-  {
-    name: 'mio.insight.mark_reported',
-    description: 'Mark insights as reported (acknowledged).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        ids: { type: 'array', items: { type: 'string' }, description: 'Insight IDs to mark' },
-      },
-      required: ['ids'],
-    },
-  },
-  {
-    name: 'mio.insight.generate',
-    description: 'Run LLM-based insight generation from provided context data.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        memories: { type: 'array', items: { type: 'object' }, description: 'Memory entries to analyze' },
-        summaries: { type: 'array', items: { type: 'string' }, description: 'Recent summaries' },
-        plans: { type: 'array', items: { type: 'object' }, description: 'Active plans' },
-      },
-    },
-  }] : []),
+  ...(isInsightAvailable()
+    ? [
+        {
+          name: 'mio.insight.status',
+          description: 'Get insight engine status: total insights, unreported count, cooldown.',
+          inputSchema: { type: 'object', properties: {} },
+        },
+        {
+          name: 'mio.insight.list',
+          description: 'List stored insights with optional filters.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              unreported: { type: 'boolean', description: 'Only unreported insights' },
+              minScore: { type: 'number', description: 'Minimum score filter' },
+              detector: { type: 'string', description: 'Filter by detector name' },
+              limit: { type: 'number', description: 'Max results (default 20)' },
+            },
+          },
+        },
+        {
+          name: 'mio.insight.mark_reported',
+          description: 'Mark insights as reported (acknowledged).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              ids: { type: 'array', items: { type: 'string' }, description: 'Insight IDs to mark' },
+            },
+            required: ['ids'],
+          },
+        },
+        {
+          name: 'mio.insight.generate',
+          description: 'Run LLM-based insight generation from provided context data.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              memories: { type: 'array', items: { type: 'object' }, description: 'Memory entries to analyze' },
+              summaries: { type: 'array', items: { type: 'string' }, description: 'Recent summaries' },
+              plans: { type: 'array', items: { type: 'object' }, description: 'Active plans' },
+            },
+          },
+        },
+      ]
+    : []),
 
   // ═══ Observer Research Pipeline ═══
 
-  ...(isObserverAvailable() ? [{
-    name: 'mio.observer.world_model',
-    description: 'Query the Observer world model: entities, events, trends, narratives, uncertainties, and relations.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        baseDir: { type: 'string', description: 'Observer data directory (default: .local/observer)' },
-      },
-    },
-  },
-  {
-    name: 'mio.observer.trends',
-    description: 'Get recent trend reports from the Observer pipeline.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        date: { type: 'string', description: 'Specific date (YYYY-MM-DD) or null for latest' },
-        limit: { type: 'number', description: 'Max reports to return (default 7)' },
-        baseDir: { type: 'string', description: 'Observer data directory' },
-      },
-    },
-  },
-  {
-    name: 'mio.observer.research',
-    description: 'List recent deep research results from the Observer pipeline.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'number', description: 'Max results (default 10)' },
-        baseDir: { type: 'string', description: 'Observer data directory' },
-      },
-    },
-  },
-  {
-    name: 'mio.observer.insights',
-    description: 'List Observer-generated insights (5-section structured articles).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'number', description: 'Max insights (default 20)' },
-        baseDir: { type: 'string', description: 'Observer data directory' },
-      },
-    },
-  },
-  {
-    name: 'mio.observer.status',
-    description: 'Get Observer pipeline status: counts of observations, trends, topics, research, insights, essays, and world model entities.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        baseDir: { type: 'string', description: 'Observer data directory' },
-      },
-    },
-  },
-  {
-    name: 'mio.observer.collect',
-    description: 'Force data collection from all configured sources (RSS, Bilibili, HackerNews, GitHub, Douyin). Returns collected observations.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sources: { type: 'array', items: { type: 'string' }, description: 'Specific sources to collect (default: all)' },
-        keywords: { type: 'array', items: { type: 'string' }, description: 'Keyword filter (OR match)' },
-        limit: { type: 'number', description: 'Max items per source (default 20)' },
-        baseDir: { type: 'string', description: 'Observer data directory' },
-      },
-    },
-  },
-  {
-    name: 'mio.observer.ferment',
-    description: 'Run fermentation engine: find recurring themes across recent observations and optionally write an essay.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        session: { type: 'string', description: 'Session label: morning/afternoon/night (default: afternoon)' },
-        baseDir: { type: 'string', description: 'Observer data directory' },
-      },
-    },
-  },
-  {
-    name: 'mio.observer.pipeline',
-    description: 'Run the Observer research DAG (collect -> trend -> tension -> research -> multi-brain -> compose -> world model -> publish). Heavy: network plus several LLM calls. Previews by default; pass run:true to execute.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', description: 'Writing mode: neutral | analytical | creative (default: analytical)' },
-        run: { type: 'boolean', description: 'Execute the pipeline. Default false returns a dry-run plan without network or LLM calls.' },
-        baseDir: { type: 'string', description: 'Observer data directory' },
-      },
-    },
-  },
-  {
-    name: 'mio.observer.essays',
-    description: 'List published or draft essays from the Observer.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        type: { type: 'string', description: 'published or draft (default: published)' },
-        limit: { type: 'number', description: 'Max essays (default 10)' },
-        baseDir: { type: 'string', description: 'Observer data directory' },
-      },
-    },
-  },
-  {
-    name: 'mio.observer.dag',
-    description: 'Get DAG state machine status: today\'s task, recent summaries, retryable tasks.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        days: { type: 'number', description: 'Days to look back (default 7)' },
-        baseDir: { type: 'string', description: 'Observer data directory' },
-      },
-    },
-  }] : []),
+  ...(isObserverAvailable()
+    ? [
+        {
+          name: 'mio.observer.world_model',
+          description: 'Query the Observer world model: entities, events, trends, narratives, uncertainties, and relations.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              baseDir: { type: 'string', description: 'Observer data directory (default: .local/observer)' },
+            },
+          },
+        },
+        {
+          name: 'mio.observer.trends',
+          description: 'Get recent trend reports from the Observer pipeline.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              date: { type: 'string', description: 'Specific date (YYYY-MM-DD) or null for latest' },
+              limit: { type: 'number', description: 'Max reports to return (default 7)' },
+              baseDir: { type: 'string', description: 'Observer data directory' },
+            },
+          },
+        },
+        {
+          name: 'mio.observer.research',
+          description: 'List recent deep research results from the Observer pipeline.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', description: 'Max results (default 10)' },
+              baseDir: { type: 'string', description: 'Observer data directory' },
+            },
+          },
+        },
+        {
+          name: 'mio.observer.insights',
+          description: 'List Observer-generated insights (5-section structured articles).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', description: 'Max insights (default 20)' },
+              baseDir: { type: 'string', description: 'Observer data directory' },
+            },
+          },
+        },
+        {
+          name: 'mio.observer.status',
+          description:
+            'Get Observer pipeline status: counts of observations, trends, topics, research, insights, essays, and world model entities.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              baseDir: { type: 'string', description: 'Observer data directory' },
+            },
+          },
+        },
+        {
+          name: 'mio.observer.collect',
+          description:
+            'Force data collection from all configured sources (RSS, Bilibili, HackerNews, GitHub, Douyin). Returns collected observations.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              sources: { type: 'array', items: { type: 'string' }, description: 'Specific sources to collect (default: all)' },
+              keywords: { type: 'array', items: { type: 'string' }, description: 'Keyword filter (OR match)' },
+              limit: { type: 'number', description: 'Max items per source (default 20)' },
+              baseDir: { type: 'string', description: 'Observer data directory' },
+            },
+          },
+        },
+        {
+          name: 'mio.observer.ferment',
+          description: 'Run fermentation engine: find recurring themes across recent observations and optionally write an essay.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              session: { type: 'string', description: 'Session label: morning/afternoon/night (default: afternoon)' },
+              baseDir: { type: 'string', description: 'Observer data directory' },
+            },
+          },
+        },
+        {
+          name: 'mio.observer.pipeline',
+          description:
+            'Run the Observer research DAG (collect -> trend -> tension -> research -> multi-brain -> compose -> world model -> publish). Heavy: network plus several LLM calls. Previews by default; pass run:true to execute.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              mode: { type: 'string', description: 'Writing mode: neutral | analytical | creative (default: analytical)' },
+              run: {
+                type: 'boolean',
+                description: 'Execute the pipeline. Default false returns a dry-run plan without network or LLM calls.',
+              },
+              baseDir: { type: 'string', description: 'Observer data directory' },
+            },
+          },
+        },
+        {
+          name: 'mio.observer.essays',
+          description: 'List published or draft essays from the Observer.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', description: 'published or draft (default: published)' },
+              limit: { type: 'number', description: 'Max essays (default 10)' },
+              baseDir: { type: 'string', description: 'Observer data directory' },
+            },
+          },
+        },
+        {
+          name: 'mio.observer.dag',
+          description: "Get DAG state machine status: today's task, recent summaries, retryable tasks.",
+          inputSchema: {
+            type: 'object',
+            properties: {
+              days: { type: 'number', description: 'Days to look back (default 7)' },
+              baseDir: { type: 'string', description: 'Observer data directory' },
+            },
+          },
+        },
+      ]
+    : []),
 ]
 
 // ═══ Insight Self-Observation Handlers ═══
@@ -1138,6 +1234,12 @@ async function callTool(name, args = {}) {
       return creativityEngine.ferment(args.limit)
     case 'mio.creativity.adopt':
       return adoptHypothesis(creativityEngine, args, ingestObservation, dataDir)
+    case 'mio.mechanism.registry':
+      return mechanismRegistry(args, dataDir)
+    case 'mio.mechanism.promote':
+      return mechanismPromote(args, dataDir)
+    case 'mio.mechanism.rollback':
+      return mechanismRollback(args, dataDir)
     case 'mio.idea.generate': {
       const goal = typeof args.goal === 'string' ? args.goal.trim() : ''
       if (!goal) throw new Error('mio.idea.generate requires goal: a non-empty string')
@@ -1217,7 +1319,7 @@ async function handleMessage(message) {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: {} },
           serverInfo: SERVER_INFO,
-        })
+        }),
       )
       return
     }
@@ -1237,7 +1339,7 @@ async function handleMessage(message) {
         jsonRpcResult(message.id, {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
           isError: false,
-        })
+        }),
       )
       return
     }
@@ -1267,13 +1369,10 @@ rl.on('close', () => {
   }
 })
 
-
 const evolutionReportStore = createEvolutionReport({ dataDir, projectName })
 
 function evolutionReport(args = {}) {
   return evolutionReportStore.report(args)
 }
-
-
 
 module.exports = { TOOLS, callTool, handleMessage, readJsonl, appendJsonl, rl }

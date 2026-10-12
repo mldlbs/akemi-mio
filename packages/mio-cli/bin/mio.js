@@ -24,6 +24,7 @@ const { createMemoryStore } = require('../server/memory-store.js')
 const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine, sourcesFromInsights, adoptHypothesis } = require('../server/creativity-engine.js')
+const { mechanismRegistry, mechanismPromote, mechanismRollback } = require('../server/mechanism-registry.js')
 const { buildAutoSources, topUpSources } = require('../server/creativity-sources.js')
 const { runIdeaGenerate, groundingFrom } = require('../server/idea-generate.js')
 const { createAgentStore } = require('../server/agent-store.js')
@@ -71,15 +72,11 @@ function readJsonl(file) {
 
 function projectName() {
   try {
-    const commonDir = execFileSync(
-      'git',
-      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
-      {
-        cwd: process.cwd(),
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }
-    ).trim()
+    const commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
     if (commonDir) return path.basename(path.dirname(commonDir))
   } catch (_) {}
   return path.basename(process.cwd())
@@ -193,7 +190,7 @@ function printMigrationPlan(plan, useJson) {
   if (useJson) return jsonOrText(plan, true)
   console.log(`Migration plan: ${plan.ready ? 'ready' : 'conflicts'}`)
   console.log(
-    `legacy=${plan.summary.legacy} modular=${plan.summary.modular} toCreate=${plan.summary.toCreate} conflicts=${plan.summary.conflicts}`
+    `legacy=${plan.summary.legacy} modular=${plan.summary.modular} toCreate=${plan.summary.toCreate} conflicts=${plan.summary.conflicts}`,
   )
 }
 
@@ -457,7 +454,9 @@ function splitTagsOption(args, name) {
 function recallCommand(args, useJson) {
   const query = args[1]
   if (!query) {
-    console.error('Usage: mio recall "<query>" [--project name] [--scope project|global|all] [--kind kind] [--tags a,b] [--limit n] [--json]')
+    console.error(
+      'Usage: mio recall "<query>" [--project name] [--scope project|global|all] [--kind kind] [--tags a,b] [--limit n] [--json]',
+    )
     process.exitCode = 1
     return
   }
@@ -479,9 +478,7 @@ function recallCommand(args, useJson) {
     return
   }
   if (useJson) return jsonOrText(result, true)
-  console.log(
-    `Mio memory: ${result.count} result(s) for "${result.query}" (project=${result.project}, scope=${result.scope})`
-  )
+  console.log(`Mio memory: ${result.count} result(s) for "${result.query}" (project=${result.project}, scope=${result.scope})`)
   result.results.forEach((record, index) => {
     const date = (record.timestamp || '').slice(0, 10)
     console.log(`${index + 1}. [${record.kind || 'note'}] ${record.content}`)
@@ -523,9 +520,7 @@ function tracesCommand(args, useJson) {
     .filter(([, value]) => value !== null && value !== undefined)
     .map(([key, value]) => `${key}=${value}`)
     .join(', ')
-  console.log(
-    `Mio traces: ${result.matched} matched / ${result.total} total${filters ? ' (' + filters + ')' : ''}`
-  )
+  console.log(`Mio traces: ${result.matched} matched / ${result.total} total${filters ? ' (' + filters + ')' : ''}`)
   const summary = Object.entries(result.summary.byOutcome)
     .map(([key, value]) => `${key}=${value}`)
     .join(' ')
@@ -534,7 +529,7 @@ function tracesCommand(args, useJson) {
     const time = (trace.timestamp || '').replace('T', ' ').slice(0, 19)
     const brief = trace.payload && trace.payload.summary ? ' | ' + String(trace.payload.summary).slice(0, 100) : ''
     console.log(
-      `${index + 1}. ${time} [${trace.event_type || '?'}${trace.outcome ? '/' + trace.outcome : ''}] ${trace.agent || '?'} @ ${trace.project || '?'}${brief}`
+      `${index + 1}. ${time} [${trace.event_type || '?'}${trace.outcome ? '/' + trace.outcome : ''}] ${trace.agent || '?'} @ ${trace.project || '?'}${brief}`,
     )
     console.log(`   ${trace.id} trace_id=${trace.trace_id || '-'}`)
   })
@@ -587,15 +582,11 @@ function digestCommand(args, useJson) {
       targetCwds = [explicitCwd]
     } else if (explicitProject) {
       const wanted = String(explicitProject).toLowerCase()
-      targetCwds = Object.keys(state.contexts).filter(
-        (cwd) => path.basename(cwd).toLowerCase() === wanted,
-      )
+      targetCwds = Object.keys(state.contexts).filter((cwd) => path.basename(cwd).toLowerCase() === wanted)
     } else {
       // No explicit target: only write to workspaces this digest has data for.
       // A workspace with no matching project gets nothing.
-      targetCwds = Object.keys(state.contexts).filter((cwd) =>
-        projectLine.has(path.basename(cwd).toLowerCase()),
-      )
+      targetCwds = Object.keys(state.contexts).filter((cwd) => projectLine.has(path.basename(cwd).toLowerCase()))
     }
 
     let written = 0
@@ -633,9 +624,7 @@ function digestCommand(args, useJson) {
   console.log(report.markdown)
   console.log(`Report saved: ${reportFile}`)
   if (report.writeBack) {
-    console.log(
-      `Write-back: ${report.writeBack.workspaces} workspace(s), ${report.writeBack.skipped} skipped (no digest data)`,
-    )
+    console.log(`Write-back: ${report.writeBack.workspaces} workspace(s), ${report.writeBack.skipped} skipped (no digest data)`)
     if (report.writeBack.failures && report.writeBack.failures.length > 0) {
       console.error(`  ${report.writeBack.failures.length} write-back failure(s):`)
       for (const f of report.writeBack.failures) console.error(`    - ${f.workspace}: ${f.error}`)
@@ -665,7 +654,7 @@ function pruneCommand(args, useJson) {
   }
   if (useJson) return jsonOrText(result, true)
   console.log(
-    `Prune ${dryRun ? 'plan (dry-run)' : 'result'}: cutoff ${result.cutoff}, days=${days}${includeMemory ? ', memory included' : ''}`
+    `Prune ${dryRun ? 'plan (dry-run)' : 'result'}: cutoff ${result.cutoff}, days=${days}${includeMemory ? ', memory included' : ''}`,
   )
   for (const file of result.files) {
     console.log(`- ${file.file}: ${file.total} total -> keep ${file.kept}, remove ${file.removed}`)
@@ -678,7 +667,9 @@ function pruneCommand(args, useJson) {
 function rememberCommand(args, useJson) {
   const content = args[1]
   if (!content) {
-    console.error('Usage: mio remember "<content>" [--kind decision|context|problem|note] [--tags a,b] [--hypothesis-id id] [--scope project|global] [--project name] [--json]')
+    console.error(
+      'Usage: mio remember "<content>" [--kind decision|context|problem|note] [--tags a,b] [--hypothesis-id id] [--scope project|global] [--project name] [--json]',
+    )
     process.exitCode = 1
     return
   }
@@ -710,8 +701,18 @@ function rememberCommand(args, useJson) {
 // Every flag that consumes the next token. A positional directly after one of
 // these is that flag's value, not an id.
 const VALUE_FLAGS = new Set([
-  '--ids', '--reason', '--project', '--limit', '--scope', '--keep',
-  '--by', '--notes', '--source-agent', '--target-agent', '--experience-id', '--status',
+  '--ids',
+  '--reason',
+  '--project',
+  '--limit',
+  '--scope',
+  '--keep',
+  '--by',
+  '--notes',
+  '--source-agent',
+  '--target-agent',
+  '--experience-id',
+  '--status',
 ])
 
 // Accept ids both as `--ids a,b,c` and as bare positionals
@@ -741,9 +742,7 @@ function collectIds(flags) {
 
 function printMemoryAnalyze(result) {
   const project = result.project || 'all'
-  console.log(
-    `Memory analyze: ${result.total} active, ${result.archived} archived (project=${project})`,
-  )
+  console.log(`Memory analyze: ${result.total} active, ${result.archived} archived (project=${project})`)
   console.log(`layers: project=${result.layers.project} global=${result.layers.global}`)
   const kinds = Object.entries(result.byKind)
   if (kinds.length > 0) {
@@ -813,9 +812,7 @@ function printMemoryMerge(result) {
     return
   }
 
-  console.log(
-    `Merged ${result.archivedCount} record(s) into ${result.survivor.id} (project=${result.project || 'current'})`,
-  )
+  console.log(`Merged ${result.archivedCount} record(s) into ${result.survivor.id} (project=${result.project || 'current'})`)
   console.log(`survivor: ${result.survivor.contentLength} chars, ${result.survivor.timestamp || 'no timestamp'}`)
   if (result.divergentContent) console.log('note: content differed across members; the survivor body was chosen explicitly')
   console.log(`supersedes: ${result.survivor.supersedes.join(', ')}`)
@@ -921,7 +918,11 @@ function memoryCommand(args, useJson) {
       const matched = all.filter((r) => idSet.has(r.id))
       console.log(`Forget preview: ${ids.length} id(s) (project=${previewProject})`)
       for (const record of matched) {
-        console.log(`  ${record.id}  ${String(record.content || '').replace(/\s+/g, ' ').slice(0, 80)}`)
+        console.log(
+          `  ${record.id}  ${String(record.content || '')
+            .replace(/\s+/g, ' ')
+            .slice(0, 80)}`,
+        )
       }
       for (const id of ids) {
         if (!matched.some((r) => r.id === id)) console.log(`  ${id}  (not found)`)
@@ -1075,9 +1076,7 @@ Options:
 }
 
 function printExperienceList(result) {
-  console.log(
-    `Experience reuse: ${result.count} shown of ${result.total} (project=${result.project || 'all'}, status=${result.status})`,
-  )
+  console.log(`Experience reuse: ${result.count} shown of ${result.total} (project=${result.project || 'all'}, status=${result.status})`)
   if (result.count === 0) {
     console.log('No reuse records match.')
     return
@@ -1086,23 +1085,15 @@ function printExperienceList(result) {
     const state = record.confirmed ? 'confirmed' : 'pending'
     const badge = record.reuse && record.behaviorChanged && record.outcomeImproved ? 'verified' : state
     const arrow = `${record.sourceAgent || '?'} -> ${record.targetAgent || '?'}`
-    const flags = [
-      record.reuse ? 'reused' : null,
-      record.behaviorChanged ? 'changed' : null,
-      record.outcomeImproved ? 'improved' : null,
-    ]
+    const flags = [record.reuse ? 'reused' : null, record.behaviorChanged ? 'changed' : null, record.outcomeImproved ? 'improved' : null]
       .filter(Boolean)
       .join(',')
     console.log(`${index + 1}. [${badge}] ${record.experienceId}  ${arrow}`)
-    console.log(
-      `   ${flags || 'no effect flags'} | ${(record.timestamp || '').slice(0, 19)} | ${record.id}`,
-    )
+    console.log(`   ${flags || 'no effect flags'} | ${(record.timestamp || '').slice(0, 19)} | ${record.id}`)
     if (record.notes) console.log(`   note: ${record.notes}`)
   })
   // Only auto_claims are confirmable — experience.confirm rejects anything else.
-  const pending = result.records
-    .filter((record) => record.source === 'auto_claim' && !record.confirmed)
-    .map((record) => record.id)
+  const pending = result.records.filter((record) => record.source === 'auto_claim' && !record.confirmed).map((record) => record.id)
   if (pending.length > 0) {
     console.log('')
     console.log(
@@ -1158,11 +1149,7 @@ function experienceCommand(args, useJson) {
         return
       }
       // Absent = keep whatever the auto-claim recorded; --no-improved rejects it.
-      const improved = flagPresent(flags, '--no-improved')
-        ? false
-        : flagPresent(flags, '--outcome-improved')
-          ? true
-          : undefined
+      const improved = flagPresent(flags, '--no-improved') ? false : flagPresent(flags, '--outcome-improved') ? true : undefined
       result = store.confirmReuse({
         ids,
         outcomeImproved: improved,
@@ -1260,9 +1247,7 @@ function printPolicyCheck(result) {
     console.log('Try a more specific action, e.g. mio policy check "npm publish".')
   } else if (diag && diag.lowSample) {
     console.log('')
-    console.log(
-      `NOTE: only ${diag.sampleSize} matching trace(s); treat the level above as a weak signal.`,
-    )
+    console.log(`NOTE: only ${diag.sampleSize} matching trace(s); treat the level above as a weak signal.`)
   }
 
   console.log(`\n${result.suggestion}`)
@@ -1500,9 +1485,7 @@ function insightGenerateCommand(args, useJson) {
   return Promise.resolve(result).then((resolved) => {
     if (useJson) return jsonOrText(resolved, true)
     if (!resolved || resolved.generated === 0) {
-      console.log(
-        `No insights generated: ${(resolved && resolved.reason) || 'nothing notable in the given context'}`
-      )
+      console.log(`No insights generated: ${(resolved && resolved.reason) || 'nothing notable in the given context'}`)
       return
     }
     console.log(`Generated ${resolved.generated} insight(s)`)
@@ -1623,7 +1606,10 @@ function printObserverEssays(essays) {
   }
   for (const essay of essays) {
     console.log(`- ${essay.file} (${essay.type}, ${String(essay.created).slice(0, 10)})`)
-    const firstLine = String(essay.content || '').split('\n').find((l) => l.trim()) || ''
+    const firstLine =
+      String(essay.content || '')
+        .split('\n')
+        .find((l) => l.trim()) || ''
     if (firstLine) console.log(`    ${firstLine.replace(/\s+/g, ' ').slice(0, 120)}`)
   }
   console.log(`\n${essays.length} essay(s)`)
@@ -1960,7 +1946,9 @@ function printObserverServe(result) {
   }
   console.log(`Observer research scheduler running (base-dir=${result.baseDir})`)
   console.log(`  ${result.schedule ? result.schedule.collectors : 'collectors started'}`)
-  console.log(`  pipeline: first tick ${result.schedule ? result.schedule.pipelineFirstTickMs : 5000}ms, then every ${result.schedule ? result.schedule.pipelineTickMs : 60000}ms`)
+  console.log(
+    `  pipeline: first tick ${result.schedule ? result.schedule.pipelineFirstTickMs : 5000}ms, then every ${result.schedule ? result.schedule.pipelineTickMs : 60000}ms`,
+  )
   console.log('  Stops with Ctrl+C (or `mio observe --stop` when started that way).')
 }
 
@@ -2104,7 +2092,9 @@ function printCreativityStatus(result) {
   console.log(`  hypotheses: ${result.hypotheses}  combos: ${result.combos}  experiments: ${result.experiments}`)
   console.log(`  active: ${result.active}  validated: ${result.validated}  rejected: ${result.rejected}  draft: ${result.draft}`)
   const adoption = result.adoption || { adopted: 0, claimed: 0, evidenced: 0 }
-  console.log(`  adoption: ${adoption.adopted} adopted (events=${adoption.claimed} tags=${adoption.evidenced}) — derived join, not a metric`)
+  console.log(
+    `  adoption: ${adoption.adopted} adopted (events=${adoption.claimed} tags=${adoption.evidenced}) — derived join, not a metric`,
+  )
   if (result.recentIdeas.length === 0) {
     console.log('No hypotheses yet.')
     return
@@ -2125,7 +2115,9 @@ function printCreativityList(items) {
   items.forEach((h, index) => {
     const when = h.createdAt ? new Date(h.createdAt).toISOString().slice(0, 19).replace('T', ' ') : ''
     const labels = Array.isArray(h.sourceLabels) && h.sourceLabels.length > 0 ? h.sourceLabels.join(' + ') : '—'
-    console.log(`${index + 1}. [${h.status}]${h.adopted ? ' [adopted]' : ''} ${h.title}  (N=${h.novelty} F=${h.feasibility} I=${h.impact} score=${h.score}${h.noveltyScore !== undefined ? ` noveltyScore=${h.noveltyScore}` : ''})`)
+    console.log(
+      `${index + 1}. [${h.status}]${h.adopted ? ' [adopted]' : ''} ${h.title}  (N=${h.novelty} F=${h.feasibility} I=${h.impact} score=${h.score}${h.noveltyScore !== undefined ? ` noveltyScore=${h.noveltyScore}` : ''})`,
+    )
     console.log(`   ${labels} | ${when} | ${h.id}`)
     if (h.fermentCount) console.log(`   fermented ${h.fermentCount}x`)
   })
@@ -2168,7 +2160,7 @@ function printCreativityErrors(errors, label) {
   if (!Array.isArray(errors) || errors.length === 0) return
   console.log(`\n${errors.length} ${label}(s) failed:`)
   for (const err of errors) {
-    const who = err.pair ? err.pair.join(' + ') : (err.title || err.id)
+    const who = err.pair ? err.pair.join(' + ') : err.title || err.id
     console.log(`- ${who}: ${err.error}`)
   }
 }
@@ -2327,7 +2319,7 @@ function creativityAdoptCommand(args, useJson) {
         note: optionValue(flags, '--note'),
       },
       cliTaskStore().ingestObservation,
-      MIO_HOME
+      MIO_HOME,
     )
   } catch (error) {
     console.error(error.message || error)
@@ -2408,7 +2400,9 @@ async function ideaGenerateCommand(args, useJson) {
   console.log(`Generated ${result.ideas.length} idea(s) (grounded with ${result.groundedWith} memories)`)
   result.ideas.forEach((idea) => {
     console.log(`- [${idea.hypothesis.status}] ${idea.title}`)
-    console.log(`  novelty=${idea.hypothesis.novelty} feasibility=${idea.hypothesis.feasibility} impact=${idea.hypothesis.impact} | ${idea.hypothesis.id}`)
+    console.log(
+      `  novelty=${idea.hypothesis.novelty} feasibility=${idea.hypothesis.feasibility} impact=${idea.hypothesis.impact} | ${idea.hypothesis.id}`,
+    )
     if (idea.provenance && idea.provenance.technique) console.log(`  technique=${idea.provenance.technique}`)
     if (idea.hypothesis.rejectionReason) console.log(`  rejected: ${idea.hypothesis.rejectionReason}`)
   })
@@ -2470,6 +2464,86 @@ function creativityCommand(args, useJson) {
   if (useJson) return jsonOrText(result, true)
   if (sub === 'status') printCreativityStatus(result)
   else printCreativityList(result)
+}
+
+function mechanismUsage(write = console.log) {
+  write(`mio mechanism <subcommand> — mechanism registry (promotion/rollback)
+
+Subcommands:
+  mio mechanism registry              List versions and promotion requests (--mechanism-id, --status)
+  mio mechanism promote submit ...     Submit a PromotionRequest (gate-checked)
+  mio mechanism promote approve ...    Approve a request (approver must differ from submitter)
+  mio mechanism promote reject ...     Reject a request
+  mio mechanism rollback <mechanismId> Roll back the active version to its rollbackTo target
+
+Options:
+  --json             Machine-readable output
+
+Examples:
+  mio mechanism registry
+  mio mechanism promote submit --mechanism-id m-1 --version 1 --submitted-by codex
+  mio mechanism promote approve --request-id pr-1 --approved-by other-agent
+  mio mechanism rollback m-1`)
+}
+
+function mechanismCommand(args, useJson) {
+  const sub = args[1]
+
+  if (!sub || sub === 'help' || sub === '--help' || sub === '-h') {
+    mechanismUsage()
+    if (!sub) process.exitCode = 1
+    return
+  }
+
+  const flags = args.slice(2)
+
+  try {
+    if (sub === 'registry') {
+      const result = mechanismRegistry(
+        { mechanismId: optionValue(flags, '--mechanism-id'), status: optionValue(flags, '--status') },
+        MIO_HOME,
+      )
+      return jsonOrText(result, useJson)
+    }
+
+    if (sub === 'promote') {
+      const action = flags[0]
+      const result = mechanismPromote(
+        {
+          action,
+          mechanismId: optionValue(flags, '--mechanism-id'),
+          version: parseNumberOption(flags, '--version'),
+          hypothesisId: optionValue(flags, '--hypothesis-id'),
+          experimentRunIds: optionValues(flags, '--experiment-run-ids'),
+          submittedBy: optionValue(flags, '--submitted-by'),
+          requestId: optionValue(flags, '--request-id'),
+          approvedBy: optionValue(flags, '--approved-by'),
+          reason: optionValue(flags, '--reason'),
+        },
+        MIO_HOME,
+      )
+      return jsonOrText(result, useJson)
+    }
+
+    if (sub === 'rollback') {
+      const mechanismId = args[2]
+      if (!mechanismId) {
+        console.error('mio mechanism rollback requires <mechanismId>')
+        console.error('Usage: mio mechanism rollback <mechanismId> [--json]')
+        process.exitCode = 1
+        return
+      }
+      const result = mechanismRollback({ mechanismId }, MIO_HOME)
+      return jsonOrText(result, useJson)
+    }
+
+    console.error(`Unknown mechanism subcommand: ${sub}`)
+    mechanismUsage(console.error)
+    process.exitCode = 1
+  } catch (error) {
+    console.error(error.message || error)
+    process.exitCode = 1
+  }
 }
 
 function readConfig() {
@@ -2538,7 +2612,7 @@ function configShowCommand(useJson) {
           configured: isLlmConfigured(),
         },
       },
-      true
+      true,
     )
   }
 
@@ -2548,7 +2622,7 @@ function configShowCommand(useJson) {
   console.log('LLM (effective):')
   console.log(`  apiUrl: ${effective.apiUrl}   [${LLM_SOURCE_LABELS[sources.apiUrl]}]`)
   console.log(
-    `  apiKey: ${effective.apiKey ? `${maskSecret(effective.apiKey)}   [${LLM_SOURCE_LABELS[sources.apiKey]}]` : '(none / unauthenticated)'}`
+    `  apiKey: ${effective.apiKey ? `${maskSecret(effective.apiKey)}   [${LLM_SOURCE_LABELS[sources.apiKey]}]` : '(none / unauthenticated)'}`,
   )
   console.log(`  model:  ${effective.model}   [${LLM_SOURCE_LABELS[sources.model]}]`)
   console.log('')
@@ -2632,7 +2706,7 @@ function configLlmCommand(flags, useJson) {
         },
         configFile: CONFIG_FILE,
       },
-      true
+      true,
     )
   }
 
@@ -2738,11 +2812,8 @@ function statusCommand(useJson) {
         dataDir: MIO_HOME,
         projectName: () => null,
       }).listReuse({ status: 'pending', limit: 100 }).records
-      return records.filter(
-        (record) =>
-          String(record.sourceAgent || '').toLowerCase() !==
-          String(record.targetAgent || '').toLowerCase()
-      ).length
+      return records.filter((record) => String(record.sourceAgent || '').toLowerCase() !== String(record.targetAgent || '').toLowerCase())
+        .length
     } catch {
       return 0
     }
@@ -2789,11 +2860,9 @@ function statusCommand(useJson) {
   console.log(`Observer: ${observer.isRunning(MIO_HOME) ? 'running (pid ' + observer.readPid(MIO_HOME) + ')' : 'not running'}`)
   if (pendingAutoClaims > 0) {
     console.log(
-      `Pending auto-claims: ${pendingAutoClaims} (${pendingCrossAgent} cross-agent) -- only cross-agent claims whose target output actually cites the source memory may be confirmed; same-agent / weak / self-reported must NOT be (ADR-017).`
+      `Pending auto-claims: ${pendingAutoClaims} (${pendingCrossAgent} cross-agent) -- only cross-agent claims whose target output actually cites the source memory may be confirmed; same-agent / weak / self-reported must NOT be (ADR-017).`,
     )
-    console.log(
-      `  review: \`mio experience list --status pending\` then \`mio experience confirm --ids <id,...>\``
-    )
+    console.log(`  review: \`mio experience list --status pending\` then \`mio experience confirm --ids <id,...>\``)
   }
 }
 
@@ -2928,9 +2997,7 @@ function agentsCommand(args, useJson) {
     }
     if (useJson) return jsonOrText(result, true)
     console.log(`Registered ${result.agentId} (project=${project})`)
-    console.log(
-      `  ${result.registered ? 'created' : `updated (session ${result.sessionCount})`} | host=${result.hostType}`,
-    )
+    console.log(`  ${result.registered ? 'created' : `updated (session ${result.sessionCount})`} | host=${result.hostType}`)
     if (result.capabilities && result.capabilities.length > 0) {
       console.log(`  capabilities: ${result.capabilities.join(', ')}`)
     }
@@ -2951,9 +3018,7 @@ function printAgentList(result) {
   for (const a of result.agents) {
     const caps = Array.isArray(a.capabilities) && a.capabilities.length > 0 ? ` [${a.capabilities.join(', ')}]` : ''
     console.log(`${a.agentId} (${a.hostType})${caps}  project=${a.project || '-'}`)
-    console.log(
-      `   sessions=${a.sessionCount || 0} tasks=${a.taskCount} success=${a.successCount} failure=${a.failureCount} | ${a.id}`,
-    )
+    console.log(`   sessions=${a.sessionCount || 0} tasks=${a.taskCount} success=${a.successCount} failure=${a.failureCount} | ${a.id}`)
   }
 }
 
@@ -2967,9 +3032,7 @@ function printAgentReport(result) {
     const o = r.taskOutcomes
     const when = r.lastSeenAt ? r.lastSeenAt.slice(0, 19).replace('T', ' ') : 'unknown'
     console.log(`${r.agentId} (${r.hostType})  ${r.active ? 'active' : 'idle'}`)
-    console.log(
-      `   tasks: ${o.total} total, ${o.success} success, ${o.failure} failure (${o.successRate}% success)`,
-    )
+    console.log(`   tasks: ${o.total} total, ${o.success} success, ${o.failure} failure (${o.successRate}% success)`)
     console.log(`   memories: ${r.memories}  experience reuses: ${r.experienceReuses.total} (verified ${r.experienceReuses.verified})`)
     console.log(`   last seen: ${when} | sessions=${r.sessionCount}`)
   }
@@ -2993,12 +3056,8 @@ function printRate(label, metric, numeratorKey, denominatorKey, unit, rateKey = 
 
 function printEvaluation(result) {
   const s = result.sample
-  console.log(
-    `ADR-017 evaluation${result.project ? ` (project=${result.project})` : ''}${result.since ? ` since ${result.since}` : ''}`,
-  )
-  console.log(
-    `   sample: queries=${s.queries} routeHits=${s.routeHits} reuses=${s.reuses} traces=${s.traces} agents=${s.agents}`,
-  )
+  console.log(`ADR-017 evaluation${result.project ? ` (project=${result.project})` : ''}${result.since ? ` since ${result.since}` : ''}`)
+  console.log(`   sample: queries=${s.queries} routeHits=${s.routeHits} reuses=${s.reuses} traces=${s.traces} agents=${s.agents}`)
   console.log('   1. route adoption rate (hit and acted on / hits)')
   printRate('adoption', result.routeAdoption, 'adopted', 'routeHits', 'experience hits')
   console.log('   2. behaviour change rate (confirmed behaviorChanged / reuses)')
@@ -3012,9 +3071,7 @@ function printEvaluation(result) {
   if (base) {
     const now = result.behaviorChange.verified
     const verdict = now >= base.observed ? 'at or above' : now >= base.required ? 'above threshold, below baseline' : 'BELOW BASELINE'
-    console.log(
-      `      baseline ${result.baseline.date}: ${base.observed} (required ${base.required}) -- now ${now}, ${verdict}`,
-    )
+    console.log(`      baseline ${result.baseline.date}: ${base.observed} (required ${base.required}) -- now ${now}, ${verdict}`)
   }
   console.log('   3. recall quality (queries with results that led to a reuse)')
   printRate('yield', result.recallQuality, 'queriesLinkedToReuse', 'queriesWithResults', 'queries', 'yield')
@@ -3393,11 +3450,7 @@ function installCommand(host, useJson) {
   if (!observerCycleOk) {
     console.error('Warning: observer cycle failed during install; run `mio observe --once` manually.')
   }
-  console.log(
-    observer.isRunning(MIO_HOME)
-      ? 'Observer daemon running.'
-      : 'Observer daemon not running. Run `mio observe --start`.'
-  )
+  console.log(observer.isRunning(MIO_HOME) ? 'Observer daemon running.' : 'Observer daemon not running. Run `mio observe --start`.')
 }
 
 function mcpCommand() {
@@ -3438,7 +3491,8 @@ function observeCommand(args, jsonFlag = false) {
     console.log(result.started ? 'Observer started.' : 'Observer already running.')
     if (researchResult) {
       if (researchResult.skipped) console.log('Research scheduler skipped: ' + researchResult.skipped)
-      else if (researchResult.started) console.log('Research scheduler started (pid ' + researchResult.pid + ', base-dir ' + researchResult.baseDir + ')')
+      else if (researchResult.started)
+        console.log('Research scheduler started (pid ' + researchResult.pid + ', base-dir ' + researchResult.baseDir + ')')
       else console.log('Research scheduler already running (pid ' + researchResult.pid + ')')
     }
     return
@@ -3447,10 +3501,7 @@ function observeCommand(args, jsonFlag = false) {
     const result = observer.stopBackground(MIO_HOME)
     const researchResult = observer.stopResearchBackground(MIO_HOME)
     if (useJson) {
-      return jsonOrText(
-        { ...result, research: { running: false, stopped: researchResult.stopped, pid: researchResult.pid } },
-        true
-      )
+      return jsonOrText({ ...result, research: { running: false, stopped: researchResult.stopped, pid: researchResult.pid } }, true)
     }
     console.log(result.stopped ? 'Observer stopped.' : 'Observer was not running.')
     console.log(researchResult.stopped ? 'Research scheduler stopped.' : 'Research scheduler was not running.')
@@ -3464,9 +3515,7 @@ function observeCommand(args, jsonFlag = false) {
     const researchInfo = { running: researchRunning, pid: researchPid, logFile: observer.researchLogFile(MIO_HOME) }
     if (useJson) return jsonOrText({ running, pid, research: researchInfo }, true)
     console.log(running ? 'Observer: running (pid ' + pid + ')' : 'Observer: not running')
-    console.log(
-      researchRunning ? 'Research scheduler: running (pid ' + researchPid + ')' : 'Research scheduler: not running'
-    )
+    console.log(researchRunning ? 'Research scheduler: running (pid ' + researchPid + ')' : 'Research scheduler: not running')
     return
   }
   if (flags.includes('--research') && !flags.includes('--start')) {
@@ -3475,11 +3524,7 @@ function observeCommand(args, jsonFlag = false) {
     return
   }
   if (flags.includes('--once')) {
-    const res = observer.runCycle(
-      MIO_HOME,
-      observer.loadState(MIO_HOME),
-      observer.createSinks(MIO_HOME)
-    )
+    const res = observer.runCycle(MIO_HOME, observer.loadState(MIO_HOME), observer.createSinks(MIO_HOME))
     if (useJson) return jsonOrText(res, true)
     console.log('Observed files=' + res.files + ' lines=' + res.lines + ' outcomes=' + res.outcomes)
     return
@@ -3540,6 +3585,9 @@ Usage:
   mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
   mio creativity ferment       Review and refine active hypotheses (calls an LLM)
   mio creativity adopt         Record an adoption event for a stored hypothesis (writes traces only)
+  mio mechanism registry       List mechanism versions and promotion requests
+  mio mechanism promote        Submit/approve/reject a PromotionRequest (approver must differ from submitter)
+  mio mechanism rollback       Roll back the active version of a mechanism
   mio idea generate --goal "..."   Grounded idea pipeline: auto sources, novelty gate, persisted (calls an LLM)
   mio insight status           Insight counts: total, reported, unreported, high-value
   mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)
@@ -3604,6 +3652,8 @@ async function main() {
       return policyCommand(args, useJson)
     case 'creativity':
       return creativityCommand(args, useJson)
+    case 'mechanism':
+      return mechanismCommand(args, useJson)
     case 'idea':
       return ideaCommand(args, useJson)
     case 'insight':

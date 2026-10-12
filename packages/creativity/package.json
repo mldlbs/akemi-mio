@@ -25,6 +25,31 @@
       "require": "./dist/types.js",
       "default": "./dist/types.js"
     },
+    "./MechanismRegistry": {
+      "types": "./dist/MechanismRegistry.d.ts",
+      "require": "./dist/MechanismRegistry.js",
+      "default": "./dist/MechanismRegistry.js"
+    },
+    "./ExperimentRunStore": {
+      "types": "./dist/ExperimentRunStore.d.ts",
+      "require": "./dist/ExperimentRunStore.js",
+      "default": "./dist/ExperimentRunStore.js"
+    },
+    "./WhenThenRunner": {
+      "types": "./dist/WhenThenRunner.d.ts",
+      "require": "./dist/WhenThenRunner.js",
+      "default": "./dist/WhenThenRunner.js"
+    },
+    "./MechanismGraph": {
+      "types": "./dist/MechanismGraph.d.ts",
+      "require": "./dist/MechanismGraph.js",
+      "default": "./dist/MechanismGraph.js"
+    },
+    "./InsightSamplingExperiment": {
+      "types": "./dist/InsightSamplingExperiment.d.ts",
+      "require": "./dist/InsightSamplingExperiment.js",
+      "default": "./dist/InsightSamplingExperiment.js"
+    },
     "./package.json": "./package.json"
   },
   "files": ["dist"],

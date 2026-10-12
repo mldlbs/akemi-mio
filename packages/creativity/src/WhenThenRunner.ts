@@ -8,7 +8,16 @@
  * 条件字符串长度上限，解析失败 = fail-closed（步骤跳过 + 记 guardrail 事件，不中断实验、不泄漏沙箱内部）。
  */
 
-import type { CapabilityToken } from '@akemi-mio/capabilities'
+/**
+ * Token constraints — structural alias for CapabilityToken['constraints'].
+ * Defined locally to avoid a cross-package type dependency in the build (tsconfig.build.json is allowlist-based).
+ */
+export interface TokenConstraints {
+  maxCalls?: number
+  maxTokens?: number
+  expiryMs?: number
+  allowedValues?: Record<string, string[]>
+}
 
 // ══════════════════════════════════════════
 // DSL 类型
@@ -169,11 +178,11 @@ export function evaluateWhen(context: Record<string, unknown>, when: WhenConditi
 export function compileBudgetToConstraints(
   budget: ResourceBudgetSpec | undefined,
   ruleBudget?: ResourceBudgetSpec,
-): CapabilityToken['constraints'] | undefined {
+): TokenConstraints | undefined {
   // 步骤级覆盖规则级
   const b = budget ?? ruleBudget
   if (!b) return undefined
-  const constraints: NonNullable<CapabilityToken['constraints']> = {}
+  const constraints: TokenConstraints = {}
   if (typeof b.maxCalls === 'number' && Number.isFinite(b.maxCalls) && b.maxCalls >= 0) {
     constraints.maxCalls = Math.floor(b.maxCalls)
   }
@@ -206,7 +215,7 @@ export interface StepExecInput {
   /** 显式 named inputs（路径解析后的值） */
   inputs: Record<string, unknown>
   /** 编译后的 token constraints */
-  constraints?: CapabilityToken['constraints']
+  constraints?: TokenConstraints
 }
 
 /** 单步执行结果 */

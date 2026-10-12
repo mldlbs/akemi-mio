@@ -16,6 +16,11 @@
     "src/IdeaGenerator.ts",
     "src/SourceAggregator.ts",
     "src/NoveltyScorer.ts",
-    "src/types.ts"
+    "src/types.ts",
+    "src/MechanismRegistry.ts",
+    "src/ExperimentRunStore.ts",
+    "src/WhenThenRunner.ts",
+    "src/MechanismGraph.ts",
+    "src/InsightSamplingExperiment.ts"
   ]
 }
