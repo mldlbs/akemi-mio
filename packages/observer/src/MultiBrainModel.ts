@@ -144,8 +144,7 @@ export class MultiBrainModel {
         '只允许使用上方已有的信息，不得新增任何外部信息，不做分析不下结论。'
     } else if (brain === 'analyst') {
       userPrompt =
-        `前序分析：${previousContent}\n\n` +
-        '只输出因果链，每行用「因为→所以」格式，基于上方素材做因果连接，不得引入上方没有的新信息。'
+        `前序分析：${previousContent}\n\n` + '只输出因果链，每行用「因为→所以」格式，基于上方素材做因果连接，不得引入上方没有的新信息。'
     } else if (brain === 'writer') {
       userPrompt = `${previousContent}\n\n用第一人称「我」写一段随笔，别列点，像在说话。`
     } else {

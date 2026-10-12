@@ -92,11 +92,7 @@ export class ObserverService {
     this.worldModel = new WorldModelStore(this.llm, this.store)
     this.selfEvo = new SelfEvolutionEngine(this.store)
     this.output = new OutputLayer(this.store)
-    this.collectors = [
-      new RSSCollector(),
-      new GitHubTrendingCollector(),
-      new HackerNewsCollector(),
-    ]
+    this.collectors = [new RSSCollector(), new GitHubTrendingCollector(), new HackerNewsCollector()]
   }
 
   // ════════════════════════════════════════════════════════════
@@ -317,12 +313,11 @@ export class ObserverService {
     for (const c of this.collectors) {
       collectorMap.set(c.name, c)
       // 兼容源名称别名
-      if (c.name === 'weibo-hot') collectorMap.set('weibo_hot', c)
       if (c.name === 'github-trending') collectorMap.set('github_trending', c)
     }
 
     for (const name of sourceNames) {
-      const canonical = name === 'weibo_hot' ? 'weibo-hot' : name === 'github_trending' ? 'github-trending' : name
+      const canonical = name === 'github_trending' ? 'github-trending' : name
       const collector = collectorMap.get(canonical)
       if (!collector) {
         if (name !== '36kr' && name !== 'crunchbase') {

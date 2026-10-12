@@ -115,7 +115,7 @@ test('observer trends returns the newest report first', () => {
   assert.deepEqual(
     items.map((i) => i.title),
     ['newer', 'older'],
-    'reports are ordered by file name descending, so the newest day comes first'
+    'reports are ordered by file name descending, so the newest day comes first',
   )
 })
 
@@ -205,11 +205,7 @@ test('observer defaults to <cwd>/.local/observer', () => {
   const ws = workspace()
   const local = path.join(ws.cwd, '.local', 'observer')
   fs.mkdirSync(path.join(local, 'trends'), { recursive: true })
-  fs.writeFileSync(
-    path.join(local, 'trends', '2026-09-12.json'),
-    JSON.stringify({ title: 'from cwd default' }),
-    'utf8'
-  )
+  fs.writeFileSync(path.join(local, 'trends', '2026-09-12.json'), JSON.stringify({ title: 'from cwd default' }), 'utf8')
 
   const items = jsonOf(ws, ['observer', 'trends', '--json'])
   assert.equal(items.length, 1)
@@ -286,11 +282,16 @@ test('observer ingest records a trace event', () => {
   const ws = workspace()
 
   const result = run(ws, [
-    'observer', 'ingest',
-    '--trace-id', 't1',
-    '--event-type', 'tool_call',
-    '--payload', '{"tool":"Bash"}',
-    '--project', 'demo',
+    'observer',
+    'ingest',
+    '--trace-id',
+    't1',
+    '--event-type',
+    'tool_call',
+    '--payload',
+    '{"tool":"Bash"}',
+    '--project',
+    'demo',
   ])
   assert.equal(result.status, 0, result.stderr)
   assert.match(result.stdout, /Ingested tool_call \(trace=t1\)/)
@@ -321,16 +322,12 @@ test('observer ingest requires trace id and event type, writing nothing', () => 
 test('observer ingest rejects a malformed payload before writing', () => {
   const ws = workspace()
 
-  const bad = run(ws, [
-    'observer', 'ingest', '--trace-id', 't2', '--event-type', 'error', '--payload', '{not json',
-  ])
+  const bad = run(ws, ['observer', 'ingest', '--trace-id', 't2', '--event-type', 'error', '--payload', '{not json'])
   assert.equal(bad.status, 1)
   assert.match(bad.stderr, /valid JSON/)
 
   // Valid JSON but not an object -- also rejected, rather than silently stored.
-  const array = run(ws, [
-    'observer', 'ingest', '--trace-id', 't3', '--event-type', 'error', '--payload', '[1,2]',
-  ])
+  const array = run(ws, ['observer', 'ingest', '--trace-id', 't3', '--event-type', 'error', '--payload', '[1,2]'])
   assert.equal(array.status, 1)
   assert.match(array.stderr, /JSON object/)
 
@@ -340,8 +337,17 @@ test('observer ingest rejects a malformed payload before writing', () => {
 test('observer ingest --json returns the recorded event', () => {
   const ws = workspace()
   const result = run(ws, [
-    'observer', 'ingest', '--trace-id', 't1', '--event-type', 'retry',
-    '--outcome', 'success', '--project', 'demo', '--json',
+    'observer',
+    'ingest',
+    '--trace-id',
+    't1',
+    '--event-type',
+    'retry',
+    '--outcome',
+    'success',
+    '--project',
+    'demo',
+    '--json',
   ])
   assert.equal(result.status, 0, result.stderr)
   const json = JSON.parse(result.stdout)
@@ -387,9 +393,7 @@ function readSubscriptions(ws) {
 test('observer subscribe previews without writing', () => {
   const ws = workspace()
 
-  const result = run(ws, [
-    'observer', 'subscribe', '--event-types', 'tool_call,error', '--project', 'demo',
-  ])
+  const result = run(ws, ['observer', 'subscribe', '--event-types', 'tool_call,error', '--project', 'demo'])
   assert.equal(result.status, 1, 'preview exits non-zero')
   assert.match(result.stdout, /Subscribe preview/)
   assert.match(result.stdout, /event types: tool_call, error/)
@@ -400,9 +404,7 @@ test('observer subscribe previews without writing', () => {
 test('observer subscribe --yes creates then renews in place', () => {
   const ws = workspace()
 
-  const first = run(ws, [
-    'observer', 'subscribe', '--event-types', 'tool_call', '--project', 'demo', '--yes',
-  ])
+  const first = run(ws, ['observer', 'subscribe', '--event-types', 'tool_call', '--project', 'demo', '--yes'])
   assert.equal(first.status, 0, first.stderr)
   let subs = readSubscriptions(ws)
   assert.equal(subs.length, 1)
@@ -410,9 +412,7 @@ test('observer subscribe --yes creates then renews in place', () => {
   assert.deepEqual(subs[0].eventTypes, ['tool_call'])
 
   // Same key -> renewal, not a second row.
-  const again = run(ws, [
-    'observer', 'subscribe', '--event-types', 'tool_call', '--project', 'demo', '--yes',
-  ])
+  const again = run(ws, ['observer', 'subscribe', '--event-types', 'tool_call', '--project', 'demo', '--yes'])
   assert.equal(again.status, 0, again.stderr)
   subs = readSubscriptions(ws)
   assert.equal(subs.length, 1, 'renewed in place, no duplicate')
@@ -567,7 +567,7 @@ Module._load = function (request, parent, isMain) {
   }
   return originalLoad.apply(this, [request, parent, isMain])
 }
-`
+`,
   )
   return file
 }
@@ -618,10 +618,10 @@ test('observer collect defaults to every source instead of none', () => {
   const logFile = path.join(ws.mioHome, 'collect-args.json')
 
   const { logged } = runFake(ws, ['observer', 'collect'], logFile)
-  assert.equal(logged.length, 5, 'the store default is five sources, one call each')
+  assert.equal(logged.length, 3, 'the store default is three sources, one call each')
   assert.deepEqual(
     logged.map((entry) => entry.sources[0]),
-    ['bilibili', 'hackernews', 'github', 'douyin', 'rss'],
+    ['hackernews', 'github-trending', 'rss'],
   )
   assert.ok(
     logged.every((entry) => entry.sources.length === 1),

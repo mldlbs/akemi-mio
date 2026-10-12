@@ -83,7 +83,7 @@ export class GitHubTrendingCollector implements Collector {
             id: `gh_${now.getTime()}_${idx++}`,
             timestamp: ts,
             source: this.name,
-            content: `【GitHub】${repoPath} ⭐${stars ? (stripHtml(stars[1]).trim() || '?') : '?'} — ${truncateAtWord(cleanDesc, 100)}`,
+            content: `【GitHub】${repoPath} ⭐${stars ? stripHtml(stars[1]).trim() || '?' : '?'} — ${truncateAtWord(cleanDesc, 100)}`,
             metadata: { description: cleanDesc },
           })
       }
@@ -134,7 +134,10 @@ const REPO_PATH_BLOCKLIST = new Set([
  * Returns the canonical `owner/repo` or null.
  */
 export function validRepoPath(raw: string): string | null {
-  const cleaned = raw.split(/[?#]/)[0].trim().replace(/^\/+|\/+$/g, '')
+  const cleaned = raw
+    .split(/[?#]/)[0]
+    .trim()
+    .replace(/^\/+|\/+$/g, '')
   const segs = cleaned.split('/').filter((s) => s.length > 0)
   if (segs.length !== 2) return null
   const [owner, repo] = segs

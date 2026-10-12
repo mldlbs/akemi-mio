@@ -31,7 +31,10 @@ export class RSSCollector implements Collector {
 
   private feeds: string[]
   private seenUrls = new Set<string>()
-  private health = new Map<string, { successes: number; failures: number; lastSuccessAt: string | null; lastFailureAt: string | null; lastError: string | null }>()
+  private health = new Map<
+    string,
+    { successes: number; failures: number; lastSuccessAt: string | null; lastFailureAt: string | null; lastError: string | null }
+  >()
 
   constructor(feeds?: string[]) {
     this.feeds = feeds ?? [

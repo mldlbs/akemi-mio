@@ -71,18 +71,9 @@ function stripTrailingSlash(url: string): string {
 // not break, but anything the host passes in wins.
 function resolveConfig(explicit?: ObserverLlmConfig): ResolvedLlmConfig {
   const apiUrl =
-    explicit?.apiUrl ||
-    process.env.LLM_API_URL ||
-    process.env.OBSERVER_LLM_API_URL ||
-    process.env.OBSERVER_OLLAMA_URL ||
-    DEFAULT_OLLAMA_URL
+    explicit?.apiUrl || process.env.LLM_API_URL || process.env.OBSERVER_LLM_API_URL || process.env.OBSERVER_OLLAMA_URL || DEFAULT_OLLAMA_URL
   const apiKey = explicit?.apiKey ?? process.env.LLM_KEY ?? ''
-  const model =
-    explicit?.model ||
-    process.env.LLM_CHAT_MODEL ||
-    process.env.LLM_MODEL ||
-    process.env.OBSERVER_MODEL ||
-    DEFAULT_OLLAMA_MODEL
+  const model = explicit?.model || process.env.LLM_CHAT_MODEL || process.env.LLM_MODEL || process.env.OBSERVER_MODEL || DEFAULT_OLLAMA_MODEL
   const provider = inferProvider(apiUrl, explicit?.provider || process.env.OBSERVER_LLM_PROVIDER)
 
   if (provider === 'openai') {

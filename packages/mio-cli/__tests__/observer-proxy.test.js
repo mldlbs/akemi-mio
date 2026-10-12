@@ -70,7 +70,11 @@ test('D7 resolveProxyUrl: env proxy is normalized, scheme-aware, bypassable', ()
 
   const bypassed = { env: { HTTP_PROXY: 'http://p:3128' }, readSystemProxy: () => null }
   assert.equal(resolveProxyUrl('http://x.com', { ...bypassed, env: { ...bypassed.env, NO_PROXY: '*' } }), null)
-  assert.equal(resolveProxyUrl('http://api.x.com', { ...bypassed, env: { ...bypassed.env, NO_PROXY: 'x.com' } }), null, 'NO_PROXY matches subdomains')
+  assert.equal(
+    resolveProxyUrl('http://api.x.com', { ...bypassed, env: { ...bypassed.env, NO_PROXY: 'x.com' } }),
+    null,
+    'NO_PROXY matches subdomains',
+  )
   assert.equal(
     resolveProxyUrl('http://xy.com', { ...bypassed, env: { ...bypassed.env, NO_PROXY: 'x.com' } }),
     'http://p:3128',
@@ -100,13 +104,21 @@ test('D7 resolveProxyUrl: Windows system proxy is read and its ProxyOverride hon
   assert.equal(resolveProxyUrl('https://a.com', { env: {}, readSystemProxy: () => perScheme }), 'http://127.0.0.1:7891')
 
   const socksOnly = { servers: parseProxyServer('socks=127.0.0.1:7890'), bypass: [] }
-  assert.equal(resolveProxyUrl('http://a.com', { env: {}, readSystemProxy: () => socksOnly }), null, 'a socks-only system proxy is not an HTTP proxy for us')
+  assert.equal(
+    resolveProxyUrl('http://a.com', { env: {}, readSystemProxy: () => socksOnly }),
+    null,
+    'a socks-only system proxy is not an HTTP proxy for us',
+  )
 
   const proxied = { servers: parseProxyServer('127.0.0.1:7890'), bypass: parseBypassList('*.zhihu.com;127.*;<local>', /[;]/) }
   const withSystem = { env: {}, readSystemProxy: () => proxied }
   assert.equal(resolveProxyUrl('https://www.zhihu.com', withSystem), null, 'ProxyOverride *.zhihu.com bypasses the system proxy')
   assert.equal(resolveProxyUrl('https://api.zhihu.com', withSystem), null, 'ProxyOverride pattern matches subdomains')
-  assert.equal(resolveProxyUrl('https://github.com/trending', withSystem), 'http://127.0.0.1:7890', 'everything else still goes to the proxy')
+  assert.equal(
+    resolveProxyUrl('https://github.com/trending', withSystem),
+    'http://127.0.0.1:7890',
+    'everything else still goes to the proxy',
+  )
 
   assert.equal(
     resolveProxyUrl('https://a.com', { env: { HTTPS_PROXY: 'http://env:1' }, readSystemProxy: () => perScheme }),
@@ -188,10 +200,14 @@ test('D7 httpFetch: a dead proxy falls back to direct instead of failing the fet
   await close(dead)
 
   try {
-    const res = await httpFetch(`http://127.0.0.1:${originPort}/x`, {}, {
-      env: { HTTP_PROXY: `http://127.0.0.1:${deadPort}` },
-      readSystemProxy: () => null,
-    })
+    const res = await httpFetch(
+      `http://127.0.0.1:${originPort}/x`,
+      {},
+      {
+        env: { HTTP_PROXY: `http://127.0.0.1:${deadPort}` },
+        readSystemProxy: () => null,
+      },
+    )
     assert.equal(res.status, 200)
     assert.equal(await res.text(), 'still-reachable')
     assert.equal(originHits, 1, 'the direct route answered after the proxy failed')

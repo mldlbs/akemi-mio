@@ -25,14 +25,14 @@ function sanitizeClusters(raw: unknown): AssociationCluster[] {
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue
     const c = item as Record<string, unknown>
-    const theme = String(c.theme ?? '').trim().slice(0, 40)
+    const theme = String(c.theme ?? '')
+      .trim()
+      .slice(0, 40)
     if (!theme) continue
     const strength = normalizeStrength(c.strength)
     if (strength === null || strength < 0.3) continue
     const assocRaw = Array.isArray(c.associations) ? c.associations : []
-    const associations = [
-      ...new Set(assocRaw.map((a) => String(a).trim()).filter(Boolean)),
-    ].slice(0, MAX_ASSOCIATIONS)
+    const associations = [...new Set(assocRaw.map((a) => String(a).trim()).filter(Boolean))].slice(0, MAX_ASSOCIATIONS)
     out.push({ theme, associations, observations: [], strength })
   }
   return out.sort((a, b) => b.strength - a.strength).slice(0, MAX_CLUSTERS)

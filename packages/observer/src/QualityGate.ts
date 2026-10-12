@@ -32,8 +32,18 @@ const CLICHE_LIMIT = 5
 // Same ban list InsightComposer feeds to the section prompts — the gate is
 // where it stops being a request and becomes a check.
 export const BANNED_CLICHES = [
-  '然而', '不仅', '而且', '因此', '总之', '显而易见',
-  '不可忽视', '值得关注', '引人深思', '从某种意义上说', '由此可见', '综上所述',
+  '然而',
+  '不仅',
+  '而且',
+  '因此',
+  '总之',
+  '显而易见',
+  '不可忽视',
+  '值得关注',
+  '引人深思',
+  '从某种意义上说',
+  '由此可见',
+  '综上所述',
 ]
 
 export class QualityGate {
@@ -105,9 +115,7 @@ ${trimmed.slice(0, 6000)}
     }
 
     const score = clampScore(result.data.score)
-    const issues = Array.isArray(result.data.issues)
-      ? result.data.issues.filter((i): i is string => typeof i === 'string')
-      : []
+    const issues = Array.isArray(result.data.issues) ? result.data.issues.filter((i): i is string => typeof i === 'string') : []
     const pass = score >= QUALITY_PASS_SCORE
     if (!pass) {
       log('WARN', 'quality_gate_reject', { score, issues })

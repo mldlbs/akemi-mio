@@ -54,15 +54,7 @@ try {
 
 // Subdirectories that make up the pipeline. `observerStatus` counts files in
 // each, so adding a stage here also makes it show up in the status output.
-const OBSERVER_SUBDIRS = [
-  'observations',
-  'trends',
-  'topics',
-  'research',
-  'insights',
-  'world_model',
-  'essays',
-]
+const OBSERVER_SUBDIRS = ['observations', 'trends', 'topics', 'research', 'insights', 'world_model', 'essays']
 
 function isObserverAvailable() {
   return Boolean(ObserverStore)
@@ -91,11 +83,7 @@ function todayTaskId() {
 function readJsonlSafe(filePath) {
   if (!fs.existsSync(filePath)) return []
   try {
-    const lines = fs
-      .readFileSync(filePath, 'utf8')
-      .trim()
-      .split('\n')
-      .filter(Boolean)
+    const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n').filter(Boolean)
     const results = []
     for (let i = 0; i < lines.length; i++) {
       try {
@@ -113,8 +101,15 @@ function readJsonlSafe(filePath) {
 // Reads a directory of per-item JSON files, newest file name first.
 function readJsonDir(dirPath, limit) {
   if (!fs.existsSync(dirPath)) return []
-  const files = fs.readdirSync(dirPath).filter((f) => f.endsWith('.json')).sort().reverse()
-  return files.slice(0, limit).map((f) => readJsonSafe(path.join(dirPath, f))).filter(Boolean)
+  const files = fs
+    .readdirSync(dirPath)
+    .filter((f) => f.endsWith('.json'))
+    .sort()
+    .reverse()
+  return files
+    .slice(0, limit)
+    .map((f) => readJsonSafe(path.join(dirPath, f)))
+    .filter(Boolean)
 }
 
 function createObserverStore(options = {}) {
@@ -131,9 +126,7 @@ function createObserverStore(options = {}) {
     const result = {}
     for (const d of OBSERVER_SUBDIRS) {
       const dir = path.join(baseDir, d)
-      result[d] = fs.existsSync(dir)
-        ? fs.readdirSync(dir).filter((f) => !f.startsWith('.')).length
-        : 0
+      result[d] = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => !f.startsWith('.')).length : 0
     }
     return result
   }
@@ -172,7 +165,11 @@ function createObserverStore(options = {}) {
     const type = args.type || 'published'
     const essaysDir = path.join(baseDir, 'essays', type)
     if (!fs.existsSync(essaysDir)) return []
-    const files = fs.readdirSync(essaysDir).filter((f) => f.endsWith('.md')).sort().reverse()
+    const files = fs
+      .readdirSync(essaysDir)
+      .filter((f) => f.endsWith('.md'))
+      .sort()
+      .reverse()
     return files.slice(0, args.limit || 10).map((f) => {
       const full = path.join(essaysDir, f)
       return {
@@ -212,7 +209,7 @@ function createObserverStore(options = {}) {
     // was dead on arrival for every caller. (collectorConfig was never read by
     // the package; it was invented here.)
     const service = new ObserverService(baseDirOf(args), observerLlmConfig())
-    const sources = args.sources || ['bilibili', 'hackernews', 'github', 'douyin', 'rss']
+    const sources = args.sources || ['hackernews', 'github-trending', 'rss']
     const allObs = []
     for (const src of sources) {
       try {
@@ -354,7 +351,7 @@ function createObserverStore(options = {}) {
     const baseDir = baseDirOf(args)
     const llmConfig = observerLlmConfig()
     const schedule = {
-      collectors: 'every source collects on start, then on its own interval (30m weibo / 1h rss,hn,douyin,bilibili / 4h github-trending)',
+      collectors: 'every source collects on start, then on its own interval (1h rss,hackernews / 4h github-trending)',
       pipelineTickMs: 60000,
       pipelineFirstTickMs: 5000,
       pipelineGate: "runs while today's DAG is not COMPLETED -- one full run per day, retried until it completes",

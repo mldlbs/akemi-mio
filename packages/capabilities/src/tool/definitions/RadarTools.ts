@@ -17,15 +17,14 @@ import { log } from '@akemi-mio/core/logger/Logger'
 export const radarScanTool = buildTool({
   name: 'radar_scan',
   description:
-    '按需采集指定信息源的网络情报。支持 hackernews、weibo-hot、github-trending、bilibili、douyin、rss 等源，' +
-    '可用关键词过滤结果。返回每条内容附带来源标签。',
+    '按需采集指定信息源的网络情报。支持 hackernews、github-trending、rss 等源，' + '可用关键词过滤结果。返回每条内容附带来源标签。',
   inputJSONSchema: {
     type: 'object',
     properties: {
       sources: {
         type: 'array',
         items: { type: 'string' },
-        description: '采集源名称列表。可选值: hackernews, weibo-hot, github-trending, bilibili, douyin, rss。传入 ["all"] 采集所有源',
+        description: '采集源名称列表。可选值: hackernews, github-trending, rss。传入 ["all"] 采集所有源',
       },
       keywords: {
         type: 'array',
@@ -189,10 +188,7 @@ ${data.slice(0, 30000)}`
 /** 源名称 → 友好标签映射 */
 const SOURCE_LABELS: Record<string, string> = {
   hackernews: 'HackerNews 技术趋势',
-  'weibo-hot': '微博热搜',
   'github-trending': 'GitHub Trending',
-  bilibili: 'Bilibili 热门',
-  douyin: '抖音热点',
   rss: 'RSS 订阅',
 }
 
@@ -315,4 +311,3 @@ function formatFallbackAnalysis(data: string, mode: string): string {
 // =============================================================================
 
 export const radarTools = [radarScanTool, radarAnalyzeTool] as const
-

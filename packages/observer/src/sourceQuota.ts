@@ -31,11 +31,7 @@ interface Share {
  * 5. Phase B 余量按各家族余池占比（最大余数法、tie 取首现序）补齐。
  * 6. 输出保持原始输入时间序。
  */
-export function sampleBySourceQuota(
-  observations: Observation[],
-  limit = 30,
-  minPerSource = 5
-): Observation[] {
+export function sampleBySourceQuota(observations: Observation[], limit = 30, minPerSource = 5): Observation[] {
   if (limit <= 0) return []
   if (observations.length <= limit) return observations.slice()
 
