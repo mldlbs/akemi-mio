@@ -29,6 +29,21 @@ function sanitizeKeyword(kw: string): string {
 }
 
 /**
+ * 从一段内容中提取 fallback 关键词（完整词/n-gram，非截断片段）。
+ * 替代旧的 slice(0,8) 截断——英文单词不再被切成 "Anthropi" 这类残词。
+ * 规则：按空白+常见标点切分，保留 2-20 字符、含字母或 CJK 的 token，
+ * 纯数字/纯标点丢弃。
+ */
+export function extractFallbackKeywords(content: string): string[] {
+  return content
+    .split(/[\s,，。！？;；:：、"'「」【】\[\]()（）<>《》|]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2 && t.length <= 20)
+    .filter((t) => /[一-鿿\w]/.test(t))
+    .filter((t) => !/^\d+$/.test(t))
+}
+
+/**
  * TrendEngine — 热点引擎
  *
  * 从近期 observations 中提取关键词、计算热度评分、
@@ -223,11 +238,12 @@ ${list}
   private fallbackCounting(observations: Observation[], generatedAt: string): TrendReport {
     const freq: Record<string, { count: number; obs: Observation[] }> = {}
     for (const obs of observations) {
-      const key = obs.content.slice(0, 8).trim()
-      if (key.length < 2) continue
-      if (!freq[key]) freq[key] = { count: 0, obs: [] }
-      freq[key].count++
-      freq[key].obs.push(obs)
+      // 完整词提取，替代旧的 slice(0,8) 截断（"Anthropic" 不再被切成 "Anthropi"）
+      for (const key of extractFallbackKeywords(obs.content)) {
+        if (!freq[key]) freq[key] = { count: 0, obs: [] }
+        freq[key].count++
+        freq[key].obs.push(obs)
+      }
     }
 
     const signals: TrendSignal[] = Object.entries(freq)

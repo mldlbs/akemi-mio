@@ -24,6 +24,26 @@ import type { Collector, FeedbackSignal, EvolutionParams, OutputEnvelope, Writin
 const PIPELINE_INTERVAL_MS = 4 * 60 * 60 * 1000
 
 /**
+ * 从选题文本中提取用于素材检索的关键词。
+ * 中文按 2-gram + 整段，英文按完整单词；过滤单字符和纯标点。
+ */
+function extractTopicKeywords(topic: string): string[] {
+  const tokens = topic
+    .split(/[\s,，。！？;；:：、"'「」【】\[\]()（）]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2 && t.length <= 20)
+    .filter((t) => /[一-鿿\w]/.test(t))
+  // 中文短语补充 2-gram（如 "AI 安全" → ["AI", "安全"] 已够；"人工智能安全" → 加 "人工智能","能安全" 等）
+  const cjk = topic.replace(/[^一-鿿]/g, '')
+  if (cjk.length >= 3) {
+    for (let i = 0; i <= cjk.length - 2; i++) {
+      tokens.push(cjk.slice(i, i + 2))
+    }
+  }
+  return [...new Set(tokens)]
+}
+
+/**
  * ObserverService — 观察者服务（升级版）
  *
  * 混合模式：同时支持 legacy 发酵和新的 DAG 驱动 pipeline。
@@ -157,12 +177,39 @@ export class ObserverService {
 
       // Step 4: Deep Research
       log('INFO', `${logTag}_research`)
-      const recent = this.store.readRecent(3)
-      const sampled = sampleBySourceQuota(recent, 30, 5)
+      // 按 topic 关键词检索素材（而非只靠时间窗+配额——旧版 8 条 Anthropic
+      // 因不在近 3 天窗口或被 30 条配额裁掉而"有料不用"）。
+      const recent = this.store.readRecent(7)
+      const topicKeywords = extractTopicKeywords(topicSelection.topic.topic)
+      const related =
+        topicKeywords.length > 0
+          ? recent.filter((o) => {
+              const lc = o.content.toLowerCase()
+              return topicKeywords.some((kw) => lc.includes(kw.toLowerCase()))
+            })
+          : []
+      const MIN_RELATED = 3
+      let sampled: Observation[]
+      if (topicSelection.fallback) {
+        // 抽象 fallback 题目无法按关键词匹配：退化为时间窗抽样，但要求总量下限
+        if (recent.length < 5) {
+          throw new Error(`insufficient_material: only ${recent.length} observations for fallback topic`)
+        }
+        sampled = sampleBySourceQuota(recent, 30, 5)
+      } else {
+        if (related.length < MIN_RELATED) {
+          throw new Error(
+            `insufficient_material: only ${related.length} related observations for topic "${topicSelection.topic.topic}" (need ${MIN_RELATED})`,
+          )
+        }
+        sampled = sampleBySourceQuota(related, 30, 5)
+      }
       const obs = sampled.map((o) => `[${o.source}] ${o.content}`)
       log('INFO', 'research_obs_sampled', {
         total: recent.length,
+        related: related.length,
         sampled: sampled.length,
+        topicKeywords: topicKeywords.join(','),
         families: [...new Set(sampled.map((o) => sourceFamily(o.source)))].join(','),
       })
       const researchResult = await this.research.research(topicSelection.topic, obs)

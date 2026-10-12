@@ -9,6 +9,32 @@ const EXPLOIT_RATE = 0.8
 const FALLBACK_TOPICS = ['今日观察到的事物之间的联系', '近期技术趋势中的矛盾与张力', '碎片信息中浮现的模式']
 
 /**
+ * 关键词合理性门槛：防止残缺词/无意义片段进入选题候选。
+ * - 至少 2 字符
+ * - 必须含字母或 CJK 字符（排除纯数字/纯标点）
+ * - 纯 ASCII 关键词：2 字符仅允许全大写缩写（AI/IT/OS…），否则至少 3 字符
+ * - 不以常见截断尾部结尾（连续辅音/单字母尾缀通常是切词残片）
+ */
+export function isPlausibleKeyword(kw: string): boolean {
+  const s = kw.trim()
+  if (s.length < 2 || s.length > 40) return false
+  if (!/[一-鿿\w]/.test(s)) return false
+  if (/^\d+$/.test(s)) return false
+  // 纯 ASCII（无 CJK）
+  if (!/[一-鿿]/.test(s)) {
+    if (s.length === 2) {
+      // 仅允许全大写 2 字母缩写
+      if (!/^[A-Z]{2}$/.test(s)) return false
+    } else if (s.length === 3 && !/[aeiouAEIOU]/.test(s)) {
+      // 3 字符且无元音 → 大概率是截断残片（如 "Anth" 有元音所以不会被拒，但 "xyz" 会被）
+      // 放行含元音的 3 字符词
+      return false
+    }
+  }
+  return true
+}
+
+/**
  * TensionFieldEngine — 选题张力场（多因子版）
  *
  * 升级点：
@@ -97,6 +123,11 @@ export class TensionFieldEngine {
     const candidates: TopicCandidate[] = []
 
     for (const signal of trends.signals.slice(0, 10)) {
+      // 关键词合理性门槛：残缺词/无意义片段不进入候选
+      if (!isPlausibleKeyword(signal.keyword)) {
+        log('INFO', 'tension_keyword_rejected', { keyword: signal.keyword })
+        continue
+      }
       const popularity = signal.score
       // 两个 LLM 评分互不依赖：并行把每条信号从两次串行往返降为一次（L4）
       const [novelty, tension] = await Promise.all([
