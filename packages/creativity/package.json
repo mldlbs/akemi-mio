@@ -1,6 +1,6 @@
 {
   "name": "@akemi-mio/creativity",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Creativity layer: ideas, writing, blog, image, inspiration",
   "main": "./dist/IdeaGenerator.js",
   "types": "./dist/IdeaGenerator.d.ts",
@@ -52,12 +52,16 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "npm run build"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "license": "MIT",
   "dependencies": {
     "@akemi-mio/core": "^0.1.0"
