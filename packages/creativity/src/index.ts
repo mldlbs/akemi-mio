@@ -94,4 +94,16 @@ export type {
 } from './ExperimentRunStore'
 export { sampleVariant, computeSamplingMetrics, runInsightSamplingExperiment, reportToExperimentRuns } from './InsightSamplingExperiment'
 export type { SamplingVariant, SamplingMetrics, VariantResult, CapabilityDeltaReport } from './InsightSamplingExperiment'
+export { MechanismRegistryStore, canIndependentlyApprove, checkSubmitGate } from './MechanismRegistry'
+export type {
+  MechanismStatus,
+  MechanismVersion,
+  ApprovalStatus,
+  PromotionRequest,
+  SubmitGateResult,
+  SubmitPromotionInput,
+  SubmitResult,
+  DecideResult,
+  RollbackResult,
+} from './MechanismRegistry'
 export * from './types'
