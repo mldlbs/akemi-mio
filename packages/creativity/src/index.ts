@@ -92,4 +92,6 @@ export type {
   AssignmentResult,
   PromotionGateResult,
 } from './ExperimentRunStore'
+export { sampleVariant, computeSamplingMetrics, runInsightSamplingExperiment, reportToExperimentRuns } from './InsightSamplingExperiment'
+export type { SamplingVariant, SamplingMetrics, VariantResult, CapabilityDeltaReport } from './InsightSamplingExperiment'
 export * from './types'
