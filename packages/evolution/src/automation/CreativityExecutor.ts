@@ -9,7 +9,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import { CreativityWorkspace } from './CreativityWorkspace'
 import { log } from '@akemi-mio/core/logger/Logger'
 import type { AssignedProblem, FixResult, FixExecutor, ProblemSource } from './types'
-import { ideaStore } from '@akemi-mio/creativity'
+import { ideaStore, DrizzleFeedbackEventStore } from '@akemi-mio/creativity'
 import { credentialsManager } from '@akemi-mio/core/credentials/CredentialsManager'
 import { getRuntimeLlmConfig } from '@akemi-mio/intelligence/llm/runtimeConfig'
 
@@ -22,9 +22,16 @@ export class CreativityExecutor implements FixExecutor {
   private minIntervalMs = 30_000
   private busy = false
   private workspace: CreativityWorkspace
+  private feedbackEvents: DrizzleFeedbackEventStore | null = null
 
   constructor(workspace?: CreativityWorkspace) {
     this.workspace = workspace ?? new CreativityWorkspace()
+  }
+
+  /** 惰性构造：多数 execute 路径不写反馈事件；无 DB 的隔离测试也不应被构造拖垮。 */
+  private getFeedbackStore(): DrizzleFeedbackEventStore {
+    if (!this.feedbackEvents) this.feedbackEvents = new DrizzleFeedbackEventStore()
+    return this.feedbackEvents
   }
 
   isAvailable(): boolean {
@@ -137,6 +144,31 @@ export class CreativityExecutor implements FixExecutor {
             committed: deliver.committed,
             commitSha: deliver.commitSha,
           })
+          // 正向反馈闭环 P0（设计 §九 R1）：deliver 拿到 commitSha 必须回写假设
+          // 并追加 implemented 证据事件，否则落地证据生产端永远为空。
+          if (hypothesisId && deliver.commitSha && ideaStore) {
+            const implementedAt = Date.now()
+            ideaStore.updateHypothesisImplementation(hypothesisId, {
+              commitSha: deliver.commitSha,
+              implementedAt,
+              implementationNote: `delivered problem ${problem.id}`,
+            })
+            const feedback = this.getFeedbackStore().append({
+              hypothesisId,
+              eventType: 'implemented',
+              sourceType: 'commit',
+              sourceId: `deliver:${problem.id}`,
+              commitSha: deliver.commitSha,
+              evidenceRef: deliver.patchPath || undefined,
+              occurredAt: implementedAt,
+            })
+            log('INFO', 'creativity_exec_feedback_implemented', {
+              hypothesisId,
+              commitSha: deliver.commitSha,
+              appended: feedback.appended,
+              deduped: feedback.deduped,
+            })
+          }
         } catch (err: any) {
           log('WARN', 'creativity_exec_deliver_failed', { problemId: problem.id, error: err.message })
         }

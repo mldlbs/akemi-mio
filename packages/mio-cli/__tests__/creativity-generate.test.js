@@ -349,6 +349,58 @@ test('ferment updates an active hypothesis and records the verdict', async () =>
   assert.equal(typeof stored[0].fermentedAt, 'number')
 })
 
+test('ferment promote/reject append feedback events; keep and merge do not', async () => {
+  // 正向反馈闭环 P0：终局状态（validated/rejected）才产证据事件；
+  // keep/merge 不是终局质量结论。sourceId 按 ferment 轮次确定 → 同轮重放幂等。
+  const ws = workspace('ferment-fbe')
+  const dir = path.join(ws.mioHome, 'creativity')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'creativity-hypotheses.jsonl'),
+    [
+      JSON.stringify({ id: 'h-promote', title: 'P', idea: 'i', status: 'active', novelty: 80, feasibility: 80, impact: 80, sourceLabels: ['a', 'b'], createdAt: Date.now() }),
+      JSON.stringify({ id: 'h-reject', title: 'R', idea: 'i', status: 'active', novelty: 50, feasibility: 50, impact: 50, sourceLabels: ['a', 'b'], createdAt: Date.now() }),
+      JSON.stringify({ id: 'h-keep', title: 'K', idea: 'i', status: 'active', novelty: 60, feasibility: 60, impact: 60, sourceLabels: ['a', 'b'], createdAt: Date.now() }),
+    ].join('\n') + '\n',
+    'utf8'
+  )
+
+  // 按 hypothesisId 返回不同 verdict 的 stub
+  const engine = engineWith(ws, async (prompt) => {
+    if (prompt.includes('h-promote') || prompt.includes('title: P') || prompt.includes('Title: P')) {
+      return { data: { title: 'P', idea: 'i', expectedBenefit: 'b', risk: 'r', novelty: 90, feasibility: 90, impact: 90, logic: 80, verdict: 'promote', reason: 'ok' } }
+    }
+    if (prompt.includes('Title: R')) {
+      return { data: { title: 'R', idea: 'i', expectedBenefit: 'b', risk: 'r', novelty: 30, feasibility: 30, impact: 30, logic: 20, verdict: 'reject', reason: 'broken chain' } }
+    }
+    return { data: { title: 'K', idea: 'i', expectedBenefit: 'b', risk: 'r', novelty: 60, feasibility: 60, impact: 60, logic: 60, verdict: 'keep', reason: 'fine' } }
+  })
+
+  // 上面的 stub 按 Title 匹配——ferment prompt 用 Title: 行
+  const result = await engine.ferment(10)
+  assert.equal(result.fermented, 3)
+
+  const feedbackPath = path.join(dir, 'feedback-events.jsonl')
+  assert.ok(fs.existsSync(feedbackPath), 'feedback-events.jsonl created')
+  const events = fs.readFileSync(feedbackPath, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  const byHyp = Object.fromEntries(events.map((e) => [e.hypothesisId, e]))
+  assert.equal(byHyp['h-promote'] && byHyp['h-promote'].eventType, 'validated')
+  assert.equal(byHyp['h-promote'].sourceType, 'experiment')
+  assert.equal(byHyp['h-reject'] && byHyp['h-reject'].eventType, 'rejected')
+  assert.equal(byHyp['h-keep'], undefined, 'keep produces no feedback event')
+  assert.equal(events.length, 2, 'only terminal verdicts produce events')
+
+  // sourceId 按轮次确定 → 同一轮重放（同 key）在 JSONL 幂等层 dedup
+  const again = engine.feedbackEvents.append({
+    hypothesisId: 'h-promote',
+    eventType: 'validated',
+    sourceType: 'experiment',
+    sourceId: byHyp['h-promote'].sourceId,
+  })
+  assert.equal(again.appended, false)
+  assert.equal(again.deduped, true)
+})
+
 test('ferment promotes on the refined scores, not the stale pre-review ones', async () => {
   // The gate used to read the OLD totals, so a review that raised an idea
   // over the bar (or dropped one under it) changed nothing about the verdict.

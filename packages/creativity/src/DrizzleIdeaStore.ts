@@ -212,6 +212,24 @@ export class DrizzleIdeaStore {
     return true
   }
 
+  /**
+   * 回写实现落地证据（正向反馈闭环 P0）：deliver 拿到 commitSha 后必须落盘，
+   * 否则 implementedCommitSha 永远为空（设计 §九 R1 断链修复）。
+   */
+  updateHypothesisImplementation(
+    id: string,
+    impl: { commitSha: string; implementedAt?: number; implementationNote?: string },
+  ): boolean {
+    const db = getRawDb()
+    const implementedAt = impl.implementedAt ?? Date.now()
+    db.run(
+      `UPDATE hypotheses SET implemented_commit_sha = ?, implemented_at = ?, implementation_note = ? WHERE id = ?`,
+      [impl.commitSha, implementedAt, impl.implementationNote ?? null, id],
+    )
+    markDirty()
+    return true
+  }
+
   updateHypothesisFermentation(id: string, patch: HypothesisFermentationPatch): boolean {
     const db = getRawDb()
     const sets: string[] = []

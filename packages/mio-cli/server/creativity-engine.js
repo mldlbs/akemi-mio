@@ -5,6 +5,7 @@ const path = require('path')
 const crypto = require('crypto')
 const { readJsonl } = require('./memory-store.js')
 const { evaluateNovelty } = require('@akemi-mio/creativity/NoveltyScorer')
+const { JsonlFeedbackEventStore } = require('@akemi-mio/creativity/JsonlFeedbackEventStore')
 
 // Cache validity key for a JSONL file: a (size, mtimeMs) pair, the same
 // guard server/insight-store.js uses (commit 0ba7fa8). Every getter below used
@@ -312,6 +313,9 @@ class CreativityEngine {
     this.strategyIndex = 0
     this.exploredPairs = new Set()
     this.rng = mulberry32(Date.now())
+    // 正向反馈闭环 P0：CLI 侧证据事件只追加 feedback-events.jsonl（交换格式），
+    // 权威真相源在主进程 SQLite，由 ingest 单向导入。
+    this.feedbackEvents = new JsonlFeedbackEventStore(dataDir)
   }
 
   async generate(sourceLabels, strategy) {
@@ -549,6 +553,23 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
         }
 
         this.store.updateHypothesis(h.id, patch)
+
+        // 正向反馈闭环 P0：ferment 终局追加证据事件（validated/rejected）。
+        // sourceId 按 ferment 轮次确定 → 同轮重放幂等；keep/merge 不产事件。
+        // 只写 JSONL 交换层，不改假设状态、不进晋级门。
+        if (patch.status === 'validated' || patch.status === 'rejected') {
+          const feedback = this.feedbackEvents.append({
+            hypothesisId: h.id,
+            eventType: patch.status,
+            sourceType: 'experiment',
+            sourceId: `ferment:${h.id}:${patch.fermentCount}`,
+            evidenceRef: typeof result.data.reason === 'string' ? result.data.reason.slice(0, 200) : undefined,
+          })
+          if (!feedback.appended && !feedback.deduped && feedback.quarantine) {
+            errors.push({ id: h.id, title: h.title, error: `feedback quarantine: ${feedback.quarantine.reason}` })
+          }
+        }
+
         results.push({ id: h.id, title: h.title, verdict, reason: result.data.reason })
       } catch (err) {
         errors.push({ id: h.id, title: h.title, error: String((err && err.message) || err) })
@@ -737,8 +758,9 @@ function adoptHypothesis(engine, args = {}, ingest, dataRoot) {
   }
   const taskId = String(args.taskId || '').trim()
   const note = String(args.note || '').trim()
+  const occurredAt = Date.now()
   const result = ingest({
-    trace_id: `creativity-adopt:${hypothesisId}:${Date.now()}`,
+    trace_id: `creativity-adopt:${hypothesisId}:${occurredAt}`,
     event_type: 'creativity.adopt',
     outcome: 'success',
     payload: {
@@ -748,10 +770,22 @@ function adoptHypothesis(engine, args = {}, ingest, dataRoot) {
       ...(note ? { note } : {}),
     },
   })
+  // 正向反馈闭环 P0：adopt 是选择证据（weight 0.2 档），追加 adopted 事件到
+  // feedback-events.jsonl 交换层。store 状态不变（D1），不写 Memory（D4）。
+  // 每次有意的 adopt 调用各记一条事件；P1 聚合时在假设级归并，不虚增样本。
+  const feedback = engine.feedbackEvents.append({
+    hypothesisId,
+    eventType: 'adopted',
+    sourceType: 'adoption',
+    sourceId: `adopt:${hypothesisId}:${occurredAt}`,
+    ...(memoryId ? { evidenceRef: `memory:${memoryId}` } : {}),
+    occurredAt,
+  })
   return {
     recorded: true,
     hypothesisId,
     event: (result && result.event) || result,
+    feedback: { appended: feedback.appended, deduped: feedback.deduped },
   }
 }
 

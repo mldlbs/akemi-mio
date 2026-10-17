@@ -94,6 +94,28 @@ export type {
 } from './ExperimentRunStore'
 export { sampleVariant, computeSamplingMetrics, runInsightSamplingExperiment, reportToExperimentRuns } from './InsightSamplingExperiment'
 export type { SamplingVariant, SamplingMetrics, VariantResult, CapabilityDeltaReport } from './InsightSamplingExperiment'
+export {
+  FEEDBACK_EVENT_SCHEMA_VERSION,
+  FEEDBACK_EVENT_TYPES,
+  FEEDBACK_SOURCE_TYPES,
+  buildFeedbackIdempotencyKey,
+  normalizeFeedbackEvent,
+  feedbackEvidenceDimension,
+} from './FeedbackEvents'
+export type {
+  HypothesisFeedbackEvent,
+  HypothesisFeedbackEventInput,
+  HypothesisFeedbackEventType,
+  HypothesisFeedbackSourceType,
+  NormalizeResult,
+  NormalizeQuarantineReason,
+} from './FeedbackEvents'
+export { JsonlFeedbackEventStore } from './JsonlFeedbackEventStore'
+export type { JsonlAppendResult } from './JsonlFeedbackEventStore'
+export { DrizzleFeedbackEventStore } from './DrizzleFeedbackEventStore'
+export type { DrizzleAppendResult } from './DrizzleFeedbackEventStore'
+export { ingestFeedbackEvents } from './ingestFeedbackEvents'
+export type { IngestFeedbackResult, IngestFeedbackOptions } from './ingestFeedbackEvents'
 export { MechanismRegistryStore, canIndependentlyApprove, checkSubmitGate } from './MechanismRegistry'
 export type {
   MechanismStatus,

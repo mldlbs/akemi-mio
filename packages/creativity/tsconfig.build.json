@@ -21,6 +21,8 @@
     "src/ExperimentRunStore.ts",
     "src/WhenThenRunner.ts",
     "src/MechanismGraph.ts",
-    "src/InsightSamplingExperiment.ts"
+    "src/InsightSamplingExperiment.ts",
+    "src/FeedbackEvents.ts",
+    "src/JsonlFeedbackEventStore.ts"
   ]
 }

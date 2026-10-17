@@ -50,6 +50,16 @@
       "require": "./dist/InsightSamplingExperiment.js",
       "default": "./dist/InsightSamplingExperiment.js"
     },
+    "./FeedbackEvents": {
+      "types": "./dist/FeedbackEvents.d.ts",
+      "require": "./dist/FeedbackEvents.js",
+      "default": "./dist/FeedbackEvents.js"
+    },
+    "./JsonlFeedbackEventStore": {
+      "types": "./dist/JsonlFeedbackEventStore.d.ts",
+      "require": "./dist/JsonlFeedbackEventStore.js",
+      "default": "./dist/JsonlFeedbackEventStore.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

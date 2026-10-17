@@ -1,0 +1,80 @@
+import Database from 'better-sqlite3'
+import { describe, expect, it } from 'vitest'
+
+import { MIGRATIONS, runMigrations } from '@akemi-mio/core/db/migration'
+
+function wrap(db: Database.Database) {
+  return {
+    run(sql: string, params?: any[]) {
+      const statements = sql.includes(';') && !params ? sql.split(';').map((value) => value.trim()).filter(Boolean) : [sql]
+      for (const statement of statements) db.prepare(statement).run(params || [])
+    },
+    exec(sql: string) {
+      const statement = db.prepare(sql)
+      const columns = statement.columns().map((column) => column.name)
+      const rows = statement.all() as Record<string, unknown>[]
+      return rows.length ? [{ columns, values: rows.map((row) => columns.map((column) => row[column])) }] : []
+    },
+    prepare(sql: string) {
+      const rows = db.prepare(sql).all() as Record<string, unknown>[]
+      let index = 0
+      return {
+        bind() {},
+        step: () => index < rows.length,
+        getAsObject: () => rows[index++],
+        reset: () => {
+          index = 0
+        },
+        free() {},
+      }
+    },
+  }
+}
+
+describe('migration v51: hypothesis_feedback_events (正向反馈闭环 P0)', () => {
+  it('migration versions are strictly unique (v44 撞车教训的前向钉)', () => {
+    const versions = MIGRATIONS.map((m) => m.version)
+    expect(new Set(versions).size).toBe(versions.length)
+    expect(versions).toContain(51)
+    const sorted = [...versions].sort((a, b) => a - b)
+    expect(versions).toEqual(sorted)
+  })
+
+  it('creates the evidence table with idempotency_key UNIQUE and append-only shape', () => {
+    const db = new Database(':memory:')
+    runMigrations(wrap(db) as any)
+
+    const columns = db.prepare('PRAGMA table_info(hypothesis_feedback_events)').all().map((c: any) => c.name)
+    expect(columns).toEqual(
+      expect.arrayContaining([
+        'id',
+        'hypothesis_id',
+        'event_type',
+        'source_type',
+        'source_id',
+        'source_version',
+        'commit_sha',
+        'experiment_run_id',
+        'evidence_ref',
+        'occurred_at',
+        'ingested_at',
+        'idempotency_key',
+        'schema_version',
+      ]),
+    )
+
+    const insert = db.prepare(`
+      INSERT INTO hypothesis_feedback_events
+        (id, hypothesis_id, event_type, source_type, source_id, occurred_at, ingested_at, idempotency_key, schema_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    insert.run('e1', 'h-1', 'validated', 'experiment', 'ferment:h-1:1', 1, 2, 'k1', 1)
+    // 同 idempotencyKey 第二次插入必须被唯一约束拒绝（重复导入不增样本）
+    expect(() => insert.run('e2', 'h-1', 'validated', 'experiment', 'ferment:h-1:1', 1, 3, 'k1', 1)).toThrow()
+    // 非法 event_type 被 CHECK 拒绝
+    expect(() => insert.run('e3', 'h-1', 'promoted', 'experiment', 's', 1, 2, 'k2', 1)).toThrow()
+
+    const rows = db.prepare('SELECT COUNT(*) AS n FROM hypothesis_feedback_events').get() as { n: number }
+    expect(rows.n).toBe(1)
+  })
+})

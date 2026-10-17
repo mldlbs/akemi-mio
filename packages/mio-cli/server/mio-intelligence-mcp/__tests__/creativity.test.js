@@ -372,6 +372,46 @@ test('mio.creativity.status exposes the adoption join; list rows carry adopted',
   assert.match(listTool.description, /adopted/, 'the tool description documents the row flag')
 })
 
+// --- 正向反馈闭环 P0 (2026-10-17 design): adopted 事件进 feedback-events.jsonl ---
+test('mio.creativity.adopt appends an adopted feedback event to feedback-events.jsonl', async () => {
+  seedHypotheses([hypothesis('h-fbe-adopt', 'validated')])
+  const feedbackPath = path.join(dataDir, 'creativity', 'feedback-events.jsonl')
+  const before = fs.existsSync(feedbackPath)
+    ? fs.readFileSync(feedbackPath, 'utf8').split('\n').filter(Boolean).length
+    : 0
+
+  const result = await callTool('mio.creativity.adopt', { hypothesisId: 'h-fbe-adopt', note: 'fbe' })
+  assert.equal(result.recorded, true)
+  assert.ok(result.feedback, 'the adopt result carries the feedback append summary')
+  assert.equal(result.feedback.appended, true)
+
+  const lines = fs.readFileSync(feedbackPath, 'utf8').split('\n').filter(Boolean)
+  assert.equal(lines.length, before + 1, 'exactly one feedback event appended')
+  const event = JSON.parse(lines[lines.length - 1])
+  assert.equal(event.hypothesisId, 'h-fbe-adopt')
+  assert.equal(event.eventType, 'adopted')
+  assert.equal(event.sourceType, 'adoption')
+  assert.equal(event.schemaVersion, 1)
+  assert.ok(event.idempotencyKey, 'the event carries a deterministic idempotency key')
+
+  // store 状态不变（D1）：adoption 仍是证据轴，不是假设状态
+  const stored = fs
+    .readFileSync(path.join(dataDir, 'creativity', 'creativity-hypotheses.jsonl'), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .find((h) => h.id === 'h-fbe-adopt')
+  assert.equal(stored.status, 'validated')
+
+  // 重放同一次 adopt 调用的自然键 → JSONL 幂等层 dedup（key 不含时间戳时）
+  // 注意：当前 sourceId 含 occurredAt，每次有意 adopt 各记一条；P1 聚合在假设级归并。
+  // 此处只钉：adopted 事件格式正确、可被 JsonlFeedbackEventStore 解析。
+  const { JsonlFeedbackEventStore } = require('@akemi-mio/creativity/JsonlFeedbackEventStore')
+  const store = new JsonlFeedbackEventStore(path.join(dataDir, 'creativity'))
+  const parsed = store.list()
+  assert.ok(parsed.some((e) => e.hypothesisId === 'h-fbe-adopt' && e.eventType === 'adopted'))
+})
+
 after(() => {
   fs.rmSync(dataDir, { recursive: true, force: true })
   rl.close()

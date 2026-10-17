@@ -1074,6 +1074,33 @@ const MIGRATIONS: Migration[] = [
     irreversible: true,
     category: 'schema',
   },
+  {
+    // 正向反馈闭环 P0（设计 2026-10-17-creativity-positive-feedback-loop）：
+    // 证据事件权威表。append-only + idempotency_key 唯一约束；纠错用更正事件不覆盖。
+    // 与 evolution-feedback 模块级反馈无关（命名空间隔离，spec D-2）。
+    version: 51,
+    sql: `
+      CREATE TABLE IF NOT EXISTS hypothesis_feedback_events (
+        id TEXT PRIMARY KEY,
+        hypothesis_id TEXT NOT NULL,
+        event_type TEXT NOT NULL CHECK(event_type IN ('validated','adopted','implemented','rejected','regression_failed')),
+        source_type TEXT NOT NULL CHECK(source_type IN ('experiment','memory','adoption','commit','manual')),
+        source_id TEXT NOT NULL,
+        source_version TEXT,
+        commit_sha TEXT,
+        experiment_run_id TEXT,
+        evidence_ref TEXT,
+        occurred_at INTEGER NOT NULL,
+        ingested_at INTEGER NOT NULL,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        schema_version INTEGER NOT NULL DEFAULT 1
+      );
+      CREATE INDEX IF NOT EXISTS idx_hypothesis_feedback_events_hypothesis ON hypothesis_feedback_events(hypothesis_id);
+      CREATE INDEX IF NOT EXISTS idx_hypothesis_feedback_events_type ON hypothesis_feedback_events(event_type);
+    `,
+    revert: '',
+    category: 'schema',
+  },
 ]
 
 // 导出迁移数组供测试验证
