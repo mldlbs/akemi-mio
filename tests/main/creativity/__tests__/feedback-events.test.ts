@@ -9,7 +9,7 @@ import {
   feedbackEvidenceDimension,
 } from '@akemi-mio/creativity/FeedbackEvents'
 import { JsonlFeedbackEventStore } from '@akemi-mio/creativity/JsonlFeedbackEventStore'
-import { ingestFeedbackEvents } from '@akemi-mio/creativity/ingestFeedbackEvents'
+import { ingestFeedbackEvents, formatIngestSummary } from '@akemi-mio/creativity/ingestFeedbackEvents'
 
 /**
  * 正向反馈闭环 P0 钉（设计 2026-10-17-creativity-positive-feedback-loop）：
@@ -200,6 +200,13 @@ describe('ingestFeedbackEvents (CLI JSONL → 权威侧单向导入)', () => {
       const events = [...authoritative.values()]
       expect(events.map((e) => e.eventType).sort()).toEqual(['implemented', 'validated'])
       expect(events.every((e) => e.schemaVersion === FEEDBACK_EVENT_SCHEMA_VERSION)).toBe(true)
+
+      // 评审 a4：隔离可观测——调用方拿到的摘要必须显式包含 quarantined 与原因
+      const summary = formatIngestSummary(result)
+      expect(summary).toContain('quarantined=1')
+      expect(summary).toContain('unknown_hypothesis:1')
+      expect(summary).toContain('ingested=2')
+      expect(summary).toContain('deduped=0')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

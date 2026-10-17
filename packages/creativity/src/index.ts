@@ -114,8 +114,40 @@ export { JsonlFeedbackEventStore } from './JsonlFeedbackEventStore'
 export type { JsonlAppendResult } from './JsonlFeedbackEventStore'
 export { DrizzleFeedbackEventStore } from './DrizzleFeedbackEventStore'
 export type { DrizzleAppendResult } from './DrizzleFeedbackEventStore'
-export { ingestFeedbackEvents } from './ingestFeedbackEvents'
+export { ingestFeedbackEvents, formatIngestSummary } from './ingestFeedbackEvents'
 export type { IngestFeedbackResult, IngestFeedbackOptions } from './ingestFeedbackEvents'
+export {
+  DEFAULT_FEEDBACK_LEARNING_CONFIG,
+  aggregateConceptPairWeights,
+  buildFeedbackSnapshot,
+  canonicalJson,
+  conceptIdOf,
+  evidenceWeight,
+  hashPrefix,
+  isNegativeEvent,
+  pairKeyOf,
+  replayFeedbackAdjustment,
+  timeDecay,
+  POSITIVE_DIMENSIONS,
+} from './FeedbackLearning'
+export type {
+  AggregateResult,
+  AttributionKind,
+  ConceptPairWeight,
+  DimensionEstimate,
+  EvidenceTraceEntry,
+  FeedbackAdjustment,
+  FeedbackDimension,
+  FeedbackLearningConfig,
+  FeedbackSnapshot,
+  HypothesisProvenanceLike,
+} from './FeedbackLearning'
+export { FeedbackLearningService } from './FeedbackLearningService'
+export type {
+  FeedbackLearningServiceOptions,
+  ReplayComparison,
+  ReplayReport,
+} from './FeedbackLearningService'
 export { MechanismRegistryStore, canIndependentlyApprove, checkSubmitGate } from './MechanismRegistry'
 export type {
   MechanismStatus,

@@ -23,6 +23,7 @@
     "src/MechanismGraph.ts",
     "src/InsightSamplingExperiment.ts",
     "src/FeedbackEvents.ts",
-    "src/JsonlFeedbackEventStore.ts"
+    "src/JsonlFeedbackEventStore.ts",
+    "src/FeedbackLearning.ts"
   ]
 }

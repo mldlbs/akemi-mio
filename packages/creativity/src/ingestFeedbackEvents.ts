@@ -27,6 +27,21 @@ export interface IngestFeedbackOptions {
 }
 
 /**
+ * 隔离可观测（评审 a4）：把导入结果格式化成可落日志/回传的摘要。
+ * 静默隔离 = 静默丢失，调用方必须落这份摘要。
+ */
+export function formatIngestSummary(result: IngestFeedbackResult): string {
+  const parts = [`ingested=${result.ingested}`, `deduped=${result.deduped}`]
+  if (result.quarantined.length > 0) {
+    const byReason = new Map<string, number>()
+    for (const q of result.quarantined) byReason.set(q.reason, (byReason.get(q.reason) ?? 0) + 1)
+    const detail = [...byReason].map(([reason, n]) => `${reason}:${n}`).join(',')
+    parts.push(`quarantined=${result.quarantined.length}(${detail})`)
+  }
+  return `feedback-ingest ${parts.join(' ')}`
+}
+
+/**
  * @param jsonlSource CLI 侧 JSONL store（或等价的 list() 数据源）
  * @param target 主进程权威 SQLite store
  */

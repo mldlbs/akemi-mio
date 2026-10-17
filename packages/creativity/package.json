@@ -60,6 +60,11 @@
       "require": "./dist/JsonlFeedbackEventStore.js",
       "default": "./dist/JsonlFeedbackEventStore.js"
     },
+    "./FeedbackLearning": {
+      "types": "./dist/FeedbackLearning.d.ts",
+      "require": "./dist/FeedbackLearning.js",
+      "default": "./dist/FeedbackLearning.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
