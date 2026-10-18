@@ -17,7 +17,14 @@ export class HypothesisGenerator {
   private rng: RandomGenerator
   private chatJson: (
     userText: string,
-    options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string; maxTokens?: number },
+    options?: {
+      system?: string
+      temperature?: number
+      timeoutMs?: number
+      requestId?: string
+      maxTokens?: number
+      responseFormat?: 'object' | 'array'
+    },
   ) => Promise<{ data?: any; error?: string }>
   private templateLib: TemplateLibrary
   private localModel: LocalModelService
@@ -27,7 +34,14 @@ export class HypothesisGenerator {
   constructor(
     chatJson: (
       userText: string,
-      options?: { system?: string; temperature?: number; timeoutMs?: number; requestId?: string; maxTokens?: number },
+      options?: {
+        system?: string
+        temperature?: number
+        timeoutMs?: number
+        requestId?: string
+        maxTokens?: number
+        responseFormat?: 'object' | 'array'
+      },
     ) => Promise<{ data?: any; error?: string }>,
     seed?: number,
     rotationSeed = 0,
@@ -174,6 +188,12 @@ export class HypothesisGenerator {
         timeoutMs: 60000,
         // 输出无界会顶满超时（M2）：生成上限 1200 tokens
         maxTokens: 1200,
+        // 提示词要求顶层数组：json_object 模式下部分模型会包成
+        // {"ideas": [...]}，Array.isArray 判空后**静默**降级到模板
+        // （无 provenance.sources → 反馈事件不可归因，attribution
+        // coverage 恒 0）。声明 array 身份让 llm-client 省略
+        // response_format，与 InsightGenerator 同策略。
+        responseFormat: 'array',
       })
 
       if (result.error) {

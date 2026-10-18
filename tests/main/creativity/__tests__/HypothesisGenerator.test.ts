@@ -60,6 +60,30 @@ describe('HypothesisGenerator', () => {
       expect(results[0].id).toMatch(/^hyp_/)
     })
 
+    it('LLM 调用声明 array 输出（json_object 会把顶层数组包成对象，导致静默降级模板、provenance 断链）', async () => {
+      chatJson.mockResolvedValue({
+        data: [
+          {
+            title: 'array 声明钉',
+            idea: 'test',
+            expectedBenefit: 'test',
+            risk: 'test',
+            sourceLabels: ['A', 'B'],
+            novelty: 70,
+            feasibility: 60,
+            impact: 65,
+            relevance: 'A 与 B 通过共享接口形成协同',
+          },
+        ],
+      })
+      await generator.generate([makeCombo({ sources: ['A', 'B'] })], [makeSource('A'), makeSource('B')])
+      expect(chatJson).toHaveBeenCalledTimes(1)
+      const opts = chatJson.mock.calls[0][1]
+      expect(opts.responseFormat).toBe('array')
+      expect(opts.timeoutMs).toBe(60000)
+      expect(opts.maxTokens).toBe(1200)
+    })
+
     it('novelty/feasibility/impact 应 clamp 在 10-100', async () => {
       chatJson.mockResolvedValue({
         data: [
