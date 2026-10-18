@@ -83,6 +83,105 @@ test('generate persists hypotheses produced by the LLM', async () => {
   assert.equal(fs.existsSync(path.join(ws.mioHome, 'creativity', 'creativity-combos.jsonl')), true)
 })
 
+// P3-R5（task 0946ba33）：generate 路径补写 provenance。
+test('generate persists provenance with exactly 2 concept origins (passthrough + name: fallback)', async () => {
+  const ws = workspace('gen-prov')
+  const engine = engineWith(
+    ws,
+    llmReturning({
+      title: 'Provenance pin',
+      idea: 'combine two concepts',
+      expectedBenefit: 'attributable events',
+      risk: 'none',
+      novelty: 70,
+      feasibility: 60,
+      impact: 80,
+    }),
+  )
+
+  // origin 透传：聚合来源带 memory: provider id
+  await engine.generate(
+    [
+      { name: 'auth', content: 'token rotation', origin: 'memory:mem_a' },
+      { name: 'cache', content: 'write-through cache', origin: 'memory:mem_b' },
+    ],
+    'explore',
+  )
+  const withOrigin = readHypotheses(ws)[0]
+  assert.equal(withOrigin.provenance.sources.length, 2, 'exactly two sources')
+  assert.deepEqual(
+    withOrigin.provenance.sources.map((s) => s.origin),
+    ['memory:mem_a', 'memory:mem_b'],
+    'provider origins pass through so isAttributable holds',
+  )
+  assert.deepEqual(
+    withOrigin.provenance.sources.map((s) => s.name),
+    ['auth', 'cache'],
+    'source names match sourceLabels (pair identity)',
+  )
+  assert.equal(withOrigin.provenance.strategy, 'explore')
+  assert.ok(!Number.isNaN(Date.parse(withOrigin.provenance.generatedAt)), 'generatedAt is ISO 8601')
+
+  // origin 缺失（显式 --source）：回退 name:<name>，与 sourceConceptId 同一身份规则
+  const ws2 = workspace('gen-prov-fallback')
+  const engine2 = engineWith(
+    ws2,
+    llmReturning({
+      title: 'Fallback origins',
+      idea: 'explicit sources',
+      expectedBenefit: 'x',
+      risk: 'y',
+      novelty: 70,
+      feasibility: 60,
+      impact: 80,
+    }),
+  )
+  await engine2.generate(twoSources(), 'stable')
+  const rows = readHypotheses(ws2)
+  assert.deepEqual(
+    rows[0].provenance.sources.map((s) => s.origin),
+    ['name:auth', 'name:cache'],
+    'missing origin falls back to name:<name> — the documented concept identity',
+  )
+})
+
+// P3-R5 验收 #2：generate → ferment promote 至 terminal → pair precision@K 有采样。
+test('generate → ferment promote → feedbackStatus reports pair precision@K evaluated > 0', async () => {
+  const ws = workspace('gen-prec')
+  const idea = {
+    title: 'Precise attribution chain',
+    idea: 'premise -> mechanism -> outcome',
+    expectedBenefit: 'samples',
+    risk: 'low',
+    novelty: 90,
+    feasibility: 80,
+    impact: 50, // 90+80+50 = 220 > 200
+    logic: 70, // >= 60 → promote gate passes
+  }
+  const engine = engineWith(ws, async (prompt) => {
+    if (String(prompt).includes('Review and refine')) {
+      return { data: { ...idea, verdict: 'promote', reason: 'mature' } }
+    }
+    return { data: idea }
+  })
+
+  const gen = await engine.generate(twoSources(), 'explore')
+  assert.equal(gen.ideas.length >= 1, true)
+  const fer = await engine.ferment()
+  assert.equal((fer.errors || []).length, 0, JSON.stringify(fer.errors))
+  const stored = readHypotheses(ws)
+  assert.equal(stored[0].status, 'validated', 'ferment promote lands on terminal validated')
+
+  const status = engine.feedbackStatus()
+  assert.ok(status.generation, 'generation metrics present')
+  assert.equal(status.generation.terminalHypotheses >= 1, true)
+  assert.ok(status.generation.pairPrecisionAtK !== null, 'precision@K is sampled, not n/a')
+  assert.ok(status.generation.evaluatedPairs >= 1, 'at least one top pair evaluated')
+  assert.ok(status.snapshot.attributionCoverage > 0, 'ferment event attributes to the concept pair')
+  // R5 对称：本链路之外的无 provenance 假设不受影响（见 feedback 测试的
+  // hypothesis_only 钉）——这里只断言 generate 自己的假设进入了 pair 空间。
+})
+
 test('generate needs at least two sources and never calls the LLM otherwise', async () => {
   const ws = workspace('gen-one')
   let calls = 0

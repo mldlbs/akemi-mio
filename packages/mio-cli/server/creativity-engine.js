@@ -458,6 +458,8 @@ class CreativityEngine {
       weight: s.weight || 0.5,
       // 正向反馈闭环 P2：保留 origin 供快照 pair 对齐（缺省 = 不影响既有行为）
       ...(s.origin ? { origin: s.origin } : {}),
+      // P3-R5（task 0946ba33）：provenance 需要来源时间戳，有则透传
+      ...(s.timestamp ? { timestamp: s.timestamp } : {}),
     }))
 
     if (sources.length < 2) {
@@ -612,6 +614,23 @@ class CreativityEngine {
           // a neutral value instead of NaN.
           logic: clamp100(result.data.logic ?? 50),
           sourceLabels: [a.name, b.name],
+          // P3-R5（task 0946ba33）：generate 路径补写 provenance——本路径的
+          // 每条假设都诞生于恰好一个概念对，来源身份与 mixer pairAdjustments
+          // 同一规则（sourceConceptId：origin 优先，缺失回退 name:<name>，
+          // types.ts 概念身份）。由此 ferment/adopt 的终局事件可归因到对
+          // （isAttributable 不变），terminal 假设参与 pair precision@K 链接；
+          // 其他路径的模板/legacy 兜底假设无 provenance，仍按 R5 记
+          // hypothesis_only——对称规则不破。
+          provenance: {
+            strategy: strat,
+            sources: [a, b].map((src) => ({
+              name: src.name,
+              type: src.type,
+              origin: src.origin || `name:${src.name}`,
+              ...(src.timestamp ? { timestamp: src.timestamp } : {}),
+            })),
+            generatedAt: isoOf(Date.now()),
+          },
           status: 'active',
           createdAt: Date.now(),
           strategy: strat,

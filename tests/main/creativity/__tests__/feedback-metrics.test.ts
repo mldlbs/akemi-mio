@@ -163,6 +163,37 @@ describe('pair precision@K / novelty@K ranking', () => {
     expect(m.noveltyAtK).toBeCloseTo(1 / 3, 6)
   })
 
+  it('links generate-shaped provenance (name: origin fallback) to snapshot pairs so precision@K is sampled', () => {
+    // P3-R5（task 0946ba33）：creativity generate 落库的 provenance 用
+    // sourceConceptId 同一身份规则——origin 缺失回退 name:<name>。
+    const key = conceptPairKey('name:auth', 'name:cache')
+    const m = computeFeedbackGenerationMetrics({
+      snapshot: snapshotOf([pairWeight(key, 0.9)]),
+      hypotheses: [
+        {
+          id: 'h_gen',
+          status: 'validated',
+          createdAt: NOW,
+          provenance: {
+            strategy: 'explore',
+            sources: [
+              { name: 'auth', type: 'knowledge', origin: 'name:auth' },
+              { name: 'cache', type: 'knowledge', origin: 'name:cache' },
+            ],
+          },
+        },
+      ],
+      ingestion: { rawLines: 1, validRows: 1 },
+      config: { precisionK: 10, windowDays: 30 },
+      now: NOW,
+    })
+    expect(m.pairPrecisionAtK).toBe(1)
+    expect(m.evaluatedPairs).toBe(1)
+    expect(m.validationPassRate).toBe(1)
+    expect(m.topPairs[0].pairKey).toBe(key)
+    expect(m.topPairs[0].novel).toBe(false)
+  })
+
   it('hypothesis_only pairs never enter top-K even when they carry the largest adjustment', () => {
     const m = computeFeedbackGenerationMetrics({
       snapshot: snapshotOf([pairWeight('hypothesis:only', 1.0)]),
