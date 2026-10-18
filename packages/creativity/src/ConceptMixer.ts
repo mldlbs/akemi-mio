@@ -41,6 +41,8 @@ export class ConceptMixer {
    * @param strategy 策略约束：stable/explore/signal，默认为 'explore'
    *   策略决定哪些 type 配对被允许、评分权重如何调整。
    * @param feedback 可选：正向反馈有界修正 + 探索预算；缺省 = 行为不变。
+   * @returns 每项含 combo / score / pair。pair 是组合引用的原始来源对象对
+   *   （R2 收敛：CLI 引擎等调用方不再从 combo.sources 字符串反查来源）。
    */
   mix(
     sources: CreativitySource[],
@@ -48,7 +50,7 @@ export class ConceptMixer {
     exploredPairs: string[] = [],
     strategy: Strategy = 'explore',
     feedback?: FeedbackMixerInput,
-  ): { combo: ConceptCombo; score: number }[] {
+  ): { combo: ConceptCombo; score: number; pair: [CreativitySource, CreativitySource] }[] {
     if (sources.length < 2) return []
 
     const exploredSet = new Set(exploredPairs)
@@ -90,7 +92,7 @@ export class ConceptMixer {
 
     return [...main, ...rest]
       .sort((a, b) => (b.adjusted - a.adjusted) || (a.feedbackKey < b.feedbackKey ? -1 : 1))
-      .map((s) => ({ combo: s.combo, score: s.adjusted }))
+      .map((s) => ({ combo: s.combo, score: s.adjusted, pair: s.pair }))
   }
 
   /**
@@ -152,7 +154,7 @@ export class ConceptMixer {
     allSources: CreativitySource[],
     exploredSet: Set<string> = new Set(),
     strategy: Strategy = 'explore',
-  ): { combo: ConceptCombo; score: number } {
+  ): { combo: ConceptCombo; score: number; pair: [CreativitySource, CreativitySource] } {
     // 按策略调整基础评分权重
     let typeBonus: number
     switch (strategy) {
@@ -188,7 +190,7 @@ export class ConceptMixer {
       createdAt: Date.now(),
     }
 
-    return { combo, score }
+    return { combo, score, pair: [a, b] }
   }
 
   private contentRelevance(a: CreativitySource, b: CreativitySource): number {

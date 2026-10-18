@@ -78,7 +78,8 @@ test('generate persists hypotheses produced by the LLM', async () => {
   assert.equal(stored[0].title, idea.title)
   assert.equal(stored[0].status, 'active')
   assert.equal(stored[0].sourceLabels.length, 2, 'records which concepts were combined')
-  // A combo row is written alongside so the pair is not re-explored.
+  // A combo row is written alongside the hypothesis (history, not a
+  // dedup gate — repeat pairs are demoted by the mixer, never skipped).
   assert.equal(fs.existsSync(path.join(ws.mioHome, 'creativity', 'creativity-combos.jsonl')), true)
 })
 
@@ -170,140 +171,134 @@ test('generate succeeds for one pair and still reports the others failing', asyn
   assert.equal(readHypotheses(ws).length, 1)
 })
 
-// ── per-strategy dedup: a fallback retry must not be a deterministic no-op ──
+// ── R2 收敛：单一 ConceptMixer —— 降权不跳过 / 入口层策略回退 / 空池信号 ──
 
-test('generate re-tries the same sources under a new strategy but never the same one twice', async () => {
-  // The documented fallback is "409 -> retry with another strategy", but the
-  // pair key used to ignore `strategy`, so all three retries computed the
-  // same key and returned the same `all pairs already explored` without ever
-  // reaching the LLM. Identity is (pair, strategy) now.
-  const ws = workspace('gen-strategy')
-  const idea = {
-    title: 'Once per strategy',
-    idea: 'combine rotation with invalidation',
-    expectedBenefit: 'b',
-    risk: 'r',
-    novelty: 70,
-    feasibility: 60,
-    impact: 80,
-  }
+test('explored pairs are demoted by the mixer, never skipped', async () => {
+  // R2 收敛（spec §九）：配对唯一实现是 @akemi-mio/creativity/ConceptMixer，
+  // 已探索对罚 15 分参与排序。重复生成仍然到达 LLM——旧语义下同池第四次
+  // 调用返回 "all pairs already explored" 且零 LLM 调用，已不复存在。
+  const ws = workspace('gen-penalty')
   let calls = 0
   const engine = engineWith(ws, async () => {
     calls += 1
-    return { data: idea }
+    return {
+      data: { title: `Idea ${calls}`, idea: 'chain', expectedBenefit: 'b', risk: 'r', novelty: 70, feasibility: 60, impact: 80 },
+    }
   })
 
-  const first = await engine.generate(twoSources(), 'explore')
-  assert.equal(first.ideas.length, 1)
-  assert.equal(calls, 1)
+  for (const strategy of ['explore', 'signal', 'stable']) {
+    const result = await engine.generate(twoSources(), strategy)
+    assert.equal(result.ideas.length, 1, `${strategy} still generates from a repeat pair`)
+    assert.equal(result.strategy, strategy, 'the requested strategy is reported back')
+  }
+  assert.equal(calls, 3, 'penalty demotes the pair but never skips the LLM')
 
-  const fallback = await engine.generate(twoSources(), 'signal')
-  assert.equal(fallback.ideas.length, 1, 'a different strategy is a different experiment')
-  assert.equal(fallback.strategy, 'signal')
-  assert.equal(calls, 2)
-
-  const third = await engine.generate(twoSources(), 'stable')
-  assert.equal(third.ideas.length, 1)
-  assert.equal(calls, 3)
-
-  // Now every strategy has seen this pair — and the payload says so instead
-  // of returning a bare string that reads as "try another strategy".
-  const exhausted = await engine.generate(twoSources(), 'explore')
-  assert.deepEqual(exhausted.ideas, [])
-  assert.equal(calls, 3, 'an exhausted retry never reaches the LLM')
-  assert.equal(exhausted.strategy, 'explore')
-  assert.equal(exhausted.pairsAvailable, 0)
-  assert.match(exhausted.reason, /all pairs already explored for strategy "explore"/)
-  assert.match(exhausted.reason, /2 sources, 1 candidate pairs/)
-
-  // The reverse order is the same pair, also under the same strategy.
+  // 换序 = 排序后的同一对（身份对顺序不敏感），同样降权不跳过。
   const reversed = await engine.generate([twoSources()[1], twoSources()[0]], 'explore')
-  assert.deepEqual(reversed.ideas, [], 'source order does not mint a new pair')
-  assert.equal(calls, 3)
+  assert.equal(reversed.ideas.length, 1)
+  assert.equal(calls, 4, 'source order does not mint a new pair — and still reaches the LLM')
 })
 
-test('records without a strategy field keep blocking every strategy', async () => {
-  // Legacy rows (written before the strategy field existed) carry the
-  // unsuffixed key; the extra un-suffixed comparison keeps the old
-  // "this pair was tried once" semantics for them.
+test('pair identity ignores the strategy field: seeded rows demote every strategy', async () => {
+  // 旧实现按 (pair, strategy) 分桶硬跳过：带/不带 strategy 字段的记录用不同
+  // key 阻断重试。收敛后身份就是排序原始 sourceLabel 对——策略完全不参与，
+  // 任何旧记录（含无 strategy 字段的 legacy 行）对任何策略都只是降权。
   const ws = workspace('gen-legacy')
   const dir = path.join(ws.mioHome, 'creativity')
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(
     path.join(dir, 'creativity-hypotheses.jsonl'),
-    JSON.stringify({
-      id: 'h1',
-      title: 'Seeded before strategies existed',
-      idea: 'original',
-      status: 'active',
-      novelty: 70,
-      feasibility: 70,
-      impact: 70,
-      sourceLabels: ['auth', 'cache'],
-      createdAt: Date.now(),
-      // no strategy field on purpose
-    }) + '\n',
+    [
+      JSON.stringify({
+        id: 'h-legacy',
+        title: 'Seeded before strategies existed',
+        idea: 'original',
+        status: 'active',
+        novelty: 70,
+        feasibility: 70,
+        impact: 70,
+        sourceLabels: ['auth', 'cache'],
+        createdAt: Date.now(),
+        // no strategy field on purpose
+      }),
+      JSON.stringify({
+        id: 'h-strat',
+        title: 'Seeded with one strategy',
+        idea: 'original',
+        status: 'active',
+        novelty: 70,
+        feasibility: 70,
+        impact: 70,
+        sourceLabels: ['auth', 'cache'],
+        strategy: 'stable',
+        createdAt: Date.now(),
+      }),
+    ].join('\n') + '\n',
     'utf8'
   )
 
   let calls = 0
   const engine = engineWith(ws, async () => {
     calls += 1
-    return { data: { title: 'x' } }
+    return { data: { title: 'x', idea: 'c', expectedBenefit: 'b', risk: 'r', novelty: 70, feasibility: 60, impact: 80 } }
   })
 
   for (const strategy of ['explore', 'signal', 'stable']) {
     const result = await engine.generate(twoSources(), strategy)
-    assert.deepEqual(result.ideas, [], `legacy record blocks ${strategy}`)
+    assert.equal(result.ideas.length, 1, `seeded rows demote but do not block ${strategy}`)
   }
-  assert.equal(calls, 0, 'no strategy reaches the LLM for a legacy-blocked pair')
+  assert.equal(calls, 3, 'no seeded record skips the LLM for any strategy')
 })
 
-test('a long source name is one identity for up to 120 chars, so a tail edit cannot bypass dedup', async () => {
-  // `--source` without a pipe turns the whole description into `name`; a
-  // one-character edit at the end used to mint a brand-new key.
-  const ws = workspace('gen-longname')
-  const longName = 'GOAL_' + 'x'.repeat(300)
+test('entry-layer strategy fallback keeps homogeneous pools pairing', async () => {
+  // mixer 的 explore 只配跨类型、signal 要求 provocation/insight/failure 来源：
+  // 同质池（两个 knowledge）直接配出 0 对。入口层回退（先例 idea-generate.js
+  // "cross-type explore only when two types exist"）保证两者仍配对；回退只喂
+  // mixer——返回的 strategy、prompt 框架与温度仍按请求值。
+  const ws = workspace('gen-fallback')
   let calls = 0
   const engine = engineWith(ws, async () => {
     calls += 1
-    return {
-      data: { title: 'Idea', idea: 'chain', expectedBenefit: 'b', risk: 'r', novelty: 70, feasibility: 60, impact: 80 },
-    }
+    return { data: { title: `Idea ${calls}`, idea: 'chain', expectedBenefit: 'b', risk: 'r', novelty: 70, feasibility: 60, impact: 80 } }
   })
 
-  const first = await engine.generate(
-    [
-      { name: longName, content: 'goal text' },
-      { name: 'ctx', content: 'context text' },
-    ],
-    'explore'
-  )
-  assert.equal(first.ideas.length, 1)
-  assert.equal(calls, 1)
+  const exp = await engine.generate(twoSources(), 'explore')
+  assert.equal(exp.ideas.length, 1, 'explore falls back to same-type pairing on a homogeneous pool')
+  assert.equal(exp.strategy, 'explore')
 
-  const editedTail = longName.replace(/x$/, 'y')
-  const second = await engine.generate(
-    [
-      { name: editedTail, content: 'goal text' },
-      { name: 'ctx', content: 'context text' },
-    ],
-    'explore'
-  )
-  assert.deepEqual(second.ideas, [], 'same first 120 chars = same pair')
-  assert.match(second.reason, /already explored/)
-  assert.equal(calls, 1)
-
-  // A genuinely different short name is not falsely collapsed onto the first.
-  const different = await engine.generate(
-    [
-      { name: 'goal-2', content: 'another goal' },
-      { name: 'ctx', content: 'context text' },
-    ],
-    'explore'
-  )
-  assert.equal(different.ideas.length, 1, 'truncation must not merge distinct sources')
+  const sig = await engine.generate(twoSources(), 'signal')
+  assert.equal(sig.ideas.length, 1, 'signal falls back too — this pool has no signal-typed source')
+  assert.equal(sig.strategy, 'signal')
   assert.equal(calls, 2)
+})
+
+test('stable on an all-distinct-type pool reports no candidate pairs', async () => {
+  // stable 不回退：三类互异的来源配不出同类型对 → 空池信号（新文案），调用方
+  // 据此切换策略（文档化 "409 -> retry" 契约的承接者），且不触 LLM。
+  const ws = workspace('gen-stable-empty')
+  let calls = 0
+  const engine = engineWith(ws, async () => {
+    calls += 1
+    return { data: { title: 'x', idea: 'c', expectedBenefit: 'b', risk: 'r', novelty: 70, feasibility: 60, impact: 80 } }
+  })
+  const sources = [
+    { name: 'auth', content: 'token rotation', type: 'knowledge' },
+    { name: 'cache', content: 'write-through', type: 'behavior' },
+    { name: 'drift', content: 'latency crept up', type: 'insight' },
+  ]
+
+  const result = await engine.generate(sources, 'stable')
+  assert.deepEqual(result.ideas, [])
+  assert.equal(result.strategy, 'stable')
+  assert.equal(result.pairsAvailable, 0)
+  assert.match(result.reason, /no candidate pairs for strategy "stable"/)
+  assert.match(result.reason, /3 sources, 3 candidate pairs/)
+  assert.equal(calls, 0, 'an infeasible strategy never reaches the LLM')
+
+  // 同一池子切回 explore 即可行：三对全跨类型，重试是真实验。
+  const ok = await engine.generate(sources, 'explore')
+  assert.equal(ok.pairsAttempted, 3)
+  assert.equal(calls, 3, 'the retry with another strategy does reach the LLM (one call per pair)')
 })
 
 test('ferment updates an active hypothesis and records the verdict', async () => {
@@ -930,7 +925,8 @@ test('feedback runtime gating: off unchanged, shadow observes without applying, 
   engine.feedbackEvents.append({ hypothesisId: 'h1', eventType: 'validated', sourceType: 'experiment', sourceId: 's1' })
 
   // 快照来自 h1 的 provenance（memory:a|memory:b）；这里用 C/D 作为待生成来源，
-  // 避免 h1 的 sourceLabels 命中 exploredPairs 导致提前返回。
+  // 与快照的 pair key 互不相干——调整表只在同 key 时生效（R2 收敛后 explored
+  // 只降权不阻断，换源主要是让各阶段输入保持干净）。
   const sources = [
     { name: 'C', content: 'c', type: 'knowledge', weight: 0.8, origin: 'memory:c' },
     { name: 'D', content: 'd', type: 'behavior', weight: 0.7, origin: 'memory:d' },
@@ -942,7 +938,7 @@ test('feedback runtime gating: off unchanged, shadow observes without applying, 
   assert.equal(result.feedback.mode, 'off')
   assert.equal(captured.join('\n').includes('历史反馈'), false)
 
-  // shadow：观测到快照但不应用（每轮重新播种，避免上一轮生成的假设命中 exploredPairs）
+  // shadow：观测到快照但不应用（每轮重新播种，保持各阶段起点干净）
   seed()
   captured.length = 0
   engine.setFeedbackRuntime({ mode: 'shadow', lambdaClampPct: 0.1, explorationBudget: 0.2, halfLifeDays: 30, canaryFraction: 0.1 })

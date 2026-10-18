@@ -87,7 +87,14 @@ test('grounding memory flows into sources, ids, groundedWith and strategy', asyn
   assert.deepEqual(res.ideas[0].provenance.relatedMemoryIds, ['mem_a', 'mem_b'])
   // knowledge goal + feedback memory → cross-type pairs exist → explore
   assert.equal(res.ideas[0].provenance.strategy, 'explore')
-  assert.ok(res.ideas[0].provenance.sources.some((s) => s.origin === 'memory:mem_a'))
+  // Both pairs (goal×mem_a / goal×mem_b) always generate; which one ranks
+  // first is decided by the unseeded mixer perturbation (rng*20 vs a 13-point
+  // relevance gap), so pin the order-independent contract: grounding memory
+  // flowed into the run's sources, not into a particular slot.
+  assert.ok(
+    res.ideas.some((i) => i.provenance.sources.some((s) => s.origin === 'memory:mem_a')),
+    'grounding source memory:mem_a appears in some idea provenance',
+  )
 })
 
 test('numIdeas clamps to 1..3 whatever the caller asks for', async () => {

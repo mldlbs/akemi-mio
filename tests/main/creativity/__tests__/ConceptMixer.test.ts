@@ -230,9 +230,17 @@ describe('ConceptMixer feedback (P2 bounded consumption)', () => {
   ]
 
   it('缺省 feedback 时与不传第五参逐字节一致（回归钉）', () => {
-    const a = new ConceptMixer(7).mix(sources(), 3, [], 'explore')
-    const b = new ConceptMixer(7).mix(sources(), 3, [], 'explore', undefined)
-    expect(b).toEqual(a)
+    // combo.id/createdAt 内嵌 Date.now()：不冻结时钟的话两次调用跨过毫秒
+    // 边界就会让"逐字节"比对偶发变红（与反馈路径无关的计时竞态）。
+    vi.useFakeTimers()
+    vi.setSystemTime(1_700_000_000_000)
+    try {
+      const a = new ConceptMixer(7).mix(sources(), 3, [], 'explore')
+      const b = new ConceptMixer(7).mix(sources(), 3, [], 'explore', undefined)
+      expect(b).toEqual(a)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('正向调整把目标组合顶到首位', () => {
@@ -267,5 +275,49 @@ describe('ConceptMixer feedback (P2 bounded consumption)', () => {
     })
     // 4 槽 × 25% = 1 个探索槽；结果仍受 maxCombos 约束
     expect(results.length).toBeLessThanOrEqual(4)
+  })
+})
+
+// ── R2 双套 mix 收敛：engine 切到本实现后的身份与降权契约 ──
+describe('ConceptMixer explored-pair (R2 单一实现契约)', () => {
+  const pairSources = () => [
+    makeSource({ name: 'A', type: 'knowledge', weight: 0.8 }),
+    makeSource({ name: 'B', type: 'behavior', weight: 0.6 }),
+  ]
+
+  it('已探索对罚 15 分且仍然返回（降权，不是硬跳过）', () => {
+    // 旧 CLI 内联 mixConcepts 对 explored pair 直接 continue（LLM-less no-op）；
+    // 收敛后唯一行为是 scorePair 的 explorationPenalty —— 对照同种子两次调用，
+    // 分差必须恰为 15，且结果数组非空。
+    const fresh = new ConceptMixer(42).mix(pairSources(), 5)
+    const penalized = new ConceptMixer(42).mix(pairSources(), 5, ['A|B'])
+    expect(fresh).toHaveLength(1)
+    expect(penalized).toHaveLength(1, 'the explored pair is still returned')
+    expect(fresh[0].score - penalized[0].score).toBe(15)
+  })
+
+  it('身份是排序后的原始名：长名不截断，尾部编辑才是新对', () => {
+    // 旧 pairSourceKey trim+前 120 字符：300 字符名的尾部编辑会落进同一 key。
+    // 收敛后身份 = [nameA, nameB].sort().join('|') 原文匹配——全名命中罚 15，
+    // 尾部改一个字符的同长名不命中（分差 0）。
+    const longName = 'GOAL_' + 'x'.repeat(300)
+    const sources = [makeSource({ name: longName }), makeSource({ name: 'ctx', type: 'behavior' })]
+    const exactKey = [longName, 'ctx'].sort().join('|')
+    const editedTail = longName.replace(/x$/, 'y')
+    const editedKey = [editedTail, 'ctx'].sort().join('|')
+
+    const fresh = new ConceptMixer(42).mix(sources, 5)
+    const exact = new ConceptMixer(42).mix(sources, 5, [exactKey])
+    const other = new ConceptMixer(42).mix(sources, 5, [editedKey])
+
+    expect(fresh).toHaveLength(1)
+    expect(fresh[0].score - exact[0].score).toBe(15, 'the full 300-char name is one identity')
+    expect(other[0].score).toBe(fresh[0].score, 'a tail edit is a different pair')
+  })
+
+  it('每项带 pair 引用（engine 按 pair 取原始来源，不再查 combo.sources 字符串）', () => {
+    const results = new ConceptMixer(42).mix(pairSources(), 5)
+    expect(results[0].pair.map((s) => s.name)).toEqual(['A', 'B'])
+    expect(results[0].pair[0]).toBeTypeOf('object')
   })
 })

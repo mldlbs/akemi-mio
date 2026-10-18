@@ -4,6 +4,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { readJsonl } = require('./memory-store.js')
+const { ConceptMixer } = require('@akemi-mio/creativity/ConceptMixer')
 const { evaluateNovelty } = require('@akemi-mio/creativity/NoveltyScorer')
 const { JsonlFeedbackEventStore } = require('@akemi-mio/creativity/JsonlFeedbackEventStore')
 const {
@@ -168,67 +169,11 @@ class CreativityStore {
 }
 
 // ═══════════════════════════════════════════════
-//  Concept Mixer — pair sources for novel combos
+//  Concept pairing — R2 收敛（spec §九）：唯一实现是
+//  @akemi-mio/creativity/ConceptMixer（已探索对罚 15 分参与排序，
+//  不再硬跳过；策略配对约束也在 mixer 内）。engine 只在入口层做
+//  策略可行性回退、装配 explored key 与反馈输入。
 // ═══════════════════════════════════════════════
-
-function mulberry32(seed) {
-  let t = seed | 0
-  return () => {
-    t = (t + 0x6D2B79F5) | 0
-    let x = Math.imul(t ^ (t >>> 15), 1 | t)
-    x ^= x + Math.imul(x ^ (x >>> 7), 61 | x)
-    return ((x ^ (x >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-// One concept-pair identity. `--source "name|content"` allows omitting the
-// pipe, so `name` can degrade into the entire description (often >1k chars):
-// with the raw name as identity, a tail edit mints a brand-new pair and
-// silently bypasses dedup. Trim + first 120 chars is short enough to read in
-// a key and long enough that genuine sources do not collide.
-function pairSourceKey(name) {
-  return String(name == null ? '' : name).trim().slice(0, 120)
-}
-
-function mixConcepts(sources, exploredPairs, rng, strategy, pairAdjustments) {
-  if (sources.length < 2) return []
-  // Dedup identity is (pair, strategy): `strategy` picks the prompt and the
-  // temperature, so the documented fallback "hit 409, retry with another
-  // strategy" is a genuinely different experiment. Without the suffix every
-  // retry recomputed the same key and returned the same deterministic
-  // `all pairs already explored` — three LLM-less no-ops in a row.
-  const strat = String(strategy || '')
-  const pairs = []
-  for (let i = 0; i < sources.length; i++) {
-    for (let j = i + 1; j < sources.length; j++) {
-      const a = pairSourceKey(sources[i].name)
-      const b = pairSourceKey(sources[j].name)
-      const key = strat ? `${a}||${b}||${strat}` : `${a}||${b}`
-      const reverseKey = strat ? `${b}||${a}||${strat}` : `${b}||${a}`
-      if (exploredPairs.has(key) || exploredPairs.has(reverseKey)) continue
-      // Records written without a strategy field carry the unsuffixed key;
-      // they must keep blocking every strategy (the old semantics).
-      if (strat && (exploredPairs.has(`${a}||${b}`) || exploredPairs.has(`${b}||${a}`))) continue
-      pairs.push([sources[i], sources[j]])
-    }
-  }
-  // Shuffle and take top pairs
-  for (let i = pairs.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1))
-    ;[pairs[i], pairs[j]] = [pairs[j], pairs[i]]
-  }
-  // 正向反馈闭环 P3：按概念对反馈调整重排（缺省 pairAdjustments = 原顺序不变）。
-  // key 与快照 conceptPairKey 对齐（origin 优先，name 回退）。
-  if (pairAdjustments && pairAdjustments.size > 0) {
-    const fbId = (s) => (s.origin ? s.origin : `name:${s.name}`)
-    const adj = ([a, b]) => {
-      const k = [fbId(a), fbId(b)].sort().join('|')
-      return pairAdjustments.get(k) || 0
-    }
-    pairs.sort((x, y) => adj(y) - adj(x))
-  }
-  return pairs.slice(0, Math.min(5, pairs.length))
-}
 
 // ═══════════════════════════════════════════════
 //  Creativity Engine — main orchestrator
@@ -338,8 +283,8 @@ class CreativityEngine {
     this.store = new CreativityStore(dataDir)
     this.chatJson = chatJson
     this.strategyIndex = 0
-    this.exploredPairs = new Set()
-    this.rng = mulberry32(Date.now())
+    // R2 收敛：配对唯一实现（已探索对降权 15 分，不硬跳过）。
+    this.mixer = new ConceptMixer()
     // 正向反馈闭环 P0：CLI 侧证据事件只追加 feedback-events.jsonl（交换格式），
     // 权威真相源在主进程 SQLite，由 ingest 单向导入。
     this.feedbackEvents = new JsonlFeedbackEventStore(dataDir)
@@ -437,20 +382,33 @@ class CreativityEngine {
     const strat = strategy || STRATEGY_CYCLE[this.strategyIndex % STRATEGY_CYCLE.length]
     this.strategyIndex++
 
-    // Mix concepts. Keys carry the strategy each record was written with, so
-    // explore -> signal -> stable retries each get their own attempt while a
-    // record without a strategy stays unsuffixed and blocks every strategy.
+    // R2 收敛（spec §九）：配对唯一实现是 @akemi-mio/creativity/ConceptMixer。
+    // 策略可行性在入口层回退：mixer 的 explore 只配跨类型、signal 要求
+    // provocation/insight/failure 来源，同质池会直接配出 0 对（先例：
+    // idea-generate.js "cross-type explore only when two types exist, else
+    // stable"）。回退只喂给 mixer——prompt 框架与温度仍按请求的 strat。
+    const distinctTypes = new Set(sources.map((s) => s.type)).size
+    const hasSignal = sources.some(
+      (s) => s.type === 'provocation' || s.type === 'insight' || s.type === 'failure',
+    )
+    let mixStrat = strat
+    if (strat === 'explore' && distinctTypes < 2) mixStrat = 'stable'
+    else if (strat === 'signal' && !hasSignal) mixStrat = distinctTypes >= 2 ? 'explore' : 'stable'
+    // stable 不回退：全部来源类型互异时它配不出同类型对，由下面的空池分支
+    // 给出可切换策略的信号（文档化 "409 -> retry" 契约的承接者）。
+
+    // 已探索身份 = 近 30 条假设 sourceLabels 的排序原始名对，与 ConceptMixer
+    // scorePair 的 [nameA, nameB].sort().join('|') 同键。不按 strategy 分桶
+    // （策略不再参与身份：降权对任何策略的重跑一致生效）；不 trim/截断
+    // （旧 pairSourceKey 的 120 字符身份随 mixConcepts 一并移除）。
     const recent = this.store.getHypotheses({ limit: 30 })
     const rejected = this.store.getHypotheses({ status: 'rejected', limit: 50 })
     const exploredPairs = new Set(
       recent.flatMap((h) =>
-        (h.sourceLabels || []).flatMap((l, i, a) => {
-          if (i === 0) return []
-          const x = pairSourceKey(a[i - 1])
-          const y = pairSourceKey(l)
-          return h.strategy ? [`${x}||${y}||${h.strategy}`] : [`${x}||${y}`]
-        })
-      )
+        (h.sourceLabels || []).flatMap((l, i, a) =>
+          i === 0 ? [] : [[a[i - 1], l].sort().join('|')],
+        ),
+      ),
     )
     // 正向反馈闭环 P3：受控启用。
     //   off     = 原行为（缺省，逐字节不变）
@@ -498,17 +456,24 @@ class CreativityEngine {
       }
     }
 
-    const pairs = mixConcepts(sources, exploredPairs, this.rng.bind(this), strat, pairAdjustments)
+    // 反馈只进 mixer 排序：λ clamp 已在 buildPairAdjustments 完成、canary 已
+    // 按 canaryFraction 缩放；explorationBudget 从运行时配置透传（spec §六.2
+    // 有界消费）。off/shadow/无快照 → pairAdjustments 为 null → 缺省路径。
+    const mixerFeedback =
+      pairAdjustments && pairAdjustments.size > 0
+        ? { pairAdjustments, explorationBudget: this.feedbackRuntime.explorationBudget }
+        : undefined
+    const pairs = this.mixer.mix(sources, 5, [...exploredPairs], mixStrat, mixerFeedback)
 
     if (pairs.length === 0) {
-      // The bare string made a deterministic failure look like "this strategy
-      // did not work, maybe the next one will" — callers that degrade by
-      // switching strategy burned two LLM-less retries before learning the
-      // material pool itself was exhausted.
+      // 空池只剩一种成因：stable 在"全部来源类型互异"的池子上配不出同类型
+      // 对（explore/signal 的入口层回退保证非空）。调用方据此切换策略重试。
+      // 旧文案 "all pairs already explored" 已不成立——罚分降权后重复生成
+      // 总是到达 LLM，耗尽信号只来自策略可行性。
       const candidatePairs = (sources.length * (sources.length - 1)) / 2
       return {
         ideas: [],
-        reason: `all pairs already explored for strategy "${strat}" (${sources.length} sources, ${candidatePairs} candidate pairs)`,
+        reason: `no candidate pairs for strategy "${strat}" (${sources.length} sources, ${candidatePairs} candidate pairs)`,
         strategy: strat,
         pairsAvailable: 0,
         feedback: feedbackInfo,
@@ -522,7 +487,7 @@ class CreativityEngine {
     // so the caller saw `ideas: []` with no explanation of whether the LLM was
     // down, the JSON was unparseable, or every pair really was a duplicate.
     const errors = []
-    for (const [a, b] of pairs) {
+    for (const { pair: [a, b] } of pairs) {
       const prompt = this._buildGenerationPrompt(a, b, strat, recent.slice(-10), rejected.slice(-5), feedbackBlock)
       try {
         const result = await this.chatJson(prompt, {
