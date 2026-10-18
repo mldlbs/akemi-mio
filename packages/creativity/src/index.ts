@@ -110,6 +110,7 @@ export type {
   NormalizeResult,
   NormalizeQuarantineReason,
 } from './FeedbackEvents'
+export { buildCreativityPrompt, buildFeedbackBlockSection } from './CreativityPrompt'
 export { JsonlFeedbackEventStore } from './JsonlFeedbackEventStore'
 export type { JsonlAppendResult } from './JsonlFeedbackEventStore'
 export { DrizzleFeedbackEventStore } from './DrizzleFeedbackEventStore'
@@ -128,6 +129,9 @@ export {
   pairKeyOf,
   replayFeedbackAdjustment,
   timeDecay,
+  buildFeedbackPromptBlock,
+  buildMixerInputFromSnapshot,
+  clipPromptText,
   POSITIVE_DIMENSIONS,
 } from './FeedbackLearning'
 export type {
@@ -137,11 +141,16 @@ export type {
   DimensionEstimate,
   EvidenceTraceEntry,
   FeedbackAdjustment,
+  FeedbackBand,
   FeedbackDimension,
   FeedbackLearningConfig,
+  FeedbackPromptBlock,
+  FeedbackPromptFailure,
+  FeedbackPromptSource,
   FeedbackSnapshot,
   HypothesisProvenanceLike,
 } from './FeedbackLearning'
+export { DrizzleExperimentRunStore } from './DrizzleExperimentRunStore'
 export { FeedbackLearningService } from './FeedbackLearningService'
 export type {
   FeedbackLearningServiceOptions,

@@ -1,5 +1,19 @@
 import type { CreativitySource, ConceptCombo, Strategy } from './types'
+import { sourceConceptId, conceptPairKey } from './types'
 import { resolveRandom, type RandomGenerator } from '@akemi-mio/core/utils/random'
+
+/**
+ * 正向反馈闭环 P2 有界消费输入（spec §六.2）。
+ * - `pairAdjustments`：conceptPairKey → λ clamp 后的调整量（调用方已按 λ 上限裁剪）。
+ * - `explorationBudget`：0..1，保留给低频/新组合的槽位比例（防自我复制）。
+ * 缺省 `undefined` → mix() 行为逐字节不变（回归钉保证）。
+ */
+export interface FeedbackMixerInput {
+  pairAdjustments: ReadonlyMap<string, number> | Record<string, number>
+  explorationBudget?: number
+  /** 单对调整上限（λ clamp，绝对分）。缺省 0.1（与 DEFAULT_FEEDBACK_LEARNING_CONFIG.lambdaClampPct 对齐）。 */
+  maxAdjustment?: number
+}
 
 /**
  * ConceptMixer — 创造力核心：旧概念随机重组产生新想法
@@ -10,6 +24,9 @@ import { resolveRandom, type RandomGenerator } from '@akemi-mio/core/utils/rando
  * v2 改动：mix() 接受 strategy 参数，在配对前约束组合空间。
  * strategy 决定了允许哪些 type 配对，而不只是事后评分。
  * 参见策略定义：Strategy = 'stable' | 'explore' | 'signal'
+ *
+ * P2 改动：mix() 接受可选 feedback，做有界排序修正 + 探索预算。
+ * 反馈只影响探索优先级，永不进入晋级门输入（spec §二.2）。
  */
 export class ConceptMixer {
   private rng: RandomGenerator
@@ -23,12 +40,14 @@ export class ConceptMixer {
    * @param exploredPairs 已探索过的 pair key 列表（"A|B" 格式，已排序），用于降权
    * @param strategy 策略约束：stable/explore/signal，默认为 'explore'
    *   策略决定哪些 type 配对被允许、评分权重如何调整。
+   * @param feedback 可选：正向反馈有界修正 + 探索预算；缺省 = 行为不变。
    */
   mix(
     sources: CreativitySource[],
     maxCombos = 10,
     exploredPairs: string[] = [],
     strategy: Strategy = 'explore',
+    feedback?: FeedbackMixerInput,
   ): { combo: ConceptCombo; score: number }[] {
     if (sources.length < 2) return []
 
@@ -38,8 +57,40 @@ export class ConceptMixer {
     const allowed = this.generatePairs(sources, strategy)
 
     const scored = allowed.map(([a, b]) => this.scorePair(a, b, sources, exploredSet, strategy))
-    const sorted = scored.sort((a, b) => b.score - a.score)
-    return sorted.slice(0, maxCombos)
+    if (!feedback) {
+      // 缺省路径：与原实现完全一致（含 RNG 调用序列），不得改动
+      const sorted = scored.sort((a, b) => b.score - a.score)
+      return sorted.slice(0, maxCombos)
+    }
+
+    const adjustments = feedback.pairAdjustments instanceof Map
+      ? feedback.pairAdjustments
+      : new Map(Object.entries(feedback.pairAdjustments))
+    const budget = Math.max(0, Math.min(1, feedback.explorationBudget ?? 0))
+    const exploreCount = Math.min(maxCombos, Math.round(maxCombos * budget))
+    const mainCount = maxCombos - exploreCount
+
+    const maxAdj = feedback.maxAdjustment ?? 0.1
+    const withAdjustment = scored.map((s, idx) => {
+      const [a, b] = allowed[idx]
+      const key = conceptPairKey(sourceConceptId(a), sourceConceptId(b))
+      const raw = adjustments.get(key) ?? 0
+      const adj = Math.max(-maxAdj, Math.min(maxAdj, raw))
+      return { ...s, feedbackKey: key, adjusted: s.score + adj }
+    })
+
+    const main = [...withAdjustment]
+      .sort((a, b) => (b.adjusted - a.adjusted) || (a.feedbackKey < b.feedbackKey ? -1 : 1))
+      .slice(0, mainCount)
+    const mainKeys = new Set(main.map((s) => s.feedbackKey))
+    const rest = withAdjustment
+      .filter((s) => !mainKeys.has(s.feedbackKey))
+      .sort((a, b) => (a.score - b.score) || (a.feedbackKey < b.feedbackKey ? -1 : 1))
+      .slice(0, exploreCount)
+
+    return [...main, ...rest]
+      .sort((a, b) => (b.adjusted - a.adjusted) || (a.feedbackKey < b.feedbackKey ? -1 : 1))
+      .map((s) => ({ combo: s.combo, score: s.adjusted }))
   }
 
   /**

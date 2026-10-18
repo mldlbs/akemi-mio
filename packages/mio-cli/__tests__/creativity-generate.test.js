@@ -851,3 +851,35 @@ test('CLI generate --from-insights still needs two concepts in total', (t) => {
   assert.match(out.stderr, /at least 2 concept sources/)
   assert.equal(fs.existsSync(hypothesesFile(ws)), false)
 })
+
+// ── 正向反馈闭环 P2：CLI 生成端消费预装配的结构化快照块 ──
+
+test('generate renders the structured feedback block without raw event text', () => {
+  const ws = workspace('cli-fbe-block')
+  const engine = engineWith(ws, async () => ({ data: [] }))
+  const block = {
+    version: 'snap1',
+    verified: [
+      {
+        pairKey: 'memory:a|memory:b',
+        conceptA: 'memory:a',
+        conceptB: 'memory:b',
+        dimension: 'quality',
+        evidenceCount: 2,
+        posteriorBand: 'high',
+        confidenceBand: 'medium',
+        scope: '多批次独立验证',
+        limits: '尚未验证跨场景泛化',
+      },
+    ],
+    failures: [],
+  }
+  const withBlock = engine._buildGenerationPrompt({ name: 'A', content: 'a' }, { name: 'B', content: 'b' }, 'explore', [], [], block)
+  assert.match(withBlock, /历史反馈/)
+  assert.match(withBlock, /快照 v/)
+  assert.doesNotMatch(withBlock, /idempotencyKey/)
+  assert.doesNotMatch(withBlock, /sourceId/)
+
+  const withoutBlock = engine._buildGenerationPrompt({ name: 'A', content: 'a' }, { name: 'B', content: 'b' }, 'explore', [], [])
+  assert.doesNotMatch(withoutBlock, /历史反馈/)
+})

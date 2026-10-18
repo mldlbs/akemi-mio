@@ -21,6 +21,8 @@ import {
   type HypothesisFeedbackEvent,
   type HypothesisFeedbackEventType,
 } from './FeedbackEvents'
+import { sourceConceptId, conceptPairKey } from './types'
+import type { FeedbackMixerInput } from './ConceptMixer'
 
 export type FeedbackDimension = 'selection' | 'quality' | 'landing' | 'negative'
 
@@ -135,11 +137,11 @@ export function timeDecay(occurredAt: number, now: number, halfLifeDays: number)
 
 /** 概念身份：取 origin（稳定字段），缺失时回退 name 并标记 hypothesis_only。 */
 export function conceptIdOf(source: { name: string; origin?: string }): string {
-  return source.origin && source.origin.trim() ? source.origin.trim() : `name:${source.name}`
+  return sourceConceptId(source)
 }
 
 export function pairKeyOf(a: string, b: string): string {
-  return [a, b].sort().join('|')
+  return conceptPairKey(a, b)
 }
 
 /** 稳定序列化：对象键排序、数组保序，保证跨平台 hash 一致。 */
@@ -504,5 +506,130 @@ export function replayFeedbackAdjustment(
     posteriorMean: posMean,
     confidence: conf,
     clampedAdjustment: adjustment * clamp,
+  }
+}
+
+// ══════════════════════════════════════════
+// P2：快照 → 生成端结构化提示块（spec §六.3 / §13.4）
+// ══════════════════════════════════════════
+
+export type FeedbackBand = 'low' | 'medium' | 'high'
+
+export interface FeedbackPromptSource {
+  pairKey: string
+  conceptA: string
+  conceptB: string
+  dimension: FeedbackDimension
+  evidenceCount: number
+  posteriorBand: FeedbackBand
+  confidenceBand: FeedbackBand
+  scope: string
+  limits: string
+}
+
+export interface FeedbackPromptFailure {
+  pairKey: string
+  conceptA: string
+  conceptB: string
+  dimension: FeedbackDimension
+  evidenceCount: number
+  scope: string
+  limits: string
+}
+
+export interface FeedbackPromptBlock {
+  version: string
+  verified: FeedbackPromptSource[]
+  failures: FeedbackPromptFailure[]
+}
+
+const PROMPT_TEXT_LIMIT = 120
+
+/** 确定性裁剪：字符串上限 120 字符（§13.4）。 */
+export function clipPromptText(s: string, limit = PROMPT_TEXT_LIMIT): string {
+  const clean = String(s ?? '').replace(/\s+/g, ' ').trim()
+  return clean.length > limit ? `${clean.slice(0, limit)}…` : clean
+}
+
+function band(value: number): FeedbackBand {
+  if (value < 0.5) return 'low'
+  if (value < 0.8) return 'medium'
+  return 'high'
+}
+
+function confidenceBand(value: number): FeedbackBand {
+  if (value < 0.3) return 'low'
+  if (value < 0.7) return 'medium'
+  return 'high'
+}
+
+function scopeOf(evidenceCount: number): string {
+  return evidenceCount >= 3 ? '多批次独立验证' : '限定任务类别'
+}
+
+const LIMITS = '尚未验证跨场景泛化'
+
+/**
+ * 从不可变快照构建结构化提示块。只带结构化字段，永不回灌 raw 事件正文
+ * 或 provenance.origin 自由文本（§13.4，红队注入面）。
+ */
+export function buildFeedbackPromptBlock(snapshot: FeedbackSnapshot): FeedbackPromptBlock {
+  const verified: FeedbackPromptSource[] = []
+  const failures: FeedbackPromptFailure[] = []
+
+  for (const pair of snapshot.pairs) {
+    if (pair.attribution === 'hypothesis_only') continue
+    for (const d of POSITIVE_DIMENSIONS) {
+      const est = pair[d]
+      if (est.evidenceCount <= 0) continue
+      verified.push({
+        pairKey: pair.pairKey,
+        conceptA: pair.conceptAId,
+        conceptB: pair.conceptBId,
+        dimension: d,
+        evidenceCount: est.evidenceCount,
+        posteriorBand: band(est.posteriorMean),
+        confidenceBand: confidenceBand(est.confidence),
+        scope: scopeOf(est.evidenceCount),
+        limits: LIMITS,
+      })
+    }
+    if (pair.negative.evidenceCount > 0) {
+      failures.push({
+        pairKey: pair.pairKey,
+        conceptA: pair.conceptAId,
+        conceptB: pair.conceptBId,
+        dimension: 'negative',
+        evidenceCount: pair.negative.evidenceCount,
+        scope: '特定实验条件',
+        limits: LIMITS,
+      })
+    }
+  }
+
+  const byPair = (a: { pairKey: string; dimension: string }, b: { pairKey: string; dimension: string }) =>
+    a.pairKey < b.pairKey ? -1 : a.pairKey > b.pairKey ? 1 : a.dimension < b.dimension ? -1 : a.dimension > b.dimension ? 1 : 0
+  verified.sort(byPair)
+  failures.sort(byPair)
+
+  return { version: snapshot.version, verified, failures }
+}
+
+/**
+ * 快照 → ConceptMixer 有界消费输入（spec §六.2）。
+ * pairAdjustments 用快照 pairKey（conceptId 对齐）；λ clamp 由 mixer 再兜底。
+ */
+export function buildMixerInputFromSnapshot(
+  snapshot: FeedbackSnapshot,
+  config: FeedbackLearningConfig = DEFAULT_FEEDBACK_LEARNING_CONFIG,
+): FeedbackMixerInput {
+  const pairAdjustments: Record<string, number> = {}
+  for (const pair of snapshot.pairs) {
+    pairAdjustments[pair.pairKey] = replayFeedbackAdjustment(pair, config).clampedAdjustment
+  }
+  return {
+    pairAdjustments,
+    explorationBudget: config.explorationBudget,
+    maxAdjustment: config.lambdaClampPct,
   }
 }

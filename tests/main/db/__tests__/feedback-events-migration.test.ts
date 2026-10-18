@@ -78,3 +78,41 @@ describe('migration v51: hypothesis_feedback_events (正向反馈闭环 P0)', ()
     expect(rows.n).toBe(1)
   })
 })
+
+describe('migration v52: experiment_runs (正向反馈闭环 P2)', () => {
+  it('creates the table with feedback attribution columns', () => {
+    const db = new Database(':memory:')
+    runMigrations(wrap(db) as any)
+
+    const columns = db.prepare('PRAGMA table_info(experiment_runs)').all().map((c: any) => c.name)
+    expect(columns).toEqual(
+      expect.arrayContaining([
+        'id',
+        'hypothesis_id',
+        'assignment',
+        'outcome',
+        'metrics',
+        'evidence_ids',
+        'feedback_snapshot_version',
+        'baseline_version',
+        'candidate_version',
+        'test_results',
+        'regression_results',
+        'decision',
+      ]),
+    )
+
+    const insert = db.prepare(`
+      INSERT INTO experiment_runs
+        (id, assignment, outcome, metrics, evidence_ids, created_at, feedback_snapshot_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+    insert.run('run-1', 'candidate', 'success', '{}', '[]', 1, 'snap_abc')
+    // 非法 assignment 被 CHECK 拒绝
+    expect(() => insert.run('run-2', 'bogus', 'success', '{}', '[]', 1, null)).toThrow()
+
+    const versions = MIGRATIONS.map((m) => m.version)
+    expect(versions).toContain(52)
+    expect(new Set(versions).size).toBe(versions.length)
+  })
+})

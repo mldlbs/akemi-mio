@@ -1,5 +1,6 @@
 import type { CreativitySource, ConceptCombo, Hypothesis, CreativeIdea, Strategy, ExternalSignal } from './types'
-import { ConceptMixer } from './ConceptMixer'
+import { ConceptMixer, type FeedbackMixerInput } from './ConceptMixer'
+import type { FeedbackPromptBlock } from './FeedbackLearning'
 import { HypothesisGenerator } from './HypothesisGenerator'
 import { ExperimentPlanner } from './ExperimentPlanner'
 import { resolveRandom, type RandomGenerator } from '@akemi-mio/core/utils/random'
@@ -51,20 +52,24 @@ export class IdeaGenerator {
     strategy: Strategy = 'explore',
     externalSignals: ExternalSignal[] = [],
     method?: string,
+    /** 正向反馈闭环 P2：结构化提示块（缺省 = 提示词逐字节不变）。 */
+    feedbackPrompt?: FeedbackPromptBlock,
+    /** 正向反馈闭环 P2：mixer 有界修正 + 探索预算（缺省 = 配对排序逐字节不变）。 */
+    mixerFeedback?: FeedbackMixerInput,
   ): Promise<CreativeIdea[]> {
     if (sources.length < 2) return []
 
     // 1. 随机扰动：温度越高，来源选择越随机
     const activeSources = this.applyTemperature(sources)
 
-    // 2. 概念重组：按策略约束配对 + 打分
-    const scoredCombos = this.mixer.mix(activeSources, maxIdeas * 3, this.exploredPairs, strategy)
+    // 2. 概念重组：按策略约束配对 + 打分（可选反馈有界修正）
+    const scoredCombos = this.mixer.mix(activeSources, maxIdeas * 3, this.exploredPairs, strategy, mixerFeedback)
     const combos = scoredCombos.map((c) => c.combo)
 
     if (combos.length === 0) return []
 
     // 3. 用 LLM 生成假设（外部信号作为审视视角注入，不参与配对）
-    const hypotheses = await this.hypothesisGen.generate(combos, activeSources, false, externalSignals, method)
+    const hypotheses = await this.hypothesisGen.generate(combos, activeSources, false, externalSignals, method, feedbackPrompt)
 
     // 4. 可行性/质量门禁（与 dream 模式同一套门槛）——此前只有梦境路径
     //    过 feasibilityGate，主路径仅按 novelty 筛，可行性 0 分也能入库。

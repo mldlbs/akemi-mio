@@ -33,6 +33,16 @@ export interface ExperimentRun {
   stale?: boolean
   createdAt: number
   completedAt?: number
+  // ── 正向反馈闭环 P2：实验可归因（spec §五.3）──
+  /** 实验时使用的反馈快照版本（无反馈时为空）；回答"收益来自机制还是反馈权重" */
+  feedbackSnapshotVersion?: string
+  baselineVersion?: string
+  candidateVersion?: string
+  /** 独立验证/测试结果（白名单标量） */
+  testResults?: Record<string, number | boolean | string>
+  /** 回归验证结果（白名单标量） */
+  regressionResults?: Record<string, number | boolean | string>
+  decision?: 'promote' | 'reject' | 'inconclusive' | 'rollback'
 }
 
 // ══════════════════════════════════════════

@@ -1101,6 +1101,35 @@ const MIGRATIONS: Migration[] = [
     revert: '',
     category: 'schema',
   },
+  {
+    version: 52,
+    sql: `
+      CREATE TABLE IF NOT EXISTS experiment_runs (
+        id TEXT PRIMARY KEY,
+        hypothesis_id TEXT,
+        candidate_id TEXT,
+        baseline_id TEXT,
+        assignment TEXT NOT NULL CHECK(assignment IN ('baseline','candidate','ablation')),
+        outcome TEXT NOT NULL CHECK(outcome IN ('success','failure','inconclusive')),
+        metrics TEXT NOT NULL DEFAULT '{}',
+        evidence_ids TEXT NOT NULL DEFAULT '[]',
+        base_snapshot_id TEXT,
+        stale INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        feedback_snapshot_version TEXT,
+        baseline_version TEXT,
+        candidate_version TEXT,
+        test_results TEXT,
+        regression_results TEXT,
+        decision TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_experiment_runs_hypothesis ON experiment_runs(hypothesis_id);
+      CREATE INDEX IF NOT EXISTS idx_experiment_runs_feedback_snapshot ON experiment_runs(feedback_snapshot_version);
+    `,
+    revert: '',
+    category: 'schema',
+  },
 ]
 
 // 导出迁移数组供测试验证

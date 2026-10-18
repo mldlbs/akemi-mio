@@ -1,4 +1,5 @@
 import type { Hypothesis, ConceptCombo, CreativitySource, ExternalSignal } from './types'
+import type { FeedbackPromptBlock } from './FeedbackLearning'
 import { CREATIVITY_SYSTEM_PROMPT, buildCreativityPrompt, buildSystemPrompt, pickTechnique } from './CreativityPrompt'
 import { TemplateLibrary } from './TemplateLibrary'
 import { LocalModelService } from './LocalModelService'
@@ -56,13 +57,15 @@ export class HypothesisGenerator {
     externalSignals: ExternalSignal[] = [],
     /** 显式技法；缺省走五技法轮换（rotationSeed + 调用次数） */
     method?: string,
+    /** 正向反馈闭环 P2：不可变快照的结构化提示块。缺省 = 提示词逐字节不变。 */
+    feedback?: FeedbackPromptBlock,
   ): Promise<Hypothesis[]> {
     if (combos.length === 0) return []
     const technique = method ?? pickTechnique(this.rotationSeed + this.callCount)
     this.callCount += 1
 
     // 第一级：远程 LLM 驱动生成
-    const llmResults = await this.tryLLM(sources, combos, dreamMode, externalSignals, technique)
+    const llmResults = await this.tryLLM(sources, combos, dreamMode, externalSignals, technique, feedback)
     if (llmResults.length > 0) {
       return this.tag(
         llmResults.map((r) => ({
@@ -86,7 +89,7 @@ export class HypothesisGenerator {
     // 第二级：本地 transformers.js 模型
     if (this.localModel.isEnabled) {
       log('INFO', 'hypothesis_fallback_local', { count: combos.length })
-      const localResults = await this.tryLocalModel(sources, combos, dreamMode, technique)
+      const localResults = await this.tryLocalModel(sources, combos, dreamMode, technique, feedback)
       if (localResults.length > 0) {
         return this.tag(
           localResults.map((r) => ({
@@ -138,6 +141,7 @@ export class HypothesisGenerator {
     dreamMode: boolean,
     externalSignals: ExternalSignal[] = [],
     technique: string = '',
+    feedback?: FeedbackPromptBlock,
   ): Promise<
     Array<{
       title: string
@@ -161,7 +165,7 @@ export class HypothesisGenerator {
       description: c.description,
     }))
 
-    const prompt = buildCreativityPrompt(sources, comboInfo, externalSignals)
+    const prompt = buildCreativityPrompt(sources, comboInfo, externalSignals, feedback)
 
     try {
       const result = await this.chatJson(prompt, {
@@ -201,6 +205,7 @@ export class HypothesisGenerator {
     combos: ConceptCombo[],
     dreamMode: boolean,
     technique: string = '',
+    feedback?: FeedbackPromptBlock,
   ): Promise<
     Array<{
       title: string
@@ -220,7 +225,7 @@ export class HypothesisGenerator {
       description: c.description,
     }))
 
-    const prompt = buildCreativityPrompt(sources, comboInfo)
+    const prompt = buildCreativityPrompt(sources, comboInfo, [], feedback)
 
     const result = await this.localModel.generate(prompt, {
       system: buildSystemPrompt(technique),

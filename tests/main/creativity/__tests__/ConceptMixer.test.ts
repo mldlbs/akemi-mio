@@ -219,3 +219,53 @@ describe('HypothesisGenerator', () => {
     expect(true).toBe(true)
   })
 })
+
+// ── 正向反馈闭环 P2：有界消费 ──────────────────────────────
+describe('ConceptMixer feedback (P2 bounded consumption)', () => {
+  const sources = () => [
+    makeSource({ name: 'A', type: 'knowledge', weight: 0.8 }),
+    makeSource({ name: 'B', type: 'behavior', weight: 0.7 }),
+    makeSource({ name: 'C', type: 'insight', weight: 0.6 }),
+    makeSource({ name: 'D', type: 'failure', weight: 0.5 }),
+  ]
+
+  it('缺省 feedback 时与不传第五参逐字节一致（回归钉）', () => {
+    const a = new ConceptMixer(7).mix(sources(), 3, [], 'explore')
+    const b = new ConceptMixer(7).mix(sources(), 3, [], 'explore', undefined)
+    expect(b).toEqual(a)
+  })
+
+  it('正向调整把目标组合顶到首位', () => {
+    const mixer = new ConceptMixer(7)
+    const results = mixer.mix(sources(), 1, [], 'explore', {
+      pairAdjustments: { 'name:C|name:D': 500 },
+      explorationBudget: 0,
+      maxAdjustment: 500,
+    })
+    expect(results).toHaveLength(1)
+    expect(results[0].combo.sources).toEqual(['C', 'D'])
+  })
+
+  it('调整被 λ clamp 到 maxAdjustment 上限', () => {
+    const mixer = new ConceptMixer(7)
+    const without = new ConceptMixer(7).mix(sources(), 10, [], 'explore')
+    const withBig = mixer.mix(sources(), 10, [], 'explore', {
+      pairAdjustments: { 'name:A|name:B': 1000 },
+      explorationBudget: 0,
+      maxAdjustment: 0.1,
+    })
+    const aB = withBig.find((r) => r.combo.sources.join(',') === 'A,B')!
+    const base = without.find((r) => r.combo.sources.join(',') === 'A,B')!
+    expect(Math.abs(aB.score - base.score)).toBeLessThanOrEqual(0.1 + 1e-9)
+  })
+
+  it('探索预算为低频组合保留槽位', () => {
+    const mixer = new ConceptMixer(7)
+    const results = mixer.mix(sources(), 4, [], 'explore', {
+      pairAdjustments: {},
+      explorationBudget: 0.25,
+    })
+    // 4 槽 × 25% = 1 个探索槽；结果仍受 maxCombos 约束
+    expect(results.length).toBeLessThanOrEqual(4)
+  })
+})

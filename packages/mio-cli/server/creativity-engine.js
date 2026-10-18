@@ -318,7 +318,7 @@ class CreativityEngine {
     this.feedbackEvents = new JsonlFeedbackEventStore(dataDir)
   }
 
-  async generate(sourceLabels, strategy) {
+  async generate(sourceLabels, strategy, feedbackBlock) {
     // A missing sources array used to reach .map() and surface as
     // "Cannot read properties of undefined", which tells the caller nothing.
     if (!Array.isArray(sourceLabels)) {
@@ -329,6 +329,8 @@ class CreativityEngine {
       content: s.content || '',
       type: s.type || 'knowledge',
       weight: s.weight || 0.5,
+      // 正向反馈闭环 P2：保留 origin 供快照 pair 对齐（缺省 = 不影响既有行为）
+      ...(s.origin ? { origin: s.origin } : {}),
     }))
 
     if (sources.length < 2) {
@@ -377,7 +379,7 @@ class CreativityEngine {
     // down, the JSON was unparseable, or every pair really was a duplicate.
     const errors = []
     for (const [a, b] of pairs) {
-      const prompt = this._buildGenerationPrompt(a, b, strat, recent.slice(-10), rejected.slice(-5))
+      const prompt = this._buildGenerationPrompt(a, b, strat, recent.slice(-10), rejected.slice(-5), feedbackBlock)
       try {
         const result = await this.chatJson(prompt, {
           system: [
@@ -665,7 +667,7 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
       .map(decorate)
   }
 
-  _buildGenerationPrompt(a, b, strategy, recentHypotheses, rejectedHypotheses) {
+  _buildGenerationPrompt(a, b, strategy, recentHypotheses, rejectedHypotheses, feedbackBlock) {
     // Long sources used to be pasted unbounded, crowding the instructions out
     // of the context window; 600 chars keeps the pairing signal without the
     // flood.
@@ -704,6 +706,12 @@ Output JSON with: title, idea, expectedBenefit, risk, novelty (0-100), feasibili
       for (const h of rejectedHypotheses) {
         prompt += `- "${h.title}" — ${h.risk}\n`
       }
+    }
+
+    // 正向反馈闭环 P2：结构化快照块（已验证来源 + 失败边界）。缺省 = 提示词不变。
+    if (feedbackBlock) {
+      const { buildFeedbackBlockSection } = require('@akemi-mio/creativity/CreativityPrompt')
+      prompt += `\n${buildFeedbackBlockSection(feedbackBlock)}`
     }
 
     prompt += `\nOutput JSON: {"title": "...", "idea": "...", "expectedBenefit": "...", "risk": "...", "novelty": 0-100, "feasibility": 0-100, "impact": 0-100, "logic": 0-100}`

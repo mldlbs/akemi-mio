@@ -6,6 +6,21 @@
  */
 export type Strategy = 'stable' | 'explore' | 'signal'
 
+/**
+ * 规范化概念身份（正向反馈闭环 spec §五.2）：稳定字段 `origin` 优先，
+ * `name` 仅作展示，缺失时回退 `name:<name>` 以避免与 origin 碰撞。
+ * ConceptMixer 与 FeedbackLearning 共用此规则，防止双套身份漂移（R2）。
+ */
+export function sourceConceptId(s: { name: string; origin?: string }): string {
+  const origin = s.origin ? s.origin.trim() : ''
+  return origin || `name:${s.name}`
+}
+
+/** 规范化无序概念对键：(A,B) ≡ (B,A)。 */
+export function conceptPairKey(a: string, b: string): string {
+  return [a, b].sort().join('|')
+}
+
 export interface CreativitySource {
   name: string
   content: string

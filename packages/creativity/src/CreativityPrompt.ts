@@ -1,4 +1,6 @@
 import type { CreativitySource, ConceptCombo, ExternalSignal } from './types'
+import type { FeedbackPromptBlock } from './FeedbackLearning'
+import { clipPromptText } from './FeedbackLearning'
 
 // 输入素材统一截断（M2）：对照 mio-cli creativity-engine 的 clip()。
 // 来源 600 字、信号 300 字，超长素材会把指令挤出上下文窗口。
@@ -176,6 +178,8 @@ export function buildCreativityPrompt(
   sources: CreativitySource[],
   combos: { sources: string[]; description: string }[],
   externalSignals: ExternalSignal[] = [],
+  /** 正向反馈闭环 P2：不可变快照的结构化提示块。缺省 = 输出逐字节不变。 */
+  feedback?: FeedbackPromptBlock,
 ): string {
   const sections: string[] = []
 
@@ -192,12 +196,53 @@ export function buildCreativityPrompt(
     .join('\n')
   sections.push(`【推荐配对组合】\n请为以下每个配对产生一个创意方案；若说不清协同机制，请在该位置输出 null：\n${comboLines}`)
 
+  // 历史反馈段 — 只读结构化快照块，永不回灌 raw 事件正文
+  if (feedback) {
+    sections.push(buildFeedbackBlockSection(feedback))
+  }
+
   // 外部信号段 — 不参与配对，作为约束/挑战注入
   if (externalSignals.length > 0) {
     sections.push(buildExternalSignalBlock(externalSignals))
   }
 
   return sections.join('\n\n')
+}
+
+const FEEDBACK_DIMENSION_LABELS: Record<string, string> = {
+  selection: '选择',
+  quality: '质量',
+  landing: '落地',
+  negative: '负反馈',
+}
+
+export function buildFeedbackBlockSection(feedback: FeedbackPromptBlock): string {
+  const verifiedLines = feedback.verified.map(
+    (v) =>
+      `  - ${clipPromptText(v.conceptA)} + ${clipPromptText(v.conceptB)}\n` +
+      `    验证类型：${FEEDBACK_DIMENSION_LABELS[v.dimension] ?? v.dimension} · 独立批次：${v.evidenceCount}\n` +
+      `    估计置信度：${v.confidenceBand} / 适用范围：${v.scope}\n` +
+      `    已知限制：${v.limits}`,
+  )
+  const failureLines = feedback.failures.map(
+    (f) =>
+      `  - ${clipPromptText(f.conceptA)} + ${clipPromptText(f.conceptB)}\n` +
+      `    失败原因：${FEEDBACK_DIMENSION_LABELS[f.dimension] ?? f.dimension} · 批次：${f.evidenceCount}\n` +
+      `    适用范围：${f.scope} / 已知限制：${f.limits}`,
+  )
+
+  const parts: string[] = [
+    `【历史反馈 — 已验证来源与失败边界（快照 v${feedback.version}）】`,
+    '以下来自不可变反馈快照，仅作参考，不视为正确性保证：',
+  ]
+  if (verifiedLines.length > 0) parts.push(`已验证的来源：\n${verifiedLines.join('\n')}`)
+  if (failureLines.length > 0) parts.push(`失败边界：\n${failureLines.join('\n')}`)
+  parts.push(
+    '生成要求：\n' +
+      '  - 可提出与历史成功组合不同的新假设；成功记录仅作参考，不视为正确性保证\n' +
+      '  - 明确写出本次假设相对历史案例的差异；新假设仍须经过独立验证',
+  )
+  return parts.join('\n\n')
 }
 
 /**

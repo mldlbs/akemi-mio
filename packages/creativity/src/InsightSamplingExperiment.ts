@@ -360,12 +360,13 @@ export function runInsightSamplingExperiment(
 }
 
 /** 把 CapabilityDelta 报告转成 ExperimentRun 列表（供 ExperimentRunStore.checkPromotionGate 使用） */
-export function reportToExperimentRuns(report: CapabilityDeltaReport): ExperimentRun[] {
+export function reportToExperimentRuns(report: CapabilityDeltaReport, feedbackSnapshotVersion?: string): ExperimentRun[] {
   return report.variants.map((v) => ({
     id: `${report.experimentId}:${v.variant}`,
     hypothesisId: report.hypothesisId,
     candidateId: v.variant,
     baselineId: report.baselineVariant,
+    ...(feedbackSnapshotVersion ? { feedbackSnapshotVersion } : {}),
     assignment: (v.variant === 'baseline'
       ? 'baseline'
       : v.variant.startsWith('ablation')

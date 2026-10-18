@@ -65,6 +65,16 @@
       "require": "./dist/FeedbackLearning.js",
       "default": "./dist/FeedbackLearning.js"
     },
+    "./CreativityPrompt": {
+      "types": "./dist/CreativityPrompt.d.ts",
+      "require": "./dist/CreativityPrompt.js",
+      "default": "./dist/CreativityPrompt.js"
+    },
+    "./ConceptMixer": {
+      "types": "./dist/ConceptMixer.d.ts",
+      "require": "./dist/ConceptMixer.js",
+      "default": "./dist/ConceptMixer.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

@@ -12,6 +12,13 @@ import type { FermentResult } from './IdeaFermentationEngine'
 import { evaluateNovelty } from './NoveltyScorer'
 import type { CreativitySource, CreativeIdea, DreamCycleLog, IdeaStoreLike, Strategy, ExternalSignal } from './types'
 import { DREAM_CYCLE_INTERVAL_MS, NORMAL_CYCLE_INTERVAL_MS, FERMENT_INTERVAL_MS, FERMENT_PHASE_OFFSET_MS } from './types'
+import { buildFeedbackPromptBlock, buildMixerInputFromSnapshot, DEFAULT_FEEDBACK_LEARNING_CONFIG } from './FeedbackLearning'
+import type {
+  FeedbackLearningConfig,
+  FeedbackPromptBlock,
+  FeedbackSnapshot,
+} from './FeedbackLearning'
+import type { FeedbackMixerInput } from './ConceptMixer'
 import type { TaskRunner } from '@akemi-mio/core/core/tasks/unified/TaskRunner'
 
 /**
@@ -43,6 +50,9 @@ export class CreativityService {
   private getBehaviorSources: (() => CreativitySource[]) | null = null
   private getExternalSources: (() => CreativitySource[]) | null = null
   private getFeedbackSources: (() => CreativitySource[]) | null = null
+  /** 正向反馈闭环 P2：入口层装配的不可变快照（缺省 = 不改变生成行为） */
+  private getFeedbackSnapshot: (() => FeedbackSnapshot | null) | null = null
+  private feedbackLearningConfig: FeedbackLearningConfig = DEFAULT_FEEDBACK_LEARNING_CONFIG
   private fermentTimer: ReturnType<typeof setInterval> | null = null
 
   /** 最近一次进化系统执行结果（Phase 3 反馈） */
@@ -69,6 +79,8 @@ export class CreativityService {
       getFailedHypotheses: () => { title: string; idea: string; risk: string }[]
       getExternalSources?: () => CreativitySource[]
       getFeedbackSources?: () => CreativitySource[]
+      getFeedbackSnapshot?: () => FeedbackSnapshot | null
+      getFeedbackLearningConfig?: () => FeedbackLearningConfig
     },
     chatJson: (
       userText: string,
@@ -101,6 +113,8 @@ export class CreativityService {
     this.getBehaviorSources = deps.getBehaviorSources ?? null
     this.getExternalSources = deps.getExternalSources ?? null
     this.getFeedbackSources = deps.getFeedbackSources ?? null
+    this.getFeedbackSnapshot = deps.getFeedbackSnapshot ?? null
+    if (deps.getFeedbackLearningConfig) this.feedbackLearningConfig = deps.getFeedbackLearningConfig()
     this.sourceAggregator = new SourceAggregator()
     this.sourceAggregator.addProvider({ domain: 'module', name: 'module-metrics', collect: () => this.getSources() })
     this.sourceAggregator.addProvider({ domain: 'behavior', name: 'user-behavior', collect: () => this.getBehaviorSources?.() ?? [] })
@@ -262,7 +276,17 @@ export class CreativityService {
     // 推送已探索配对给 Mixer 用于降权
     this.generator.setExploredPairs(this.store.getExploredPairs())
 
-    const ideas = await this.generator.generateIdeas(sources, undefined, strategy, externalSignals)
+    // 正向反馈闭环 P2：入口层装配快照 → 结构化提示块 + 有界 mixer 输入。
+    // 缺省快照 = 两个入参均为 undefined → 生成行为逐字节不变。
+    let feedbackPrompt: FeedbackPromptBlock | undefined
+    let mixerFeedback: FeedbackMixerInput | undefined
+    const snapshot = this.getFeedbackSnapshot?.() ?? null
+    if (snapshot) {
+      feedbackPrompt = buildFeedbackPromptBlock(snapshot)
+      mixerFeedback = buildMixerInputFromSnapshot(snapshot, this.feedbackLearningConfig)
+    }
+
+    const ideas = await this.generator.generateIdeas(sources, undefined, strategy, externalSignals, undefined, feedbackPrompt, mixerFeedback)
 
     if (ideas.length === 0) {
       log('INFO', 'creativity_cycle_empty')
