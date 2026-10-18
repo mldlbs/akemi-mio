@@ -804,6 +804,12 @@ const TOOLS = [
     },
   },
   {
+    name: 'mio.creativity.feedback',
+    description:
+      'Read-only positive-feedback-loop status: runtime mode (off/shadow/canary/full), immutable snapshot metrics (pairs, attribution coverage, duplicate application rate), recent observed runs, and the pre-fixed rollout decision (rollback/advance/hold with reasons). Rollout thresholds come from env (MIO_FEEDBACK_MIN_STAGE_RUNS / MIO_FEEDBACK_MIN_COVERAGE / MIO_FEEDBACK_MAX_NEGATIVE_RATE). Feedback never gates promotion or submit.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'mio.mechanism.registry',
     description:
       'Query the mechanism registry: active/rolled_back MechanismVersion entries and PromotionRequest list. Thin JSONL store backed by mechanisms.jsonl.',
@@ -1234,6 +1240,8 @@ async function callTool(name, args = {}) {
       return creativityEngine.ferment(args.limit)
     case 'mio.creativity.adopt':
       return adoptHypothesis(creativityEngine, args, ingestObservation, dataDir)
+    case 'mio.creativity.feedback':
+      return creativityEngine.feedbackStatus()
     case 'mio.mechanism.registry':
       return mechanismRegistry(args, dataDir)
     case 'mio.mechanism.promote':

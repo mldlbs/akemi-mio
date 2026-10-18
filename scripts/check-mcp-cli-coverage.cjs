@@ -38,6 +38,7 @@ const MCP_TO_CLI = {
   'mio.agent.report': ['agents', 'report'],
   'mio.agent.evaluation': ['agents', 'evaluation'],
   'mio.creativity.adopt': ['creativity', 'adopt'],
+  'mio.creativity.feedback': ['creativity', 'feedback'],
   'mio.creativity.ferment': ['creativity', 'ferment'],
   'mio.creativity.generate': ['creativity', 'generate'],
   'mio.creativity.list': ['creativity', 'list'],

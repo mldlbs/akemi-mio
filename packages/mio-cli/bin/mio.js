@@ -2060,6 +2060,7 @@ function creativityUsage(write = console.log) {
   write(`Usage:
   mio creativity status              Show hypothesis counts, recent top ideas, adoption join
   mio creativity list                List hypotheses (--status active|validated|rejected|draft, --sort novelty, --limit N)
+  mio creativity feedback            Show feedback runtime mode, snapshot metrics, and rollout decision (read-only)
 
   mio creativity generate        Generate hypotheses by combining sources (needs 2+ --source, calls an LLM)
   mio creativity ferment         Review/refine active hypotheses (calls an LLM)
@@ -2078,6 +2079,7 @@ Examples:
   mio creativity status
   mio creativity list --status rejected --limit 10
   mio creativity list --sort novelty
+  mio creativity feedback
   mio creativity generate --source "auth|token rotation" --source "cache|write-through"
   mio creativity generate --from-insights --source "auth|token rotation"
 
@@ -2428,7 +2430,7 @@ function creativityCommand(args, useJson) {
   if (sub === 'ferment') return creativityFermentCommand(args, useJson)
   if (sub === 'adopt') return creativityAdoptCommand(args, useJson)
 
-  if (!['status', 'list'].includes(sub)) {
+  if (!['status', 'list', 'feedback'].includes(sub)) {
     console.error(`Unknown creativity subcommand: ${sub}`)
     creativityUsage(console.error)
     process.exitCode = 1
@@ -2442,6 +2444,8 @@ function creativityCommand(args, useJson) {
   try {
     if (sub === 'status') {
       result = engine.status()
+    } else if (sub === 'feedback') {
+      result = engine.feedbackStatus()
     } else {
       const sort = optionValue(flags, '--sort')
       if (sort !== undefined && sort !== 'novelty') {
@@ -2463,7 +2467,36 @@ function creativityCommand(args, useJson) {
 
   if (useJson) return jsonOrText(result, true)
   if (sub === 'status') printCreativityStatus(result)
+  else if (sub === 'feedback') printCreativityFeedback(result)
   else printCreativityList(result)
+}
+
+function printCreativityFeedback(status) {
+  console.log('Feedback runtime (positive feedback loop):')
+  console.log(`  mode: ${status.mode}`)
+  const snap = status.snapshot
+  if (snap) {
+    console.log(
+      `  snapshot: v${snap.version}  pairs=${snap.pairs}  events=${snap.eventCount}  coverage=${snap.attributionCoverage.toFixed(3)}  dupRate=${snap.duplicateApplicationRate.toFixed(3)}`,
+    )
+  } else {
+    console.log('  snapshot: unavailable')
+  }
+  const t = status.thresholds
+  const r = status.rollout
+  console.log(
+    `  runs: shadow=${r.metrics.shadowRuns} canary=${r.metrics.canaryRuns} (min per stage ${t.minStageRuns})`,
+  )
+  console.log(`  rollout: ${r.decision}${r.to ? ` → ${r.to}` : ''} (from ${r.from})`)
+  for (const reason of r.reasons) console.log(`    - ${reason}`)
+  if (status.recentRuns.length > 0) {
+    console.log('  recent runs:')
+    for (const run of status.recentRuns) {
+      console.log(
+        `    ${new Date(run.at).toISOString().slice(0, 19)}  ${run.mode}  v${run.snapshotVersion || '-'}  pairs=${run.pairCount}  applied=${run.applied}`,
+      )
+    }
+  }
 }
 
 function mechanismUsage(write = console.log) {
@@ -3582,6 +3615,7 @@ Usage:
   mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse
   mio creativity status        Show creativity hypothesis counts, recent top ideas, adoption join
   mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --sort novelty, --limit N)
+  mio creativity feedback      Show feedback runtime mode, snapshot metrics, and rollout decision (read-only)
   mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
   mio creativity ferment       Review and refine active hypotheses (calls an LLM)
   mio creativity adopt         Record an adoption event for a stored hypothesis (writes traces only)

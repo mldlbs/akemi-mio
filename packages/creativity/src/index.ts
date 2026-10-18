@@ -163,6 +163,23 @@ export {
   isFeedbackObserved,
 } from './FeedbackRuntime'
 export type { FeedbackMode, FeedbackRuntimeConfig } from './FeedbackRuntime'
+export {
+  DEFAULT_FEEDBACK_ROLLOUT_THRESHOLDS,
+  FEEDBACK_MODE_LADDER,
+  parseFeedbackRolloutThresholds,
+  resolveFeedbackRolloutThresholds,
+  nextFeedbackMode,
+  negativeEventRateOf,
+  buildFeedbackRolloutReport,
+} from './FeedbackRollout'
+export type {
+  FeedbackRolloutThresholds,
+  FeedbackRuntimeRun,
+  FeedbackRolloutMetrics,
+  FeedbackRolloutDecision,
+  FeedbackRolloutReport,
+  BuildFeedbackRolloutReportArgs,
+} from './FeedbackRollout'
 export { FeedbackLearningService } from './FeedbackLearningService'
 export type {
   FeedbackLearningServiceOptions,

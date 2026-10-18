@@ -416,3 +416,23 @@ after(() => {
   fs.rmSync(dataDir, { recursive: true, force: true })
   rl.close()
 })
+
+// --- 正向反馈闭环 P3 收尾: mio.creativity.feedback (read-only) --------------
+test('mio.creativity.feedback reports mode, snapshot, ledger, and a rollout decision', async () => {
+  const result = await callTool('mio.creativity.feedback')
+  assert.equal(result.mode, 'off')
+  // prior adopt tests in this file already appended feedback events, so the
+  // snapshot is non-empty; only pin the shape and the rollout decision.
+  assert.ok(result.snapshot, 'snapshot builds from the shared engine')
+  assert.equal(typeof result.snapshot.eventCount, 'number')
+  assert.ok(result.snapshot.version, 'snapshot carries an immutable version')
+  assert.deepEqual(result.recentRuns, [], 'off mode never records runtime runs')
+  assert.equal(result.rollout.decision, 'advance')
+  assert.equal(result.rollout.to, 'shadow')
+  assert.equal(result.thresholds.minStageRuns, 5)
+
+  const tool = TOOLS.find((t) => t.name === 'mio.creativity.feedback')
+  assert.ok(tool, 'the tool is registered')
+  assert.match(tool.description, /read-only/i)
+  assert.match(tool.description, /never gates/i, 'the tool documents the feedback/promotion separation')
+})

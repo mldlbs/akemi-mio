@@ -58,6 +58,7 @@ mio creativity list          List creativity hypotheses (--status active|validat
 mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
 mio creativity ferment       Review and refine active hypotheses (calls an LLM)
 mio creativity adopt         Record an adoption event for a stored hypothesis (writes traces only)
+mio creativity feedback      Show feedback runtime mode, snapshot metrics, and rollout decision (read-only)
 mio idea generate --goal "..."   Grounded idea pipeline: auto sources + novelty gate, persisted (calls an LLM)
 mio insight status           Insight counts: total, reported, unreported, high-value (needs @akemi-mio/insight)
 mio insight list             List insights (--unreported, --min-score N, --detector X, --limit N)
@@ -384,6 +385,7 @@ Historically risky: ...
 mio creativity status
 mio creativity list --status rejected --limit 10
 mio creativity list --json
+mio creativity feedback
 ```
 
 ```text
@@ -404,6 +406,7 @@ Recent top ideas:
 - **`status` 计入 `draft`。** `draft` 是发酵中的真实状态（`ferment` 会同时处理 `draft` 与 `active`），此前漏计导致 `status` 与 `list --status draft` 对不上。
 - **空存储是正常状态。** 引擎运行之前，`status` 报告全零计数，`list` 显示 "No hypotheses match." 两者都是有效输出，不是错误。
 - **缓存会在文件变化时失效。** 三个 JSONL 的读取按 `(size, mtime)` 校验，因此另一个进程写入后长驻的 MCP 服务端无需重启就能看到——与 `server/insight-store.js` 同一套守卫。
+- **`feedback` 只读展示正向反馈闭环状态**（`mio.creativity.feedback` 同面）：当前运行时模式（`off`/`shadow`/`canary`/`full`，默认 `off` = 逐字节原行为）、不可变快照指标（概念对数、归因覆盖率、重复加权率）、观测运行摘要（`feedback-runtime-runs.jsonl`，`shadow`/`canary`/`full` 模式下 generate 自动落盘），以及按预固定阈值算出的放量判定（`rollback`/`advance`/`hold`）。阈值走 `MIO_FEEDBACK_MIN_STAGE_RUNS`/`MIO_FEEDBACK_MIN_COVERAGE`/`MIO_FEEDBACK_MAX_NEGATIVE_RATE`，fail-closed 解析。反馈只影响生成，**永不进 `checkPromotionGate`/`checkSubmitGate`**。
 
 ### 采用证据链（adopt / status / list）
 
