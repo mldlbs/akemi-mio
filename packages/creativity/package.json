@@ -1,6 +1,6 @@
 {
   "name": "@akemi-mio/creativity",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Creativity layer: ideas, writing, blog, image, inspiration",
   "main": "./dist/IdeaGenerator.js",
   "types": "./dist/IdeaGenerator.d.ts",

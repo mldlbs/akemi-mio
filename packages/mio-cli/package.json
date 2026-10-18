@@ -1,6 +1,6 @@
 {
   "name": "mio-agent-runtime",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "description": "Mio Agent Runtime installer and MCP intelligence layer",
   "license": "MIT",
   "type": "commonjs",
@@ -36,7 +36,7 @@
     "@akemi-mio/evolution-scheduler": "^0.1.0",
     "@akemi-mio/observer": "^0.1.5",
     "@akemi-mio/insight": "^0.1.1",
-    "@akemi-mio/creativity": "^0.1.1"
+    "@akemi-mio/creativity": "^0.2.0"
   },
   "main": "index.js",
   "directories": {
