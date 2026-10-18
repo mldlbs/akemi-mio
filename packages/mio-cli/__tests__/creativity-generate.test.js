@@ -883,3 +883,81 @@ test('generate renders the structured feedback block without raw event text', ()
   const withoutBlock = engine._buildGenerationPrompt({ name: 'A', content: 'a' }, { name: 'B', content: 'b' }, 'explore', [], [])
   assert.doesNotMatch(withoutBlock, /历史反馈/)
 })
+
+// ── 正向反馈闭环 P3：受控启用模式门控 ──
+
+test('feedback runtime gating: off unchanged, shadow observes without applying, full applies', async () => {
+  const ws = workspace('p3-mode')
+  const dir = path.join(ws.mioHome, 'creativity')
+  fs.mkdirSync(dir, { recursive: true })
+  const seed = () =>
+    fs.writeFileSync(
+      path.join(dir, 'creativity-hypotheses.jsonl'),
+      JSON.stringify({
+        id: 'h1',
+        title: 't',
+        idea: 'i',
+        status: 'active',
+        novelty: 60,
+        feasibility: 60,
+        impact: 60,
+        sourceLabels: ['A', 'B'],
+        provenance: { sources: [{ name: 'A', origin: 'memory:a' }, { name: 'B', origin: 'memory:b' }] },
+        createdAt: Date.now(),
+      }) + '\n',
+      'utf8',
+    )
+  seed()
+
+  const captured = []
+  const engine = engineWith(ws, async (prompt) => {
+    captured.push(prompt)
+    return {
+      data: {
+        title: 'T',
+        idea: 'i'.repeat(40),
+        expectedBenefit: 'b',
+        risk: 'r',
+        novelty: 60,
+        feasibility: 60,
+        impact: 60,
+        logic: 60,
+        sourceLabels: ['A', 'B'],
+        relevance: 'x'.repeat(20),
+      },
+    }
+  })
+  engine.feedbackEvents.append({ hypothesisId: 'h1', eventType: 'validated', sourceType: 'experiment', sourceId: 's1' })
+
+  // 快照来自 h1 的 provenance（memory:a|memory:b）；这里用 C/D 作为待生成来源，
+  // 避免 h1 的 sourceLabels 命中 exploredPairs 导致提前返回。
+  const sources = [
+    { name: 'C', content: 'c', type: 'knowledge', weight: 0.8, origin: 'memory:c' },
+    { name: 'D', content: 'd', type: 'behavior', weight: 0.7, origin: 'memory:d' },
+  ]
+
+  // off：原行为，无反馈段
+  captured.length = 0
+  let result = await engine.generate(sources, 'explore')
+  assert.equal(result.feedback.mode, 'off')
+  assert.equal(captured.join('\n').includes('历史反馈'), false)
+
+  // shadow：观测到快照但不应用（每轮重新播种，避免上一轮生成的假设命中 exploredPairs）
+  seed()
+  captured.length = 0
+  engine.setFeedbackRuntime({ mode: 'shadow', lambdaClampPct: 0.1, explorationBudget: 0.2, halfLifeDays: 30, canaryFraction: 0.1 })
+  result = await engine.generate(sources, 'explore')
+  assert.equal(result.feedback.mode, 'shadow')
+  assert.ok(result.feedback.pairs > 0, 'shadow observes the snapshot')
+  assert.equal(result.feedback.applied, false)
+  assert.equal(captured.join('\n').includes('历史反馈'), false)
+
+  // full：应用结构化提示块
+  seed()
+  captured.length = 0
+  engine.setFeedbackRuntime({ mode: 'full', lambdaClampPct: 0.1, explorationBudget: 0.2, halfLifeDays: 30, canaryFraction: 0.1 })
+  result = await engine.generate(sources, 'explore')
+  assert.equal(result.feedback.mode, 'full')
+  assert.equal(result.feedback.applied, true)
+  assert.equal(captured.join('\n').includes('历史反馈'), true)
+})

@@ -18,6 +18,8 @@ import type {
   FeedbackPromptBlock,
   FeedbackSnapshot,
 } from './FeedbackLearning'
+import { DEFAULT_FEEDBACK_RUNTIME, isFeedbackApplied, isFeedbackObserved, resolveFeedbackRuntime } from './FeedbackRuntime'
+import type { FeedbackRuntimeConfig } from './FeedbackRuntime'
 import type { FeedbackMixerInput } from './ConceptMixer'
 import type { TaskRunner } from '@akemi-mio/core/core/tasks/unified/TaskRunner'
 
@@ -53,6 +55,8 @@ export class CreativityService {
   /** 正向反馈闭环 P2：入口层装配的不可变快照（缺省 = 不改变生成行为） */
   private getFeedbackSnapshot: (() => FeedbackSnapshot | null) | null = null
   private feedbackLearningConfig: FeedbackLearningConfig = DEFAULT_FEEDBACK_LEARNING_CONFIG
+  /** 正向反馈闭环 P3：受控启用运行时（缺省 off） */
+  private feedbackRuntime: FeedbackRuntimeConfig = DEFAULT_FEEDBACK_RUNTIME
   private fermentTimer: ReturnType<typeof setInterval> | null = null
 
   /** 最近一次进化系统执行结果（Phase 3 反馈） */
@@ -81,6 +85,7 @@ export class CreativityService {
       getFeedbackSources?: () => CreativitySource[]
       getFeedbackSnapshot?: () => FeedbackSnapshot | null
       getFeedbackLearningConfig?: () => FeedbackLearningConfig
+      getFeedbackRuntime?: () => FeedbackRuntimeConfig
     },
     chatJson: (
       userText: string,
@@ -115,6 +120,7 @@ export class CreativityService {
     this.getFeedbackSources = deps.getFeedbackSources ?? null
     this.getFeedbackSnapshot = deps.getFeedbackSnapshot ?? null
     if (deps.getFeedbackLearningConfig) this.feedbackLearningConfig = deps.getFeedbackLearningConfig()
+    if (deps.getFeedbackRuntime) this.feedbackRuntime = deps.getFeedbackRuntime()
     this.sourceAggregator = new SourceAggregator()
     this.sourceAggregator.addProvider({ domain: 'module', name: 'module-metrics', collect: () => this.getSources() })
     this.sourceAggregator.addProvider({ domain: 'behavior', name: 'user-behavior', collect: () => this.getBehaviorSources?.() ?? [] })
@@ -276,14 +282,23 @@ export class CreativityService {
     // 推送已探索配对给 Mixer 用于降权
     this.generator.setExploredPairs(this.store.getExploredPairs())
 
-    // 正向反馈闭环 P2：入口层装配快照 → 结构化提示块 + 有界 mixer 输入。
-    // 缺省快照 = 两个入参均为 undefined → 生成行为逐字节不变。
+    // 正向反馈闭环 P2/P3：入口层装配快照 → 结构化提示块 + 有界 mixer 输入。
+    // 模式门控：off = 原行为；shadow = 只观测；canary/full = 应用。
     let feedbackPrompt: FeedbackPromptBlock | undefined
     let mixerFeedback: FeedbackMixerInput | undefined
-    const snapshot = this.getFeedbackSnapshot?.() ?? null
+    const runtime = this.feedbackRuntime
+    const snapshot = isFeedbackObserved(runtime.mode) ? (this.getFeedbackSnapshot?.() ?? null) : null
     if (snapshot) {
-      feedbackPrompt = buildFeedbackPromptBlock(snapshot)
-      mixerFeedback = buildMixerInputFromSnapshot(snapshot, this.feedbackLearningConfig)
+      const block = buildFeedbackPromptBlock(snapshot)
+      const mixer = buildMixerInputFromSnapshot(snapshot, this.feedbackLearningConfig)
+      if (isFeedbackApplied(runtime.mode)) {
+        feedbackPrompt = block
+        mixerFeedback = mixer
+        log('INFO', 'creativity_feedback_applied', { mode: runtime.mode, version: snapshot.version, pairs: snapshot.pairs.length })
+      } else {
+        // shadow：只观测，不改变生成行为
+        log('INFO', 'creativity_feedback_shadow', { mode: runtime.mode, version: snapshot.version, pairs: snapshot.pairs.length })
+      }
     }
 
     const ideas = await this.generator.generateIdeas(sources, undefined, strategy, externalSignals, undefined, feedbackPrompt, mixerFeedback)

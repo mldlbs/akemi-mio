@@ -75,6 +75,11 @@
       "require": "./dist/ConceptMixer.js",
       "default": "./dist/ConceptMixer.js"
     },
+    "./FeedbackRuntime": {
+      "types": "./dist/FeedbackRuntime.d.ts",
+      "require": "./dist/FeedbackRuntime.js",
+      "default": "./dist/FeedbackRuntime.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

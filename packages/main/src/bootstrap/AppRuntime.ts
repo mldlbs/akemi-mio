@@ -50,6 +50,14 @@ import {
 } from '@akemi-mio/evolution/automation'
 import { initInsight, insightService, insightStore } from '@akemi-mio/intelligence-insight'
 import { initCreativity, creativityService } from '@akemi-mio/creativity'
+import {
+  FeedbackLearningService,
+  DrizzleFeedbackEventStore,
+  JsonlFeedbackEventStore,
+  ingestFeedbackEvents,
+  formatIngestSummary,
+  resolveFeedbackRuntime,
+} from '@akemi-mio/creativity'
 import { initInspiration } from '@akemi-mio/intelligence-inspiration'
 import type { GitHubInspiration } from '@akemi-mio/intelligence-inspiration/GitHubInspiration'
 import { setMemoryService } from '@akemi-mio/intelligence-mcp/LocalProvider'
@@ -2356,6 +2364,7 @@ export class AppRuntime {
       priority: 'normal',
       delayMs: 600,
       fn: async () => {
+        const feedbackService = new FeedbackLearningService()
         const creativity = initCreativity(
           join(WORKSPACE.cache, 'creativity.json'),
           {
@@ -2379,6 +2388,15 @@ export class AppRuntime {
             getBehaviorSources: () => this.buildBehaviorSources(memoryService),
             getExternalSources: () => this.inspirationService?.getSources() ?? [],
             getFeedbackSources: () => this.buildFeedbackSources(join(WORKSPACE.evolution, 'observer')),
+            // 正向反馈闭环 P3：入口层装配快照 + 受控启用运行时。
+            getFeedbackSnapshot: () => {
+              try {
+                return feedbackService.buildSnapshot()
+              } catch {
+                return null
+              }
+            },
+            getFeedbackRuntime: () => resolveFeedbackRuntime(),
           },
           llmService.chatJson.bind(llmService),
           0.3,
@@ -2387,6 +2405,25 @@ export class AppRuntime {
           join(WORKSPACE.evolution, 'observer'),
           llmService.chatJsonWithCode.bind(llmService),
         )
+        // 正向反馈闭环 P3：CLI/MCP 的 JSONL 证据单向导入主进程 SQLite（幂等）。
+        // 两轴数据目录可能不同（Electron userDataDir vs MIO_HOME），按可配置路径 best-effort。
+        try {
+          const jsonlDir = process.env.MIO_HOME
+            ? join(process.env.MIO_HOME, 'creativity')
+            : join(WORKSPACE_ROOT, 'creativity')
+          const jsonl = new JsonlFeedbackEventStore(jsonlDir)
+          const result = ingestFeedbackEvents(jsonl, new DrizzleFeedbackEventStore(), {
+            hypothesisExists: (id) => {
+              const store = creativityService?.getStore?.() as any
+              if (!store) return false
+              if (typeof store.getHypothesisById === 'function') return !!store.getHypothesisById(id)
+              return store.getHypotheses?.().some((h: any) => h.id === id) ?? false
+            },
+          })
+          log('INFO', 'feedback_ingest', { summary: formatIngestSummary(result) })
+        } catch (err) {
+          log('WARN', 'feedback_ingest_failed', { error: String(err) })
+        }
         creativity.start()
         // 注册创意采集器和执行器到管道
         if (this.pipeline) {

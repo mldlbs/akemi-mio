@@ -6,6 +6,18 @@ const crypto = require('crypto')
 const { readJsonl } = require('./memory-store.js')
 const { evaluateNovelty } = require('@akemi-mio/creativity/NoveltyScorer')
 const { JsonlFeedbackEventStore } = require('@akemi-mio/creativity/JsonlFeedbackEventStore')
+const {
+  buildFeedbackSnapshot,
+  buildFeedbackPromptBlock,
+  replayFeedbackAdjustment,
+  DEFAULT_FEEDBACK_LEARNING_CONFIG,
+} = require('@akemi-mio/creativity/FeedbackLearning')
+const {
+  resolveFeedbackRuntime,
+  isFeedbackApplied,
+  isFeedbackObserved,
+  DEFAULT_FEEDBACK_RUNTIME,
+} = require('@akemi-mio/creativity/FeedbackRuntime')
 
 // Cache validity key for a JSONL file: a (size, mtimeMs) pair, the same
 // guard server/insight-store.js uses (commit 0ba7fa8). Every getter below used
@@ -173,7 +185,7 @@ function pairSourceKey(name) {
   return String(name == null ? '' : name).trim().slice(0, 120)
 }
 
-function mixConcepts(sources, exploredPairs, rng, strategy) {
+function mixConcepts(sources, exploredPairs, rng, strategy, pairAdjustments) {
   if (sources.length < 2) return []
   // Dedup identity is (pair, strategy): `strategy` picks the prompt and the
   // temperature, so the documented fallback "hit 409, retry with another
@@ -199,6 +211,16 @@ function mixConcepts(sources, exploredPairs, rng, strategy) {
   for (let i = pairs.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1))
     ;[pairs[i], pairs[j]] = [pairs[j], pairs[i]]
+  }
+  // 正向反馈闭环 P3：按概念对反馈调整重排（缺省 pairAdjustments = 原顺序不变）。
+  // key 与快照 conceptPairKey 对齐（origin 优先，name 回退）。
+  if (pairAdjustments && pairAdjustments.size > 0) {
+    const fbId = (s) => (s.origin ? s.origin : `name:${s.name}`)
+    const adj = ([a, b]) => {
+      const k = [fbId(a), fbId(b)].sort().join('|')
+      return pairAdjustments.get(k) || 0
+    }
+    pairs.sort((x, y) => adj(y) - adj(x))
   }
   return pairs.slice(0, Math.min(5, pairs.length))
 }
@@ -316,9 +338,36 @@ class CreativityEngine {
     // 正向反馈闭环 P0：CLI 侧证据事件只追加 feedback-events.jsonl（交换格式），
     // 权威真相源在主进程 SQLite，由 ingest 单向导入。
     this.feedbackEvents = new JsonlFeedbackEventStore(dataDir)
+    // 正向反馈闭环 P3：受控启用运行时（默认 off，行为不变）。
+    this.feedbackRuntime = resolveFeedbackRuntime()
   }
 
-  async generate(sourceLabels, strategy, feedbackBlock) {
+  /** P3：热切换反馈模式（回滚 = 切回 off）。 */
+  setFeedbackRuntime(cfg) {
+    this.feedbackRuntime = cfg || DEFAULT_FEEDBACK_RUNTIME
+    return this.feedbackRuntime
+  }
+
+  /** P3：用本机 JSONL 事件 + 假设 provenance 构建不可变快照。 */
+  buildFeedbackSnapshot() {
+    const events = this.feedbackEvents.list()
+    const hypotheses = {}
+    for (const h of this.store.getHypotheses()) {
+      hypotheses[h.id] = h.provenance ? { sources: h.provenance.sources } : undefined
+    }
+    return buildFeedbackSnapshot(events, hypotheses, DEFAULT_FEEDBACK_LEARNING_CONFIG)
+  }
+
+  /** P3：把快照转成 mixer 调整表（key = 排序 conceptId 对）。 */
+  buildPairAdjustments(snapshot) {
+    const map = new Map()
+    for (const pair of snapshot.pairs) {
+      map.set(pair.pairKey, replayFeedbackAdjustment(pair, DEFAULT_FEEDBACK_LEARNING_CONFIG).clampedAdjustment)
+    }
+    return map
+  }
+
+  async generate(sourceLabels, strategy, feedbackBlockArg) {
     // A missing sources array used to reach .map() and surface as
     // "Cannot read properties of undefined", which tells the caller nothing.
     if (!Array.isArray(sourceLabels)) {
@@ -355,7 +404,39 @@ class CreativityEngine {
         })
       )
     )
-    const pairs = mixConcepts(sources, exploredPairs, this.rng.bind(this), strat)
+    // 正向反馈闭环 P3：受控启用。
+    //   off     = 原行为（缺省，逐字节不变）
+    //   shadow  = 只观测：计算快照与调整，记录版本，不应用到排序/prompt
+    //   canary  = 按比例应用（canaryFraction 缩放 λ）
+    //   full    = 全部应用
+    let feedbackBlock = feedbackBlockArg
+    let pairAdjustments = null
+    const feedbackInfo = { mode: this.feedbackRuntime.mode, version: null, pairs: 0, applied: false }
+    if (isFeedbackObserved(this.feedbackRuntime.mode) && !feedbackBlock) {
+      try {
+        const snapshot = this.buildFeedbackSnapshot()
+        feedbackInfo.version = snapshot.version
+        feedbackInfo.pairs = snapshot.pairs.length
+        if (snapshot.pairs.length > 0) {
+          const block = buildFeedbackPromptBlock(snapshot)
+          const adjustments = this.buildPairAdjustments(snapshot)
+          if (this.feedbackRuntime.mode === 'canary') {
+            const scale = this.feedbackRuntime.canaryFraction
+            for (const [k, v] of adjustments) adjustments.set(k, v * scale)
+          }
+          if (isFeedbackApplied(this.feedbackRuntime.mode)) {
+            feedbackBlock = block
+            pairAdjustments = adjustments
+            feedbackInfo.applied = true
+          }
+          // shadow：保持 block=null / adjustments=null，仅观测
+        }
+      } catch (_) {
+        // best-effort：反馈构建失败不得阻断生成
+      }
+    }
+
+    const pairs = mixConcepts(sources, exploredPairs, this.rng.bind(this), strat, pairAdjustments)
 
     if (pairs.length === 0) {
       // The bare string made a deterministic failure look like "this strategy
@@ -368,6 +449,7 @@ class CreativityEngine {
         reason: `all pairs already explored for strategy "${strat}" (${sources.length} sources, ${candidatePairs} candidate pairs)`,
         strategy: strat,
         pairsAvailable: 0,
+        feedback: feedbackInfo,
       }
     }
 
@@ -450,7 +532,7 @@ class CreativityEngine {
       }
     }
 
-    return { ideas, strategy: strat, pairsAttempted: pairs.length, errors }
+    return { ideas, strategy: strat, pairsAttempted: pairs.length, errors, feedback: feedbackInfo }
   }
 
   async ferment(limit = 5) {

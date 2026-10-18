@@ -24,6 +24,7 @@
     "src/InsightSamplingExperiment.ts",
     "src/FeedbackEvents.ts",
     "src/JsonlFeedbackEventStore.ts",
-    "src/FeedbackLearning.ts"
+    "src/FeedbackLearning.ts",
+    "src/FeedbackRuntime.ts"
   ]
 }

@@ -15,6 +15,9 @@ export function initCreativity(
     getFailedHypotheses: () => { title: string; idea: string; risk: string }[]
     getExternalSources?: () => CreativitySource[]
     getFeedbackSources?: () => CreativitySource[]
+    getFeedbackSnapshot?: () => import('./FeedbackLearning').FeedbackSnapshot | null
+    getFeedbackLearningConfig?: () => import('./FeedbackLearning').FeedbackLearningConfig
+    getFeedbackRuntime?: () => import('./FeedbackRuntime').FeedbackRuntimeConfig
   },
   chatJson: (
     userText: string,
@@ -151,6 +154,15 @@ export type {
   HypothesisProvenanceLike,
 } from './FeedbackLearning'
 export { DrizzleExperimentRunStore } from './DrizzleExperimentRunStore'
+export {
+  DEFAULT_FEEDBACK_RUNTIME,
+  FEEDBACK_MODES,
+  parseFeedbackRuntime,
+  resolveFeedbackRuntime,
+  isFeedbackApplied,
+  isFeedbackObserved,
+} from './FeedbackRuntime'
+export type { FeedbackMode, FeedbackRuntimeConfig } from './FeedbackRuntime'
 export { FeedbackLearningService } from './FeedbackLearningService'
 export type {
   FeedbackLearningServiceOptions,
