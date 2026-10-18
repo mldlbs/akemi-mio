@@ -1130,6 +1130,26 @@ const MIGRATIONS: Migration[] = [
     revert: '',
     category: 'schema',
   },
+  {
+    // 正向反馈闭环端到端修复：Hypothesis.provenance 之前只存在于 CLI 侧 JSON store，
+    // 主进程 DrizzleIdeaStore 不落此列 → FeedbackLearningService 永远拿到 undefined
+    // → 所有事件退化为 hypothesis_only，概念对权重在主进程轴无法形成（R5 归因断链）。
+    // JSON 列与 proposed_relations 等同构；读侧 parse 容错。
+    version: 53,
+    sql: (db) => {
+      const columns = new Set<string>()
+      const stmt = db.prepare('PRAGMA table_info(hypotheses)')
+      while (stmt.step()) {
+        const row = stmt.getAsObject()
+        if (typeof row.name === 'string') columns.add(row.name)
+      }
+      stmt.free()
+      if (!columns.has('provenance')) db.run('ALTER TABLE hypotheses ADD COLUMN provenance TEXT')
+    },
+    revert: '',
+    irreversible: true,
+    category: 'schema',
+  },
 ]
 
 // 导出迁移数组供测试验证

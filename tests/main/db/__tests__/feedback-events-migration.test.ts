@@ -116,3 +116,26 @@ describe('migration v52: experiment_runs (正向反馈闭环 P2)', () => {
     expect(new Set(versions).size).toBe(versions.length)
   })
 })
+
+describe('migration v53: hypotheses.provenance (正向反馈闭环归因断链修复)', () => {
+  it('adds the provenance column idempotently and keeps versions unique', () => {
+    const db = new Database(':memory:')
+    runMigrations(wrap(db) as any)
+
+    const columns = db.prepare('PRAGMA table_info(hypotheses)').all().map((c: any) => c.name)
+    expect(columns).toContain('provenance')
+
+    // 已有假设行不受影响；provenance 可空
+    const insert = db.prepare(`
+      INSERT INTO hypotheses (id, title, idea, expected_benefit, risk, source_labels, novelty, feasibility, impact, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    insert.run('h1', 't', 'i', 'b', 'r', '["A","B"]', 60, 60, 60, 'active', 1)
+    const row = db.prepare('SELECT provenance FROM hypotheses WHERE id = ?').get('h1') as any
+    expect(row.provenance).toBeNull()
+
+    const versions = MIGRATIONS.map((m) => m.version)
+    expect(versions).toContain(53)
+    expect(new Set(versions).size).toBe(versions.length)
+  })
+})

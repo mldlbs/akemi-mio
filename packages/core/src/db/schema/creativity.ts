@@ -28,6 +28,7 @@ export const hypotheses = sqliteTable('hypotheses', {
   proposedRelations: text('proposed_relations'),
   falsificationConditions: text('falsification_conditions'),
   sourceObservationIds: text('source_observation_ids'),
+  provenance: text('provenance'),
 })
 
 export const experiments = sqliteTable('experiments', {

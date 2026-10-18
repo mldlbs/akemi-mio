@@ -8,8 +8,8 @@
  * 与 DrizzleIdeaStore / DrizzleFeedbackEventStore 同构，靠 monorepo paths 解析。
  */
 
-import type { DrizzleFeedbackEventStore } from './DrizzleFeedbackEventStore'
-import type { DrizzleIdeaStore } from './DrizzleIdeaStore'
+import { DrizzleFeedbackEventStore } from './DrizzleFeedbackEventStore'
+import { DrizzleIdeaStore } from './DrizzleIdeaStore'
 import {
   aggregateConceptPairWeights,
   buildFeedbackSnapshot,
@@ -77,8 +77,8 @@ export class FeedbackLearningService {
   constructor(options: FeedbackLearningServiceOptions = {}) {
     this.config = options.config ?? DEFAULT_FEEDBACK_LEARNING_CONFIG
     this.scoreRange = options.scoreRange ?? 100
-    this.eventStore = options.eventStore ?? new (require('./DrizzleFeedbackEventStore').DrizzleFeedbackEventStore)()
-    this.ideaStore = options.ideaStore ?? new (require('./DrizzleIdeaStore').DrizzleIdeaStore)()
+    this.eventStore = options.eventStore ?? new DrizzleFeedbackEventStore()
+    this.ideaStore = options.ideaStore ?? new DrizzleIdeaStore()
     this.now = options.now ?? Date.now()
   }
 

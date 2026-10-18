@@ -51,6 +51,13 @@ function parseHypothesis(obj: any): Hypothesis {
       h.sourceObservationIds = []
     }
   }
+  if (obj.provenance) {
+    try {
+      h.provenance = JSON.parse(obj.provenance)
+    } catch {
+      // 损坏的 provenance 视为缺失（hypothesis_only 归因），不阻断读取
+    }
+  }
   // 旧记录状态归一：experimenting → testing（P1 改名，D2）
   if ((h.status as string) === 'experimenting') h.status = 'testing'
   return h
@@ -320,7 +327,7 @@ export class DrizzleIdeaStore {
     const db = getRawDb()
     const status = (h.status as string) === 'experimenting' ? 'testing' : h.status
     db.run(
-      'INSERT OR IGNORE INTO hypotheses (id, title, idea, expected_benefit, risk, source_labels, novelty, feasibility, impact, logic, status, created_at, source_details, implemented_commit_sha, implemented_at, implementation_note, proposed_relations, falsification_conditions, source_observation_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT OR IGNORE INTO hypotheses (id, title, idea, expected_benefit, risk, source_labels, novelty, feasibility, impact, logic, status, created_at, source_details, implemented_commit_sha, implemented_at, implementation_note, proposed_relations, falsification_conditions, source_observation_ids, provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         h.id,
         h.title,
@@ -341,6 +348,7 @@ export class DrizzleIdeaStore {
         h.proposedRelations && h.proposedRelations.length > 0 ? JSON.stringify(h.proposedRelations) : null,
         h.falsificationConditions && h.falsificationConditions.length > 0 ? JSON.stringify(h.falsificationConditions) : null,
         h.sourceObservationIds && h.sourceObservationIds.length > 0 ? JSON.stringify(h.sourceObservationIds) : null,
+        h.provenance ? JSON.stringify(h.provenance) : null,
       ],
     )
   }
