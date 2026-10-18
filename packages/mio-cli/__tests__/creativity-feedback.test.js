@@ -21,8 +21,12 @@ function workspace(label) {
   return { mioHome, cwd, env }
 }
 
-function run(ws, args) {
-  return spawnSync(process.execPath, [CLI, ...args], { cwd: ws.cwd, encoding: 'utf8', env: ws.env })
+function run(ws, args, extraEnv) {
+  return spawnSync(process.execPath, [CLI, ...args], {
+    cwd: ws.cwd,
+    encoding: 'utf8',
+    env: { ...ws.env, ...(extraEnv || {}) },
+  })
 }
 
 function feedbackJson(ws) {
@@ -61,12 +65,12 @@ function seedRuntimeRuns(ws, runs) {
   )
 }
 
-function hypothesis(id, provenance) {
+function hypothesis(id, provenance, status) {
   return {
     id,
     title: 'H ' + id,
     idea: 'combine',
-    status: 'active',
+    status: status || 'active',
     novelty: 60,
     feasibility: 50,
     impact: 70,
@@ -205,4 +209,100 @@ test('engine.recordRuntimeRun appends JSONL and readRuntimeRuns tolerates garbag
   assert.equal(runs.length, 2)
   assert.equal(runs[0].mode, 'shadow')
   assert.equal(runs[1].applied, true)
+})
+
+// ── P3 收官：--mode 持久化（放量操作面）+ 验证指标报告面 ──
+
+function modeFile(ws) {
+  return path.join(ws.mioHome, 'creativity', 'feedback-runtime.json')
+}
+
+test('mio creativity feedback --mode persists the runtime mode and the next status picks it up', () => {
+  const ws = workspace('mode-persist')
+  const set = run(ws, ['creativity', 'feedback', '--mode', 'shadow'])
+  assert.equal(set.status, 0, set.stderr)
+  assert.match(set.stdout, /feedback mode: shadow/)
+  const file = JSON.parse(fs.readFileSync(modeFile(ws), 'utf8'))
+  assert.equal(file.mode, 'shadow')
+  assert.ok(file.updatedAt > 0)
+  assert.equal(feedbackJson(ws).mode, 'shadow')
+})
+
+test('env MIO_FEEDBACK_MODE keeps precedence over the persisted file', () => {
+  const ws = workspace('mode-env')
+  run(ws, ['creativity', 'feedback', '--mode', 'shadow'])
+  const viaEnv = JSON.parse(run(ws, ['creativity', 'feedback', '--json'], { MIO_FEEDBACK_MODE: 'canary' }).stdout)
+  assert.equal(viaEnv.mode, 'canary')
+  // --mode under env still persists (deferred), but the echoed mode stays env's
+  const set = run(ws, ['creativity', 'feedback', '--mode', 'full'], { MIO_FEEDBACK_MODE: 'canary' })
+  assert.equal(set.status, 0, set.stderr)
+  assert.match(set.stdout, /feedback mode: canary/)
+  assert.match(set.stdout, /env MIO_FEEDBACK_MODE currently overrides it/)
+  assert.equal(JSON.parse(fs.readFileSync(modeFile(ws), 'utf8')).mode, 'full')
+  assert.equal(feedbackJson(ws).mode, 'full')
+})
+
+test('mio creativity feedback --mode fails closed on unknown modes without writing a file', () => {
+  const ws = workspace('mode-bad')
+  const bad = run(ws, ['creativity', 'feedback', '--mode', 'banana'])
+  assert.equal(bad.status, 1)
+  assert.match(bad.stderr, /invalid feedback mode "banana"/)
+  assert.equal(fs.existsSync(modeFile(ws)), false)
+  assert.equal(feedbackJson(ws).mode, 'off')
+})
+
+test('mio creativity feedback --mode without a value errors instead of silently showing status', () => {
+  const ws = workspace('mode-missing')
+  const res = run(ws, ['creativity', 'feedback', '--mode'])
+  assert.equal(res.status, 1)
+  assert.match(res.stderr, /requires a value/)
+  assert.equal(fs.existsSync(modeFile(ws)), false)
+})
+
+test('mio creativity help documents the --mode switch', () => {
+  const ws = workspace('help-mode')
+  const result = run(ws, ['creativity', 'help'])
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /--mode off\|shadow\|canary\|full persists the runtime mode \(env still wins\)/)
+})
+
+test('creativity feedback reports validation metrics as no-samples on an empty world', () => {
+  const ws = workspace('metrics-empty')
+  const status = feedbackJson(ws)
+  assert.ok(status.generation, 'generation block present')
+  assert.equal(status.generation.pairPrecisionAtK, null)
+  assert.equal(status.generation.noveltyAtK, null)
+  assert.equal(status.generation.validationPassRate, null)
+  assert.equal(status.generation.terminalHypotheses, 0)
+  assert.equal(status.generation.ingestion.completeness, null)
+  assert.equal(status.generation.precisionK, 10)
+  assert.equal(status.generation.windowDays, 30)
+})
+
+test('creativity feedback computes precision/ingestion from seeded provenance + events', () => {
+  const ws = workspace('metrics-seed')
+  seedHypotheses(ws, [
+    hypothesis(
+      'h1',
+      {
+        sources: [
+          { name: 'a', type: 'knowledge', origin: 'origin:a' },
+          { name: 'b', type: 'knowledge', origin: 'origin:b' },
+        ],
+      },
+      'validated'
+    ),
+  ])
+  seedFeedbackEvents(ws, [event('e1', 'h1', 'adopted'), event('e2', 'h1', 'validated', { sourceId: 's2' })])
+  const status = feedbackJson(ws)
+  assert.equal(status.generation.pairPrecisionAtK, 1)
+  assert.equal(status.generation.evaluatedPairs, 1)
+  assert.equal(status.generation.validationPassRate, 1)
+  assert.equal(status.generation.terminalHypotheses, 1)
+  assert.deepEqual(status.generation.ingestion, { rawLines: 2, validRows: 2, droppedRows: 0, completeness: 1 })
+  assert.equal(status.generation.snapshotVersion, status.snapshot.version)
+  const text = run(ws, ['creativity', 'feedback'])
+  assert.equal(text.status, 0, text.stderr)
+  assert.match(text.stdout, /pair precision@K: 1\.000/)
+  assert.match(text.stdout, /ingestion: 2\/2 rows/)
 })

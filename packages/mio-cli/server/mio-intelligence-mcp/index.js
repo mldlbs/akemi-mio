@@ -806,7 +806,7 @@ const TOOLS = [
   {
     name: 'mio.creativity.feedback',
     description:
-      'Read-only positive-feedback-loop status: runtime mode (off/shadow/canary/full), immutable snapshot metrics (pairs, attribution coverage, duplicate application rate), recent observed runs, and the pre-fixed rollout decision (rollback/advance/hold with reasons). Rollout thresholds come from env (MIO_FEEDBACK_MIN_STAGE_RUNS / MIO_FEEDBACK_MIN_COVERAGE / MIO_FEEDBACK_MAX_NEGATIVE_RATE). Feedback never gates promotion or submit.',
+      'Read-only positive-feedback-loop status: runtime mode (off/shadow/canary/full), immutable snapshot metrics (pairs, attribution coverage, duplicate application rate), validation metrics (pair precision@K, novelty@K, validation pass rate, event ingestion completeness; null = no samples), recent observed runs, and the pre-fixed rollout decision (rollback/advance/hold with reasons). Rollout thresholds come from env (MIO_FEEDBACK_MIN_STAGE_RUNS / MIO_FEEDBACK_MIN_COVERAGE / MIO_FEEDBACK_MAX_NEGATIVE_RATE). Mode switching is CLI-only (mio creativity feedback --mode). Feedback never gates promotion or submit.',
     inputSchema: { type: 'object', properties: {} },
   },
   {

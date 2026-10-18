@@ -27,6 +27,7 @@
     "src/FeedbackLearning.ts",
     "src/FeedbackRuntime.ts",
     "src/FeedbackRollout.ts",
-    "src/FeedbackRuntimeRuns.ts"
+    "src/FeedbackRuntimeRuns.ts",
+    "src/FeedbackMetrics.ts"
   ]
 }

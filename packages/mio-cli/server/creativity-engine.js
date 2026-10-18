@@ -18,12 +18,33 @@ const {
   isFeedbackApplied,
   isFeedbackObserved,
   DEFAULT_FEEDBACK_RUNTIME,
+  FEEDBACK_MODES,
 } = require('@akemi-mio/creativity/FeedbackRuntime')
+const {
+  computeFeedbackGenerationMetrics,
+  resolveFeedbackMetricsConfig,
+} = require('@akemi-mio/creativity/FeedbackMetrics')
 const {
   resolveFeedbackRolloutThresholds,
   buildFeedbackRolloutReport,
 } = require('@akemi-mio/creativity/FeedbackRollout')
 const { recordFeedbackRuntimeRun, readFeedbackRuntimeRuns } = require('@akemi-mio/creativity/FeedbackRuntimeRuns')
+
+// P3 收官：反馈模式的持久化文件（仅 mode；λ/预算/半衰期旋钮仍只认 env）。
+// 优先级 env MIO_FEEDBACK_MODE > 本文件 > 默认 off，两层都 fail-closed：
+// 文件缺失/损坏/非法 mode 一律视为未设置，回默认 off。
+const FEEDBACK_RUNTIME_FILE = 'feedback-runtime.json'
+
+function readFeedbackModeFile(dataDir) {
+  try {
+    const raw = fs.readFileSync(path.join(dataDir, FEEDBACK_RUNTIME_FILE), 'utf8')
+    const row = JSON.parse(raw)
+    const mode = row && typeof row.mode === 'string' ? row.mode : null
+    return mode && FEEDBACK_MODES.includes(mode) ? mode : null
+  } catch (_) {
+    return null
+  }
+}
 
 // Cache validity key for a JSONL file: a (size, mtimeMs) pair, the same
 // guard server/insight-store.js uses (commit 0ba7fa8). Every getter below used
@@ -289,7 +310,32 @@ class CreativityEngine {
     // 权威真相源在主进程 SQLite，由 ingest 单向导入。
     this.feedbackEvents = new JsonlFeedbackEventStore(dataDir)
     // 正向反馈闭环 P3：受控启用运行时（默认 off，行为不变）。
+    // 模式优先级：env MIO_FEEDBACK_MODE > 持久化 feedback-runtime.json >
+    // 默认 off（两层都 fail-closed，见 readFeedbackModeFile）。
     this.feedbackRuntime = resolveFeedbackRuntime()
+    if (!process.env.MIO_FEEDBACK_MODE) {
+      const fileMode = readFeedbackModeFile(dataDir)
+      if (fileMode) {
+        this.feedbackRuntime = resolveFeedbackRuntime({ ...process.env, MIO_FEEDBACK_MODE: fileMode })
+      }
+    }
+  }
+
+  /** P3 收官：持久化反馈模式（放量操作面）。env 设定时仅写文件、当场不生效。 */
+  setFeedbackMode(mode) {
+    if (!FEEDBACK_MODES.includes(mode)) {
+      throw new Error(`invalid feedback mode "${mode}" (expected: ${FEEDBACK_MODES.join(' | ')})`)
+    }
+    if (!fs.existsSync(this.dataDir)) fs.mkdirSync(this.dataDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(this.dataDir, FEEDBACK_RUNTIME_FILE),
+      JSON.stringify({ mode, updatedAt: Date.now() }) + '\n',
+      'utf8',
+    )
+    this.feedbackRuntime = process.env.MIO_FEEDBACK_MODE
+      ? resolveFeedbackRuntime()
+      : resolveFeedbackRuntime({ ...process.env, MIO_FEEDBACK_MODE: mode })
+    return this.feedbackRuntime
   }
 
   /** P3：热切换反馈模式（回滚 = 切回 off）。 */
@@ -326,7 +372,39 @@ class CreativityEngine {
     return readFeedbackRuntimeRuns(this.dataDir)
   }
 
-  /** P3 收尾：放量状态 + 判定报告（只读；阈值走 env 配置，缺省预固定默认）。 */
+  /** 事件摄取完整度的行统计：非空原始行 vs 可解析行（损坏行=静默丢失）。 */
+  _ingestionCounts() {
+    let rawLines = 0
+    let validRows = 0
+    try {
+      const raw = fs.readFileSync(this.feedbackEvents.eventsPath, 'utf8')
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue
+        rawLines++
+        try {
+          JSON.parse(line)
+          validRows++
+        } catch (_) {
+          // 损坏行计入 dropped
+        }
+      }
+    } catch (_) {
+      // 文件缺失 → 0/0（completeness = null，无样本 ≠ 1）
+    }
+    return { rawLines, validRows }
+  }
+
+  /** P3 收官：验证指标（spec §八；纯计算，只读文件与假设状态）。 */
+  _generationMetrics(snapshot) {
+    return computeFeedbackGenerationMetrics({
+      snapshot,
+      hypotheses: this.store.getHypotheses(),
+      ingestion: this._ingestionCounts(),
+      config: resolveFeedbackMetricsConfig(),
+    })
+  }
+
+  /** P3 收尾：放量状态 + 判定报告 + 验证指标（只读；阈值/指标走 env 配置，缺省预固定默认）。 */
   feedbackStatus() {
     let snapshot = null
     try {
@@ -342,6 +420,12 @@ class CreativityEngine {
       currentMode: this.feedbackRuntime.mode,
       thresholds,
     })
+    let generation = null
+    try {
+      generation = this._generationMetrics(snapshot)
+    } catch (_) {
+      generation = null
+    }
     return {
       mode: this.feedbackRuntime.mode,
       config: this.feedbackRuntime,
@@ -354,6 +438,7 @@ class CreativityEngine {
             duplicateApplicationRate: snapshot.duplicateApplicationRate,
           }
         : null,
+      generation,
       recentRuns: runs.slice(-5),
       thresholds,
       rollout,

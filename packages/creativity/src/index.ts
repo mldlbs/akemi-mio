@@ -182,6 +182,20 @@ export type {
   BuildFeedbackRolloutReportArgs,
 } from './FeedbackRollout'
 export { FEEDBACK_RUNTIME_RUNS_FILE, recordFeedbackRuntimeRun, readFeedbackRuntimeRuns } from './FeedbackRuntimeRuns'
+export {
+  DEFAULT_FEEDBACK_METRICS_CONFIG,
+  parseFeedbackMetricsConfig,
+  resolveFeedbackMetricsConfig,
+  computeFeedbackGenerationMetrics,
+} from './FeedbackMetrics'
+export type {
+  FeedbackMetricsConfig,
+  FeedbackMetricsHypothesis,
+  FeedbackIngestionCounts,
+  FeedbackTopPair,
+  FeedbackGenerationMetrics,
+  ComputeFeedbackGenerationMetricsArgs,
+} from './FeedbackMetrics'
 export { FeedbackLearningService } from './FeedbackLearningService'
 export type {
   FeedbackLearningServiceOptions,

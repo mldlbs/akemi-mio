@@ -2060,7 +2060,8 @@ function creativityUsage(write = console.log) {
   write(`Usage:
   mio creativity status              Show hypothesis counts, recent top ideas, adoption join
   mio creativity list                List hypotheses (--status active|validated|rejected|draft, --sort novelty, --limit N)
-  mio creativity feedback            Show feedback runtime mode, snapshot metrics, and rollout decision (read-only)
+  mio creativity feedback            Show feedback runtime mode, metrics, snapshot, and rollout decision (read-only)
+                                     --mode off|shadow|canary|full persists the runtime mode (env still wins)
 
   mio creativity generate        Generate hypotheses by combining sources (needs 2+ --source, calls an LLM)
   mio creativity ferment         Review/refine active hypotheses (calls an LLM)
@@ -2080,6 +2081,7 @@ Examples:
   mio creativity list --status rejected --limit 10
   mio creativity list --sort novelty
   mio creativity feedback
+  mio creativity feedback --mode shadow
   mio creativity generate --source "auth|token rotation" --source "cache|write-through"
   mio creativity generate --from-insights --source "auth|token rotation"
 
@@ -2441,11 +2443,24 @@ function creativityCommand(args, useJson) {
   const engine = cliCreativityEngine()
 
   let result
+  let modeWritten = false
   try {
     if (sub === 'status') {
       result = engine.status()
     } else if (sub === 'feedback') {
-      result = engine.feedbackStatus()
+      const mode = optionValue(flags, '--mode')
+      if (flagPresent(flags, '--mode') && mode === undefined) {
+        console.error('mio creativity feedback: --mode requires a value (off|shadow|canary|full)')
+        process.exitCode = 1
+        return
+      }
+      if (mode !== undefined) {
+        // 放量操作面：非法值 fail-closed（engine 抛错 → exit 1，不写文件）。
+        result = engine.setFeedbackMode(mode)
+        modeWritten = true
+      } else {
+        result = engine.feedbackStatus()
+      }
     } else {
       const sort = optionValue(flags, '--sort')
       if (sort !== undefined && sort !== 'novelty') {
@@ -2467,8 +2482,18 @@ function creativityCommand(args, useJson) {
 
   if (useJson) return jsonOrText(result, true)
   if (sub === 'status') printCreativityStatus(result)
-  else if (sub === 'feedback') printCreativityFeedback(result)
-  else printCreativityList(result)
+  else if (sub === 'feedback') {
+    if (modeWritten) {
+      console.log(`feedback mode: ${result.mode}`)
+      if (process.env.MIO_FEEDBACK_MODE) {
+        console.log('(written to feedback-runtime.json; env MIO_FEEDBACK_MODE currently overrides it)')
+      } else {
+        console.log('(persisted to feedback-runtime.json; takes effect from the next command)')
+      }
+    } else {
+      printCreativityFeedback(result)
+    }
+  } else printCreativityList(result)
 }
 
 function printCreativityFeedback(status) {
@@ -2484,6 +2509,18 @@ function printCreativityFeedback(status) {
   }
   const t = status.thresholds
   const r = status.rollout
+  // 验证指标（spec §八）：空样本 = n/a，不是 0。
+  const gen = status.generation
+  if (gen) {
+    const fmt = (v) => (v === null || v === undefined ? 'n/a (no samples)' : v.toFixed(3))
+    console.log(`  metrics (precisionK=${gen.precisionK}, windowDays=${gen.windowDays}):`)
+    console.log(
+      `    pair precision@K: ${fmt(gen.pairPrecisionAtK)} (evaluated=${gen.evaluatedPairs})  novelty@K: ${fmt(gen.noveltyAtK)}`,
+    )
+    console.log(
+      `    validation pass rate: ${fmt(gen.validationPassRate)} (terminal=${gen.terminalHypotheses})  ingestion: ${gen.ingestion.validRows}/${gen.ingestion.rawLines} rows`,
+    )
+  }
   console.log(
     `  runs: shadow=${r.metrics.shadowRuns} canary=${r.metrics.canaryRuns} (min per stage ${t.minStageRuns})`,
   )
@@ -3615,7 +3652,8 @@ Usage:
   mio experience reuse --source-agent A --target-agent B --experience-id X   Record a reuse
   mio creativity status        Show creativity hypothesis counts, recent top ideas, adoption join
   mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --sort novelty, --limit N)
-  mio creativity feedback      Show feedback runtime mode, snapshot metrics, and rollout decision (read-only)
+  mio creativity feedback      Show feedback runtime mode, metrics, snapshot, and rollout decision (read-only)
+  mio creativity feedback --mode off|shadow|canary|full   Persist the feedback mode (env MIO_FEEDBACK_MODE wins)
   mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
   mio creativity ferment       Review and refine active hypotheses (calls an LLM)
   mio creativity adopt         Record an adoption event for a stored hypothesis (writes traces only)

@@ -90,6 +90,11 @@
       "require": "./dist/FeedbackRuntimeRuns.js",
       "default": "./dist/FeedbackRuntimeRuns.js"
     },
+    "./FeedbackMetrics": {
+      "types": "./dist/FeedbackMetrics.d.ts",
+      "require": "./dist/FeedbackMetrics.js",
+      "default": "./dist/FeedbackMetrics.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
