@@ -18,6 +18,7 @@ export function initCreativity(
     getFeedbackSnapshot?: () => import('./FeedbackLearning').FeedbackSnapshot | null
     getFeedbackLearningConfig?: () => import('./FeedbackLearning').FeedbackLearningConfig
     getFeedbackRuntime?: () => import('./FeedbackRuntime').FeedbackRuntimeConfig
+    recordFeedbackRuntimeRun?: (run: import('./FeedbackRollout').FeedbackRuntimeRun) => void
   },
   chatJson: (
     userText: string,
@@ -180,6 +181,7 @@ export type {
   FeedbackRolloutReport,
   BuildFeedbackRolloutReportArgs,
 } from './FeedbackRollout'
+export { FEEDBACK_RUNTIME_RUNS_FILE, recordFeedbackRuntimeRun, readFeedbackRuntimeRuns } from './FeedbackRuntimeRuns'
 export { FeedbackLearningService } from './FeedbackLearningService'
 export type {
   FeedbackLearningServiceOptions,

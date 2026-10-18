@@ -26,6 +26,7 @@
     "src/JsonlFeedbackEventStore.ts",
     "src/FeedbackLearning.ts",
     "src/FeedbackRuntime.ts",
-    "src/FeedbackRollout.ts"
+    "src/FeedbackRollout.ts",
+    "src/FeedbackRuntimeRuns.ts"
   ]
 }

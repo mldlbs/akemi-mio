@@ -53,6 +53,9 @@ mio memory forget --ids a,b     PERMANENTLY delete records (--yes required; writ
 mio memory merge --ids a,b  Merge duplicate records into one survivor (--keep/--allow-divergent; --yes required)
 mio memory migrate --ids a,b --scope global|project   Move records between the project and global layers
 mio policy check "<action>" Check the historical risk of an action before running it (--project; reads global MIO_HOME)
+mio mechanism registry       List mechanism versions and promotion requests (--mechanism-id/--status)
+mio mechanism promote        Submit/approve/reject a PromotionRequest (approver must differ from submitter)
+mio mechanism rollback <id>  Roll back the active version of a mechanism
 mio creativity status        Show creativity hypothesis counts, recent top ideas, adoption join (reads global MIO_HOME)
 mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
 mio creativity generate      Generate hypotheses from 2+ --source "name|content" (or --from-insights; calls an LLM)
@@ -104,7 +107,7 @@ mio --version                Print the version and exit (-V)
 
 ## MCP 工具
 
-MCP 服务端在 5 大域共暴露 52 个工具：
+MCP 服务端在 6 大域共暴露 56 个工具：
 
 ### 记忆（11）
 `mio.memory.query` · `mio.memory.record` · `mio.memory.archive` · `mio.memory.merge` · `mio.memory.migrate` · `mio.memory.analyze` · `mio.memory.forget` · `mio.experience.list` · `mio.experience.confirm` · `mio.experience.reuse` · `mio.policy.check`
@@ -117,8 +120,11 @@ MCP 服务端在 5 大域共暴露 52 个工具：
 ### 洞察自省（4）
 `mio.insight.status` · `mio.insight.list` · `mio.insight.mark_reported` · `mio.insight.generate`
 
-### 创意引擎（6）
-`mio.creativity.generate` · `mio.creativity.ferment` · `mio.creativity.adopt` · `mio.creativity.list` · `mio.creativity.status` · `mio.idea.generate`
+### 创意引擎（7）
+`mio.creativity.generate` · `mio.creativity.ferment` · `mio.creativity.adopt` · `mio.creativity.list` · `mio.creativity.status` · `mio.creativity.feedback` · `mio.idea.generate`
+
+### 机制注册（3）
+`mio.mechanism.registry` · `mio.mechanism.promote` · `mio.mechanism.rollback`
 
 ### 任务、Agent 与演化（16）
 `mio.task.route` · `mio.task.record_outcome` · `mio.agent.register` · `mio.agent.list` · `mio.agent.report` · `mio.agent.evaluation` · `mio.host.capabilities` · `mio.evolution.status` · `mio.evolution.report` · `mio.evolution.shadow.record` · `mio.evolution.dual_write.record` · `mio.evolution.cutover.readiness` · `mio.evolution.cutover.apply` · `mio.evolution.migration.plan` · `mio.evolution.authority.plan` · `mio.phase0.report`

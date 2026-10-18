@@ -77,7 +77,7 @@ export function isFeedbackApplied(mode: FeedbackMode): boolean {
   return mode === 'canary' || mode === 'full'
 }
 
-/** 该模式下是否观测（计算 delta 并记录）。 */
-export function isFeedbackObserved(mode: FeedbackMode): boolean {
+/** 该模式下是否观测（计算 delta 并记录）。谓词形式让调用方在守卫内拿到非 `off` 收窄。 */
+export function isFeedbackObserved(mode: FeedbackMode): mode is Exclude<FeedbackMode, 'off'> {
   return mode === 'shadow' || mode === 'canary' || mode === 'full'
 }

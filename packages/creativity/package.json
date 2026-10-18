@@ -85,6 +85,11 @@
       "require": "./dist/FeedbackRollout.js",
       "default": "./dist/FeedbackRollout.js"
     },
+    "./FeedbackRuntimeRuns": {
+      "types": "./dist/FeedbackRuntimeRuns.d.ts",
+      "require": "./dist/FeedbackRuntimeRuns.js",
+      "default": "./dist/FeedbackRuntimeRuns.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

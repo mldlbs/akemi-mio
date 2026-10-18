@@ -17,12 +17,12 @@ const {
   isFeedbackApplied,
   isFeedbackObserved,
   DEFAULT_FEEDBACK_RUNTIME,
-  FEEDBACK_MODES,
 } = require('@akemi-mio/creativity/FeedbackRuntime')
 const {
   resolveFeedbackRolloutThresholds,
   buildFeedbackRolloutReport,
 } = require('@akemi-mio/creativity/FeedbackRollout')
+const { recordFeedbackRuntimeRun, readFeedbackRuntimeRuns } = require('@akemi-mio/creativity/FeedbackRuntimeRuns')
 
 // Cache validity key for a JSONL file: a (size, mtimeMs) pair, the same
 // guard server/insight-store.js uses (commit 0ba7fa8). Every getter below used
@@ -372,40 +372,13 @@ class CreativityEngine {
     return map
   }
 
-  /** P3 收尾：观测运行摘要落 feedback-runtime-runs.jsonl（append-only，供放量报告）。 */
+  /** P3 收尾：观测运行摘要落 feedback-runtime-runs.jsonl（读写唯一实现在 @akemi-mio/creativity/FeedbackRuntimeRuns，与主进程同格式）。 */
   recordRuntimeRun(run) {
-    if (!fs.existsSync(this.dataDir)) fs.mkdirSync(this.dataDir, { recursive: true })
-    fs.appendFileSync(path.join(this.dataDir, 'feedback-runtime-runs.jsonl'), JSON.stringify(run) + '\n', 'utf8')
+    recordFeedbackRuntimeRun(this.dataDir, run)
   }
 
   readRuntimeRuns() {
-    const file = path.join(this.dataDir, 'feedback-runtime-runs.jsonl')
-    if (!fs.existsSync(file)) return []
-    const out = []
-    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-      if (!line.trim()) continue
-      try {
-        const row = JSON.parse(line)
-        if (
-          row &&
-          typeof row === 'object' &&
-          typeof row.mode === 'string' &&
-          row.mode !== 'off' &&
-          FEEDBACK_MODES.includes(row.mode)
-        ) {
-          out.push({
-            at: Number(row.at) || 0,
-            mode: row.mode,
-            snapshotVersion: typeof row.snapshotVersion === 'string' ? row.snapshotVersion : null,
-            pairCount: Number(row.pairCount) || 0,
-            applied: !!row.applied,
-          })
-        }
-      } catch (_) {
-        // 损坏行跳过（同 JsonlFeedbackEventStore 策略）
-      }
-    }
-    return out
+    return readFeedbackRuntimeRuns(this.dataDir)
   }
 
   /** P3 收尾：放量状态 + 判定报告（只读；阈值走 env 配置，缺省预固定默认）。 */

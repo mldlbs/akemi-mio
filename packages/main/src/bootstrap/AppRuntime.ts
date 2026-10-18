@@ -57,6 +57,7 @@ import {
   ingestFeedbackEvents,
   formatIngestSummary,
   resolveFeedbackRuntime,
+  recordFeedbackRuntimeRun,
 } from '@akemi-mio/creativity'
 import { initInspiration } from '@akemi-mio/intelligence-inspiration'
 import type { GitHubInspiration } from '@akemi-mio/intelligence-inspiration/GitHubInspiration'
@@ -2365,6 +2366,11 @@ export class AppRuntime {
       delayMs: 600,
       fn: async () => {
         const feedbackService = new FeedbackLearningService()
+        // 正向反馈闭环 P3（双轴观测对齐）：与下方 JSONL 事件导入同一数据目录。
+        // 两轴数据目录可能不同（Electron userDataDir vs MIO_HOME），按可配置路径 best-effort。
+        const jsonlDir = process.env.MIO_HOME
+          ? join(process.env.MIO_HOME, 'creativity')
+          : join(WORKSPACE_ROOT, 'creativity')
         const creativity = initCreativity(
           join(WORKSPACE.cache, 'creativity.json'),
           {
@@ -2397,6 +2403,9 @@ export class AppRuntime {
               }
             },
             getFeedbackRuntime: () => resolveFeedbackRuntime(),
+            // 双轴观测对齐：observed 模式生成时落运行摘要。与 CLI/MCP 写同一文件，
+            // 因此 `mio creativity feedback` / `mio.creativity.feedback` 天然覆盖两个轴。
+            recordFeedbackRuntimeRun: (run) => recordFeedbackRuntimeRun(jsonlDir, run),
           },
           llmService.chatJson.bind(llmService),
           0.3,
@@ -2406,11 +2415,7 @@ export class AppRuntime {
           llmService.chatJsonWithCode.bind(llmService),
         )
         // 正向反馈闭环 P3：CLI/MCP 的 JSONL 证据单向导入主进程 SQLite（幂等）。
-        // 两轴数据目录可能不同（Electron userDataDir vs MIO_HOME），按可配置路径 best-effort。
         try {
-          const jsonlDir = process.env.MIO_HOME
-            ? join(process.env.MIO_HOME, 'creativity')
-            : join(WORKSPACE_ROOT, 'creativity')
           const jsonl = new JsonlFeedbackEventStore(jsonlDir)
           const result = ingestFeedbackEvents(jsonl, new DrizzleFeedbackEventStore(), {
             hypothesisExists: (id) => {

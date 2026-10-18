@@ -20,6 +20,7 @@ import type {
 } from './FeedbackLearning'
 import { DEFAULT_FEEDBACK_RUNTIME, isFeedbackApplied, isFeedbackObserved, resolveFeedbackRuntime } from './FeedbackRuntime'
 import type { FeedbackRuntimeConfig } from './FeedbackRuntime'
+import type { FeedbackRuntimeRun } from './FeedbackRollout'
 import type { FeedbackMixerInput } from './ConceptMixer'
 import type { TaskRunner } from '@akemi-mio/core/core/tasks/unified/TaskRunner'
 
@@ -57,6 +58,8 @@ export class CreativityService {
   private feedbackLearningConfig: FeedbackLearningConfig = DEFAULT_FEEDBACK_LEARNING_CONFIG
   /** 正向反馈闭环 P3：受控启用运行时（缺省 off） */
   private feedbackRuntime: FeedbackRuntimeConfig = DEFAULT_FEEDBACK_RUNTIME
+  /** 正向反馈闭环 P3（双轴观测对齐）：入口层注入的运行摘要落盘器（best-effort，缺省不落盘） */
+  private recordFeedbackRuntimeRun: ((run: FeedbackRuntimeRun) => void) | null = null
   private fermentTimer: ReturnType<typeof setInterval> | null = null
 
   /** 最近一次进化系统执行结果（Phase 3 反馈） */
@@ -86,6 +89,7 @@ export class CreativityService {
       getFeedbackSnapshot?: () => FeedbackSnapshot | null
       getFeedbackLearningConfig?: () => FeedbackLearningConfig
       getFeedbackRuntime?: () => FeedbackRuntimeConfig
+      recordFeedbackRuntimeRun?: (run: FeedbackRuntimeRun) => void
     },
     chatJson: (
       userText: string,
@@ -121,6 +125,7 @@ export class CreativityService {
     this.getFeedbackSnapshot = deps.getFeedbackSnapshot ?? null
     if (deps.getFeedbackLearningConfig) this.feedbackLearningConfig = deps.getFeedbackLearningConfig()
     if (deps.getFeedbackRuntime) this.feedbackRuntime = deps.getFeedbackRuntime()
+    this.recordFeedbackRuntimeRun = deps.recordFeedbackRuntimeRun ?? null
     this.sourceAggregator = new SourceAggregator()
     this.sourceAggregator.addProvider({ domain: 'module', name: 'module-metrics', collect: () => this.getSources() })
     this.sourceAggregator.addProvider({ domain: 'behavior', name: 'user-behavior', collect: () => this.getBehaviorSources?.() ?? [] })
@@ -298,6 +303,22 @@ export class CreativityService {
       } else {
         // shadow：只观测，不改变生成行为
         log('INFO', 'creativity_feedback_shadow', { mode: runtime.mode, version: snapshot.version, pairs: snapshot.pairs.length })
+      }
+    }
+
+    // 双轴观测对齐：observed 模式落运行摘要，供放量报告统计阶段门槛（同 CreativityEngine 口径，
+    // 落盘失败/快照缺失都不阻断生成；off 不观测不记录）。
+    if (isFeedbackObserved(runtime.mode) && this.recordFeedbackRuntimeRun) {
+      try {
+        this.recordFeedbackRuntimeRun({
+          at: Date.now(),
+          mode: runtime.mode,
+          snapshotVersion: snapshot?.version ?? null,
+          pairCount: snapshot?.pairs.length ?? 0,
+          applied: feedbackPrompt !== undefined,
+        })
+      } catch (_) {
+        // best-effort：观测落盘失败不得阻断生成
       }
     }
 
