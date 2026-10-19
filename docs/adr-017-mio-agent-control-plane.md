@@ -1,6 +1,6 @@
 # ADR-017: Mio Agent Control Plane
 
-**Status:** Accepted — Strategic Direction (Target = Agent Control Plane; current implementation remains ADR-016 Phase 1)
+**Status:** Accepted — Strategic Direction (Target = Agent Control Plane; **Phase 2 Identity/Registry plane shipped 2026-10-20**, see adr-017-phase2-identity-registry-as-built.md)
 **Date:** 2026-08-14
 **Branch:** codex/mio-agent-enhancement-layer
 **Related:** ADR-016 Agent Enhancement Layer, ADR-014 MCP Control Plane v1, ADR-015 Capability Model Contract, ADR-002 Guardrail Architecture, ADR-003 Unified Progress Observer
@@ -86,11 +86,12 @@ Memory / Identity              Evolution
 | `mio.memory.migrate` | Memory | Implemented (Phase 1) |
 | `mio.observer.ingest` | Observation | Implemented (Phase 1) |
 | `mio.policy.check` | Policy | Implemented (Phase 1) |
-| `mio.agent.register` | Identity / Registry | Planned / Phase 2 |
-| `mio.agent.list` | Identity / Registry | Planned / Phase 2 |
-| `mio.agent.report` | Evaluation | Planned / Phase 2 |
+| `mio.agent.register` | Identity / Registry | **Implemented** (see adr-017-phase2-identity-registry-as-built.md) |
+| `mio.agent.list` | Identity / Registry | **Implemented** |
+| `mio.agent.report` | Evaluation | **Implemented** |
+| `mio.agent.evaluation` | Evaluation | **Implemented** (ADR-017 评估期四指标) |
 | `mio.task.route` | Routing | Implemented (Phase 1 初始版)；完整 Agent 级路由仍为 Phase 2 |
-| `mio.task.record_outcome` | Evaluation | Planned / Phase 2 |
+| `mio.task.record_outcome` | Evaluation | **Implemented** (自动更新 agent registry + auto-claim 复用，闭环见 adr-017-phase2-identity-registry-as-built.md) |
 | `mio.evolution.report` | Evolution | Planned / Phase 2 |
 
 ## Agent Identity / Unified Context
@@ -113,14 +114,15 @@ Mio 服务位于多个 Agent 外部，Codex / OpenCode / WorkBuddy 连接同一�
 - `workspace` / `sessionId` 保留给后续溯源与审计
 
 第一阶段不实现 `agent.register`，只保证多个 Agent 共用同一个 Mio 服务并保留来源身份。
+> **2026-10-20 更新：** 此条已过时——`agent.register` / `agent.list` / `agent.report` 已于 2026-10-20 实现（见 adr-017-phase2-identity-registry-as-built.md）；来源身份仍按本节规则注入 `memory.record.source` 与 `observer.ingest.agent`。
 ## Planned Scope (Not Implemented)
 
-以下控制平面扩展为规划项，当前尚未实现：
+> **2026-10-20 更新：** 下方清单大部分已随 Phase 2 Identity/Registry 平面落地（对帐见 adr-017-phase2-identity-registry-as-built.md）。现状：
 
-- `agents.jsonl` — Agent 身份、能力、默认任务类型
-- `tasks.jsonl` — 路由决策与任务结果
-- `memory.jsonl` — 保留记忆数据
-- `traces.jsonl` — 保留 Agent Trace
+- `agents.jsonl` — ✅ 已实现（Identity/Registry 平面，`server/agent-store.js`）
+- `memory.jsonl` — ✅ 已实现（Memory 平面）
+- `traces.jsonl` — ✅ 已实现（Observation 平面，承载 `task_outcome`）
+- `tasks.jsonl` — ⬜ 仍未作为独立工件实现；路由决策写入 `queries.jsonl`（1 小时关联缓冲、非持久），逐任务结果经 `task.record_outcome` 写入 `traces.jsonl`
 
 第一个验证闭环：
 
@@ -222,7 +224,7 @@ Phase 0 通过后进入真实使用期：先积累真实数据、评估后再扩
 - 召回质量：`scope=all` 与混合检索是否减少无效探索
 - 数据卫生：pending auto-claim 噪声占比是否随确认纪律下降
 
-评估期结束后再决定是否实现 `agent.register` / `agent.list` / `agent.report`（ADR-017 已授权），或合并分支。
+~~评估期结束后再决定是否实现 `agent.register` / `agent.list` / `agent.report`（ADR-017 已授权），或合并分支。~~ ✅ 三者已于 2026-10-20 实现（见 adr-017-phase2-identity-registry-as-built.md）。
 
 ## Non-Goals
 
@@ -243,6 +245,6 @@ Phase 0 通过后进入真实使用期：先积累真实数据、评估后再扩
 ## Next Steps
 
 1. ✅ 执行 Phase 0 Cross-Agent Value Validation，按成功标准收集数据（已完成，2026-08-17）。
-2. 验证通过后，再实现 `agent.register`、`agent.list`、`agent.report`。
+2. ✅ `agent.register` / `agent.list` / `agent.report` 已于 2026-10-20 实现（见 adr-017-phase2-identity-registry-as-built.md）；首个验证闭环 `agent.register → task.route → task.record_outcome → agent.report → agent.evaluation` 已在代码中闭环。
 3. 随后实现 `task.route` 与 `task.record_outcome`。
 4. 观察期结束后决定是否进入 Evolution 自动建议阶段。
