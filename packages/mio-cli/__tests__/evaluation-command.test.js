@@ -95,7 +95,7 @@ test('route adoption counts a hit only when it came from an experience', () => {
   const s = store(ws)
   // One experience-backed hit (adopted), one memory-only hit (not countable),
   // one query that found nothing.
-  seed(path.join(ws.mioHome, 'queries.jsonl'), [
+  seed(path.join(ws.mioHome, 'route_events.jsonl'), [
     query({ project: ws.project, ids: ['e1', 'm1'], sources: ['experience', 'codex'] }),
     query({ project: ws.project, ids: ['m2'], sources: ['codex'] }),
     query({ project: ws.project, ids: [], sources: [] }),
@@ -114,7 +114,7 @@ test('route adoption counts a hit only when it came from an experience', () => {
 test('a route hit nobody reused is not adoption', () => {
   const ws = workspace('adopt-no', 'proj-a')
   const s = store(ws)
-  seed(path.join(ws.mioHome, 'queries.jsonl'), [
+  seed(path.join(ws.mioHome, 'route_events.jsonl'), [
     query({ project: ws.project, ids: ['e1'], sources: ['experience'] }),
   ])
   // No reuse record at all -> the route was offered but never adopted.
@@ -127,7 +127,7 @@ test('a route hit nobody reused is not adoption', () => {
 test('route adoption is null, not zero, when no route ever hit', () => {
   const ws = workspace('adopt-empty', 'proj-a')
   const s = store(ws)
-  seed(path.join(ws.mioHome, 'queries.jsonl'), [
+  seed(path.join(ws.mioHome, 'route_events.jsonl'), [
     query({ project: ws.project, ids: ['m1'], sources: ['codex'] }),
   ])
   const result = s.evaluate({ project: ws.project })
@@ -174,7 +174,7 @@ test('behaviour change accepts the string-true form the store accepts', () => {
 test('recall quality separates empty queries from useless ones', () => {
   const ws = workspace('recall', 'proj-a')
   const s = store(ws)
-  seed(path.join(ws.mioHome, 'queries.jsonl'), [
+  seed(path.join(ws.mioHome, 'route_events.jsonl'), [
     // returned a result that was later reused -> yielded
     query({ project: ws.project, ids: ['e1'], sources: ['experience'] }),
     // returned results, nothing reused -> useless exploration
@@ -257,38 +257,38 @@ test('--since drops records older than the window', () => {
 
 // ── data provenance ────────────────────────────────────────────────────────
 
-// Two of the four metrics are derived from queries.jsonl, which is the
-// auto-claim correlation buffer: 200 entries max, pruned past a 1-hour window
-// (query-log.js + retention.js EXPIRY_BASED_FILES). Their denominators decay to
-// zero on their own, so the report has to distinguish "unused feature" from
-// "unmeasurable with what we keep". This pins that provenance so a later
-// refactor cannot quietly drop it.
+// Two of the four metrics are derived from route_events.jsonl, a durable
+// append-only log written on every MCP route decision (task-store.js), rather
+// than the 1-hour auto-claim correlation buffer. This pins that provenance so a
+// later refactor cannot quietly drop it.
 test('the report names each metric\'s backing file and whether it is durable', () => {
   const ws = workspace('sources', 'proj-a')
   const result = store(ws).evaluate({ project: ws.project })
-  assert.equal(result.sources.routeAdoption.file, 'queries.jsonl')
-  assert.equal(result.sources.routeAdoption.durable, false)
-  assert.equal(result.sources.recallQuality.file, 'queries.jsonl')
-  assert.equal(result.sources.recallQuality.durable, false)
+  assert.equal(result.sources.routeAdoption.file, 'route_events.jsonl')
+  assert.equal(result.sources.routeAdoption.durable, true)
+  assert.equal(result.sources.recallQuality.file, 'route_events.jsonl')
+  assert.equal(result.sources.recallQuality.durable, true)
   assert.equal(result.sources.behaviorChange.file, 'experience_reuse.jsonl')
   assert.equal(result.sources.behaviorChange.durable, true)
   assert.equal(result.sources.dataHygiene.durable, true)
 })
 
-// The window length is read from the query log rather than hardcoded, so it
-// cannot go stale if the auto-claim window changes.
-test('the reported buffer window matches the query log window', () => {
+// Metrics 1 and 3 now back onto the durable route_events.jsonl, so they no
+// longer carry a volatile buffer window -- a 0% means "measured zero adoption",
+// never "evidence expired before it could be read".
+test('route adoption and recall quality report the durable route_events.jsonl source', () => {
   const ws = workspace('window', 'proj-a')
   const result = store(ws).evaluate({ project: ws.project })
-  const { REUSE_MATCH_WINDOW_MS } = require('../server/query-log.js')
-  assert.equal(result.sources.routeAdoption.windowMinutes, Math.round(REUSE_MATCH_WINDOW_MS / 60000))
+  assert.equal(result.sources.routeAdoption.file, 'route_events.jsonl')
+  assert.equal(result.sources.routeAdoption.durable, true)
+  assert.equal(result.sources.recallQuality.durable, true)
 })
 
-test('the CLI explains why a windowed metric can have no data', () => {
+test('the CLI notes that route metrics read the durable log (not a volatile buffer)', () => {
   const ws = workspace('cli-note', 'proj-a')
   const r = run(ws.cwd, ws.env, ['agents', 'evaluation'])
   assert.equal(r.status, 0, r.stderr)
-  assert.match(r.stdout, /keep the last \d+ minutes|keeps only the last \d+ minutes/)
+  assert.match(r.stdout, /route_events\.jsonl/)
   assert.match(r.stdout, /not that routing is unused/)
 })
 
@@ -296,7 +296,7 @@ test('the CLI explains why a windowed metric can have no data', () => {
 
 test('mio agents evaluation prints all four metrics', () => {
   const ws = workspace('cli', 'proj-a')
-  seed(path.join(ws.mioHome, 'queries.jsonl'), [
+  seed(path.join(ws.mioHome, 'route_events.jsonl'), [
     query({ project: ws.project, ids: ['e1'], sources: ['experience'] }),
     query({ project: ws.project, ids: [], sources: [] }),
   ])

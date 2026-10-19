@@ -97,10 +97,10 @@ Source identity (`MIO_CONTEXT.agentId`) is injected into `memory.record.source` 
 
 The registry itself is done. What is *not* done — and what the original "Planned" label should have pointed at:
 
-### 4.1 Evaluation evidence is not durable (P1)
-`evaluation-store.js` is honest about this: metrics **1 (route adoption)** and **3 (recall quality)** are derived from `queries.jsonl`, which is the auto-claim correlation **buffer**, capped at 200 entries and pruned on a 1-hour `expiresAt` window (see `retention.js` / `query-log.js`). Measured 2026-09-20 it was **0 bytes** while `traces.jsonl` held 764 outcomes and `experience_reuse.jsonl` held 21 records. So in practice these two headline metrics read "no data" almost always — **not** because routing is unused, but because its evidence deliberately does not survive.
+### 4.1 Evaluation evidence is not durable (P1) — ✅ RESOLVED 2026-10-20
+`evaluation-store.js` used to derive metrics **1 (route adoption)** and **3 (recall quality)** from `queries.jsonl`, the auto-claim correlation **buffer** (capped 200 entries, 1-hour `expiresAt` prune). Measured 2026-09-20 it was **0 bytes** while `traces.jsonl` held 764 outcomes and `experience_reuse.jsonl` held 21 records — so the two headline metrics read "no data" almost always, **not** because routing was unused, but because the evidence did not survive.
 
-→ *Real task:* persist route-hit / adoption events to a **durable** log (separate from the 1-hour correlation buffer) so the control plane can actually measure its own adoption-rate success metric. This is the substance behind the original `task.route` adoption-tracking task.
+**Fix shipped:** `task-store.routeTask` now also appends a durable `route_events.jsonl` entry (resultIds + resultSources + ISO timestamp) on every MCP route decision; `evaluation-store.js` reads metrics 1 & 3 from that file; `retention.js` prunes it by AGE (added to `AGE_BASED_FILES`) so it cannot grow unbounded. The 1-hour `queries.jsonl` buffer is untouched — auto-claim still depends on it. Net effect: the control plane can now measure its own route-adoption rate over real time. The `tasks.jsonl` gap from ADR §Planned Scope remains — route decisions are not persisted as a per-task routing log, only as the aggregated adoption evidence above.
 
 ### 4.2 Network effect is unproven in production (P0 moat)
 The code supports N agents sharing one Mio server, but the ADR-017 moat ("more agents → more shared memory → value rises exponentially") is only *demonstrated* in the 2026-08-17 Phase-0 spike (2 hosts, 5 verified reuses). It is **not yet a standing, observable property** of real daily usage. The `agent.list` / `agent.report` / `agent.evaluation` tooling now makes that observable — but someone has to actually run ≥3 hosts for a sustained period and capture the metrics.
@@ -113,11 +113,11 @@ The ADR still lists these as "Planned". It should carry an "Implemented (date)" 
 ## 5. Recommended follow-ups (ordered)
 
 1. **Close the doc drift** — annotate ADR-017 §MVP Tool Surface: `agent.register/list/report` = Implemented (this doc); `agent.evaluation` = Implemented (bonus). *(Trivial, low-risk, do first.)*
-2. **Durable route-adopt evidence** — add a durable append-only log written by `task.route` + `task.record_outcome`, repoint `evaluation-store.js` metrics 1 & 3 at it. *(This is the actual remaining half of the "task.route adoption tracking" task.)*
+2. ~~**Durable route-adopt evidence**~~ — ✅ DONE 2026-10-20: durable `route_events.jsonl` + evaluation-store repoint + retention registration (see §4.1). This closes the actual remaining half of the "task.route adoption tracking" task.
 3. **Sustained multi-host demo** — run codex + opencode + workbuddy + hermes against one Mio server; capture `agent.evaluation` over ≥2 weeks; publish the adoption-rate number. *(Proves the moat; feeds the TaskHub demo task.)*
 
 ---
 
-## 6. Test coverage (already present)
+## 6. Test coverage
 
-`server/mio-intelligence-mcp/__tests__/agent-registry.test.js` (9 cases) covers: create / upsert / requires-agentId / separate-record / list-all / list-by-project / list-unknown-project / report-specific / report-all / report-by-project. `agent-command.test.js` covers the CLI dual (`mio agents list` / `report`) and the "preview must not write agents.jsonl" invariant. `evaluation-store.js` is exercised by `evaluation` tool tests. **No new tests are required to call T3 done.**
+`server/mio-intelligence-mcp/__tests__/agent-registry.test.js` covers the agent registry (create / upsert / requires-agentId / list / report). `agent-command.test.js` covers the CLI dual (`mio agents list` / `report`) and the "preview must not write agents.jsonl" invariant. `evaluation-command.test.js` covers all four ADR-017 metrics (seeded into `route_events.jsonl` / `experience_reuse.jsonl`) plus the CLI surface, including the durable-source assertions and the "no data, not 0%" contract. **New:** `server/mio-intelligence-mcp/__tests__/route-events.test.js` pins the durable evidence end-to-end — (1) `task.route` writes a `route_events.jsonl` entry that survives the 1h buffer, (2) `agent.evaluation` reads adoption from the durable log, (3) an empty durable log yields an explicit `null` (not a silent 0%), (4) retention prunes `route_events.jsonl` by age. All 54 cases across the 6 affected suites pass.

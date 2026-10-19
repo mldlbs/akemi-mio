@@ -11,7 +11,7 @@ const path = require('path')
 const { writeJsonl } = require('./memory-store.js')
 
 // Age-based JSONL stores (records carry an ISO `timestamp` field).
-const AGE_BASED_FILES = ['traces.jsonl', 'experience_reuse.jsonl']
+const AGE_BASED_FILES = ['traces.jsonl', 'experience_reuse.jsonl', 'route_events.jsonl']
 // Expiry-based stores (records carry an epoch-ms `expiresAt` field).
 const EXPIRY_BASED_FILES = ['queries.jsonl']
 // Log lines look like "[<ISO>]<message>".

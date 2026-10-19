@@ -38,21 +38,14 @@
 //      feed ranking or routing, so a rising ratio means the confirmation
 //      discipline is slipping.
 //
-// ⚠️ TWO OF THESE METRICS READ A BUFFER THAT IS EMPTY BY DESIGN.
-//
-// Metrics 1 and 3 are derived from `queries.jsonl`, which is not an evaluation
-// log: it is the auto-claim correlation buffer (see ../query-log.js), holding
-// at most 200 entries and pruning anything past a 1-hour `expiresAt` window
-// (retention.js lists it under EXPIRY_BASED_FILES). Measured against the real
-// dataset on 2026-09-20: queries.jsonl was 0 bytes while traces.jsonl held 764
-// task_outcomes and experience_reuse.jsonl held 21 records. So in practice
-// these two metrics report "no data" almost always -- not because routing is
-// unused, but because its evidence deliberately does not survive.
-//
-// That is a real limitation of the metric definitions, not of the data, and it
-// is reported rather than hidden: `sources` below names each metric's backing
-// file and whether that file is durable, so a reader can tell "route adoption
-// is 0%" from "route adoption cannot be measured from what we keep".
+// Metrics 1 and 3 are derived from `route_events.jsonl`, a durable append-only
+// log written by `taskStore.routeTask` on every MCP route decision (see
+// ../task-store.js). It carries the same route-hit shape the old auto-claim
+// buffer used, but is pruned by AGE in retention.js (AGE_BASED_FILES) rather
+// than dropped after 1 hour -- so the control plane can measure route adoption
+// rate over real time. The 1-hour `queries.jsonl` buffer is still used by
+// auto-claim, but it no longer backs these metrics, which decouples
+// "adoption is 0%" from "adoption cannot be measured from expired evidence".
 //
 // Everything is read-only. Each metric reports its own denominator so a caller
 // can tell "0%" from "no data at all" -- reporting a confident 0% on zero
@@ -61,12 +54,8 @@
 const path = require('path')
 const { readJsonl } = require('./memory-store.js')
 const { REUSE_STATUS_FILTERS } = require('./experience-store.js')
-const { REUSE_MATCH_WINDOW_MS } = require('./query-log.js')
 
-// Reported so the client can say "this number is windowed to the last N
-// minutes". Read from the query log itself rather than hardcoded, so a change
-// to the auto-claim window cannot leave this description stale.
-const QUERY_BUFFER_MINUTES = Math.round(REUSE_MATCH_WINDOW_MS / 60000)
+// (route-adoption evidence is now durable; see task-store.js route_events.jsonl)
 
 // The ADR frames the whole evaluation period as a comparison against the Phase 0
 // baseline, and states it in its own line:
@@ -106,7 +95,7 @@ function createEvaluationStore(options = {}) {
   const dataDir = options.dataDir
   const projectName = options.projectName || (() => null)
 
-  const queryPath = path.join(dataDir, 'queries.jsonl')
+  const routeEventsPath = path.join(dataDir, 'route_events.jsonl')
   const reusePath = path.join(dataDir, 'experience_reuse.jsonl')
   const tracePath = path.join(dataDir, 'traces.jsonl')
   const agentsPath = path.join(dataDir, 'agents.jsonl')
@@ -115,7 +104,7 @@ function createEvaluationStore(options = {}) {
   // want the historical record, so read the file directly rather than through
   // query-log.js (whose `load()` deliberately drops expired entries).
   function readQueries(project) {
-    const entries = readJsonl(queryPath).filter((entry) => entry && typeof entry === 'object')
+    const entries = readJsonl(routeEventsPath).filter((entry) => entry && typeof entry === 'object')
     if (!project) return entries
     return entries.filter((entry) => !entry.project || entry.project === project)
   }
@@ -180,14 +169,13 @@ function createEvaluationStore(options = {}) {
     return {
       project,
       since: args.since || null,
-      // Which file each metric is derived from, and whether that file survives.
-      // Metrics 1 and 3 depend on a 1-hour buffer, so their denominators decay
-      // to zero on their own; without this a reader cannot tell an unused
-      // feature from an unmeasurable one.
+      // Which file each metric is derived from, and whether that file survives
+      // pruning. All four now back onto durable logs, so a 0% means "zero
+      // adoption measured" -- never "evidence expired before it could be read".
       sources: {
-        routeAdoption: { file: 'queries.jsonl', durable: false, windowMinutes: QUERY_BUFFER_MINUTES },
+        routeAdoption: { file: 'route_events.jsonl', durable: true },
         behaviorChange: { file: 'experience_reuse.jsonl', durable: true },
-        recallQuality: { file: 'queries.jsonl', durable: false, windowMinutes: QUERY_BUFFER_MINUTES },
+        recallQuality: { file: 'route_events.jsonl', durable: true },
         dataHygiene: { file: 'experience_reuse.jsonl', durable: true },
       },
       // The Phase 0 reference point the ADR asks these numbers to be read

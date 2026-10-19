@@ -24,7 +24,7 @@ const { createMemoryStore } = require('../server/memory-store.js')
 const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine, sourcesFromInsights, adoptHypothesis } = require('../server/creativity-engine.js')
-const { mechanismRegistry, mechanismPromote, mechanismRollback } = require('../server/mechanism-registry.js')
+const { mechanismRegistry, mechanismPromote, mechanismRecordRun, mechanismRollback } = require('../server/mechanism-registry.js')
 const { buildAutoSources, topUpSources } = require('../server/creativity-sources.js')
 const { runIdeaGenerate, groundingFrom } = require('../server/idea-generate.js')
 const { createAgentStore } = require('../server/agent-store.js')
@@ -110,6 +110,19 @@ function optionValues(args, name) {
     if (raw && !raw.startsWith('--')) values.push(raw)
   }
   return values
+}
+
+// Id lists accept comma-separated values (`--evidence-ids a,b`) as well as the
+// repeated-flag form, matching the usage text of mechanism record-run/promote.
+function splitIdList(values) {
+  const out = []
+  for (const raw of values) {
+    for (const piece of String(raw).split(',')) {
+      const id = piece.trim()
+      if (id) out.push(id)
+    }
+  }
+  return out
 }
 
 function parseJsonOption(args, name) {
@@ -2541,16 +2554,26 @@ function mechanismUsage(write = console.log) {
 
 Subcommands:
   mio mechanism registry              List versions and promotion requests (--mechanism-id, --status)
-  mio mechanism promote submit ...     Submit a PromotionRequest (gate-checked)
+  mio mechanism record-run            Append a real ExperimentRun row (promotion gate input)
+  mio mechanism promote submit ...    Submit a PromotionRequest (gate-checked against real runs)
   mio mechanism promote approve ...    Approve a request (approver must differ from submitter)
-  mio mechanism promote reject ...     Reject a request
+  mio mechanism promote reject ...    Reject a request
   mio mechanism rollback <mechanismId> Roll back the active version to its rollbackTo target
 
 Options:
   --json             Machine-readable output
 
+record-run options:
+  --assignment baseline|candidate|ablation   (required)
+  --outcome success|failure|inconclusive     (required)
+  --evidence-ids id1,id2                     (required, at least one evidence id)
+  --metrics '{"k":1}'                        (optional JSON object of scalars)
+  --id, --hypothesis-id, --source single_agent|experiment,
+  --base-snapshot-id, --feedback-snapshot-version, --stale, --created-at
+
 Examples:
   mio mechanism registry
+  mio mechanism record-run --assignment candidate --outcome success --evidence-ids trace-1 --source experiment
   mio mechanism promote submit --mechanism-id m-1 --version 1 --submitted-by codex
   mio mechanism promote approve --request-id pr-1 --approved-by other-agent
   mio mechanism rollback m-1`)
@@ -2576,6 +2599,38 @@ function mechanismCommand(args, useJson) {
       return jsonOrText(result, useJson)
     }
 
+    if (sub === 'record-run') {
+      let metrics
+      const metricsRaw = optionValue(flags, '--metrics')
+      if (metricsRaw) {
+        try {
+          metrics = JSON.parse(metricsRaw)
+        } catch {
+          console.error('mio mechanism record-run: --metrics must be a JSON object')
+          process.exitCode = 1
+          return
+        }
+      }
+      const createdRaw = parseNumberOption(flags, '--created-at')
+      const result = mechanismRecordRun(
+        {
+          id: optionValue(flags, '--id'),
+          hypothesisId: optionValue(flags, '--hypothesis-id'),
+          assignment: optionValue(flags, '--assignment'),
+          outcome: optionValue(flags, '--outcome'),
+          evidenceIds: splitIdList(optionValues(flags, '--evidence-ids')),
+          metrics,
+          source: optionValue(flags, '--source'),
+          baseSnapshotId: optionValue(flags, '--base-snapshot-id'),
+          feedbackSnapshotVersion: optionValue(flags, '--feedback-snapshot-version'),
+          stale: flags.includes('--stale') ? true : undefined,
+          createdAt: createdRaw,
+        },
+        MIO_HOME,
+      )
+      return jsonOrText(result, useJson)
+    }
+
     if (sub === 'promote') {
       const action = flags[0]
       const result = mechanismPromote(
@@ -2584,7 +2639,7 @@ function mechanismCommand(args, useJson) {
           mechanismId: optionValue(flags, '--mechanism-id'),
           version: parseNumberOption(flags, '--version'),
           hypothesisId: optionValue(flags, '--hypothesis-id'),
-          experimentRunIds: optionValues(flags, '--experiment-run-ids'),
+          experimentRunIds: splitIdList(optionValues(flags, '--experiment-run-ids')),
           submittedBy: optionValue(flags, '--submitted-by'),
           requestId: optionValue(flags, '--request-id'),
           approvedBy: optionValue(flags, '--approved-by'),
@@ -3156,14 +3211,13 @@ function printEvaluation(result) {
     )
   }
 
-  // Metrics 1 and 3 come from a buffer that prunes itself after an hour, so a
-  // "no data" there means "cannot be measured from what we keep", not "routing
-  // is unused". Say that plainly instead of letting the reader guess.
-  const windowed = Object.values(result.sources || {}).filter((src) => src.durable === false)
-  if (windowed.length > 0) {
-    const minutes = windowed[0].windowMinutes
+  // Metrics 1 and 3 come from route_events.jsonl, a durable append-only log, so a
+  // "no data" there means no route decisions have been recorded yet, not that
+  // routing is unused. Say that plainly instead of letting the reader guess.
+  const routeSrc = (result.sources || {}).routeAdoption
+  if (routeSrc) {
     console.log(
-      `   note: route adoption and recall quality read queries.jsonl, which keeps only the last ${minutes} minutes -- "no data" above means the buffer is empty, not that routing is unused.`,
+      `   note: route adoption and recall quality read ${routeSrc.file} (durable) -- "no data" above means no route decisions have been recorded yet, not that routing is unused.`,
     )
   }
 }

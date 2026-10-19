@@ -64,6 +64,7 @@ function createTaskStore(options) {
   const experienceReusePath = path.join(dataDir, 'experience_reuse.jsonl')
   const tracePath = path.join(dataDir, 'traces.jsonl')
   const agentsPath = path.join(dataDir, 'agents.jsonl')
+  const routeEventsPath = path.join(dataDir, 'route_events.jsonl')
 
   function readAgentHealth() {
     const file = path.join(dataDir, 'digest', 'latest.json')
@@ -258,20 +259,37 @@ function createTaskStore(options) {
     // reuse. Skipped when persistQuery is false (the CLI, which is read-only).
     if (args.persistQuery !== false && (routes.length > 0 || relatedMemories.length > 0)) {
       const now = Date.now()
+      const resultIds = [...routedIds, ...relatedMemories.map((record) => record.id)].filter(Boolean)
+      const resultSources = [
+        ...routes.map(() => 'experience'),
+        ...relatedMemories.map((record) => record.source || null),
+      ]
       const entries = loadRecentQueries()
       entries.push({
         agent: resolveAgentId() || 'mcp',
         project,
         query: task,
-        resultIds: [...routedIds, ...relatedMemories.map((record) => record.id)].filter(Boolean),
-        resultSources: [
-          ...routes.map(() => 'experience'),
-          ...relatedMemories.map((record) => record.source || null),
-        ],
+        resultIds,
+        resultSources,
         timestamp: now,
         expiresAt: now + REUSE_MATCH_WINDOW_MS,
       })
       persistRecentQueries(entries)
+      // Durable route-adoption evidence for ADR-017 evaluation metrics 1 & 3.
+      // queries.jsonl above is the 1h correlation buffer auto-claim depends on;
+      // this separate append-only log survives, so the control plane can measure
+      // route adoption rate over real time (see
+      // docs/adr-017-phase2-identity-registry-as-built.md §4.1). Pruned by age
+      // in retention.js (AGE_BASED_FILES).
+      appendJsonl(routeEventsPath, {
+        id: createId('route'),
+        agent: resolveAgentId() || 'mcp',
+        project,
+        query: task,
+        resultIds,
+        resultSources,
+        timestamp: new Date(now).toISOString(),
+      })
     }
 
     let suggestion
