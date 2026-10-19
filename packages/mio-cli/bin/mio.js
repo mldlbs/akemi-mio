@@ -3593,6 +3593,33 @@ function observeCommand(args, jsonFlag = false) {
     process.exitCode = 1
     return
   }
+  if (flags[0] === 'ingest') {
+    const transcript = optionValue(flags, '--transcript')
+    if (!transcript) {
+      console.error(
+        'Usage: mio observe ingest --transcript <path> [--cwd <dir>] [--session <id>] [--no-finalize] [--json]',
+      )
+      process.exitCode = 1
+      return
+    }
+    let res
+    try {
+      res = observer.ingestTranscript(MIO_HOME, transcript, {
+        cwd: optionValue(flags, '--cwd'),
+        sessionId: optionValue(flags, '--session'),
+        // Hooks fire after the host finished the turn, so the default is to
+        // emit the open turn instead of waiting for the daemon's idle window.
+        finalize: !flagPresent(flags, '--no-finalize'),
+      })
+    } catch (error) {
+      console.error(`Failed to ingest ${transcript}: ${error.message || error}`)
+      process.exitCode = 1
+      return
+    }
+    if (useJson) return jsonOrText(res, true)
+    console.log('Ingested files=' + res.files + ' lines=' + res.lines + ' outcomes=' + res.outcomes)
+    return
+  }
   if (flags.includes('--once')) {
     const res = observer.runCycle(MIO_HOME, observer.loadState(MIO_HOME), observer.createSinks(MIO_HOME))
     if (useJson) return jsonOrText(res, true)
@@ -3638,6 +3665,7 @@ Usage:
   mio evolution cutover apply --dry-run   Dry-run a cutover plan (--plan JSON and --dry-run are both required)
   mio observe                 Watch WorkBuddy transcripts and auto-ingest task outcomes
   mio observe --start [--research]|--stop|--status|--once   Manage the background observer daemon
+  mio observe ingest --transcript <path>   Ingest one transcript file (used by host hooks)
   mio recall "<query>"        Search Mio memory from the terminal (same ranking as mio.memory.query)
   mio traces                  Show recent observer traces (--type/--outcome/--agent/--since/--limit/--compact)
   mio remember "<content>"    Write a memory record from the terminal (same schema as mio.memory.record)

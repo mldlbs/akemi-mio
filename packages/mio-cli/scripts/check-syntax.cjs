@@ -21,7 +21,7 @@ const ROOT = path.resolve(__dirname, '..')
 // Top-level dirs to walk. __tests__ is excluded: those are exercised by
 // `node --test`, and a broken test file should fail the test run, not the
 // package gate.
-const INCLUDE_DIRS = ['bin', 'adapters', 'observe', 'server', 'scripts']
+const INCLUDE_DIRS = ['bin', 'adapters', 'hooks', 'observe', 'server', 'scripts']
 const EXCLUDE_DIRS = new Set(['node_modules', '__tests__', 'dist', 'out'])
 const EXTENSIONS = new Set(['.js', '.cjs'])
 

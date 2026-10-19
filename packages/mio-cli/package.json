@@ -1,6 +1,6 @@
 {
   "name": "mio-agent-runtime",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "Mio Agent Runtime installer and MCP intelligence layer",
   "license": "MIT",
   "type": "commonjs",
@@ -11,6 +11,7 @@
     "bin/",
     "server/",
     "adapters/",
+    "hooks/",
     "observe/",
     "scripts/",
     "README.md",

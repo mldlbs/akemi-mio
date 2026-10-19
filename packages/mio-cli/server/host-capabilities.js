@@ -19,7 +19,18 @@ const HOST_CAPABILITIES = [
   },
   {
     name: 'workbuddy',
-    capabilities: ['mcp-tools', 'memory', 'observer-ingest', 'observer-transcript', 'policy-check', 'experience-reuse', 'runtime-status'],
+    capabilities: [
+      'mcp-tools',
+      'memory',
+      'observer-ingest',
+      'observer-transcript',
+      'policy-check',
+      'experience-reuse',
+      'runtime-status',
+      // WorkBuddy implements the Claude Code hook contract, so retrieval and
+      // capture can run without the model choosing to call a tool.
+      'hooks',
+    ],
   },
   {
     name: 'hermes',

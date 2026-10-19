@@ -16,12 +16,24 @@ function homeDir() {
   return process.env.MIO_HOME || path.join(os.homedir(), '.mio-intelligence')
 }
 
+// WorkBuddy 5.x writes config and transcripts under ~/.workbuddy-ai; the
+// pre-5.x root ~/.workbuddy still exists on upgraded machines and may keep
+// receiving traffic from other CodeBuddy-family apps. Scan both, newest root
+// first, so neither an upgrade nor a legacy session goes unobserved.
+function workbuddyConfigDirs(home) {
+  const override = process.env.WORKBUDDY_CONFIG_DIR || process.env.CODEBUDDY_CONFIG_DIR
+  if (override) return [override]
+  const root = home || os.homedir()
+  const modern = path.join(root, '.workbuddy-ai')
+  const legacy = path.join(root, '.workbuddy')
+  const out = []
+  if (fs.existsSync(modern)) out.push(modern)
+  if (fs.existsSync(legacy)) out.push(legacy)
+  return out.length > 0 ? out : [legacy]
+}
+
 function workbuddyConfigDir() {
-  return (
-    process.env.WORKBUDDY_CONFIG_DIR ||
-    process.env.CODEBUDDY_CONFIG_DIR ||
-    path.join(os.homedir(), '.workbuddy')
-  )
+  return workbuddyConfigDirs()[0]
 }
 
 function createId(prefix) {
@@ -201,24 +213,34 @@ function saveState(home, state) {
   }
 }
 
-function listTranscripts() {
-  const root = path.join(workbuddyConfigDir(), 'projects')
+function listTranscripts(home) {
   const out = []
-  if (!fs.existsSync(root)) return out
-  const walk = (dir) => {
-    let entries
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true })
-    } catch (_) {
-      return
+  const seen = new Set()
+  for (const root of workbuddyConfigDirs(home)) {
+    const projects = path.join(root, 'projects')
+    if (!fs.existsSync(projects)) continue
+    const walk = (dir) => {
+      let entries
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true })
+      } catch (_) {
+        return
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) walk(full)
+        else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+          // Roots can overlap (e.g. one is a symlink of the other); a file must
+          // only be counted once or the turn machine sees its lines twice.
+          const key = path.resolve(full).toLowerCase()
+          if (seen.has(key)) continue
+          seen.add(key)
+          out.push(full)
+        }
+      }
     }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) walk(full)
-      else if (entry.isFile() && entry.name.endsWith('.jsonl')) out.push(full)
-    }
+    walk(projects)
   }
-  walk(root)
   return out
 }
 
@@ -427,13 +449,24 @@ function localDateKey(ts) {
   return y + '-' + m + '-' + day
 }
 
+// Workspace memory root. WorkBuddy 5.x reads <ws>/.workbuddy-ai/memory; older
+// builds read <ws>/.workbuddy/memory. Writing the legacy path on an upgraded
+// machine produced a digest that nothing ever loaded.
+function workbuddyMemoryDir(cwd) {
+  const modern = path.join(cwd, '.workbuddy-ai')
+  const legacy = path.join(cwd, '.workbuddy')
+  if (fs.existsSync(modern)) return path.join(modern, 'memory')
+  if (fs.existsSync(legacy)) return path.join(legacy, 'memory')
+  return path.join(modern, 'memory')
+}
+
 // Write a compact Mio digest back into WorkBuddy's own memory file
-// (<workspace>/.workbuddy/memory/YYYY-MM-DD.md). WorkBuddy instructs its model
-// to maintain and read these files every session, so the digest is
+// (<workspace>/.workbuddy-ai/memory/YYYY-MM-DD.md). WorkBuddy instructs its
+// model to maintain and read these files every session, so the digest is
 // 'retrieved' next session without any Mio tool call by the model.
 function writeWorkbuddyDigest(turn, outcome, summary) {
   if (!turn.cwd || !summary) return
-  const dir = path.join(turn.cwd, '.workbuddy', 'memory')
+  const dir = workbuddyMemoryDir(turn.cwd)
   const file = path.join(dir, localDateKey(turn.ts) + '.md')
   try {
     fs.mkdirSync(dir, { recursive: true })
@@ -1678,6 +1711,88 @@ function runCycle(home, state, sinks, opts) {
   return out
 }
 
+// Ingest a single transcript file. Host hooks (Stop / SessionEnd) name the
+// transcript explicitly in their payload, and a full runCycle scans every host
+// root (tens of seconds), which does not fit a hook's timeout budget. State
+// keys are the same absolute paths runCycle uses, so the daemon and the hook
+// can share one state file without re-emitting the same turn.
+function ingestTranscript(home, transcriptPath, opts) {
+  const out = { files: 0, lines: 0, outcomes: 0 }
+  if (!transcriptPath) return out
+  const file = path.resolve(transcriptPath)
+  let st
+  try {
+    st = fs.statSync(file)
+  } catch (_) {
+    return out
+  }
+  if (!st.isFile()) return out
+
+  fs.mkdirSync(home, { recursive: true })
+  const state = loadState(home)
+  const sinks = createSinks(home)
+  out.files = 1
+
+  const info = state.files[file] || { size: 0 }
+  if (st.size < info.size) {
+    info.size = 0
+    state.buffers[file] = ''
+  }
+
+  const meta = fileMeta(file)
+  let turn = state.openTurns[file] || createTurn(meta)
+  turn.project = meta.project
+  if (opts && opts.sessionId) turn.sessionId = opts.sessionId
+  if (opts && opts.cwd) turn.cwd = opts.cwd
+
+  if (st.size > info.size) {
+    let chunk = ''
+    try {
+      const fd = fs.openSync(file, 'r')
+      const buf = Buffer.alloc(st.size - info.size)
+      fs.readSync(fd, buf, 0, buf.length, info.size)
+      fs.closeSync(fd)
+      chunk = buf.toString('utf8')
+    } catch (_) {
+      return out
+    }
+    const pending = (state.buffers[file] || '') + chunk
+    const lines = pending.split(/\r?\n/)
+    state.buffers[file] = lines.pop()
+    for (const line of lines) {
+      if (!line.trim()) continue
+      out.lines += 1
+      let obj
+      try {
+        obj = JSON.parse(line)
+      } catch (_) {
+        continue
+      }
+      const result = feedWorkbuddyLine(turn, obj)
+      if (result.finalized && emitWorkbuddyOutcome(result.finalized, sinks, state)) {
+        out.outcomes += 1
+      }
+      turn = result.next
+    }
+    state.files[file] = { size: st.size, mtimeMs: st.mtimeMs }
+  }
+
+  // A hook fires once the host already considers the turn finished, so waiting
+  // for IDLE_MS would drop the summary; finalize whatever the open turn holds.
+  const finalize = opts && opts.finalize
+  if (turn && turn.lastAssistant && (finalize || Date.now() - st.mtimeMs > IDLE_MS)) {
+    if (emitWorkbuddyOutcome(turn, sinks, state)) out.outcomes += 1
+    state.openTurns[file] = null
+  } else if (turn && turn.id) {
+    state.openTurns[file] = turn
+  } else {
+    state.openTurns[file] = null
+  }
+
+  saveState(home, state)
+  return out
+}
+
 function startForeground(home) {
   const state = loadState(home)
   const sinks = createSinks(home)
@@ -1844,6 +1959,10 @@ module.exports = {
   INTERVAL_MS,
   homeDir,
   workbuddyConfigDir,
+  workbuddyConfigDirs,
+  workbuddyMemoryDir,
+  listTranscripts,
+  ingestTranscript,
   loadState,
   saveState,
   dedupeContexts,

@@ -5,16 +5,46 @@ const path = require('path')
 const os = require('os')
 const crypto = require('crypto')
 
+// WorkBuddy 5.x moved its config root from ~/.workbuddy (the CodeBuddy era
+// path) to ~/.workbuddy-ai. Machines that upgraded keep both, and only the new
+// root is read by the running app -- writing to the legacy root produced an
+// install that reported success while the host never loaded the MCP server or
+// the rules file. An explicit override still wins (tests and portable installs
+// depend on it).
+function configCandidates(home) {
+  const override = process.env.WORKBUDDY_CONFIG_DIR || process.env.CODEBUDDY_CONFIG_DIR
+  if (override) return [override]
+  const root = home || os.homedir()
+  const modern = path.join(root, '.workbuddy-ai')
+  const legacy = path.join(root, '.workbuddy')
+  const out = []
+  if (fs.existsSync(modern)) out.push(modern)
+  if (fs.existsSync(legacy)) out.push(legacy)
+  // Fresh machine: neither root exists yet, so keep the historical path and
+  // let install create it rather than inventing a third location.
+  return out.length > 0 ? out : [legacy]
+}
+
 function configDir() {
-  return (
-    process.env.WORKBUDDY_CONFIG_DIR ||
-    process.env.CODEBUDDY_CONFIG_DIR ||
-    path.join(os.homedir(), '.workbuddy')
-  )
+  return configCandidates()[0]
 }
 
 function configPath() {
   return path.join(configDir(), 'mcp.json')
+}
+
+function settingsPath() {
+  return path.join(configDir(), 'settings.json')
+}
+
+function hookScriptPath() {
+  return path.resolve(__dirname, '..', 'hooks', 'workbuddy-hook.js')
+}
+
+// The MCP server entry is <pkg>/server/mio-intelligence-mcp/index.js, so the
+// CLI entry is <pkg>/bin/mio.js.
+function cliScriptPath(serverScript) {
+  return path.resolve(path.dirname(serverScript), '..', '..', 'bin', 'mio.js')
 }
 
 function legacyConfigPath() {
@@ -94,7 +124,10 @@ function isInstalled() {
   return Boolean(
     approvals[approvalKey('mio-intelligence', entry)] &&
     memory.includes(MEMORY_BEGIN) &&
-    memory.includes(MEMORY_END)
+    memory.includes(MEMORY_END) &&
+    // An install from before hooks existed is reported as incomplete so
+    // `mio install workbuddy` repairs it instead of short-circuiting.
+    hooksInstalled()
   )
 }
 
@@ -124,6 +157,60 @@ function writeApproval(name, entry) {
   fs.writeFileSync(target, `${JSON.stringify(approvals, null, 2)}\n`, 'utf8')
 }
 
+// --- hooks -----------------------------------------------------------------
+//
+// Rules files alone only make Mio *available*: retrieval and capture then hinge
+// on the model deciding to call a tool. WorkBuddy implements the Claude Code
+// hook contract (7 events, `hookSpecificOutput.additionalContext` is injected
+// into the model context), which is the only channel that makes memory
+// seamless. `UserPromptSubmit` injects recall results; `Stop`/`SessionEnd`
+// push the finished transcript into the observer, whose payload already
+// carries transcript_path / session_id / cwd.
+const HOOK_EVENTS = ['UserPromptSubmit', 'Stop', 'SessionEnd']
+// Identifies our own entries when merging, so re-install replaces them instead
+// of appending duplicates and never disturbs hooks the user added.
+const HOOK_MARKER = 'workbuddy-hook.js'
+
+function quoteArg(value) {
+  return `"${String(value).replace(/"/g, '')}"`
+}
+
+function isMioHookEntry(entry) {
+  const hooks = entry && Array.isArray(entry.hooks) ? entry.hooks : []
+  return hooks.some((hook) => hook && typeof hook.command === 'string' && hook.command.includes(HOOK_MARKER))
+}
+
+function hooksInstalled() {
+  const settings = readJson(settingsPath()) || {}
+  const hooks = settings.hooks && typeof settings.hooks === 'object' ? settings.hooks : {}
+  return HOOK_EVENTS.every(
+    (event) => Array.isArray(hooks[event]) && hooks[event].some(isMioHookEntry),
+  )
+}
+
+function installHooks({ node, hookScript, cliScript, home }) {
+  const target = settingsPath()
+  const settings = readJson(target) || {}
+  const hooks = settings.hooks && typeof settings.hooks === 'object' ? settings.hooks : {}
+  const command = [node, hookScript, cliScript, home].map(quoteArg).join(' ')
+  const entry = { matcher: '', hooks: [{ type: 'command', command }] }
+
+  const before = JSON.stringify(hooks)
+  for (const event of HOOK_EVENTS) {
+    const list = Array.isArray(hooks[event]) ? hooks[event] : []
+    hooks[event] = list.filter((item) => !isMioHookEntry(item)).concat([entry])
+  }
+  settings.hooks = hooks
+  const changed = JSON.stringify(hooks) !== before
+  if (!changed) return { changed: false, target, backup: null }
+
+  const backup = `${target}.bak-mio-${Date.now()}`
+  if (fs.existsSync(target)) fs.copyFileSync(target, backup)
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, `${JSON.stringify(settings, null, 2)}\n`, 'utf8')
+  return { changed: true, target, backup }
+}
+
 function install({ node, serverScript, home, workspace }) {
   const target = configPath()
   const canonical = readJson(target) || {}
@@ -145,10 +232,12 @@ function install({ node, serverScript, home, workspace }) {
   // No project/workspace here: the MCP server derives the project from its own
   // git cwd. A baked value from install-time cwd overrides that derivation and
   // mis-attributes every memory write for the host's lifetime.
-  const context = JSON.stringify({
-    agentId: 'workbuddy',
-    sessionId: 'workbuddy-session',
-  })
+  //
+  // No sessionId either: MIO_CONTEXT is written once at install time, so any
+  // value here is a constant shared by every future session. The MCP server
+  // only reads agentId; the real session id arrives through the Stop hook
+  // payload instead.
+  const context = JSON.stringify({ agentId: 'workbuddy' })
 
   config.mcpServers = {
     ...config.mcpServers,
@@ -179,7 +268,21 @@ function install({ node, serverScript, home, workspace }) {
     projectRules = ensureBlock(projectInstructionsPath(workspaceDir))
   }
 
-  const changed = userRules.changed || Boolean(projectRules && projectRules.changed)
+  // Hook scripts live next to this package; the CLI entry sits two levels above
+  // the MCP server entry (<pkg>/server/mio-intelligence-mcp/index.js ->
+  // <pkg>/bin/mio.js). Both are baked into the command because hook configs
+  // carry no environment of their own.
+  const hooks = installHooks({
+    node,
+    hookScript: hookScriptPath(),
+    cliScript: cliScriptPath(serverScript),
+    home,
+  })
+
+  const changed =
+    userRules.changed ||
+    Boolean(projectRules && projectRules.changed) ||
+    hooks.changed
 
   return {
     changed,
@@ -187,11 +290,27 @@ function install({ node, serverScript, home, workspace }) {
     approvalsPath: approvalsPath(),
     memoryRulesPath: userRules.target,
     projectInstructionsPath: projectRules ? projectRules.target : null,
+    hooksPath: hooks.target,
     userRulesChanged: userRules.changed,
     projectRulesChanged: projectRules ? projectRules.changed : false,
+    hooksChanged: hooks.changed,
     backup,
-    message: 'WorkBuddy Mio MCP installed, approved, and Mio rules injected into CODEBUDDY.md (auto-loaded user memory) and the workspace AGENTS.md. Restart WorkBuddy to load them.',
+    message:
+      'WorkBuddy Mio MCP installed, approved, Mio rules injected into CODEBUDDY.md and the workspace AGENTS.md, and hooks registered (UserPromptSubmit recall + Stop/SessionEnd transcript ingest). Fully quit WorkBuddy and relaunch to load them.',
   }
 }
 
-module.exports = { configDir, configPath, approvalsPath, memoryRulesPath, projectInstructionsPath, approvalKey, isInstalled, install }
+module.exports = {
+  configDir,
+  configCandidates,
+  configPath,
+  settingsPath,
+  approvalsPath,
+  memoryRulesPath,
+  projectInstructionsPath,
+  approvalKey,
+  hooksInstalled,
+  installHooks,
+  isInstalled,
+  install,
+}

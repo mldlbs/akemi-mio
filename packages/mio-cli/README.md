@@ -41,6 +41,7 @@ mio evolution migration plan      Preview state migration diffs (--legacy-record
 mio evolution cutover apply --dry-run   Dry-run a cutover plan (--plan JSON and --dry-run are both required)
 mio observe                 Watch WorkBuddy transcripts and auto-ingest task outcomes (foreground)
 mio observe --start [--research]|--stop|--status|--once   Manage the background observer daemon (--research also starts the research scheduler)
+mio observe ingest --transcript <path>   Ingest one transcript file (used by host hooks; --cwd/--session/--no-finalize)
 mio recall "<query>"        Search Mio memory from the terminal (--project/--scope/--kind/--tags/--limit)
 mio traces                  Show recent observer traces (--type/--outcome/--agent/--since/--limit/--compact)
 mio prune --days 30         Trim old traces/queries/reuse records and observe.log (--dry-run to preview; --memory needs --yes)
@@ -54,7 +55,8 @@ mio memory merge --ids a,b  Merge duplicate records into one survivor (--keep/--
 mio memory migrate --ids a,b --scope global|project   Move records between the project and global layers
 mio policy check "<action>" Check the historical risk of an action before running it (--project; reads global MIO_HOME)
 mio mechanism registry       List mechanism versions and promotion requests (--mechanism-id/--status)
-mio mechanism promote        Submit/approve/reject a PromotionRequest (approver must differ from submitter)
+mio mechanism record-run     Append a real ExperimentRun row — the promotion gate's only input (--assignment/--outcome/--evidence-ids required)
+mio mechanism promote        Submit/approve/reject a PromotionRequest (submit gate-checked against persisted runs; approver must differ from submitter)
 mio mechanism rollback <id>  Roll back the active version of a mechanism
 mio creativity status        Show creativity hypothesis counts, recent top ideas, adoption join (reads global MIO_HOME)
 mio creativity list          List creativity hypotheses (--status active|validated|rejected|draft, --limit N)
@@ -107,7 +109,7 @@ mio --version                Print the version and exit (-V)
 
 ## MCP 工具
 
-MCP 服务端在 6 大域共暴露 56 个工具：
+MCP 服务端在 6 大域共暴露 57 个工具：
 
 ### 记忆（11）
 `mio.memory.query` · `mio.memory.record` · `mio.memory.archive` · `mio.memory.merge` · `mio.memory.migrate` · `mio.memory.analyze` · `mio.memory.forget` · `mio.experience.list` · `mio.experience.confirm` · `mio.experience.reuse` · `mio.policy.check`
@@ -123,8 +125,8 @@ MCP 服务端在 6 大域共暴露 56 个工具：
 ### 创意引擎（7）
 `mio.creativity.generate` · `mio.creativity.ferment` · `mio.creativity.adopt` · `mio.creativity.list` · `mio.creativity.status` · `mio.creativity.feedback` · `mio.idea.generate`
 
-### 机制注册（3）
-`mio.mechanism.registry` · `mio.mechanism.promote` · `mio.mechanism.rollback`
+### 机制注册（4）
+`mio.mechanism.registry` · `mio.mechanism.promote` · `mio.mechanism.record_run` · `mio.mechanism.rollback`
 
 ### 任务、Agent 与演化（16）
 `mio.task.route` · `mio.task.record_outcome` · `mio.agent.register` · `mio.agent.list` · `mio.agent.report` · `mio.agent.evaluation` · `mio.host.capabilities` · `mio.evolution.status` · `mio.evolution.report` · `mio.evolution.shadow.record` · `mio.evolution.dual_write.record` · `mio.evolution.cutover.readiness` · `mio.evolution.cutover.apply` · `mio.evolution.migration.plan` · `mio.evolution.authority.plan` · `mio.phase0.report`
@@ -165,21 +167,31 @@ MCP 服务端在 6 大域共暴露 56 个工具：
 - OpenCode 通过 `~/.config/opencode/opencode.json` 做 MCP 注册，通过 `~/.config/opencode/AGENTS.md` 做全局指令。`mio install opencode` 会写入这两个文件，并向 `AGENTS.md` 注入 Mio 使用规则，使 OpenCode 自动调用 Mio 的记忆/观察/策略。若 OpenCode 已在运行，重启一次以重新加载这两个文件。`mio observe` 还会被动跟踪 OpenCode 会话数据库（`opencode db`），无需模型主动调用 Mio 工具。
 - Hermes 使用 `hermes mcp add mio-intelligence --command node --args <server>` 来注册 Mio MCP server。Hermes 有原生记忆并读取 AGENTS.md Context Files，因此无需注入 Mio 规则也能检索。
 - Claude Code：`mio install claude` 在用户级 `~/.claude.json`（`mcpServers`）注册 Mio MCP server——不像项目级 `.mcp.json` 需要交互式审批——并向 `~/.claude/CLAUDE.md`（自动加载的用户记忆）与 `<workspace>/CLAUDE.md`（项目记忆）注入 Mio 使用规则。重启运行中的 Claude Code 会话以重新加载两者。`mio observe` 被动跟踪 `<config-dir>/projects/<munged-cwd>/*.jsonl` 会话记录：跳过 sidechain（子 agent）行，每个用户 prompt 结束上一轮，`tool_result.is_error` 行记为错误 trace，成功轮次的摘要写回 workspace 的 `CLAUDE.md` 的 `MIO_CONTEXT` 块，供下一会话被动取用。可用 `CLAUDE_CONFIG_DIR` 覆盖配置目录。
-- WorkBuddy 使用 `~/.workbuddy/mcp.json`，并要求每个自定义 MCP server 在 `~/.workbuddy/mcp-approvals.json` 中审批通过。`mio install workbuddy` 会写入这两个文件，并向 `~/.workbuddy/CODEBUDDY.md`（用户级记忆规则，由 WorkBuddy 自动加载进每次会话；CLI 硬编码了 CodeBuddy 产品名，所以文件名是 CODEBUDDY.md 而非 WORKBUDDY.md）以及 `<workspace>/AGENTS.md`（项目级）注入 Mio 使用规则。若 WorkBuddy 已在运行，重启一次以重新加载审批与记忆规则文件。
+- WorkBuddy 5.x 的配置根目录是 `~/.workbuddy-ai`（旧版本是 `~/.workbuddy`；两者共存时以新目录为准，`WORKBUDDY_CONFIG_DIR` 可覆盖）。`mio install workbuddy` 会写入 `mcp.json`（注册 Mio MCP server）、`mcp-approvals.json`（免交互审批）、`settings.json`（hooks，见下）以及 `CODEBUDDY.md`（用户级记忆规则；CLI 硬编码了 CodeBuddy 产品名，所以文件名是 CODEBUDDY.md 而非 WORKBUDDY.md），并向 `<workspace>/AGENTS.md`（项目级）注入 Mio 使用规则。若 WorkBuddy 已在运行，**完全退出后重启**才能加载新的 MCP 与 hooks。
+- WorkBuddy 实现了 Claude Code 的 hook 规范（`SessionStart` / `SessionEnd` / `PreToolUse` / `PostToolUse` / `UserPromptSubmit` / `Stop` / `PreCompact`，用户级配置在 `<config-dir>/settings.json`）。`mio install workbuddy` 因此注册两条 hook，让记忆**不依赖模型自觉**：
+  - `UserPromptSubmit` → `hooks/workbuddy-hook.js` 执行 `mio recall "<prompt>"`，把命中的记忆以 `hookSpecificOutput.additionalContext` 注入本轮上下文。命中为空、提问过短（<6 字符）、或内容重复时都不注入。
+  - `Stop` / `SessionEnd` → 用 payload 里的 `transcript_path` 调 `mio observe ingest --transcript <path>`，**只读这一个文件**（不做全量扫描），把完成轮次写入 `MIO_HOME`。子 agent 的 Stop（`agent_type != cli`）会被忽略，避免同一轮被记两次。
+  - 合并写入：只替换带 `workbuddy-hook.js` 标记的条目，用户自己的 hook 原样保留；重复安装不会产生重复条目。
+  - 延迟（本机实测，Windows）：`UserPromptSubmit` 约 1.1s（node 启动 0.7s + 读 1.4MB 记忆库并打分 0.4s），`Stop` 约 0.8s。整条命令若再经 `bash` 包装，各加约 0.8s。觉得每轮都慢可用环境变量关掉：`MIO_HOOK_DISABLE=1` 全关，`MIO_HOOK_DISABLE_RECALL=1` 只关召回（保留采集），`MIO_HOOK_FORCE_CLI=1` 强制走 CLI 子进程（排障用）。
 
 ## 被动观察器（`mio observe`）
 
 WorkBuddy 的默认模型不一定会主动调用 Mio MCP 工具，即使规则已注入
-(`CODEBUDDY.md` / `AGENTS.md`)。`mio observe` 是一个不依赖模型自觉的
-兜底：它持续监听 `~/.workbuddy/projects/**/*.jsonl` 会话记录，把每个任务的
-结果（`task_outcome`）、工具调用错误（`error`）以及完成任务的摘要自动写入
+(`CODEBUDDY.md` / `AGENTS.md`)。`mio observe` 是**没有 hooks 时的兜底**：它
+持续监听 `~/.workbuddy-ai/projects/**/*.jsonl` 与 `~/.workbuddy/projects/**/*.jsonl`
+（新旧配置根都扫，按绝对路径去重）会话记录，把每个任务的结果
+（`task_outcome`）、工具调用错误（`error`）以及完成任务的摘要自动写入
 `MIO_HOME/traces.jsonl` 和 `MIO_HOME/memory.jsonl`（与 MCP 服务同一套
 schema，`source=workbuddy-observer`）。
 
 - `mio install <host>` 会自动执行一次回填并启动后台观察器。
 
+- 装了 hooks 之后，`Stop` 会直接调 `mio observe ingest --transcript <path>`
+  入库，不必等守护进程轮询；两者共用 `MIO_HOME/observe-state.json` 里的文件
+  偏移，不会重复写入。
 - 除了写入 `MIO_HOME`，观察器还会把任务摘要**写回 WorkBuddy 自己的记忆文件**
-  (`<workspace>/.workbuddy/memory/YYYY-MM-DD.md`，标为 `## Mio 自动摘要`)。
+  (`<workspace>/.workbuddy-ai/memory/YYYY-MM-DD.md`，标为 `## Mio 自动摘要`；
+  工作区只有旧目录 `.workbuddy` 时回退到旧路径)。
   WorkBuddy 的系统提示要求模型每次会话维护并阅读这些文件，所以下一次会话
   WorkBuddy 会**被动取到** Mio 记录的内容——单 Agent 的「存 + 取」闭环不依赖
   模型调用 Mio 工具。
