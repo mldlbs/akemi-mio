@@ -24,6 +24,14 @@ const { createQueryLog } = require('./query-log.js')
 
 const AGENT_HEALTH_FRESH_MS = 48 * 3600000
 
+// Bounded weight nudge applied to routes whose source/target agents match an
+// active Evolution routing preference (written by mio.evolution.suggestion.apply,
+// see evolution-suggestions.js). Deliberately smaller than a strong verified
+// match: it re-ranks within reason but never overrides genuine relevance, and it
+// only ever *adjusts* weight — it never force-switches the agent. A preference
+// for an agent that no experience involves simply has no effect (back-compat).
+const ROUTING_PREFERENCE_BONUS = 3
+
 // Token overlap helpers for the routing-gate diagnostic below. Kept local and
 // deliberately stricter than memory-store's scoreRecord: that scorer also
 // counts prefix matches, which are right for fuzzy recall but would make this
@@ -65,6 +73,7 @@ function createTaskStore(options) {
   const tracePath = path.join(dataDir, 'traces.jsonl')
   const agentsPath = path.join(dataDir, 'agents.jsonl')
   const routeEventsPath = path.join(dataDir, 'route_events.jsonl')
+  const preferencesPath = path.join(dataDir, 'routing_preferences.jsonl')
 
   function readAgentHealth() {
     const file = path.join(dataDir, 'digest', 'latest.json')
@@ -106,11 +115,27 @@ function createTaskStore(options) {
   const persistRecentQueries = (entries) => queryLog.persist(entries)
   const REUSE_MATCH_WINDOW_MS = queryLog.windowMs
 
+  // Active Evolution routing preferences (status: 'active', not expired, matching
+  // project). Written by mio.evolution.suggestion.apply; consumed below to nudge
+  // route weights. Missing file => empty list (back-compat, no-op).
+  function loadActivePreferences(project) {
+    if (!fs.existsSync(preferencesPath)) return []
+    const nowMs = Date.now()
+    return readJsonlCached(preferencesPath).filter(
+      (p) =>
+        p.status === 'active' &&
+        Number.isFinite(Date.parse(p.expiresAt)) &&
+        Date.parse(p.expiresAt) > nowMs &&
+        (!p.project || p.project === project),
+    )
+  }
+
   function routeTask(args = {}) {
     const task = String(args.task || '').trim()
     if (!task) throw new Error('task.route requires a non-empty task')
     const project = args.project || projectName()
     const scope = normalizeScope(args.scope)
+    const activePreferences = loadActivePreferences(project)
     const limit = Math.min(Math.max(Number(args.limit) || 5, 1), 10)
 
     const memories = readJsonlCached(memoryPath).filter((record) => record.archived !== true)
@@ -160,6 +185,22 @@ function createTaskStore(options) {
       entry.weight = Math.max(entry.weight, score + (entry.confirmed ? 2 : 1.5))
     }
 
+    // Apply active Evolution routing preferences: nudge the weight of any route
+    // whose source or target agent matches a preference's preferAgent. This only
+    // re-ranks — it never invents a route for an agent that no experience uses.
+    for (const entry of routeByMemory.values()) {
+      for (const pref of activePreferences) {
+        const matched =
+          entry.sourceAgents.has(pref.preferAgent) || entry.targetAgents.has(pref.preferAgent)
+        if (!matched) continue
+        entry.weight += ROUTING_PREFERENCE_BONUS
+        if (!entry.matchedPreferenceIds) entry.matchedPreferenceIds = new Set()
+        entry.matchedPreferenceIds.add(pref.id)
+        if (!entry.matchedPreferAgents) entry.matchedPreferAgents = new Set()
+        entry.matchedPreferAgents.add(pref.preferAgent)
+      }
+    }
+
     const routes = [...routeByMemory.values()]
       .sort((a, b) => b.weight - a.weight)
       .slice(0, limit)
@@ -170,6 +211,13 @@ function createTaskStore(options) {
         sourceAgents: [...entry.sourceAgents].filter(Boolean),
         targetAgents: [...entry.targetAgents].filter(Boolean),
         score: Number(entry.weight.toFixed(2)),
+        routingHint:
+          entry.matchedPreferAgents && entry.matchedPreferAgents.size > 0
+            ? `Evolution routing preference active for agent ${[...entry.matchedPreferAgents].join(', ')}`
+            : null,
+        routingPreferenceIds: entry.matchedPreferenceIds
+          ? [...entry.matchedPreferenceIds]
+          : [],
         memory: {
           id: entry.memory.id,
           timestamp: entry.memory.timestamp,
@@ -344,6 +392,7 @@ function createTaskStore(options) {
         verifiedRoutes: routes.length,
         relatedMemories: relatedMemories.length,
         routingSignal,
+        routingPreferences: routes.filter((r) => r.routingHint).length,
         suggestion,
       },
     }
