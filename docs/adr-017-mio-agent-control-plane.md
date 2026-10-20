@@ -249,4 +249,4 @@ Phase 0 通过后进入真实使用期：先积累真实数据、评估后再扩
 1. ✅ 执行 Phase 0 Cross-Agent Value Validation，按成功标准收集数据（已完成，2026-08-17）。
 2. ✅ `agent.register` / `agent.list` / `agent.report` 已于 2026-10-20 实现（见 adr-017-phase2-identity-registry-as-built.md）；首个验证闭环 `agent.register → task.route → task.record_outcome → agent.report → agent.evaluation` 已在代码中闭环。
 3. 随后实现 `task.route` 与 `task.record_outcome`。
-4. ~~观察期结束后决定是否进入 Evolution 自动建议阶段。~~ ✅ Evolution 平面（8 工具，含 `evolution.report`）已于代码中实现；唯一剩余真工作是"建议自动回写路由"尚未闭环（见 adr-017-phase2-evolution-as-built.md §4），该决策点已无实际意义。
+4. ~~观察期结束后决定是否进入 Evolution 自动建议阶段。~~ ✅ Evolution 平面（8 工具，含 `evolution.report`）已于代码中实现；"建议自动回写路由"已于 2026-10-20 完整闭环——见 `adr-017-phase2-evolution-autosuggest.md`（PR2 `evolution-suggestions.js` 状态机 + 人审门禁、PR3 `task.route` 消费 `routing_preferences.jsonl`、PR4 端到端测试）。该决策点已无实际意义。

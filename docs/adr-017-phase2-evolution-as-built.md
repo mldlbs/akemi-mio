@@ -40,12 +40,20 @@ Evolution 平面**不引入新的持久化工件**——全部基于既有 jsonl
 
 ## 4. 真实缺口 / 后续
 
-- ⚠️ **建议尚未自动闭环**：`evolution.report` 能生成 `suggestions`（测试
-  `evolution.report generates routing suggestion when agents differ` 已验证），
-  但 ADR-017 Next Steps 第 4 条所设想的"Evolution 自动建议阶段"——即建议
-  **自动回写并驱动 `task.route`**——尚未实现。报告目前是**诊断性**的，未回写路由。
-  这是 Evolution 平面唯一剩余的"真正 Phase 2"工作，应单独立项（非本对账范围）。
-- 增强：`evolution.report` 纳入 `route_events.jsonl` 的采纳率数据，提升建议依据。
+- ✅ **建议已自动闭环（2026-10-20）**：原缺口"建议自动回写并驱动 `task.route`"已由
+  `adr-017-phase2-evolution-autosuggest.md` 设计并经 PR2/PR3/PR4 实现：
+  - PR2 `server/evolution-suggestions.js` + MCP 工具 `mio.evolution.suggestion.list` /
+    `.apply`：把高置信路由建议纳入带人审授权门禁（`approvedBy` 必填、永不自动应用）
+    的状态机（`proposed→shadowing→dual_writing→ready→authorized→applied`），`apply`
+    落盘 `routing_preferences.jsonl`（30 天有效期）。
+  - PR3 `server/task-store.js#routeTask`：消费 `routing_preferences.jsonl`，对
+    `sourceAgents`/`targetAgents` 命中 `preferAgent` 的路由做**有界权重提升**（+3，
+    只重排序、不强制切换 agent、不凭空造路由）。
+  - PR4 `evolution-autosuggest-e2e.test.js`：端到端验证
+    `report → propose → 授权 apply → task.route 命中提升` 全链路。
+  测试 `evolution.report generates routing suggestion when agents differ` 仍绿；
+  `task-route-preferences.test.js`（4/4）、`evolution-autosuggest-e2e.test.js`（1/1）覆盖闭环。
+- 增强（仍待做）：`evolution.report` 纳入 `route_events.jsonl` 的采纳率数据，提升建议依据。
 
 ## 5. 测试
 
