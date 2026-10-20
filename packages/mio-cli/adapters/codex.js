@@ -119,4 +119,14 @@ function install({ node, serverScript, home, workspace }) {
   }
 }
 
-module.exports = { configPath, isInstalled, install, restartWarningMessage }
+// Codex is "present" when its config dir or the config file itself exists.
+// Used by `mio install --auto`; false-positive cost is a no-op install.
+function isHostPresent() {
+  const { hostPresent } = require('./host-utils')
+  return hostPresent({
+    configPath: configPath(),
+    extraPaths: [path.dirname(configPath())],
+  })
+}
+
+module.exports = { configPath, isInstalled, install, restartWarningMessage, isHostPresent }

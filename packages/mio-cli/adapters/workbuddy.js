@@ -313,4 +313,10 @@ module.exports = {
   installHooks,
   isInstalled,
   install,
+  // WorkBuddy is "present" when its config dir or config file exists.
+  // Used by `mio install --auto`. Detection is file-existence only.
+  isHostPresent: () => {
+    const { hostPresent } = require('./host-utils')
+    return hostPresent({ configPath: configPath(), extraPaths: [configDir()] })
+  },
 }

@@ -89,7 +89,7 @@
 ## 6. 建议拆分
 
 - **PR-A** ✅ 已实现（commit 见 git log，`mcp-registry.js` + `bin/mio.js` 的 `mio mcp registry [--write] [--json]` + 测试）：Registry 清单生成器 + `mio mcp registry` 子命令，输出六平面 capability 的 stdio 启动清单（工具经运行时 `tools/list` 发现）。
-- **PR-B**：`mio install --auto` / `--check`。→ 实现规格见 §7（已起草，待并发会话落地后落地）。
+- **PR-B** ✅ 已实现（`server/install-wiring.js` + `bin/mio.js` 的 `mio install --auto` / `--check` + 5 个适配器新增 `isHostPresent()` + `scripts/check-cli-docs.cjs` 补探测）：`--auto` 只接本机"已安装"的宿主（纯文件存在性探测，不扫进程/不发网络），`--check` 只读报告漂移（registry-missing / host-present-not-wired / stale-server-path），有漂移退出码 1（text 与 --json 一致）。未落地项：Observer 提示钩子（§7.1.4）。
 - **PR-C**：模板驱动适配器加载器 + 首批 2 个宿主模板（codex / opencode）。
 
 ---

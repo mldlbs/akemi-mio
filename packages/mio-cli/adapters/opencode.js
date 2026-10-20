@@ -198,6 +198,13 @@ module.exports = {
   isInstalled,
   install,
   configNeedsRepair,
+  isHostPresent: () => {
+    const { hostPresent } = require('./host-utils')
+    return hostPresent({
+      configPath: configPath(),
+      extraPaths: [path.dirname(configPath()), globalInstructionsPath()],
+    })
+  },
   contextNeedsRepair,
   restartWarningMessage,
 }

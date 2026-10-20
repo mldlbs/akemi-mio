@@ -25,6 +25,9 @@ mio config llm --clear      Remove the stored LLM config (env vars still apply)
 mio config path             Print the config.json path
 mio mcp                     Start Mio MCP server (stdio)
 mio install <host>          Install Mio into a host (codex|opencode|workbuddy|hermes|claude)
+mio install --auto          Wire every detected host in one shot (only hosts present on this machine)
+mio install --check         Report drift between present hosts and the MCP registry (read-only; exit 1 on drift)
+mio mcp registry [--write]  Emit/generate the host-discovery MCP registry manifest (--json supported)
 mio status                  Show runtime and adapter status (also reports pending auto-claims)
 mio agents                  List installed host adapters
 mio agents list             List observed agents (from agents.jsonl, --project X)
@@ -173,6 +176,21 @@ MCP 服务端在 6 大域共暴露 57 个工具：
   - `Stop` / `SessionEnd` → 用 payload 里的 `transcript_path` 调 `mio observe ingest --transcript <path>`，**只读这一个文件**（不做全量扫描），把完成轮次写入 `MIO_HOME`。子 agent 的 Stop（`agent_type != cli`）会被忽略，避免同一轮被记两次。
   - 合并写入：只替换带 `workbuddy-hook.js` 标记的条目，用户自己的 hook 原样保留；重复安装不会产生重复条目。
   - 延迟（本机实测，Windows）：`UserPromptSubmit` 约 1.1s（node 启动 0.7s + 读 1.4MB 记忆库并打分 0.4s），`Stop` 约 0.8s。整条命令若再经 `bash` 包装，各加约 0.8s。觉得每轮都慢可用环境变量关掉：`MIO_HOOK_DISABLE=1` 全关，`MIO_HOOK_DISABLE_RECALL=1` 只关召回（保留采集），`MIO_HOOK_FORCE_CLI=1` 强制走 CLI 子进程（排障用）。
+
+### 自动发现与批量接线（`mio mcp registry` / `mio install --auto` / `--check`）
+
+安装一次、让宿主持有一份**单一事实来源**，而不是逐个人工 `mio install <host>`：
+
+```bash
+mio mcp registry --write     # 生成 <MIO_HOME>/mcp-registry.json（启动清单）
+mio install --auto           # 只接本机"已安装"的宿主，一次全接
+mio install --check           # 只读：报告宿主配置与清单的漂移，有漂移退出码 1
+```
+
+- **清单不是工具快照**。`mcp-registry.json` 只描述 server 的启动形状（`command` / `args` / `env`）与六平面 capability 列表；宿主具体能用哪些工具，是在 stdio 连接后由 MCP `tools/list` 运行时发现的。过早快照工具名只会得到一份过期清单。
+- **`--auto` 只碰"已安装"的宿主**。探测是纯文件存在性判断（配置目录 / 配置文件 / 已知可执行文件），不发起网络请求、不扫描进程。没装的宿主记为 `skipped`，不会产生一次失败的写入。
+- **`--check` 不写任何文件**，退出码 1 即为"有漂移"，可直接用于 CI 或定时巡检。它报告的漂移类型：`registry-missing`（清单未生成）、`host-present-not-wired`（宿主在但没接）、`stale-server-path`（接的是别的 checkout 的 server 路径）。
+- 现有 `mio install <host>` 行为不变，仍是显式 opt-in；`--auto` / `--check` 是增量能力，不会静默改用户配置。所有写入前都会 `cp` 备份（`<config>.bak-mio-<epoch_ms>`）。
 
 ## 被动观察器（`mio observe`）
 

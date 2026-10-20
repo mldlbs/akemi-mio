@@ -64,4 +64,26 @@ function restartWarning({ hostLabel, exeName, exePathFragment, configPath }) {
   )
 }
 
-module.exports = { earliestRunningSince, restartWarning }
+// Detects whether the host application itself is installed on this machine.
+// NOTE: this is deliberately NOT the same question as `isInstalled()` — presence
+// means "the user runs this app", installed means "Mio's MCP block is already in
+// its config". `mio install --auto` only wires hosts that are present, so a
+// machine with one host gets one wiring, not five failed writes.
+//
+// Detection is file-existence based only (never a network call, never a process
+// scan), so it stays cheap and side-effect free. Any unreadable candidate is
+// skipped rather than throwing: a config under a locked-down profile simply
+// reads as "not present".
+function hostPresent({ configPath, extraPaths = [] } = {}) {
+  const candidates = [configPath, ...extraPaths].filter(Boolean)
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return true
+    } catch (_) {
+      // ignore and try the next candidate
+    }
+  }
+  return false
+}
+
+module.exports = { earliestRunningSince, restartWarning, hostPresent }

@@ -179,4 +179,14 @@ function isHermesOnPath() {
   }
 }
 
-module.exports = { hermesBin, isInstalled, install }
+// Hermes is "present" when its home dir, its config file, or a resolvable
+// binary/shim exists. Used by `mio install --auto`.
+function isHostPresent() {
+  const { hostPresent } = require('./host-utils')
+  return hostPresent({
+    configPath: hermesConfigPath(),
+    extraPaths: [hermesHome(), hermesBin()],
+  })
+}
+
+module.exports = { hermesBin, isInstalled, install, isHostPresent }

@@ -57,6 +57,16 @@ const SAFE_ARGS = {
   'observer:serve': ['--dry-run'],
   'config:llm': [],
   'insight:generate': [],
+  // The README lists these three `mio install` lines, but the parser reads
+  // `mio install <host>`, `mio install --auto` and `mio install --check` as
+  // the *same* command (`install`, no subcommand), because `<host>`, `--auto`
+  // and `--check` are all rejected by isSubToken. Spawned bare, all three run
+  // `mio install`, which prints usage and exits 1 -- so none of the three was
+  // ever actually exercised. Each probe below is read-only or temp-scoped:
+  //   - check reports drift and exits 1, but writes nothing at all
+  //   - auto is the only mutating form, so it is NOT probed here; it is
+  //     covered by unit tests over install-wiring.js against fake adapters
+  'install:': ['--check'],
 }
 
 // A minimal MCP handshake. `mio mcp` reads stdin until EOF and then exits, so

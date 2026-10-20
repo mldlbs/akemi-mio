@@ -138,4 +138,14 @@ function install({ node, serverScript, home, workspace, project }) {
   }
 }
 
-module.exports = { configDir, configPath, memoryRulesPath, projectInstructionsPath, isInstalled, install }
+// Claude Code is "present" when its config dir or the global config file
+// exists. Used by `mio install --auto`.
+function isHostPresent() {
+  const { hostPresent } = require('./host-utils')
+  return hostPresent({
+    configPath: configPath(),
+    extraPaths: [configDir(), memoryRulesPath()],
+  })
+}
+
+module.exports = { configDir, configPath, memoryRulesPath, projectInstructionsPath, isInstalled, install, isHostPresent }

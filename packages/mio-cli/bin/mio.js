@@ -26,6 +26,7 @@ const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine, sourcesFromInsights, adoptHypothesis } = require('../server/creativity-engine.js')
 const { mechanismRegistry, mechanismPromote, mechanismRecordRun, mechanismRollback } = require('../server/mechanism-registry.js')
 const { createMcpRegistryManifest, writeMcpRegistryManifest } = require('../server/mcp-registry.js')
+const { planAutoWiring, checkRegistryDrift } = require('../server/install-wiring.js')
 const { buildAutoSources, topUpSources } = require('../server/creativity-sources.js')
 const { runIdeaGenerate, groundingFrom } = require('../server/idea-generate.js')
 const { createAgentStore } = require('../server/agent-store.js')
@@ -3513,9 +3514,123 @@ function printTaskRoute(result) {
   }
 }
 
+// `mio install --auto` wires every detected host in one shot; `mio install
+// --check` compares present hosts against the mcp-registry.json manifest.
+// Both are opt-in and never silently rewrite a config the user did not ask
+// about: --auto only touches hosts this adapter map reports as present, and
+// --check is read-only (exit 1 is the only side effect).
+function installAutoCommand(useJson) {
+  ensureHome()
+  const plan = planAutoWiring(adapters)
+  const results = []
+  const config = readConfig()
+  let wiredNow = 0
+
+  for (const host of plan.targets) {
+    const adapter = adapters[host]
+    let entry
+    try {
+      const installed = adapter.install({
+        node: process.execPath,
+        serverScript: SERVER_SCRIPT,
+        home: MIO_HOME,
+        workspace: process.cwd(),
+      })
+      if (installed && installed.changed) {
+        wiredNow += 1
+        config.agents = config.agents || {}
+        config.agents[host] = {
+          installedAt: new Date().toISOString(),
+          configPath: installed.configPath || null,
+        }
+      }
+      entry = {
+        host,
+        changed: Boolean(installed && installed.changed),
+        configPath: (installed && installed.configPath) || null,
+        message: (installed && installed.message) || `${host} adapter completed.`,
+      }
+    } catch (error) {
+      entry = {
+        host,
+        changed: false,
+        configPath: null,
+        error: error && error.message ? error.message : String(error),
+      }
+    }
+    results.push(entry)
+  }
+
+  // Only persist once, after the loop, so a mid-loop failure cannot leave a
+  // half-written agents map behind.
+  if (wiredNow > 0) writeConfig(config)
+
+  const summary = {
+    ...plan.summary,
+    wiredNow,
+    unchanged: plan.summary.present - wiredNow,
+  }
+
+  if (useJson) return jsonOrText({ mode: 'auto', results, summary }, true)
+
+  for (const entry of results) {
+    if (entry.error) {
+      console.error(`x ${entry.host}: ${entry.error}`)
+      continue
+    }
+    console.log(`${entry.changed ? '✓' : '•'} ${entry.host}: ${entry.message}`)
+  }
+  const skipped = plan.hosts.filter((h) => !h.present).map((h) => h.host)
+  if (skipped.length > 0) {
+    console.log(`– not present (skipped): ${skipped.join(', ')}`)
+  }
+  console.log(
+    `Done: ${summary.present} host(s) present, ${summary.wiredNow} wired now, ` +
+      `${summary.unchanged} already wired, ${summary.skipped} skipped.`
+  )
+}
+
+// Read-only drift report against the registry manifest. Reports *absent*
+// hosts too, since a manifest entry for a host that is not installed is
+// harmless but worth listing; exit code is 1 whenever any drift is found, in
+// both text and --json mode (a CI caller piping to jq must still see a
+// non-zero status).
+function installCheckCommand(useJson) {
+  const { drifts, clean } = checkRegistryDrift(adapters, MIO_HOME, {
+    expectedServerScript: SERVER_SCRIPT,
+  })
+  if (useJson) {
+    jsonOrText({ drifts, clean }, true)
+    if (!clean) process.exitCode = 1
+    return
+  }
+
+  if (clean) {
+    console.log('No drift: all present hosts are wired to the registry manifest.')
+    return
+  }
+  for (const drift of drifts) {
+    const where = drift.host ? ` [${drift.host}]` : ''
+    console.log(`DRIFT${where}: ${drift.reason} - ${drift.detail}`)
+  }
+  console.log(`Found ${drifts.length} drift(s). Run \`mio mcp registry --write\` and \`mio install --auto\`.`)
+  process.exitCode = 1
+  return
+}
+
 function installCommand(host, useJson) {
+  if (host === '--auto') {
+    installAutoCommand(useJson)
+    return
+  }
+  if (host === '--check') {
+    installCheckCommand(useJson)
+    return
+  }
   if (!host) {
-    console.error('Usage: mio install <codex|opencode|workbuddy|hermes|claude>')
+    console.error(
+      'Usage: mio install <codex|opencode|workbuddy|hermes|claude> | --auto | --check'
+    )
     process.exitCode = 1
     return
   }
@@ -3732,6 +3847,9 @@ Usage:
   mio config path             Print the config.json path
   mio mcp                     Start Mio MCP server (stdio)
   mio install <host>          Install Mio into a host (codex|opencode|workbuddy|hermes|claude)
+  mio install --auto          Wire every detected host in one shot (only present hosts)
+  mio install --check         Report drift between present hosts and the MCP registry (read-only)
+  mio mcp registry [--write]  Emit/generate the host-discovery MCP registry manifest
   mio status                  Show runtime and adapter status
   mio agents                  List installed host adapters
   mio agents list             List observed agents (from agents.jsonl, --project X)
