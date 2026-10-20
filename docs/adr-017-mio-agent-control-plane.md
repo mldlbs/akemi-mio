@@ -1,6 +1,6 @@
 # ADR-017: Mio Agent Control Plane
 
-**Status:** Accepted — Strategic Direction (Target = Agent Control Plane; **Phase 2 Identity/Registry plane shipped 2026-10-20**, see adr-017-phase2-identity-registry-as-built.md)
+**Status:** Accepted — Strategic Direction (Target = Agent Control Plane; **Phase 2 Identity/Registry plane shipped 2026-10-20**, see adr-017-phase2-identity-registry-as-built.md; **Evolution plane (8 tools) also shipped — see adr-017-phase2-evolution-as-built.md**)
 **Date:** 2026-08-14
 **Branch:** codex/mio-agent-enhancement-layer
 **Related:** ADR-016 Agent Enhancement Layer, ADR-014 MCP Control Plane v1, ADR-015 Capability Model Contract, ADR-002 Guardrail Architecture, ADR-003 Unified Progress Observer
@@ -92,7 +92,9 @@ Memory / Identity              Evolution
 | `mio.agent.evaluation` | Evaluation | **Implemented** (ADR-017 评估期四指标) |
 | `mio.task.route` | Routing | Implemented (Phase 1 初始版)；完整 Agent 级路由仍为 Phase 2 |
 | `mio.task.record_outcome` | Evaluation | **Implemented** (自动更新 agent registry + auto-claim 复用，闭环见 adr-017-phase2-identity-registry-as-built.md) |
-| `mio.evolution.report` | Evolution | Planned / Phase 2 |
+| `mio.evolution.report` | Evolution | **Implemented** (cross-agent report; see adr-017-phase2-evolution-as-built.md) |
+
+> **2026-10-20 更新：** 此条已过时——整个 Evolution 平面（`mio.evolution.report` / `status` / `shadow.record` / `dual_write.record` / `cutover.readiness` / `migration.plan` / `authority.plan` / `cutover.apply`，共 8 个工具）已于代码中实现并随 MCP 上线：`server/evolution-report.js` 提供报告实现、CLI `mio evolution report` 与之共用同一实现（`bin/mio.js:146`），其余工具由 `server/evolution-cutover.js` 支撑；对帐见 adr-017-phase2-evolution-as-built.md。ADR-017 将 Evolution 标为 "Planned / Phase 2" 或"评估期后再决定"是过期描述。
 
 ## Agent Identity / Unified Context
 
@@ -247,4 +249,4 @@ Phase 0 通过后进入真实使用期：先积累真实数据、评估后再扩
 1. ✅ 执行 Phase 0 Cross-Agent Value Validation，按成功标准收集数据（已完成，2026-08-17）。
 2. ✅ `agent.register` / `agent.list` / `agent.report` 已于 2026-10-20 实现（见 adr-017-phase2-identity-registry-as-built.md）；首个验证闭环 `agent.register → task.route → task.record_outcome → agent.report → agent.evaluation` 已在代码中闭环。
 3. 随后实现 `task.route` 与 `task.record_outcome`。
-4. 观察期结束后决定是否进入 Evolution 自动建议阶段。
+4. ~~观察期结束后决定是否进入 Evolution 自动建议阶段。~~ ✅ Evolution 平面（8 工具，含 `evolution.report`）已于代码中实现；唯一剩余真工作是"建议自动回写路由"尚未闭环（见 adr-017-phase2-evolution-as-built.md §4），该决策点已无实际意义。
