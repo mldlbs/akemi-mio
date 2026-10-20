@@ -183,4 +183,31 @@ function checkRegistryDrift(adapters, dataDir, deps = {}) {
   return { drifts, clean: drifts.length === 0 }
 }
 
-module.exports = { planAutoWiring, checkRegistryDrift, readRegistryServer, DRIFT_REASONS }
+// Turns a plan into the rows + summary that `mio install --auto --dry-run`
+// prints. Pure, so the dry-run contract (skip / unchanged / would-wire) is
+// testable without spawning the CLI -- which matters because --auto is the one
+// install form that mutates real host configs and MIO_HOME does not isolate
+// them.
+//
+// `wouldWire` is derived from targets (the same list --auto actually installs),
+// so the preview cannot drift from the real run.
+function describeAutoPlan(plan) {
+  const rows = plan.hosts.map((h) => ({
+    host: h.host,
+    present: h.present,
+    alreadyWired: h.alreadyWired,
+    action: !h.present ? 'skip' : h.alreadyWired ? 'unchanged' : 'would-wire',
+  }))
+  return {
+    rows,
+    summary: { ...plan.summary, wouldWire: plan.targets.length },
+  }
+}
+
+module.exports = {
+  planAutoWiring,
+  describeAutoPlan,
+  checkRegistryDrift,
+  readRegistryServer,
+  DRIFT_REASONS,
+}

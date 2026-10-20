@@ -8,6 +8,7 @@ const { test } = require('node:test')
 
 const {
   planAutoWiring,
+  describeAutoPlan,
   checkRegistryDrift,
   readRegistryServer,
   DRIFT_REASONS,
@@ -86,6 +87,52 @@ test('checkRegistryDrift returns clean for a present+wired host with a valid man
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('describeAutoPlan classifies skip / unchanged / would-wire', () => {
+  const plan = planAutoWiring({
+    codex: fakeAdapter({ present: true, wired: false }),
+    opencode: fakeAdapter({ present: true, wired: true }),
+    workbuddy: fakeAdapter({ present: false, wired: false }),
+  })
+  const { rows, summary } = describeAutoPlan(plan)
+  assert.deepStrictEqual(
+    rows.map((r) => [r.host, r.action]),
+    [
+      ['codex', 'would-wire'],
+      ['opencode', 'unchanged'],
+      ['workbuddy', 'skip'],
+    ]
+  )
+  assert.deepStrictEqual(summary, { present: 2, wired: 1, skipped: 1, wouldWire: 1 })
+})
+
+test('describeAutoPlan wouldWire count matches the hosts --auto would install', () => {
+  // The preview must never drift from the real run: both derive from targets.
+  const plan = planAutoWiring({
+    codex: fakeAdapter({ present: true, wired: false }),
+    opencode: fakeAdapter({ present: true, wired: false }),
+    workbuddy: fakeAdapter({ present: false }),
+    hermes: fakeAdapter({ present: true, wired: true }),
+  })
+  const { rows, summary } = describeAutoPlan(plan)
+  assert.strictEqual(summary.wouldWire, plan.targets.length)
+  assert.strictEqual(
+    rows.filter((r) => r.action === 'would-wire').map((r) => r.host).join(','),
+    plan.targets.join(',')
+  )
+  assert.ok(summary.wouldWire > 0, 'fixture must have at least one host to wire')
+})
+
+test('describeAutoPlan reports nothing to wire when every present host is wired', () => {
+  const plan = planAutoWiring({
+    codex: fakeAdapter({ present: true, wired: true }),
+    workbuddy: fakeAdapter({ present: false }),
+  })
+  const { rows, summary } = describeAutoPlan(plan)
+  assert.strictEqual(summary.wouldWire, 0)
+  assert.deepStrictEqual(rows.filter((r) => r.action === 'would-wire'), [])
+  assert.strictEqual(rows.find((r) => r.host === 'workbuddy').action, 'skip')
 })
 
 test('checkRegistryDrift emits no duplicate host+reason pairs across hosts', () => {

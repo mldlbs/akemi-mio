@@ -26,7 +26,7 @@ const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine, sourcesFromInsights, adoptHypothesis } = require('../server/creativity-engine.js')
 const { mechanismRegistry, mechanismPromote, mechanismRecordRun, mechanismRollback } = require('../server/mechanism-registry.js')
 const { createMcpRegistryManifest, writeMcpRegistryManifest } = require('../server/mcp-registry.js')
-const { planAutoWiring, checkRegistryDrift } = require('../server/install-wiring.js')
+const { planAutoWiring, describeAutoPlan, checkRegistryDrift } = require('../server/install-wiring.js')
 const { buildAutoSources, topUpSources } = require('../server/creativity-sources.js')
 const { runIdeaGenerate, groundingFrom } = require('../server/idea-generate.js')
 const { createAgentStore } = require('../server/agent-store.js')
@@ -3519,9 +3519,31 @@ function printTaskRoute(result) {
 // Both are opt-in and never silently rewrite a config the user did not ask
 // about: --auto only touches hosts this adapter map reports as present, and
 // --check is read-only (exit 1 is the only side effect).
-function installAutoCommand(useJson) {
+function installAutoCommand(useJson, dryRun) {
   ensureHome()
   const plan = planAutoWiring(adapters)
+
+  // Dry run: report exactly what --auto *would* do and write nothing. This
+  // exists because --auto is the one install form that mutates host configs,
+  // and MIO_HOME does NOT isolate them (adapters resolve os.homedir(), which
+  // on Windows ignores HOME/USERPROFILE overrides made after process start).
+  // Being able to preview the plan is the only cheap way to stay safe.
+  if (dryRun) {
+    const { rows, summary } = describeAutoPlan(plan)
+    if (useJson) return jsonOrText({ mode: 'auto', dryRun: true, results: rows, summary }, true)
+    for (const row of rows) {
+      if (row.action === 'skip') continue
+      console.log(`${row.action === 'would-wire' ? '+' : '•'} ${row.host}: ${row.action}`)
+    }
+    const skipped = plan.hosts.filter((h) => !h.present).map((h) => h.host)
+    if (skipped.length > 0) console.log(`– not present (skipped): ${skipped.join(', ')}`)
+    console.log(
+      `Dry run: ${summary.present} host(s) present, ${summary.wouldWire} would be wired, ` +
+        `${summary.wired} already wired, ${summary.skipped} skipped. Nothing written.`
+    )
+    return
+  }
+
   const results = []
   const config = readConfig()
   let wiredNow = 0
@@ -3618,18 +3640,21 @@ function installCheckCommand(useJson) {
   return
 }
 
-function installCommand(host, useJson) {
+function installCommand(host, useJson, installArgs) {
+  // `--dry-run` is accepted only by `--auto`; it previews the plan and writes
+  // nothing (see installAutoCommand).
+  const dryRun = flagPresent(installArgs || (host ? [host] : []), '--dry-run')
   if (host === '--auto') {
-    installAutoCommand(useJson)
+    installAutoCommand(useJson, dryRun)
     return
   }
   if (host === '--check') {
     installCheckCommand(useJson)
     return
   }
-  if (!host) {
+  if (!host || host.startsWith('--')) {
     console.error(
-      'Usage: mio install <codex|opencode|workbuddy|hermes|claude> | --auto | --check'
+      'Usage: mio install <codex|opencode|workbuddy|hermes|claude> | --auto [--dry-run] | --check'
     )
     process.exitCode = 1
     return
@@ -3848,6 +3873,7 @@ Usage:
   mio mcp                     Start Mio MCP server (stdio)
   mio install <host>          Install Mio into a host (codex|opencode|workbuddy|hermes|claude)
   mio install --auto          Wire every detected host in one shot (only present hosts)
+  mio install --auto --dry-run  Preview what --auto would wire; writes nothing
   mio install --check         Report drift between present hosts and the MCP registry (read-only)
   mio mcp registry [--write]  Emit/generate the host-discovery MCP registry manifest
   mio status                  Show runtime and adapter status
@@ -3932,7 +3958,7 @@ async function main() {
     case 'mcp':
       return mcpCommand(args, useJson)
     case 'install':
-      return installCommand(args[1], useJson)
+      return installCommand(args[1], useJson, (args || []).slice(1))
     case 'status':
       return statusCommand(useJson)
     case 'agents':
