@@ -153,14 +153,29 @@ function createEvolutionReport({ dataDir, projectName }) {
     // Suggestions engine
     const suggestions = []
 
-    // Routing suggestion: compare agent success rates
+    // Routing suggestion: compare agent success rates. Structured (not just a
+    // diagnostic string) so the Evolution plane can feed it back into
+    // task.route through the gated-rollout pipeline
+    // (see adr-017-phase2-evolution-autosuggest.md) instead of leaving it
+    // unactionable. `preferAgent`/`baselineAgent`/`evidence` are the machine
+    // targets; `description` stays for human readers.
     if (agentPerf.length >= 2) {
       const best = agentPerf[0]
       const worst = agentPerf[agentPerf.length - 1]
-      if (best.tasks.total >= 5 && worst.tasks.total >= 5 && best.tasks.successRate - worst.tasks.successRate >= 15) {
+      const delta = best.tasks.successRate - worst.tasks.successRate
+      if (best.tasks.total >= 5 && worst.tasks.total >= 5 && delta >= 15) {
         suggestions.push({
           category: 'routing',
           priority: 'high',
+          preferAgent: best.agentId,
+          baselineAgent: worst.agentId,
+          successRateDelta: delta,
+          minSamplePerAgent: 5,
+          evidence: {
+            basis: 'task_outcome comparison',
+            best: best.tasks,
+            worst: worst.tasks,
+          },
           description: best.agentId + ' has ' + best.tasks.successRate + '% success rate vs ' + worst.agentId + ' at ' + worst.tasks.successRate + '%; prefer routing to ' + best.agentId,
           basedOn: 'task_outcome comparison',
         })

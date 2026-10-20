@@ -87,7 +87,7 @@ test('evolution.report includes memory health', async () => {
   assert.equal(r.memoryHealth.qualityScore, 100)
 })
 
-test('evolution.report generates routing suggestion when agents differ', async () => {
+test('evolution.report generates structured routing suggestion when agents differ', async () => {
   writeJsonl('traces.jsonl', [
     ...Array.from({ length: 10 }, (_, i) => ({
       id: 'c' + i, timestamp: new Date().toISOString(), trace_id: 'c:' + i,
@@ -100,8 +100,15 @@ test('evolution.report generates routing suggestion when agents differ', async (
   ])
   const r = await callTool('mio.evolution.report', { project: 'test-evo' })
   const routing = r.suggestions.find((s) => s.category === 'routing')
-  assert.ok(routing)
+  assert.ok(routing, 'routing suggestion present')
+  assert.equal(routing.category, 'routing')
   assert.equal(routing.priority, 'high')
+  // Structured targets so the gated-rollout pipeline can consume it (PR1).
+  assert.equal(routing.preferAgent, 'codex')
+  assert.equal(routing.baselineAgent, 'opencode')
+  assert.ok(routing.successRateDelta >= 15, 'delta >= 15')
+  assert.ok(routing.evidence && routing.evidence.best && routing.evidence.worst, 'evidence carriers both agents')
+  assert.ok(/prefer routing to codex/.test(routing.description), 'human-readable description kept')
 })
 
 test('evolution.report returns empty state gracefully', async () => {
