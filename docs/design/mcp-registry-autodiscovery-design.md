@@ -22,7 +22,7 @@
 
 ### 2.1 MCP Registry 清单
 
-`~/.mio-intelligence/mcp-registry.json`（或 `mcp.json`），由 `mio init` / `mio mcp registry --write` 生成，作为宿主读取的单一事实来源：
+`~/.mio-intelligence/mcp-registry.json`，由 `mio mcp registry --write` 生成（**PR-A 已实现**），作为宿主读取的单一事实来源：
 
 ```json
 {
@@ -88,6 +88,6 @@
 
 ## 6. 建议拆分
 
-- **PR-A**：Registry 清单生成器 + `mio mcp registry` 子命令。
+- **PR-A** ✅ 已实现（commit 见 git log，`mcp-registry.js` + `bin/mio.js` 的 `mio mcp registry [--write] [--json]` + 测试）：Registry 清单生成器 + `mio mcp registry` 子命令，输出六平面 capability 的 stdio 启动清单（工具经运行时 `tools/list` 发现）。
 - **PR-B**：`mio install --auto` / `--check`。
 - **PR-C**：模板驱动适配器加载器 + 首批 2 个宿主模板（codex / opencode）。

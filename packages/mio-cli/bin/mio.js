@@ -25,6 +25,7 @@ const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine, sourcesFromInsights, adoptHypothesis } = require('../server/creativity-engine.js')
 const { mechanismRegistry, mechanismPromote, mechanismRecordRun, mechanismRollback } = require('../server/mechanism-registry.js')
+const { createMcpRegistryManifest, writeMcpRegistryManifest } = require('../server/mcp-registry.js')
 const { buildAutoSources, topUpSources } = require('../server/creativity-sources.js')
 const { runIdeaGenerate, groundingFrom } = require('../server/idea-generate.js')
 const { createAgentStore } = require('../server/agent-store.js')
@@ -3577,7 +3578,35 @@ function installCommand(host, useJson) {
   console.log(observer.isRunning(MIO_HOME) ? 'Observer daemon running.' : 'Observer daemon not running. Run `mio observe --start`.')
 }
 
-function mcpCommand() {
+function mcpCommand(args, useJson) {
+  // `mio mcp` with no subcommand launches the stdio MCP server (legacy behavior).
+  // `mio mcp registry [--write] [--json]` emits the host-discovery manifest.
+  const sub = args && args[1]
+  if (sub === 'registry') {
+    const flags = (args || []).slice(2)
+    const project = optionValue(flags, '--project')
+    const manifest = createMcpRegistryManifest({
+      node: process.execPath,
+      serverScript: SERVER_SCRIPT,
+      dataDir: MIO_HOME,
+      project,
+    })
+    if (flagPresent(flags, '--write')) {
+      const outPath = writeMcpRegistryManifest({
+        node: process.execPath,
+        serverScript: SERVER_SCRIPT,
+        dataDir: MIO_HOME,
+        project,
+      })
+      if (useJson) return jsonOrText({ written: true, path: outPath, manifest }, true)
+      console.log(`Wrote MCP registry manifest: ${outPath}`)
+      return
+    }
+    if (useJson) return jsonOrText(manifest, true)
+    console.log(JSON.stringify(manifest, null, 2))
+    return
+  }
+
   // The MCP server resolves its data dir as `MIO_DATA_DIR || <cwd>/.mio-intelligence`,
   // while every CLI subcommand reads the global MIO_HOME. Left alone, `mio mcp`
   // launched from a scratch directory built a second, empty store there and
@@ -3783,7 +3812,7 @@ async function main() {
     case 'config':
       return configCommand(args, useJson)
     case 'mcp':
-      return mcpCommand()
+      return mcpCommand(args, useJson)
     case 'install':
       return installCommand(args[1], useJson)
     case 'status':
