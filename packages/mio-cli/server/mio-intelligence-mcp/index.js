@@ -19,6 +19,7 @@ const { createQueryLog } = require('../query-log.js')
 const { createSubscriptionStore } = require('../subscription-store.js')
 const { createDigest } = require('../digest.js')
 const { createEvolutionReport } = require('../evolution-report.js')
+const { createEvolutionSuggestionStore } = require('../evolution-suggestions.js')
 
 const { CreativityEngine, sourcesFromInsights, adoptHypothesis } = require('../creativity-engine.js')
 const { buildAutoSources, topUpSources } = require('../creativity-sources.js')
@@ -697,6 +698,33 @@ const TOOLS = [
     },
   },
   {
+    name: 'mio.evolution.suggestion.list',
+    description: 'List Evolution routing suggestions and their gated-rollout lifecycle status (ADR-017 Evolution plane, Phase 2).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Project name filter. Defaults to current repository.' },
+        status: { type: 'string', description: 'Optional status filter: proposed, shadowing, dual_writing, ready, authorized, applied, rejected, expired.' },
+      },
+    },
+  },
+  {
+    name: 'mio.evolution.suggestion.apply',
+    description: 'Promote a routing suggestion to an applied routing preference through the gated-rollout pipeline. Requires human authority (approvedBy); never auto-applies.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Suggestion id from mio.evolution.suggestion.list.' },
+        approvedBy: { type: 'string', description: 'Human authority approving the promotion. Required.' },
+        shadow: { type: 'object', description: 'Optional shadow comparison payload for the cutover gate.' },
+        dualWrite: { type: 'object', description: 'Optional dual-write payload for the cutover gate.' },
+        readiness: { type: 'object', description: 'Optional readiness overrides (minShadowRuns, maxMismatchRate).' },
+        forceAuthority: { type: 'boolean', description: 'Skip the staged cutover gate when no cutover backend is wired (requires approvedBy).' },
+      },
+      required: ['id', 'approvedBy'],
+    },
+  },
+  {
     name: 'mio.task.record_outcome',
     description:
       'Record task outcome with agent registry update and auto-claim experience reuse in one atomic call. Combines observer.ingest + agent stats + auto-claim for a complete task lifecycle closure.',
@@ -1228,6 +1256,10 @@ async function callTool(name, args = {}) {
       return evolutionCutover.authorityPlan(args)
     case 'mio.evolution.cutover.apply':
       return evolutionCutover.applyCutover(args)
+    case 'mio.evolution.suggestion.list':
+      return suggestionList(args)
+    case 'mio.evolution.suggestion.apply':
+      return suggestionApply(args)
     case 'mio.task.record_outcome':
       return recordTaskOutcome(args)
     case 'mio.creativity.status':
@@ -1378,9 +1410,18 @@ rl.on('close', () => {
 })
 
 const evolutionReportStore = createEvolutionReport({ dataDir, projectName })
+const suggestionStore = createEvolutionSuggestionStore({ dataDir, projectName, cutover: evolutionCutover })
 
 function evolutionReport(args = {}) {
   return evolutionReportStore.report(args)
+}
+
+function suggestionList(args = {}) {
+  return suggestionStore.list(args)
+}
+
+function suggestionApply(args = {}) {
+  return suggestionStore.apply(args.id, args)
 }
 
 module.exports = { TOOLS, callTool, handleMessage, readJsonl, appendJsonl, rl }
