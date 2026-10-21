@@ -50,6 +50,8 @@ const MCP_TO_CLI = {
   'mio.evolution.dual_write.record': ['evolution', 'dual-write', 'record'],
   'mio.evolution.migration.plan': ['evolution', 'migration', 'plan'],
   'mio.evolution.report': ['evolution', 'report'],
+  'mio.evolution.suggestion.list': ['evolution', 'suggestion', 'list'],
+  'mio.evolution.suggestion.apply': ['evolution', 'suggestion', 'apply'],
   'mio.evolution.shadow.record': ['evolution', 'shadow', 'record'],
   'mio.evolution.status': ['evolution', 'status'],
   'mio.experience.confirm': ['experience', 'confirm'],

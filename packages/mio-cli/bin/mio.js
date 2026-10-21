@@ -66,6 +66,11 @@ const { createSubscriptionStore, subscribeKey } = require('../server/subscriptio
 const { createRetention } = require('../server/retention.js')
 const { createDigest } = require('../server/digest.js')
 const { createEvolutionReport, formatEvolutionReportText } = require('../server/evolution-report.js')
+const {
+  createEvolutionSuggestionStore,
+  formatEvolutionSuggestionsText,
+  formatEvolutionSuggestionText,
+} = require('../server/evolution-suggestions.js')
 
 function appendJsonl(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -161,10 +166,29 @@ function parseNumberOption(args, name) {
   return value
 }
 
+// Like parseJsonOption but optional: an absent flag yields undefined instead of
+// throwing, which is what the gated payloads of `evolution suggestion apply`
+// need (shadow / dual-write / readiness are all opt-in).
+function optionalJsonOption(flags, name) {
+  const raw = optionValue(flags, name)
+  if (raw === undefined) return undefined
+  try {
+    return JSON.parse(raw)
+  } catch (error) {
+    throw new Error(`${name} must be valid JSON`)
+  }
+}
+
 // mio evolution report shares one implementation with mio.evolution.report
 // (see ../server/evolution-report.js), so CLI and MCP cannot report different numbers.
 function cliEvolutionReport() {
   return createEvolutionReport({ dataDir: MIO_HOME, projectName })
+}
+
+// Built lazily and per call: MIO_HOME is read from the environment, so a test
+// that repoints HOME must not reuse a store opened against the old one.
+function cliEvolutionSuggestions() {
+  return createEvolutionSuggestionStore({ dataDir: MIO_HOME, projectName, cutover: evolutionCutover })
 }
 
 const EVOLUTION_REPORT_PERIODS = new Set(['24h', '7d', '30d', 'all'])
@@ -254,6 +278,7 @@ const EVOLUTION_SUBCOMMANDS = {
   cutover: ['readiness', 'apply'],
   authority: ['plan'],
   migration: ['plan'],
+  suggestion: ['list', 'apply'],
 }
 
 // Usage defaults to stdout because that is where `--help` belongs; the failure
@@ -271,6 +296,8 @@ function evolutionUsage(write = console.log) {
   mio evolution cutover apply             Dry-run a cutover plan (never switches authority)
   mio evolution authority plan            Preview a gated authority switch plan
   mio evolution migration plan            Preview state migration diffs
+  mio evolution suggestion list           List evolution routing suggestions (--status, --project)
+  mio evolution suggestion apply          Apply one suggestion through the cutover gates (--id, --approved-by)
 
 Required arguments are inline JSON snapshots, not file paths:
   shadow record        --legacy JSON --modular JSON
@@ -388,6 +415,53 @@ async function evolutionCommand(args, useJson) {
         }),
         useJson,
       )
+    }
+    if (args[1] === 'suggestion' && args[2] === 'list') {
+      const flags = args.slice(2)
+      let result
+      try {
+        // The store (and the MCP tool's schema) call this filter `status`.
+        result = cliEvolutionSuggestions().list({
+          project: optionValue(flags, '--project'),
+          status: optionValue(flags, '--status'),
+        })
+      } catch (error) {
+        console.error(error.message || error)
+        process.exitCode = 1
+        return
+      }
+      if (useJson) return jsonOrText(result, true)
+      console.log(formatEvolutionSuggestionsText(result))
+      return
+    }
+    if (args[1] === 'suggestion' && args[2] === 'apply') {
+      const flags = args.slice(2)
+      const id = optionValue(flags, '--id')
+      const approvedBy = optionValue(flags, '--approved-by')
+      if (!id || !approvedBy) {
+        console.error('mio evolution suggestion apply: --id and --approved-by are both required')
+        evolutionUsage(console.error)
+        process.exitCode = 1
+        return
+      }
+      let result
+      try {
+        result = await cliEvolutionSuggestions().apply(id, {
+          project: optionValue(flags, '--project'),
+          approvedBy,
+          shadow: optionalJsonOption(flags, '--shadow'),
+          dualWrite: optionalJsonOption(flags, '--dual-write'),
+          readiness: optionalJsonOption(flags, '--readiness'),
+          forceAuthority: flagPresent(flags, '--force-authority') ? true : undefined,
+        })
+      } catch (error) {
+        console.error(error.message || error)
+        process.exitCode = 1
+        return
+      }
+      if (useJson) return jsonOrText(result, true)
+      console.log(formatEvolutionSuggestionText(result))
+      return
     }
   } catch (error) {
     console.error(error.message || error)

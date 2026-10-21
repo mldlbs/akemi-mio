@@ -37,6 +37,8 @@ mio agents register --agent-id X   Register an observed agent (--yes to apply; p
 mio agents evaluation       ADR-017 evaluation metrics: route adoption, behaviour change, recall quality, data hygiene (--project X, --since ISO)
 mio evolution status        Show composed evolution module health
 mio evolution report        Cross-agent evolution report: ecosystem, agents, memory health, suggestions (--period 24h|7d|30d|all)
+mio evolution suggestion list      List evolution routing suggestions and their gated-rollout status (--status, --project)
+mio evolution suggestion apply     Apply a suggestion through the cutover gates (--id, --approved-by; both required)
 mio evolution shadow record      Record a shadow comparison sample (--legacy/--modular JSON; both required)
 mio evolution dual-write record  Record a dual-write comparison sample (--legacy-result/--modular-result JSON; required)
 mio evolution cutover readiness   Assess shadow/dual-write cutover readiness (--min-shadow-runs/--max-mismatch-rate)
@@ -737,6 +739,26 @@ reasons: shadow samples 2/5; shadow mismatch rate 0.5; dual-write has no samples
 | `authority plan` | `--readiness <json>` | `--from`、`--to` |
 | `migration plan` | `--legacy-records <json>`、`--modular-records <json>` | 无 |
 | `cutover apply` | `--dry-run` **和** `--plan <json>` | `--project` |
+| `suggestion list` | 无 | `--status`（`proposed`/`shadowing`/`dual_writing`/`ready`/`authorized`/`applied`/`rejected`/`expired`）、`--project` |
+| `suggestion apply` | `--id` **和** `--approved-by` | `--project`、`--shadow <json>`、`--dual-write <json>`、`--readiness <json>`、`--force-authority` |
+
+### 路由建议（`mio.evolution.suggestion.list` / `mio.evolution.suggestion.apply`）
+
+`mio.evolution.report` 会把跨 agent 的可改善路由固化成结构化建议。建议与 CLI 共用一份实现
+（`server/evolution-suggestions.js`），状态机 `proposed → shadowing → dual_writing → ready →
+authorized → applied`（另有 `rejected` / `expired`），按 id 追加写、恢复时取最后一条。
+
+```bash
+mio evolution report --period 7d            # 建议的来源
+mio evolution suggestion list               # 全部建议及当前状态
+mio evolution suggestion list --status proposed
+mio evolution suggestion apply --id sug_... --approved-by <你的名字>
+```
+
+`apply` 复用 cutover 门控回路：有 shadow/dual-write 样本且就绪度通过才推进，否则报 `NOT_READY`。
+**人审是必须的**（`--approved-by`），没有它不会自动生效；生效后会往
+`routing_preferences.jsonl` 落一条 30 天有效期的偏好，由 `mio task route` 消费（有界 +3 权重提升，
+见「任务路由」）。
 
 说明：
 

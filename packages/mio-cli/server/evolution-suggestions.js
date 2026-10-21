@@ -249,4 +249,40 @@ function createEvolutionSuggestionStore({
   }
 }
 
-module.exports = { createEvolutionSuggestionStore, ALLOWED_TRANSITIONS, PREFERENCE_TTL_MS }
+// Text renderers for the CLI (`mio evolution suggestion list/apply`). Kept here
+// rather than in bin/mio.js so they are unit-testable without spawning the CLI,
+// matching how evolution-report.js exports its own formatter.
+function formatEvolutionSuggestionsText(suggestions) {
+  const list = Array.isArray(suggestions) ? suggestions : []
+  if (list.length === 0) return 'No evolution routing suggestions.'
+  const lines = [`${list.length} evolution routing suggestion(s):`]
+  for (const s of list) {
+    lines.push(
+      `  ${s.id}  ${String(s.status).padEnd(12)} ${s.project || '-'}  ` +
+        `prefer ${s.preferAgent} over ${s.baselineAgent}  ` +
+        `(successRate +${Math.round((s.successRateDelta || 0) * 1000) / 10}%)`,
+    )
+  }
+  return lines.join('\n')
+}
+
+function formatEvolutionSuggestionText(suggestion) {
+  if (!suggestion) return 'Unknown suggestion.'
+  const lines = [
+    `${suggestion.id}  ${suggestion.status}`,
+    `  project         ${suggestion.project || '-'}`,
+    `  routing         ${suggestion.baselineAgent} -> ${suggestion.preferAgent}`,
+    `  successRateDelta +${Math.round((suggestion.successRateDelta || 0) * 1000) / 10}%`,
+  ]
+  if (suggestion.preferenceId) lines.push(`  preferenceId    ${suggestion.preferenceId}`)
+  if (suggestion.authorizedBy) lines.push(`  authorizedBy    ${suggestion.authorizedBy}`)
+  return lines.join('\n')
+}
+
+module.exports = {
+  createEvolutionSuggestionStore,
+  formatEvolutionSuggestionsText,
+  formatEvolutionSuggestionText,
+  ALLOWED_TRANSITIONS,
+  PREFERENCE_TTL_MS,
+}
