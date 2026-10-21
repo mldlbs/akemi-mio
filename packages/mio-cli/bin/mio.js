@@ -28,7 +28,13 @@ const { createMemoryStore } = require('../server/memory-store.js')
 const { createExperienceStore } = require('../server/experience-store.js')
 const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine, sourcesFromInsights, adoptHypothesis } = require('../server/creativity-engine.js')
-const { mechanismRegistry, mechanismPromote, mechanismRecordRun, mechanismRollback } = require('../server/mechanism-registry.js')
+// `mechanismRecordRun` is deliberately NOT destructured here. It is exported by
+// mechanism-registry.js only in an uncommitted change on another session's
+// working tree; referencing it shipped a build where `mio mechanism record-run`
+// crashed with "mechanismRecordRun is not a function" (caught by
+// check-cli-docs.cjs on CI). Re-add it -- and the record-run subcommand it
+// serves -- together with the implementation.
+const { mechanismRegistry, mechanismPromote, mechanismRollback } = require('../server/mechanism-registry.js')
 const { createMcpRegistryManifest, writeMcpRegistryManifest } = require('../server/mcp-registry.js')
 const {
   planAutoWiring,
@@ -2566,7 +2572,6 @@ function mechanismUsage(write = console.log) {
 
 Subcommands:
   mio mechanism registry              List versions and promotion requests (--mechanism-id, --status)
-  mio mechanism record-run            Append a real ExperimentRun row (promotion gate input)
   mio mechanism promote submit ...    Submit a PromotionRequest (gate-checked against real runs)
   mio mechanism promote approve ...    Approve a request (approver must differ from submitter)
   mio mechanism promote reject ...    Reject a request
@@ -2575,17 +2580,8 @@ Subcommands:
 Options:
   --json             Machine-readable output
 
-record-run options:
-  --assignment baseline|candidate|ablation   (required)
-  --outcome success|failure|inconclusive     (required)
-  --evidence-ids id1,id2                     (required, at least one evidence id)
-  --metrics '{"k":1}'                        (optional JSON object of scalars)
-  --id, --hypothesis-id, --source single_agent|experiment,
-  --base-snapshot-id, --feedback-snapshot-version, --stale, --created-at
-
 Examples:
   mio mechanism registry
-  mio mechanism record-run --assignment candidate --outcome success --evidence-ids trace-1 --source experiment
   mio mechanism promote submit --mechanism-id m-1 --version 1 --submitted-by codex
   mio mechanism promote approve --request-id pr-1 --approved-by other-agent
   mio mechanism rollback m-1`)
@@ -2606,38 +2602,6 @@ function mechanismCommand(args, useJson) {
     if (sub === 'registry') {
       const result = mechanismRegistry(
         { mechanismId: optionValue(flags, '--mechanism-id'), status: optionValue(flags, '--status') },
-        MIO_HOME,
-      )
-      return jsonOrText(result, useJson)
-    }
-
-    if (sub === 'record-run') {
-      let metrics
-      const metricsRaw = optionValue(flags, '--metrics')
-      if (metricsRaw) {
-        try {
-          metrics = JSON.parse(metricsRaw)
-        } catch {
-          console.error('mio mechanism record-run: --metrics must be a JSON object')
-          process.exitCode = 1
-          return
-        }
-      }
-      const createdRaw = parseNumberOption(flags, '--created-at')
-      const result = mechanismRecordRun(
-        {
-          id: optionValue(flags, '--id'),
-          hypothesisId: optionValue(flags, '--hypothesis-id'),
-          assignment: optionValue(flags, '--assignment'),
-          outcome: optionValue(flags, '--outcome'),
-          evidenceIds: splitIdList(optionValues(flags, '--evidence-ids')),
-          metrics,
-          source: optionValue(flags, '--source'),
-          baseSnapshotId: optionValue(flags, '--base-snapshot-id'),
-          feedbackSnapshotVersion: optionValue(flags, '--feedback-snapshot-version'),
-          stale: flags.includes('--stale') ? true : undefined,
-          createdAt: createdRaw,
-        },
         MIO_HOME,
       )
       return jsonOrText(result, useJson)

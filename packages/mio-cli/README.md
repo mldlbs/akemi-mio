@@ -59,7 +59,6 @@ mio memory merge --ids a,b  Merge duplicate records into one survivor (--keep/--
 mio memory migrate --ids a,b --scope global|project   Move records between the project and global layers
 mio policy check "<action>" Check the historical risk of an action before running it (--project; reads global MIO_HOME)
 mio mechanism registry       List mechanism versions and promotion requests (--mechanism-id/--status)
-mio mechanism record-run     Append a real ExperimentRun row — the promotion gate's only input (--assignment/--outcome/--evidence-ids required)
 mio mechanism promote        Submit/approve/reject a PromotionRequest (submit gate-checked against persisted runs; approver must differ from submitter)
 mio mechanism rollback <id>  Roll back the active version of a mechanism
 mio creativity status        Show creativity hypothesis counts, recent top ideas, adoption join (reads global MIO_HOME)
