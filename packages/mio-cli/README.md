@@ -218,6 +218,8 @@ mio install --check           # 只读：报告宿主配置与清单的漂移，
 
 有些宿主装的不止一个 server 块（`opencode` 还会往 `AGENTS.md` 注入规则块），这类保留手写模块，由 loader 回退。**"薄 shim" 好过"其实是代码的配置文件"**。
 
+**没有宿主接线时，`mio observe --once` 会提醒一次。** 观察器采集的数据要靠宿主通过 MCP 读回去；如果一个宿主都没接，这些数据就没有读者。此时 `observe --once` 在正常输出后多打一行 `Tip: ...`（纯提示，不改任何配置）。机器上一个宿主都没装时不提示——那时 `install --auto` 也无事可做。
+
 ## 被动观察器（`mio observe`）
 
 WorkBuddy 的默认模型不一定会主动调用 Mio MCP 工具，即使规则已注入

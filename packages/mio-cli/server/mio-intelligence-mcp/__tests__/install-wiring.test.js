@@ -9,6 +9,7 @@ const { test } = require('node:test')
 const {
   planAutoWiring,
   describeAutoPlan,
+  shouldSuggestAutoInstall,
   checkRegistryDrift,
   readRegistryServer,
   DRIFT_REASONS,
@@ -133,6 +134,38 @@ test('describeAutoPlan reports nothing to wire when every present host is wired'
   assert.strictEqual(summary.wouldWire, 0)
   assert.deepStrictEqual(rows.filter((r) => r.action === 'would-wire'), [])
   assert.strictEqual(rows.find((r) => r.host === 'workbuddy').action, 'skip')
+})
+
+test('shouldSuggestAutoInstall fires only when a host is present but none is wired', () => {
+  // A host exists, nothing wired -> the observer has no reader; nudge.
+  assert.strictEqual(
+    shouldSuggestAutoInstall(
+      planAutoWiring({
+        codex: fakeAdapter({ present: true, wired: false }),
+        workbuddy: fakeAdapter({ present: false }),
+      })
+    ),
+    true
+  )
+
+  // At least one wired -> data has a reader; stay quiet.
+  assert.strictEqual(
+    shouldSuggestAutoInstall(
+      planAutoWiring({
+        codex: fakeAdapter({ present: true, wired: true }),
+        opencode: fakeAdapter({ present: true, wired: false }),
+      })
+    ),
+    false
+  )
+
+  // No host at all -> "run install --auto" would wire nothing; stay quiet.
+  assert.strictEqual(
+    shouldSuggestAutoInstall(
+      planAutoWiring({ codex: fakeAdapter({ present: false }), workbuddy: fakeAdapter({ present: false }) })
+    ),
+    false
+  )
 })
 
 test('checkRegistryDrift emits no duplicate host+reason pairs across hosts', () => {

@@ -204,9 +204,18 @@ function describeAutoPlan(plan) {
   }
 }
 
+// True when this machine has at least one host present but none wired. In that
+// state the observer is collecting data nothing will read back, so `mio observe
+// --once` is allowed to print one nudge. Deliberately false on a machine with
+// no hosts at all: "run install --auto" would wire nothing and is just noise.
+function shouldSuggestAutoInstall(plan) {
+  return plan.summary.present > 0 && plan.summary.wired === 0
+}
+
 module.exports = {
   planAutoWiring,
   describeAutoPlan,
+  shouldSuggestAutoInstall,
   checkRegistryDrift,
   readRegistryServer,
   DRIFT_REASONS,

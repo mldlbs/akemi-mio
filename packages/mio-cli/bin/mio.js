@@ -30,7 +30,12 @@ const { createPolicyStore } = require('../server/policy-store.js')
 const { CreativityEngine, sourcesFromInsights, adoptHypothesis } = require('../server/creativity-engine.js')
 const { mechanismRegistry, mechanismPromote, mechanismRecordRun, mechanismRollback } = require('../server/mechanism-registry.js')
 const { createMcpRegistryManifest, writeMcpRegistryManifest } = require('../server/mcp-registry.js')
-const { planAutoWiring, describeAutoPlan, checkRegistryDrift } = require('../server/install-wiring.js')
+const {
+  planAutoWiring,
+  describeAutoPlan,
+  shouldSuggestAutoInstall,
+  checkRegistryDrift,
+} = require('../server/install-wiring.js')
 const { buildAutoSources, topUpSources } = require('../server/creativity-sources.js')
 const { runIdeaGenerate, groundingFrom } = require('../server/idea-generate.js')
 const { createAgentStore } = require('../server/agent-store.js')
@@ -3772,6 +3777,23 @@ function startResearchScheduler(cwd) {
   return observer.startResearchBackground(MIO_HOME, { cwd })
 }
 
+// §7.1.4: the observer collects data that hosts read back through MCP. If a
+// host is installed here but none is wired, the data has no reader -- worth one
+// line, not a rewrite. Never throws: a probe failure must not break observe.
+function printUnwiredHostsTip() {
+  try {
+    const plan = planAutoWiring(adapters)
+    if (shouldSuggestAutoInstall(plan)) {
+      console.log(
+        'Tip: a host is installed but none is wired to Mio. ' +
+          'Run `mio install --auto --dry-run` to preview, then `mio install --auto`.'
+      )
+    }
+  } catch {
+    // advisory only
+  }
+}
+
 function observeCommand(args, jsonFlag = false) {
   const flags = args.slice(1)
   // main() already strips --json from argv and passes it as the second
@@ -3851,6 +3873,7 @@ function observeCommand(args, jsonFlag = false) {
     const res = observer.runCycle(MIO_HOME, observer.loadState(MIO_HOME), observer.createSinks(MIO_HOME))
     if (useJson) return jsonOrText(res, true)
     console.log('Observed files=' + res.files + ' lines=' + res.lines + ' outcomes=' + res.outcomes)
+    printUnwiredHostsTip()
     return
   }
   console.log('Observing WorkBuddy transcripts into ' + MIO_HOME + ' (Ctrl+C to stop)...')
