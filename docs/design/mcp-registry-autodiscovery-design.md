@@ -91,6 +91,8 @@
 - **PR-A** ✅ 已实现（commit 见 git log，`mcp-registry.js` + `bin/mio.js` 的 `mio mcp registry [--write] [--json]` + 测试）：Registry 清单生成器 + `mio mcp registry` 子命令，输出六平面 capability 的 stdio 启动清单（工具经运行时 `tools/list` 发现）。
 - **PR-B** ✅ 已实现（`server/install-wiring.js` + `bin/mio.js` 的 `mio install --auto` / `--check` + 5 个适配器新增 `isHostPresent()` + `scripts/check-cli-docs.cjs` 补探测）：`--auto` 只接本机"已安装"的宿主（纯文件存在性探测，不扫进程/不发网络），`--check` 只读报告漂移（registry-missing / host-present-not-wired / stale-server-path），有漂移退出码 1（text 与 --json 一致）。未落地项：Observer 提示钩子（§7.1.4）。
 - **PR-C**：模板驱动适配器加载器 + 首批 2 个宿主模板（codex / opencode）。
+  - **第一批 ✅ 已实现**：`adapters/loader.js`（`format: toml|json` 编译成现有适配器接口、`{{var}}` 插值、坏模板抛错而非静默回退）+ `adapters/codex.template.json`（codex 改为模板驱动）+ `bin/mio.js` 与 `server/host-capabilities.js` 统一经 loader 解析（`claude → claude-code.js` 的命名差异集中在 loader 的 `MODULE_ALIASES`）。`codex.js` 保留为**等价性 oracle**：`__tests__/adapter-loader.test.js` 用两个实现各装一次、断言写出的配置逐字节相同（变异 `startup_timeout_sec 30→31` 会红）。
+  - **第二批（未做）**：`opencode.template.json` + 薄 shim。opencode 除 MCP 注册外还向 `AGENTS.md` 注入 `INSTRUCTIONS_BEGIN/END` 规则块，纯模板化会丢功能——正确形态是模板管 server 块、shim 保留 instructions 注入与 `contextNeedsRepair`，即 §2.3 所说"宿主特异的怪癖保留在薄 shim 里"。
 
 ---
 
