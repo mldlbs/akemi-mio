@@ -21,6 +21,13 @@ process.env.MIO_CONTEXT = JSON.stringify({
 })
 
 const { callTool, rl } = require('../index.js')
+// The server caches JSONL reads in memory-store.js keyed on (size, mtimeMs). This
+// integration test writes the backing files directly (an "outside process"), so
+// after each write we must drop that file's cache entry -- otherwise a same-size
+// rewrite landing in the same millisecond would be served stale (the exact CI
+// flake this file guards against). dropCache is the same call the server makes
+// on every write through writeJsonl/appendJsonl.
+const { dropCache } = require('../../memory-store.js')
 
 function writeMemories(records) {
   const file = path.join(dataDir, 'memory.jsonl')
@@ -29,6 +36,7 @@ function writeMemories(records) {
     records.length > 0 ? records.map((record) => JSON.stringify(record)).join('\n') + '\n' : '',
     'utf8',
   )
+  dropCache(file)
 }
 
 function writeReuse(records) {
@@ -38,6 +46,7 @@ function writeReuse(records) {
     records.length > 0 ? records.map((record) => JSON.stringify(record)).join('\n') + '\n' : '',
     'utf8',
   )
+  dropCache(file)
 }
 
 function mem(overrides = {}) {

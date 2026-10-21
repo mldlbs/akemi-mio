@@ -300,3 +300,26 @@ test('recordMemory injects the hypothesis tag only when hypothesisId is given', 
   const miss = store.queryMemory({ query: 'backed by hypothesis', tags: ['hypothesis:h-99'] })
   assert.equal(miss.count, 0)
 })
+
+test('dropCache exposes a rewritten file on the next read', () => {
+  // Regression for the CI failure in evidence-ranking.test.js. The cache is a
+  // read-through cache keyed on (size, mtimeMs); an outside process rewriting a
+  // file to the same byte count within one millisecond can be served stale. The
+  // supported contract is dropCache(): the server calls it on every write through
+  // writeJsonl/appendJsonl, and after it the next read must see the rewrite --
+  // independent of OS clock resolution. This is the exact call the integration
+  // test now makes after each direct fs.writeFileSync.
+  const { readJsonlCached, dropCache } = require('../server/memory-store.js')
+  const file = path.join(tempDir('cache-drop'), 'log.jsonl')
+  fs.writeFileSync(file, '{"a":1}\n')
+
+  assert.deepEqual(readJsonlCached(file), [{ a: 1 }])
+
+  fs.writeFileSync(file, '{"b":2}\n') // same byte count as the first write
+  dropCache(file)
+  assert.deepEqual(
+    readJsonlCached(file),
+    [{ b: 2 }],
+    'dropCache must expose the rewritten content on the next read',
+  )
+})
