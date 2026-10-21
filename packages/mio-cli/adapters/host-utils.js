@@ -14,13 +14,17 @@ function earliestRunningSince(exePathFragment) {
       "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '*" +
       escaped +
       "*' } | ForEach-Object { [long]($_.CreationDate.ToUniversalTime() - [datetime]'1970-01-01').TotalMilliseconds }"
+    // Budget is read per call (not a module constant) and overridable, so the
+    // load-sensitive probe test can ask for more time without making real
+    // `mio install` waits longer on a hung PowerShell.
+    const probeTimeoutMs = Number(process.env.MIO_HOST_PROBE_TIMEOUT_MS) || 10000
     // stdio[0] must not be a pipe. On Windows a piped stdin makes spawnSync
     // fail with EBUSY before powershell starts: status is null and stderr is
     // empty, so this probe returned null every time and the "host is running an
     // older config" warning never fired. powershell reads no stdin here.
     const res = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
       encoding: 'utf8',
-      timeout: 10000,
+      timeout: probeTimeoutMs,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })

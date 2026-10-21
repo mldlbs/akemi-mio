@@ -25,7 +25,26 @@ test('earliestRunningSince actually reaches the OS', () => {
   }
 
   const fragment = path.basename(process.execPath)
-  const since = earliestRunningSince(fragment)
+
+  // PowerShell's cold start can exceed the production 10s budget when the full
+  // suite runs 600+ tests in parallel, which made this fail intermittently
+  // while passing in isolation. Raise only the probe's budget for this test --
+  // production keeps 10s so a hung PowerShell does not stall `mio install`.
+  const prevTimeout = process.env.MIO_HOST_PROBE_TIMEOUT_MS
+  process.env.MIO_HOST_PROBE_TIMEOUT_MS = '120000'
+
+  let since = null
+  try {
+    // Retry as well: load can starve a single attempt even with a big budget.
+    // A genuinely dead probe (the EBUSY regression this guards) returns null
+    // on every attempt, so this does not weaken the assertion.
+    for (let attempt = 0; attempt < 2 && since === null; attempt += 1) {
+      since = earliestRunningSince(fragment)
+    }
+  } finally {
+    if (prevTimeout === undefined) delete process.env.MIO_HOST_PROBE_TIMEOUT_MS
+    else process.env.MIO_HOST_PROBE_TIMEOUT_MS = prevTimeout
+  }
 
   // Two branches on purpose. The first says the probe reached PowerShell at
   // all; without it a failure of the second would be indistinguishable from a
