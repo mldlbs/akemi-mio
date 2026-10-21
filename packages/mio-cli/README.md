@@ -26,7 +26,7 @@ mio config path             Print the config.json path
 mio mcp                     Start Mio MCP server (stdio)
 mio install <host>          Install Mio into a host (codex|opencode|workbuddy|hermes|claude)
 mio install --auto          Wire every detected host in one shot (only hosts present on this machine)
-mio install --auto --dry-run  Preview the plan; writes nothing
+mio install --dry-run       Preview without writing (works with <host> or --auto)
 mio install --check         Report drift between present hosts and the MCP registry (read-only; exit 1 on drift)
 mio mcp registry [--write]  Emit/generate the host-discovery MCP registry manifest (--json supported)
 mio status                  Show runtime and adapter status (also reports pending auto-claims)
@@ -184,12 +184,12 @@ MCP 服务端在 6 大域共暴露 57 个工具：
 
 ```bash
 mio mcp registry --write     # 生成 <MIO_HOME>/mcp-registry.json（启动清单）
-mio install --auto --dry-run # 先预演：哪些宿主会被接、哪些已接、哪些没装。零写入
+mio install --dry-run        # 先预演：哪些宿主会被接、哪些已接、哪些没装。零写入
 mio install --auto           # 只接本机"已安装"的宿主，一次全接
 mio install --check           # 只读：报告宿主配置与清单的漂移，有漂移退出码 1
 ```
 
-- **先 dry-run 再执行**。`--auto` 是唯一会改写宿主配置的形态，而 `MIO_HOME` **不能**隔离宿主配置（适配器用 `os.homedir()`，Windows 上忽略 `HOME`）。想预演就用 `--auto --dry-run`：它只打印 `would-wire` / `unchanged` / `skip`，一个字节都不写。
+- **先 dry-run 再执行**。`--auto` 与 `mio install <host>` 都会改写宿主配置，而 `MIO_HOME` **不能**隔离宿主配置（适配器用 `os.homedir()` 或宿主自己的 env 覆盖）。想预演就加 `--dry-run`：`mio install codex --dry-run` 只报告 `would-wire` / `unchanged` / `skip` 与目标配置文件路径，一个字节都不写；`mio install --auto --dry-run` 同理，一次看全部宿主。
 
 - **清单不是工具快照**。`mcp-registry.json` 只描述 server 的启动形状（`command` / `args` / `env`）与六平面 capability 列表；宿主具体能用哪些工具，是在 stdio 连接后由 MCP `tools/list` 运行时发现的。过早快照工具名只会得到一份过期清单。
 - **`--auto` 只碰"已安装"的宿主**。探测是纯文件存在性判断（配置目录 / 配置文件 / 已知可执行文件），不发起网络请求、不扫描进程。没装的宿主记为 `skipped`，不会产生一次失败的写入。

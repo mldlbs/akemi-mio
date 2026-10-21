@@ -212,9 +212,37 @@ function shouldSuggestAutoInstall(plan) {
   return plan.summary.present > 0 && plan.summary.wired === 0
 }
 
+// Preview for `mio install <host> --dry-run`. Same action vocabulary as the
+// --auto preview so the two read identically.
+//
+// This exists because the flag was silently ignored for a named host: it fell
+// through to the real install, so `mio install codex --dry-run` wrote the config
+// (and started the observer) while the user believed they were previewing.
+function describeHostInstall(host, adapter) {
+  const call = (fn) => {
+    try {
+      return typeof fn === 'function' ? fn() : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  const present = Boolean(call(adapter.isHostPresent))
+  const alreadyWired = present ? Boolean(call(adapter.isInstalled)) : false
+
+  return {
+    host,
+    present,
+    alreadyWired,
+    action: !present ? 'skip' : alreadyWired ? 'unchanged' : 'would-wire',
+    configPath: call(adapter.configPath) || null,
+  }
+}
+
 module.exports = {
   planAutoWiring,
   describeAutoPlan,
+  describeHostInstall,
   shouldSuggestAutoInstall,
   checkRegistryDrift,
   readRegistryServer,

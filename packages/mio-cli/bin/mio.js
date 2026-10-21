@@ -33,6 +33,7 @@ const { createMcpRegistryManifest, writeMcpRegistryManifest } = require('../serv
 const {
   planAutoWiring,
   describeAutoPlan,
+  describeHostInstall,
   shouldSuggestAutoInstall,
   checkRegistryDrift,
 } = require('../server/install-wiring.js')
@@ -3674,6 +3675,19 @@ function installCommand(host, useJson, installArgs) {
     process.exitCode = 1
     return
   }
+
+  // `--dry-run` on a named host used to be ignored: the flag was only read by
+  // the --auto branch, so `mio install codex --dry-run` performed a real
+  // install (and started the observer). Preview instead, and write nothing.
+  if (dryRun) {
+    const preview = describeHostInstall(host, adapter)
+    if (useJson) return jsonOrText({ mode: 'single', dryRun: true, ...preview }, true)
+    console.log(`${preview.action === 'would-wire' ? '+' : '•'} ${host}: ${preview.action}`)
+    if (preview.configPath) console.log(`  config: ${preview.configPath}`)
+    console.log('Dry run: nothing written.')
+    return
+  }
+
   ensureHome()
   const config = readConfig()
   let result
@@ -3900,7 +3914,7 @@ Usage:
   mio mcp                     Start Mio MCP server (stdio)
   mio install <host>          Install Mio into a host (codex|opencode|workbuddy|hermes|claude)
   mio install --auto          Wire every detected host in one shot (only present hosts)
-  mio install --auto --dry-run  Preview what --auto would wire; writes nothing
+  mio install --dry-run       Preview without writing (works with <host> or --auto)
   mio install --check         Report drift between present hosts and the MCP registry (read-only)
   mio mcp registry [--write]  Emit/generate the host-discovery MCP registry manifest
   mio status                  Show runtime and adapter status

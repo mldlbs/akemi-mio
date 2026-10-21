@@ -9,6 +9,7 @@ const { test } = require('node:test')
 const {
   planAutoWiring,
   describeAutoPlan,
+  describeHostInstall,
   shouldSuggestAutoInstall,
   checkRegistryDrift,
   readRegistryServer,
@@ -22,6 +23,7 @@ function fakeAdapter({ present = false, wired = false, needsRepair = false } = {
   const calls = []
   return {
     calls,
+    configPath: () => '/tmp/host-config.json',
     install() {
       calls.push('install')
       return { changed: !wired, configPath: '/tmp/host-config.json', message: 'installed' }
@@ -134,6 +136,52 @@ test('describeAutoPlan reports nothing to wire when every present host is wired'
   assert.strictEqual(summary.wouldWire, 0)
   assert.deepStrictEqual(rows.filter((r) => r.action === 'would-wire'), [])
   assert.strictEqual(rows.find((r) => r.host === 'workbuddy').action, 'skip')
+})
+
+test('describeHostInstall previews one host without touching it', () => {
+  const unwired = fakeAdapter({ present: true, wired: false })
+  assert.deepStrictEqual(describeHostInstall('codex', unwired), {
+    host: 'codex',
+    present: true,
+    alreadyWired: false,
+    action: 'would-wire',
+    configPath: '/tmp/host-config.json',
+  })
+
+  const wired = fakeAdapter({ present: true, wired: true })
+  assert.strictEqual(describeHostInstall('codex', wired).action, 'unchanged')
+
+  const absent = fakeAdapter({ present: false, wired: false })
+  assert.strictEqual(describeHostInstall('codex', absent).action, 'skip')
+
+  // An absent host is reported skip even if isInstalled() would say true --
+  // presence gates the whole question, same as planAutoWiring.
+  const absentButInstalled = fakeAdapter({ present: false, wired: true })
+  const preview = describeHostInstall('codex', absentButInstalled)
+  assert.strictEqual(preview.action, 'skip')
+  assert.strictEqual(preview.alreadyWired, false)
+})
+
+test('describeHostInstall never calls install() and survives throwing probes', () => {
+  const calls = []
+  const hostile = {
+    install() {
+      calls.push('install')
+    },
+    isHostPresent() {
+      throw new Error('probe down')
+    },
+    isInstalled() {
+      throw new Error('probe down')
+    },
+    configPath() {
+      throw new Error('probe down')
+    },
+  }
+  const preview = describeHostInstall('broken', hostile)
+  assert.deepStrictEqual(calls, [], 'a preview must never install')
+  assert.strictEqual(preview.action, 'skip')
+  assert.strictEqual(preview.configPath, null)
 })
 
 test('shouldSuggestAutoInstall fires only when a host is present but none is wired', () => {
