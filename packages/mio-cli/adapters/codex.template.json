@@ -1,0 +1,34 @@
+{
+  "hostLabel": "Codex",
+  "configPath": "~/.codex/config.toml",
+  "format": "toml",
+  "mcpKey": "mcp_servers.mio-intelligence",
+  "sectionMarkers": {
+    "open": "[mcp_servers.mio-intelligence]",
+    "envOpen": "[mcp_servers.mio-intelligence.env]"
+  },
+  "serverShape": {
+    "command": "{{node}}",
+    "args": ["{{serverScript}}"],
+    "extra": { "startup_timeout_sec": 30 },
+    "env": {
+      "MIO_DATA_DIR": "{{home}}",
+      "MIO_CONTEXT": "{{context}}"
+    }
+  },
+  "context": {
+    "agentId": "codex",
+    "workspace": "{{workspace}}",
+    "sessionId": "codex-session"
+  },
+  "restart": {
+    "hostLabel": "Codex",
+    "exeName": "codex.exe",
+    "exePathFragment": "OpenAI.Codex"
+  },
+  "messages": {
+    "installed": "Codex Mio MCP installed. Restart Codex to load it.",
+    "repaired": "Codex Mio MCP repaired (server path updated). Restart Codex to load it.",
+    "unchanged": "Codex Mio MCP already installed."
+  }
+}

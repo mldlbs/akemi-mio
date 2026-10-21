@@ -10,12 +10,16 @@ const SERVER_SCRIPT = path.resolve(__dirname, '..', 'server', 'mio-intelligence-
 const MIO_HOME = process.env.MIO_HOME || path.join(os.homedir(), '.mio-intelligence')
 const CONFIG_FILE = path.join(MIO_HOME, 'config.json')
 
+// Host adapters resolve through the loader: a host with an
+// adapters/<host>.template.json is compiled from that declaration, otherwise
+// its hand-written module is used. Call sites stay identical either way.
+const { loadAdapter } = require('../adapters/loader.js')
 const adapters = {
-  codex: require('../adapters/codex.js'),
-  opencode: require('../adapters/opencode.js'),
-  workbuddy: require('../adapters/workbuddy.js'),
-  hermes: require('../adapters/hermes.js'),
-  claude: require('../adapters/claude-code.js'),
+  codex: loadAdapter('codex'),
+  opencode: loadAdapter('opencode'),
+  workbuddy: loadAdapter('workbuddy'),
+  hermes: loadAdapter('hermes'),
+  claude: loadAdapter('claude'),
 }
 const observer = require('../observe/observer.js')
 const { getEvolutionStatus, formatEvolutionStatusText } = require('../server/runtime-modules.js')

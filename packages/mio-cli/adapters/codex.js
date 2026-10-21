@@ -1,5 +1,16 @@
 'use strict'
 
+// REFERENCE IMPLEMENTATION -- not the live path.
+//
+// codex is now driven by adapters/codex.template.json through adapters/loader.js.
+// This module is kept deliberately: adapter-loader.test.js installs through both
+// implementations and asserts the written config is byte-identical, so this file
+// is the oracle that keeps the template honest. Deleting it would leave the
+// template with nothing to be checked against.
+//
+// Do not "fix" behaviour here and expect it to reach users -- change the
+// template (and this file together, if the oracle must move).
+
 const fs = require('fs')
 const path = require('path')
 const os = require('os')

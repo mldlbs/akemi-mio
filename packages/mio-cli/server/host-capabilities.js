@@ -1,11 +1,16 @@
 'use strict'
 
+// Same resolution the CLI uses: template if one exists, hand-written module
+// otherwise. Keeping this in step with bin/mio.js matters -- otherwise
+// `mio host capabilities` would describe a different adapter than the one
+// `mio install` actually drives.
+const { loadAdapter } = require('../adapters/loader.js')
 const adapters = {
-  codex: require('../adapters/codex.js'),
-  opencode: require('../adapters/opencode.js'),
-  workbuddy: require('../adapters/workbuddy.js'),
-  hermes: require('../adapters/hermes.js'),
-  claude: require('../adapters/claude-code.js'),
+  codex: loadAdapter('codex'),
+  opencode: loadAdapter('opencode'),
+  workbuddy: loadAdapter('workbuddy'),
+  hermes: loadAdapter('hermes'),
+  claude: loadAdapter('claude'),
 }
 
 const HOST_CAPABILITIES = [

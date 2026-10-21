@@ -196,6 +196,28 @@ mio install --check           # 只读：报告宿主配置与清单的漂移，
 - **`--check` 不写任何文件**，退出码 1 即为"有漂移"，可直接用于 CI 或定时巡检。它报告的漂移类型：`registry-missing`（清单未生成）、`host-present-not-wired`（宿主在但没接）、`stale-server-path`（接的是别的 checkout 的 server 路径）。
 - 现有 `mio install <host>` 行为不变，仍是显式 opt-in；`--auto` / `--check` 是增量能力，不会静默改用户配置。所有写入前都会 `cp` 备份（`<config>.bak-mio-<epoch_ms>`）。
 
+**新增宿主 = 丢一个模板，不改核心代码。** 适配器统一经 `adapters/loader.js` 解析：存在 `adapters/<host>.template.json` 就用模板编译，否则回退到手写模块。模板只描述"把 server 块写进哪个文件的哪个位置"：
+
+```json
+{
+  "hostLabel": "Codex",
+  "configPath": "~/.codex/config.toml",
+  "format": "toml",
+  "sectionMarkers": { "open": "[mcp_servers.mio-intelligence]", "envOpen": "[mcp_servers.mio-intelligence.env]" },
+  "serverShape": {
+    "command": "{{node}}",
+    "args": ["{{serverScript}}"],
+    "extra": { "startup_timeout_sec": 30 },
+    "env": { "MIO_DATA_DIR": "{{home}}", "MIO_CONTEXT": "{{context}}" }
+  },
+  "context": { "agentId": "codex", "workspace": "{{workspace}}", "sessionId": "codex-session" }
+}
+```
+
+`format` 支持 `toml`（按 `sectionMarkers` 剥旧块再追加）与 `json`（按 `mcpKey` 路径合并）。`codex` 已改为模板驱动，`codex.js` 保留为**等价性 oracle**——`adapter-loader.test.js` 用两个实现各装一次，断言写出的配置逐字节相同，模板因此不能悄悄漂移。
+
+有些宿主装的不止一个 server 块（`opencode` 还会往 `AGENTS.md` 注入规则块），这类保留手写模块，由 loader 回退。**"薄 shim" 好过"其实是代码的配置文件"**。
+
 ## 被动观察器（`mio observe`）
 
 WorkBuddy 的默认模型不一定会主动调用 Mio MCP 工具，即使规则已注入
